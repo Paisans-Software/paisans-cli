@@ -85,11 +85,16 @@ type tracked struct {
 	wrote bool
 }
 
+// Write is where every line the reporter draws leaves it, so each is
+// redacted here (see Secret).
 func (t *tracked) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		t.wrote = true
 	}
-	return t.w.Write(p)
+	if _, err := io.WriteString(t.w, Redact(string(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (r *writer) Step(title string) Step {
@@ -181,6 +186,9 @@ func (r *writer) spinnerLine(title, progress, nested string, elapsed time.Durati
 	if nested != "" {
 		text += " (" + nested + ")"
 	}
+	// Redacted before it is cut, so a secret at the edge is not left in
+	// part.
+	text = Redact(text)
 	if r.termCols > 1 {
 		if runes := []rune(text); len(runes) > r.termCols-1 {
 			text = string(runes[:r.termCols-1])

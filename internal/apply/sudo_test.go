@@ -26,7 +26,7 @@ type sudoHost struct {
 func (h *sudoHost) install(t *testing.T) {
 	t.Helper()
 	restore := apply.FakeSSH(func(args []string, stdin string) (string, int) {
-		command := args[len(args)-1]
+		command, stdin := apply.Unfence(args[len(args)-1], stdin)
 		h.commands = append(h.commands, command)
 		h.stdins = append(h.stdins, stdin)
 		switch {
@@ -134,7 +134,7 @@ func TestSudoWithAPasswordPromptsOnceAndSendsItOnStdin(t *testing.T) {
 	if len(p.asked) != 1 || p.asked[0] != "box, host box-01" {
 		t.Fatalf("asked %q, want once for box, host box-01", p.asked)
 	}
-	if want := []string{"sudo -n true", "uname -n", "sudo -k -S -p '' true", "sudo -k -S -p '' sh -c 'echo one'", "sudo -k -S -p '' sh -c 'cat'"}; !equalPrefix(h.commands, want) {
+	if want := []string{"sudo -n true", "uname -n", "sudo -k -S -p '' sh -c 'true'", "sudo -k -S -p '' sh -c 'echo one'", "sudo -k -S -p '' sh -c 'cat'"}; !equalPrefix(h.commands, want) {
 		t.Fatalf("commands %q, want them to begin %q", h.commands, want)
 	}
 	if !strings.HasPrefix(h.commands[5], "sudo -k -S -p '' sh -c ") {
@@ -361,7 +361,7 @@ func TestPrepareSudoAsksBeforeTheFirstCommand(t *testing.T) {
 	if len(p.asked) != 1 {
 		t.Fatalf("asked %d times by PrepareSudo, want once: %q", len(p.asked), p.asked)
 	}
-	if want := []string{"sudo -n true", "uname -n", "sudo -k -S -p '' true"}; !equalPrefix(h.commands, want) || len(h.commands) != len(want) {
+	if want := []string{"sudo -n true", "uname -n", "sudo -k -S -p '' sh -c 'true'"}; !equalPrefix(h.commands, want) || len(h.commands) != len(want) {
 		t.Errorf("PrepareSudo ran %q, want %q", h.commands, want)
 	}
 	if _, err := tr.Run("echo one"); err != nil {
