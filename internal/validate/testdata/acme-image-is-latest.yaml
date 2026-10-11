@@ -12,7 +12,7 @@ mesh:
 
 acme:
   provider: route53
-  # An adopter's own image, on a tag that moves: a rebuild can drop the module.
+  # An adopter's own image on `latest`, which crosses Caddy major versions.
   image: ghcr.io/example-org/caddy-route53:latest
 
 sites:

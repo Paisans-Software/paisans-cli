@@ -134,16 +134,25 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		_, recorded := st.Initial[m]
 		return !recorded && (len(st.Initial) == 0 || listed[m])
 	}
-	// A witness is founded first, since nothing waits on it. A data
+	// Every witness is applied before a data member is founded, since that
+	// member's gate refuses it while a witness's etcd does not run: one
+	// still being founded is founded there, and one with its record is
+	// applied, which plans nothing when its etcd already runs. A data
 	// member's apply may stop until the other members run, and pass two
 	// resumes it.
+	witness := func(m string) bool { return cfg.Sites[m].Has(config.RoleWitness) }
+	dataFounding := slices.ContainsFunc(members, func(m string) bool { return founding(m) && !witness(m) })
 	for _, m := range members {
-		if founding(m) && cfg.Sites[m].Has(config.RoleWitness) {
+		switch {
+		case !witness(m):
+		case founding(m):
 			steps = append(steps, applyStep(stageFounding, m))
+		case dataFounding:
+			steps = append(steps, applyStep(stageOthers, m))
 		}
 	}
 	for _, m := range members {
-		if founding(m) && !cfg.Sites[m].Has(config.RoleWitness) {
+		if founding(m) && !witness(m) {
 			steps = append(steps, applyStep(stageFounding, m))
 		}
 	}
@@ -1138,28 +1147,41 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 // steps first reach them: it spins while one of its steps runs, waits
 // between them with the time they took, and ends once its last step has.
 // A data member's founding stop is expected, and the run carries on: pass
-// two applies it again. Each step is listed under its line with its own
-// result, which -v shows with the step's own output; its notes follow the
-// line at every verbosity. A failure ends its line and the run, leaving the
-// other lines as they stand.
+// two applies it again. So is a replica's stop for the app databases, on any
+// of its site's applies, since only the Patroni leader's site creates them
+// and which site leads is known only once Patroni runs. A later visit to the
+// site resumes it; when the stop is on the site's last visit, the site is
+// applied once more after every other step, by which time the leader's site
+// has had its own last visit, and a stop then ends the run. Each step is
+// listed under its line with its own result, which -v shows with the step's
+// own output; its notes follow the line at every verbosity. A failure ends
+// its line and the run, leaving the other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
 	places := installPlaces(steps)
 	lines, done := ui.Ordered(r, places...)
 	defer done()
 	last := lastVisits(steps)
-	for i, s := range steps {
+	// again is each step whose site waited for its databases on its last
+	// visit, to be run once more at the end.
+	var again []int
+	run := func(i int, final bool) error {
+		s := steps[i]
 		k := slices.Index(places, installPlace(s))
 		line := lines[k]
 		line.Start()
 		start := convergeNow()
 		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
+		databases := err != nil && !final && errors.Is(err, apply.ErrDatabasesWait)
 		switch {
 		case err == nil:
 			line.Detail("%s", innerLine(ui.OK, s.Title, since(start)))
 		case founding:
 			line.Detail("%s", innerLine(ui.OK, s.Title, "stopped for the other etcd members"))
+			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
+		case databases:
+			line.Detail("%s", innerLine(ui.OK, s.Title, "waiting for the primary's databases"))
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
@@ -1168,10 +1190,15 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Note(n.Text, n.Detail)
 		}
 		switch {
-		case (err == nil || founding) && last[k] == i:
+		case databases && last[k] == i:
+			again = append(again, i)
+			line.Pause("waiting for the primary's databases")
+		case (err == nil || founding) && (final || last[k] == i):
 			line.Done("")
 		case founding:
 			line.Pause("stopped for the other etcd members")
+		case databases:
+			line.Pause("waiting for the primary's databases")
 		case err == nil:
 			line.Pause("again in pass two")
 		case errors.Is(err, storageadd.ErrWaiting):
@@ -1181,6 +1208,17 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		default:
 			line.Fail(err)
 			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
+		}
+		return nil
+	}
+	for i := range steps {
+		if err := run(i, false); err != nil {
+			return err
+		}
+	}
+	for _, i := range again {
+		if err := run(i, true); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1240,7 +1278,7 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 
 // convergeWaits is the titles of the earlier steps that steps[i] waits on,
 // in the order they ran: init, for every step once it has work; the site's
-// host prepare, for every step on a site; each founding witness's apply, for
+// host prepare, for every step on a site; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
 // runs; the site's earlier apply or site add and the storage step, for an
 // apply in pass two; and the host prepare and first apply of each Garage
@@ -1268,7 +1306,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		waits = append(waits, prepare(site))
 		if s.Stage == stageFounding && !cfg.Sites[site].Has(config.RoleWitness) {
 			for _, e := range earlier {
-				if e.Stage == stageFounding && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
+				if e.Stage != stagePassTwo && e.Args[0] == "apply" && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
 					waits = append(waits, e.Title)
 				}
 			}

@@ -32,6 +32,19 @@ func ParseReference(ref string) Reference {
 	return Reference{Name: ref}
 }
 
+// Repository is the reference without its tag or its digest, which is what
+// two builds of the same image share (Eg: ghcr.io/paisans-software/caddy for
+// both ghcr.io/paisans-software/caddy:2 and
+// ghcr.io/paisans-software/caddy:2@sha256:...).
+func (r Reference) Repository() string {
+	name := r.Name
+	slash := strings.LastIndex(name, "/")
+	if colon := strings.LastIndex(name, ":"); colon > slash {
+		name = name[:colon]
+	}
+	return name
+}
+
 // Pinned reports whether a reference names one build.
 //
 // A digest is the strongest form and always pins. A tag pins by convention

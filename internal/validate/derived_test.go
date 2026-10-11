@@ -68,7 +68,7 @@ func TestTwoDerivedVotersSayHowToFixTheRoles(t *testing.T) {
 	if f.Key != "etcd.members (derived from the roles)" {
 		t.Errorf("key %q does not say the list was derived", f.Key)
 	}
-	for _, want := range []string{"witness role", "third location", "fails independently", "etcd.members: [home-a]", "automatic failover"} {
+	for _, want := range []string{"Add a witness", "witness role", "`roles: [witness]`", "third location", "fails independently", "three voters", "etcd.members: [home-a]", "automatic failover"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("message does not say %q: %s", want, f.Message)
 		}
@@ -90,11 +90,18 @@ func TestOneDataSiteAndAWitnessSayDropTheWitness(t *testing.T) {
 	}
 }
 
-// A written pair keeps its message, which names the key the operator wrote.
-func TestTwoWrittenVotersKeepTheirMessage(t *testing.T) {
+// A written pair names the key the operator wrote, and suggests a witness
+// first: a site in a third location with the witness role, listed as a third
+// voter. Declaring one member stays the other way out.
+func TestTwoWrittenVotersSuggestAWitness(t *testing.T) {
 	f := findingFor(t, validate.Check(load(t, "two-etcd-voters")), "two-etcd-voters")
-	if f.Key != "etcd.members" || !strings.Contains(f.Message, "Declare one member, or three") {
-		t.Errorf("written pair reported as %q: %s", f.Key, f.Message)
+	if f.Key != "etcd.members" {
+		t.Errorf("written pair reported as %q", f.Key)
+	}
+	for _, want := range []string{"Add a witness", "third location", "fails independently", "`roles: [witness]`", "listed in etcd.members", "three voters", "automatic failover", "declare one member"} {
+		if !strings.Contains(f.Message, want) {
+			t.Errorf("message does not say %q: %s", want, f.Message)
+		}
 	}
 }
 

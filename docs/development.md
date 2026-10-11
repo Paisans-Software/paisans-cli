@@ -584,6 +584,20 @@ no module answers to both produce a gateway that cannot load its own
 configuration, and neither is visible in an image reference. This check runs
 before the configuration check because its error says what to fix.
 
+**The gateway's Caddy image is resolved to a build while apply plans.** The
+configuration names it by a tag that moves (`acme.Published`,
+`ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and `render` renders
+that tag, listing it per site in `Plan.CaddyImages`, since render reaches no
+network. `planSiteApply` passes `apply.ResolveImages` with
+`imagedigest.Registry`, which asks the registry's HTTP API, anonymously and
+from the workstation, for the digest the tag names; `apply.Build` pins it
+into the infrastructure compose file with `render.PinCaddyImage` before the
+file is compared, so a new build is a changed file and goes through every
+gate above. A registry that cannot be reached keeps the build the site runs,
+read from its compose file, with a warning; a site running none is refused.
+Execute records the build in the manifest's `caddy` entry. Tests in
+`cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
+
 A DNS provider's Caddyfile syntax is provider specific rather than uniform: the
 cloudflare module takes the API token as a bare argument, while the deSEC module
 requires a block with a `token` subdirective and rejects a bare argument. That
@@ -1214,8 +1228,11 @@ connects to Postgres.
 waits up to three minutes for Patroni's `/cluster` to name a running leader,
 then sends one psql script on stdin to the Spilo container: create the role if
 missing, set its password every time (so rotation is editing the secret and
-applying), create the database owned by it if missing. A replica skips the work
-and says which site holds the leader; a leader that is not one of
+applying), create the database owned by it if missing. A replica creates
+nothing and reads its own catalogue: it goes on to the app stacks only when
+every app database and role is there, and otherwise stops with
+`apply.ErrDatabasesWait`, naming the leader's site to apply first, which
+`paisans apply` treats as a pause. A leader that is not one of
 `cluster.sites` is not a replica and stops the apply. A timeout or a psql
 failure stops it too, before any app starts, and the next apply resumes there. `README.md` has
 the reasoning under "`apply` creates each clustered app's role and database".

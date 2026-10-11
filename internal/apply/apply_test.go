@@ -85,6 +85,9 @@ type fakeHost struct {
 	// unresolved is how many more polls each mesh endpoint name fails to
 	// resolve on, -1 for never. A name not in it resolves.
 	unresolved map[string]int
+	// replicaHas is each app database, with its role, that a replica's read
+	// of its own catalogue finds.
+	replicaHas []string
 }
 
 func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
@@ -147,6 +150,9 @@ func (h *fakeHost) Run(command string) (string, error) {
 	}
 	if strings.HasPrefix(command, "docker system df") {
 		return h.reclaimable, nil
+	}
+	if strings.Contains(command, "psql") && strings.Contains(command, " -At") {
+		return strings.Join(h.replicaHas, "\n") + "\n", nil
 	}
 	if strings.Contains(command, ":8008/cluster") {
 		if h.leader == "" {
@@ -656,7 +662,7 @@ func TestAnImageOnlyChangeIsStillChecked(t *testing.T) {
 	}
 
 	// An image carrying the same provider, declared rather than published:
-	// the one line the sibling repository's digest bump would move.
+	// the one line a new build of the image moves.
 	moved := planWith(t, func(cfg *config.Config) {
 		cfg.ACME.Image = "ghcr.io/example-org/caddy-desec:2.11.4"
 	})
@@ -1376,27 +1382,123 @@ func TestAFoundingApplyStopsWhileAMemberHasNotStarted(t *testing.T) {
 	}
 }
 
-// A replica leaves the work to the leader's site and says so. Its apps still
-// start: they reach the leader through HAProxy, and creating roles there from
-// a replica is not something Postgres allows.
+// created reports whether any role was created or altered, which only the
+// leader's site does.
+func (h *fakeHost) created() bool {
+	for _, input := range h.inputs {
+		if strings.Contains(input, "ROLE") {
+			return true
+		}
+	}
+	return false
+}
+
+// A replica leaves the work to the leader's site and says so. Once its own
+// catalogue, which streams the leader's, holds every app database, its apps
+// start: they reach the leader through HAProxy, and creating roles there
+// from a replica is not something Postgres allows.
 func TestAReplicaLeavesTheDatabasesToTheLeader(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leader = "home-b"
+	host.replicaHas = []string{"auth", "docs", "talk"}
 	p := bootstrapPlan(t, host)
 	said := &ui.Recorder{}
 	p.Report = said
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if host.ran("psql") {
+	if host.created() {
 		t.Error("a replica tried to create roles")
 	}
 	if !said.Has("detail", "home-b") {
-		t.Errorf("the skip does not name the leader's site:\n%s", said.Lines())
+		t.Errorf("the replica does not name the leader's site:\n%s", said.Lines())
 	}
 	if !host.ran("/srv/paisans/f2a9/talk/compose.yaml up -d") {
 		t.Error("a replica's apps were not started")
+	}
+}
+
+// A replica whose catalogue lacks an app database stops before any app
+// stack: an app started then fails to authenticate as a role nobody created,
+// and Docker restarts it in a loop. The stop names the leader's site to apply
+// first, is apply.ErrDatabasesWait, and the next apply resumes and finishes.
+func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
+	noWait(t)
+	host := newHost()
+	host.leader = "home-b"
+	host.replicaHas = []string{"auth"}
+	err := apply.Execute(bootstrapPlan(t, host), host)
+	if err == nil {
+		t.Fatal("a replica started its apps with app databases missing")
+	}
+	if !errors.Is(err, apply.ErrDatabasesWait) {
+		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
+	}
+	if errors.Is(err, apply.ErrFoundingWait) {
+		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
+	}
+	q := problemOf(t, err)
+	if q.Hint != "home-a is waiting on home-b to create databases docs, talk" {
+		t.Errorf("hint: %q", q.Hint)
+	}
+	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
+		if !strings.Contains(q.Explain, want) {
+			t.Errorf("the explanation does not say %q:\n%s", want, q.Explain)
+		}
+	}
+	if host.created() {
+		t.Error("a replica tried to create roles")
+	}
+	passwords := clusteredPasswords(t)
+	for _, input := range host.inputs {
+		for app, password := range passwords {
+			if strings.Contains(input, password) {
+				t.Errorf("the replica's read carries %s's password", app)
+			}
+		}
+	}
+	for _, command := range host.commands {
+		if strings.Contains(command, "docker compose") && strings.Contains(command, " up -d") && !strings.Contains(command, "/srv/paisans/f2a9/infra/") {
+			t.Errorf("an app stack was started past the gate: %s", command)
+		}
+	}
+
+	host.replicaHas = []string{"auth", "docs", "talk"}
+	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
+		t.Fatal(err)
+	}
+	if !host.ran("/srv/paisans/f2a9/talk/compose.yaml up -d") {
+		t.Error("the resumed apply did not start the apps")
+	}
+}
+
+// A replica whose Postgres does not answer the read is asked again, as the
+// wait for a primary is, and one that never answers stops the apply before
+// any app stack.
+func TestAReplicaThatCannotBeReadStopsTheApply(t *testing.T) {
+	noWait(t)
+	host := newHost()
+	host.leader = "home-b"
+	host.fail = " -At"
+	err := apply.Execute(bootstrapPlan(t, host), host)
+	if err == nil {
+		t.Fatal("a replica started its apps without reading its databases")
+	}
+	reads := 0
+	for _, command := range host.commands {
+		if strings.Contains(command, " -At") {
+			reads++
+		}
+	}
+	if reads != 3 {
+		t.Errorf("read %d times, want 3 in 9s at 3s", reads)
+	}
+	if !strings.Contains(err.Error(), "home-a: Postgres here did not answer") {
+		t.Errorf("the error does not say what happened:\n%v", err)
+	}
+	if host.ran("/srv/paisans/f2a9/talk/compose.yaml up -d") {
+		t.Error("an app stack was started past the gate")
 	}
 }
 

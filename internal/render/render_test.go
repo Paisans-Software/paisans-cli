@@ -921,7 +921,7 @@ func TestTheDeclaredProviderIsRendered(t *testing.T) {
 }
 
 // The image a gateway runs is the one that carries the declared provider's
-// module, pinned by digest, and never upstream's own image.
+// module, named by the tag apply resolves, and never upstream's own image.
 func TestTheGatewayRunsAnImageWithTheModule(t *testing.T) {
 	files := map[string]string{}
 	for _, f := range build(t).Files {
@@ -2651,7 +2651,7 @@ func TestEveryDeclaredImageVolumeIsMounted(t *testing.T) {
 					t.Fatalf("%s: %v", path, err)
 				}
 				for name, s := range services {
-					declared, ok := kinds.ImageVolumes[s.Image]
+					declared, ok := kinds.DeclaredVolumes(s.Image)
 					if !ok {
 						t.Errorf("%s service %s runs %s, which kinds.ImageVolumes does not record. Inspect it and record what it declares", path, name, s.Image)
 						continue

@@ -131,7 +131,23 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 // member has its record: it is applied, not added.
 func TestConvergeResumesAFoundingAfterAFailure(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"founding: apply --site home-a", "founding: apply --site home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"other sites: apply --site vm", "founding: apply --site home-a", "founding: apply --site home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+}
+
+// A witness that has its record, though no data member it lists has one, is
+// applied before them: their founding is refused until its etcd runs.
+func TestConvergeAppliesARecordedWitnessBeforeTheFoundingMembers(t *testing.T) {
+	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
+	lines := titles(steps)
+	witness := slices.IndexFunc(lines, func(l string) bool { return strings.HasSuffix(l, "apply --site vm") })
+	for _, data := range []string{"founding: apply --site home-a", "founding: apply --site home-b"} {
+		if i := slices.Index(lines, data); i < 0 || witness < 0 || witness > i {
+			t.Errorf("the witness's apply does not come before %q:\n%s", data, strings.Join(lines, "\n"))
+		}
+	}
+	if steps[witness].Stage == stageFounding {
+		t.Errorf("a recorded witness is applied as founding: %s", lines[witness])
+	}
 }
 
 func TestConvergeRunsInitFirstWhenItHasWork(t *testing.T) {
@@ -268,6 +284,80 @@ func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
 		t.Fatalf("the run stopped at the founding stop: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
+}
+
+// databasesWait is a replica's stop for the app databases, as apply returns
+// it.
+func databasesWait(site, leader string) error {
+	return &ui.Problem{
+		Hint:  site + " is waiting on " + leader + " to create databases auth, talk",
+		Cause: fmt.Errorf("%s: %w %s: auth, talk", site, apply.ErrDatabasesWait, leader),
+	}
+}
+
+// waitsFor makes the run's apply of site stop for the app databases on its
+// first n runs.
+func waitsFor(t *testing.T, site, leader string, n int) {
+	t.Helper()
+	saved := convergeRun
+	runs := 0
+	convergeRun = func(args []string) error {
+		if err := saved(args); err != nil {
+			return err
+		}
+		if title := strings.Join(args, " "); strings.HasPrefix(title, "apply --site "+site+" ") {
+			if runs++; runs <= n {
+				return databasesWait(site, leader)
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { convergeRun = saved })
+}
+
+// The first deployment's order: home-a's founding apply stops for etcd, so
+// home-b's finds Patroni a replica of home-a with no database yet. Neither
+// stop ends the run, and pass two, home-a first, creates the databases and
+// then starts home-b's apps.
+func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	waitsFor(t, "home-b", "home-a", 1)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("the run stopped at the databases wait: %v", err)
+	}
+	sameLines(t, *ran, commands(blankPlan()))
+	if !rec.Has("detail", "✓ apply --site home-b: waiting for the primary's databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
+	}
+}
+
+// A replica still waiting on its last visit, pass two having reached it
+// before the leader's site, is applied once more after every other step,
+// and its line ends done then.
+func TestTheDatabasesWaitOnTheLastVisitIsAppliedAgain(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	waitsFor(t, "home-a", "home-b", 2)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("the run stopped at the databases wait: %v", err)
+	}
+	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
+	if rec.Has("fail", "") || !rec.Has("done", "home-a") {
+		t.Errorf("home-a's line did not end done:\n%s", rec.Lines())
+	}
+}
+
+// A replica still waiting when applied once more, after every other step,
+// has a leader that did not create the databases, and that ends the run.
+func TestTheDatabasesWaitAfterEveryStepStopsTheRun(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	waitsFor(t, "home-a", "home-b", 3)
+	err := converge(t, "--execute")
+	if !errors.Is(err, apply.ErrDatabasesWait) || !strings.Contains(err.Error(), "apply --site home-a") || !strings.Contains(err.Error(), "Run paisans apply --execute again to resume") {
+		t.Fatalf("err = %v", err)
+	}
+	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
 }
 
 func TestAFailingStepStopsTheRun(t *testing.T) {
@@ -657,6 +747,27 @@ func TestSiteRemoveUsageNamesForceAndSSH(t *testing.T) {
 		if !strings.Contains(entry, flag) {
 			t.Errorf("site remove's usage leaves out %s:\n%s", flag, entry)
 		}
+	}
+}
+
+// apply --site's usage entry names every flag about one site.
+func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
+	start := strings.Index(usage, "paisans apply    --site")
+	entry := usage[start : start+strings.Index(usage[start:], "\n  paisans site")]
+	for _, flag := range []string{"--ssh", "--only", "--overwrite", "--recreate", "--min-free", "--keep-images", "--execute"} {
+		if !strings.Contains(entry, flag) {
+			t.Errorf("apply --site's usage leaves out %s:\n%s", flag, entry)
+		}
+	}
+}
+
+// The usage's list of the commands that reach a host names secrets prune,
+// which reads the gateways' deployment records over ssh.
+func TestUsageHostListNamesSecretsPrune(t *testing.T) {
+	start := strings.Index(usage, "host prepare, host deployments, apply")
+	entry := strings.Join(strings.Fields(usage[start:start+strings.Index(usage[start:], "reach a host.")]), " ")
+	if !strings.Contains(entry, "secrets prune") {
+		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
 	}
 }
 
@@ -1200,7 +1311,8 @@ func convergeShaped(t *testing.T, edit func(*config.Config), recorded map[string
 }
 
 // What each step waits on, for each shape of deployment: a member joining
-// through site add, one Garage site, no etcd, no Garage, and a monitor in
+// through site add, a witness with its record before the data members are
+// founded, one Garage site, no etcd, no Garage, and a monitor in
 // etcd.members.
 func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 	founded := initial("home-a", "vm")
@@ -1225,6 +1337,25 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"· apply --site home-a: after storage add",
 				"· apply --site home-b: after site add home-b",
 				"· apply --site vm: after storage add",
+				"· apply --site watch: after storage add",
+			},
+		},
+		{
+			name:     "a recorded witness",
+			edit:     func(*config.Config) {},
+			recorded: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")},
+			found:    map[string]any{"apply --site vm": "1 change"},
+			want: []string{
+				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ dns init",
+				"○ apply --site vm: 1 change",
+				"· apply --site home-a: after apply --site vm",
+				"· apply --site home-b: after apply --site vm",
+				"✓ apply --site watch",
+				"· storage add: after apply --site home-a",
+				"· apply --site home-a: after the earlier apply --site home-a",
+				"· apply --site home-b: after the earlier apply --site home-b",
+				"· apply --site vm: after the earlier apply --site vm",
 				"· apply --site watch: after storage add",
 			},
 		},

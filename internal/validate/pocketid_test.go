@@ -169,3 +169,17 @@ func TestASenderNameOnPocketIDIsWarnedAbout(t *testing.T) {
 		t.Error("the deployment's own from_name was warned about")
 	}
 }
+
+// An unset file_backend is not warned about, because the template renders
+// `database` for it; a backend set to anything else is.
+func TestPocketIDFileBackendWarnsOnlyWhenSetToOtherThanDatabase(t *testing.T) {
+	unset := withAuth(t, nil, nil, nil)
+	delete(unset.Apps["auth"].Settings, "file_backend")
+	if r := validate.Check(unset); r.Has("pocket-id-file-backend") {
+		t.Errorf("unset file_backend warned: %v", findings(r, "pocket-id-file-backend"))
+	}
+	r := validate.Check(withAuth(t, map[string]any{"file_backend": "filesystem"}, nil, nil))
+	if got := findings(r, "pocket-id-file-backend"); len(got) != 1 || got[0] != "WARN apps.auth.settings.file_backend" {
+		t.Errorf("filesystem file_backend gave %v", got)
+	}
+}

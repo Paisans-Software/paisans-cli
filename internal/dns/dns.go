@@ -14,10 +14,12 @@
 // the deployment needs is a conflict, and any conflict stops the whole run
 // before a single record is written.
 //
-// Prune is the one path that deletes, and only an address record that passes
-// every rule in prune.go: the toolkit's comment, a name and an address that
-// are this deployment's, and no longer wanted. dns prune and site remove's
-// DNS stage both plan through it. Nothing in this package updates a record.
+// Prune is the one path that deletes, and only a record that passes every
+// rule in prune.go: the toolkit's comment, a name that is this deployment's,
+// and no longer wanted; and either an A or AAAA record pointing at a site's
+// public address, or, for dns prune, a TXT or MX record holding exactly a
+// no-mail content init writes (mail.go). dns prune and site remove's DNS
+// stage both plan through it. Nothing in this package updates a record.
 //
 // It reaches no host. The only thing it talks to is the DNS provider's API,
 // from the workstation, with the token from the decrypted secrets.

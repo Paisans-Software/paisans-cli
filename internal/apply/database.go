@@ -56,8 +56,9 @@ var reservedRoles = map[string]bool{"postgres": true, "admin": true, "standby": 
 //
 // Only a site in cluster.sites runs Patroni, so only such a site can reach a
 // primary through its own container. The work is idempotent and runs on
-// whichever of them is the leader when it is applied; a replica says so and
-// leaves it to the leader's site.
+// whichever of them is the leader when it is applied; a replica leaves it to
+// the leader's site, and starts its apps only once its own catalogue holds
+// what the leader created.
 func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Bootstrap, error) {
 	inCluster := false
 	for _, name := range cfg.Cluster.Sites {
@@ -270,9 +271,16 @@ func quoteLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''
 // resumes when applied again once that member runs.
 var ErrFoundingWait = errors.New("waiting on")
 
+// ErrDatabasesWait is the replica's stop: Patroni here is a replica, and an
+// app database or its role is not there yet, so its apply ends before any app
+// stack, and resumes when applied again once the leader's site has created
+// them.
+var ErrDatabasesWait = errors.New("waiting for databases from")
+
 // runBootstrap waits for a primary and creates what is missing. A replica
-// skips, saying which site does the work; anything else that goes wrong stops
-// the apply before any app stack is started.
+// creates nothing and stops unless every app database already exists;
+// anything else that goes wrong stops the apply before any app stack is
+// started.
 func runBootstrap(plan *Plan, t Transport) error {
 	if waiting := plan.Bootstrap.EtcdUnstarted; len(waiting) > 0 {
 		return &ui.Problem{
@@ -292,9 +300,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 	}
 	if err != nil {
 		if replica, ok := err.(errReplica); ok {
-			plan.say("databases skipped: Patroni here is a replica, and %s holds the leader. Apply %s to create app roles and databases",
-				replica.leader, replica.leader)
-			return nil
+			return replicaDatabases(plan, t, replica.leader)
 		}
 		return err
 	}
@@ -328,4 +334,77 @@ func runBootstrap(plan *Plan, t Transport) error {
 		plan.say("ensured role and database %s for %s", db.Name, db.App)
 	}
 	return nil
+}
+
+// replicaDatabases is a replica's part of the bootstrap: it creates nothing,
+// since a replica is read only, and lets the apply go on to the app stacks
+// only once every app database and its role is in its own catalogue, which
+// streams the leader's. An app started before then fails to authenticate as
+// a role nobody created and is restarted in a loop by Docker. A replica's
+// Postgres that has only just started may not answer yet, so the read is
+// polled like the wait for a primary.
+func replicaDatabases(plan *Plan, t Transport, leader string) error {
+	plan.say("Patroni here is a replica, and %s holds the leader and creates app roles and databases", leader)
+	if len(plan.Bootstrap.Databases) == 0 {
+		return nil
+	}
+	done := plan.step("check replica databases")
+	attempts := int(primaryWait / primaryPoll)
+	if attempts < 1 {
+		attempts = 1
+	}
+	var out string
+	var err error
+	for i := 0; i < attempts; i++ {
+		out, err = t.RunInput(psql(plan.Deployment)+" -At", replicaSQL(plan.Bootstrap))
+		if err == nil {
+			break
+		}
+		if i < attempts-1 {
+			sleep(primaryPoll)
+		}
+	}
+	if err != nil {
+		finish(done, err)
+		return fmt.Errorf(
+			"%s: Postgres here did not answer a read of its databases after %s, so no app stack was started:\n%s\nRead `%s logs patroni` on the host, then apply again: it resumes here",
+			plan.Site, primaryWait, strings.TrimSpace(out), plan.Deployment.ComposeCmd(infraStack))
+	}
+	present := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		present[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, db := range plan.Bootstrap.Databases {
+		if present[db.Name] {
+			done.Detail("database %s and role %s exist, for %s", db.Name, db.Role, db.App)
+		} else {
+			missing = append(missing, db.Name)
+		}
+	}
+	if len(missing) == 0 {
+		done.Done("")
+		return nil
+	}
+	done.Done("missing " + strings.Join(missing, ", "))
+	return &ui.Problem{
+		Hint: fmt.Sprintf("%s is waiting on %s to create databases %s", plan.Site, leader, strings.Join(missing, ", ")),
+		Explain: fmt.Sprintf(
+			"The infrastructure stack is up. Patroni here is a replica, and the primary, on %s, creates the app roles and databases, so no app stack was started. Apply %s, then apply this site again: it resumes here.",
+			leader, leader),
+		Cause: fmt.Errorf("%s: %w %s: %s", plan.Site, ErrDatabasesWait, leader, strings.Join(missing, ", ")),
+	}
+}
+
+// replicaSQL lists, one per line, each app database that exists and whose
+// role does too. It names databases and roles and nothing else: no password
+// is read or sent.
+func replicaSQL(b *Bootstrap) string {
+	var want []string
+	for _, db := range b.Databases {
+		want = append(want, fmt.Sprintf("(%s, %s)", quoteLiteral(db.Role), quoteLiteral(db.Name)))
+	}
+	return "SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
+		" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
+		" AND EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n"
 }

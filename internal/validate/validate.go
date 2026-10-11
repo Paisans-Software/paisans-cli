@@ -142,7 +142,7 @@ func Check(cfg *config.Config) Result {
 	c.clusterPlacementWithoutACluster()
 	c.acmeProviderHasAnImage()
 	c.acmeImageIsNotStockCaddy()
-	c.floatingACMEImage()
+	c.latestACMEImage()
 	c.hostnameRoles()
 	c.duplicateHostname()
 	c.gateWithoutAGate()
@@ -229,11 +229,14 @@ func (c *checker) witnessSharesFailureDomain() {
 // worse than one, so a join goes from one to three in a single operation and
 // never rests at two.
 //
+// Either way the first way out is a witness: a site with the witness role in a
+// third location, which makes three voters and gives automatic failover. The
+// toolkit never demands one, so declaring one voter stays the other way out.
 // A derived pair came from the roles, so the advice is in their terms: with
-// one data site the witness has no tie to break and its role comes off;
-// otherwise a witness in a third location makes three, or one voter is
-// written out.
+// one data site the witness has no tie to break and its role comes off.
 func (c *checker) twoVoters() {
+	const witness = "Add a witness: a site in a third location, one that fails independently of both, with the witness role (Eg: `roles: [witness]`)"
+	const failover = ", which makes three voters and gives automatic failover."
 	members := c.cfg.Etcd.Members
 	if len(members) != 2 {
 		return
@@ -241,25 +244,25 @@ func (c *checker) twoVoters() {
 	if !c.cfg.Etcd.MembersDerived {
 		c.refuse("two-etcd-voters", "etcd.members",
 			"etcd has exactly two voters",
-			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. Declare one member, or three.",
-			members[0], members[1])
+			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. %s Or declare one member, which gives up automatic failover.",
+			members[0], members[1], witness+" and listed in etcd.members"+failover)
 		return
 	}
-	var data, witness []string
+	var data, witnesses []string
 	for _, name := range members {
 		if c.cfg.Sites[name].Has(config.RoleData) {
 			data = append(data, name)
 		} else {
-			witness = append(witness, name)
+			witnesses = append(witnesses, name)
 		}
 	}
 	one := members[0]
 	if len(data) > 0 {
 		one = data[0]
 	}
-	fix := fmt.Sprintf("Give a site in a third location, one that fails independently of both, the witness role, which makes three voters; or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", one)
-	if len(data) == 1 && len(witness) == 1 {
-		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witness[0], data[0])
+	fix := fmt.Sprintf("%s Or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", witness+failover, one)
+	if len(data) == 1 && len(witnesses) == 1 {
+		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witnesses[0], data[0])
 	}
 	c.refuse("two-etcd-voters", c.cfg.EtcdMembersKey(),
 		"etcd has exactly two voters",
@@ -818,11 +821,12 @@ func (c *checker) mbinRabbitMQAcrossSites() {
 // that diverge from the moment anybody writes to them, and a failover would
 // move readers between them.
 //
-// Two kinds are in this position: Element, which is a static client, and
-// oauth2-proxy, which keeps a session in a cookie. It is refused rather than
-// warned about because there is no reading of it that works, and pinning is
-// not a downgrade: it is the plain case, and the app's availability becomes
-// its site's, which is what it was always going to be.
+// Three kinds are in this position: Element, which is a static client,
+// oauth2-proxy, which keeps a session in a cookie, and uptime, which keeps
+// its database in SQLite under its own data directory. It is refused rather
+// than warned about because there is no reading of it that works, and pinning
+// is not a downgrade: it is the plain case, and the app's availability
+// becomes its site's, which is what it was always going to be.
 func (c *checker) clusterPlacementWithoutACluster() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
@@ -1050,7 +1054,10 @@ func collides(a, b render.Listener) bool {
 	return a.Overlaps(b)
 }
 
-// pocketIDFileBackend warns about anything other than the database backend.
+// pocketIDFileBackend warns about a backend set to anything other than
+// database. Unset is not warned about: the pocket-id template renders
+// `database` when the setting is absent, so unset already is the backend this
+// check asks for.
 //
 // Its uploads are avatars and admin branding, about a megabyte in total. In
 // Postgres they ride streaming replication, so a promoted site has them
@@ -1063,17 +1070,13 @@ func (c *checker) pocketIDFileBackend() {
 			continue
 		}
 		backend, _ := app.Settings["file_backend"].(string)
-		if backend == "database" {
+		if backend == "" || backend == "database" {
 			continue
-		}
-		shown := backend
-		if shown == "" {
-			shown = "unset, which means filesystem"
 		}
 		c.warn("pocket-id-file-backend", fmt.Sprintf("apps.%s.settings.file_backend", name),
 			"pocket id file backend is not database",
 			"is %s. Prefer `database`: the uploads are about a megabyte of avatars and branding, in Postgres they ride streaming replication with no sync job, and sign in then does not depend on object storage being up. On filesystem, a promoted site serves broken avatars and stock branding mid incident.",
-			shown)
+			backend)
 	}
 }
 
@@ -1105,15 +1108,20 @@ func (c *checker) pocketIDStandbyMarkerUnknown() {
 	}
 }
 
-// floatingACMEImage refuses a gateway image that does not name one build.
+// latestACMEImage refuses a gateway image on `latest`, or on no tag, which
+// means `latest`.
 //
-// The same rule as floating-image-tag, applied to the one image that was
-// exempt from it because it lives in its own stanza rather than under an app.
-// It matters more here, not less: a moving tag on an app image deploys a
-// different build of that app, while a moving tag on the gateway can silently
-// drop the DNS provider module, and a gateway that cannot answer a challenge
-// holds no certificate for any hostname in the deployment.
-func (c *checker) floatingACMEImage() {
+// A tag that moves is otherwise welcome here, unlike under an app: apply
+// resolves acme.image to the digest its tag names while it plans, renders
+// that digest, and records it, so a moving tag (Eg: `2`, or `2.11`) brings
+// rebuilds in as an ordinary planned change that every gateway gate checks.
+// What resolving cannot do is keep a tag inside one major version. `latest`
+// moves to Caddy 3 the day it ships, and a major version can change the
+// Caddyfile syntax the gateway is rendered with. The gateway's validation gate
+// would refuse that build, and so every apply from that day on, with nothing
+// in the configuration having changed. Naming the major version is the whole
+// of the fix.
+func (c *checker) latestACMEImage() {
 	if c.cfg.ACME.Image == "" {
 		return
 	}
@@ -1121,9 +1129,9 @@ func (c *checker) floatingACMEImage() {
 	if why == "" {
 		return
 	}
-	c.refuse("acme-image-is-floating", "acme.image",
-		"acme image tag is floating",
-		"is %q and %s. The gateway's image carries the DNS provider module compiled in, so a tag that moves can drop the module the configuration names, and the gateway would then hold no certificate for any hostname. Name a version tag, or a digest, which is stronger.",
+	c.refuse("acme-image-is-latest", "acme.image",
+		"acme image follows latest, which crosses Caddy major versions",
+		"is %q and %s. apply resolves a moving tag to the build it names, so a rebuild is fine, but `latest` moves to the next Caddy major version as soon as one ships, and a major version can change the Caddyfile syntax the gateway is rendered with: from that day every apply would stop at the gateway's validation, with nothing in this configuration changed. Name the major version as the tag (Eg: `2`), a narrower version, or a digest.",
 		c.cfg.ACME.Image, why)
 }
 
@@ -1658,7 +1666,7 @@ func (c *checker) watchdogOffOnDataSite() {
 		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
 			c.warn("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
 				"watchdog is off on a data site",
-				"is off on a site holding the data role. Patroni is rendered with PATRONI_WATCHDOG_MODE=off, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
+				"is off on a site holding the data role. patroni.env sets the watchdog mode to off inside SPILO_CONFIGURATION, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
 		}
 	}
 }

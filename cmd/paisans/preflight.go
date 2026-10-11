@@ -48,7 +48,7 @@ func runPreflight(args []string) error {
 	report.Show(r)
 	r.Result("%s", report.Summary())
 	if report.Refused() {
-		return fmt.Errorf("preflight refused adding %s: fix what is marked REFUSED and run it again", *site)
+		return fmt.Errorf("preflight refused adding %s: fix each check marked ✗ (FAIL off a terminal) and run it again", *site)
 	}
 	return nil
 }

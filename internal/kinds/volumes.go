@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/paisans-software/paisans-stack/internal/acme"
 )
 
 // ImageVolumes records the VOLUME paths each image this toolkit pins declares,
@@ -23,9 +25,11 @@ import (
 // The table is keyed by the whole reference on purpose. Bumping an image
 // changes its reference, the new one has no entry, and a test fails until
 // somebody inspects it and records what it declares here, which is the
-// moment a new VOLUME has to be noticed. `paisans apply` makes the same check
-// against the host's copy of every image, which is what covers an operator's
-// own `images` override; this table covers what the toolkit ships.
+// moment a new VOLUME has to be noticed. The one image whose reference moves
+// by design is recorded in RepositoryVolumes instead. `paisans apply` makes
+// the same check against the host's copy of every image, which is what covers
+// an operator's own `images` override; this table covers what the toolkit
+// ships.
 //
 // Inspect with --platform linux/amd64 on a machine of another architecture:
 // Docker's containerd image store otherwise answers for the native platform,
@@ -62,12 +66,40 @@ var ImageVolumes = map[string][]string{
 	"gcr.io/etcd-development/etcd:v3.5.16": nil,
 	"haproxy:3.0-alpine":                   nil,
 	"dxflrs/garage:v1.0.1":                 nil,
-	"ghcr.io/paisans-software/caddy:2.11.7@sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186": nil,
 	// The per site heartbeat (internal/render/heartbeat.go). curl's image
 	// declares no VOLUME in its Dockerfile (curl/curl-container, alpine
 	// variant); recorded from the Dockerfile rather than an inspect, which
 	// is still to be run against the exact reference.
 	"docker.io/curlimages/curl:8.11.1": nil,
+}
+
+// RepositoryVolumes is ImageVolumes for the images whose reference moves by
+// design, keyed by repository rather than by reference, so any tag or digest
+// of one answers.
+//
+// The gateway's Caddy is the one such image: the toolkit names
+// ghcr.io/paisans-software/caddy:2 and apply renders whichever build that tag
+// names when it plans (see acme.Published), so no reference to it stays fixed
+// for long enough to be a key. Every build comes from the same Dockerfile in
+// Paisans-Software/caddy-dns, and the build the tag named on 2026-10-11
+// (sha256:b401d1cb...) declared none, inspected as above. `paisans apply`
+// inspects the exact build it deploys against the host's copy all the same,
+// so a later build that declared a path is still refused before it runs.
+var RepositoryVolumes = map[string][]string{
+	acme.Repository: nil,
+}
+
+// DeclaredVolumes is what an image declares, as far as the toolkit has
+// recorded it: by its whole reference in ImageVolumes, or else by its
+// repository in RepositoryVolumes. ok is false for an image neither records,
+// which is an operator's own and is checked against the host's copy at apply
+// time instead.
+func DeclaredVolumes(ref string) (paths []string, ok bool) {
+	if paths, ok := ImageVolumes[ref]; ok {
+		return paths, true
+	}
+	paths, ok = RepositoryVolumes[ParseReference(ref).Repository()]
+	return paths, ok
 }
 
 // ServiceMounts is what one compose service mounts, and from which image.
