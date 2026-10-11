@@ -104,9 +104,14 @@ func mbinFallbackAddress(hostname string) string { return "noreply@" + hostname 
 // Each name is both a key the template renders and a field of the fork's
 // SettingsDto (src/DTO/SettingsDto.php), and TestMbinLockedSettingsAreRendered
 // checks both directions against the rendered file, so a setting added to the
-// template without being locked here fails a test.
-func mbinLockedSettings(gated bool) []string {
+// template without being locked here fails a test. A setting's environment
+// variable is usually its own name; mbinSettingEnv lists the ones that are
+// not, and the lock names the setting, never the variable.
+func mbinLockedSettings(gated, sso bool) []string {
 	out := []string{"KBIN_DOMAIN", "KBIN_SENDER_EMAIL", "KBIN_CONTACT_EMAIL"}
+	if sso {
+		out = append(out, "MBIN_SSO_ONLY_MODE")
+	}
 	if gated {
 		out = append(out, "MBIN_PRIVATE_INSTANCE", "MBIN_AUTHORIZED_FETCH", "MBIN_USE_FEDERATION_ALLOW_LIST")
 	}
@@ -115,5 +120,12 @@ func mbinLockedSettings(gated bool) []string {
 
 // MbinLockedSettings is MBIN_LOCKED_SETTINGS, comma separated.
 func (v appValues) MbinLockedSettings() string {
-	return strings.Join(mbinLockedSettings(v.Gate != ""), ",")
+	return strings.Join(mbinLockedSettings(v.Gate != "", v.OIDC.Present), ",")
+}
+
+// mbinSettingEnv maps a Mbin database setting to the environment variable
+// that feeds it, where the two names differ (config/services.yaml:135 at
+// Paisans-Software/mbin develop: sso_only_mode reads SSO_ONLY_MODE).
+var mbinSettingEnv = map[string]string{
+	"MBIN_SSO_ONLY_MODE": "SSO_ONLY_MODE",
 }

@@ -125,9 +125,15 @@ var mbinDatabaseSettings = []string{
 // .env sets that Mbin keeps in its database is in it. Passthrough keys are
 // left out, since only the template is the toolkit's.
 func TestMbinLockedSettingsAreRendered(t *testing.T) {
-	database := map[string]bool{}
+	// Keyed by the environment variable that feeds each setting, which is the
+	// setting's own name unless mbinSettingEnv says otherwise.
+	database := map[string]string{}
 	for _, name := range mbinDatabaseSettings {
-		database[name] = true
+		key := name
+		if env, ok := render.MbinSettingEnv[name]; ok {
+			key = env
+		}
+		database[key] = name
 	}
 	for _, gate := range []string{config.GateMember, ""} {
 		env := renderTalk(t, fixtureSMTP, nil, func(a *config.App) {
@@ -141,10 +147,11 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 			if !ok || strings.HasPrefix(key, "#") {
 				continue
 			}
-			rendered[key] = true
-			if database[key] {
-				want = append(want, key)
+			if setting, ok := database[key]; ok {
+				rendered[setting] = true
+				want = append(want, setting)
 			}
+			rendered[key] = true
 		}
 		locked := strings.Split(envValue(env, "MBIN_LOCKED_SETTINGS"), ",")
 		for _, name := range locked {
@@ -159,6 +166,11 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		}
 		if gated := rendered["MBIN_PRIVATE_INSTANCE"]; gated != (gate != "") {
 			t.Errorf("gate %q: MBIN_PRIVATE_INSTANCE rendered = %v", gate, gated)
+		}
+		// The fixture's talk has a Pocket ID client, so sign in is the
+		// provider's alone and password registration is closed.
+		if got := envValue(env, "SSO_ONLY_MODE"); got != "true" {
+			t.Errorf("gate %q: SSO_ONLY_MODE = %q, want true", gate, got)
 		}
 	}
 }

@@ -3890,6 +3890,14 @@ still mail a community wants delivered, a contact form message above all, so
 the kind reads the `smtp` block like the other two (see *Mail is declared once
 and overridden per app*) and renders three variables into its `.env`.
 
+**Mbin with a client at the identity provider is rendered `SSO_ONLY_MODE=true`,
+because mail makes its own registration real.** The image's defaults leave
+password registration at `/register` open. While mail goes nowhere its
+verification link never arrives, but a working transport delivers it, and
+anyone who could reach the page could make an account the provider and its
+member group never see. `SSO_ONLY_MODE` closes `/register`; accounts are still
+made on first sign in.
+
 **`MAILER_DSN`** is the transport, the only place Symfony Mailer reads it
 from (`config/packages/mailer.yaml`). It is built in Go from the app's
 effective `smtp` settings, so it can be tested:
