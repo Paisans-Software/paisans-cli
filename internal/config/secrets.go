@@ -188,13 +188,16 @@ var AgeKeystore keystore.Store = keystore.Platform()
 // not read.
 var ageVariables = []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD", "SOPS_AGE_SSH_PRIVATE_KEY_FILE", "SOPS_AGE_SSH_PRIVATE_KEY_CMD"}
 
-func ageVariableSet() bool {
+// AgeVariableSet returns the first of the SOPS_AGE_* variables that is set,
+// and whether there is one. While one is, decryption uses it and never reads
+// the keystore, so init says so rather than promising the keystore is read.
+func AgeVariableSet() (string, bool) {
 	for _, name := range ageVariables {
 		if os.Getenv(name) != "" {
-			return true
+			return name, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // errNoKey and errTampered are what decryptSOPS found, for decryptProblem to
@@ -218,7 +221,21 @@ func decryptProblem(path string, err error) error {
 	const noKey = "Set SOPS_AGE_KEY_CMD to a command that prints your key, Eg: a Keychain lookup, so the key is never stored in a file or the environment. SOPS_AGE_KEY_FILE (its path), SOPS_AGE_KEY (the key itself) and sops/age/keys.txt in your config directory are read too. Your public key must be a recipient in .sops.yaml; if it was added recently, run sops updatekeys on the file."
 	var miss *keystoreMiss
 	var stale *notRecipient
+	var failed *keystoreFailed
+	var chosen *variableChosen
 	switch {
+	case errors.As(err, &failed):
+		return &ui.Problem{
+			Hint:    name + " cannot be decrypted: the keystore could not be read",
+			Explain: fmt.Sprintf("paisans looked for %s and the keystore said: %v. Unlock or repair the keystore and re-run, or name a key another way. %s", failed.item, failed.cause, noKey),
+			Cause:   cause,
+		}
+	case errors.As(err, &chosen):
+		return &ui.Problem{
+			Hint:    name + " cannot be decrypted: no usable age key was found",
+			Explain: fmt.Sprintf("%s %s is set, so %s was not read.", noKey, chosen.name, chosen.item),
+			Cause:   cause,
+		}
 	case errors.As(err, &stale):
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("the keystore key for deployment %s… is not a recipient of %s", deployment.Deployment{ID: stale.id}.Token(), name),
@@ -280,11 +297,19 @@ func decryptSOPS(data []byte, id string) ([]byte, error) {
 // dataKey opens the file's data key. With an id and no variable set, the
 // key in the keystore item for id is tried first, in memory: nothing is set
 // in the environment, so no child paisans starts can inherit it. sops'
-// own search runs when there is no item, and when the item's key is not a
-// recipient, so a stale item never hides a key sops would find.
+// own search runs when there is no item, when the keystore cannot be read,
+// and when the item's key is not a recipient, so neither a stale item nor a
+// broken keystore ever hides a key sops would find.
 func dataKey(m *sops.Metadata, id string) ([]byte, error) {
-	if id == "" || ageVariableSet() {
+	if id == "" {
 		return sopsDataKey(m)
+	}
+	if name, ok := AgeVariableSet(); ok {
+		key, err := sopsDataKey(m)
+		if _, none := AgeKeystore.(keystore.Unavailable); errors.Is(err, errNoKey) && !none {
+			return nil, &variableChosen{name: name, item: AgeKeystore.Describe(id), err: err}
+		}
+		return key, err
 	}
 	identity, err := AgeKeystore.Get(id)
 	if errors.Is(err, keystore.ErrUnavailable) {
@@ -298,7 +323,14 @@ func dataKey(m *sops.Metadata, id string) ([]byte, error) {
 		return key, err
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", AgeKeystore.Describe(id), err)
+		// A keystore that is there but cannot be read, Eg: secret-tool with
+		// no D-Bus session or a locked Keychain over ssh, must not stop a key
+		// sops finds on its own, which is how such a machine worked before.
+		key, sopsErr := sopsDataKey(m)
+		if errors.Is(sopsErr, errNoKey) {
+			return nil, &keystoreFailed{item: AgeKeystore.Describe(id), cause: err, err: sopsErr}
+		}
+		return key, sopsErr
 	}
 	if key, ok := keystoreDataKey(m, identity); ok {
 		return key, nil
@@ -351,6 +383,28 @@ type keystoreMiss struct {
 
 func (e *keystoreMiss) Error() string { return e.err.Error() }
 func (e *keystoreMiss) Unwrap() error { return e.err }
+
+// keystoreFailed is no usable key, with a keystore that could not be read.
+// cause is the keystore's own error, which the operator needs to repair it.
+type keystoreFailed struct {
+	item       string
+	cause, err error
+}
+
+func (e *keystoreFailed) Error() string {
+	return fmt.Sprintf("%v; reading %s: %v", e.err, e.item, e.cause)
+}
+func (e *keystoreFailed) Unwrap() error { return e.err }
+
+// variableChosen is no usable key while a SOPS_AGE_* variable is set, so
+// the keystore item was not read.
+type variableChosen struct {
+	name, item string
+	err        error
+}
+
+func (e *variableChosen) Error() string { return e.err.Error() }
+func (e *variableChosen) Unwrap() error { return e.err }
 
 // notRecipient is a keystore item whose key opens none of the file's
 // recipients, and no other key sops could find.
