@@ -684,7 +684,10 @@ in the manifest's `pins`. `Plan.Moved` is what the dry run lists, with the
 version labels `imagedigest.Registry.Version` reads. `apply --site` passes
 `apply.OtherSites`, the compose files of each clustered app on its other sites
 (`readPeers`), so the app stays on the build they run, and sites on different
-builds are refused; a step of apply without `--site` passes none. Tests in
+builds are refused; a step of apply without `--site` (`planningEverySite`)
+passes none. Without a resolver, or for a stack outside `--only` or held back,
+Build keeps whatever the host runs. `ImagePin.FirstPin` is a bare tag pinned
+for the first time, which the dry run lists apart from `Plan.Moved`. Tests in
 `cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
 
 A DNS provider's Caddyfile syntax is provider specific rather than uniform: the

@@ -1643,6 +1643,29 @@ see every site of the app does not choose a build for it.
 * **Versions are read from the image configuration**, anonymously as the
   digest is, for linux/amd64 of a multi platform index. A build without the
   label shows its digest alone.
+* **Without a resolver, whatever the host runs is kept**, whatever the
+  configuration now names: another tag, a moved channel or another
+  repository. Every caller without one has a purpose narrower than moving
+  images, and the next apply shows and makes the move. With a resolver and an
+  unreachable registry, only the same tag is kept, pinned or bare, since a
+  different one is not the configuration's.
+* **A bare tag is not a build.** A stack an older toolkit applied names its
+  tags bare, so which build it runs is not known. Pinning one is a first pin,
+  listed as `pins`, not a move, though the stack is recreated once. Across
+  sites, a bare tag agrees with a digest of the same tag, and both are held
+  on the pinned build.
+* **A stack this apply leaves alone resolves nothing.** Outside `--only`, or
+  held back with Except, a stack is pinned as with no resolver, so a registry
+  outage for one app cannot refuse an apply of another, and the dry run lists
+  only what moves.
+* **The run's cache keeps failures too.** A reference that failed fails for
+  the rest of the run, and a registry host that could not be reached fails
+  every later reference on it at once.
+* **Only a run over every site skips the other sites' builds.** apply
+  without `--site` marks its run (`planningEverySite`); its `apply --site`
+  steps then hold nothing, and every site moves through one cache. A run that
+  stops part way leaves the moved sites on the new build, an `apply --site`
+  then refuses naming each, and the next whole apply moves the rest.
 
 ### What was weighed
 
@@ -1652,6 +1675,11 @@ see every site of the app does not choose a build for it.
 * **Reading a peer site's build from its manifest.** A manifest written
   before this change has no `pins`, and the compose file is the fact the
   manifest records.
+* **Holding a clustered app in the steps of apply without `--site` too.**
+  Each step would hold its site on the build the others run, so a clustered
+  app would never move at all.
+* **Comparing a bare tag with the digest it names now.** The registry says
+  what the tag names today, not what a host pulled under it earlier.
 * **Refusing an apply --site whenever another site of the app cannot be
   read.** That refuses the apply an operator runs to repair a surviving site
   while another is down, and the surviving site's own build is one the

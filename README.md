@@ -1559,8 +1559,18 @@ Mbin's application and its messenger consumers are pinned together, and a
 plan whose rewrite would leave one of them on the bare tag stops. Each tag is
 resolved once per run, so every site and service an apply plans gets the same
 build. The registry is asked from the workstation, anonymously; when it cannot
-be reached, the plan keeps the build the stack already runs and says so, and
-a stack that runs none is refused until it can be. The manifest,
+be reached, the plan keeps what the stack already runs of the same tag and
+says so, and a stack that runs none is refused until it can be. A registry
+that could not be reached is not asked again for the rest of the run, so an
+outage costs one timeout rather than one per image. `--only` and a stack an
+apply holds back resolve nothing: they keep what the host runs, and nothing
+about them is listed or refused.
+
+A stack an older toolkit applied runs its tags bare. Its first apply pins
+each to the build the tag names then, and the dry run says `pins` rather
+than calling it a new build, since which build the host runs under the bare
+tag is not known; the compose file changes, so the stack is recreated once,
+on the build pinned. The manifest,
 `/srv/paisans/<token>/.paisans-manifest.json`, records each service's build
 under `pins`: the stack, the service, the reference as configured, the one
 pinned, when it was resolved, and whether it came from the registry, was kept,
@@ -1570,8 +1580,9 @@ A digest in `images` is taken as written, so it, or a version tag the
 publisher does not rebuild, holds an app on one build until the operator
 changes it. Commands that rewrite a compose file for a narrower reason
 (`site add`, `site remove`, `storage add`, `storage rotate-key`) resolve
-nothing and keep the build each stack runs, so none of them moves an image
-nobody planned.
+nothing and keep whatever each stack runs, whatever the configuration now
+names (another tag, a moved channel, another repository), so none of them
+moves an image nobody planned; the next `apply` shows and makes that move.
 
 **An app on several sites moves to a new build on all of them at once.** A
 clustered app runs one database from every site it is on, and two builds
@@ -1581,7 +1592,9 @@ reads the app's compose file on its other sites, keeps the app on the build
 they run, and says so, naming a newer build when the tag points at one; moving
 the app takes an apply that covers all its sites. Sites that already run
 different builds are refused, naming each site's, and the operator chooses with
-an apply that covers all of them.
+an apply that covers all of them. A site still on a bare tag beside one pinned
+to a build of that tag is not a disagreement: both are held on the pinned
+build.
 
 **An app may follow another channel than its kind's, with a warning.** A fork
 the toolkit runs can publish a channel tag, `stack-<N>`, naming its latest
