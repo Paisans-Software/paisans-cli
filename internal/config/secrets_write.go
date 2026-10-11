@@ -21,6 +21,22 @@ import (
 // followed by a re-encrypt rather than a rotation of every secret.
 const SOPSConfigName = ".sops.yaml"
 
+// WriteSOPSConfig writes a .sops.yaml into dir naming recipient, the one init
+// writes for a key it made. An existing file is never replaced: once there,
+// it is the operator's, and may name other admins.
+func WriteSOPSConfig(dir, recipient string) error {
+	path := filepath.Join(dir, SOPSConfigName)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if _, err := f.WriteString("creation_rules:\n  - age: " + recipient + "\n"); err != nil {
+		f.Close()
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return f.Close()
+}
+
 // WriteSecrets serialises secrets and writes them to path, encrypted to the
 // given age recipients.
 //
@@ -29,10 +45,11 @@ const SOPSConfigName = ".sops.yaml"
 // different questions with different failure modes.
 //
 // With no recipients the file is written in plaintext and the caller is
-// expected to say so loudly. That is not a convenience for real deployments: it
-// exists because fixtures and a first look at the tool must not require an age
-// key, and because refusing to write anything at all would leave an operator
-// with generated secrets that went nowhere.
+// expected to say so loudly. That is not a convenience for real deployments:
+// init makes a key for a deployment built from scratch. It exists because
+// fixtures must not require an age key, and because refusing to write
+// anything at all would leave an operator with generated secrets that went
+// nowhere.
 func WriteSecrets(path string, s *Secrets, recipients []string) error {
 	plain, err := yaml.Marshal(s)
 	if err != nil {

@@ -7,13 +7,15 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-stack/internal/keystore"
 )
 
 // TestMain stands a refusal in for the DNS provider site remove builds, so
 // that no test in this package can reach a real one, whatever provider its
 // fixture names. A test that needs one replaces it with a fake. The same goes
-// for the registry apply resolves Caddy's tag against: every test sees the
-// tag name one fixed build, testCaddyDigest.
+// for the registry apply resolves Caddy's tag against, and for the keystore
+// init keeps age keys in: every test sees the tag name one fixed build,
+// testCaddyDigest, and keeps its age keys in memory.
 func TestMain(m *testing.M) {
 	caddyDigests = fixedDigest(testCaddyDigest)
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
@@ -22,6 +24,9 @@ func TestMain(m *testing.M) {
 	// No test reaches a host to ask whether it was the gateway; a test
 	// about the move says otherwise.
 	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
+	// No test reaches the workstation's keystore: init makes and reads age
+	// keys in memory. A test about the keystore sets its own.
+	config.AgeKeystore = keystore.NewMemory()
 	os.Exit(m.Run())
 }
 
