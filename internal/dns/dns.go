@@ -19,7 +19,10 @@
 // and no longer wanted; and either an A or AAAA record pointing at a site's
 // public address, or, for dns prune, a TXT or MX record holding exactly a
 // no-mail content init writes (mail.go). dns prune and site remove's DNS
-// stage both plan through it. Nothing in this package updates a record.
+// stage both plan through it. A gateway move (move.go) is the one other
+// path, and deletes only through ExecutePrune too: the old gateway's address
+// records at the gateway's hostnames, once every record of the new one's is
+// present. Nothing in this package updates a record.
 //
 // It reaches no host. The only thing it talks to is the DNS provider's API,
 // from the workstation, with the token from the decrypted secrets.
@@ -30,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 
@@ -57,6 +61,11 @@ type Record struct {
 	Comment string
 	// Priority is an MX record's preference, and zero for every other type.
 	Priority int
+	// TTL is the record's time to live in seconds as the provider reports
+	// it, with a provider's automatic setting given as the seconds it
+	// stands for. Zero is unknown. It is read, never written: a record is
+	// created with the provider's automatic TTL.
+	TTL int
 }
 
 // Want is a record the deployment needs.
@@ -79,13 +88,23 @@ type Want struct {
 	// One found is a conflict that dns prune resolves; none is Clear. It is
 	// never created, and prune never counts it as wanted.
 	Leftover bool
+	// ViaGateway is an address record for a hostname the gateway serves: an
+	// app's hostname or media hostname, not a monitor's or a site endpoint's.
+	// These are the records a gateway move adds and deletes.
+	ViaGateway bool
+	// Former are the public addresses of every declared site other than the
+	// gateway, on a ViaGateway want: one of them may be the gateway this one
+	// replaces, whose record at the name waits for `gateway move` rather than
+	// being a conflict.
+	Former []string
 }
 
 // Provider is a DNS provider's API, reduced to the things this package does
 // with it. There is no update here on purpose: a method that does not exist
-// cannot be called by mistake. Delete exists for prune alone, and the only
-// caller is ExecutePrune, which deletes nothing its plan did not pass through
-// every prune rule, whether BuildPrune or BuildSiteRemoval made the plan.
+// cannot be called by mistake. Delete's only caller is ExecutePrune, which
+// deletes nothing its plan did not pass through every rule of the builder
+// that made it: BuildPrune or BuildSiteRemoval under prune.go's rules, or
+// BuildMove under move.go's.
 type Provider interface {
 	// Name is the provider's name as acme.provider spells it, for messages.
 	Name() string
@@ -136,38 +155,10 @@ func Desired(cfg *config.Config) ([]Want, error) {
 	// Every public hostname is served by the gateway, except a monitor's,
 	// which the monitor serves from its own address so that it does not go
 	// dark with the gateway it reports on.
-	type claim struct{ key, name, app string }
-	var hostnames []claim
-	for _, appName := range cfg.AppNames() {
-		app := cfg.Apps[appName]
-		if app.Hostname != "" {
-			hostnames = append(hostnames, claim{fmt.Sprintf("apps.%s.hostname", appName), app.Hostname, appName})
-		}
-		roles := make([]string, 0, len(app.Hostnames))
-		for role := range app.Hostnames {
-			roles = append(roles, role)
-		}
-		sort.Strings(roles)
-		for _, role := range roles {
-			hostnames = append(hostnames, claim{fmt.Sprintf("apps.%s.hostnames.%s", appName, role), app.Hostnames[role], appName})
-		}
-	}
-	// Each app that stores objects serves them on a media hostname of its
-	// own, derived when the app does not declare one under hostnames.media
-	// (a declared one is already in the loop above).
-	for _, appName := range cfg.AppNames() {
-		app := cfg.Apps[appName]
-		if !kinds.MediaHostnameIsDerived(app) {
-			continue
-		}
-		if media := kinds.MediaHostname(app, cfg.Community.Domain); media != "" {
-			hostnames = append(hostnames, claim{fmt.Sprintf("apps.%s.hostnames.media (derived)", appName), media, appName})
-		}
-	}
-	var viaGateway []claim
+	var viaGateway []Hostname
 	refusedMonitor := map[string]bool{}
-	for _, h := range hostnames {
-		monitor, ok := render.ServedBy(cfg, h.app)
+	for _, h := range hostnames(cfg) {
+		monitor, ok := render.ServedBy(cfg, h.App)
 		if !ok {
 			viaGateway = append(viaGateway, h)
 			continue
@@ -182,8 +173,10 @@ func Desired(cfg *config.Config) ([]Want, error) {
 			}
 			continue
 		}
-		addSite(site, normalise(h.name), h.key)
+		addSite(site, normalise(h.Name), h.Key)
 	}
+	gatewayNames := map[string]bool{}
+	var former []string
 	if len(viaGateway) > 0 {
 		gateways := cfg.GatewaySites()
 		switch {
@@ -201,8 +194,21 @@ func Desired(cfg *config.Config) ([]Want, error) {
 					gateways[0], gateways[0]))
 			} else {
 				for _, h := range viaGateway {
-					addSite(gateway, normalise(h.name), h.key)
+					addSite(gateway, normalise(h.Name), h.Key)
+					gatewayNames[normalise(h.Name)] = true
 				}
+				own := siteAddresses(cfg, gateways[0])
+				for _, name := range cfg.SiteNames() {
+					if name == gateways[0] {
+						continue
+					}
+					for _, ip := range siteAddresses(cfg, name) {
+						if !slices.Contains(former, ip) && !mapHas(own, ip) {
+							former = append(former, ip)
+						}
+					}
+				}
+				sort.Strings(former)
 			}
 		}
 	}
@@ -233,7 +239,14 @@ func Desired(cfg *config.Config) ([]Want, error) {
 	}
 	out := make([]Want, 0, len(order))
 	for _, key := range order {
-		out = append(out, *byKey[key])
+		w := *byKey[key]
+		// A name that is a site endpoint too is not the gateway's alone,
+		// so a move leaves it to dns init.
+		if gatewayNames[w.Name] && allHostnames(w.Sources) {
+			w.ViaGateway = true
+			w.Former = former
+		}
+		out = append(out, w)
 	}
 	out = append(out, mailWants(cfg, out)...)
 	sort.SliceStable(out, func(i, j int) bool {
@@ -243,6 +256,83 @@ func Desired(cfg *config.Config) ([]Want, error) {
 		return out[i].Type < out[j].Type
 	})
 	return out, nil
+}
+
+// Hostname is one public hostname the configuration names for an app.
+type Hostname struct {
+	// Key is the configuration key that names it.
+	Key string
+	// Name is the hostname as written.
+	Name string
+	// App is the app it belongs to, and Main whether it is the app's own
+	// hostname rather than one under hostnames.
+	App  string
+	Main bool
+}
+
+// GatewayHostnames is every hostname the gateway serves: each app's
+// hostnames, declared and derived, except a monitor's, which the monitor
+// serves itself. It is what a gateway move checks the new gateway answers
+// for, and the names its DNS stages touch.
+func GatewayHostnames(cfg *config.Config) []Hostname {
+	var out []Hostname
+	for _, h := range hostnames(cfg) {
+		if _, ok := render.ServedBy(cfg, h.App); !ok {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hostnames is every hostname the configuration names for an app.
+func hostnames(cfg *config.Config) []Hostname {
+	var out []Hostname
+	for _, appName := range cfg.AppNames() {
+		app := cfg.Apps[appName]
+		if app.Hostname != "" {
+			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostname", appName), Name: app.Hostname, App: appName, Main: true})
+		}
+		roles := make([]string, 0, len(app.Hostnames))
+		for role := range app.Hostnames {
+			roles = append(roles, role)
+		}
+		sort.Strings(roles)
+		for _, role := range roles {
+			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.%s", appName, role), Name: app.Hostnames[role], App: appName})
+		}
+	}
+	// Each app that stores objects serves them on a media hostname of its
+	// own, derived when the app does not declare one under hostnames.media
+	// (a declared one is already in the loop above).
+	for _, appName := range cfg.AppNames() {
+		app := cfg.Apps[appName]
+		if !kinds.MediaHostnameIsDerived(app) {
+			continue
+		}
+		if media := kinds.MediaHostname(app, cfg.Community.Domain); media != "" {
+			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.media (derived)", appName), Name: media, App: appName})
+		}
+	}
+	return out
+}
+
+// allHostnames reports whether every source of a want is an app's hostname.
+func allHostnames(sources []string) bool {
+	for _, s := range sources {
+		if !strings.HasPrefix(s, "apps.") {
+			return false
+		}
+	}
+	return true
+}
+
+func mapHas(m map[string]string, v string) bool {
+	for _, x := range m {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // RefusedError is every reason the configuration cannot be turned into
@@ -289,6 +379,14 @@ const (
 	Warn Action = "warn"
 	// Clear is a leftover record that is not there. It is not shown.
 	Clear Action = "clear"
+	// Moving is an address record for a hostname the gateway serves, at a
+	// name that still holds the record this deployment's dns init made for
+	// the gateway before this one. Set that record aside and the name is
+	// fine. Nothing is written for it here: `gateway move` adds the new
+	// gateway's record once that gateway answers, and deletes the old one
+	// once it is verified, so a move is never a conflict and never a
+	// cutover.
+	Moving Action = "moving"
 )
 
 // Entry is one wanted record and what will be done about it.
@@ -324,6 +422,9 @@ func RecordComment(d deployment.Deployment) string {
 
 // Conflicts returns the entries that stop an execute.
 func (p *Plan) Conflicts() []Entry { return p.only(Conflict) }
+
+// Moving returns the entries that wait for `gateway move`.
+func (p *Plan) Moving() []Entry { return p.only(Moving) }
 
 // Creates returns the entries an execute will create.
 func (p *Plan) Creates() []Entry { return p.only(Create) }
@@ -376,9 +477,48 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 				action, detail = Conflict, leftover(w, r)
 			}
 		}
+		if action == Conflict && w.ViaGateway {
+			if rest, old := setAsideFormer(w, records, plan.comment); len(old) > 0 {
+				if a, _ := classify(w, rest, wantedTypes[w.Name]); a != Conflict {
+					action, detail = Moving, fmt.Sprintf("%s still points at %s, the gateway before this one; paisans gateway move adds %s beside it once the new gateway answers, and deletes it once every hostname is verified", w.Name, strings.Join(old, ", "), w.Content)
+				}
+			}
+		}
 		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail})
 	}
 	return plan, nil
+}
+
+// setAsideFormer splits the records at a want's name into the address
+// records this deployment's dns init made for a former gateway (carrying
+// comment, unproxied, and pointing at one of w.Former) and the rest. It
+// returns the rest, and the former addresses found.
+func setAsideFormer(w Want, records []Record, comment string) ([]Record, []string) {
+	var rest []Record
+	var old []string
+	for _, r := range records {
+		typ := strings.ToUpper(r.Type)
+		if (typ == "A" || typ == "AAAA") && r.Comment == comment && !r.Proxied {
+			if ip := canonical(r.Content); ip != "" && slices.Contains(w.Former, ip) {
+				if !slices.Contains(old, r.Content) {
+					old = append(old, r.Content)
+				}
+				continue
+			}
+		}
+		rest = append(rest, r)
+	}
+	return rest, old
+}
+
+// canonical is an address in net.IP's own spelling, or empty for one that is
+// not an address.
+func canonical(s string) string {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 // classify decides what one wanted record needs, given every record already
@@ -509,6 +649,8 @@ func (p *Plan) Show(r ui.Reporter) {
 			r.Refuse(fmt.Sprintf("%s %s conflicts with a record at the provider", e.Type, e.Name),
 				fmt.Sprintf("%s\n%s: %s -> %s (zone %s)", e.Detail, wanted, e.Name, content, e.Zone))
 		case Clear:
+		case Moving:
+			r.Note(fmt.Sprintf("%s %s waits for paisans gateway move", e.Type, e.Name), e.Detail)
 		case Warn:
 			r.Note(fmt.Sprintf("%s %s is not this toolkit's to write, and is missing or weak", e.Type, e.Name),
 				fmt.Sprintf("%s\nexpected at least: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))

@@ -1017,6 +1017,59 @@ probe that ignores an error, or reads `err != nil` as "absent", is the pattern
 to avoid; check `apply.ErrUnreachable` first, or make the remote script print
 a marker for every answer it can give, as the set aside script does.
 
+## `gateway move`, and the one other path that deletes DNS records
+
+`paisans gateway move` moves the gateway role to the site `paisans.yaml` gives
+it, from the site that still serves as the gateway, as the overlap README's
+*Moving the gateway* describes. It is a dry run unless `--execute` is given,
+takes no site, and is built the way `site remove` is: `internal/gatewaymove`
+plans six stages from live state, each ending at a gate, and every gate runs
+on every run, so a re-run after a fix resumes. `apply` without `--site` runs it
+last when a site without the gateway role still holds a gateway.
+`docs/specs/2026-10-11-gateway-move.md` is the specification.
+
+```
+paisans gateway move              # the old gateway it found, then every stage
+paisans gateway move --execute    # record, serve, dns add, dns remove, wait, stop
+```
+
+Things about the code that are easy to undo by accident:
+
+* **`ExecutePrune` deletes a third builder's plan.** `internal/dns/move.go`'s
+  `BuildMove` makes the plan, under its own rules (stated at the top of that
+  file), and `ExecuteMoveRemove` deletes through `ExecutePrune`. It is a
+  founder decision (docs/decisions.md, 2026-10-11) that this deletion is
+  automated at all, and it is narrow: this deployment's comment, an unproxied
+  address record, a hostname the gateway serves, the old gateway's address and
+  not the new one's, and every record the new gateway needs present. Widening
+  any of these, or deleting before `verify` passed on the same run, reopens
+  that decision. `Delete` still has `ExecutePrune` as its only caller.
+* **The new gateway is checked through its own address.** `Probes.Get` dials
+  the address under test and verifies the certificate against the hostname,
+  whatever the name resolves to; resolving the name would check the old
+  gateway for as long as DNS points there. The check runs at stage 2's gate and
+  again at the start of stage 4's and stage 6's runs.
+* **The old gateway is found, never declared.** A site without the role and
+  not running Caddy for a monitor is the old gateway when its host has this
+  deployment's gateway Caddy, its deployment record or the move's marker, or
+  this deployment's records at a gateway hostname point at it. A probe that
+  fails is an error, never "no gateway". Stage 6 removes the marker last, so a
+  run stopped part way finds the site again.
+* **`host prepare` keeps a former gateway's 80 and 443** while its Caddy is
+  there (`hostprep.GatewayCaddyProbe`), with the gateway's own comments, so
+  `apply`'s first step does not cut the overlap short.
+* **`dns init`'s `moving` is not a conflict and not a create.** A wanted
+  record at a gateway hostname that still holds the record `dns init` made for
+  another declared site is left to the move (`Want.ViaGateway`,
+  `Want.Former`). Turning it into a create would publish the new gateway
+  before it is verified; turning it into a conflict stops `apply` before the
+  new gateway is applied.
+* **No test reaches a host or a provider.** `cmd/paisans`'s `TestMain` makes
+  every site answer that it holds no gateway, and the move's own tests use
+  fake hosts, `dnstest` and fake probes.
+
+Nothing here has been run against a real host or a real provider.
+
 ## Refuse and warn
 
 The distinction is the point of the tool and it is not a matter of severity

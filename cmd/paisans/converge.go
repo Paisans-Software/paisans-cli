@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -35,6 +36,10 @@ type convergeState struct {
 	// a secrets file that reads, which a dry run generates itself.
 	SecretsOnly bool
 	Initial     map[string]render.EtcdInitial
+	// MoveGateway is a site without the gateway role still holding this
+	// deployment's gateway Caddy or record: a gateway move to run once
+	// every site is applied.
+	MoveGateway bool
 }
 
 // clusterNames is the member names an --initial-cluster lists.
@@ -68,6 +73,8 @@ const (
 	stageStorage
 	// stagePassTwo is every site's apply once more, after the rest.
 	stagePassTwo
+	// stageGateway is a gateway move, once the new gateway is applied.
+	stageGateway
 )
 
 // installs reports whether a step of st is one of the install lines'.
@@ -233,6 +240,14 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	for _, s := range ordered(func(string) bool { return true }) {
 		steps = append(steps, applyStep(stagePassTwo, s))
 	}
+
+	// A gateway the configuration moved away from still serves until the
+	// move has checked the new one, moved DNS and waited out the old
+	// records: last, since the new gateway has to be applied and answering
+	// before any of that.
+	if st.MoveGateway {
+		steps = append(steps, step(stageGateway, "gateway", "move"))
+	}
 	return steps
 }
 
@@ -350,6 +365,8 @@ func runStep(args []string) error {
 		return runStorageAdd(args[2:])
 	case args[0] == "dns" && args[1] == "init":
 		return runDNSInit(args[2:])
+	case args[0] == "gateway" && args[1] == "move":
+		return runGatewayMove(args[2:])
 	}
 	return fmt.Errorf("apply: no command %q", strings.Join(args, " "))
 }
@@ -358,6 +375,38 @@ func runStep(args []string) error {
 // through its ssh section. Tests replace it.
 var convergeReadInitial = func(cfg *config.Config, member string, sudo bool) (render.EtcdInitial, bool, error) {
 	return apply.ReadEtcdInitial(siteTransport(member, cfg.Sites[member], "", sudo), cfg.Deployment())
+}
+
+// convergeHoldsGateway reads whether a site's host holds this deployment's
+// gateway Caddy, record or move marker. Tests replace it.
+var convergeHoldsGateway = func(cfg *config.Config, site string, sudo bool) (bool, error) {
+	return gatewaymove.Holds(siteTransport(site, cfg.Sites[site], "", sudo), cfg.Deployment())
+}
+
+// convergeGatewayMove reports whether a gateway move is still to run: a
+// site that neither holds the gateway role nor runs Caddy for a monitor
+// still holds what a gateway holds. Only with exactly one gateway declared,
+// which is what a move goes to. A site that does not answer is an error,
+// as for the etcd reads: a move left unfinished keeps an old gateway
+// running.
+func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
+	gateways := cfg.GatewaySites()
+	if len(gateways) != 1 {
+		return false, nil
+	}
+	for _, site := range cfg.SiteNames() {
+		if site == gateways[0] || cfg.Sites[site].RunsCaddy() {
+			continue
+		}
+		held, err := convergeHoldsGateway(cfg, site, sudo)
+		if err != nil {
+			return false, convergeStop("apply could not read "+site, err, "A site that was the gateway keeps serving until paisans gateway move stops it, so every site is asked. Make it reachable and run again.")
+		}
+		if held {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // convergeFounded reads which etcd members hold infra/etcd-initial, each in
@@ -675,6 +724,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
 		return err
 	}
+	if st.MoveGateway, err = convergeGatewayMove(cfg, sudo); err != nil {
+		return err
+	}
 	steps := convergePlan(cfg, st)
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
@@ -885,7 +937,7 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 		default:
 			title := s.Title
 			if i == 0 || steps[i-1].Stage != s.Stage {
-				r.Section(map[stage]string{stageDNS: "dns"}[s.Stage])
+				r.Section(map[stage]string{stageDNS: "dns", stageGateway: "gateway"}[s.Stage])
 			}
 			line := r.Step(title)
 			st := check(i)
@@ -1119,10 +1171,10 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			}
 			i = j
 		default:
-			r.Section("dns")
-			dnsInsideApply = true
+			r.Section(map[stage]string{stageDNS: "dns", stageGateway: "gateway"}[s.Stage])
+			insideApply = true
 			err := convergeRun(convergeFlags(s.Args, o))
-			dnsInsideApply = false
+			insideApply = false
 			if err != nil {
 				if errors.Is(err, dns.ErrConflict) {
 					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans apply --execute again.")
@@ -1433,6 +1485,13 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 					waits = append(waits, e.Title)
 				}
 			}
+		}
+	case s.Args[0] == "gateway":
+		// The move checks the new gateway answers, so it waits on that
+		// gateway's applies.
+		for _, g := range cfg.GatewaySites() {
+			waits = append(waits, prepare(g))
+			waits = append(waits, "apply --site "+g)
 		}
 	case s.Args[0] == "storage":
 		for _, g := range cfg.Storage.Garage.Sites {

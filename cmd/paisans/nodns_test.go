@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 )
 
@@ -18,6 +19,9 @@ func TestMain(m *testing.M) {
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
 		return nil, fmt.Errorf("test: no DNS provider may be built in tests, asked for %s", name)
 	}
+	// No test reaches a host to ask whether it was the gateway; a test
+	// about the move says otherwise.
+	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
 	os.Exit(m.Run())
 }
 

@@ -83,10 +83,7 @@ func Rules(d deployment.Deployment, site config.Site) []Rule {
 	rules = append(rules, Rule{Interface: d.Interface(), Why: "the mesh: etcd, Patroni, Garage, HAProxy"})
 	switch {
 	case site.Has(config.RoleGateway):
-		rules = append(rules,
-			Rule{Port: 80, Proto: "tcp", Why: gatewayHTTPWhy},
-			Rule{Port: 443, Proto: "tcp", Why: gatewayHTTPSWhy},
-		)
+		rules = append(rules, GatewayRules()...)
 	case site.RunsCaddy():
 		// A monitor serving its own hostname through the toolkit's Caddy.
 		// Behind the operator's own web server it opens nothing here: that

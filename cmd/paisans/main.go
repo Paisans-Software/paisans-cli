@@ -60,6 +60,7 @@ Usage:
                [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]
   paisans site remove --force --ssh <user@host[:port]> --id <id or token>
                [--delete-data] [--sudo=false] [--execute]
+  paisans gateway move [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--ssh <destination>] [--execute]
   paisans storage add [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -140,6 +141,14 @@ Commands:
              names, as --force does, from the registry entry alone.
              DNS is not modified. --execute asks for the site's name at
              a terminal.
+  gateway    move: move the gateway role to the site paisans.yaml gives it,
+             from the site that still serves as the gateway, in gated
+             stages: carry the deployment record, check the new gateway
+             answers for every hostname through its own address, add its
+             address records beside the old one's, delete the old one's
+             (only after that check, and only records dns init made for
+             it), wait out their TTL, then stop the old gateway's Caddy.
+             Resumes after a fix. Writes nothing without --execute.
   storage    init: provision object storage on a site: each app's key and
              bucket, and the layout when it is the only Garage site.
              add: join every site in storage.garage.sites into one Garage
@@ -277,6 +286,8 @@ func main() {
 		default:
 			os.Exit(usageError(os.Stderr, "site takes one subcommand, add or remove"))
 		}
+	case "gateway":
+		err = runGateway(os.Args[2:])
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":
@@ -1169,10 +1180,10 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	return nil
 }
 
-// dnsInsideApply is set while apply runs dns init as one of its steps. Apply
-// has already shown the configuration's findings and ends on a result of its
-// own, so dns init shows neither.
-var dnsInsideApply bool
+// insideApply is set while apply runs dns init or gateway move as one of its
+// steps. Apply has already shown the configuration's findings and ends on a
+// result of its own, so the step shows neither.
+var insideApply bool
 
 // runDNSInit creates the public DNS records a deployment needs, at the
 // provider acme.provider names, using the token that already answers ACME
@@ -1222,7 +1233,7 @@ func runDNSInit(args []string) error {
 	if err := dns.Execute(ctx, provider, plan, r); err != nil {
 		return err
 	}
-	if !dnsInsideApply {
+	if !insideApply {
 		r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
 	}
 	return nil
@@ -1290,7 +1301,7 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 		return nil, nil, nil, nil, false, err
 	}
 	result := validate.Check(cfg)
-	if !dnsInsideApply {
+	if !insideApply {
 		reportFindings(r, *configPath, result)
 	}
 	if result.Refused() {

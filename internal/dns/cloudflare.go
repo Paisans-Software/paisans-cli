@@ -126,8 +126,17 @@ func (c *cloudflare) Records(ctx context.Context, zoneID, name string) ([]Record
 	return out, nil
 }
 
+// cfAutoTTL is the seconds Cloudflare's automatic TTL, a ttl of 1 in its
+// API, stands for on a record that is not proxied: "A TTL of Auto is set to
+// 300 seconds (five minutes)."
+// https://developers.cloudflare.com/dns/manage-dns-records/reference/ttl/
+const cfAutoTTL = 300
+
 func (r cfRecord) record() Record {
-	out := Record{Type: strings.ToUpper(r.Type), Name: r.Name, Content: r.Content, Proxied: r.Proxied, ID: r.ID, Comment: r.Comment}
+	out := Record{Type: strings.ToUpper(r.Type), Name: r.Name, Content: r.Content, Proxied: r.Proxied, ID: r.ID, Comment: r.Comment, TTL: r.TTL}
+	if r.TTL == 1 {
+		out.TTL = cfAutoTTL
+	}
 	if r.Priority != nil {
 		out.Priority = *r.Priority
 	}

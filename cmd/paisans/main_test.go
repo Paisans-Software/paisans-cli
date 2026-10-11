@@ -209,10 +209,10 @@ func TestDNSInitInsideApplyLeavesTheFindingsToIt(t *testing.T) {
 	}
 	for _, inside := range []bool{false, true} {
 		rec := &ui.Recorder{}
-		savedReporter, savedInside := reporterOverride, dnsInsideApply
-		reporterOverride, dnsInsideApply = rec, inside
+		savedReporter, savedInside := reporterOverride, insideApply
+		reporterOverride, insideApply = rec, inside
 		_ = runDNSInit([]string{"--config", path, "--secrets", secrets})
-		reporterOverride, dnsInsideApply = savedReporter, savedInside
+		reporterOverride, insideApply = savedReporter, savedInside
 		if shown := rec.Has("warn", "garage consistency is dangerous"); shown == inside {
 			t.Errorf("inside apply %t: the garage warning shown %t, events %v", inside, shown, rec.Events)
 		}
