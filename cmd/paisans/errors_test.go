@@ -22,7 +22,7 @@ func withoutAgeKey(t *testing.T) {
 	empty := t.TempDir()
 	t.Setenv("HOME", empty)
 	t.Setenv("XDG_CONFIG_HOME", empty)
-	for _, name := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD", "SOPS_AGE_SSH_PRIVATE_KEY_FILE", "SOPS_AGE_SSH_PRIVATE_KEY_CMD"} {
+	for _, name := range config.AgeVariables() {
 		t.Setenv(name, "")
 		os.Unsetenv(name)
 	}
