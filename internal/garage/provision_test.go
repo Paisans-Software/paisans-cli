@@ -590,3 +590,36 @@ func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 		}
 	}
 }
+
+// An app keeping its files on its own disk gets nothing from storage init: no
+// key imported, no bucket, no grant and no website access. The others are
+// planned as before.
+func TestALocalStorageAppIsNotProvisioned(t *testing.T) {
+	transport := &fakeTransport{responses: map[string]response{
+		"layout show": {out: "Connection established to 51494feb5444d466\n==== CURRENT CLUSTER LAYOUT ====\nID  Tags  Zone  Capacity\n51494feb5444d466  []  home-a  100.0 GB\n\nCurrent cluster layout version: 1\n"},
+		"node id -q":  {out: "51494feb5444d466aaaabbbbccccddddeeeeffff00001111222233334444abcd@10.44.0.1:3901\n"},
+		"key info":    {out: "Error: 0 matching keys", err: errors.New("exit status 1")},
+		"bucket info": {out: "Error: Bucket not found", err: errors.New("exit status 1")},
+	}}
+	cfg := fixtureConfig(t)
+	blog := cfg.Apps["blog"]
+	blog.Storage = config.StorageLocal
+	cfg.Apps["blog"] = blog
+
+	plan, err := garage.Build("home-a", cfg, fixtureSecrets(t), transport)
+	if err != nil {
+		t.Fatalf("building the plan: %v", err)
+	}
+	var sawTalk bool
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "blog-uploads") || strings.Contains(s.Title, "blog") {
+			t.Errorf("blog keeps its files locally and storage init planned %q: %s", s.Title, s.Command)
+		}
+		if strings.Contains(s.Command, "talk-uploads") {
+			sawTalk = true
+		}
+	}
+	if !sawTalk {
+		t.Error("talk is still in Garage and its bucket was not planned")
+	}
+}

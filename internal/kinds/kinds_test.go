@@ -84,6 +84,8 @@ func TestEveryKindThatStoresObjectsHasAMediaRole(t *testing.T) {
 // community's domain, and never a child of it or a name for the backend. A
 // declared name wins outright.
 func TestMediaHostnameIsDerivedAsASiblingAndCanBeOverridden(t *testing.T) {
+	withGarage := &config.Config{Community: config.Community{Domain: "example.org"}}
+	withGarage.Storage.Garage.Sites = []string{"home-a"}
 	for _, tc := range []struct {
 		name string
 		app  config.App
@@ -98,15 +100,18 @@ func TestMediaHostnameIsDerivedAsASiblingAndCanBeOverridden(t *testing.T) {
 		{"declared", config.App{Kind: config.KindOutline, Hostname: "docs.example.org", Hostnames: map[string]string{"media": "attachments.example.org"}}, "attachments.example.org"},
 		{"stores nothing", config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}, ""},
 		{"synapse keeps media on disk", config.App{Kind: config.KindSynapse, Hostname: "chat.example.org"}, ""},
+		// An app keeping its files on its own disk serves them on its own
+		// hostname, and has no media hostname to derive or declare.
+		{"local storage", config.App{Kind: config.KindMbin, Hostname: "talk.example.org", Storage: config.StorageLocal}, ""},
 	} {
-		if got := kinds.MediaHostname(tc.app, "example.org"); got != tc.want {
+		if got := kinds.MediaHostname(withGarage, tc.app); got != tc.want {
 			t.Errorf("%s: MediaHostname = %q, want %q", tc.name, got, tc.want)
 		}
 	}
-	if !kinds.MediaHostnameIsDerived(config.App{Kind: config.KindMbin, Hostname: "talk.example.org"}) {
+	if !kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.KindMbin, Hostname: "talk.example.org"}) {
 		t.Error("an app with no hostnames.media has a derived media hostname")
 	}
-	if kinds.MediaHostnameIsDerived(config.App{Kind: config.KindMbin, Hostname: "talk.example.org", Hostnames: map[string]string{"media": "m.example.org"}}) {
+	if kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.KindMbin, Hostname: "talk.example.org", Hostnames: map[string]string{"media": "m.example.org"}}) {
 		t.Error("an app that declares hostnames.media does not have a derived one")
 	}
 }

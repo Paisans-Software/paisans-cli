@@ -1492,3 +1492,81 @@ first below are the implementation's, proposed in the spec for review.
 against a fake DNS provider and fake hosts; the deletion tests were checked to
 fail with the old address filter removed. Nothing was run against a provider
 or a deployment.
+
+---
+
+## 2026-10-11: A pinned app may keep its files on its own disk
+
+Founder decision.
+
+### What was decided
+
+Every app takes `storage: local | s3`. Left out, it is `s3` when
+`storage.garage.sites` names a site and `local` when it names none.
+`local` is valid only with pinned placement; `cluster` with `local`, written
+or by default, is refused (`storage-local-on-cluster`). A pinned app in `s3`
+may use a Garage node on another site, with no warning. The key applies to
+every kind that stores files: `mbin`, `outline` and `writefreely` take either
+value; `synapse` and `uptime` have no S3 form, so `s3` is refused and `local`
+accepted as what they do anyway; `pocket-id` is refused and pointed at its
+`file_backend` setting; `element` and `oauth2-proxy` store no files and are
+refused. `s3` with no Garage site and a declared `hostnames.media` on an app
+in local mode are refused as well.
+
+In local mode an app gets no bucket, key, grant, website access or media
+hostname, so `storage init`, `storage add`, `dns init`, the gateway's media
+route, `init`'s S3 key generation and `CheckGarageKeys` all skip it, and
+`storage rotate-key` refuses it. Each kind renders upstream's own local
+configuration: Mbin leaves `S3_KEY` out and sets `KBIN_STORAGE_URL` to its
+own hostname under `/media`; Outline sets `FILE_STORAGE=local` with
+`FILE_STORAGE_LOCAL_ROOT_DIR=/var/lib/outline/data`; the wisp fork renders
+`[storage] type = local` and `[uploads] dir = /data/uploads`. Every one of
+those directories was already a bind mount in the kind's compose file.
+
+### Why
+
+README Rule 5 called a pinned app "exactly as upstream ships it", yet every
+kind that can use S3 was given Garage whatever its placement, so a pinned app
+still depended on another site for its uploads. Defaulting to S3 where Garage
+exists keeps Rule 3 for everyone who does not ask otherwise. Defaulting to
+local where it does not replaces S3 settings with an empty endpoint, which
+rendered an app whose every upload failed. Local under cluster is refused
+because each apps site would keep its own diverging copy.
+
+Allowing `local` on `synapse` and `uptime` rather than refusing it as
+redundant: the value is true of those apps, so nothing written is ignored, and
+an operator who sets `storage: local` on every pinned app is not refused for
+consistency. The rule that refuses an override nothing reads (`smtp` on a kind
+without mail) refuses because the setting would silently not happen; here it
+already happens.
+
+### What it needed beyond the settings
+
+* **Ownership.** Docker creates a missing bind source as root. Mbin's
+  entrypoint chowns `var/`, `/data` and `/config` but not `public/media`, and
+  Outline runs as `nodejs` and nothing in its image chowns a bind there, so in local mode
+  neither could write an upload. Their compose files wrap the image's
+  entrypoint to chown the one directory first, Outline then dropping to
+  `nodejs` with `setpriv`. The wisp fork's uploads are under `/data`, which
+  holds its keys too, so it needs what it already needed.
+* **The gate.** A media hostname is never gated, because a federating server
+  fetching an image has no gate session. In local mode those files are on the
+  app's own hostname, so a gated Mbin opens `/media/*` and a gated blog
+  `/uploads/*` (`kinds.LocalMediaPaths`). Outline's local files answer through
+  its API with the reader's session, and open nothing.
+
+### What was weighed
+
+* **Refusing `storage: local` on `synapse` and `uptime` as redundant.** Above.
+* **A one-shot container to chown the directory.** apply's health gate fails a
+  stack with an exited container, so the wrapper stays in the app's own
+  service.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. The
+wrapped entrypoints were run through Docker Compose against the pinned
+`ghcr.io/paisans-software/mbin:1.14.0-paisans` and `outlinewiki/outline:1.10.0`
+images with a root owned bind at the upload directory: each wrote a file
+there as uid 1000 and uid 1001 respectively. Nothing was run against a
+deployment, and no app was started in local mode end to end.

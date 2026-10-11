@@ -316,11 +316,12 @@ func setAsideCommand(d deployment.Deployment, factor int) string {
 }
 
 // buckets is every bucket the configuration's apps store objects in, sorted.
+// An app keeping its files on its own disk has none.
 func (p *Plan) buckets() []string {
 	var out []string
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if kinds.UsesObjectStorage(app.Kind) {
+		if kinds.InObjectStorage(p.cfg, app) {
 			out = append(out, garage.BucketName(app, name))
 		}
 	}

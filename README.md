@@ -279,7 +279,9 @@ placement: { pinned: vm }
 upstream ships it: its own compose file, its own Postgres container, its own
 volumes. No etcd, no Patroni, no HAProxy, no shared cluster. A single-site
 install is every app pinned to the only site, which is why this costs a new
-adopter nothing.
+adopter nothing. Its uploaded files go to Garage when the deployment runs one,
+or with `storage: local` into a directory of its own stack, so that they go
+with it too (see *A pinned app may keep its files on its own disk*, below).
 
 `cluster` is the opt-in variant: drop the stack's own `postgres` service, point
 it at its own site's HAProxy (rule 2), put its media in Garage. One compose
@@ -301,6 +303,69 @@ SQLite file. Pinning any of them is not a downgrade, because that was always
 its availability. WriteFreely used to be
 in this group too, before the fork it now runs gained Postgres support; see
 Rule 5 above.
+
+#### A pinned app may keep its files on its own disk
+
+`apps.<name>.storage` says where an app keeps the files its members upload:
+`s3`, a bucket in the deployment's Garage, or `local`, a directory in the
+app's own stack under `/srv/paisans/<token>/<stack>/`, bind mounted like the
+rest of a pinned stack. Founder decision.
+
+```yaml
+apps:
+  blog:
+    kind: writefreely
+    placement: { pinned: home-a }
+    storage: local
+```
+
+**Left out, it is `s3` when `storage.garage.sites` names a site and `local`
+when it names none.** The first is Rule 3: object storage from the first
+install, so a pinned app that later joins the cluster has nothing to migrate.
+The second is because there is no S3 to write to, and S3 settings with no
+endpoint would only render an app whose every upload fails.
+
+**`local` is the plain case taken all the way down.** The files sit beside the
+app's database in its stack directory, so they move with it in the one `tar`
+(*Moving a pinned app*), and nothing about the app depends on another site.
+The app has no bucket, no key and no media hostname: `storage init` and
+`storage add` provision nothing for it, `dns init` publishes no
+`<label>-media` record, the gateway routes no media hostname, and `init`
+generates no S3 key. It serves its files on its own hostname, where upstream
+serves them: Mbin under `/media`, the writefreely-wisp fork under
+`/uploads/`, and Outline through its own API. A gated app opens Mbin's and the
+blog's file paths past the gate, exactly as a media hostname is never gated,
+because a federating server fetching an image has no gate session. Mbin and
+Outline run as an unprivileged user and their images do not take ownership of
+a bind mounted upload directory, so in local mode their stacks hand that one
+directory to the application's user when the container starts.
+
+**`local` is valid only with `placement: pinned`, and `cluster` with `local`
+is refused.** A clustered app runs on every apps site, and each would keep its
+own directory: an upload on one site would be missing on the others, and a
+failover would move readers onto the copy without it. The same refusal covers
+a clustered app in a deployment with no Garage, whose default is `local`.
+
+**A pinned app in `s3` may use a Garage node on another site, and nothing
+warns about it.** Founder decision. Its uploads then depend on that Garage as
+well as on its own site, which is the half-pinned shape described below, for
+its files alone; `storage: local` is how to pin the files too.
+
+The key applies to every kind that stores files, and means what each kind can
+do:
+
+| Kind | `storage` |
+|------|-----------|
+| `mbin`, `outline`, `writefreely` | `s3` or `local` |
+| `synapse`, `uptime` | `local` only. They have no S3 form here (Synapse's provider supplements its media store, the monitor keeps SQLite under `/data`), so `s3` is refused; `local` is accepted, since it says what they do anyway |
+| `pocket-id` | refused. Pocket ID chooses with its own `settings.file_backend` (Rule 3) |
+| `element`, `oauth2-proxy` | refused. They store no files |
+
+Changing the key on an app that already holds files moves none of them. The
+toolkit does not copy files between a bucket and a disk, and a bucket left
+behind stays in Garage with its key in the secrets file. For a federated app
+the media URLs change as well, which Rule 3 explains is not recoverable on
+remote instances.
 
 #### A pinned app must be pinned all the way down
 
@@ -2168,7 +2233,9 @@ are state inside a running service that no manifest describes, so they are a
 separate command: `paisans storage init --site <name>`.
 
 It checks what a site's Garage node already has and creates only what is
-missing, so running it again is safe. It assigns the cluster layout only when
+missing, so running it again is safe. An app with `storage: local` keeps its
+files on its own disk and gets neither key nor bucket (see *A pinned app may
+keep its files on its own disk*). It assigns the cluster layout only when
 the site is the one Garage site; joining several is `storage add`, below. Like `apply`, it prints a plan and
 writes nothing without `--execute`.
 
@@ -2349,8 +2416,8 @@ Founder requirement. How to run it, and its flags, are under *`paisans dns
 init`* in [docs/commands.md](docs/commands.md).
 
 **The records are derived, never declared.** Each app's `hostname`, each of its
-role `hostnames`, and the media hostname of each app that stores objects,
-derived or declared, get an A record pointing at the gateway site's
+role `hostnames`, and the media hostname of each app that keeps objects in
+Garage, derived or declared, get an A record pointing at the gateway site's
 `public_address`, except an app pinned to a monitor site, whose names point at
 that monitor's own `public_address` (see *The monitor has a site of its
 own*). A site whose `endpoint` is a name rather than

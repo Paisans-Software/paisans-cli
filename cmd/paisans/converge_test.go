@@ -1476,8 +1476,17 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			},
 		},
 		{
-			name:  "no Garage",
-			edit:  func(cfg *config.Config) { cfg.Storage.Garage.Sites = nil },
+			name: "no Garage",
+			// With no Garage every app that can use S3 keeps its files on
+			// its own disk, which only a pinned app may do.
+			edit: func(cfg *config.Config) {
+				cfg.Storage.Garage.Sites = nil
+				for _, name := range []string{"talk", "docs"} {
+					app := cfg.Apps[name]
+					app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+					cfg.Apps[name] = app
+				}
+			},
 			found: map[string]any{"apply --site watch": "1 change"},
 			want: []string{
 				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",

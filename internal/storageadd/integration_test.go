@@ -353,7 +353,7 @@ func mediaBuckets(cfg *config.Config) map[string]string {
 	out := map[string]string{}
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if media := kinds.MediaHostname(app, cfg.Community.Domain); media != "" {
+		if media := kinds.MediaHostname(cfg, app); media != "" {
 			out[media] = garage.BucketName(app, name)
 		}
 	}

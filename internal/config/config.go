@@ -484,7 +484,26 @@ type App struct {
 	// field: a field left out is inherited. Only kinds that send mail read
 	// it, and validate refuses it on any other (smtp-on-a-kind-without-mail).
 	SMTP *SMTP `yaml:"smtp"`
+
+	// Storage is where an app that stores files keeps them: s3, a bucket in
+	// the deployment's Garage, or local, a directory in the app's own stack
+	// on the site it is pinned to. Empty means the default, which depends on
+	// the deployment rather than on this file: s3 when storage.garage.sites
+	// names a site, local when it names none. Read it through
+	// kinds.InObjectStorage, never by comparing this field, so that the
+	// default is decided in one place.
+	//
+	// local is valid only with pinned placement, because a clustered app runs
+	// on every apps site and each would keep its own copy of the files.
+	// validate refuses the rest of the incoherent combinations by kind.
+	Storage string `yaml:"storage"`
 }
+
+// The values of an app's storage key.
+const (
+	StorageLocal = "local"
+	StorageS3    = "s3"
+)
 
 // The values of visibility_gate. Public is also what an absent key means.
 const (
@@ -966,6 +985,11 @@ func (c *Config) structural(noSubnet bool) error {
 		case "", GatePublic, GateMember, GateProvisional:
 		default:
 			add("apps.%s.visibility_gate: unknown value %q. Valid values are public, member and provisional.", name, app.VisibilityGate)
+		}
+		switch app.Storage {
+		case "", StorageLocal, StorageS3:
+		default:
+			add("apps.%s.storage: unknown value %q. Valid values are local and s3, or leave it out for s3 when the deployment runs Garage and local when it does not.", name, app.Storage)
 		}
 	}
 	problems = append(problems, smtpProblems("smtp", c.SMTP)...)

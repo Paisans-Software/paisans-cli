@@ -167,6 +167,7 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDSMTPSender()
 	c.mbinSMTPSender()
 	c.mbinContactEmail()
+	c.storage()
 	c.mediaHostnameShape()
 	c.mediaHostnameUnderAnAppHostname()
 	c.mailDomains()
@@ -833,7 +834,8 @@ func (c *checker) placementShape() {
 func (c *checker) outlineBucketName() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Kind != config.KindOutline {
+		// An Outline keeping its attachments on its own disk has no bucket.
+		if app.Kind != config.KindOutline || !kinds.InObjectStorage(c.cfg, app) {
 			continue
 		}
 		bucket, _ := app.Settings["s3_bucket"].(string)
@@ -1369,12 +1371,12 @@ func (c *checker) mediaHostnameShape() {
 	domain := strings.ToLower(c.cfg.Community.Domain)
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := kinds.MediaHostname(app, c.cfg.Community.Domain)
+		media := kinds.MediaHostname(c.cfg, app)
 		if media == "" {
 			continue
 		}
 		key := fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole)
-		derived := kinds.MediaHostnameIsDerived(app)
+		derived := kinds.MediaHostnameIsDerived(c.cfg, app)
 		if problem := hostnameProblem(media); problem != "" {
 			if derived {
 				c.refuse("media-hostname-is-not-a-hostname", key,
@@ -1462,7 +1464,7 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := strings.ToLower(kinds.MediaHostname(app, c.cfg.Community.Domain))
+		media := strings.ToLower(kinds.MediaHostname(c.cfg, app))
 		if media == "" {
 			continue
 		}
@@ -1504,7 +1506,7 @@ func (c *checker) outlineBucketInMediaURL() {
 		if app.Kind != config.KindOutline {
 			continue
 		}
-		media := kinds.MediaHostname(app, c.cfg.Community.Domain)
+		media := kinds.MediaHostname(c.cfg, app)
 		if media == "" {
 			continue
 		}
@@ -1603,8 +1605,8 @@ func (c *checker) duplicateHostname() {
 		// been. It is the claim most likely to collide unseen: an app whose
 		// hostname is talk-media.example.org clashes with talk's media
 		// hostname, and neither line in the file says so.
-		if kinds.MediaHostnameIsDerived(app) {
-			if media := kinds.MediaHostname(app, c.cfg.Community.Domain); media != "" {
+		if kinds.MediaHostnameIsDerived(c.cfg, app) {
+			if media := kinds.MediaHostname(c.cfg, app); media != "" {
 				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole), hostname: media, derived: true})
 			}
 		}

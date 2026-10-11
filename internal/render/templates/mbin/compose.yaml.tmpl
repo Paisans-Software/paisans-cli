@@ -29,9 +29,16 @@
 #
 #   app, messenger  start as root; the image's entrypoint chowns var/, /data
 #                   and /config to MBIN_USER (1000:1000, set in .env) and then
-#                   drops to it. media/ and oauth/ are NOT chowned. media/ is
-#                   unused while uploads go to S3; oauth/ holds two rendered
+#                   drops to it. oauth/ is NOT chowned: it holds two rendered
 #                   0644 files, which uid 1000 reads as they are (see below).
+{{- if .LocalStorage }}
+#                   media/ holds every upload, and the image does not chown
+#                   it, so each service below hands it to MBIN_USER before
+#                   running the image's own entrypoint.
+{{- else }}
+#                   media/ is NOT chowned either, and is unused while uploads
+#                   go to S3.
+{{- end }}
 #   rabbitmq        starts as root; its entrypoint chowns /var/lib/rabbitmq to
 #                   its own user and drops to it. No `user:` here for that
 #                   reason, which is a deliberate difference from upstream.
@@ -68,6 +75,19 @@ services:
       # and a second copy was checked to be harmless (frankenphp validate on
       # 1.14.0-paisans accepts the Caddyfile with and without it).
       MERCURE_EXTRA_DIRECTIVES: "protocol_version_compatibility 8"
+{{- if .LocalStorage }}
+    # media/ is a bind mount Docker creates as root, and the image's
+    # entrypoint chowns var/, /data and /config but not public/media
+    # (docker/docker-entrypoint.sh:59 at the fork's tag v1.14.0+paisans), so
+    # the uid it drops to could not write an upload. This hands the one
+    # directory to MBIN_USER, not recursively, and then runs the image's own
+    # entrypoint unchanged. Replacing the entrypoint drops the image's CMD, so
+    # it is restated (docker/Dockerfile:58). Checked by running
+    # 1.14.0-paisans with a root owned bind at /app/public/media: uid 1000
+    # could write there after the chown.
+    entrypoint: ["sh", "-c", "chown \"$$MBIN_USER\" /app/public/media && exec docker-entrypoint \"$$@\"", "sh"]
+    command: ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
+{{- end }}
     # The mesh address only. Docker's own iptables rules bypass a host
     # firewall, so a port published on every interface of a host with a
     # public address is reachable from the internet whatever ufw says. The
@@ -107,10 +127,10 @@ services:
       - {{ .DataPath }}/oauth:/app/config/oauth2:ro
       - {{ .DataPath }}/php_logs:/app/var/log
       # Nothing is mounted over config/packages/. The image's entrypoint edits
-      # three files there in place at every start (liip_imagine.yaml,
-      # monolog.yaml, and oneup_flysystem.yaml, which it switches to the S3
-      # adapter because S3_KEY is set in .env), and `sed -i` over a bind mount
-      # fails and stops the container.
+      # files there in place at every start (liip_imagine.yaml, monolog.yaml,
+      # and oneup_flysystem.yaml, which it switches to the S3 adapter when
+      # S3_KEY is set in .env), and `sed -i` over a bind mount fails and stops
+      # the container.
     depends_on:
 {{- if eq .MbinQueue "rabbitmq" }}
       amqproxy:
@@ -131,6 +151,12 @@ services:
     image: {{ .Image "app" }}
     restart: unless-stopped
     command: bin/console messenger:consume scheduler_default old async outbox deliver inbox resolve receive failed --time-limit=3600
+{{- if .LocalStorage }}
+    # The consumers write media too (AttachEntryEmbedHandler.php:120 downloads
+    # an embedded image into it), so they hand media/ to MBIN_USER the same
+    # way app does.
+    entrypoint: ["sh", "-c", "chown \"$$MBIN_USER\" /app/public/media && exec docker-entrypoint \"$$@\"", "sh"]
+{{- end }}
     # Two, not upstream's six: one consumer restarting does not stop
     # federation delivery, at a third of the memory. Raise it when the queue
     # is seen to back up, not before.

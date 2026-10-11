@@ -244,8 +244,10 @@ func UsesPostgres(kind config.Kind) bool {
 	return Has(kind, PostgresService)
 }
 
-// UsesObjectStorage reports whether a kind keeps uploads in S3 rather than on
-// local disk.
+// UsesObjectStorage reports whether a kind can keep its uploads in S3 rather
+// than on local disk. Whether one app of the kind does is InObjectStorage,
+// which also reads the app's `storage` key and whether the deployment has a
+// Garage at all.
 //
 // Synapse is deliberately absent. Its media store is a directory the
 // homeserver owns, which is also why the synapse kind is pinned to one node.

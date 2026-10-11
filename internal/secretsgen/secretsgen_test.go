@@ -667,3 +667,31 @@ func TestFillGeneratesAHeartbeatTokenPerSite(t *testing.T) {
 		}
 	}
 }
+
+// An app keeping its files on its own disk has no bucket, so init generates
+// no Garage key for it, and a key left in its stanza (Eg: from before it was
+// switched to local) is not checked, because nothing renders it.
+func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
+	cfg := load(t)
+	blog := cfg.Apps["blog"]
+	blog.Storage = config.StorageLocal
+	cfg.Apps["blog"] = blog
+
+	secrets := &config.Secrets{}
+	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+		t.Fatalf("filling secrets: %v", err)
+	}
+	for _, key := range []string{"s3_access_key_id", "s3_secret_access_key"} {
+		if _, ok := secrets.Apps["blog"][key]; ok {
+			t.Errorf("blog keeps its files locally and was given %s", key)
+		}
+		if _, ok := secrets.Apps["talk"][key]; !ok {
+			t.Errorf("talk is still in Garage and was not given %s", key)
+		}
+	}
+
+	secrets.Apps["blog"]["s3_access_key_id"] = "not-a-garage-key"
+	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
+		t.Errorf("a key on a local storage app was checked: %v", err)
+	}
+}

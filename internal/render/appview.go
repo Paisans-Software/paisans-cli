@@ -104,8 +104,15 @@ type appValues struct {
 	// the deployment runs. Mbin's Doctrine wants it in its DSN.
 	PostgresVersion string
 
-	// S3 is object storage, which is Garage over the mesh.
+	// S3 is object storage, which is Garage over the mesh. Zero for an app
+	// that keeps its files on its own disk (LocalStorage), so a template
+	// cannot render half an S3 configuration for it.
 	S3 s3Values
+
+	// LocalStorage is true for an app of a kind that can use S3 and keeps its
+	// files in its own stack directory instead: `storage: local`, or the
+	// default in a deployment with no Garage (kinds.InObjectStorage).
+	LocalStorage bool
 
 	// OIDC is this app's client at the identity provider, empty when the app
 	// has no client declared in the secrets.
@@ -300,6 +307,38 @@ func (v appValues) PostgresDataMount() string {
 	return kinds.PostgresDataMount(v.Image(kinds.PostgresService), v.PostgresVersion)
 }
 
+// s3For is an app's object storage settings, for an app that keeps its files
+// in Garage (kinds.InObjectStorage).
+func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Values {
+	var s3Endpoint string
+	if garage := garageEndpointHost(p); garage != "" {
+		s3Endpoint = fmt.Sprintf("http://%s:%d", garage, garageS3Port)
+	}
+	s3 := s3Values{
+		// Mbin and the blog write to this address themselves, server side,
+		// over the mesh. Outline never uses it: its uploads are a presigned
+		// POST the browser submits directly, so for Outline every upload and
+		// every read goes through PublicBase, not here.
+		Endpoint:        s3Endpoint,
+		GarageAddresses: garageAddresses(p),
+		GarageElsewhere: p.elsewhere(garageAddresses(p)),
+		AccessKeyID:     v.Secret("s3_access_key_id"),
+		SecretKey:       v.Secret("s3_secret_access_key"),
+		Bucket:          kinds.BucketName(planned.Name, app),
+		Region:          v.Setting("s3_region", "garage"),
+		ForcePathStyle:  v.SettingBool("s3_force_path_style", true),
+	}
+	s3.WebHost = s3.Bucket + webEndpointSuffix
+	// Set only for a kind that stores objects, so a kind that stores nothing
+	// does not carry the literal string "https://" into a template that has
+	// never been written to check.
+	if media := kinds.MediaHostname(p.cfg, app); media != "" {
+		s3.MediaHostname = media
+		s3.PublicBase = "https://" + media
+	}
+	return s3
+}
+
 // values assembles what the template set is given.
 func (p *planner) values(planned plannedApp, app config.App) (appValues, error) {
 	var password string
@@ -354,32 +393,9 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	if planned.Kind == config.KindElement {
 		v.ServerName = p.homeserverServerName(v.Setting("homeserver", planned.Hostname))
 	}
-	garage := garageEndpointHost(p)
-	var s3Endpoint string
-	if garage != "" {
-		s3Endpoint = fmt.Sprintf("http://%s:%d", garage, garageS3Port)
-	}
-	v.S3 = s3Values{
-		// Mbin and the blog write to this address themselves, server side,
-		// over the mesh. Outline never uses it: its uploads are a presigned
-		// POST the browser submits directly, so for Outline every upload and
-		// every read goes through PublicBase, not here.
-		Endpoint:        s3Endpoint,
-		GarageAddresses: garageAddresses(p),
-		GarageElsewhere: p.elsewhere(garageAddresses(p)),
-		AccessKeyID:     v.Secret("s3_access_key_id"),
-		SecretKey:       v.Secret("s3_secret_access_key"),
-		Bucket:          kinds.BucketName(planned.Name, app),
-		Region:          v.Setting("s3_region", "garage"),
-		ForcePathStyle:  v.SettingBool("s3_force_path_style", true),
-	}
-	v.S3.WebHost = v.S3.Bucket + webEndpointSuffix
-	// Set only for a kind that stores objects, so a kind that stores nothing
-	// does not carry the literal string "https://" into a template that has
-	// never been written to check.
-	if media := kinds.MediaHostname(app, p.cfg.Community.Domain); media != "" {
-		v.S3.MediaHostname = media
-		v.S3.PublicBase = "https://" + media
+	v.LocalStorage = kinds.KeepsFilesLocally(p.cfg, app)
+	if kinds.InObjectStorage(p.cfg, app) {
+		v.S3 = p.s3For(planned, app, v)
 	}
 	v.OIDC = p.oidcFor(planned)
 	v.Upstreams = p.upstreams(planned.Name)

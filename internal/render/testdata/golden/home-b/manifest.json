@@ -28,7 +28,7 @@
     },
     {
       "path": "srv/paisans/f2a9/docs/compose.yaml",
-      "sha256": "7193ef16b5e7a72d07b563c6018b44f5e8604c979c358e117cbfd28eaf0b941d",
+      "sha256": "ca2a1a832d82c4c2e2a4a5bb3e472aa4b63c6c5770d8a2c3fd7e37ac5f33a144",
       "mode": "0644"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/compose.yaml",
-      "sha256": "b030cbf033e0adb6f0eb4dc20a7e21bc01aefb3d775f246a16feb241f31b63fe",
+      "sha256": "1dbd956096ad1155805c09f263e02dcb877175d2542a60ca95018e2e5804f1ab",
       "mode": "0644"
     },
     {
