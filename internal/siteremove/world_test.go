@@ -59,12 +59,22 @@ type world struct {
 	etcd     []apply.EtcdMember
 	nextID   uint64
 	etcdDown map[string]bool
+	// clusterID is the cluster ID every etcd reports in its member list's
+	// header; 0 leaves it out, as an etcdctl that prints none would.
+	clusterID uint64
 
 	members  []map[string]any
 	syncMode bool
 
-	layout     map[string]string // short ID to zone
-	staged     map[string]bool   // short IDs staged for removal
+	layout map[string]string // short ID to zone
+	staged map[string]bool   // short IDs staged for removal
+	// assigned are role assignments staged and not applied, short ID to
+	// zone, as an interrupted storage add or a hand-run `garage layout
+	// assign` leaves them.
+	assigned map[string]string
+	// redundancy is a zone redundancy staged and not applied, empty when
+	// none is.
+	redundancy string
 	version    int
 	moving     int
 	resyncing  int
@@ -105,6 +115,10 @@ type host struct {
 	etcdContainer bool
 	// etcdHosts is ETCD3_HOSTS as the running Patroni has it.
 	etcdHosts string
+	// ownCluster, when set, is the separate cluster this host's etcd
+	// founded on its own, which its member list reports instead of the
+	// world's.
+	ownCluster *etcdView
 	// starting is how many more times the recreated Patroni's REST API
 	// answers that Postgres is starting.
 	starting   int
@@ -452,7 +466,7 @@ func (h *host) Run(command string) (string, error) {
 		if !h.etcdUp {
 			return "__PAISANS_NO_ETCD__\n", nil
 		}
-		return w.memberList(), nil
+		return w.memberList(h), nil
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
 		failed := false
@@ -468,7 +482,7 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return string(data), nil
 	case strings.Contains(command, "member list -w json"):
-		return w.memberList(), nil
+		return w.memberList(h), nil
 	case memberRemove.MatchString(command):
 		hex := memberRemove.FindStringSubmatch(command)[1]
 		var kept []apply.EtcdMember
@@ -844,9 +858,33 @@ func (h *host) dirAnswer(dir string) string {
 	return fmt.Sprintf("present\n%d\n%d\n%s\n", bytes, n, strings.Join(entries, "\n"))
 }
 
-func (w *world) memberList() string {
-	data, _ := json.Marshal(map[string]any{"header": map[string]any{}, "members": w.etcd})
+// etcdView is one etcd cluster as a member of it reports it.
+type etcdView struct {
+	cluster uint64
+	members []apply.EtcdMember
+}
+
+// memberList is `etcdctl member list -w json` on h: the world's cluster, or
+// the one h's etcd founded on its own.
+func (w *world) memberList(h *host) string {
+	view := etcdView{w.clusterID, w.etcd}
+	if h.ownCluster != nil {
+		view = *h.ownCluster
+	}
+	header := map[string]any{}
+	if view.cluster != 0 {
+		header["cluster_id"] = view.cluster
+	}
+	data, _ := json.Marshal(map[string]any{"header": header, "members": view.members})
 	return string(data)
+}
+
+// splitEtcd makes site's etcd one that founded a cluster of its own, as an
+// etcd restarted on a wiped data directory with --initial-cluster-state new
+// does: it lists only itself, under another cluster ID.
+func (w *world) splitEtcd(site string) {
+	addr := w.cfg.Sites[site].Address
+	w.hosts[site].ownCluster = &etcdView{cluster: 0x5eed, members: []apply.EtcdMember{{ID: 0x9999, Name: site, PeerURLs: []string{"http://" + addr + ":2380"}, ClientURLs: []string{"http://" + addr + ":2379"}}}}
 }
 
 func (w *world) patroniList() string {
@@ -891,6 +929,48 @@ func (w *world) stats(site string) (string, error) {
 	return b.String(), nil
 }
 
+// stagedChanges is what `garage layout show` prints after the current
+// layout when changes are staged, as dxflrs/garage:v1.0.1 prints it
+// (src/garage/cli/layout.rs, cmd_show_layout and
+// print_staging_role_changes): nothing at all when none are.
+func (w *world) stagedChanges() string {
+	if len(w.staged) == 0 && len(w.assigned) == 0 && w.redundancy == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n==== STAGED ROLE CHANGES ====\n")
+	if len(w.staged) > 0 || len(w.assigned) > 0 {
+		b.WriteString("ID                Tags  Zone    Capacity\n")
+		var ids []string
+		for id := range w.staged {
+			ids = append(ids, id)
+		}
+		for id := range w.assigned {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if w.staged[id] {
+				fmt.Fprintf(&b, "%s  REMOVED\n", id)
+			} else {
+				fmt.Fprintf(&b, "%s        %s  100.0 GB\n", id, w.assigned[id])
+			}
+		}
+		b.WriteString("\n")
+	}
+	if w.redundancy != "" {
+		fmt.Fprintf(&b, "Zone redundancy: %s\n", w.redundancy)
+	}
+	b.WriteString("\n==== NEW CLUSTER LAYOUT AFTER APPLYING CHANGES ====\nID                Tags  Zone    Capacity  Usable capacity\n")
+	for id, zone := range w.layout {
+		if !w.staged[id] {
+			fmt.Fprintf(&b, "%s  []  %s  100.0 GB  100.0 GB (100.0%%)\n", id, zone)
+		}
+	}
+	fmt.Fprintf(&b, "\nZone redundancy: maximum\n\nTo enact the staged role changes, type:\n\n    garage layout apply --version %d\n\nYou can also revert all proposed changes with: garage layout revert\n", w.version+1)
+	return b.String()
+}
+
 func (w *world) garage(h *host, cmd string) (string, error) {
 	switch {
 	case cmd == "layout show":
@@ -904,7 +984,8 @@ func (w *world) garage(h *host, cmd string) (string, error) {
 		for _, id := range ids {
 			fmt.Fprintf(&b, "%s  []  %s  100.0 GB  100.0 GB (100.0%%)\n", id, w.layout[id])
 		}
-		fmt.Fprintf(&b, "\nCurrent cluster layout version: %d\n", w.version)
+		fmt.Fprintf(&b, "\nZone redundancy: maximum\n\nCurrent cluster layout version: %d\n", w.version)
+		b.WriteString(w.stagedChanges())
 		return b.String(), nil
 	case cmd == "status":
 		var b strings.Builder
@@ -926,7 +1007,10 @@ func (w *world) garage(h *host, cmd string) (string, error) {
 		for id := range w.staged {
 			delete(w.layout, id)
 		}
-		w.staged = map[string]bool{}
+		for id, zone := range w.assigned {
+			w.layout[id] = zone
+		}
+		w.staged, w.assigned, w.redundancy = map[string]bool{}, map[string]string{}, ""
 		w.version = v
 		w.moving, w.resyncing = 2, 2
 		return "New cluster layout with updated role assignment has been applied in cluster.\n", nil
@@ -1099,7 +1183,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	t.Helper()
 	cfg, secrets, path := worldConfig(t, edits...)
 	w := &world{t: t, cfg: cfg, secrets: secrets, configPath: path, hosts: map[string]*host{},
-		etcdDown: map[string]bool{}, syncMode: true, staged: map[string]bool{}, version: 3,
+		etcdDown: map[string]bool{}, clusterID: 0xc1a5, syncMode: true, staged: map[string]bool{}, assigned: map[string]string{}, version: 3,
 		garageDown: map[string]bool{}, served: map[string]string{}, unreachable: map[string]bool{}}
 	rendered, err := render.Build(cfg, secrets)
 	if err != nil {

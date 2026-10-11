@@ -234,6 +234,67 @@ func parseLayout(out string) (layout, error) {
 	return l, nil
 }
 
+// LayoutStaging is what `garage layout show` says is staged and not yet
+// applied. `garage layout apply` commits every staged change at once, so
+// whoever applies a layout applies all of it.
+type LayoutStaging struct {
+	// Seen is whether the output has a staged section at all.
+	Seen bool
+	// Removed are the short IDs staged to lose their role, and Assigned
+	// those staged to gain one or have theirs changed, in the order shown.
+	Removed  []string
+	Assigned []string
+	// Parameters is whether a layout parameter, the zone redundancy, is
+	// staged.
+	Parameters bool
+}
+
+// Any reports whether anything is staged.
+func (s LayoutStaging) Any() bool { return s.Seen }
+
+// Only reports whether the one thing staged is the removal of node.
+func (s LayoutStaging) Only(node string) bool {
+	return s.Seen && !s.Parameters && len(s.Assigned) == 0 && len(s.Removed) == 1 && s.Removed[0] == node
+}
+
+// LayoutStaged reads the staged changes from `garage layout show` as
+// dxflrs/garage:v1.0.1 prints them (src/garage/cli/layout.rs,
+// print_staging_role_changes): after the current layout's version line, a
+// "==== STAGED ROLE CHANGES ====" banner, printed only when something is
+// staged, then an "ID Tags Zone Capacity" table whose rows are a short ID
+// and its new role, or a short ID and REMOVED, and a "Zone redundancy: X"
+// line when that parameter is staged. The section ends where the new
+// layout computed from it starts, or where the error saying it cannot be
+// computed does.
+func LayoutStaged(out string) LayoutStaging {
+	var s LayoutStaging
+	text := ansi.ReplaceAllString(out, "")
+	const banner = "==== STAGED ROLE CHANGES ===="
+	start := strings.Index(text, banner)
+	if start < 0 {
+		return s
+	}
+	s.Seen = true
+	section := text[start+len(banner):]
+	for _, end := range []string{"==== NEW CLUSTER LAYOUT AFTER APPLYING CHANGES ====", "Error while trying to compute the assignment"} {
+		if i := strings.Index(section, end); i >= 0 {
+			section = section[:i]
+		}
+	}
+	for _, line := range strings.Split(section, "\n") {
+		fields := strings.Fields(line)
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(line), "Zone redundancy:"):
+			s.Parameters = true
+		case len(fields) == 2 && shortID.MatchString(fields[0]) && fields[1] == "REMOVED":
+			s.Removed = append(s.Removed, fields[0])
+		case len(fields) >= 2 && shortID.MatchString(fields[0]):
+			s.Assigned = append(s.Assigned, fields[0])
+		}
+	}
+	return s
+}
+
 // healthy reads the short IDs under `garage status`'s HEALTHY NODES heading,
 // and whether a FAILED NODES heading follows.
 func parseStatus(out string) (healthy map[string]bool, failed bool) {

@@ -71,6 +71,21 @@ func TestRefusals(t *testing.T) {
 			edits: []func(string) string{replace("replication: 2", "replication: 1")},
 			world: func(w *world) { delete(w.layout, "cccccccccccccccc") }, want: "home-c is in storage.garage.sites but not in Garage's layout yet"},
 		{name: "a live layout too small without the site", site: "home-b", world: func(w *world) { delete(w.layout, "cccccccccccccccc") }, want: "1 node(s) in Garage's layout would stay without home-b, fewer than storage.garage.replication 2"},
+		{name: "a staged role assignment", site: "home-b", world: func(w *world) { w.assigned["dddddddddddddddd"] = "home-z" },
+			want: "site remove home-b: Garage has staged layout changes that site remove would apply along with its own. Apply them with paisans storage add, or revert them with garage layout revert --yes, first. Nothing was changed"},
+		{name: "another node's staged removal", site: "home-b", world: func(w *world) { w.staged["cccccccccccccccc"] = true }, want: "Garage has staged layout changes"},
+		{name: "its own staged removal beside another change", site: "home-b", world: func(w *world) { w.staged["bbbbbbbbbbbbbbbb"], w.redundancy = true, "2" }, want: "Garage has staged layout changes"},
+		{name: "a staged zone redundancy", site: "home-b", world: func(w *world) { w.redundancy = "2" }, want: "Garage has staged layout changes"},
+		{name: "the first etcd in a cluster of its own", site: "home-b", world: func(w *world) { w.splitEtcd("home-a") },
+			want: "site remove home-b: home-a's etcd belongs to a different cluster than home-c's and vm's, so its membership cannot be changed safely. Run paisans doctor on home-a. Nothing was changed"},
+		{name: "a later etcd in a cluster of its own", site: "home-b", world: func(w *world) { w.splitEtcd("vm") },
+			want: "vm's etcd belongs to a different cluster than home-a's and home-c's"},
+		{name: "one of two answering etcds in a cluster of its own", site: "home-b", world: func(w *world) { w.splitEtcd("home-a"); w.hosts["vm"].etcdUp = false },
+			want: "home-a's etcd belongs to a different cluster than home-c's, so"},
+		{name: "an etcd in a cluster of its own, no cluster IDs", site: "home-b", world: func(w *world) {
+			w.splitEtcd("home-a")
+			w.clusterID, w.hosts["home-a"].ownCluster.cluster = 0, 0
+		}, want: "home-a's etcd belongs to a different cluster than home-c's and vm's"},
 		{name: "a host that does not answer", site: "home-b", world: func(w *world) { w.unreachable["home-b"] = true }, want: "--host-gone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +98,10 @@ func TestRefusals(t *testing.T) {
 			_, err := w.build(tc.site, tc.opts)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			// A cluster of its own is that site's fault, not the others'.
+			if strings.Contains(tc.want, "different cluster") && strings.Contains(err.Error(), "not an etcd member yet") {
+				t.Errorf("a healthy site is blamed: %v", err)
 			}
 			if tc.hint != "" {
 				var p *ui.Problem
@@ -134,5 +153,30 @@ func TestRefusalNamesAnUndeclaredSite(t *testing.T) {
 	var p *ui.Problem
 	if !errors.As(err, &p) || !strings.HasSuffix(p.Hint, "declares no site home-z") || !strings.Contains(p.Explain, "Declared sites are") {
 		t.Errorf("not the Problem main prints: %#v", p)
+	}
+}
+
+// A removal resumed between its own `garage layout remove` and `layout
+// apply` finds only its own removal staged, and carries on.
+func TestItsOwnStagedRemovalIsNotRefused(t *testing.T) {
+	w := setup(t)
+	w.staged["bbbbbbbbbbbbbbbb"] = true
+	if err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{})); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.layout["bbbbbbbbbbbbbbbb"]; ok {
+		t.Error("home-b's node is still in the layout")
+	}
+}
+
+// Every remaining etcd in one cluster, with or without cluster IDs in its
+// answer, is one view: the removal plans and runs as it always has.
+func TestAgreeingEtcdViewsRemoveAsBefore(t *testing.T) {
+	for _, id := range []uint64{0xc1a5, 0} {
+		w := setup(t)
+		w.clusterID = id
+		if err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{})); err != nil {
+			t.Fatalf("cluster ID %x: %v", id, err)
+		}
 	}
 }

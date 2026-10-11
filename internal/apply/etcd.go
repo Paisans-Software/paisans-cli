@@ -80,32 +80,59 @@ const noEtcd = "__PAISANS_NO_ETCD__"
 // ReadEtcdMembers asks this host's etcd for the cluster's membership. running
 // is false when no etcd container runs here, which is an answer, not an error.
 func ReadEtcdMembers(t Transport, d deployment.Deployment) (members []EtcdMember, running bool, err error) {
+	c, running, err := ReadEtcdCluster(t, d)
+	return c.Members, running, err
+}
+
+// EtcdCluster is the cluster as one member answers `etcdctl member list -w
+// json`: the cluster ID from the response header, 0 when it has none, and
+// the members.
+type EtcdCluster struct {
+	ID      uint64
+	Members []EtcdMember
+}
+
+// ReadEtcdCluster asks this host's etcd which cluster it belongs to and
+// that cluster's membership. running is false when no etcd container runs
+// here, which is an answer, not an error.
+func ReadEtcdCluster(t Transport, d deployment.Deployment) (cluster EtcdCluster, running bool, err error) {
 	command := fmt.Sprintf(
 		"if %s ps --status running --quiet etcd 2>/dev/null | grep -q .; then %s; else echo %s; fi",
 		d.ComposeCmd(infraStack), Etcdctl(d, "member list -w json"), noEtcd)
 	out, err := t.Run(command)
 	if err != nil {
-		return nil, false, fmt.Errorf("asking etcd for its members: %w", err)
+		return EtcdCluster{}, false, fmt.Errorf("asking etcd for its members: %w", err)
 	}
 	if strings.TrimSpace(out) == noEtcd {
-		return nil, false, nil
+		return EtcdCluster{}, false, nil
 	}
-	members, err = ParseEtcdMembers(out)
+	cluster, err = ParseEtcdCluster(out)
 	if err != nil {
-		return nil, false, err
+		return EtcdCluster{}, false, err
 	}
-	return members, true, nil
+	return cluster, true, nil
 }
 
 // ParseEtcdMembers reads `etcdctl member list -w json`.
 func ParseEtcdMembers(out string) ([]EtcdMember, error) {
+	c, err := ParseEtcdCluster(out)
+	return c.Members, err
+}
+
+// ParseEtcdCluster reads `etcdctl member list -w json`, header and members
+// (etcd v3.5.16, etcdctl/ctlv3/command/printer_json.go, which marshals the
+// MemberListResponse whole: header.cluster_id is the cluster's ID).
+func ParseEtcdCluster(out string) (EtcdCluster, error) {
 	var list struct {
+		Header struct {
+			ClusterID uint64 `json:"cluster_id"`
+		} `json:"header"`
 		Members []EtcdMember `json:"members"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
-		return nil, fmt.Errorf("etcd's member list is not JSON: %w\n%s", err, out)
+		return EtcdCluster{}, fmt.Errorf("etcd's member list is not JSON: %w\n%s", err, out)
 	}
-	return list.Members, nil
+	return EtcdCluster{ID: list.Header.ClusterID, Members: list.Members}, nil
 }
 
 // EtcdMemberSite names the configured site a member runs on, matched by its
