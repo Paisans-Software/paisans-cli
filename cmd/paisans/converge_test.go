@@ -750,6 +750,27 @@ func TestSiteRemoveUsageNamesForceAndSSH(t *testing.T) {
 	}
 }
 
+// apply --site's usage entry names every flag about one site.
+func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
+	start := strings.Index(usage, "paisans apply    --site")
+	entry := usage[start : start+strings.Index(usage[start:], "\n  paisans site")]
+	for _, flag := range []string{"--ssh", "--only", "--overwrite", "--recreate", "--min-free", "--keep-images", "--execute"} {
+		if !strings.Contains(entry, flag) {
+			t.Errorf("apply --site's usage leaves out %s:\n%s", flag, entry)
+		}
+	}
+}
+
+// The usage's list of the commands that reach a host names secrets prune,
+// which reads the gateways' deployment records over ssh.
+func TestUsageHostListNamesSecretsPrune(t *testing.T) {
+	start := strings.Index(usage, "host prepare, host deployments, apply")
+	entry := strings.Join(strings.Fields(usage[start:start+strings.Index(usage[start:], "reach a host.")]), " ")
+	if !strings.Contains(entry, "secrets prune") {
+		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
+	}
+}
+
 // recordConverge sends the commands' reports to a Recorder for the test.
 func recordConverge(t *testing.T) *ui.Recorder {
 	t.Helper()

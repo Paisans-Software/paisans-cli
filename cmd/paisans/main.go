@@ -52,8 +52,8 @@ Usage:
                    [--min-free <size>] [--keep-images] [--execute]
                    every site, from paisans.yaml to a running stack, in order
   paisans apply    --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-                   [--ssh <destination>] [--overwrite <path>]... [--recreate <stack>]...
-                   [--min-free <size>] [--keep-images] [--execute]
+                   [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...
+                   [--recreate <stack>]... [--min-free <size>] [--keep-images] [--execute]
   paisans site add <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--execute]
   paisans site remove <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -111,10 +111,11 @@ Commands:
              host without --execute; without --site, the dry run may add
              missing generated secrets to the local secrets file, and
              says so when it does.
-  site       add: join a new data site to the running cluster in seven gated
+  site       add: join a new data site to the running cluster in eight gated
              stages: preflight, mesh, etcd (learners, then promoted), the
-             Patroni replica, synchronous mode, HAProxy, and each existing
-             replica's patroni.env, one replica restart at a time. Reads
+             Patroni replica, synchronous mode, HAProxy, each existing
+             replica's patroni.env, one replica restart at a time, and each
+             monitor site's uptime stack, so it checks the new site. Reads
              every site and plans only what differs, so a re-run resumes.
              Writes nothing without --execute.
              remove: take a site out of the running deployment in gated
@@ -204,7 +205,8 @@ Commands:
   oidc       client create: create an app's client at the deployment's
              Pocket ID, with the groups the app reads, and record its ID and
              secret in the secrets file. The secret is never printed.
-             Writes nothing without --execute. Mbin only, so far.
+             Writes nothing without --execute. Supports the mbin, outline,
+             writefreely and uptime kinds.
   ingress    show: for an app pinned to a monitor site, print what the web
              server in front of it must do (terminate TLS for its hostname,
              pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled
@@ -218,10 +220,12 @@ Commands:
 
 host prepare, host deployments, apply, prune, site add, site remove, storage
 init, storage add, storage rotate-key, app admin create, app remove, oidc
-client create, preflight, failover test, doctor and init are the only
-commands that reach a host.
+client create, secrets prune, preflight, failover test, doctor and init are the
+only commands that reach a host.
 Each reads it to plan, and changes it only with --execute; host deployments,
-preflight, doctor and init have no --execute and never change it. With --execute, a command first
+preflight, doctor and init have no --execute and never change it; secrets
+prune only reads the gateways' deployment records, and its --execute writes
+the local secrets file alone. With --execute, a command first
 claims each host it writes to in /var/lib/paisans/registry.json, and refuses if
 another deployment there holds this one's token, WireGuard interface or listen
 port, or a mesh subnet overlapping this one's. apply and host prepare also
