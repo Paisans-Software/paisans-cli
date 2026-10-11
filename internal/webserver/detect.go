@@ -50,6 +50,22 @@ const (
 	CertsFolder
 )
 
+// GlobalDNS is the DNS challenge a Caddy's global options set.
+type GlobalDNS int
+
+const (
+	// DNSUnread is a Caddyfile that was not read.
+	DNSUnread GlobalDNS = iota
+	// DNSNone is global options that set no DNS challenge.
+	DNSNone
+	// DNSCertIssuer is a DNS challenge in a global cert_issuer, which the
+	// toolkit's site, with an issuer of its own, does not use.
+	DNSCertIssuer
+	// DNSACME is a global acme_dns, which Caddy gives the toolkit's site
+	// too: WebServer.ACMEDNS is the directive.
+	DNSACME
+)
+
 // WebServer is what Detect found in front of the app's host, enough for Show
 // to print only the snippet that applies and for the operator to check it.
 type WebServer struct {
@@ -80,6 +96,11 @@ type WebServer struct {
 	// Private each of its listeners bound to a private address only.
 	Listen  string
 	Private []string
+	// DNS is the DNS challenge a Caddy that obtains its own certificates
+	// sets in its global options, and ACMEDNS the acme_dns directive's
+	// lines, as written, when that is how.
+	DNS     GlobalDNS
+	ACMEDNS []string
 	// Why is what could not be determined, and why.
 	Why string
 }
@@ -110,6 +131,14 @@ func (w WebServer) Summary() string {
 	switch {
 	case w.Certs == CertsAutomatic:
 		s += ", obtains its own certificates"
+		switch w.DNS {
+		case DNSNone:
+			s += " (this site uses HTTP-01)"
+		case DNSCertIssuer:
+			s += " (DNS-01 globally; this site uses HTTP-01)"
+		case DNSACME:
+			s += " (DNS-01 globally through acme_dns, this site included)"
+		}
 	case w.Certs == CertsFolder:
 		s += ", loads its certificates from " + w.Folder
 	case w.Certbot != "":
@@ -454,7 +483,51 @@ func caddy(h Host, exec func(string) (string, error), ws *WebServer, t Target) {
 		ws.Certs, ws.Folder = CertsFolder, certs.LoadFolders[0]
 	default:
 		ws.Certs = CertsAutomatic
+		main := ws.Main
+		if main == "" {
+			main = ws.Config
+		}
+		if main == "" {
+			return
+		}
+		if conf, err := exec("cat " + quote(main)); err == nil {
+			ws.DNS, ws.ACMEDNS = globalDNS(conf)
+		}
 	}
+}
+
+// globalDNS reads the DNS challenge a Caddyfile's global options block
+// sets: an acme_dns directive, with its lines as written, or a dns
+// subdirective in a cert_issuer.
+func globalDNS(conf string) (GlobalDNS, []string) {
+	depth, options := caddyBlocks(conf)
+	if options < 0 {
+		return DNSNone, nil
+	}
+	lines := strings.Split(conf, "\n")
+	dns, issuer := DNSNone, false
+	for i := options + 1; i < len(lines) && depth[i] > 0; i++ {
+		toks := caddyTokens(lines[i])
+		if len(toks) == 0 {
+			continue
+		}
+		switch {
+		case depth[i] == 1 && toks[0] == "acme_dns":
+			found := []string{strings.TrimSpace(lines[i])}
+			for j := i + 1; j < len(lines) && depth[j] > 1; j++ {
+				found = append(found, strings.TrimSpace(lines[j]))
+			}
+			return DNSACME, found
+		case depth[i] == 1:
+			issuer = toks[0] == "cert_issuer"
+			if issuer && slices.Contains(toks, "dns") {
+				dns = DNSCertIssuer
+			}
+		case issuer && depth[i] == 2 && toks[0] == "dns":
+			dns = DNSCertIssuer
+		}
+	}
+	return dns, nil
 }
 
 // public reports whether a listener's host takes connections from the

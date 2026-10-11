@@ -244,8 +244,12 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	if ws.Certbot != "" {
 		advice = "If the certificate is not there yet, obtain it as the others were, then run paisans apply --execute again:\n\n    " + ws.Certbot
 	}
+	var also []problem
+	if hint, detail, ok := webserver.ACMEDNSWarning(target, ws); ok {
+		also = append(also, problem{hint, detail})
+	}
 	sf.until = ""
-	return sf, reportWebServerFiles(r, step, sf, outcomes, recorded, keep, cfg.Deployment(), t, app, advice)
+	return sf, reportWebServerFiles(r, step, sf, outcomes, recorded, keep, cfg.Deployment(), t, app, advice, also...)
 }
 
 // problem is one thing a step ended on: short on its line, detail under it.
@@ -254,8 +258,9 @@ type problem struct{ short, detail string }
 // reportWebServerFiles ends step with what happened to the files, on a
 // warning or a failure with what to do about each problem, and records
 // what is kept in the site's manifest. It notes in sf what the app's check
-// needs to know, and returns the step's mark.
-func reportWebServerFiles(r ui.Reporter, step ui.Step, sf *siteFile, outcomes []webserver.Outcome, recorded, keep []render.ManifestWebServer, d deployment.Deployment, t apply.Transport, app, advice string) ui.Mark {
+// needs to know, and returns the step's mark. also are warnings about the
+// web server that leave the files as they are.
+func reportWebServerFiles(r ui.Reporter, step ui.Step, sf *siteFile, outcomes []webserver.Outcome, recorded, keep []render.ManifestWebServer, d deployment.Deployment, t apply.Transport, app, advice string, also ...problem) ui.Mark {
 	// Which server each file is for: a removed file's as recorded, a
 	// written one's as found.
 	entries := map[string]render.ManifestWebServer{}
@@ -326,6 +331,7 @@ func reportWebServerFiles(r ui.Reporter, step ui.Step, sf *siteFile, outcomes []
 	if err := apply.WriteWebServerRecord(t, d, keep); err != nil {
 		failed = append(failed, problem{"the record of its site files was not written", errLine(err)})
 	}
+	warned = append(warned, also...)
 	mark, problems := ui.OK, append(failed, warned...)
 	switch {
 	case len(failed) > 0:

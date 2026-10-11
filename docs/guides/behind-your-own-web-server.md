@@ -325,11 +325,12 @@ It reads the machine's web server over ssh, changing nothing, and prints:
   certificates, for you to check, such as:
 
   ```
-  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates
+  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates (this site uses HTTP-01)
   ```
 
 * the snippet for that web server, filled in;
-* a warning when `listen` is not loopback.
+* a warning when `listen` is not loopback, and one when Caddy's global options
+  set `acme_dns` (below).
 
 It looks for a container publishing 443 or 80 first, then for the process
 listening on 443 or 80 on the machine itself, using sudo only where docker or
@@ -338,7 +339,7 @@ certificate follows what it found:
 
 | Found | Certificate in the snippet |
 |---|---|
-| Caddy whose admin API shows it obtains its own certificates | no `tls` line: Caddy obtains this one too |
+| Caddy whose admin API shows it obtains its own certificates | `tls { issuer acme }`: Caddy obtains this one too, over HTTP-01 |
 | Caddy loading certificate files for its other sites | a `tls` line naming files for this hostname by the same pattern |
 | nginx or Apache with certificates under `/etc/letsencrypt/live/` | the files certbot will write for this hostname, after the `certbot certonly` command that obtains them the way your other certificates were |
 | nginx or Apache with other certificate files | files for this hostname by the same pattern, where the paths name a host |
@@ -346,6 +347,58 @@ certificate follows what it found:
 
 When Caddy also serves a listener bound to a private address only, such as a
 Tailscale one, the snippet says which listener the site belongs on.
+
+### A Caddy that obtains its own certificates
+
+The site gets an issuer of its own, so its certificate never depends on a DNS
+challenge you set for your other sites, whose token may not cover the
+monitor's zone:
+
+```
+status.example.org {
+	tls {
+		issuer acme
+	}
+	...
+}
+```
+
+With no DNS provider, Caddy obtains the certificate over HTTP-01, or
+TLS-ALPN-01. Both need the hostname's A record (and AAAA, with
+`public_address6`) pointing at this machine, which step 5 publishes, and port
+80, or 443 for TLS-ALPN-01, reachable from the internet. Your global `email`
+still applies.
+
+How your global options set a DNS challenge decides whether the site keeps out
+of it:
+
+| Global options | This site |
+|---|---|
+| none | HTTP-01; the line says `(this site uses HTTP-01)` |
+| `cert_issuer acme { dns <provider> … }` | HTTP-01: its own issuer replaces the global one; the line says `(DNS-01 globally; this site uses HTTP-01)` |
+| `acme_dns <provider> …` | DNS-01 with your global token: Caddy gives `acme_dns` to every ACME issuer without a DNS provider of its own, this one included |
+
+With `acme_dns`, `show` and `apply` warn, and the site file is still written,
+since it is valid and changes nothing there:
+
+```
+  ! site file for status: caddy's global acme_dns applies to status.example.org too
+       /opt/caddy/Caddyfile sets, in its global options:
+
+           acme_dns cloudflare {$CF_API_TOKEN}
+
+       ... To have this site use HTTP-01, replace it with:
+
+           cert_issuer acme {
+               dns cloudflare {$CF_API_TOKEN}
+           }
+```
+
+Either make sure the token covers the hostname's zone, or make that rewrite.
+It gives the same DNS challenge to every site without an issuer of its own, but
+drops Caddy's default ZeroSSL fallback issuer for them. A value in the line
+that is not a placeholder is shown as `<value>`, so a token written into the
+Caddyfile is never printed.
 
 This snippet is what apply writes into the include directory. With
 `include_dir: false`, copy it into your web server's configuration yourself,

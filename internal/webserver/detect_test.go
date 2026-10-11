@@ -68,7 +68,8 @@ func show(t *testing.T, ws webserver.WebServer) string {
 
 // A Caddy in a container that publishes 443, which obtains its own
 // certificates: its admin API, reached inside the container, says so, and
-// the sheet is its snippet alone, with no tls line.
+// the sheet is its snippet alone, with an issuer of its own and no
+// certificate files.
 func TestDetectsADockerCaddyThatObtainsItsOwnCertificates(t *testing.T) {
 	plain := &fakeHost{answers: []answer{
 		{key: "docker ps", out: caddyPS},
@@ -95,7 +96,10 @@ func TestDetectsADockerCaddyThatObtainsItsOwnCertificates(t *testing.T) {
 	if !strings.Contains(out, want) || !strings.Contains(out, "status.example.org {") {
 		t.Errorf("sheet:\n%s", out)
 	}
-	for _, absent := range []string{"\ttls ", "# tls", "proxy_pass", "VirtualHost", "YOUR CERTIFICATE"} {
+	if !strings.Contains(out, "\ttls {\n    \t\tissuer acme\n") {
+		t.Errorf("sheet has no issuer of its own:\n%s", out)
+	}
+	for _, absent := range []string{"\ttls /", "# tls", "proxy_pass", "VirtualHost", "YOUR CERTIFICATE"} {
 		if strings.Contains(out, absent) {
 			t.Errorf("sheet has %q:\n%s", absent, out)
 		}
@@ -264,5 +268,53 @@ func TestDetectOnlyReads(t *testing.T) {
 				t.Errorf("%q writes (%s)", c, verb)
 			}
 		}
+	}
+}
+
+// detectCaddy is Detect on a Caddy in a container that obtains its own
+// certificates, whose Caddyfile reads conf.
+func detectCaddy(t *testing.T, conf string) webserver.WebServer {
+	t.Helper()
+	plain := &fakeHost{answers: []answer{
+		{key: "docker ps", out: caddyPS},
+		{key: "docker inspect", out: caddyMounts},
+		{key: "curl", out: caddyAutomatic},
+		{key: "docker exec caddy-1 cat '/etc/caddy/Caddyfile'", out: conf},
+	}}
+	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	if ws.Certs != webserver.CertsAutomatic {
+		t.Fatalf("got %+v", ws)
+	}
+	return ws
+}
+
+// The global options say whether a DNS challenge applies to every site:
+// through cert_issuer, which the site's own issuer replaces, or through
+// acme_dns, which Caddy gives every ACME issuer, the site's included.
+func TestDetectReadsTheGlobalDNSChallenge(t *testing.T) {
+	const head = "web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates"
+	for _, c := range []struct {
+		name, conf string
+		dns        webserver.GlobalDNS
+		summary    string
+	}{
+		{"no challenge", "{\n\temail admin@example.org\n}\nimport /etc/caddy/paisans.d/*\n", webserver.DNSNone, head + " (this site uses HTTP-01)"},
+		{"no global options", "example.org {\n\trespond ok\n}\n", webserver.DNSNone, head + " (this site uses HTTP-01)"},
+		{"commented out", "{\n\t# acme_dns cloudflare {$CF_API_TOKEN}\n}\n", webserver.DNSNone, head + " (this site uses HTTP-01)"},
+		{"cert_issuer without dns", "{\n\tcert_issuer acme {\n\t\tdir https://acme.example.org/directory\n\t}\n}\n", webserver.DNSNone, head + " (this site uses HTTP-01)"},
+		{"cert_issuer", "{\n\temail admin@example.org\n\tcert_issuer acme {\n\t\tdns cloudflare {$CF_API_TOKEN}\n\t}\n}\n", webserver.DNSCertIssuer, head + " (DNS-01 globally; this site uses HTTP-01)"},
+		{"cert_issuer on one line", "{\n\tcert_issuer acme { dns cloudflare {$CF_API_TOKEN} }\n}\n", webserver.DNSCertIssuer, head + " (DNS-01 globally; this site uses HTTP-01)"},
+		{"acme_dns", "{\n\temail admin@example.org\n\tacme_dns cloudflare {$CF_API_TOKEN}\n}\n", webserver.DNSACME, head + " (DNS-01 globally through acme_dns, this site included)"},
+		{"acme_dns beside cert_issuer", "{\n\tcert_issuer acme {\n\t\tdns cloudflare {$CF_API_TOKEN}\n\t}\n\tacme_dns cloudflare {$CF_API_TOKEN}\n}\n", webserver.DNSACME, head + " (DNS-01 globally through acme_dns, this site included)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ws := detectCaddy(t, c.conf)
+			if ws.DNS != c.dns {
+				t.Errorf("dns %v, want %v", ws.DNS, c.dns)
+			}
+			if got := ws.Summary(); got != c.summary {
+				t.Errorf("summary\n got %q\nwant %q", got, c.summary)
+			}
+		})
 	}
 }

@@ -170,8 +170,8 @@ func TestSyncWritesValidatesAndReloads(t *testing.T) {
 			t.Errorf("file lacks %q:\n%s", want, content)
 		}
 	}
-	if strings.Contains(content, "tls ") {
-		t.Errorf("a Caddy that obtains its own certificates got a tls line:\n%s", content)
+	if strings.Contains(content, "tls /") || !strings.Contains(content, siteIssuer) {
+		t.Errorf("a Caddy that obtains its own certificates got certificate files, or no issuer of its own:\n%s", content)
 	}
 	if !s.Ran("mkdir -p '/opt/caddy/paisans.d'") {
 		t.Errorf("the directory was not created: %v", s.Asked)

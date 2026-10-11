@@ -795,16 +795,35 @@ publishing 443 or 80 (`docker ps`, through sudo when docker refuses the ssh
 user), and its configuration from the container's mounts; failing that, the
 process listening on 443 or 80 (`sudo ss -ltnp`). For Caddy it asks the admin
 API on `localhost:2019`, on the host or inside the container: a Caddy that
-obtains its own certificates gets no `tls` line, one that loads certificate
-files gets a `tls` line following their pattern for the new name, and where a
+obtains its own certificates gets a site level `tls { issuer acme }`, one that
+loads certificate files gets a `tls` line following their pattern for the new
+name, and where a
 server is bound to a private address only the snippet says which listener the
 site belongs on. For nginx (`nginx -T`) and Apache it reads the certificate
 files the configuration names; under `/etc/letsencrypt/live/` it names the
 files certbot will write for the new name and the `certbot certonly` command,
 with the authenticator the existing renewals use. A line above the snippet
 says what was found, such as `web server: caddy (docker container caddy-1,
-config /opt/caddy/Caddyfile), obtains its own certificates`, so it can be
-checked before anything is copied. When nothing could be read, or the server
+config /opt/caddy/Caddyfile), obtains its own certificates (DNS-01 globally;
+this site uses HTTP-01)`, so it can be checked before anything is copied.
+
+The site's own issuer is there so that its certificate never depends on a DNS
+challenge the operator set for their other sites, whose token may not cover
+the monitor's zone. With no DNS provider, Caddy obtains it over HTTP-01 or
+TLS-ALPN-01, which needs only what the monitor already needs: the hostname's
+A (and AAAA) record pointing at the host, and port 80, or 443 for TLS-ALPN-01,
+reachable from the internet. The operator's global `email` still applies. The
+issuer replaces a global `cert_issuer acme { dns … }`, but not a global
+`acme_dns`: Caddy gives that to every ACME issuer without a DNS provider of
+its own, the site's included (`fillInGlobalACMEDefaults` in
+`caddyconfig/httpcaddyfile/tlsapp.go`, Caddy v2.11.7), and then uses the DNS
+challenge alone. So `show` reads the Caddyfile's global options block too, and
+where it finds `acme_dns` it warns, as `apply` does on the site file's step,
+that the certificate needs the global token to cover the hostname's zone, with
+the line rewritten as a `cert_issuer acme { dns … }` that lets the site use
+HTTP-01. That rewrite drops Caddy's default ZeroSSL fallback issuer for the
+sites without one of their own. The site file is written either way: it is
+valid, and with `acme_dns` it changes nothing. When nothing could be read, or the server
 has no snippet, that line says why and the sheet carries the Caddy, nginx and
 Apache snippets, with Caddy's `tls` line commented out. sudo is asked for once,
 and only when a command needs it; `--sudo=false` reads as the ssh user alone. `check` reports pass or fail, with the fix, for: the hostname

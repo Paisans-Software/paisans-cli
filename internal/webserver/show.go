@@ -88,6 +88,69 @@ func ListenWarning(t Target) (hint, detail string, ok bool) {
 		fmt.Sprintf("Docker publishes the port with its own iptables rules, in front of ufw, so ufw does not protect it: anything that can reach %s can reach the app around your web server. Restrict it upstream of the host, or in Docker's DOCKER-USER chain.", t.ListenHost), true
 }
 
+// ACMEDNSWarning is the warning for a Caddy whose global acme_dns reaches
+// the toolkit's site: its issuer of its own does not keep the DNS challenge
+// out, so the site's certificate depends on the global DNS provider's
+// credentials covering its hostname. Like ListenWarning, it is returned
+// rather than written into the sheet.
+func ACMEDNSWarning(t Target, ws WebServer) (hint, detail string, ok bool) {
+	if ws.Server != ServerCaddy || ws.Certs != CertsAutomatic || ws.DNS != DNSACME || len(ws.ACMEDNS) == 0 {
+		return "", "", false
+	}
+	conf := ws.Config
+	if conf == "" {
+		conf = ws.Main
+	}
+	found := directive(ws.ACMEDNS, 1)
+	inner := append([]string{"dns" + strings.TrimPrefix(ws.ACMEDNS[0], "acme_dns")}, ws.ACMEDNS[1:]...)
+	rewrite := "    cert_issuer acme {\n" + directive(inner, 2) + "    }\n"
+	masked := ""
+	if strings.Contains(found, maskedValue) {
+		masked = fmt.Sprintf(" Each %s stands for a value as it is in %s, not shown here.", maskedValue, conf)
+	}
+	return "caddy's global acme_dns applies to " + t.Hostname + " too",
+		fmt.Sprintf("%s sets, in its global options:\n\n%s\nCaddy gives a global acme_dns to every site's ACME issuer that names no DNS provider of its own, the paisans site included, and then uses the DNS challenge alone. So the certificate for %s is obtained over DNS-01 with that provider's credentials, which must cover %s's zone. To have this site use HTTP-01, replace it with:\n\n%s\nwhich gives the same DNS challenge to every site without an issuer of its own, while the paisans site keeps its own. It drops Caddy's default ZeroSSL fallback issuer for those sites.%s", conf, found, t.Hostname, t.Hostname, rewrite, masked), true
+}
+
+// maskedValue stands in for a value from the operator's Caddyfile that is
+// not a placeholder, which may be a credential.
+const maskedValue = "<value>"
+
+// directive is a Caddyfile directive's lines, as Detect read them, indented
+// by level and by its own braces, with every value that is not a
+// placeholder masked: what follows the first token of a line, and on its
+// first line the provider's name too.
+func directive(lines []string, level int) string {
+	var b strings.Builder
+	depth := level
+	for i, line := range lines {
+		toks := caddyTokens(line)
+		if len(toks) > 0 && toks[0] == "}" {
+			depth--
+		}
+		keep := 1
+		if i == 0 {
+			keep = 2
+		}
+		for j := keep; j < len(toks); j++ {
+			if tok := toks[j]; tok != "{" && tok != "}" && !(len(tok) > 2 && strings.HasPrefix(tok, "{") && strings.HasSuffix(tok, "}")) {
+				toks[j] = maskedValue
+			}
+		}
+		b.WriteString(strings.Repeat("    ", depth) + strings.Join(toks, " ") + "\n")
+		// A closing brace that opens the line was counted above.
+		for j, tok := range toks {
+			switch {
+			case tok == "{":
+				depth++
+			case tok == "}" && j > 0:
+				depth--
+			}
+		}
+	}
+	return b.String()
+}
+
 // The three snippets differ in what they spell out because the servers
 // differ in what they do unasked. Caddy's reverse_proxy passes incoming
 // headers, Host included, through unchanged and sets X-Forwarded-For and
@@ -118,6 +181,15 @@ func caddySnippet(t Target, ws WebServer) string {
 	case ws.Server != ServerCaddy:
 		tls = fmt.Sprintf("\t# %s: if this Caddy obtains its certificates itself, leave this\n\t# out; otherwise uncomment it and name your own files.\n", certificateMarker) + generic
 	case ws.Certs == CertsAutomatic:
+		// An issuer of the site's own replaces a global cert_issuer, and
+		// with no DNS provider certmagic uses HTTP-01 and TLS-ALPN-01
+		// (certmagic v0.25.6, acmeclient.go, where a DNS solver is
+		// exclusive of the others). A global acme_dns is the exception:
+		// fillInGlobalACMEDefaults (caddy v2.11.7, caddyconfig/
+		// httpcaddyfile/tlsapp.go) gives it to every ACME issuer without a
+		// DNS provider, this one included, and ACMEDNSWarning says so. A
+		// global email still fills in the issuer's.
+		tls = "\ttls {\n\t\tissuer acme\n\t}\n"
 	case ws.Certs == CertsFolder:
 		tls = fmt.Sprintf("\t# This Caddy loads every certificate in %s: put the one for\n\t# %s there.\n", ws.Folder, t.Hostname)
 	case ws.CertFile != "":

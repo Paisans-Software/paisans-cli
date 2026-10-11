@@ -133,3 +133,31 @@ func TestWebServerShowPrintsTheDetectedServer(t *testing.T) {
 		t.Errorf("asked %v:\n%s", *asked, out2)
 	}
 }
+
+// acmeDNSCaddy is a Caddy that obtains its own certificates with a global
+// acme_dns, which reaches the toolkit's site too.
+var acmeDNSCaddy = webserver.WebServer{
+	Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile",
+	Mounts: []webserver.Mount{{Source: "/opt/caddy", Destination: "/etc/caddy"}},
+	Certs:  webserver.CertsAutomatic, DNS: webserver.DNSACME, ACMEDNS: []string{"acme_dns cloudflare {$CF_API_TOKEN}"},
+}
+
+// show warns, outside the sheet, that a global acme_dns reaches the site,
+// and still prints the site with its own issuer.
+func TestWebServerShowWarnsOfAGlobalACMEDNS(t *testing.T) {
+	fakeWebServer(t, acmeDNSCaddy)
+	rec := withRecorder(t, false)
+	var err error
+	out := captureStdout(t, func() {
+		err = runWebServer([]string{"show", "--app", "status", "--config", externalFixture(t)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := rec.Index("warn", "acme_dns"); i < 0 || !strings.Contains(rec.Events[i].Extra, "cert_issuer acme {") {
+		t.Errorf("no warning:\n%s", rec.Lines())
+	}
+	if !strings.Contains(out, "issuer acme") || strings.Contains(out, "cert_issuer") {
+		t.Errorf("sheet:\n%s", out)
+	}
+}
