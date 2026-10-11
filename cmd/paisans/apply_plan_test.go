@@ -31,6 +31,13 @@ func (emptyHost) Run(command string) (string, error) {
 	}
 	// Every image is present, so the plan carries no disk check; apply's
 	// own tests cover that.
+	// The sweep's read: no images beyond the rendered ones, and no
+	// containers.
+	sweep := strings.Contains(command, "echo paisans-sweep-end")
+	if sweep {
+		_, loop, _ := strings.Cut(command, "for r in ")
+		command = "for r in " + loop
+	}
 	if list, ok := strings.CutPrefix(command, "for r in "); ok {
 		list, _, _ = strings.Cut(list, "; do")
 		// The volume probe asks the same loop what each image declares:
@@ -47,7 +54,13 @@ func (emptyHost) Run(command string) (string, error) {
 			}
 			out.WriteString("\n")
 		}
+		if sweep {
+			out.WriteString("paisans-sweep-end\n")
+		}
 		return out.String(), nil
+	}
+	if sweep {
+		return "paisans-sweep-end\n", nil
 	}
 	return "down\n", nil
 }

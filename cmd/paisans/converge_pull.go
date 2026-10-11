@@ -81,7 +81,9 @@ func (p *puller) load() error {
 			}
 			need = n
 		}
-		p.options = []apply.Option{apply.MinFree(need)}
+		// The pull stage executes none of these plans, so none reads what
+		// its apply's sweep would remove.
+		p.options = []apply.Option{apply.MinFree(need), apply.SkipSweepRead()}
 		if p.o.KeepImages {
 			p.options = append(p.options, apply.KeepImages())
 		}

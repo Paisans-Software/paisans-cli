@@ -771,10 +771,16 @@ func runApply(args []string) error {
 		if clients != nil {
 			changes += clients.steps
 		}
+		// The sweep removes images and writes nothing, so it is its own part
+		// of the summary rather than a change.
+		summary := count(changes, "change")
+		if len(plan.Sweep) > 0 {
+			summary = strings.TrimPrefix(summary+", "+plural(len(plan.Sweep), "old image")+" to sweep", ", ")
+		}
 		// A plan --execute would refuse, Eg: a file edited on the host, is
 		// where the run would stop, not work it would do.
-		dryRunFound(count(changes, "change"), apply.Refusal(plan))
-		if changes == 0 {
+		dryRunFound(summary, apply.Refusal(plan))
+		if changes == 0 && len(plan.Sweep) == 0 {
 			r.Result("%s is up to date. Nothing to apply.", *site)
 			return err
 		}

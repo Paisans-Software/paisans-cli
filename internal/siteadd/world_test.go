@@ -127,6 +127,18 @@ func (h *host) Run(command string) (string, error) {
 			fmt.Fprintf(&b, "absent %s\n", strings.Trim(q, "'"))
 		}
 		return b.String(), nil
+	case strings.Contains(command, "echo paisans-sweep-end"):
+		// The sweep's read: no image beyond the ones rendered, each present,
+		// and no container.
+		_, loop, _ := strings.Cut(command, "for r in ")
+		list, _, _ := strings.Cut(loop, "; do")
+		var b strings.Builder
+		for _, q := range strings.Fields(list) {
+			ref := strings.Trim(q, "'")
+			d := sha256.Sum256([]byte(ref))
+			fmt.Fprintf(&b, "present sha256:%s %s\n", hex.EncodeToString(d[:]), ref)
+		}
+		return b.String() + "paisans-sweep-end\n", nil
 	case strings.HasPrefix(command, "for r in ") && strings.Contains(command, ".Config.Volumes"):
 		// What each image declares: nothing, for every image in this world.
 		list, _, _ := strings.Cut(strings.TrimPrefix(command, "for r in "), "; do")
