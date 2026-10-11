@@ -73,8 +73,9 @@ type Plan struct {
 	Site      string
 	Stages    []*Stage
 	Preflight preflight.Report
-	// Notes are things the join leaves for later, on purpose.
-	Notes []string
+	// Owed are the applies the join leaves for later, on purpose, one note a
+	// site.
+	Owed []string
 	// Report receives each stage as a section, the work in it as steps and
 	// each gate as a step of its own. Nil discards it.
 	Report ui.Reporter
@@ -239,7 +240,11 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	if started {
 		p.preflightSkipped = why
 	} else {
-		report, err := runPreflight(cfg, newSite, transports)
+		blank, err := p.blankJoiners(live)
+		if err != nil {
+			return nil, err
+		}
+		report, err := runPreflight(cfg, append([]string{newSite}, blank...), transports)
 		if err != nil {
 			return nil, fmt.Errorf("preflight: %w", err)
 		}
@@ -296,8 +301,11 @@ func checkScope(cfg *config.Config, newSite string, transports map[string]apply.
 	if !ok {
 		return fmt.Errorf("site add: the configuration declares no site %q. Declare it at its end state first, Eg: roles [data], an address, an endpoint and an ssh section", newSite)
 	}
+	if site.Has(config.RoleWitness) && !site.Has(config.RoleData) {
+		return fmt.Errorf("site add %s: a witness has no replica, so it has no site add of its own. It joins in the site add of the data site that joins with it, whose etcd stage adds every member not yet a voter, witnesses first: run `paisans site add <data site>`, or `paisans apply`, which plans it. A witness joining with no data site makes the voters even, which validate refuses", newSite)
+	}
 	if len(site.Roles) != 1 || !site.Has(config.RoleData) {
-		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run host prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway or witness is a separate change", newSite)
+		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run host prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change", newSite)
 	}
 	if !contains(cfg.Cluster.Sites, newSite) {
 		return fmt.Errorf("site add %s: cluster.sites is written and does not list it, so there is no replica to add. List it there, or leave the key out so it is derived from the roles, every data site", newSite)
@@ -364,6 +372,32 @@ func (p *Plan) joinStarted(live []apply.EtcdMember) (bool, string, error) {
 	return false, "", nil
 }
 
+// blankJoiners are the other members this join brings into etcd that it
+// also takes from a blank host, Eg: a new witness: none is in etcd's
+// membership and none has the mesh file stage 2 writes. Each is a host the
+// join has not touched, so preflight checks it as it checks the new site; an
+// existing site gaining the witness role runs already and is not one.
+func (p *Plan) blankJoiners(live []apply.EtcdMember) ([]string, error) {
+	present := map[string]bool{}
+	for _, m := range live {
+		present[apply.EtcdMemberSite(p.cfg, m)] = true
+	}
+	var out []string
+	for _, name := range p.joiners(live) {
+		if name == p.Site || present[name] {
+			continue
+		}
+		_, found, err := p.transports[name].ReadFile("/" + p.dep().WireGuardConf())
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		if !found {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
 func (p *Plan) buildPreflight() *Stage {
 	st := &Stage{Number: 1, Name: "preflight", Gate: "every check passes", Short: "preflight checks pass"}
 	if p.preflightSkipped != "" {
@@ -406,10 +440,10 @@ func leader(members []patroniMember) string {
 	return ""
 }
 
-// noteOwed lists what the join leaves on purpose: the leader's patroni.env,
-// which names every etcd member after the join. Applying it recreates the
-// leader's Patroni, a failover, and the join does not need it (see
-// apply.LeaderPatroniEnvNote). Every replica's is applied by stage 7.
+// noteOwed adds to Owed what the join leaves on purpose: the leader's
+// patroni.env, which names every etcd member after the join. Applying it
+// recreates the leader's Patroni, a failover, and the join does not need it
+// (see apply.LeaderPatroniEnvNote). Every replica's is applied by stage 7.
 func (p *Plan) noteOwed(rendered *render.Plan, members []patroniMember) error {
 	name := leader(members)
 	if name == "" || name == p.Site {
@@ -421,7 +455,7 @@ func (p *Plan) noteOwed(rendered *render.Plan, members []patroniMember) error {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	if found && have != want {
-		p.Notes = append(p.Notes, apply.LeaderPatroniEnvNote(name))
+		p.Owed = append(p.Owed, apply.LeaderPatroniEnvNote(name))
 	}
 	return nil
 }
@@ -618,8 +652,9 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, " / ")
 }
 
-// runPreflight is stage 1. It is a variable so that this package's tests, which
-// drive stages 2 to 6 against fake hosts, can stand in a passing report:
+// runPreflight is stage 1, on the new site and every blank joiner. It is a
+// variable so that this package's tests, which drive stages 2 to 6 against
+// fake hosts, can stand in a passing report:
 // preflight's own checks are tested in internal/preflight, against hosts shaped
 // for them.
-var runPreflight = preflight.Run
+var runPreflight = preflight.RunAll

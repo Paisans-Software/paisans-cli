@@ -52,7 +52,7 @@ func runStorageAdd(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -98,6 +98,7 @@ func runStorageAdd(args []string) error {
 	if !*execute {
 		dryRunFound(count(plan.PendingStages(), "stage"), nil)
 		reportRemains(r, plan.Notes)
+		reportOwedApplies(r, plan.Owed)
 		r.Result("Nothing changed. Re-run with --execute to apply.")
 		return nil
 	}
@@ -106,6 +107,7 @@ func runStorageAdd(args []string) error {
 		return err
 	}
 	reportRemains(r, plan.Notes)
+	reportOwedApplies(r, plan.Owed)
 	r.Result("storage add: every gate passed.")
 	return nil
 }

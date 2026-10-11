@@ -1,4 +1,4 @@
-package ingress
+package webserver
 
 import (
 	"fmt"
@@ -8,24 +8,25 @@ import (
 )
 
 // certificateMarker is the line in each snippet where the operator's own
-// certificate goes. The toolkit obtains no certificate in ingress mode
+// certificate goes. The toolkit obtains no certificate with managed_by:
 // external: it cannot know how an unfamiliar web server gets one, and it must
 // not edit a configuration it does not own.
 const certificateMarker = "YOUR CERTIFICATE"
 
 // Show prints the hand-off sheet for a target: what the web server in front
-// of the app must do, and the same filled in for Caddy, nginx and Apache. In
-// ingress mode paisans the toolkit's own Caddy is in front, and the sheet
-// says there is nothing to hand off.
-func Show(w io.Writer, t Target) {
+// of the app must do, and the same filled in for the web server ws found, or
+// for Caddy, nginx and Apache when none was. With managed_by: paisans the
+// toolkit's own Caddy is in front, and the sheet says there is nothing to
+// hand off.
+func Show(w io.Writer, t Target, ws WebServer) {
 	if !t.External() {
-		fmt.Fprintf(w, "%s is served by the toolkit's own Caddy on %s (ingress mode paisans): nothing to hand off.\n", t.App, t.Site)
+		fmt.Fprintf(w, "%s is served by the toolkit's own Caddy on %s (managed_by: paisans): nothing to hand off.\n", t.App, t.Site)
 		fmt.Fprintf(w, "Its certificate for %s is obtained over DNS-01 through acme.provider, and %s points at %s.\n", t.Hostname, t.Hostname, addresses(t))
-		fmt.Fprintf(w, "`paisans ingress check --app %s` checks the name and the certificate from this machine.\n", t.App)
+		fmt.Fprintf(w, "`paisans web-server check --app %s` checks the name and the certificate from this machine.\n", t.App)
 		return
 	}
 
-	fmt.Fprintf(w, "Ingress for %s on %s (ingress mode external)\n\n", t.App, t.Site)
+	fmt.Fprintf(w, "Web server for %s on %s (managed_by: external)\n\n", t.App, t.Site)
 	fmt.Fprintf(w, "  hostname   %s\n", t.Hostname)
 	fmt.Fprintf(w, "  DNS        %s must point at %s\n", t.Hostname, addresses(t))
 	fmt.Fprintf(w, "  upstream   %s\n", t.Upstream())
@@ -42,13 +43,37 @@ func Show(w io.Writer, t Target) {
 	fmt.Fprintf(w, "    every monitor, mesh addresses included, and /metrics is public whenever\n")
 	fmt.Fprintf(w, "    no API token exists, which under this toolkit is always\n\n")
 
-	fmt.Fprintf(w, "Caddy (it sets X-Forwarded-For and X-Forwarded-Proto and passes Host itself):\n\n")
-	fmt.Fprint(w, indent(caddySnippet(t)))
-	fmt.Fprintf(w, "\nnginx:\n\n")
-	fmt.Fprint(w, indent(nginxSnippet(t)))
-	fmt.Fprintf(w, "\nApache (mod_ssl, mod_proxy, mod_proxy_http and mod_headers; mod_proxy sets\nX-Forwarded-For itself):\n\n")
-	fmt.Fprint(w, indent(apacheSnippet(t)))
-	fmt.Fprintf(w, "\nThen run `paisans ingress check --app %s` from this machine.\n", t.App)
+	fmt.Fprintf(w, "%s\n\n", ws.Summary())
+	if ws.Certbot != "" {
+		fmt.Fprintf(w, "Obtain its certificate as the others were obtained:\n\n    %s\n\n", ws.Certbot)
+	}
+	caddy := func() {
+		fmt.Fprintf(w, "Caddy (it sets X-Forwarded-For and X-Forwarded-Proto and passes Host itself):\n\n")
+		fmt.Fprint(w, indent(caddySnippet(t, ws)))
+	}
+	nginx := func() {
+		fmt.Fprintf(w, "nginx:\n\n")
+		fmt.Fprint(w, indent(nginxSnippet(t, ws)))
+	}
+	apache := func() {
+		fmt.Fprintf(w, "Apache (mod_ssl, mod_proxy, mod_proxy_http and mod_headers; mod_proxy sets\nX-Forwarded-For itself):\n\n")
+		fmt.Fprint(w, indent(apacheSnippet(t, ws)))
+	}
+	switch ws.Server {
+	case ServerCaddy:
+		caddy()
+	case ServerNginx:
+		nginx()
+	case ServerApache:
+		apache()
+	default:
+		caddy()
+		fmt.Fprintln(w)
+		nginx()
+		fmt.Fprintln(w)
+		apache()
+	}
+	fmt.Fprintf(w, "\nThen run `paisans web-server check --app %s` from this machine.\n", t.App)
 }
 
 // ListenWarning is the warning for a listen address that is not loopback. It
@@ -83,27 +108,51 @@ func ListenWarning(t Target) (hint, detail string, ok bool) {
 // /status and /metrics. Caddy's path matcher already ignores case; nginx's
 // ~* and the (?i) in Apache's pattern make theirs do the same, and every
 // pattern accepts /metrics/.
-func caddySnippet(t Target) string {
-	return fmt.Sprintf(`%s {
-	# %s: leave this line out if this Caddy obtains the certificate
-	# itself; otherwise name your own files.
-	tls /etc/ssl/%s/fullchain.pem /etc/ssl/%s/privkey.pem
-	@refused path /status* /badge/* /metrics /metrics/ /api/v1/*
+func caddySnippet(t Target, ws WebServer) string {
+	var head, tls string
+	if ws.Server == ServerCaddy && ws.Listen != "" && len(ws.Private) > 0 {
+		head = fmt.Sprintf("# A site of its own, with no bind: it belongs on %s, not on %s.\n", ws.Listen, strings.Join(ws.Private, " or "))
+	}
+	generic := fmt.Sprintf("\t# tls /etc/ssl/%s/fullchain.pem /etc/ssl/%s/privkey.pem\n", t.Hostname, t.Hostname)
+	switch {
+	case ws.Server != ServerCaddy:
+		tls = fmt.Sprintf("\t# %s: if this Caddy obtains its certificates itself, leave this\n\t# out; otherwise uncomment it and name your own files.\n", certificateMarker) + generic
+	case ws.Certs == CertsAutomatic:
+	case ws.Certs == CertsFolder:
+		tls = fmt.Sprintf("\t# This Caddy loads every certificate in %s: put the one for\n\t# %s there.\n", ws.Folder, t.Hostname)
+	case ws.CertFile != "":
+		tls = fmt.Sprintf("\ttls %s %s\n", ws.CertFile, ws.KeyFile)
+	case ws.Certs == CertsFiles:
+		tls = fmt.Sprintf("\t# %s: this Caddy loads its certificates from files, such as\n\t# %s: uncomment this and name the files for %s.\n", certificateMarker, ws.Example, t.Hostname) + generic
+	default:
+		tls = fmt.Sprintf("\t# %s: if this Caddy obtains its certificates itself, leave this\n\t# out; otherwise uncomment it and name your own files.\n", certificateMarker) + generic
+	}
+	return head + fmt.Sprintf(`%s {
+%s	@refused path /status* /badge/* /metrics /metrics/ /api/v1/*
 	respond @refused 404
 	reverse_proxy %s
 }
-`, t.Hostname, certificateMarker, t.Hostname, t.Hostname, t.Listen)
+`, t.Hostname, tls, t.Listen)
 }
 
-func nginxSnippet(t Target) string {
+// certLines is the certificate's lines in an nginx or Apache snippet, each
+// directive ended by end and indented as the snippet's body: the files
+// Detect found for the target, or the operator's own to name.
+func certLines(t Target, ws WebServer, server Server, cert, key, end string) string {
+	if ws.Server == server && ws.CertFile != "" {
+		return cert + ws.CertFile + end + "\n    " + key + ws.KeyFile + end
+	}
+	return fmt.Sprintf("# %s: replace both paths with your own.\n    %s/etc/ssl/%s/fullchain.pem%s\n    %s/etc/ssl/%s/privkey.pem%s", certificateMarker, cert, t.Hostname, end, key, t.Hostname, end)
+}
+
+func nginxSnippet(t Target, ws WebServer) string {
+	certs := certLines(t, ws, ServerNginx, "ssl_certificate     ", "ssl_certificate_key ", ";")
 	return fmt.Sprintf(`server {
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name %s;
 
-    # %s: replace both paths with your own.
-    ssl_certificate     /etc/ssl/%s/fullchain.pem;
-    ssl_certificate_key /etc/ssl/%s/privkey.pem;
+    %s
 
     location ~* ^/(status|badge/|metrics/?$|api/v1/) {
         return 404;
@@ -116,17 +165,16 @@ func nginxSnippet(t Target) string {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-`, t.Hostname, certificateMarker, t.Hostname, t.Hostname, t.Upstream())
+`, t.Hostname, certs, t.Upstream())
 }
 
-func apacheSnippet(t Target) string {
+func apacheSnippet(t Target, ws WebServer) string {
+	certs := certLines(t, ws, ServerApache, "SSLCertificateFile    ", "SSLCertificateKeyFile ", "")
 	return fmt.Sprintf(`<VirtualHost *:443>
     ServerName %s
 
-    # %s: replace both paths with your own.
     SSLEngine on
-    SSLCertificateFile    /etc/ssl/%s/fullchain.pem
-    SSLCertificateKeyFile /etc/ssl/%s/privkey.pem
+    %s
 
     <LocationMatch "(?i)^/(status|badge/|metrics/?$|api/v1/)">
         Require all denied
@@ -137,7 +185,7 @@ func apacheSnippet(t Target) string {
     ProxyPass        / %s/
     ProxyPassReverse / %s/
 </VirtualHost>
-`, t.Hostname, certificateMarker, t.Hostname, t.Hostname, t.Upstream(), t.Upstream())
+`, t.Hostname, certs, t.Upstream(), t.Upstream())
 }
 
 // addresses is where the hostname must resolve, as a phrase.

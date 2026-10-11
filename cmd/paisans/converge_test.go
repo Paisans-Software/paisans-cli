@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -27,6 +28,7 @@ import (
 var stageLabels = map[stage]string{
 	stageInit:     "configuration",
 	stagePrepare:  "hosts",
+	stagePull:     "pull",
 	stageFounding: "founding",
 	stageJoining:  "joining",
 	stageOthers:   "other sites",
@@ -68,14 +70,19 @@ func sameLines(t *testing.T, got, want []string) {
 }
 
 // hostsAndDNS, foundingPhase and the rest are the fixture's plan, phase by
-// phase, where a test does not change them. dns follows the hosts, before
-// any apply: the mesh's endpoint names must resolve before wg-quick starts.
+// phase, where a test does not change them. Each site's pull follows the
+// hosts, and dns follows the pulls, before any apply: the mesh's endpoint
+// names must resolve before wg-quick starts.
 var (
 	hostsAndDNS = []string{
 		"hosts: host prepare --site home-a",
 		"hosts: host prepare --site home-b",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 	}
 	foundingPhase = []string{
@@ -96,13 +103,14 @@ func blankPlan() []string {
 	return slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: apply --site watch", "storage: storage add"}, passTwoPhase)
 }
 
-// commands is plan lines as the commands a run runs: no phase, and no init,
-// which runs before the plan is read again.
+// commands is plan lines as the commands a run runs: no phase, no init,
+// which runs before the plan is read again, and no pull, which the run does
+// itself rather than through a command.
 func commands(lines []string) []string {
 	var out []string
 	for _, l := range lines {
-		_, title, _ := strings.Cut(l, ": ")
-		if title != "init" {
+		stage, title, _ := strings.Cut(l, ": ")
+		if title != "init" && stage != "pull" {
 			out = append(out, title)
 		}
 	}
@@ -125,6 +133,24 @@ func initial(names ...string) render.EtcdInitial {
 func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+}
+
+// One data site runs, founded alone, and the configuration adds a witness and
+// a second data site: the documented way from one voter to three. The data
+// site's site add joins both, the witness first, so the witness gets no site
+// add of its own, which would refuse it as not a data site and stop the run.
+func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
+	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+}
+
+// A witness joining with no data site beside it is still planned, as its own
+// site add, so the run stops there with site add's refusal, which says what to
+// do, rather than leaving the witness out of the cluster without a word.
+func TestConvergePlansAWitnessJoiningAloneAsItsSiteAdd(t *testing.T) {
+	founded := initial("home-a", "home-b")
+	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A member a founding record lists is still being founded, though another
@@ -205,6 +231,16 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	var full [][]string
 	savedRun, savedRead, savedCheck := convergeRun, convergeReadInitial, convergeCheck
 	savedPrepare, savedAtOnce := convergePrepare, prepareAtOnce
+	savedPullPlan, savedPull := convergePullPlan, convergePullImage
+	// Each site's pull reads the plan its apply would make, which reaches a
+	// host; here every image is present. fakePulls says otherwise.
+	convergePullPlan = func(_ *config.Config, _ *config.Secrets, site string, _ apply.Transport, _ ...apply.Option) (*apply.Plan, error) {
+		return &apply.Plan{Site: site}, nil
+	}
+	convergePullImage = func(_ apply.Transport, ref string) (string, error) {
+		t.Errorf("pulled %s with every image present", ref)
+		return "", nil
+	}
 	// Each host's prepare goes through the step runner below, one host at
 	// a time and in order, reporting as a step under apply does; allAtOnce
 	// runs them together.
@@ -218,9 +254,15 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// A dry run's checks are each step's own dry run, which reaches a host;
 	// here every step is up to date. fakeChecks says otherwise.
 	convergeCheck = func(ui.Reporter, []string) (string, []checkReport, error) { return "", nil, nil }
-	// Asking Pocket ID for an admin reaches a host too; here it has none.
-	// fakeAdminCheck says otherwise.
+	// Asking Pocket ID for an admin reaches a host too; here it has none,
+	// and every declared admin has registered. fakeAdminCheck and
+	// fakeDeclaredAdmins say otherwise.
 	fakeAdminCheck(t, false, nil)
+	fakeDeclaredAdmins(t, registered)
+	fakeEmailFailures(t, nil, nil)
+	// An app's web server is checked from this machine; here every check
+	// passes. fakeWebServerCheck says otherwise.
+	fakeWebServerCheck(t, nil)
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")
@@ -244,6 +286,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	t.Cleanup(func() {
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
+		convergePullPlan, convergePullImage = savedPullPlan, savedPull
 		if now, _ := os.ReadFile(fixtureSecretsPath()); string(now) != string(fixtureBefore) {
 			t.Errorf("%s was rewritten: add the generated secret it lacks to it, and restore it", fixtureSecretsPath())
 		}
@@ -279,11 +322,20 @@ func TestConvergeDryRunRunsNothing(t *testing.T) {
 }
 
 func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the founding stop: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
+}
+
+// foundingWait is a founding member's stop for the others' etcd, as apply
+// returns it.
+func foundingWait(site string, unstarted ...string) error {
+	return &ui.Problem{
+		Hint:  site + " is waiting on " + strings.Join(unstarted, ", ") + " to start etcd.",
+		Cause: &apply.FoundingWaitError{Site: site, Unstarted: unstarted},
+	}
 }
 
 // databasesWait is a replica's stop for the app databases, as apply returns
@@ -291,7 +343,7 @@ func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
 func databasesWait(site, leader string) error {
 	return &ui.Problem{
 		Hint:  site + " is waiting on " + leader + " to create databases auth, talk",
-		Cause: fmt.Errorf("%s: %w %s: auth, talk", site, apply.ErrDatabasesWait, leader),
+		Cause: &apply.DatabasesWaitError{Site: site, Leader: leader, Missing: []string{"auth", "talk"}},
 	}
 }
 
@@ -320,14 +372,14 @@ func waitsFor(t *testing.T, site, leader string, n int) {
 // stop ends the run, and pass two, home-a first, creates the databases and
 // then starts home-b's apps.
 func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	waitsFor(t, "home-b", "home-a", 1)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the databases wait: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
-	if !rec.Has("detail", "✓ apply --site home-b: waiting for the primary's databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+	if !rec.Has("detail", "✓ apply --site home-b: paused until home-a creates its databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
 		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
 	}
 }
@@ -475,7 +527,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase))...))
 }
 
-// The dry run names what only the operator can do.
+// The dry run names what is left, the declared admins among it.
 func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	fakeConverge(t, nil)
 	out := ""
@@ -485,7 +537,7 @@ func TestConvergeSaysWhatIsLeft(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, want := range []string{"app admin create"} {
+	for _, want := range []string{"alice on auth"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("does not say %q:\n%s", want, out)
 		}
@@ -532,6 +584,10 @@ func TestConvergeFoundsAMonitorMemberAndAppliesItLast(t *testing.T) {
 		"hosts: host prepare --site home-b",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 		"founding: apply --site vm",
 		"founding: apply --site home-a",
@@ -614,6 +670,8 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	for _, s := range steps {
 		commands[strings.Join(s.Args[:min(2, len(s.Args))], " ")] = true
 	}
+	// A pull is not a command: the run pulls a site's images itself.
+	steps = slices.DeleteFunc(steps, func(s convergeStep) bool { return s.Stage == stagePull })
 	for _, want := range []string{"init", "host prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
 		if !commands[want] {
 			t.Fatalf("the plans hold no %s step: %v", want, commands)
@@ -653,8 +711,7 @@ func derivedWithNewDataSite(t *testing.T) *config.Config {
     ssh:
       host: home-c.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   vm:
 `, 1)
 	path := filepath.Join(t.TempDir(), "paisans.yaml")
@@ -684,6 +741,11 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 		"hosts: host prepare --site home-c",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site home-c",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 		"joining: site add home-c",
 		"other sites: apply --site watch",
@@ -990,7 +1052,7 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 
 // statuses is each plan step's status as "mark title: result", in order,
 // from the events of the dry run's steps but the etcd reads: a prepare line
-// as the host prepare it checked, and each install line as the inner steps
+// as the host prepare it checked, a pull line as its pull, and each install line as the inner steps
 // it lists, so the install steps are grouped by line (see byLine).
 func statuses(rec *ui.Recorder) []string {
 	var out []string
@@ -1007,12 +1069,15 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "pocket id" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
-		if section == "prepare" {
+		switch section {
+		case "prepare":
 			title = "host prepare --site " + title
+		case "pull":
+			title = "pull --site " + title
 		}
 		line := mark + " " + title
 		if e.Extra != "" {
@@ -1074,7 +1139,10 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 	}
 	var want []string
 	for _, l := range blankPlan() {
-		_, title, _ := strings.Cut(l, ": ")
+		stage, title, _ := strings.Cut(l, ": ")
+		if stage == "pull" {
+			title += ": nothing to pull"
+		}
 		want = append(want, "✓ "+title)
 	}
 	sameLines(t, statuses(rec), byLine(want))
@@ -1107,6 +1175,11 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		"○ host prepare --site home-b: docker, firewall",
 		"✓ host prepare --site vm",
 		"✗ host prepare --site watch: ssh: connect to host watch.local: timed out",
+		// A pull line waiting on its prepare ends first, unchecked.
+		"· pull --site home-b: after host prepare --site home-b",
+		"· pull --site watch: after host prepare --site watch",
+		"✓ pull --site home-a: nothing to pull",
+		"✓ pull --site vm: nothing to pull",
 		"○ dns init: 2 records to create",
 		"○ apply --site vm: 5 changes",
 		"· apply --site home-a: after apply --site vm",
@@ -1171,6 +1244,10 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		"✓ host prepare --site home-b",
 		"✓ host prepare --site vm",
 		"✓ host prepare --site watch",
+		"✓ pull --site home-a: nothing to pull",
+		"✓ pull --site home-b: nothing to pull",
+		"✓ pull --site vm: nothing to pull",
+		"✓ pull --site watch: nothing to pull",
 		"✓ dns init",
 		"✓ apply --site watch",
 		"○ storage add: 1 stage",
@@ -1450,9 +1527,33 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			if err := convergeShaped(t, c.edit, c.recorded); err != nil {
 				t.Fatal(err)
 			}
-			sameLines(t, statuses(rec), byLine(c.want))
+			sameLines(t, statuses(rec), byLine(withPulls(c.want)))
 		})
 	}
+}
+
+// withPulls is a dry run's statuses with each site's pull line put in after
+// the prepare lines, as the dry run draws them: a pull whose prepare is up
+// to date has nothing to pull, here, and one whose prepare is not waits on
+// it, unchecked, and so ends first.
+func withPulls(want []string) []string {
+	var waiting, checked []string
+	end := 0
+	for i, l := range want {
+		mark, title, _ := strings.Cut(l, " ")
+		site, isPrepare := strings.CutPrefix(title, "host prepare --site ")
+		if !isPrepare {
+			continue
+		}
+		site, _, _ = strings.Cut(site, ":")
+		if mark == "✓" {
+			checked = append(checked, "✓ pull --site "+site+": nothing to pull")
+		} else {
+			waiting = append(waiting, "· pull --site "+site+": after host prepare --site "+site)
+		}
+		end = i + 1
+	}
+	return slices.Concat(want[:end], waiting, checked, want[end:])
 }
 
 // editedFixture is the fixture configuration with each old replaced by its
@@ -1629,6 +1730,7 @@ func TestConvergeStopIsAProblem(t *testing.T) {
 	}{
 		{"apply --site vm", unreachable, "apply stopped at apply --site vm", []string{"ubuntu@203.0.113.10 cannot be reached over ssh.", "Check that the host is up.", "Run paisans apply --execute again to resume."}, 1},
 		{"apply --site vm", errors.New("vm: boom"), "apply stopped at apply --site vm", []string{"vm: boom.", "Run paisans apply --execute again to resume."}, 1},
+		{"apply --site vm", errors.New("apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:\n  talk: no client"), "apply stopped at apply --site vm", []string{"apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:", "  talk: no client", "Run paisans apply --execute again to resume."}, 1},
 		{"storage add", waiting, "apply is waiting at storage add", []string{"storage add is waiting on Garage at stage 3 (sync): blocks are still moving.", "Nothing failed: Garage is still moving data. Run paisans apply --execute again later."}, 75},
 	} {
 		fakeConverge(t, map[string]error{tc.step: tc.err})
@@ -1646,6 +1748,20 @@ func TestConvergeStopIsAProblem(t *testing.T) {
 		var b strings.Builder
 		if code := reportError(&b, err, false); code != tc.code {
 			t.Errorf("%s: exit %d, want %d", tc.step, code, tc.code)
+		}
+	}
+}
+
+// A hint is ended with a period, but one that ends with a colon introduces
+// the lines after it and is kept as it is.
+func TestSentencesEndAHintOnce(t *testing.T) {
+	for in, want := range map[string]string{
+		"vm: boom":                             "vm: boom.",
+		"vm: boom.":                            "vm: boom.",
+		"talk was refused:\n  talk: no client": "talk was refused:\n  talk: no client",
+	} {
+		if got := sentences(errors.New(in)); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
 	}
 }
@@ -1674,13 +1790,13 @@ func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 // install line lists it as its inner step's result, and its reason under it,
 // without a doubled stop or a trailing blank.
 func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
+	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
+		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: paused until home-b runs etcd"
 	})
 	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
 		t.Errorf("inner result:\n%s", rec.Lines())
@@ -1726,29 +1842,86 @@ func adminNotes(rec *ui.Recorder) []string {
 
 const authAdminCommand = "paisans app admin create --app auth --username <name> --email <address>"
 
-// A dry run in which a step that brings Pocket ID up is not up to date names
-// no admin, and does not ask: the app is not running yet.
-func TestConvergeDryRunNamesNoAdminBeforePocketIDRuns(t *testing.T) {
+// fakeDeclaredAdmins replaces making a declared admin: answer gives the
+// outcome for each app and admin. It returns the calls, as "app/id", with
+// "!" after one that executes.
+func fakeDeclaredAdmins(t *testing.T, answer func(app, id string, execute bool) (declaredAdmin, error)) *[]string {
+	t.Helper()
+	var asked []string
+	saved := convergeDeclaredAdmin
+	convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredAdmin, error) {
+		call := app + "/" + id
+		if execute {
+			call += "!"
+		}
+		asked = append(asked, call)
+		d, err := answer(app, id, execute)
+		d.App, d.ID, d.Email = app, id, cfg.Admins[id].Email
+		return d, err
+	}
+	t.Cleanup(func() { convergeDeclaredAdmin = saved })
+	return &asked
+}
+
+// registered is an admin who has a passkey: nothing to do.
+func registered(string, string, bool) (declaredAdmin, error) { return declaredAdmin{}, nil }
+
+// unregistered is an admin with no account yet: created, linked, and emailed
+// when emailed is set.
+func unregistered(emailed bool) func(string, string, bool) (declaredAdmin, error) {
+	return func(_, id string, execute bool) (declaredAdmin, error) {
+		d := declaredAdmin{Titles: []string{"create administrator " + id, "issue login link for " + id}}
+		if execute {
+			d.Created, d.Link, d.ExpiresIn, d.Emailed = true, "https://id.example.org/lc/tok-not-real-"+id, adminLinkTTL, emailed
+		}
+		return d, nil
+	}
+}
+
+// fakeEmailFailures replaces reading Pocket ID's log: it answers failed, by
+// address, and returns the addresses asked about.
+func fakeEmailFailures(t *testing.T, failed map[string]string, err error) *[]string {
+	t.Helper()
+	var asked []string
+	saved := convergeEmailFailures
+	convergeEmailFailures = func(_ *config.Config, _ string, _ convergeOptions, addresses []string) (map[string]string, error) {
+		asked = append(asked, addresses...)
+		return failed, err
+	}
+	t.Cleanup(func() { convergeEmailFailures = saved })
+	return &asked
+}
+
+// recordLinks captures what is printed as login links.
+func recordLinks(t *testing.T) *strings.Builder {
+	t.Helper()
+	var b strings.Builder
+	saved := loginLinkOut
+	loginLinkOut = &b
+	t.Cleanup(func() { loginLinkOut = saved })
+	return &b
+}
+
+// A dry run in which a step that brings Pocket ID up is not up to date asks
+// nothing about its admins: the app is not running yet.
+func TestConvergeDryRunAsksNoAdminBeforePocketIDRuns(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{"apply --site home-b": "2 changes"})
-	asked := fakeAdminCheck(t, false, nil)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 0 {
-		t.Errorf("asked %v for an admin", *asked)
-	}
-	if notes := adminNotes(rec); len(notes) != 0 || rec.Has("step", "for an admin") {
-		t.Errorf("named an admin:\n%s", rec.Lines())
+	if len(*asked) != 0 || rec.Has("step", "alice on auth") {
+		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
 	}
 }
 
-// Init with work is a step that brings Pocket ID up, so no admin is named.
-func TestConvergeDryRunNamesNoAdminWhileInitHasWork(t *testing.T) {
+// Init with work is a step that brings Pocket ID up, so nothing is asked.
+func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	asked := fakeAdminCheck(t, false, nil)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	saved := convergeRead
 	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
 		cfg, st, err := readConvergeState(c, s)
@@ -1760,66 +1933,160 @@ func TestConvergeDryRunNamesNoAdminWhileInitHasWork(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 0 || len(adminNotes(rec)) != 0 {
+	if len(*asked) != 0 {
 		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
 	}
 }
 
-// With every step that brings Pocket ID up ✓, it is asked, in a step of its
-// own, even while a step about another site is pending; with no admin, that
-// is named as a fact with the command.
-func TestConvergeDryRunNamesAMissingAdmin(t *testing.T) {
+// With Pocket ID up, a dry run plans each declared admin on a line of its
+// own, pending with what would happen, and issues nothing.
+func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, map[string]any{"apply --site watch": "1 change", "dns init": "2 records to create"})
-	asked := fakeAdminCheck(t, false, nil)
+	fakeChecks(t, map[string]any{"apply --site watch": "1 change"})
+	asked := fakeDeclaredAdmins(t, unregistered(false))
+	links := recordLinks(t)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, []string{"auth"}) {
+	if !slices.Equal(*asked, []string{"auth/alice"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	sameLines(t, adminNotes(rec), []string{"Pocket ID auth has no admin yet | " + authAdminCommand})
-	step := rec.Index("step", "check auth for an admin")
-	note := rec.Index("note", "Pocket ID auth")
-	if step < 0 || note < step {
-		t.Errorf("the check is not a step ahead of its note:\n%s", rec.Lines())
+	if !rec.Has("pending", "alice on auth") {
+		t.Errorf("no pending line for alice:\n%s", rec.Lines())
+	}
+	if links.Len() != 0 {
+		t.Errorf("a dry run printed links: %q", links.String())
 	}
 }
 
-// An admin that exists is not named.
-func TestConvergeDryRunNamesNoAdminWhenOneExists(t *testing.T) {
+// An admin with a passkey is marked registered.
+func TestConvergeDryRunMarksARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	asked := fakeAdminCheck(t, true, nil)
+	fakeDeclaredAdmins(t, registered)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 1 || len(adminNotes(rec)) != 0 {
-		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
-	}
-	if !rec.Has("done", "check auth for an admin") {
-		t.Errorf("the check's step did not end done:\n%s", rec.Lines())
+	if !rec.Has("done", "alice on auth") {
+		t.Errorf("alice is not marked done:\n%s", rec.Lines())
 	}
 }
 
-// A check that fails names the admin anyway, with why it could not check on
-// one line, and does not fail the dry run.
-func TestConvergeDryRunSaysWhenItCouldNotCheckForAnAdmin(t *testing.T) {
+// A run makes each admin and prints each link once, after the result.
+func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, nil)
-	fakeAdminCheck(t, false, errors.New("GET /api/users: curl: (7) connection refused\nmore detail"))
+	asked := fakeDeclaredAdmins(t, unregistered(false))
+	links := recordLinks(t)
 	rec := recordConverge(t)
-	if err := converge(t); err != nil {
+	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, adminNotes(rec), []string{"Pocket ID auth: could not check for an admin (GET /api/users: curl: (7) connection refused) | " + authAdminCommand})
+	if !slices.Equal(*asked, []string{"auth/alice!"}) {
+		t.Errorf("asked %v", *asked)
+	}
+	if !rec.Has("done", "alice on auth") || !rec.Has("result", "Deployment complete.") {
+		t.Errorf("output:\n%s", rec.Lines())
+	}
+	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n"
+	if links.String() != want {
+		t.Errorf("links %q\nwant %q", links.String(), want)
+	}
+	if strings.Contains(rec.Lines(), "tok-not-real") {
+		t.Errorf("a link reached the report:\n%s", rec.Lines())
+	}
 }
 
-// A run that completed asks, and names a missing admin.
-func TestConvergeRunNamesAMissingAdmin(t *testing.T) {
+// A registered admin gets no link and the run prints none.
+func TestConvergeRunPrintsNoLinkForARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
+	fakeDeclaredAdmins(t, registered)
+	links := recordLinks(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if links.Len() != 0 {
+		t.Errorf("printed %q", links.String())
+	}
+}
+
+// An emailed admin's line says sent when Pocket ID logged no failure, and
+// failed with Pocket ID's error when it did. Neither fails the run.
+func TestConvergeRunReportsEachEmail(t *testing.T) {
+	for _, tc := range []struct {
+		failed map[string]string
+		mark   string
+		result string
+	}{
+		{nil, "done", "sent"},
+		{map[string]string{"alice@example.org": "dial tcp: i/o timeout"}, "fail", "failed: dial tcp: i/o timeout"},
+	} {
+		fakeConverge(t, nil)
+		fakeDeclaredAdmins(t, unregistered(true))
+		asked := fakeEmailFailures(t, tc.failed, nil)
+		recordLinks(t)
+		rec := recordConverge(t)
+		if err := converge(t, "--execute"); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(*asked, []string{"alice@example.org"}) {
+			t.Errorf("asked about %v", *asked)
+		}
+		found := false
+		for _, e := range rec.Events {
+			if e.Kind == tc.mark && e.Text == "email alice a login link" && strings.Contains(e.Extra, tc.result) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no %s line saying %q:\n%s", tc.mark, tc.result, rec.Lines())
+		}
+	}
+}
+
+// An admin who could not be made fails the run, and a link already issued is
+// still printed.
+func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
+	fakeConverge(t, nil)
+	saved := convergeRead
+	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
+		cfg, st, err := readConvergeState(c, s)
+		cfg.Admins["bob"] = config.Admin{Email: "bob@example.org"}
+		return cfg, st, err
+	}
+	t.Cleanup(func() { convergeRead = saved })
+	fakeDeclaredAdmins(t, func(app, id string, execute bool) (declaredAdmin, error) {
+		if id == "bob" {
+			return declaredAdmin{}, errors.New("POST /api/users: 400 email already in use")
+		}
+		return unregistered(false)(app, id, execute)
+	})
+	links := recordLinks(t)
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	if err == nil || !strings.Contains(err.Error(), "bob") {
+		t.Fatalf("err = %v", err)
+	}
+	if rec.Has("result", "Deployment complete.") {
+		t.Error("said complete")
+	}
+	if !strings.Contains(links.String(), "alice") {
+		t.Errorf("links %q", links.String())
+	}
+}
+
+// A deployment that declares no admins is checked for any admin, and one
+// with none is named with the command that makes one.
+func TestConvergeWithoutDeclaredAdminsNamesAMissingAdmin(t *testing.T) {
+	fakeConverge(t, nil)
+	saved := convergeRead
+	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
+		cfg, st, err := readConvergeState(c, s)
+		cfg.Admins = nil
+		return cfg, st, err
+	}
+	t.Cleanup(func() { convergeRead = saved })
 	asked := fakeAdminCheck(t, false, nil)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
@@ -1831,18 +2098,40 @@ func TestConvergeRunNamesAMissingAdmin(t *testing.T) {
 	sameLines(t, adminNotes(rec), []string{"Pocket ID auth has no admin yet | " + authAdminCommand})
 }
 
-// A run that stopped names no admin and does not ask.
-func TestConvergeStoppedRunNamesNoAdmin(t *testing.T) {
+// A run that stopped asks about no admin.
+func TestConvergeStoppedRunAsksNoAdmin(t *testing.T) {
 	fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
-	asked := fakeAdminCheck(t, false, nil)
-	rec := recordConverge(t)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("the run did not stop")
 	}
-	if len(*asked) != 0 || len(adminNotes(rec)) != 0 {
-		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
+	if len(*asked) != 0 {
+		t.Errorf("asked %v", *asked)
 	}
 }
+
+// apply asks for each declared admin as the table in the spec says: the key
+// as the username, the name split at its first space, verified, a 24 hour
+// link, emailed when the deployment has SMTP.
+func TestAdminRequest(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Admins["alice"] = config.Admin{Name: "Alice van Example", Email: "alice@example.org"}
+	req := adminRequest(cfg, "auth", "alice")
+	if req.Username != "alice" || req.Email != "alice@example.org" || req.FirstName != "Alice" || req.LastName != "van Example" ||
+		!req.Declared || req.LinkTTL != 24*time.Hour || req.PublicURL != "https://"+cfg.Apps["auth"].Hostname {
+		t.Errorf("request %+v", req)
+	}
+	if req.EmailLink != cfg.CanMail("auth") || !req.EmailLink {
+		t.Errorf("EmailLink %t, CanMail %t; the fixture can mail", req.EmailLink, cfg.CanMail("auth"))
+	}
+	cfg.SMTP = config.SMTP{}
+	cfg.Apps["auth"] = withoutSMTP(cfg.Apps["auth"])
+	if adminRequest(cfg, "auth", "alice").EmailLink {
+		t.Error("emails without SMTP")
+	}
+}
+
+func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
 
 // The check asks the Pocket ID app admin create would call, with its key, read
 // only, through the run's sudo, and answers whether a user is an admin.
@@ -1895,12 +2184,10 @@ func TestConvergeRunAdminCheckHoldsTheRunsReporter(t *testing.T) {
 	}
 	run := recordHolds(t)
 	t.Cleanup(func() { convergeRun = saved; routeHolds(ui.Discard) })
-	savedCheck := convergeAdminCheck
-	convergeAdminCheck = func(*config.Config, string, convergeOptions) (bool, error) {
+	fakeDeclaredAdmins(t, func(string, string, bool) (declaredAdmin, error) {
 		holdOutput()()
-		return true, nil
-	}
-	t.Cleanup(func() { convergeAdminCheck = savedCheck })
+		return declaredAdmin{}, nil
+	})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}

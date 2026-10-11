@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
 // composeProjectLabel is the label Compose puts on every container, network
@@ -144,6 +145,9 @@ func (e *Executor) execute(p *Plan) error {
 		e.work("remove containers and networks").Detail("containers and networks of %s", s.Project)
 		if out, err := h.Run(ContainersCommand(d, s.Project, p.DeleteData)); err != nil {
 			return fmt.Errorf("%s: stopping and removing %s: %w: %s", s.Site, s.Project, err, firstLine(out))
+		}
+		if err := e.webServer(h, d, s); err != nil {
+			return fmt.Errorf("%s: %w", s.Site, err)
 		}
 		if err := e.files(h, d, s); err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
@@ -307,6 +311,50 @@ func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
 		return fmt.Errorf("writing %s: %w", d.Manifest(), err)
 	}
 	return nil
+}
+
+// webServer removes the app's files from the include directory of the
+// operator's web server, validating and reloading the server after each,
+// and drops their entries from the manifest. A file edited on the host is
+// kept, and one already gone is fine. A removal the server refuses puts the
+// file back and stops the run, which a run again resumes.
+func (e *Executor) webServer(h Host, d deployment.Deployment, s SitePlan) error {
+	if len(s.WebServer) == 0 {
+		return nil
+	}
+	drop := map[string]bool{}
+	var failed error
+	for _, entry := range s.WebServer {
+		e.work("remove site file").Detail("%s, then validate and reload %s", entry.Path, entry.Server)
+		o := webserver.Remove(webserver.Host{Plain: h}, entry)
+		switch o.Kind {
+		case webserver.Removed, webserver.Gone:
+			drop[entry.Path] = true
+		case webserver.Edited:
+			e.Kept = append(e.Kept, fileEdited(s.Site, entry.Path))
+		default:
+			failed = fmt.Errorf("removing %s: %s. The file is back, and the web server runs its previous configuration", entry.Path, o.Why)
+		}
+		if failed != nil {
+			break
+		}
+	}
+	if len(drop) > 0 {
+		recorded, err := apply.ReadWebServerRecord(h, d)
+		if err != nil {
+			return err
+		}
+		var keep []render.ManifestWebServer
+		for _, entry := range recorded {
+			if !drop[entry.Path] {
+				keep = append(keep, entry)
+			}
+		}
+		if err := apply.WriteWebServerRecord(h, d, keep); err != nil {
+			return fmt.Errorf("writing %s: %w", d.Manifest(), err)
+		}
+	}
+	return failed
 }
 
 // DropSQL drops the database and then the role. DROP DATABASE ... WITH

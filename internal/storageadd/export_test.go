@@ -43,7 +43,7 @@ func KeepsImagesOn(opts Options, site string) bool {
 
 // AppConfigNote is the note a join leaves for an app configuration that is
 // out of date.
-func AppConfigNote(site string, files int) string { return appConfigNote(site, files) }
+func AppConfigNote(site string, files []string) string { return appConfigNote(site, files) }
 
 // MediaNote is the note left when no app serves objects publicly.
 const MediaNote = mediaNote

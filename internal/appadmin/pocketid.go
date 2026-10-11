@@ -57,8 +57,41 @@ func (pocketID) client(t Transport, req Request) *pocketid.Client {
 	return &pocketid.Client{Transport: t, BaseURL: req.APIBase, APIKey: req.APIKey}
 }
 
+// find is the user a request is about: the one with its username, or for a
+// Declared request whose username no account has, the one with its email.
+// Pocket ID lets users edit their own username and email by default
+// (ALLOW_OWN_ACCOUNT_EDIT, appconfig/model.go:24, :129), so a declared admin
+// who renamed themselves after signing in is still the account with their
+// address. The address is compared whole, ignoring case, since Pocket ID's
+// search is a substring match.
+func (p pocketID) find(c *pocketid.Client, req Request) (*pocketid.User, error) {
+	u, err := c.FindUser(req.Username)
+	if err != nil || u != nil || !req.Declared || req.Email == "" {
+		return u, err
+	}
+	users, err := c.SearchUsers(req.Email)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range users {
+		if candidate.Email != nil && strings.EqualFold(*candidate.Email, req.Email) {
+			return &candidate, nil
+		}
+	}
+	return nil, nil
+}
+
+// linkTTL is the request's link lifetime, or loginTTL.
+func linkTTL(req Request) time.Duration {
+	if req.LinkTTL > 0 {
+		return req.LinkTTL
+	}
+	return loginTTL
+}
+
 func (p pocketID) Probe(t Transport, req Request) (State, error) {
-	u, err := p.client(t, req).FindUser(req.Username)
+	c := p.client(t, req)
+	u, err := p.find(c, req)
 	if err != nil {
 		return State{}, fmt.Errorf("looking up %s in %s: %w", req.Username, req.App, err)
 	}
@@ -71,6 +104,13 @@ func (p pocketID) Probe(t Transport, req Request) (State, error) {
 	// An account without an email has nothing to verify, and no address an
 	// app could match against one of its own.
 	state := State{Exists: true, Verified: u.Email == nil || u.EmailVerified, Admin: u.IsAdmin}
+	if req.Declared {
+		has, err := c.HasPasskey(u.ID)
+		if err != nil {
+			return State{}, fmt.Errorf("reading whether %s in %s has a passkey: %w", req.Username, req.App, err)
+		}
+		state.Passkey = has
+	}
 	for _, name := range req.AdminGroups {
 		g, err := p.client(t, req).FindGroup(name)
 		if err != nil {
@@ -94,7 +134,7 @@ func (pocketID) Steps(state State, req Request) []Action {
 		if len(state.MissingGroups) > 0 {
 			out = append(out, ActionJoinGroups)
 		}
-		return append(out, ActionLoginLink)
+		return withLink(out, req)
 	}
 	var out []Action
 	if !state.Verified {
@@ -106,8 +146,17 @@ func (pocketID) Steps(state State, req Request) []Action {
 	if len(state.MissingGroups) > 0 {
 		out = append(out, ActionJoinGroups)
 	}
-	if req.LoginLink {
-		out = append(out, ActionLoginLink)
+	if req.LoginLink || (req.Declared && !state.Passkey) {
+		out = withLink(out, req)
+	}
+	return out
+}
+
+// withLink adds the login link, and the email of one when asked for.
+func withLink(out []Action, req Request) []Action {
+	out = append(out, ActionLoginLink)
+	if req.EmailLink {
+		out = append(out, ActionEmailLink)
 	}
 	return out
 }
@@ -145,7 +194,9 @@ func (p pocketID) Describe(a Action, req Request) string {
 	case ActionJoinGroups:
 		return fmt.Sprintf("add %s to admin groups %s: POST /api/user-groups for any that does not exist yet, then PUT /api/users/<id>/user-groups with the groups %s is in now, plus these", req.Username, strings.Join(req.AdminGroups, ", "), req.Username)
 	case ActionLoginLink:
-		return fmt.Sprintf("issue one-time login link for %s: valid %s and for one sign in, printed once and only with --execute", req.Username, loginTTL)
+		return fmt.Sprintf("issue one-time login link for %s: valid %s and for one sign in, printed once and only with --execute", req.Username, linkTTL(req))
+	case ActionEmailLink:
+		return fmt.Sprintf("email one-time login link to %s: POST /api/users/<id>/one-time-access-email, valid %s, a link of Pocket ID's own", req.Username, linkTTL(req))
 	}
 	return string(a) + " " + req.Username
 }
@@ -157,7 +208,7 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 		if user != nil {
 			return nil
 		}
-		found, err := c.FindUser(req.Username)
+		found, err := p.find(c, req)
 		if err != nil {
 			return err
 		}
@@ -228,12 +279,20 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 			if err := load(); err != nil {
 				return Outcome{}, err
 			}
-			token, err := c.LoginToken(user.ID, loginTTL)
+			token, err := c.LoginToken(user.ID, linkTTL(req))
 			if err != nil {
 				return Outcome{}, fmt.Errorf("issuing a login link for %s: %w", req.Username, err)
 			}
 			out.LoginLink = pocketid.LoginLink(req.PublicURL, token)
-			out.ExpiresIn = loginTTL
+			out.ExpiresIn = linkTTL(req)
+		case ActionEmailLink:
+			if err := load(); err != nil {
+				return Outcome{}, err
+			}
+			if err := c.EmailLoginLink(user.ID, linkTTL(req)); err != nil {
+				return Outcome{}, fmt.Errorf("asking Pocket ID to email %s a login link: %w", req.Username, err)
+			}
+			out.Emailed = true
 		default:
 			return Outcome{}, fmt.Errorf("pocket-id has no step for %q", a)
 		}

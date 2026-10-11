@@ -26,7 +26,7 @@ func ServedBy(cfg *config.Config, app string) (string, bool) {
 }
 
 // ExternalListen is where an app is published for the operator's own web
-// server: the listen address of the monitor in ingress mode external that
+// server: the listen address of the monitor with managed_by: external that
 // the app is pinned to. False for every other app.
 func ExternalListen(cfg *config.Config, app string) (string, int, bool) {
 	site, ok := ServedBy(cfg, app)
@@ -34,27 +34,27 @@ func ExternalListen(cfg *config.Config, app string) (string, int, bool) {
 		return "", 0, false
 	}
 	s := cfg.Sites[site]
-	if s.IngressMode() != config.IngressExternal || s.Ingress == nil {
+	if s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil {
 		return "", 0, false
 	}
-	return s.Ingress.ListenHostPort()
+	return s.WebServer.ListenHostPort()
 }
 
 // privateBlocks are the RFC 1918 ranges and carrier grade NAT space, for
 // naming the network a LAN listen address sits in.
 var privateBlocks = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"}
 
-// IngressNetwork is the compose network an app on a monitor in ingress mode
+// WebServerNetwork is the compose network an app on a monitor with managed_by:
 // external runs on, pinned so that the address the operator's web server
-// reaches it from is known, and IngressGateway that network's gateway, which
+// reaches it from is known, and WebServerGateway that network's gateway, which
 // is that address for a loopback listen. Docker's default address pools are
 // 172.17.0.0/16 to 172.31.0.0/16 and 192.168.0.0/16, so a network it creates
 // for anything else never lands here; validate refuses a mesh over it
-// (ingress-network-overlaps-mesh), and the host check refuses a host where a
+// (web-server-network-overlaps-mesh), and the host check refuses a host where a
 // foreign network or route already holds it.
 const (
-	IngressNetwork = "10.255.255.0/29"
-	IngressGateway = "10.255.255.1"
+	WebServerNetwork = "10.255.255.0/29"
+	WebServerGateway = "10.255.255.1"
 )
 
 // Network is a subnet a site's rendered stacks create, with the paisans.yaml
@@ -69,7 +69,7 @@ type Network struct {
 }
 
 // SiteNetworks is every subnet the rendered stacks on one site pin. Only an
-// app on a monitor in ingress mode external pins one; every other compose
+// app on a monitor with managed_by: external pins one; every other compose
 // network takes what Docker's pools give it.
 func SiteNetworks(cfg *config.Config, site string) []Network {
 	var out []Network
@@ -77,8 +77,8 @@ func SiteNetworks(cfg *config.Config, site string) []Network {
 		if _, _, ok := ExternalListen(cfg, name); ok {
 			out = append(out, Network{
 				Owner:   fmt.Sprintf("app %s (%s)", name, cfg.Apps[name].Kind),
-				Key:     fmt.Sprintf("sites.%s.ingress", site),
-				Subnet:  IngressNetwork,
+				Key:     fmt.Sprintf("sites.%s.web_server", site),
+				Subnet:  WebServerNetwork,
 				Project: cfg.Deployment().Project(name),
 			})
 		}
@@ -100,11 +100,11 @@ func SiteNetworks(cfg *config.Config, site string) []Network {
 // reaching a loopback listen goes through Docker's publish, which hands the
 // connection to the container from the compose network's gateway
 // (docker-proxy, or with the userland proxy off a masqueraded hairpin), and
-// that network is pinned (IngressNetwork). A LAN or mesh listen is reached
+// that network is pinned (WebServerNetwork). A LAN or mesh listen is reached
 // by the web server's own address, which Docker's forwarding keeps; the
 // toolkit knows only the network it lies in.
 func trustProxy(cfg *config.Config, app string) string {
-	if site, ok := ServedBy(cfg, app); ok && cfg.Sites[site].IngressMode() == config.IngressPaisans {
+	if site, ok := ServedBy(cfg, app); ok && cfg.Sites[site].WebServerManagedBy() == config.ManagedByPaisans {
 		return cfg.Sites[site].Address + "/32"
 	}
 	host, _, ok := ExternalListen(cfg, app)
@@ -114,7 +114,7 @@ func trustProxy(cfg *config.Config, app string) string {
 	ip := net.ParseIP(host)
 	switch {
 	case ip.IsLoopback():
-		return IngressGateway + "/32"
+		return WebServerGateway + "/32"
 	case cfg.Mesh.Contains(host):
 		return cfg.Mesh.Subnet
 	}
@@ -123,14 +123,14 @@ func trustProxy(cfg *config.Config, app string) string {
 			return block
 		}
 	}
-	// validate refuses any other listen (ingress-listen-public), so this is
+	// validate refuses any other listen (web-server-listen-public), so this is
 	// only reached by a caller that rendered without validating.
 	return cfg.Mesh.Subnet
 }
 
-// ingressListen is the extra publish an app gets on an external monitor, as
+// webServerListen is the extra publish an app gets on an external monitor, as
 // compose's host:port, empty for every other app.
-func ingressListen(cfg *config.Config, app string) string {
+func webServerListen(cfg *config.Config, app string) string {
 	host, port, ok := ExternalListen(cfg, app)
 	if !ok {
 		return ""

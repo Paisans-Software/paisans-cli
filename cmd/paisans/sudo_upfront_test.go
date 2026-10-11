@@ -234,7 +234,7 @@ func withSpare(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spare := "  spare:\n    roles: [apps]\n    address: 10.44.0.6\n    ssh:\n      host: spare.local\n      user: ubuntu\n      keys:\n        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org\n  vm:\n"
+	spare := "  spare:\n    roles: [apps]\n    address: 10.44.0.6\n    ssh:\n      host: spare.local\n      user: ubuntu\n      keys: [alice]\n  vm:\n"
 	body := strings.Replace(string(data), "  vm:\n", spare, 1)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "paisans.yaml")

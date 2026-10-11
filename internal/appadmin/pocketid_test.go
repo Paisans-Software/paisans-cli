@@ -25,6 +25,12 @@ type fakePocketID struct {
 	// bodies is every mutation's body, in order.
 	bodies []string
 	tokens int
+	// ttls is every token's and every email's ttl, in order.
+	ttls []string
+	// passkeys holds the IDs of users with a PASSKEY_ADDED event.
+	passkeys map[string]bool
+	// emailed is the ID of every user emailed a login link.
+	emailed []string
 	// echo makes every mutation fail with a body that repeats its input, the
 	// worst case for a leak.
 	echo bool
@@ -53,7 +59,8 @@ func (f *fakePocketID) serve(method string, u *url.URL, body, stdin string) (int
 	case method == "GET" && u.Path == "/api/users":
 		var data []pocketid.User
 		for _, user := range f.users {
-			if strings.Contains(user.Username, u.Query().Get("search")) {
+			q := u.Query().Get("search")
+			if strings.Contains(user.Username, q) || (user.Email != nil && strings.Contains(*user.Email, q)) {
 				data = append(data, user)
 			}
 		}
@@ -109,7 +116,24 @@ func (f *fakePocketID) serve(method string, u *url.URL, body, stdin string) (int
 			}
 		}
 		return 404, `{"error":"user not found"}`
+	case method == "GET" && u.Path == "/api/audit-logs/all":
+		id := u.Query().Get("filters[userID]")
+		data := []map[string]string{}
+		if f.passkeys[id] {
+			data = append(data, map[string]string{"event": "PASSKEY_ADDED", "userID": id})
+		}
+		raw, _ := json.Marshal(map[string]any{"data": data, "pagination": map[string]int{"totalPages": 1}})
+		return 200, string(raw)
+	case method == "POST" && strings.HasSuffix(u.Path, "/one-time-access-email"):
+		var sent map[string]string
+		_ = json.Unmarshal([]byte(body), &sent)
+		f.ttls = append(f.ttls, sent["ttl"])
+		f.emailed = append(f.emailed, strings.TrimSuffix(strings.TrimPrefix(u.Path, "/api/users/"), "/one-time-access-email"))
+		return 204, ``
 	case method == "POST" && strings.HasSuffix(u.Path, "/one-time-access-token"):
+		var sent map[string]string
+		_ = json.Unmarshal([]byte(body), &sent)
+		f.ttls = append(f.ttls, sent["ttl"])
 		f.tokens++
 		return 201, fmt.Sprintf(`{"token":"tok-not-real-%04d"}`, f.tokens)
 	}

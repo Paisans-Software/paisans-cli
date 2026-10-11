@@ -11,9 +11,13 @@ is the source and the other is a pointer to it.
 A toolkit for installing and operating a paisans community stack, plus the
 design that toolkit follows. **The design leads and the code follows it.**
 `README.md` is the design; `cmd/` and `internal/` implement the parts of it that
-have been built, which so far are `paisans validate` and `paisans render`.
-Nothing here reaches a host: no SSH, no Docker, no release. See
-`docs/development.md` for what exists and what does not.
+have been built: the `paisans` command, from `validate` and `render` through
+`host prepare`, `apply`, `site add` and the rest, and the admin reconciler in
+`cmd/admin-reconciler`. `docs/development.md` lists what exists, under *Run*,
+and what does not, under *What is not here yet*. The commands reach hosts over
+SSH and drive Docker there, and each one that changes a host does so only with
+`--execute`. The toolkit has had no release; *Releases* says what has been
+published.
 
 That matters for scope. Much of the work here is still *documentation of a
 design*, and the design is explained rather than asserted: every rule in
@@ -76,8 +80,10 @@ Researching two candidate applications and recommending one is your work.
 Choosing between them is not.
 
 The one hard line that is genuinely dangerous here is **publishing**: a push to
-`main`, a release, or anything leaving this repository. That is where a mistake
-becomes irreversible, and it is the human's action.
+`main` or `develop`, a tag, a release, or anything leaving this repository. That
+is where a mistake becomes irreversible, and it is the human's action. A push to
+`develop` or an `admin-reconciler-v*` tag can publish an image as well (see
+*Releases*).
 
 ## What must never enter this repository
 
@@ -96,16 +102,17 @@ wrong; generalise it.
 
 ## Making a change
 
-1. **Branch.** Never commit directly to `main` unless the human says so in this
-   session. Name it for the change: `docs/backup-contract`, `feat/site-add`.
+1. **Branch.** Never commit directly to `main` or `develop`; both take pull
+   requests only. Name the branch for the change: `docs/backup-contract`,
+   `feat/site-add`.
 2. **Read the surrounding argument first.** `README.md` is one continuous line
    of reasoning. A new rule that contradicts rule 2 four sections later is the
    most common way to damage this document.
 3. **Make the change small and self-contained.** One decision per commit.
 4. **Verify** (see below).
 5. **Commit** in the house style (see below).
-6. **Open a pull request**, or hand the branch to the human. Do not merge your
-   own work to `main` without approval.
+6. **Open a pull request** against `develop`, or hand the branch to the human.
+   Do not merge your own work without approval.
 
 ### Documentation changes specifically
 
@@ -131,7 +138,9 @@ You are *authoring* the tool that other agents and operators will run against
 live deployments. You are not running it. The care goes into what the code
 permits, because the blast radius lands on someone else's stack.
 
-Nothing below is exercised against a real deployment yet, and all of it holds:
+`apply` has run against a real host; `site add` and `site remove` have not, and
+*What is not here yet* in `docs/development.md` says what else is reasoned
+rather than observed. All of it holds:
 
 * **A pinned stack lays out under `/srv/paisans/<token>/<stack>/` with bind mounts**, not named
   volumes. `README.md` explains why (`app move` becomes one `tar`).
@@ -152,13 +161,15 @@ Nothing below is exercised against a real deployment yet, and all of it holds:
 
 ## Verifying before you claim it is done
 
-There is no test suite. Verification is therefore manual and you must actually
-do it, not assert it:
+`go vet ./...` and `go test ./...` are the test suite, and *Tests* in
+`docs/development.md` describes it, including the Docker tests behind build
+tags. Documentation has no test, so its verification is manual and you must
+actually do it, not assert it:
 
 * `git diff` the full change and read it.
 * Every internal link resolves: check `docs/` and `examples/` paths exist.
-* Every fenced YAML block parses. Every command example uses the flags the
-  document defines elsewhere.
+* Every fenced YAML block parses. Every command example uses flags the command
+  accepts, which `cmd/paisans` defines.
 * No real hostname, address, key or secret appears in the diff. Grep the diff,
   do not eyeball it.
 * Claims about upstream software (S3 support, environment variable names,
@@ -166,8 +177,10 @@ do it, not assert it:
   about Mbin, Outline, Synapse, Pocket ID and WriteFreely. Do not add one from
   memory.
 
-When code exists, add: it runs; the linter passes; the test you wrote fails
-before your change and passes after.
+For a code change, add: it builds; `go vet ./...` and `go test ./...` pass; the
+test you wrote fails before your change and passes after; a change to what is
+rendered regenerates the golden tree, and you read its diff; and the Docker
+tests run when the change touches what they cover.
 
 **Report what you actually ran.** If a check was skipped, say which and why.
 
@@ -208,15 +221,18 @@ on a shared branch unasked.
 
 ## Releases
 
-**There have been none. No tags exist, and no versioning scheme is settled.**
-The shape below is provisional and needs a founder decision before the first
-release; do not treat it as ratified, and do not cut a release on your own
-initiative under any circumstances.
+**The toolkit has had no release, and no versioning scheme is settled.** One
+tag exists, `admin-reconciler-v0.1.0`, and it is not a toolkit release: it
+published the admin reconciler's image through
+`.github/workflows/admin-reconciler-image.yml`, which the `pocket-id` kind pins
+by digest. The shape below is provisional and needs a founder decision before
+the first release; do not treat it as ratified, and do not cut a release, or
+push a tag, on your own initiative under any circumstances.
 
 When it is settled, the expectation is:
 
 * **Semantic versioning on git tags** (`v0.1.0`), with `0.x` while command
-  names remain provisional (`README.md` says they are).
+  names remain provisional.
 * **`CHANGELOG.md` written by hand** from the commit bodies, grouped by what an
   operator has to *do*, not by commit type. The categories that matter to this
   project: changes requiring an `apply`, changes requiring a config edit,

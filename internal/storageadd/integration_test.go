@@ -190,9 +190,23 @@ func recordManifest(t *testing.T, h *dockerHost) {
 	}
 }
 
+// withoutMonitor drops the fixture's monitor sites and the apps pinned to
+// them. These tests run Garage in containers and have no host for the
+// monitor, whose reseed storage add ends with; the fake-cluster tests cover
+// that stage.
+func withoutMonitor(cfg *config.Config) {
+	for _, site := range cfg.MonitorSites() {
+		for _, app := range cfg.PinnedTo(site) {
+			delete(cfg.Apps, app)
+		}
+		delete(cfg.Sites, site)
+	}
+}
+
 func TestStorageAddResetsAndJoinsRealGarage(t *testing.T) {
 	requireDocker(t)
 	cfg, secrets := fixture(t)
+	withoutMonitor(cfg)
 	cfg.Mesh.Subnet = subnet
 	addresses := map[string]string{"home-a": "10.47.0.1", "home-b": "10.47.0.2", "vm": "10.47.0.3"}
 	for name, addr := range addresses {
@@ -354,6 +368,7 @@ func mediaBuckets(cfg *config.Config) map[string]string {
 func TestStorageAddGrowsToThreeWithAStorageSite(t *testing.T) {
 	requireDocker(t)
 	cfg, secrets := fixture(t)
+	withoutMonitor(cfg)
 	const sub, gw = "10.48.0.0/24", "10.48.0.254"
 	cfg.Mesh.Subnet = sub
 	addresses := map[string]string{"home-a": "10.48.0.1", "home-b": "10.48.0.2", "vm": "10.48.0.3", "store": "10.48.0.4"}

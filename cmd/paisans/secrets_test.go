@@ -177,7 +177,7 @@ func TestRenderRefusesAGatewayWithoutItsACMEToken(t *testing.T) {
 	}
 	// The monitor runs the same Caddy for its own hostname.
 	if err := requireACMEToken(mustLoad(t, configPath), mustSecrets(t, secretsPath), []string{"watch"}); err == nil || !strings.Contains(err.Error(), "watch runs the toolkit's Caddy") {
-		t.Errorf("apply of a monitor in ingress mode paisans was not refused: %v", err)
+		t.Errorf("apply of a monitor with managed_by: paisans was not refused: %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -55,9 +56,11 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `paisans apply`", p.Site, strings.Join(order, ", "))
 }
 
-// joiners are the configured members that are not yet voters: existing sites
-// gaining the role first, so the witness joins before the new data site, then
-// the new site. One at a time, because etcd admits one learner at a time
+// joiners are the configured members that are not yet voters: every witness
+// first, an existing site gaining the role or a new site holding it, then any
+// other member, then the new site. A witness has no replica and so no site add
+// of its own: it joins here, in the join of the data site it makes the voters
+// odd with. One at a time, because etcd admits one learner at a time
 // (maxLearners = 1, etcd v3.5.16, server/etcdserver/api/membership/
 // cluster.go).
 func (p *Plan) joiners(live []apply.EtcdMember) []string {
@@ -67,12 +70,17 @@ func (p *Plan) joiners(live []apply.EtcdMember) []string {
 			voter[apply.EtcdMemberSite(p.cfg, m)] = true
 		}
 	}
-	var out []string
+	var witnesses, others []string
 	for _, name := range sortedCopy(p.cfg.Etcd.Members) {
-		if !voter[name] && name != p.Site {
-			out = append(out, name)
+		switch {
+		case voter[name] || name == p.Site:
+		case p.cfg.Sites[name].Has(config.RoleWitness):
+			witnesses = append(witnesses, name)
+		default:
+			others = append(others, name)
 		}
 	}
+	out := append(witnesses, others...)
 	if !voter[p.Site] {
 		out = append(out, p.Site)
 	}
@@ -234,9 +242,18 @@ func (p *Plan) joinEtcd(j string) error {
 	}
 	paths := []string{p.dep().RelPath("infra", "compose.yaml"), render.EtcdInitialPath(p.dep())}
 	// compose parses every service's env_file when it loads the project, so
-	// a data site's patroni.env has to exist before its etcd can start.
-	if env := p.dep().RelPath("infra", "patroni.env"); renders(rendered, j, env) {
-		paths = append(paths, env)
+	// each one the site's infrastructure stack names has to exist before its
+	// etcd can start: a data site's patroni.env, and on a site the join
+	// brings in from blank, a new witness, the Caddy and heartbeat files its
+	// other services name.
+	for _, env := range []string{
+		p.dep().RelPath("infra", "patroni.env"),
+		p.dep().RelPath("infra", "caddy", "caddy.env"),
+		p.dep().RelPath("infra", "heartbeat", "heartbeat.env"),
+	} {
+		if renders(rendered, j, env) {
+			paths = append(paths, env)
+		}
 	}
 	sp, err := apply.Build(j, rendered, "", t, apply.Scope(paths...))
 	if err != nil {

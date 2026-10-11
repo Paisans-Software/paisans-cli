@@ -40,6 +40,7 @@ Out:
 |---|---|---|
 | 0. Configuration | `init`: the deployment id, the mesh subnet, every generated secret | the yaml has no id or no subnet, or the secrets file is missing or lacks a generated secret; once it has run, the rest is read and planned again |
 | 1. Hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
+| 1. Pull | each site's images, as its `apply --site` would pull them, every host at once | every site; a host with every image pulls nothing, and a host short of space is refused here with the refusal its apply would make |
 | 2. Founding | `apply --site <w>` for each witness in `etcd.members`, then `apply --site <d>` for each other member, of those still being founded; a monitor among them too, since etcd needs it | a member holds no `infra/etcd-initial`, and either no member holds one or one's `--initial-cluster` lists it: the founding set is fixed by the first apply that wrote a record |
 | 2. Joining | `site add <s>` | a member holds no record and no record lists it: the cluster was founded without it |
 | 3. Other sites | `apply --site <s>` for every site not in `etcd.members`, monitor sites last | every such site; an applied site plans nothing |
@@ -95,6 +96,7 @@ then its own dry run would describe a host that is about to change:
 | `init` | nothing; its status is what init has to do, or what the dry run generated |
 | every other step | `init`, when init has work: it writes the subnet and the secrets they read |
 | `host prepare --site <s>` | nothing else |
+| a site's pull | `host prepare --site <s>`: a host without Docker has no images to ask about |
 | `apply --site <s>` | `host prepare --site <s>`; a founding member that is not a witness, each founding witness's apply too, since its gate refuses one founded before the witness; in pass two, the site's earlier `apply` or `site add` and the storage step |
 | `site add <s>` | `host prepare --site <s>` |
 | `storage init`, `storage add` | the host prepare and the first `apply` or `site add` of each Garage site: Garage has to be running to be asked |
@@ -160,6 +162,10 @@ A secret the toolkit cannot generate stays a note naming `secrets set`, as
 before.
 
 ## The first Pocket ID admin
+
+For a deployment that declares `admins`, this section is replaced by
+`2026-10-11-apply-admin-login-links.md`: apply makes those admins itself. What
+follows still holds for a deployment that declares none.
 
 A credential the toolkit cannot generate is named whenever it is owed. The
 first Pocket ID admin is named only when it is actionable, for each

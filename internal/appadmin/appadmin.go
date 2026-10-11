@@ -59,6 +59,19 @@ type Request struct {
 	// since it cannot be signed in to without it.
 	LoginLink bool
 
+	// Declared is an admin the configuration's admins list declares, made by
+	// apply rather than by the operator naming them. Such an account may have
+	// been renamed by its owner since it was made, so it is also found by its
+	// email; and a link is issued whenever its owner has not registered a
+	// passkey yet, since until then nobody can sign in to it.
+	Declared bool
+	// LinkTTL is how long a login link is valid. Zero is the kind's own
+	// default.
+	LinkTTL time.Duration
+	// EmailLink has the provider email the user a login link of its own as
+	// well, whenever one is issued.
+	EmailLink bool
+
 	// APIBase, APIKey and PublicURL are for a kind administered through its
 	// own HTTP API rather than through commands in its container. APIBase is
 	// where the API answers from the site's host, APIKey is never printed,
@@ -73,6 +86,9 @@ type State struct {
 	Exists   bool
 	Verified bool
 	Admin    bool
+	// Passkey is whether the user has registered a passkey, read only for a
+	// Declared request.
+	Passkey bool
 	// MissingGroups is the part of Request.AdminGroups the user is not in,
 	// including any group that does not exist yet. All of them for a user
 	// that does not exist.
@@ -88,6 +104,7 @@ const (
 	ActionGrantAdmin Action = "grant admin"
 	ActionJoinGroups Action = "add to admin groups"
 	ActionLoginLink  Action = "issue one-time login link for"
+	ActionEmailLink  Action = "email one-time login link to"
 )
 
 // Outcome is what an execute produced that the operator has to be given.
@@ -96,6 +113,9 @@ const (
 type Outcome struct {
 	LoginLink string
 	ExpiresIn time.Duration
+	// Emailed is whether the provider accepted a request to email the user a
+	// login link. It did not necessarily send it.
+	Emailed bool
 }
 
 // Creator is what a kind implements to support admin creation. Probe must
@@ -205,6 +225,8 @@ func (p *Plan) Titles() []string {
 			out = append(out, "add "+p.req.Username+" to admin groups "+strings.Join(p.req.AdminGroups, ", "))
 		case ActionLoginLink:
 			out = append(out, "issue login link for "+p.req.Username)
+		case ActionEmailLink:
+			out = append(out, "email login link to "+p.req.Username)
 		default:
 			out = append(out, string(a)+" "+p.req.Username)
 		}

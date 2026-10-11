@@ -83,7 +83,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	}
 
 	if secrets.Version == 0 {
-		secrets.Version = 1
+		secrets.Version = config.SecretsVersion
 	}
 
 	// The cluster's three roles. Spilo ships published defaults for all three

@@ -558,7 +558,7 @@ func TestAPaisansMonitorOpensEightyAndFourFortyThree(t *testing.T) {
 		t.Errorf("paisans: got %s, want %s", strings.Join(got, ","), want)
 	}
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	got = nil
 	for _, r := range hostprep.Rules(cfg.Deployment(), watch) {
 		got = append(got, r.String())
@@ -697,14 +697,35 @@ func TestASoftdogHostReRunsClean(t *testing.T) {
 	}
 }
 
-// Ubuntu's own docker.io is refused rather than removed: removing it would take
-// down whatever containers it is running.
+// Ubuntu's own docker.io without a working `docker compose` is refused rather
+// than removed: removing it would take down whatever containers it is
+// running. Without Ubuntu's compose plugin, installing that is offered too.
 func TestDistroDockerIsRefusedNotRemoved(t *testing.T) {
 	host := freshHost()
 	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "docker.io, runc") {
+	if err == nil || !strings.Contains(err.Error(), "docker.io, runc") || !strings.Contains(err.Error(), "apt-get install docker-compose-v2), or remove them yourself (apt-get remove docker.io runc)") {
 		t.Fatalf("got %v", err)
+	}
+	host = freshHost()
+	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\nkeyring absent\narch amd64\n"
+	_, err = hostprep.Build("home-a", fixture(t), host)
+	if err == nil || strings.Contains(err.Error(), "apt-get install") || !strings.Contains(err.Error(), "Remove them yourself (apt-get remove docker.io docker-compose-v2)") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// Ubuntu's docker.io is left as it is when `docker compose` works with it:
+// nothing of Docker's is planned, and nothing refused.
+func TestDistroDockerWithComposeIsLeftAlone(t *testing.T) {
+	host := freshHost()
+	host.responses[probePackages] = "compose present\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := describes(plan); strings.Contains(got, "docker-ce") || strings.Contains(got, "docker apt") || strings.Contains(got, "Docker's apt") {
+		t.Errorf("Docker was planned over a working docker.io:\n%s", got)
 	}
 }
 
@@ -1576,10 +1597,9 @@ func TestASharedHostNeverSetsTheFirewallsDefaults(t *testing.T) {
 	}
 }
 
-// Docker installed as a snap is refused, not removed, as Ubuntu's docker.io
-// is, and whether or not `docker compose` works with it: the toolkit runs
-// Docker from Docker's own repository on every host. Removing it would stop
-// whatever runs from it.
+// Docker installed as a snap is refused, not removed, whether or not
+// `docker compose` works with it: its confinement keeps it from bind mounting
+// under /srv. Removing it would stop whatever runs from it.
 func TestSnapDockerIsRefusedNotRemoved(t *testing.T) {
 	for _, compose := range []string{"compose present", "compose absent"} {
 		host := freshHost()
@@ -1816,5 +1836,50 @@ func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
 	}
 	if got := (&hostprep.Plan{}).Kinds(); len(got) != 0 {
 		t.Errorf("an empty plan has kinds %q", got)
+	}
+}
+
+// A site that was the gateway keeps 80 and 443 while this deployment's
+// gateway Caddy is still on it, so the move's overlap is not cut short by
+// the prepare that runs before it; once the move has stopped that Caddy, the
+// next prepare removes them.
+func TestAFormerGatewayKeepsItsWebAllowsUntilItsCaddyIsGone(t *testing.T) {
+	host := preparedHost(true)
+	host.responses["com.docker.compose.service=caddy"] = "caddy c0ffee running\n"
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "80/tcp") || strings.Contains(s.Command, "443/tcp") {
+			t.Errorf("removes a web allow while the old gateway serves: %s", s.Command)
+		}
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0].Hint, "keeps 80 and 443") {
+		t.Errorf("warnings: %+v", plan.Warnings)
+	}
+
+	delete(host.responses, "com.docker.compose.service=caddy")
+	plan, err = hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	for _, s := range plan.Steps {
+		if s.Label == "remove" && (strings.Contains(s.Command, "80") || strings.Contains(s.Command, "443")) {
+			removed++
+		}
+	}
+	if removed != 2 {
+		t.Errorf("want both web allows removed once the Caddy is gone:\n%s", printed(plan))
+	}
+}
+
+// A Docker that cannot be asked is an error, never no Caddy.
+func TestAFailedCaddyProbeIsAnError(t *testing.T) {
+	host := preparedHost(false)
+	host.failures = map[string]error{"com.docker.compose.service=caddy": errors.New("exit status 1")}
+	if _, err := hostprep.Build("home-a", fixture(t), host); err == nil {
+		t.Fatal("a failed probe was read as no Caddy")
 	}
 }

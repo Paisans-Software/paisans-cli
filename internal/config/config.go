@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -93,11 +94,14 @@ type Config struct {
 	// ACME is how certificates are obtained. It is deployment wide rather than
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
-	ACME    ACME            `yaml:"acme"`
-	Sites   map[string]Site `yaml:"sites"`
-	Cluster Cluster         `yaml:"cluster"`
-	Etcd    Etcd            `yaml:"etcd"`
-	Storage Storage         `yaml:"storage"`
+	ACME ACME `yaml:"acme"`
+	// Admins is the people who may log in to the sites, under the name a
+	// site's ssh.keys lists them by.
+	Admins  map[string]Admin `yaml:"admins"`
+	Sites   map[string]Site  `yaml:"sites"`
+	Cluster Cluster          `yaml:"cluster"`
+	Etcd    Etcd             `yaml:"etcd"`
+	Storage Storage          `yaml:"storage"`
 	// SMTP is how apps send mail, the default for every app that sends any.
 	// An app's own smtp block overrides it field by field: see SMTPFor.
 	SMTP SMTP           `yaml:"smtp"`
@@ -197,42 +201,95 @@ type Site struct {
 	// site. It only matters where the site holds the data role. Empty means
 	// auto; read it through WatchdogMode rather than directly.
 	Watchdog WatchdogMode `yaml:"watchdog"`
-	// Ingress is what sits in front of a monitor site's apps. Only a site
+	// WebServer is what sits in front of a monitor site's apps. Only a site
 	// holding the monitor role may declare it: a gateway always runs the
 	// toolkit's Caddy, and every other site is reached through the gateway.
-	// Absent means mode paisans; read it through IngressMode.
-	Ingress *Ingress `yaml:"ingress"`
+	// Absent means managed_by paisans; read it through WebServerManagedBy.
+	WebServer *WebServer `yaml:"web_server"`
 }
 
-// IngressMode is what serves a monitor site's apps to the internet.
-type IngressMode string
+// ManagedBy is what serves a monitor site's apps to the internet.
+type ManagedBy string
 
 const (
-	// IngressPaisans runs the toolkit's own Caddy on the monitor, the same
+	// ManagedByPaisans runs the toolkit's own Caddy on the monitor, the same
 	// image as the gateway's, with certificates over DNS-01.
-	IngressPaisans IngressMode = "paisans"
-	// IngressExternal runs nothing in front of the app: a web server the
+	ManagedByPaisans ManagedBy = "paisans"
+	// ManagedByExternal runs nothing in front of the app: a web server the
 	// operator already runs terminates TLS and proxies to Listen. Its
 	// certificates are the operator's, because the toolkit cannot know how
 	// an unfamiliar proxy obtains them and must not edit a configuration it
 	// does not own.
-	IngressExternal IngressMode = "external"
+	ManagedByExternal ManagedBy = "external"
 )
 
-var knownIngressModes = map[IngressMode]bool{IngressPaisans: true, IngressExternal: true}
+var knownManagedBy = map[ManagedBy]bool{ManagedByPaisans: true, ManagedByExternal: true}
 
-// Ingress is how the internet reaches a monitor site's apps.
-type Ingress struct {
-	Mode IngressMode `yaml:"mode"`
+// WebServer is how the internet reaches a monitor site's apps.
+type WebServer struct {
+	ManagedBy ManagedBy `yaml:"managed_by"`
 	// Listen is where the app is published for the operator's web server, as
-	// an IPv4 address and a port. Required with mode external, refused with
-	// mode paisans.
+	// an IPv4 address and a port. Required with managed_by external, refused with
+	// managed_by paisans.
 	Listen string `yaml:"listen"`
+	// IncludeDir is the directory on the host the toolkit writes its own
+	// files in for the operator's web server, which includes them with one
+	// wildcard line. Unset, apply derives it beside the web server's
+	// configuration and writes it here; false writes nothing there.
+	IncludeDir IncludeDir `yaml:"include_dir"`
+}
+
+// IncludeDir is sites.<site>.web_server.include_dir: a path, false, or unset.
+type IncludeDir struct {
+	Path string
+	// Off is include_dir: false.
+	Off bool
+}
+
+// Unset reports whether include_dir is not written at all.
+func (d IncludeDir) Unset() bool { return d.Path == "" && !d.Off }
+
+// UnmarshalYAML reads a path or false. true means nothing, so it is refused
+// rather than read as either.
+func (d *IncludeDir) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!bool" {
+		var on bool
+		if err := node.Decode(&on); err != nil {
+			return err
+		}
+		if on {
+			return fmt.Errorf("line %d: include_dir is true, which names no directory. Write the directory, or false to have the toolkit write nothing for your web server", node.Line)
+		}
+		*d = IncludeDir{Off: true}
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: include_dir is %s, not a directory or false", node.Line, describeNode(node))
+	}
+	*d = IncludeDir{Path: node.Value}
+	return nil
+}
+
+// IncludeDirProblem says what is wrong with an include_dir path, empty when
+// nothing is. It is written into the web server's configuration and into
+// shell commands, so it is held to plain absolute paths.
+func IncludeDirProblem(dir string) string {
+	switch {
+	case !strings.HasPrefix(dir, "/"):
+		return "is not an absolute path"
+	case dir == "/":
+		return "is the root directory"
+	case path.Clean(dir) != dir:
+		return "is not written in its clean form, " + path.Clean(dir)
+	case strings.ContainsAny(dir, " \t\n'\"\\$`;#*?[]{}"):
+		return "holds a space, a quote or a character a shell or a web server's glob reads specially"
+	}
+	return ""
 }
 
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it
 // is not one.
-func (i Ingress) ListenHostPort() (string, int, bool) {
+func (i WebServer) ListenHostPort() (string, int, bool) {
 	host, port, err := net.SplitHostPort(i.Listen)
 	if err != nil || !isIPv4(host) {
 		return "", 0, false
@@ -244,19 +301,19 @@ func (i Ingress) ListenHostPort() (string, int, bool) {
 	return host, n, true
 }
 
-// IngressMode returns the site's declared ingress mode, paisans when none is
+// WebServerManagedBy returns the site's declared web_server.managed_by, paisans when none is
 // declared. It is meaningful only on a monitor site.
-func (s Site) IngressMode() IngressMode {
-	if s.Ingress == nil || s.Ingress.Mode == "" {
-		return IngressPaisans
+func (s Site) WebServerManagedBy() ManagedBy {
+	if s.WebServer == nil || s.WebServer.ManagedBy == "" {
+		return ManagedByPaisans
 	}
-	return s.Ingress.Mode
+	return s.WebServer.ManagedBy
 }
 
 // RunsCaddy reports whether the toolkit's Caddy runs on the site: on a
 // gateway, and on a monitor that serves its own apps.
 func (s Site) RunsCaddy() bool {
-	return s.Has(RoleGateway) || (s.Has(RoleMonitor) && s.IngressMode() == IngressPaisans)
+	return s.Has(RoleGateway) || (s.Has(RoleMonitor) && s.WebServerManagedBy() == ManagedByPaisans)
 }
 
 // WatchdogMode is how a data site's watchdog device is provided.
@@ -499,6 +556,13 @@ func (s SMTP) PortOrDefault() int {
 	return 587
 }
 
+// CanMail reports whether an app's effective SMTP settings name both a host
+// and a sender, the two a mail needs before anything else.
+func (c *Config) CanMail(app string) bool {
+	s := c.SMTPFor(app)
+	return s.Host != "" && s.FromAddress != ""
+}
+
 // SMTPFor is an app's effective SMTP settings: the deployment's block with
 // every field the app declares replacing the deployment's.
 func (c *Config) SMTPFor(app string) SMTP {
@@ -532,7 +596,7 @@ func (c *Config) SMTPFor(app string) SMTP {
 func smtpProblems(key string, s SMTP) []string {
 	var out []string
 	if s.Security != "" && s.Security != SMTPStartTLS && s.Security != SMTPTLS {
-		out = append(out, fmt.Sprintf("%s.security: unknown mode %q. Valid modes are starttls and tls.", key, s.Security))
+		out = append(out, fmt.Sprintf("%s.security: unknown value %q. Valid values are starttls and tls.", key, s.Security))
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		out = append(out, fmt.Sprintf("%s.port: %d is not a port. Give one from 1 to 65535, or leave it out for 587 with starttls and 465 with tls.", key, s.Port))
@@ -637,6 +701,7 @@ func load(path string, noSubnet bool) (*Config, error) {
 		return nil, parseProblem(path, "a configuration", err)
 	}
 	cfg.deriveLists(written)
+	cfg.resolveKeys()
 	if cfg.Storage.Garage.Capacity == "" {
 		cfg.Storage.Garage.Capacity = "100G"
 	}
@@ -862,13 +927,13 @@ func (c *Config) structural(noSubnet bool) error {
 				add("sites.%s.roles: unknown role %q. Valid roles are data, apps, gateway, witness, storage, monitor.", name, role)
 			}
 		}
-		if in := site.Ingress; in != nil {
-			if in.Mode != "" && !knownIngressModes[in.Mode] {
-				add("sites.%s.ingress.mode: unknown mode %q. Valid modes are paisans, where the toolkit's Caddy serves the site's apps, and external, where your own web server does.", name, in.Mode)
+		if in := site.WebServer; in != nil {
+			if in.ManagedBy != "" && !knownManagedBy[in.ManagedBy] {
+				add("sites.%s.web_server.managed_by: unknown value %q. Valid values are paisans, where the toolkit's Caddy serves the site's apps, and external, where your own web server does.", name, in.ManagedBy)
 			}
 			if in.Listen != "" {
 				if _, _, ok := in.ListenHostPort(); !ok {
-					add("sites.%s.ingress.listen: %q is not an IPv4 address and a port. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
+					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
 				}
 			}
 		}
@@ -885,10 +950,11 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
-			add("sites.%s.watchdog: unknown mode %q. Valid modes are auto, required, softdog and off.", name, site.Watchdog)
+			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required, softdog and off.", name, site.Watchdog)
 		}
-		problems = append(problems, sshProblems(name, site)...)
+		problems = append(problems, sshProblems(name, site, c.Admins)...)
 	}
+	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if app.Kind == "" {
@@ -938,7 +1004,7 @@ func (c *Config) structural(noSubnet bool) error {
 		// import internal/acme, by design, so any list written out would be a
 		// second copy in prose that nothing keeps in step with the catalogue.
 		// `validate` names them, built from acme.Providers.
-		add("acme.provider: required, because %s runs the toolkit's Caddy (a gateway, or a monitor in ingress mode paisans). Certificates are issued over DNS-01, so the provider that answers the challenge has to be named. It must be one this toolkit publishes an image for, which `paisans validate` will list, or any other provider together with an acme.image carrying its module.", strings.Join(c.CaddySites(), ", "))
+		add("acme.provider: required, because %s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans). Certificates are issued over DNS-01, so the provider that answers the challenge has to be named. It must be one this toolkit publishes an image for, which `paisans validate` will list, or any other provider together with an acme.image carrying its module.", strings.Join(c.CaddySites(), ", "))
 	}
 	if len(problems) == 0 {
 		return nil

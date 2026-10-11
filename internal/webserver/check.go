@@ -1,4 +1,4 @@
-package ingress
+package webserver
 
 import (
 	"context"
@@ -72,7 +72,7 @@ type Result struct {
 //  4. the published port refuses a connection, or does not answer, on the
 //     public address (and public_address6), around the web server.
 //
-// In ingress mode paisans the toolkit's own Caddy is in front of the app and
+// With managed_by: paisans the toolkit's own Caddy is in front of the app and
 // only the first two are the operator's to check.
 func Check(ctx context.Context, t Target, p Probes) []Result {
 	results := []Result{checkDNS(ctx, t, p), checkCertificate(ctx, t, p)}
@@ -150,7 +150,7 @@ func checkDNS(ctx context.Context, t Target, p Probes) Result {
 func checkCertificate(ctx context.Context, t Target, p Probes) Result {
 	r := Result{Name: CheckCertificate}
 	address := fmt.Sprintf("https://%s%s", t.Hostname, t.HealthPath)
-	certFix := fmt.Sprintf("give your web server a certificate for %s, on the lines marked YOUR CERTIFICATE in `paisans ingress show --app %s`, and renew it before it expires", t.Hostname, t.App)
+	certFix := fmt.Sprintf("give your web server a certificate for %s, on the lines marked YOUR CERTIFICATE in `paisans web-server show --app %s`, and renew it before it expires", t.Hostname, t.App)
 	if !t.External() {
 		certFix = fmt.Sprintf("the Caddy on %s obtains it over DNS-01: check that secrets external.acme_dns_token is set and scoped to the zone, then read the caddy container's log there", t.Site)
 	}
@@ -254,7 +254,7 @@ func checkUpstream(ctx context.Context, t Target, p Probes) Result {
 	switch {
 	case len(open) > 0:
 		r.Detail = fmt.Sprintf("%s answers: the app is reachable around your web server", strings.Join(open, " and "))
-		r.Fix = fmt.Sprintf("Docker publishes %s in front of ufw. Set sites.%s.ingress.listen to 127.0.0.1:%d when the web server runs on this machine, or drop port %d from outside in Docker's DOCKER-USER chain", t.Listen, t.Site, t.ListenPort, t.ListenPort)
+		r.Fix = fmt.Sprintf("Docker publishes %s in front of ufw. Set sites.%s.web_server.listen to 127.0.0.1:%d when the web server runs on this machine, or drop port %d from outside in Docker's DOCKER-USER chain", t.Listen, t.Site, t.ListenPort, t.ListenPort)
 	case len(closed) == 0:
 		// Not one address answered either way, so nothing is known about
 		// the port.
