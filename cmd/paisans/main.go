@@ -1142,6 +1142,11 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	return nil
 }
 
+// dnsInsideApply is set while apply runs dns init as one of its steps. Apply
+// has already shown the configuration's findings and ends on a result of its
+// own, so dns init shows neither.
+var dnsInsideApply bool
+
 // runDNSInit creates the public DNS records a deployment needs, at the
 // provider acme.provider names, using the token that already answers ACME
 // challenges. It is modelled on runStorageInit: a dry run by default, and
@@ -1190,7 +1195,9 @@ func runDNSInit(args []string) error {
 	if err := dns.Execute(ctx, provider, plan, r); err != nil {
 		return err
 	}
-	r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+	if !dnsInsideApply {
+		r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+	}
 	return nil
 }
 
@@ -1256,7 +1263,9 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 		return nil, nil, nil, nil, false, err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, *configPath, result)
+	if !dnsInsideApply {
+		reportFindings(r, *configPath, result)
+	}
 	if result.Refused() {
 		return nil, nil, nil, nil, false, refused(*configPath, len(result.Refusals()), "")
 	}

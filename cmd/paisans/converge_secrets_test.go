@@ -461,3 +461,20 @@ func TestConvergeDryRunFillsTheFileSecretsNames(t *testing.T) {
 		t.Error("a secrets file was written beside the configuration")
 	}
 }
+
+// A run that finished every step ends on one plain sentence, without the
+// configuration's path.
+func TestConvergeEndsWithDeploymentComplete(t *testing.T) {
+	configPath, secretsPath := encryptedDeployment(t, dropGenerated)
+	fakeConverge(t, nil)
+	var err error
+	out := captureStdout(t, func() {
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Deployment complete.") || strings.Contains(out, "is converged") {
+		t.Errorf("output:\n%s", out)
+	}
+}
