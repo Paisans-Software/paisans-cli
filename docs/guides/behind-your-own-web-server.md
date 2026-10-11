@@ -142,6 +142,24 @@ visitor would, and reports each item as `PASS` or `FAIL` with what fixes it.
 
 Run it again after every change until every line says `PASS`.
 
+`paisans apply --execute` without `--site` runs the same checks for every app
+behind your own web server once every other step has run, in an `ingress`
+section:
+
+```
+ingress
+  ✓ status   status.example.org
+```
+
+When one fails it marks the app's line failed, notes which check failed with
+that check's own line, and ends with `Deployment complete, but 1 app failed
+its ingress check: status` and exit status 1 rather than `Deployment
+complete.`, since every step ran but a visitor cannot use the app yet. A
+failing `certificate` or `sign in` check, which an app or certificate that has
+only just started can cause, is tried again for about half a minute before it
+is reported. Fix what it names with steps 3 and 4, then run `paisans ingress
+check --app status` until it passes.
+
 ## Afterwards
 
 The monitor checks its own public URL, `https://<hostname>/healthz`, every

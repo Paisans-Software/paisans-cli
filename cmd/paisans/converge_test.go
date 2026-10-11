@@ -256,6 +256,9 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// Asking Pocket ID for an admin reaches a host too; here it has none.
 	// fakeAdminCheck says otherwise.
 	fakeAdminCheck(t, false, nil)
+	// An app's ingress is checked from this machine; here every check
+	// passes. fakeIngressCheck says otherwise.
+	fakeIngressCheck(t, nil)
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")

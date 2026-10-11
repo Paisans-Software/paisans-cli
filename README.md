@@ -504,7 +504,14 @@ sites:
   check refuses a host where a foreign network or route already holds it.
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
-  a configuration it does not own. `docs/guides/behind-your-own-web-server.md`
+  a configuration it does not own. `paisans apply` without `--site` runs
+  `paisans ingress check` for each such app once every step has run, a line
+  per app in an `ingress` section, and does not call the deployment complete
+  while one fails: it names the app, what failed and the `ingress show` and
+  `ingress check` commands to fix it with, and exits 1. A certificate or sign
+  in failure, which an app or certificate that has only just started can
+  cause, is tried again for about half a minute first; a dry run lists the
+  check without running it. `docs/guides/behind-your-own-web-server.md`
   walks through it.
 
 `listen` belongs to `mode: external` alone, which cannot work without it
