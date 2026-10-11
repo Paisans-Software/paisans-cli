@@ -64,7 +64,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually remove them and write the file")
 	withoutRecord := fs.Bool("without-record", false, "trust paisans.yaml alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")
-	sudo := fs.Bool("sudo", true, "read the gateways' deployment records through sudo, since /var/lib/paisans is root's")
+	sudo := fs.Bool("sudo", true, "read a gateway's deployment record through sudo when the ssh user may not read it")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -85,7 +85,9 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		if len(cfg.GatewaySites()) == 0 {
 			return fmt.Errorf("secrets prune: %s declares no gateway, so there is no deployment record to read. Pass --without-record to trust paisans.yaml alone. Nothing was changed", *configPath)
 		}
-		rec, missing := readDeploymentRecord(r, cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "", *sudo) })
+		rec, missing := readDeploymentRecord(r, cfg, func(gw string, elevated bool) registry.Runner {
+			return registryHost(gw, cfg.Sites[gw], "", elevated && *sudo)
+		})
 		if len(missing) > 0 {
 			gw := sortedKeys(missing)[0]
 			return fmt.Errorf("secrets prune: the deployment record on %s could not be read (%v), so nothing says whether what paisans.yaml no longer declares was removed or is still running. Apply the gateway first, or pass --without-record to trust paisans.yaml alone. Nothing was changed", gw, missing[gw])

@@ -55,8 +55,12 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 )
 
-// Dir holds the registry and its lock. It is root's and 0700: the registry
-// names every community a host carries, which is nobody else's business.
+// Dir holds the registry and its lock. It is root's and 0711: others may
+// enter it but not list it. The registry names every community a host
+// carries, which is nobody else's business, so it is 0600 and the listing,
+// which would name each deployment's files, is root's. Entering is allowed
+// so that a gateway's deployment record, which holds only names and is
+// 0644, can be read at its known path without sudo (see deployrecord).
 const Dir = "/var/lib/paisans"
 
 // Path is the registry, and LockPath the file flock holds while it changes.
@@ -496,7 +500,7 @@ func ClaimCommand(id string, e Entry) (string, error) {
 		"set -e",
 		"umask 077",
 		"mkdir -p " + Dir,
-		"chmod 700 " + Dir,
+		"chmod 711 " + Dir,
 		"exec 9>>" + LockPath,
 		fmt.Sprintf("flock -w %d 9 || { echo 'paisans: another command holds %s'; exit 1; }", lockWait, LockPath),
 		"tmp=$(mktemp " + Dir + "/.registry.XXXXXX)",

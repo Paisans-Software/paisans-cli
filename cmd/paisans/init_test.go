@@ -30,6 +30,9 @@ func (f *initFake) Run(command string) (string, error) {
 	if f.down {
 		return "ssh: connect to host " + f.name + " port 22: Operation timed out", errors.New("exit status 255")
 	}
+	if out, ok := userRead(f.files, command); ok {
+		return out, nil
+	}
 	switch command {
 	case mesh.RouteCommand:
 		if f.routes != "" {

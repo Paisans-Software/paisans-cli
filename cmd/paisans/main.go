@@ -456,7 +456,12 @@ func runInit(args []string) error {
 	case err != nil:
 		return err
 	}
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner { return hosts[gw] }))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
+		if elevated {
+			return hosts[gw]
+		}
+		return initHost(gw, cfg.Sites[gw], false)
+	}))
 
 	filled, recipients, err := fillSecrets(cfg, *secretsPath, secrets)
 	var failed *secretsWriteError
@@ -670,12 +675,7 @@ func runApply(args []string) error {
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner {
-		if gw == *site {
-			return transport
-		}
-		return registryHost(gw, cfg.Sites[gw], "", *sudo)
-	}))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	done := r.Step("check mesh subnet")
 	err = checkMeshLive(cfg, *site, transport)
