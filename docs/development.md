@@ -1157,8 +1157,11 @@ is what keeps one blog from adding a second database engine to operate.
 waits up to three minutes for Patroni's `/cluster` to name a running leader,
 then sends one psql script on stdin to the Spilo container: create the role if
 missing, set its password every time (so rotation is editing the secret and
-applying), create the database owned by it if missing. A replica skips the work
-and says which site holds the leader; a leader that is not one of
+applying), create the database owned by it if missing. A replica creates
+nothing and reads its own catalogue: it goes on to the app stacks only when
+every app database and role is there, and otherwise stops with
+`apply.ErrDatabasesWait`, naming the leader's site to apply first, which
+`paisans apply` treats as a pause. A leader that is not one of
 `cluster.sites` is not a replica and stops the apply. A timeout or a psql
 failure stops it too, before any app starts, and the next apply resumes there. `README.md` has
 the reasoning under "`apply` creates each clustered app's role and database".

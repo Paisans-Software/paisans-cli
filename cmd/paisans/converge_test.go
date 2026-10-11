@@ -286,6 +286,80 @@ func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
 	sameLines(t, *ran, commands(blankPlan()))
 }
 
+// databasesWait is a replica's stop for the app databases, as apply returns
+// it.
+func databasesWait(site, leader string) error {
+	return &ui.Problem{
+		Hint:  site + " is waiting on " + leader + " to create databases auth, talk",
+		Cause: fmt.Errorf("%s: %w %s: auth, talk", site, apply.ErrDatabasesWait, leader),
+	}
+}
+
+// waitsFor makes the run's apply of site stop for the app databases on its
+// first n runs.
+func waitsFor(t *testing.T, site, leader string, n int) {
+	t.Helper()
+	saved := convergeRun
+	runs := 0
+	convergeRun = func(args []string) error {
+		if err := saved(args); err != nil {
+			return err
+		}
+		if title := strings.Join(args, " "); strings.HasPrefix(title, "apply --site "+site+" ") {
+			if runs++; runs <= n {
+				return databasesWait(site, leader)
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { convergeRun = saved })
+}
+
+// The first deployment's order: home-a's founding apply stops for etcd, so
+// home-b's finds Patroni a replica of home-a with no database yet. Neither
+// stop ends the run, and pass two, home-a first, creates the databases and
+// then starts home-b's apps.
+func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	waitsFor(t, "home-b", "home-a", 1)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("the run stopped at the databases wait: %v", err)
+	}
+	sameLines(t, *ran, commands(blankPlan()))
+	if !rec.Has("detail", "✓ apply --site home-b: waiting for the primary's databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
+	}
+}
+
+// A replica still waiting on its last visit, pass two having reached it
+// before the leader's site, is applied once more after every other step,
+// and its line ends done then.
+func TestTheDatabasesWaitOnTheLastVisitIsAppliedAgain(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	waitsFor(t, "home-a", "home-b", 2)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("the run stopped at the databases wait: %v", err)
+	}
+	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
+	if rec.Has("fail", "") || !rec.Has("done", "home-a") {
+		t.Errorf("home-a's line did not end done:\n%s", rec.Lines())
+	}
+}
+
+// A replica still waiting when applied once more, after every other step,
+// has a leader that did not create the databases, and that ends the run.
+func TestTheDatabasesWaitAfterEveryStepStopsTheRun(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	waitsFor(t, "home-a", "home-b", 3)
+	err := converge(t, "--execute")
+	if !errors.Is(err, apply.ErrDatabasesWait) || !strings.Contains(err.Error(), "apply --site home-a") || !strings.Contains(err.Error(), "Run paisans apply --execute again to resume") {
+		t.Fatalf("err = %v", err)
+	}
+	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
+}
+
 func TestAFailingStepStopsTheRun(t *testing.T) {
 	ran := fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
 	err := converge(t, "--execute")
