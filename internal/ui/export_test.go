@@ -42,3 +42,6 @@ func NewForTestWidth(w io.Writer, terminal bool, cols int, clock func() time.Tim
 	}
 	return r
 }
+
+// ItalicFor is Italic with the terminal chosen by the test.
+var ItalicFor = italic

@@ -1974,7 +1974,9 @@ func TestConvergeDryRunMarksARegisteredAdmin(t *testing.T) {
 	}
 }
 
-// A run makes each admin and prints each link once, after the result.
+// A run makes each admin and prints each link once, after the result, with a
+// blank line before the heading and after the list to set it apart from what
+// is around it.
 func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	fakeConverge(t, nil)
 	asked := fakeDeclaredAdmins(t, unregistered(false))
@@ -1989,7 +1991,7 @@ func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	if !rec.Has("done", "alice on auth") || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
-	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n"
+	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n\n"
 	if links.String() != want {
 		t.Errorf("links %q\nwant %q", links.String(), want)
 	}
@@ -2244,5 +2246,21 @@ func TestAFailedChecksAdviceFollowsItsLine(t *testing.T) {
 	}
 	if rec.Has("note", "can run") {
 		t.Errorf("a heading before the advice:\n%s", rec.Lines())
+	}
+}
+
+// With links on more than one app, each name says which, and the links
+// start in one column however long the names are.
+func TestPrintLoginLinksAlignsEachLink(t *testing.T) {
+	links := recordLinks(t)
+	printLoginLinks([]declaredAdmin{
+		{App: "auth", ID: "alice", Link: "https://id.example.org/lc/tok-a", ExpiresIn: adminLinkTTL},
+		{App: "auth-staff", ID: "bob", Link: "https://staff.example.org/lc/tok-b", ExpiresIn: adminLinkTTL},
+	})
+	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n" +
+		"  alice on auth      https://id.example.org/lc/tok-a\n" +
+		"  bob on auth-staff  https://staff.example.org/lc/tok-b\n\n"
+	if links.String() != want {
+		t.Errorf("links %q\nwant %q", links.String(), want)
 	}
 }

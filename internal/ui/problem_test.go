@@ -275,3 +275,22 @@ func TestShortPathThroughASymlink(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// A Warning ends a command that did what it was asked behind a yellow !, WARN
+// off a terminal, rather than the failure's mark.
+func TestWarningPrintsAWarningMark(t *testing.T) {
+	warn := &ui.Warning{Problem: ui.Problem{Hint: "Deployment complete, but 1 app failed its web server check: status", Explain: "Fix its web server."}}
+	var b strings.Builder
+	ui.PrintErrorForTest(&b, warn, false, false, 80)
+	if want := "WARN Deployment complete, but 1 app failed its web server check: status\n  Fix its web server.\n"; b.String() != want {
+		t.Errorf("got %q\nwant %q", b.String(), want)
+	}
+	b.Reset()
+	ui.PrintErrorForTest(&b, warn, false, true, 80)
+	if !strings.HasPrefix(b.String(), "\x1b[33m!\x1b[0m Deployment complete, but") {
+		t.Errorf("the hint is not under a yellow !: %q", b.String())
+	}
+	if hint, explain := ui.Describe(warn); hint != warn.Hint || explain != warn.Explain {
+		t.Errorf("Describe = %q, %q", hint, explain)
+	}
+}

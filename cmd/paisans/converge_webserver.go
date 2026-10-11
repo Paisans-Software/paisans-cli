@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -17,18 +16,6 @@ import (
 var convergeWebServerCheck = func(t webserver.Target) []webserver.Result {
 	return webserver.Check(context.Background(), t, webServerProbes())
 }
-
-// convergeSleep is the wait between two attempts at a web server check. Tests
-// replace it.
-var convergeSleep = time.Sleep
-
-// webServerAttempts and webServerPause are how long a web server check that may
-// still come right is tried: about half a minute, for an app that has just
-// started or a certificate the web server is still obtaining.
-const (
-	webServerAttempts = 7
-	webServerPause    = 5 * time.Second
-)
 
 // externalApps is every app served through a web server the operator runs:
 // pinned to a monitor site with managed_by: external.
@@ -98,43 +85,17 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo, headed bool) []s
 	return failed
 }
 
-// webServerResults checks target, and checks it again, a few seconds apart,
-// while what fails may be only the app or its certificate not being ready
-// yet. A failure that waiting cannot fix, such as a name that does not
-// resolve, ends it at once.
+// webServerResults checks target once. The web server in front of it is the
+// operator's, so a check that fails is reported as it stands.
 func webServerResults(s ui.Step, target webserver.Target) []webserver.Result {
 	s.Progress("reach " + target.Hostname)
-	for attempt := 1; ; attempt++ {
-		results := convergeWebServerCheck(target)
-		if attempt == webServerAttempts || !mayStillCome(results) {
-			return results
-		}
-		s.Progress(fmt.Sprintf("reach %s, again (%d of %d)", target.Hostname, attempt+1, webServerAttempts))
-		convergeSleep(webServerPause)
-	}
-}
-
-// mayStillCome reports whether results failed, and only on the checks an
-// app or certificate that is not ready yet fails: the certificate and the
-// sign in redirect.
-func mayStillCome(results []webserver.Result) bool {
-	failed := false
-	for _, res := range results {
-		if res.OK {
-			continue
-		}
-		if res.Name != webserver.CheckCertificate && res.Name != webserver.CheckSignIn {
-			return false
-		}
-		failed = true
-	}
-	return failed
+	return convergeWebServerCheck(target)
 }
 
 // webServerFailed is how a run whose every step ran ends when an app failed
 // its web server check: not complete, since a visitor cannot reach it as they
-// should.
-func webServerFailed(apps []string) error {
+// should. Alone it is the run's warning; beside a failure it is part of it.
+func webServerFailed(apps []string) *ui.Problem {
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("Deployment complete, but %s failed its web server check: %s", plural(len(apps), "app"), andList(apps)),
 		Explain: "Every step ran. Fix each app's web server as noted above, then run paisans web-server check --app <app> to check it again.",

@@ -145,6 +145,20 @@ func isTerminal(w io.Writer) bool {
 	return os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
+// Italic is text set in italics when w is a terminal that should be drawn
+// on, and text as it is anywhere else: for a line written to w directly,
+// beside a reporter's.
+func Italic(w io.Writer, text string) string {
+	return italic(isTerminal(w), text)
+}
+
+func italic(terminal bool, text string) string {
+	if !terminal {
+		return text
+	}
+	return ital + text + reset
+}
+
 // terminalWidth is w's width in columns when w is a terminal, or 0. A
 // terminal drawn on without colour (NO_COLOR, TERM=dumb) is still as wide as
 // it is.

@@ -532,3 +532,18 @@ func TestSectionsAreSetApartByABlankLine(t *testing.T) {
 		t.Errorf("got:\n%q\nwant:\n%q", b.String(), want)
 	}
 }
+
+// Italic sets text in italics on a terminal, and leaves it bare anywhere
+// else, so piped output carries no escape codes.
+func TestItalic(t *testing.T) {
+	if got := ui.ItalicFor(true, "https://id.example.org/lc/tok"); got != "\x1b[3mhttps://id.example.org/lc/tok\x1b[0m" {
+		t.Errorf("terminal: %q", got)
+	}
+	if got := ui.ItalicFor(false, "https://id.example.org/lc/tok"); got != "https://id.example.org/lc/tok" {
+		t.Errorf("plain: %q", got)
+	}
+	var b strings.Builder
+	if got := ui.Italic(&b, "x"); got != "x" {
+		t.Errorf("a writer that is not a terminal: %q", got)
+	}
+}

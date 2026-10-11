@@ -274,8 +274,8 @@ app's snippet into the web server's `include_dir` through `webserver.Sync`
 (`internal/webserver/include.go`), recording each file in the manifest
 (`internal/apply/webserverrecord.go`) so `app remove` and `site remove` delete
 it through `webserver.Remove`, and `convergeWebServer`
-(`cmd/paisans/converge_webserver.go`) runs `Check` for each app, again for
-about half a minute while only the certificate or sign in fails.
+(`cmd/paisans/converge_webserver.go`) runs `Check` once for each app, and a
+failure alone ends the run on a `ui.Warning`, which exits 0.
 
 `render` validates, then writes per site artifacts under `--out`. It writes
 files and stops: pushing them to a host is `apply`'s work.

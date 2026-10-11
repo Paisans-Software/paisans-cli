@@ -764,7 +764,12 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if len(failed) > 0 {
-		return errors.Join(webServerFailed(failed), adminErr)
+		if adminErr != nil {
+			return errors.Join(webServerFailed(failed), adminErr)
+		}
+		// Every step ran, and what is left is the operator's own web
+		// server: the run ends on a warning, not a failure.
+		return &ui.Warning{Problem: *webServerFailed(failed)}
 	}
 	if adminErr != nil {
 		return adminErr

@@ -582,11 +582,11 @@ sites:
   per app in a `web server` section, and does not call the deployment complete
   while one fails: it names the app, what failed, the web server `web-server show`
   finds in front of it, read through the sudo the run settled at its start,
-  and the `web-server show` and `web-server check` commands to fix it with, and
-  exits 1. A certificate or sign
-  in failure, which an app or certificate that has only just started can
-  cause, is tried again for about half a minute first; a dry run lists the
-  check without running it. `docs/guides/behind-your-own-web-server.md`
+  and the `web-server show` and `web-server check` commands to fix it with,
+  and ends on a warning, `! Deployment complete, but 1 app failed its web
+  server check`, with exit status 0: every step ran, and the web server is the
+  operator's. The check runs once, since waiting on that web server is not the
+  toolkit's to do; a dry run lists the check without running it. `docs/guides/behind-your-own-web-server.md`
   walks through it.
 
 **The toolkit writes its own file, never the operator's configuration.** In
@@ -3766,7 +3766,8 @@ dry run a line per app, `checked with --execute` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends
 `Deployment complete.`; one where an app failed its web server check, or its site
-file was not written, names those apps instead and exits 1. With
+file was not written, ends on a warning naming those apps instead and exits 0,
+or 1 when something else failed as well. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
 above the hosts still running, so the lines end in the order their hosts
@@ -4880,8 +4881,9 @@ is used or expires.
 
 **Every link is printed at the end of the run**, after its result, whether
 output is a terminal or a pipe, so that it can be passed on by any means. A
-link signs in as its admin: treat it as a password. It is printed once and
-kept nowhere.
+blank line sets the list apart before and after, and on a terminal each link
+is in italics. A link signs in as its admin: treat it as a password. It is
+printed once and kept nowhere.
 
 ```
 pocket id
