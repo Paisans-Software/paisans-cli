@@ -229,11 +229,14 @@ func (c *checker) witnessSharesFailureDomain() {
 // worse than one, so a join goes from one to three in a single operation and
 // never rests at two.
 //
+// Either way the first way out is a witness: a site with the witness role in a
+// third location, which makes three voters and gives automatic failover. The
+// toolkit never demands one, so declaring one voter stays the other way out.
 // A derived pair came from the roles, so the advice is in their terms: with
-// one data site the witness has no tie to break and its role comes off;
-// otherwise a witness in a third location makes three, or one voter is
-// written out.
+// one data site the witness has no tie to break and its role comes off.
 func (c *checker) twoVoters() {
+	const witness = "Add a witness: a site in a third location, one that fails independently of both, with the witness role (Eg: `roles: [witness]`)"
+	const failover = ", which makes three voters and gives automatic failover."
 	members := c.cfg.Etcd.Members
 	if len(members) != 2 {
 		return
@@ -241,25 +244,25 @@ func (c *checker) twoVoters() {
 	if !c.cfg.Etcd.MembersDerived {
 		c.refuse("two-etcd-voters", "etcd.members",
 			"etcd has exactly two voters",
-			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. Declare one member, or three.",
-			members[0], members[1])
+			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. %s Or declare one member, which gives up automatic failover.",
+			members[0], members[1], witness+" and listed in etcd.members"+failover)
 		return
 	}
-	var data, witness []string
+	var data, witnesses []string
 	for _, name := range members {
 		if c.cfg.Sites[name].Has(config.RoleData) {
 			data = append(data, name)
 		} else {
-			witness = append(witness, name)
+			witnesses = append(witnesses, name)
 		}
 	}
 	one := members[0]
 	if len(data) > 0 {
 		one = data[0]
 	}
-	fix := fmt.Sprintf("Give a site in a third location, one that fails independently of both, the witness role, which makes three voters; or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", one)
-	if len(data) == 1 && len(witness) == 1 {
-		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witness[0], data[0])
+	fix := fmt.Sprintf("%s Or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", witness+failover, one)
+	if len(data) == 1 && len(witnesses) == 1 {
+		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witnesses[0], data[0])
 	}
 	c.refuse("two-etcd-voters", c.cfg.EtcdMembersKey(),
 		"etcd has exactly two voters",

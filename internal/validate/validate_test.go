@@ -317,7 +317,7 @@ func TestRefusalMessagesAreActionable(t *testing.T) {
 			continue
 		}
 		found = true
-		if !strings.Contains(f.Message, "one member, or three") {
+		if !strings.Contains(f.Message, "Add a witness") || !strings.Contains(f.Message, "declare one member") {
 			t.Fatalf("the refusal does not say what to do instead: %q", f.Message)
 		}
 	}
