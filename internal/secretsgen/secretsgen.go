@@ -180,7 +180,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 		if entries == nil {
 			entries = map[string]any{}
 		}
-		for _, key := range appSecretKeys(app) {
+		for _, key := range appSecretKeys(cfg, app) {
 			if key == oauthPrivateKey || key == oauthPublicKey {
 				continue // a pair, derived from the passphrase; see below
 			}
@@ -213,7 +213,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 // the writefreely-wisp fork has a database role like any other Postgres
 // backed kind, and only Mbin runs a message broker, a cache and an OAuth2
 // server of its own.
-func appSecretKeys(app config.App) []string {
+func appSecretKeys(cfg *config.Config, app config.App) []string {
 	var keys []string
 	if kinds.UsesPostgres(app.Kind) {
 		keys = append(keys, "database_password")
@@ -262,7 +262,10 @@ func appSecretKeys(app config.App) []string {
 		// Matrix Authentication Service in front of it needs its own.
 		keys = append(keys, masEncryptionSecret, masMatrixSecret, masSigningKey)
 	}
-	if kinds.UsesObjectStorage(app.Kind) {
+	if kinds.InObjectStorage(cfg, app) {
+		// Only for an app keeping its files in Garage: one keeping them on
+		// its own disk has no bucket for a key to open.
+		//
 		// Per app rather than shared: one key for every app would mean each
 		// bucket granted to it with --owner, so any one app's .env would be
 		// enough to read, rewrite and delete every other app's objects.
@@ -680,7 +683,9 @@ func garageKeyIsMalformed(appName, key, value string) error {
 }
 
 // CheckGarageKeys refuses a hand edited S3 credential Garage would reject, for
-// every app that stores objects and already has one set.
+// every app that keeps its files in Garage and already has one set. An app
+// keeping them on its own disk uses no key, so one left in its stanza is not
+// checked: nothing reaches a host with it.
 //
 // Fill calls this itself, so `init` is covered. It is exported because `init`
 // is not the only path that reads a secrets file: `render` and `apply` both
@@ -692,7 +697,7 @@ func garageKeyIsMalformed(appName, key, value string) error {
 func CheckGarageKeys(cfg *config.Config, secrets *config.Secrets) error {
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.UsesObjectStorage(app.Kind) {
+		if !kinds.InObjectStorage(cfg, app) {
 			continue
 		}
 		entries := secrets.Apps[name]

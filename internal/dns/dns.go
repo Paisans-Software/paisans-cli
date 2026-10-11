@@ -149,18 +149,26 @@ func Desired(cfg *config.Config) ([]Want, error) {
 		}
 		sort.Strings(roles)
 		for _, role := range roles {
+			if role == kinds.MediaRole && kinds.MediaHostname(cfg, app) == "" {
+				// An app keeping its files on its own disk serves them on its
+				// own hostname, so a media hostname would point at no route.
+				// validate refuses a declared one; this keeps dns from
+				// publishing it if that is ever bypassed.
+				continue
+			}
 			hostnames = append(hostnames, claim{fmt.Sprintf("apps.%s.hostnames.%s", appName, role), app.Hostnames[role], appName})
 		}
 	}
-	// Each app that stores objects serves them on a media hostname of its
-	// own, derived when the app does not declare one under hostnames.media
-	// (a declared one is already in the loop above).
+	// Each app keeping objects in Garage serves them on a media hostname of
+	// its own, derived when the app does not declare one under hostnames.media
+	// (a declared one is already in the loop above). An app keeping its files
+	// on its own disk has none, and gets no record for one.
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
-		if !kinds.MediaHostnameIsDerived(app) {
+		if !kinds.MediaHostnameIsDerived(cfg, app) {
 			continue
 		}
-		if media := kinds.MediaHostname(app, cfg.Community.Domain); media != "" {
+		if media := kinds.MediaHostname(cfg, app); media != "" {
 			hostnames = append(hostnames, claim{fmt.Sprintf("apps.%s.hostnames.media (derived)", appName), media, appName})
 		}
 	}

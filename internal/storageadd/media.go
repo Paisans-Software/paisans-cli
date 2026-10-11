@@ -123,7 +123,7 @@ type probe struct {
 func (p *Plan) publicProbe() *probe {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if !kinds.UsesObjectStorage(app.Kind) || !kinds.ServesObjectsPublicly(app.Kind) {
+		if !kinds.InObjectStorage(p.cfg, app) || !kinds.ServesObjectsPublicly(app.Kind) {
 			continue
 		}
 		keyID, _ := garage.SecretString(p.secrets, name, "s3_access_key_id")
@@ -139,7 +139,7 @@ func (p *Plan) publicProbe() *probe {
 		rand.Read(buf)
 		return &probe{
 			app: name, bucket: garage.BucketName(app, name), keyID: keyID, secret: secret, region: region,
-			media: kinds.MediaHostname(app, p.cfg.Community.Domain),
+			media: kinds.MediaHostname(p.cfg, app),
 			// One fixed key, overwritten by every run and deleted at the end,
 			// so an interrupted run leaves at most this one object behind.
 			key:  "paisans-probe/storage-add",

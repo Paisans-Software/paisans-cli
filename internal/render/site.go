@@ -207,14 +207,21 @@ const GateSessionCookie = "_oauth2_proxy"
 // body rather than the status alone, and fails when the gate is gone.
 const GateMarker = "Sign in required by the visibility gate."
 
-func bypassFor(name string, app config.App) gateBypass {
+// bypassFor is what a gated app lets past its gate, from its kind's GateSpec.
+//
+// An app keeping public files on its own disk also opens the paths they are
+// served on (kinds.LocalMediaPaths). In object storage they are on a media
+// hostname, which is never gated; on the app's own hostname they would be,
+// and a federating server fetching an image will not follow a redirect to a
+// passkey prompt any more than it would there.
+func bypassFor(cfg *config.Config, name string, app config.App) gateBypass {
 	spec := kinds.GateFor(app.Kind)
 	return gateBypass{
 		ActivityPub: kinds.Federates(app),
 		InboxPaths:  spec.InboxPaths,
 		AutoLogin:   spec.AutoLogin,
 		LoopBreaker: name + "_autologin",
-		OpenPaths:   kinds.OpenPathsFor(app.Kind),
+		OpenPaths:   append(kinds.OpenPathsFor(app.Kind), kinds.LocalMediaPaths(cfg, app)...),
 		TokenPaths:  spec.TokenPaths,
 	}
 }
@@ -816,7 +823,7 @@ func (p *planner) routesFor(site *siteView) []route {
 		gate := app.Gate()
 		var bypass gateBypass
 		if gate != "" {
-			bypass = bypassFor(name, app)
+			bypass = bypassFor(p.cfg, name, app)
 		}
 		out = append(out, route{
 			App:       name,
@@ -828,16 +835,22 @@ func (p *planner) routesFor(site *siteView) []route {
 			Bypass:    bypass,
 		})
 		roles := sortedKeys(app.Hostnames)
-		if kinds.MediaHostnameIsDerived(app) {
-			// Every kind that stores objects has a media hostname whether or
-			// not the app names one, so the route exists either way.
+		if kinds.MediaHostnameIsDerived(p.cfg, app) {
+			// Every app keeping objects in Garage has a media hostname whether
+			// or not it names one, so the route exists either way.
 			roles = append(roles, kinds.MediaRole)
 		}
 		for _, role := range roles {
+			if role == kinds.MediaRole && kinds.MediaHostname(p.cfg, app) == "" {
+				// An app keeping its files on its own disk serves them on its
+				// own hostname, and has no bucket for a media route to reach.
+				// validate refuses a declared hostnames.media on one.
+				continue
+			}
 			hostname := app.Hostnames[role]
 			routeGate, routeBypass := gate, bypass
 			if role == kinds.MediaRole {
-				hostname = kinds.MediaHostname(app, p.cfg.Community.Domain)
+				hostname = kinds.MediaHostname(p.cfg, app)
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
 				// redirect to a passkey prompt; Outline's private objects are

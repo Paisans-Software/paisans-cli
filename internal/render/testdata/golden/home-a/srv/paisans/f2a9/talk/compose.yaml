@@ -22,9 +22,10 @@
 #
 #   app, messenger  start as root; the image's entrypoint chowns var/, /data
 #                   and /config to MBIN_USER (1000:1000, set in .env) and then
-#                   drops to it. media/ and oauth/ are NOT chowned. media/ is
-#                   unused while uploads go to S3; oauth/ holds two rendered
+#                   drops to it. oauth/ is NOT chowned: it holds two rendered
 #                   0644 files, which uid 1000 reads as they are (see below).
+#                   media/ is NOT chowned either, and is unused while uploads
+#                   go to S3.
 #   rabbitmq        starts as root; its entrypoint chowns /var/lib/rabbitmq to
 #                   its own user and drops to it. No `user:` here for that
 #                   reason, which is a deliberate difference from upstream.
@@ -100,10 +101,10 @@ services:
       - /srv/paisans/f2a9/talk/oauth:/app/config/oauth2:ro
       - /srv/paisans/f2a9/talk/php_logs:/app/var/log
       # Nothing is mounted over config/packages/. The image's entrypoint edits
-      # three files there in place at every start (liip_imagine.yaml,
-      # monolog.yaml, and oneup_flysystem.yaml, which it switches to the S3
-      # adapter because S3_KEY is set in .env), and `sed -i` over a bind mount
-      # fails and stops the container.
+      # files there in place at every start (liip_imagine.yaml, monolog.yaml,
+      # and oneup_flysystem.yaml, which it switches to the S3 adapter when
+      # S3_KEY is set in .env), and `sed -i` over a bind mount fails and stops
+      # the container.
     depends_on:
       valkey:
         condition: service_healthy

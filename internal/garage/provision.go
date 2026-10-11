@@ -248,7 +248,9 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.UsesObjectStorage(app.Kind) {
+		// An app keeping its files on its own disk gets no key and no
+		// bucket: it has nothing to put in one.
+		if !kinds.InObjectStorage(cfg, app) {
 			continue
 		}
 		keyID, _ := SecretString(secrets, name, "s3_access_key_id")

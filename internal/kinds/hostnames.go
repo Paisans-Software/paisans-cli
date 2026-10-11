@@ -104,7 +104,9 @@ func SnippetFor(role string) string {
 }
 
 // MediaHostname is where an app's stored objects are served from, and empty
-// for a kind that stores none.
+// for an app that keeps none in object storage: a kind that stores none, and
+// an app that keeps its files on its own disk (InObjectStorage), which serves
+// them on its own hostname instead.
 //
 // An app that declares `hostnames.media` gets exactly that. Otherwise the name
 // is derived as a sibling of the app's own hostname: the first label of that
@@ -121,10 +123,11 @@ func SnippetFor(role string) string {
 // be wrong (a label too long once the suffix is added, or one that collides
 // with another app's hostname), and internal/validate refuses those by the
 // key an operator has to edit, which this package cannot name.
-func MediaHostname(app config.App, domain string) string {
-	if !HasHostnameRole(app.Kind, MediaRole) {
+func MediaHostname(cfg *config.Config, app config.App) string {
+	if !HasHostnameRole(app.Kind, MediaRole) || !InObjectStorage(cfg, app) {
 		return ""
 	}
+	domain := cfg.Community.Domain
 	if declared := strings.TrimSpace(app.Hostnames[MediaRole]); declared != "" {
 		return declared
 	}
@@ -137,7 +140,8 @@ func MediaHostname(app config.App, domain string) string {
 
 // MediaHostnameIsDerived reports whether an app's media hostname comes from
 // the derivation rather than from `hostnames.media`, so an error message can
-// say which one the operator has to change.
-func MediaHostnameIsDerived(app config.App) bool {
-	return HasHostnameRole(app.Kind, MediaRole) && strings.TrimSpace(app.Hostnames[MediaRole]) == ""
+// say which one the operator has to change. False for an app with no media
+// hostname at all.
+func MediaHostnameIsDerived(cfg *config.Config, app config.App) bool {
+	return HasHostnameRole(app.Kind, MediaRole) && InObjectStorage(cfg, app) && strings.TrimSpace(app.Hostnames[MediaRole]) == ""
 }

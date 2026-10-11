@@ -1,0 +1,96 @@
+package validate_test
+
+import (
+	"testing"
+
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/validate"
+)
+
+// pinDocs pins the valid fixture's Outline app to home-a, with the given
+// storage key, so a storage rule can be tested apart from placement.
+func pinDocs(t *testing.T, storage string) *config.Config {
+	t.Helper()
+	cfg := load(t, "valid")
+	docs := cfg.Apps["docs"]
+	docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	docs.Storage = storage
+	cfg.Apps["docs"] = docs
+	return cfg
+}
+
+// A pinned app may keep its files on its own disk, and may keep them in a
+// Garage on another site: neither is refused or warned about. Founder
+// decision.
+func TestPinnedStorageIsQuiet(t *testing.T) {
+	for _, storage := range []string{"", config.StorageLocal, config.StorageS3} {
+		cfg := pinDocs(t, storage)
+		// Garage on home-b, the app on home-a.
+		cfg.Storage.Garage.Sites = []string{"home-b"}
+		if result := validate.Check(cfg); len(result.Findings) != 0 {
+			t.Errorf("storage %q: %v", storage, result.Findings)
+		}
+	}
+}
+
+func TestStorageRefusals(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*config.Config)
+		rule string
+		key  string
+	}{
+		{"s3 without garage", func(c *config.Config) {
+			c.Storage.Garage = config.Garage{}
+			docs := c.Apps["docs"]
+			docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+			docs.Storage = config.StorageS3
+			c.Apps["docs"] = docs
+		}, "storage-s3-without-garage", "apps.docs.storage"},
+		// With no Garage the default is local, which a clustered app cannot
+		// have either, so the refusal names the placement.
+		{"cluster without garage", func(c *config.Config) {
+			c.Storage.Garage = config.Garage{}
+		}, "storage-local-on-cluster", "apps.docs.placement"},
+		{"media hostname on a local app", func(c *config.Config) {
+			docs := c.Apps["docs"]
+			docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+			docs.Storage = config.StorageLocal
+			docs.Hostnames = map[string]string{"media": "files.example.org"}
+			c.Apps["docs"] = docs
+		}, "media-hostname-without-object-storage", "apps.docs.hostnames.media"},
+		{"a kind with no files", func(c *config.Config) {
+			c.Apps["web"] = config.App{Kind: config.KindElement, Hostname: "web.example.org",
+				Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
+				Storage:   config.StorageLocal, Settings: map[string]any{"homeserver": "chat.example.org"}}
+		}, "storage-on-a-kind-without-files", "apps.web.storage"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := load(t, "valid")
+			tc.edit(cfg)
+			if result := validate.Check(cfg); !refusedFor(result, tc.rule, tc.key) {
+				t.Fatalf("%s did not refuse %s: %v", tc.rule, tc.key, result.Findings)
+			}
+		})
+	}
+}
+
+// storage: local on a kind that keeps its files only locally is what it does
+// anyway, so it is accepted rather than refused as redundant.
+func TestLocalStorageOnALocalOnlyKindIsAccepted(t *testing.T) {
+	cfg := load(t, "valid")
+	status := cfg.Apps["status"]
+	status.Storage = config.StorageLocal
+	cfg.Apps["status"] = status
+	if result := validate.Check(cfg); len(result.Findings) != 0 {
+		t.Errorf("%v", result.Findings)
+	}
+}
+
+// An unknown value is refused when the file is loaded, before any rule.
+func TestAnUnknownStorageValueIsRefusedAtLoad(t *testing.T) {
+	if _, err := config.Load("testdata/storage-unknown-value.yaml"); err == nil {
+		t.Fatal("storage: disk loaded")
+	}
+}

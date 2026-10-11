@@ -27,7 +27,7 @@ func TestExampleSecretsMatchAppSecretKeys(t *testing.T) {
 	}
 
 	for _, name := range cfg.AppNames() {
-		want := appSecretKeys(cfg.Apps[name])
+		want := appSecretKeys(cfg, cfg.Apps[name])
 		sort.Strings(want)
 
 		var got []string

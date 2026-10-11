@@ -202,6 +202,9 @@ func declared() *config.Config {
 			"docs": {Kind: config.KindOutline, Hostname: "Docs.Example.org."},
 		},
 		Community: config.Community{Domain: "example.org"},
+		// Garage, so talk and docs keep their files in it and each has a
+		// media hostname, as they would by default in a real deployment.
+		Storage: config.Storage{Garage: config.Garage{Sites: []string{"home-a"}}},
 	}
 }
 
@@ -565,6 +568,33 @@ func TestDesiredDerivesAndDedupes(t *testing.T) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+// An app keeping its files on its own disk has no media hostname, so dns
+// creates no record for one: there is no bucket and no route behind it.
+func TestALocalStorageAppGetsNoMediaRecord(t *testing.T) {
+	cfg := declared()
+	talk := cfg.Apps["talk"]
+	talk.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	talk.Storage = config.StorageLocal
+	cfg.Apps["talk"] = talk
+
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawDocsMedia bool
+	for _, w := range wants {
+		if w.Name == "talk-media.example.org" {
+			t.Errorf("talk keeps its files locally and still gets %s %s", w.Type, w.Name)
+		}
+		if w.Name == "docs-media.example.org" {
+			sawDocsMedia = true
+		}
+	}
+	if !sawDocsMedia {
+		t.Error("docs is still in Garage and lost its media record")
 	}
 }
 

@@ -329,6 +329,12 @@ apps:
     # ordinary choice, not a forced one: pinning to a home is as valid as
     # pinning to the gateway, and its availability is that site's.
     placement: { pinned: home-a }
+    # Optional, and only for a kind that stores files. Left out, the blog's
+    # images go to Garage, because this deployment runs one; `local` keeps
+    # them in the blog's own stack directory on home-a instead, which only a
+    # pinned app may do, and gives it no bucket and no media hostname. See
+    # README, "A pinned app may keep its files on its own disk".
+    # storage: local
     settings:
       # WriteFreely reads config.ini rather than an environment, and this is
       # what the [app] section is rendered from. A rendered file carrying a
