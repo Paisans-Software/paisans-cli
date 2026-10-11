@@ -317,7 +317,23 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(keys)
 
-	firewall, err := profile.Firewall(t, d, append(Rules(d, declared), ContainerRules(cfg, site)...), !o.shared)
+	rules := append(Rules(d, declared), ContainerRules(cfg, site)...)
+	if !declared.RunsCaddy() {
+		// A former gateway still serving through a move keeps 80 and 443
+		// (gateway.go).
+		out, err := t.Run(GatewayCaddyProbe(d))
+		if err != nil {
+			return nil, fmt.Errorf("asking %s for this deployment's gateway Caddy: %w", t.Describe(), err)
+		}
+		if len(ParseGatewayCaddy(out)) > 0 {
+			rules = append(rules, GatewayRules()...)
+			plan.Warnings = append(plan.Warnings, Warning{
+				Hint:   site + " keeps 80 and 443 for the gateway it was",
+				Detail: "This deployment's gateway Caddy still runs here although the site no longer holds the gateway role, so it keeps serving until paisans gateway move has moved DNS and stopped it. The next prepare after that removes both allows.",
+			})
+		}
+	}
+	firewall, err := profile.Firewall(t, d, rules, !o.shared)
 	if err != nil {
 		return nil, fmt.Errorf("firewall on %s: %w", t.Describe(), err)
 	}

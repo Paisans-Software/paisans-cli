@@ -5802,20 +5802,87 @@ connection cannot be that.
 The move should never be "stop here, start there."
 
 ```
-1. The new gateway comes up, obtains certificates, and serves —
+1. The new gateway comes up, obtains certificates, and serves,
    while the old one is still serving
 2. Verify the new gateway answers correctly for every hostname
-3. Repoint DNS
+3. Add the new gateway's address records beside the old one's,
+   then delete the old one's
 4. Wait out the old TTL; the old gateway keeps serving stragglers throughout
 5. Stop the old gateway
 ```
 
-No gap, and reversible at any point before step 5 — repoint DNS back and the old
-gateway is still running. That is the difference between an easy migration and a
-nervous one.
+No gap, and reversible at any point before step 5: delete the new records and
+the old gateway is still running and still published. That is the difference
+between an easy migration and a nervous one.
+
+Step 3 publishes both gateways at once rather than replacing one record with
+another. While both addresses are published every visitor reaches a gateway
+that serves, whichever address their resolver hands them, and the old one's
+records go only once the new one has been verified (Founder decision).
 
 This works because the new gateway can reach the apps over the mesh, which was
 established when its site joined. The ordering already holds.
+
+`paisans gateway move` performs steps 2 to 5 as six gated stages, each planned
+from live state and each ending at a gate that stops the run with its
+evidence, so a run after a fix resumes at the first stage with anything left
+to do. Like every command that changes a deployment it is a dry run until
+`--execute`.
+
+| # | Stage | Does | Gate |
+|---|---|---|---|
+| 1 | record | merges the old gateway's deployment record into the new one's | the new gateway's record lists every name the old one's lists |
+| 2 | serve | nothing | the new gateway answers for every hostname |
+| 3 | dns add | creates the new gateway's address records beside the old one's | every one is present, unproxied |
+| 4 | dns remove | checks the new gateway again, then deletes the old one's records | no hostname the gateway serves points at the old gateway |
+| 5 | wait | sleeps out the longest TTL of the deleted records | that time has passed |
+| 6 | stop | checks the new gateway again, then stops and removes the old Caddy | the old site holds nothing of a gateway's |
+
+**Answering** means: every hostname the gateway serves, each app's hostnames
+and media hostnames but never a monitor's, requested over HTTPS from the
+operator's machine **through the new gateway's own public address** (and
+`public_address6` when declared), whatever the name resolves to. An app's own
+hostname is asked at its kind's health route, any other at `/`. It passes with
+a certificate valid for the name and a status below 500, because that is what
+the gateway alone decides: Caddy answers 502 or 503 when it cannot reach the
+app, and a redirect such as the visibility gate's sign in is the app
+answering. The check runs at stage 2's gate, and again on the same run before
+anything is deleted and before anything is stopped, so neither ever acts on a
+check from an earlier run.
+
+**What is deleted** is narrow on purpose (Founder decision): an A or AAAA
+record carrying this deployment's `dns init` comment, not proxied, at a
+hostname the gateway serves, pointing at the old gateway's public address and
+not the new one's, and only once every record the new gateway needs is
+present. A record pointing at the old gateway that fails any of that, such as
+one made by hand, is listed with why, nothing is deleted while it stands, and
+the old gateway is not stopped, since that name would still send visitors to
+it. Records at every other name are `dns prune`'s and `site remove`'s, under
+their own rules.
+
+**The wait** is the longest TTL of the deleted records, from the time of the
+last delete, which stage 4 writes on the old gateway's host
+(`/var/lib/paisans/gateway-move.<token>.json`) so that a run stopped during the
+wait resumes it. Every record `dns init` makes carries the provider's automatic
+TTL, 300 seconds at Cloudflare
+([Cloudflare: Time to Live](https://developers.cloudflare.com/dns/manage-dns-records/reference/ttl/)),
+so the records are already short lived and the wait is minutes. A record made
+by hand with a long TTL is not the move's to delete, so it stops the move
+instead of lengthening it.
+
+**The old gateway is found, never declared.** `paisans.yaml` names one
+gateway, the new one. The old one is the site without the role whose host
+still has this deployment's gateway Caddy, its deployment record or the move's
+marker, or whose public address this deployment's records at the gateway's
+hostnames still point at. The configuration declares the end state, and what
+is still running is a fact about the hosts, so it is read from them; a site
+that cannot be asked stops the move rather than reading as no gateway. The
+move ends by removing each of those, so a finished move finds nothing and says
+so. Two sites that both still hold a gateway are refused: one move at a time.
+
+**The move needs the provider's API.** It adds and deletes through record
+management (see *`dns init` creates the records a deployment needs*), so a
+provider without it is refused and the steps above are done by hand.
 
 ### DNS-01 is what makes step 1 possible
 
@@ -5943,7 +6010,9 @@ fine: Caddy logs a warning for an import glob that matches no file and starts
 (Caddy v2.11.7, `caddyconfig/caddyfile/parse.go`, `doImport`). The directory
 stays on the host when the gateway role moves, and its files move by hand.
 `doctor` lists each file there, so whoever moves or stops the gateway can see
-what else depends on it. When `site remove` takes a gateway off a host whose
+what else depends on it. `gateway move` does not stop the old gateway's Caddy while
+its `/srv/caddy.d` holds a site file: it stops at that stage, naming the
+files, and resumes there once they have moved or gone. When `site remove` takes a gateway off a host whose
 `/srv/caddy.d` is in use, it keeps the Caddy, reduced to those sites, so they
 stay served (see *`site remove` takes a site out*).
 
@@ -5955,11 +6024,33 @@ sites:
   vm:     { roles: [gateway, witness] }  # gateway added
 ```
 
-`apply` then performs the overlap above. Two things it should do unasked: lower
-the DNS TTL well in advance and restore it afterwards, and refuse to stop the old
-gateway until the new one has answered correctly for every hostname.
+`paisans apply` without `--site` then performs the overlap above. Three things
+make that hold across its steps:
 
-Rollback is moving the role back and applying again.
+* **`host prepare` keeps the old gateway open.** Its firewall follows roles,
+  and home-a no longer has the gateway's, so the prepare `apply` runs first
+  would close 80 and 443 before DNS had moved. While this deployment's gateway
+  Caddy is still on a site's host, that site keeps the gateway's two allows,
+  and the plan warns that it does. The first prepare after the move stopped
+  the Caddy removes them.
+* **`dns init` leaves a moving name to the move.** A hostname the gateway
+  serves that still holds the record `dns init` made for another declared
+  site is marked `moving`, shown as a note, and neither created nor counted as
+  a conflict, so the run is not stopped before the new gateway is applied. A
+  record pointing elsewhere that `dns init` did not make is still a conflict.
+* **The move runs last.** `apply` asks every site without the gateway role
+  whether it still holds a gateway, and when one does, plans `gateway move`
+  after pass two, in a `gateway` section of its own, waiting on the new
+  gateway's apply. The new gateway is applied, comes up and obtains its
+  certificates in the install steps; the move then verifies it, moves DNS,
+  waits and stops the old Caddy.
+
+The old Caddy's files and certificates stay on home-a, recorded as left over
+by its apply. `paisans gateway move` runs the same stages alone, when the new
+gateway has already been applied.
+
+Rollback, before stage 6, is moving the role back and applying again: the
+gateway it moves from is then vm, and the same stages move the records back.
 
 ## Where documentation lives
 

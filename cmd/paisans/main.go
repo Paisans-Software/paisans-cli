@@ -60,6 +60,7 @@ Usage:
                [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]
   paisans site remove --force --ssh <user@host[:port]> --id <id or token>
                [--delete-data] [--sudo=false] [--execute]
+  paisans gateway move [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--ssh <destination>] [--execute]
   paisans storage add [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -140,6 +141,14 @@ Commands:
              names, as --force does, from the registry entry alone.
              DNS is not modified. --execute asks for the site's name at
              a terminal.
+  gateway    move: move the gateway role to the site paisans.yaml gives it,
+             from the site that still serves as the gateway, in gated
+             stages: carry the deployment record, check the new gateway
+             answers for every hostname through its own address, add its
+             address records beside the old one's, delete the old one's
+             (only after that check, and only records dns init made for
+             it), wait out their TTL, then stop the old gateway's Caddy.
+             Resumes after a fix. Writes nothing without --execute.
   storage    init: provision object storage on a site: each app's key and
              bucket, and the layout when it is the only Garage site.
              add: join every site in storage.garage.sites into one Garage
@@ -274,6 +283,8 @@ func main() {
 		default:
 			os.Exit(usageError(os.Stderr, "site takes one subcommand, add or remove"))
 		}
+	case "gateway":
+		err = runGateway(os.Args[2:])
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":

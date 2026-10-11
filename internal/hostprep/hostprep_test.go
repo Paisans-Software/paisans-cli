@@ -1818,3 +1818,48 @@ func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
 		t.Errorf("an empty plan has kinds %q", got)
 	}
 }
+
+// A site that was the gateway keeps 80 and 443 while this deployment's
+// gateway Caddy is still on it, so the move's overlap is not cut short by
+// the prepare that runs before it; once the move has stopped that Caddy, the
+// next prepare removes them.
+func TestAFormerGatewayKeepsItsWebAllowsUntilItsCaddyIsGone(t *testing.T) {
+	host := preparedHost(true)
+	host.responses["com.docker.compose.service=caddy"] = "caddy c0ffee running\n"
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "80/tcp") || strings.Contains(s.Command, "443/tcp") {
+			t.Errorf("removes a web allow while the old gateway serves: %s", s.Command)
+		}
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0].Hint, "keeps 80 and 443") {
+		t.Errorf("warnings: %+v", plan.Warnings)
+	}
+
+	delete(host.responses, "com.docker.compose.service=caddy")
+	plan, err = hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	for _, s := range plan.Steps {
+		if s.Label == "remove" && (strings.Contains(s.Command, "80") || strings.Contains(s.Command, "443")) {
+			removed++
+		}
+	}
+	if removed != 2 {
+		t.Errorf("want both web allows removed once the Caddy is gone:\n%s", printed(plan))
+	}
+}
+
+// A Docker that cannot be asked is an error, never no Caddy.
+func TestAFailedCaddyProbeIsAnError(t *testing.T) {
+	host := preparedHost(false)
+	host.failures = map[string]error{"com.docker.compose.service=caddy": errors.New("exit status 1")}
+	if _, err := hostprep.Build("home-a", fixture(t), host); err == nil {
+		t.Fatal("a failed probe was read as no Caddy")
+	}
+}
