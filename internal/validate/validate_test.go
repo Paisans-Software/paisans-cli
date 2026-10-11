@@ -644,6 +644,36 @@ func TestExternalIngressNeedsListen(t *testing.T) {
 	}
 }
 
+// include_dir is where apply writes for the operator's web server: it fits
+// mode external alone, and must be a plain absolute path. false fits either.
+func TestIngressIncludeDir(t *testing.T) {
+	for _, tc := range []struct {
+		mode config.IngressMode
+		dir  config.IncludeDir
+		rule string
+	}{
+		{config.IngressExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
+		{config.IngressExternal, config.IncludeDir{Off: true}, ""},
+		{config.IngressExternal, config.IncludeDir{Path: "paisans.d"}, "ingress-include-dir-path"},
+		{config.IngressExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "ingress-include-dir-path"},
+		{config.IngressPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "ingress-include-dir-mode"},
+	} {
+		cfg := load(t, "uptime-without-smtp")
+		site := cfg.Sites["watch"]
+		site.Ingress = &config.Ingress{Mode: tc.mode, IncludeDir: tc.dir}
+		if tc.mode == config.IngressExternal {
+			site.Ingress.Listen = "127.0.0.1:8480"
+		}
+		cfg.Sites["watch"] = site
+		result := validate.Check(cfg)
+		for _, rule := range []string{"ingress-include-dir-path", "ingress-include-dir-mode"} {
+			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.ingress.include_dir") != want {
+				t.Errorf("%s %+v: %s refused %v, want %v: %v", tc.mode, tc.dir, rule, !want, want, result.Findings)
+			}
+		}
+	}
+}
+
 // acme.image's module check covers every site running the toolkit's Caddy,
 // a monitor serving its own hostname included, not only a gateway.
 func TestACMEProviderNeedsAnImageForAMonitorsCaddy(t *testing.T) {
