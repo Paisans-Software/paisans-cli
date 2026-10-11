@@ -3548,8 +3548,10 @@ once Patroni runs, so a later visit applies it again, and one still waiting on
 its last visit is applied once more after every other step, by which time the
 leader's site has created them. Still waiting then, it stops the run. It never takes anything out: a site or an
 app the yaml no longer declares is reported by the deployment record's warning,
-with the command that removes it. What only the operator can decide is left to
-its own command: the first Pocket ID admin (`app admin create`), a credential
+with the command that removes it. Once Pocket ID runs, every admin the
+`admins` section declares is made a Pocket ID administrator and handed a login
+link (see *`apply` makes the declared admins and hands each a login link*).
+What only the operator can decide is left to its own command: a credential
 the toolkit cannot generate (`secrets set`), and a DNS record pointing
 elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
@@ -4625,13 +4627,74 @@ volume is mounted** because each recreate otherwise costs a volume, and a
 throwaway path is not bound under the deployment's root because a shared cache directory
 between replicas is a race, not state.
 
+### `apply` makes the declared admins and hands each a login link
+
+A deployment that has just come up runs every app and lets nobody in: Pocket
+ID has no administrator, and its users sign in with passkeys, so there is no
+password to hand anyone. The `admins` section already says who the admins
+are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
+Pocket ID administrator: the admin's key is the username, `email` is the
+address, marked verified for the reason `app admin create` gives below, and
+`name` is split at its first space into a first and a last name. Each is put
+in every app's admin group, as `app admin create` does. Declaring the admin is
+the approval for all of it.
+
+An account is found by its username, then by its email, because Pocket ID
+lets a user change both once signed in (`ALLOW_OWN_ACCOUNT_EDIT`). Only an
+admin found by neither is created. Since the username is the admin's key,
+`validate` refuses a key Pocket ID would not take, one that does not end in a
+letter or digit (`pocket-id-admin-username`), when the deployment runs Pocket
+ID.
+
+**An admin who has registered a passkey gets nothing more.** That is the sign
+the account was taken up, and Pocket ID records it as a `PASSKEY_ADDED` event
+in its audit log, which apply reads. **Every other admin gets a new login link
+on every run**, valid for 24 hours and for one sign in. Pocket ID keeps no way
+to read a link back once issued, so a run cannot reuse an earlier one, and
+issuing one does not revoke the others: an earlier link stays valid until it
+is used or expires.
+
+**Every link is printed at the end of the run**, after its result, whether
+output is a terminal or a pipe, so that it can be passed on by any means. A
+link signs in as its admin: treat it as a password. It is printed once and
+kept nowhere.
+
+```
+pocket id
+  ✓ alice on auth          registered
+  ✓ fern on auth           created, link issued
+  ✓ email fern a login link   sent
+
+Login links, each valid for 24 hours and for one sign in. Treat each as a password:
+  fern  https://id.example.org/lc/ABCDEFGHJKLM
+```
+
+**When the smtp settings resolve a host and a sender, Pocket ID emails each
+admin a link as well.** `email_one_time_access_as_admin` is then `true`
+unless the settings say otherwise, and apply asks Pocket ID to email the
+admin. The emailed link is Pocket ID's own, a second link beside the printed
+one. Pocket ID answers before it sends and logs only a failure, so apply
+reads its log for 30 seconds and marks the line `failed:` with Pocket ID's
+error, or `sent` when none was logged. `sent` means no failure was reported,
+not that the mail arrived. A failed email fails nothing: the printed link is
+there.
+
+An admin who cannot be made fails the run, after every other admin has been
+tried and the links already issued are printed. Taking an admin out of the
+section changes nothing in Pocket ID. A dry run reads Pocket ID and plans,
+one `○` line per admin, and issues nothing.
+`docs/specs/2026-10-11-apply-admin-login-links.md` is the approved
+specification.
+
 ### `app admin create` makes an app's first administrator
 
 An app whose registrations are closed has no way to make its first account
 from a browser, and Pocket ID's own way to make its first administrator is a
 setup page open to whoever reaches it first. So the toolkit makes it, through
 Pocket ID's API; the commands are under *Pocket ID's administrator gets a
-login link, not a password*.
+login link, not a password*. `apply` does the same for every admin the
+`admins` section declares (see above); this command is for any other, and for
+a deployment that declares none.
 
 The result is a user that exists, is verified and is an administrator. The
 command probes first and plans only what is missing, one `○` line each; when
@@ -4790,7 +4853,7 @@ which is a restart of a few seconds during which nobody can sign in.
 | `require_user_email` | `REQUIRE_USER_EMAIL` | `true` or `false` |
 | `email_login_notification` | `EMAIL_LOGIN_NOTIFICATION_ENABLED` | `true` or `false` |
 | `email_one_time_access_as_unauthenticated` | `EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED` | `true` or `false` |
-| `email_one_time_access_as_admin` | `EMAIL_ONE_TIME_ACCESS_AS_ADMIN_ENABLED` | `true` or `false` |
+| `email_one_time_access_as_admin` | `EMAIL_ONE_TIME_ACCESS_AS_ADMIN_ENABLED` | `true` or `false`; `true` when unset and the smtp settings resolve a host and a sender |
 | `email_api_key_expiration` | `EMAIL_API_KEY_EXPIRATION_ENABLED` | `true` or `false` |
 | `email_verification` | `EMAIL_VERIFICATION_ENABLED` | `true` or `false` |
 | `webauthn_user_verification` | `WEBAUTHN_USER_VERIFICATION` | `required` or `preferred` |

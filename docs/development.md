@@ -114,6 +114,14 @@ exists so a credential issued elsewhere never touches a terminal or an editor:
 an argument is in shell history and `ps`, a prompt is in scrollback, and `sops`
 opens the whole decrypted file in an editor.
 
+A whole `apply --execute` does the same, once Pocket ID runs, for every admin
+the `admins` section declares (`cmd/paisans/converge_admins.go`), through
+`appadmin` with `Request.Declared`: the account is also found by its email, a
+24 hour link is issued to each admin with no `PASSKEY_ADDED` audit event, and
+with mail Pocket ID emails one too (`Request.EmailLink`); its log is read for
+a failed send. Every link is printed after the run's result. See *`apply`
+makes the declared admins and hands each a login link* in `README.md`.
+
 `app admin create --app <pocket-id app> --username <u> --email <e>` makes
 sure one user exists, is verified, is an administrator of Pocket ID, and is in
 every admin group the apps signing in through it read (`kinds.OIDCClient`),
