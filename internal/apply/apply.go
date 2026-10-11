@@ -211,6 +211,10 @@ type Plan struct {
 	// recordedCaddy is what the manifest Build read recorded for Caddy, kept
 	// when this plan does not settle the compose file.
 	recordedCaddy *render.ManifestCaddy
+	// recordedIngress is what the manifest Build read recorded of the files
+	// in the operator's web server's include directory. Apply writes them
+	// after every site is up, so every manifest write keeps them.
+	recordedIngress []render.ManifestIngress
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
 	// deploymentImages is what every other site of the deployment renders.
@@ -579,6 +583,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		return nil, err
 	}
 	out.recordedCaddy = manifest.Caddy
+	out.recordedIngress = manifest.Ingress
 	out.imageHistory = manifest.Images
 	out.deploymentImages = otherSitesImages(site, plan)
 	recorded := make(map[string]string, len(entries))
@@ -1436,7 +1441,8 @@ func stackOrder(stacks map[string]bool) []string {
 
 // readManifest returns what the last apply recorded: its files, keyed by
 // path relative to the site root, and the manifest itself, for its record of
-// the site's Caddy build and of the images it rendered. A host with no
+// the site's Caddy build, of the images it rendered and of the files
+// written for the operator's web server. A host with no
 // manifest is a first apply, which is ordinary.
 func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, render.Manifest, error) {
 	var m render.Manifest
@@ -1514,7 +1520,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan)}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan), Ingress: plan.recordedIngress}, "", "  ")
 	if err != nil {
 		return err
 	}

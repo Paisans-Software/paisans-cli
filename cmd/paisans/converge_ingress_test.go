@@ -32,7 +32,11 @@ func fakeIngressCheck(t *testing.T, failing map[string][]ingress.Result) *[]stri
 		}
 	}
 	convergeSleep = func(time.Duration) {}
-	t.Cleanup(func() { convergeIngressCheck, convergeSleep = saved, savedSleep })
+	// Writing the site files reaches the monitor's host; here there is
+	// nothing to write. fakeIngressFiles says otherwise.
+	savedFiles := convergeIngressFiles
+	convergeIngressFiles = func(ui.Reporter, *config.Config, string, bool) ([]string, bool) { return nil, false }
+	t.Cleanup(func() { convergeIngressCheck, convergeSleep, convergeIngressFiles = saved, savedSleep, savedFiles })
 	fakeWebServer(t, caddyAutomatic)
 	return &checked
 }

@@ -712,7 +712,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	convergeAdmins(r, cfg, o, func(string) bool { return true })
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	failed := convergeIngress(r, cfg, sudo)
+	unwritten, headed := convergeIngressFiles(r, cfg, configPath, sudo)
+	failed := convergeIngress(r, cfg, sudo, headed)
+	for _, app := range unwritten {
+		if !slices.Contains(failed, app) {
+			failed = append(failed, app)
+		}
+	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if len(failed) > 0 {
 		return ingressFailed(failed)

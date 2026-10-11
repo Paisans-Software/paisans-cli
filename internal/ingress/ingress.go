@@ -1,10 +1,16 @@
 // Package ingress helps an operator put a monitor site's app behind a web
-// server: what that server must do, filled in for this deployment (Show), and
-// whether it does it, checked from the operator's machine (Check).
+// server: what that server must do, filled in for this deployment (Show),
+// which server it is (Detect), the file that does it written into a
+// directory the server includes (Sync), and whether it works, checked from
+// the operator's machine (Check).
 //
-// It reaches no host over ssh and changes nothing anywhere. Show reads
-// paisans.yaml alone; Check resolves a name, makes two HTTPS requests and
-// opens one TCP connection, as any visitor could.
+// Show reads paisans.yaml alone, and Detect only reads the host. Check
+// resolves a name, makes two HTTPS requests and opens one TCP connection, as
+// any visitor could. Sync and Remove are the one part that changes a host,
+// and they change only the toolkit's own files in the include directory,
+// each recorded in the deployment's manifest, never the server's own
+// configuration: the operator adds the one line that includes the
+// directory.
 package ingress
 
 import (

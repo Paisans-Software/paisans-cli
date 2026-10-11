@@ -46,13 +46,16 @@ func externalApps(cfg *config.Config) []string {
 // runs, as `paisans ingress check --app <app>` does, a line per app in a
 // section of its own. A failed check is a warning naming what failed, with
 // the failing checks' own lines, the web server found in front of the app
-// and how to fix it. It returns the apps that failed.
-func convergeIngress(r ui.Reporter, cfg *config.Config, sudo bool) []string {
+// and how to fix it. It returns the apps that failed. headed is whether the
+// section is already open, with the steps writing the apps' site files.
+func convergeIngress(r ui.Reporter, cfg *config.Config, sudo, headed bool) []string {
 	apps := externalApps(cfg)
 	if len(apps) == 0 {
 		return nil
 	}
-	r.Section("ingress")
+	if !headed {
+		r.Section("ingress")
+	}
 	var failed []string
 	for _, app := range apps {
 		s := r.Step(app)
