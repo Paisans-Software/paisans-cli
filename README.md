@@ -3618,6 +3618,7 @@ it:
 | other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
+| gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
 **DNS comes before any site is applied.** Each site's `wg-quick` resolves the
 `endpoint` names it dials, those of sites with no `public_address`, as the

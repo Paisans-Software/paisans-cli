@@ -13,8 +13,8 @@ reasoning.
 
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running
 stack. It runs `init`, `host prepare`, `dns init`, `apply --site`, `site add`,
-`storage init` and `storage add` itself, in the order the deployment needs
-them, each exactly as it runs when typed, pulls every site's images on every
+`storage init`, `storage add` and, when the gateway role has moved, `gateway
+move` itself, in the order the deployment needs them, each exactly as it runs when typed, pulls every site's images on every
 host at once before the first of them installs anything, and ends by running
 `web-server check`'s checks for each app behind the operator's own web server
 (see *`paisans apply` with no `--site` converges the whole deployment* in
@@ -214,7 +214,8 @@ that it runs, in the order and under the conditions *`paisans apply` with no
 `init` when it has work; `host prepare` on every host at once; a pull of every
 site's images on every host at once, so no install waits on a download; `dns
 init`; the founding applies, `site add`, the other sites, storage and pass
-two; a `pocket id` check for an admin; and, for each app behind the
+two; `gateway move`, when a site without the gateway role still serves as
+the gateway; a `pocket id` check for an admin; and, for each app behind the
 operator's own web server, its site file written into the web server's
 `include_dir` and `web-server check`'s checks. Each `apply --site` it runs that
 covers the whole site, rather than holding apps back until their sign in
@@ -484,6 +485,41 @@ paisans dns prune --execute     # deletes the removes, then confirms each is gon
   `--config`, `--secrets`, `--execute`.
 * **Hosts:** none; the DNS provider's API only.
 * **`--execute`:** deletes, then lists the zone again to confirm each delete.
+
+## Gateway
+
+### `paisans gateway move`
+
+Moves the gateway role to the site `paisans.yaml` gives it, from the site that
+still serves as the gateway, as an overlap: both gateways serve while the new
+one is checked, its address records are added beside the old one's, the old
+one's are deleted, their TTL is waited out, and only then is the old Caddy
+stopped. It takes no site: the new gateway is the configuration's, and the old
+one is found from what it still runs, holds and is pointed at. With no old
+gateway found, it says there is nothing to move.
+
+```sh
+paisans gateway move              # the old gateway it found, then every stage
+paisans gateway move --execute    # record, serve, dns add, dns remove, wait, stop
+```
+
+* **Alone:** when the new gateway has already been applied. The whole apply
+  runs it last, after pass two, whenever a site without the gateway role still
+  holds a gateway.
+* **Flags:** `--config`, `--secrets`, `--execute`, `--sudo` (on: run remote
+  commands through sudo).
+* **Hosts:** reads every site without the gateway role, to find the old
+  gateway; writes only to the old and new gateways' hosts. Also the DNS
+  provider's API, and each hostname the gateway serves over HTTPS from this
+  machine, through the new gateway's own public address.
+* **`--execute`:** runs the six stages in order, each ending at a gate that
+  stops the run with its evidence; a re-run resumes at the first stage with
+  anything left to do. It deletes only the old gateway's address records
+  that `dns init` made, once the new gateway passed its check on the same run,
+  and does not stop the old Caddy while the host's `/srv/caddy.d` holds a site
+  file. Without it, it shows the old gateway it found and every stage.
+
+See *Moving the gateway* in `README.md`.
 
 ## Apps
 
