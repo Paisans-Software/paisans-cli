@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1355,6 +1356,10 @@ func TestAFoundingApplyStopsWhileAMemberHasNotStarted(t *testing.T) {
 	if !errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the founding stop is not apply.ErrFoundingWait: %v", err)
 	}
+	var wait *apply.FoundingWaitError
+	if !errors.As(err, &wait) || wait.Site != "home-a" || !slices.Equal(wait.Unstarted, []string{"home-b"}) {
+		t.Errorf("the founding stop does not name the members it waits on: %#v", wait)
+	}
 	for _, want := range []string{"waiting on home-b", "Apply home-b, then apply this site again"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not say %q:\n%v", want, err)
@@ -1434,6 +1439,10 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 	}
 	if !errors.Is(err, apply.ErrDatabasesWait) {
 		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
+	}
+	var wait *apply.DatabasesWaitError
+	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"docs", "talk"}) {
+		t.Errorf("the replica's stop does not name the leader: %#v", wait)
 	}
 	if errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)

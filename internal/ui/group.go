@@ -388,17 +388,20 @@ func (l *line) text() string {
 	return l.title + ": " + l.result
 }
 
-// waitingText is a line that is not visited as it stands: its title, the
-// time its visits took, and why it paused.
+// waitingText is a line that is not visited as it stands: its title, then
+// the time its visits took and why it paused, as "39.2s, paused until".
 func (l *line) waitingText() string {
-	text := l.title
+	var after []string
 	if l.spent >= time.Second {
-		text += fmt.Sprintf(": %.1fs", l.spent.Seconds())
+		after = append(after, fmt.Sprintf("%.1fs", l.spent.Seconds()))
 	}
 	if l.why != "" {
-		text += " (" + l.why + ")"
+		after = append(after, l.why)
 	}
-	return text
+	if len(after) == 0 {
+		return l.title
+	}
+	return l.title + ": " + strings.Join(after, ", ")
 }
 
 // elapsedLocked is the time l's visits have taken, the one running too.
