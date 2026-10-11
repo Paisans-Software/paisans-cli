@@ -49,7 +49,11 @@ type step struct {
 	title   string
 	started time.Time
 	details []string
-	ended   bool
+	// progress is what the step is working on now, drawn after its title
+	// while it is open. The writer's mutex guards it, since the spinner's
+	// goroutine reads it.
+	progress string
+	ended    bool
 	// stop closes when this step's spinner must stop. It lives on the step,
 	// not the writer, so ending one step cannot stop another step's spinner.
 	stop chan struct{}
@@ -151,6 +155,9 @@ func (r *writer) drawLocked() {
 	}
 	elapsed := r.now().Sub(s.started)
 	fmt.Fprintf(r.w, "%s  %s %s", clear, frames[r.frame_%len(frames)], s.title)
+	if s.progress != "" {
+		fmt.Fprintf(r.w, ": %s", s.progress)
+	}
 	if elapsed >= time.Second {
 		fmt.Fprintf(r.w, ": %ds", int(elapsed.Seconds()))
 	}
@@ -161,6 +168,22 @@ func (s *step) Detail(format string, args ...any) {
 	defer s.r.mu.Unlock()
 	if s.r.verbose && !s.ended {
 		s.details = append(s.details, fmt.Sprintf(format, args...))
+	}
+}
+
+// Progress replaces what the open step shows it is working on, and redraws
+// its spinner line at once, unless a hold is in place. An ended step keeps
+// the line it ended with.
+func (s *step) Progress(text string) {
+	r := s.r
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s.ended {
+		return
+	}
+	s.progress = text
+	if r.terminal && r.open == s {
+		r.drawLocked()
 	}
 }
 
