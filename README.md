@@ -2612,6 +2612,28 @@ it from the operator, once per site per run, on the controlling terminal:
 sudo password for site home-a (ubuntu@203.0.113.10, host home-a-01):
 ```
 
+A command that reaches several hosts asks every one of them before it reaches
+any: `apply` without `--site` (and the `init` it runs first, when it has work)
+and `site remove`. Each host is asked on its own, in site name order, under a
+`sudo` section at the top of the run:
+
+```
+sudo
+  ✓ home-a
+  ✓ home-b
+  · vm: not reached; asked when a step reaches it
+  ✓ watch
+```
+
+A line is ✓ once that host's sudo is settled, whether a password was accepted
+or none was needed. A password that is empty, unreadable or not accepted marks
+its line ✗ and stops the run there, before any step, with sudo's own problem.
+A host that does not answer, or that ssh cannot log in to, is not a stop: its
+line waits, and the first step that reaches it asks for its password then and
+reports what went wrong exactly as it would have. `site remove --host-gone`
+never reaches the leaving host, so it is not asked. A command about one host
+asks before its first sudo command, as above.
+
 The prompt names the site as `paisans.yaml` does and the name the host gives
 itself (`uname -n`), beside the address ssh reached. An address alone is often
 one the operator does not recognise, and typing a root password needs
@@ -3178,7 +3200,8 @@ Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
 step is the command an operator would type, so it plans, gates, claims and
 refuses as that command does, and the sudo password each host asks for is
-asked once for the run. `-v` reaches every step, and `--keep-images` and
+asked once for the run, every one of them before the first step (see *A sudo
+that wants a password is asked for once, on a terminal*). `-v` reaches every step, and `--keep-images` and
 `--min-free` each `apply`; `--ssh`, `--overwrite`, `--only` and `--recreate`
 are about one site, and are refused without `--site`. A stop names its step and how
 to carry on: usually by running it again, but a DNS record pointing elsewhere

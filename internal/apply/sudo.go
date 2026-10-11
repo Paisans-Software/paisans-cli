@@ -49,6 +49,50 @@ func NewSudoAuth(prompt func(host string) (string, error)) *SudoAuth {
 	return &SudoAuth{Prompt: prompt}
 }
 
+// SudoPreparer is a transport whose sudo can be settled before its first
+// command, so that a run reaching several hosts asks every password at its
+// start. A test's fake transport implements it to stand in for a host.
+type SudoPreparer interface {
+	// SettlesSudo reports whether commands run through sudo with an Auth,
+	// so that there is an answer to settle.
+	SettlesSudo() bool
+	// PrepareSudo settles that answer now: see PrepareSudo.
+	PrepareSudo() error
+}
+
+// SettlesSudo reports whether t runs its commands through sudo with an Auth
+// to settle.
+func (t SSHTransport) SettlesSudo() bool { return t.Sudo && t.Auth != nil }
+
+// PrepareSudo asks the host whether sudo needs a password and, if it does,
+// asks the operator and checks it, exactly as the first sudo command would.
+// The answer is kept in t's Auth, so the commands after it never ask.
+func (t SSHTransport) PrepareSudo() error {
+	if !t.SettlesSudo() {
+		return nil
+	}
+	_, err := t.Auth.resolve(t)
+	return err
+}
+
+// SettlesSudo reports whether t is a SudoPreparer with sudo to settle.
+func SettlesSudo(t Transport) bool {
+	p, ok := t.(SudoPreparer)
+	return ok && p.SettlesSudo()
+}
+
+// PrepareSudo settles sudo on t ahead of its first command, and does nothing
+// for a transport with none to settle. Its errors are the first command's
+// would be: ErrSudo for an answer that is kept, a refusal or a password sudo
+// did not accept, and ErrUnreachable for a host that never answered, which
+// is not kept, so the next command asks again.
+func PrepareSudo(t Transport) error {
+	if !SettlesSudo(t) {
+		return nil
+	}
+	return t.(SudoPreparer).PrepareSudo()
+}
+
 // sudo wraps a command to run under sudo, when the transport says to, and
 // returns the stdin to send with it.
 func (t SSHTransport) sudo(command string, stdin *string) (string, *string, error) {

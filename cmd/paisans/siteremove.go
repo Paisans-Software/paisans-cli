@@ -126,6 +126,11 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		transports[name] = removeSiteHost(name, cfg.Sites[name], *sudo)
 		claim = append(claim, name)
 	}
+	// Every host it reaches is asked for its sudo password before any is
+	// read, rather than at whichever stage first needs it.
+	if err := settleSudo(r, claim, func(name string) apply.Transport { return transports[name] }); err != nil {
+		return err
+	}
 	// The monitor's stack is applied last, with the site out of its seed,
 	// so each monitor site is host checked as apply would check it.
 	if _, err := gateSites(r, cfg, cfg.MonitorSites(), func(site string) hostcheck.Transport { return transports[site] }); err != nil {
@@ -217,6 +222,9 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	reach := declared
 	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.Host, dest.Port
 	t := removeSiteHost(site, reach, a.sudo)
+	if err := settleSudo(r, []string{site}, func(string) apply.Transport { return t }); err != nil {
+		return err
+	}
 	opts := siteremove.Options{DeleteData: a.deleteData, ConfigPath: a.config, DNSProvider: dnsProviderFor}
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForced(cfg, secrets, site, dest, t, opts)
@@ -311,6 +319,9 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 		return noTerminal("Nothing says whether this deployment still runs")
 	}
 	t := reachDestination(dest, a.sudo)
+	if err := settleSudo(r, []string{dest.String()}, func(string) apply.Transport { return t }); err != nil {
+		return err
+	}
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForcedByID(dest, t, a.id, siteremove.Options{DeleteData: a.deleteData})
 	})
