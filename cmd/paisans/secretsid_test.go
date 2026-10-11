@@ -139,7 +139,7 @@ func TestInitWritesTheDeploymentID(t *testing.T) {
 			if err := runInitQuietly(t, path); err != nil {
 				t.Fatal(err)
 			}
-			secrets, err := config.LoadSecrets(secretsPath)
+			secrets, err := config.LoadDeploymentSecrets(secretsPath, exampleID)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
+	"github.com/paisans-software/paisans-stack/internal/keystore"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -102,6 +103,15 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 	}
 	meshRandom = bytes.NewReader(random)
 	t.Cleanup(func() { initHost, meshRandom = savedHost, savedRandom })
+	// Every init makes an age key under the example id, and the package's
+	// keystore outlives the test: put its items back as they were.
+	if m, ok := config.AgeKeystore.(*keystore.Memory); ok {
+		saved := map[string]keystore.MemoryItem{}
+		for k, v := range m.Items {
+			saved[k] = v
+		}
+		t.Cleanup(func() { m.Items = saved })
+	}
 	return path, withRecorder(t, true)
 }
 
@@ -278,8 +288,8 @@ func TestCheckMeshLive(t *testing.T) {
 }
 
 // init reports the subnet decision as one step with its result, each secret
-// it generates as a step named for it and never its value, and a file written
-// without a recipient as a warning.
+// it generates as a step named for it and never its value, and a fresh
+// deployment's age key as a step of its own.
 func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	path, rec := initWorld(t, nil, fakeSites(), nil)
 	if err := runInitQuietly(t, path); err != nil {
@@ -291,8 +301,8 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	if !rec.Has("done", "write secrets") || !rec.Has("detail", "+ ") || !rec.Has("result", "Generated ") {
 		t.Errorf("no created secrets:\n%s", rec.Lines())
 	}
-	if !rec.Has("warn", "was written in plaintext") {
-		t.Errorf("no plaintext warning, although no recipient is configured:\n%s", rec.Lines())
+	if !rec.Has("done", "make age key") || rec.Has("warn", "was written in plaintext") {
+		t.Errorf("a fresh init did not make a key and encrypt:\n%s", rec.Lines())
 	}
 	again := withRecorder(t, true)
 	if err := runInitQuietly(t, path); err != nil {
@@ -300,6 +310,20 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	}
 	if !again.Has("result", "already present") {
 		t.Errorf("a second run does not say nothing was written:\n%s", again.Lines())
+	}
+}
+
+// A plaintext secrets file that already exists stays plaintext, and says so.
+func TestInitWarnsAboutAPlaintextFile(t *testing.T) {
+	path, rec := initWorld(t, nil, fakeSites(), nil)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "secrets.enc.yaml"), []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Has("warn", "was written in plaintext") || rec.Has("done", "make age key") {
+		t.Errorf("unexpected report:\n%s", rec.Lines())
 	}
 }
 
@@ -349,7 +373,7 @@ func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	if !strings.Contains(out.Lines(), "sites.monitor-a is deployed but paisans.yaml no longer declares it") {
 		t.Errorf("no warning:\n%s", out.Lines())
 	}
-	secrets, err := config.LoadSecrets(filepath.Join(filepath.Dir(path), "secrets.enc.yaml"))
+	secrets, err := config.LoadDeploymentSecrets(filepath.Join(filepath.Dir(path), "secrets.enc.yaml"), cfg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

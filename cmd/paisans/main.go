@@ -406,6 +406,7 @@ func runInit(args []string) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
+	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
 	sudo := fs.Bool("sudo", true, "read each site through sudo, since the host registry is root's")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -448,6 +449,9 @@ func runInit(args []string) error {
 
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	if err := ensureAgeKey(r, cfg.ID, *configPath, *secretsPath, *ageKeyFile); err != nil {
+		return err
 	}
 	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	switch {

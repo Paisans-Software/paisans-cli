@@ -13,9 +13,9 @@ import (
 // TestMain stands a refusal in for the DNS provider site remove builds, so
 // that no test in this package can reach a real one, whatever provider its
 // fixture names. A test that needs one replaces it with a fake. The same goes
-// for the registry apply resolves Caddy's tag against: every test sees the
-// tag name one fixed build, testCaddyDigest. The same goes for the keystore
-// init keeps age keys in.
+// for the registry apply resolves Caddy's tag against, and for the keystore
+// init keeps age keys in: every test sees the tag name one fixed build,
+// testCaddyDigest, and keeps its age keys in memory.
 func TestMain(m *testing.M) {
 	caddyDigests = fixedDigest(testCaddyDigest)
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
