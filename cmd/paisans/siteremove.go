@@ -339,7 +339,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 		return err
 	}
 	reportRemains(r, plan.Remains())
-	r.Result("%s is cleaned of deployment %s. No paisans.yaml or secrets file was read.", dest, plan.DeploymentID())
+	r.Result("%s is cleaned of deployment %s.", dest, plan.DeploymentID())
 	return nil
 }
 
