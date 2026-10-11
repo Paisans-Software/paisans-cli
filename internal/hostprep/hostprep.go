@@ -19,6 +19,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -71,6 +72,44 @@ type Step struct {
 	// "share", "release" or "remove". It is not printed; Title already says
 	// what the step does.
 	Label string
+	// Kinds are what the step changes on the host, Eg: KindDocker, as a dry
+	// run sums a plan up. Most steps change one thing; installing packages
+	// changes what each package is for.
+	Kinds []string
+}
+
+// The kinds of change a step makes, in the order Plan.Kinds lists them.
+const (
+	KindDocker    = "docker"
+	KindWireGuard = "wireguard"
+	KindFirewall  = "firewall"
+	KindSSHKeys   = "ssh keys"
+	KindWatchdog  = "watchdog"
+)
+
+var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog}
+
+// Kinds is each kind of change the plan's steps make, once: those named
+// above in their order, then any other in the order its first step runs.
+// A plan with nothing to do has none.
+func (p *Plan) Kinds() []string {
+	found := map[string]bool{}
+	var others []string
+	for _, s := range p.Steps {
+		for _, k := range s.Kinds {
+			if !found[k] && !slices.Contains(kindOrder, k) {
+				others = append(others, k)
+			}
+			found[k] = true
+		}
+	}
+	var out []string
+	for _, k := range kindOrder {
+		if found[k] {
+			out = append(out, k)
+		}
+	}
+	return append(out, others...)
 }
 
 // Section is what one part of the preparation found: the steps still needed

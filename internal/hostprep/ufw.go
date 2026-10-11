@@ -173,12 +173,12 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		a, found := byKey[key]
 		switch {
 		case !found:
-			out.Steps = append(out.Steps, Step{Title: "allow " + r.String(), Describe: fmt.Sprintf("firewall: allow %s (%s)", r, r.Why), Command: "ufw " + ufwArgs(tag, r)})
+			out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "allow " + r.String(), Describe: fmt.Sprintf("firewall: allow %s (%s)", r, r.Why), Command: "ufw " + ufwArgs(tag, r)})
 		case a.owned(tag) && a.action == action:
 			out.Present = append(out.Present, fmt.Sprintf("firewall: %s allowed", r))
 		case a.owned(tag):
 			// Ours, changed by hand since. Adding it again replaces it.
-			out.Steps = append(out.Steps, Step{Title: "allow " + r.String(), Describe: fmt.Sprintf("firewall: allow %s (%s), replacing `ufw %s`", r, r.Why, a.line), Command: "ufw " + ufwArgs(tag, r)})
+			out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "allow " + r.String(), Describe: fmt.Sprintf("firewall: allow %s (%s), replacing `ufw %s`", r, r.Why, a.line), Command: "ufw " + ufwArgs(tag, r)})
 		case a.comment == "" && a.action == action:
 			// What an earlier version of host prepare added, before rules
 			// carried a comment. ufw replaces it in place when the commented
@@ -187,6 +187,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			// commented rule too, and remove the very rule just adopted.
 			out.Present = append(out.Present, fmt.Sprintf("firewall: %s allowed, by a rule without the paisans comment", r))
 			out.Steps = append(out.Steps, Step{
+				Kinds:    []string{KindFirewall},
 				Label:    "adopt",
 				Title:    "adopt rule " + r.String(),
 				Describe: fmt.Sprintf("firewall: mark `ufw %s` as host prepare's (%s); ufw rewrites it in place", a.line, r.Why),
@@ -252,6 +253,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			continue
 		}
 		removals = append(removals, Step{
+			Kinds:    []string{KindFirewall},
 			Label:    "remove",
 			Title:    "remove ufw rule " + a.key,
 			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which host prepare added and this site's roles and configuration no longer give", a.line),

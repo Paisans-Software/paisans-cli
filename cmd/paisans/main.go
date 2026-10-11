@@ -1055,7 +1055,9 @@ func runHostPrepare(args []string) error {
 	}
 
 	if !*execute {
-		dryRunFound(count(len(plan.Steps), "change"), nil)
+		// The kinds of change the plan makes, which apply's dry run shows
+		// on this step's line.
+		dryRunFound(strings.Join(plan.Kinds(), ", "), nil)
 		if len(plan.Steps) == 0 {
 			r.Result("%s is prepared. Nothing to do.", *site)
 			return nil

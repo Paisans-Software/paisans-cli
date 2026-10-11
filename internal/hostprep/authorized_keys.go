@@ -207,6 +207,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 
 	if !found {
 		out.Steps = append(out.Steps, Step{
+			Kinds:    []string{KindSSHKeys},
 			Title:    "create authorized_keys",
 			Describe: fmt.Sprintf("ssh: create %s (0600) in %s (0700), owned by %s", file, dir, user),
 			Command: fmt.Sprintf("set -e; [ -d %[1]s ] || install -d -m 700 -o %[3]s -g %[4]s %[1]s; [ -f %[2]s ] || install -m 600 -o %[3]s -g %[4]s /dev/null %[2]s",
@@ -229,6 +230,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 				was := owned[i].name
 				owned[i].name = k.Name
 				out.Steps = append(out.Steps, Step{
+					Kinds:    []string{KindSSHKeys},
 					Label:    "rename",
 					Title:    "rename ssh key",
 					Describe: fmt.Sprintf("ssh: record key %s as %s, which ssh.keys called %s", k.Fingerprint, k.Name, was),
@@ -250,6 +252,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 			added := append(append([]ownedEntry(nil), owned...), ownedEntry{mark: markAdded, fingerprint: k.Fingerprint, name: k.Name})
 			owned = append(owned, ownedEntry{mark: markShared, fingerprint: k.Fingerprint, name: k.Name})
 			out.Steps = append(out.Steps, Step{
+				Kinds:    []string{KindSSHKeys},
 				Label:    "share",
 				Title:    "share ssh key",
 				Describe: fmt.Sprintf("ssh: key %s is already authorized for %s and %s claims it; claim it too, so it stays while either lists it", label, user, claimedBy(k.Fingerprint)),
@@ -272,6 +275,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 			drop(k.Fingerprint)
 			owned = append(owned, ownedEntry{mark: markAdded, fingerprint: k.Fingerprint, name: k.Name})
 			out.Steps = append(out.Steps, Step{
+				Kinds:    []string{KindSSHKeys},
 				Label:    "add",
 				Title:    "authorize ssh key",
 				Describe: fmt.Sprintf("ssh: authorize key %s for %s", label, user),
@@ -298,9 +302,10 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 			if len(restricted) > 0 {
 				describe = fmt.Sprintf("ssh: forget key %s, which is now authorized with options by `%s` and so is no longer host prepare's", label, restricted[0].raw)
 			}
-			out.Steps = append(out.Steps, Step{Title: "forget ssh key", Describe: describe, Command: Locked(writeOwned(d, user, owned))})
+			out.Steps = append(out.Steps, Step{Kinds: []string{KindSSHKeys}, Title: "forget ssh key", Describe: describe, Command: Locked(writeOwned(d, user, owned))})
 		case o.mark == markShared:
 			out.Steps = append(out.Steps, Step{
+				Kinds:    []string{KindSSHKeys},
 				Label:    "release",
 				Title:    "release ssh key",
 				Describe: fmt.Sprintf("ssh: stop claiming key %s, which ssh.keys no longer lists; another deployment wrote it, so its line stays in %s", label, file),
@@ -308,6 +313,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 			})
 		case claimedBy(o.fingerprint) != "":
 			out.Steps = append(out.Steps, Step{
+				Kinds:    []string{KindSSHKeys},
 				Label:    "release",
 				Title:    "release ssh key",
 				Describe: fmt.Sprintf("ssh: stop claiming key %s, which ssh.keys no longer lists; %s still claims it, so its line stays in %s", label, claimedBy(o.fingerprint), file),
@@ -319,6 +325,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 				raws = append(raws, l.raw)
 			}
 			removals = append(removals, Step{
+				Kinds:    []string{KindSSHKeys},
 				Label:    "remove",
 				Title:    "remove ssh key",
 				Describe: fmt.Sprintf("ssh: remove key %s from %s, which host prepare added, ssh.keys no longer lists and no other deployment claims", label, file),
