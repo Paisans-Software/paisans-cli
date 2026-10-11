@@ -420,8 +420,29 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if err != nil {
 		return err
 	}
+	// Every sudo password is asked before the first step that reaches a
+	// host, once the configuration is one a host may be reached for.
+	settled := false
+	settle := func(cfg *config.Config) error {
+		if settled {
+			return nil
+		}
+		settled = true
+		return settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport {
+			return convergeHost(name, cfg.Sites[name], sudo)
+		})
+	}
 	initRan := false
 	if st.NeedsInit && execute {
+		// init reads every host for the mesh subnet, so the passwords are
+		// asked ahead of it. A file init cannot read yet, with no id, or
+		// one it would refuse, reaches no host here: init asks for them in
+		// its own first read of the hosts.
+		if pre, err := config.LoadForInit(configPath); err == nil && !validate.Check(pre).Refused() {
+			if err := settle(pre); err != nil {
+				return err
+			}
+		}
 		// init writes the id, the subnet and the secrets the rest is
 		// planned from, so the state is read again once it has run.
 		if err := convergeRun(convergeFlags([]string{"init"}, o)); err != nil {
@@ -488,6 +509,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		default:
 			line.End(ui.Pending, initWhy(st))
 		}
+	}
+	if err := settle(cfg); err != nil {
+		return err
 	}
 	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
 		return err
@@ -934,3 +958,10 @@ type adminCheckFailure struct {
 
 func (f *adminCheckFailure) Error() string { return f.reason }
 func (f *adminCheckFailure) Unwrap() error { return f.cause }
+
+// convergeHost is how apply without --site reaches a site to settle its
+// sudo: the transport every step builds for it, so the answer is the one
+// they find. Tests replace it.
+var convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
+	return siteTransport(name, site, "", sudo)
+}
