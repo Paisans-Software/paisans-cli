@@ -181,3 +181,15 @@ const ControlPathMax = controlPathMax
 // LogCause exposes the reader that picks one failing service's cause out of
 // the tail of its log.
 var LogCause = logCause
+
+// SetResolveWait shortens the wait for the mesh's endpoint names the same
+// way, and shares the same sleep.
+func SetResolveWait(wait, poll time.Duration, sleeper func(time.Duration)) func() {
+	oldWait, oldPoll, oldSleep := resolveWait, resolvePoll, sleep
+	resolveWait, resolvePoll, sleep = wait, poll, sleeper
+	return func() { resolveWait, resolvePoll, sleep = oldWait, oldPoll, oldSleep }
+}
+
+// ResolveProbe exposes the command that flushes the host's DNS cache and
+// asks which of names resolve.
+func ResolveProbe(names []string) string { return resolveProbe(names) }
