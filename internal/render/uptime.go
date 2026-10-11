@@ -67,6 +67,10 @@ func directCheckName(app, site string) string {
 	return fmt.Sprintf("%s — direct (%s)", app, site)
 }
 
+func privateAPICheckName(app, site string) string {
+	return fmt.Sprintf("%s — private API (%s)", app, site)
+}
+
 func pingName(site string) string { return site + " — ping" }
 
 func (p *planner) uptimeSeed(self string) (string, error) {
@@ -137,6 +141,19 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
+			if app.Kind == config.KindMbin && gated {
+				// A gated Mbin runs as a private instance, so its API refuses
+				// a read with no token. Through the edge the gate answers
+				// first, so this is asked of the app directly: it is what
+				// notices an image that ignores MBIN_PRIVATE_INSTANCE.
+				monitors = append(monitors, seedMonitor{
+					Name: privateAPICheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
+					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, appPort[app.Kind], kinds.MbinPrivateAPIProbe),
+					ExpectedStatus: "401", FollowRedirects: &noRedirects,
+					RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
+					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+				})
+			}
 			if app.Kind == config.KindPocketID {
 				// The admin reconciler beside each instance: 503 while admins
 				// has fewer than two members (docs/specs/2026-10-08-admin-reconciler.md).

@@ -98,22 +98,25 @@ func mbinFallbackAddress(hostname string) string { return "noreply@" + hostname 
 // mbinLockedSettings are the Mbin database settings this .env renders, so
 // the configuration is their only source. The paisans fork reads each one
 // named in MBIN_LOCKED_SETTINGS from the environment on every read, never
-// writes it when an admin saves, and shows it disabled in the admin form. An
-// image without that feature ignores the variable.
+// writes it when an admin saves, shows it disabled in the admin form, and
+// refuses it through the settings API. Every stack-1 image carries the
+// feature, and a name it cannot lock makes it answer every request with an
+// error, so each name here must be one the fork lists as lockable.
 //
 // Each name is both a key the template renders and a field of the fork's
 // SettingsDto (src/DTO/SettingsDto.php), and TestMbinLockedSettingsAreRendered
-// checks both directions against the rendered file, so a setting added to the
-// template without being locked here fails a test. A setting's environment
+// checks both directions against the rendered file, and every name against
+// the fork's lockable list, so a setting added to the template without being
+// locked here fails a test. A setting's environment
 // variable is usually its own name; mbinSettingEnv lists the ones that are
 // not, and the lock names the setting, never the variable.
 func mbinLockedSettings(gated, sso bool) []string {
-	out := []string{"KBIN_DOMAIN", "KBIN_SENDER_EMAIL", "KBIN_CONTACT_EMAIL"}
+	out := []string{"KBIN_DOMAIN", "KBIN_SENDER_EMAIL", "KBIN_CONTACT_EMAIL", "MBIN_AUTHORIZED_FETCH"}
 	if sso {
 		out = append(out, "MBIN_SSO_ONLY_MODE")
 	}
 	if gated {
-		out = append(out, "MBIN_PRIVATE_INSTANCE", "MBIN_AUTHORIZED_FETCH", "MBIN_USE_FEDERATION_ALLOW_LIST")
+		out = append(out, "MBIN_PRIVATE_INSTANCE", "MBIN_USE_FEDERATION_ALLOW_LIST")
 	}
 	return out
 }

@@ -151,6 +151,8 @@ func Check(cfg *config.Config) Result {
 	c.gateWithoutAGate()
 	c.visibilityGateOnUngateableKind()
 	c.visibilityGateWithoutSignedFetch()
+	c.authorizedFetchIsABoolean()
+	c.writefreelySettingsInRange()
 	c.homeserverMustBePinned()
 	c.uptimeNeedsAnAdminGroup()
 	c.adminGroupNotAdmins()
@@ -1285,15 +1287,17 @@ func (c *checker) visibilityGateOnUngateableKind() {
 	}
 }
 
-// visibilityGateWithoutSignedFetch refuses a gate on a federating app whose
-// kind records no way to refuse an unsigned ActivityPub read.
+// visibilityGateWithoutSignedFetch refuses a gate on a federating app that
+// does not refuse an unsigned ActivityPub read: one whose kind records no way
+// to, or whose settings.authorized_fetch is false.
 //
 // The gate sends every ActivityPub request to the app without asking for a
 // session, because a federating peer has none and proves who it is by
 // signature instead. Anyone can send an ActivityPub Accept header, so that is
 // only safe when the app refuses a read that is not signed by an instance on
-// its allow list. A kind with no such setting would serve its whole read
-// surface to anyone who asked for JSON.
+// its allow list. Without that it would serve its whole read surface to
+// anyone who asked for JSON. A WriteFreely reads only from its allowlist in
+// private mode, so for one that also means private is not false.
 func (c *checker) visibilityGateWithoutSignedFetch() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
@@ -1302,8 +1306,67 @@ func (c *checker) visibilityGateWithoutSignedFetch() {
 		}
 		c.refuse("visibility-gate-without-signed-fetch", fmt.Sprintf("apps.%s.visibility_gate", name),
 			"gated federating app still answers unsigned reads",
-			"is %q, but this %s app federates and the toolkit records no way for it to refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Turn federation off for this app, or set visibility_gate: public. A WriteFreely checks signatures only in private mode, so for one this also means private is not false.",
+			"is %q, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and, for a WriteFreely, private: false, since only private mode reads from the allowlist alone), turn federation off for this app, or set visibility_gate: public.",
 			app.VisibilityGate, app.Kind)
+	}
+}
+
+// authorizedFetchIsABoolean refuses a settings.authorized_fetch on an mbin or
+// writefreely app that is not a YAML boolean. The toolkit renders it into the
+// app's configuration and locks it there, so a value read as on that the
+// operator meant as off (Eg: the string "no") would be both wrong and out of
+// reach of the app's admin page.
+func (c *checker) authorizedFetchIsABoolean() {
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if app.Kind != config.KindMbin && app.Kind != config.KindWriteFreely {
+			continue
+		}
+		v, ok := app.Settings[kinds.AuthorizedFetchSetting]
+		if !ok {
+			continue
+		}
+		if _, isBool := v.(bool); isBool {
+			continue
+		}
+		c.refuse("authorized-fetch-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.AuthorizedFetchSetting),
+			"authorized_fetch is not true or false",
+			"is %#v. Write true or false, unquoted, or leave it out for the default, true.", v)
+	}
+}
+
+// writefreelySettingsInRange refuses a numeric WriteFreely setting outside
+// the range the fork accepts. config.ini locks every setting the toolkit
+// renders, and the fork refuses to start on a locked value it would refuse to
+// save (docs/settings.md, "Locking settings in config.ini", at
+// writefreely-wisp v0.21.1+wisp), so the blog would not come up at all. The
+// ranges are the fork's registry's (config/settings.go dbSettings).
+func (c *checker) writefreelySettingsInRange() {
+	ranges := []struct {
+		setting  string
+		min, max int
+	}{
+		{"min_username_len", 1, 100},
+		{"uploads_max_size_mb", 1, 1 << 20},
+	}
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if app.Kind != config.KindWriteFreely {
+			continue
+		}
+		for _, r := range ranges {
+			s, ok := app.Settings[r.setting].(string)
+			if !ok || s == "" {
+				continue
+			}
+			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= r.min && n <= r.max {
+				continue
+			}
+			c.refuse("writefreely-setting-invalid", fmt.Sprintf("apps.%s.settings.%s", name, r.setting),
+				"writefreely setting is out of range",
+				"is %q. WriteFreely accepts a whole number from %d to %d, and config.ini locks this setting, so any other value stops the blog at startup.",
+				s, r.min, r.max)
+		}
 	}
 }
 

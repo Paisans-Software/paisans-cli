@@ -71,10 +71,10 @@
     {
       "name": "blog — public",
       "monitor_type": "active",
-      "url": "https://blog.example.org/",
+      "url": "https://blog.example.org/healthz",
       "method": "GET",
       "check_type": "status",
-      "expected_status": "200,302",
+      "expected_status": "200",
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
@@ -83,10 +83,10 @@
     {
       "name": "blog — direct (home-a)",
       "monitor_type": "active",
-      "url": "http://10.44.0.1:8081/",
+      "url": "http://10.44.0.1:8081/healthz",
       "method": "GET",
       "check_type": "status",
-      "expected_status": "200,302",
+      "expected_status": "200",
       "follow_redirects": false,
       "request_headers": {
         "Host": "blog.example.org",
@@ -197,6 +197,18 @@
       "failure_threshold": 2
     },
     {
+      "name": "talk — public",
+      "monitor_type": "active",
+      "url": "https://talk.example.org/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
       "name": "talk — gate",
       "monitor_type": "active",
       "url": "https://talk.example.org/",
@@ -226,10 +238,26 @@
     {
       "name": "talk — direct (home-a)",
       "monitor_type": "active",
-      "url": "http://10.44.0.1:8080/",
+      "url": "http://10.44.0.1:8080/healthz",
       "method": "GET",
       "check_type": "status",
-      "expected_status": "200,302",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "talk.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
+      "name": "talk — private API (home-a)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.1:8080/api/entries",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "401",
       "follow_redirects": false,
       "request_headers": {
         "Host": "talk.example.org",
@@ -242,10 +270,26 @@
     {
       "name": "talk — direct (home-b)",
       "monitor_type": "active",
-      "url": "http://10.44.0.2:8080/",
+      "url": "http://10.44.0.2:8080/healthz",
       "method": "GET",
       "check_type": "status",
-      "expected_status": "200,302",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "talk.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
+      "name": "talk — private API (home-b)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.2:8080/api/entries",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "401",
       "follow_redirects": false,
       "request_headers": {
         "Host": "talk.example.org",

@@ -65,13 +65,18 @@ var catalogue = map[config.Kind][]Service{
 		// have, and the Doctrine transport decorator the default
 		// settings.queue (postgres) needs: on an image without it,
 		// MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
-		// Released 2026-10-07 as 1.14.0-paisans. Checked against ghcr.io on
-		// 2026-10-07 by requesting the manifest for that exact tag with an
-		// anonymous pull token, which resolved (200, an OCI image index,
-		// sha256:b04dc373df76eaf4b61a303b18e540eb35f8b541b07631da2544ff2f5f3b4acf).
-		// The index carries linux/amd64 only, beside an attestation
-		// manifest, so an arm64 apps site cannot run it.
-		{Name: "app", Image: "ghcr.io/paisans-software/mbin:1.14.0-paisans", Purpose: "the application, and its messenger consumers"},
+		//
+		// stack-1 is the fork's toolkit channel: the latest release a
+		// maintainer has promoted as working with what this toolkit renders
+		// (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
+		// this kind's templates: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
+		// MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
+		// route the monitor checks. Its first promotion is 1.15.0+paisans,
+		// the first release carrying all four, published as the image tag
+		// 1.15.0-paisans (linux/amd64 only, so an arm64 apps site cannot run
+		// it). The tag moves by design, so RepositoryVolumes records what the
+		// image declares.
+		{Name: "app", Image: "ghcr.io/paisans-software/mbin:stack-1", Purpose: "the application, and its messenger consumers"},
 		// The three sidecars upstream's compose.yaml runs beside it. The
 		// messenger consumers are not here: they run the application's own
 		// code, so they always take the app's image, and a key that let them
@@ -147,24 +152,16 @@ var catalogue = map[config.Kind][]Service{
 		// section at all, so it will reject the configuration this kind
 		// renders; do not point this kind at ghcr.io/writefreely/writefreely.
 		//
-		// The digest below is a `develop` build, not a release: no tagged
-		// release of the fork carries Postgres or S3 support yet. Resolved
-		// against ghcr.io on 2026-10-04 with `docker manifest inspect`, which
-		// returned a multi architecture index covering linux/amd64 and
-		// linux/arm64, and confirmed by pulling the amd64 manifest and
-		// checking the binary with `strings` for the `s3_secret_access_key`
-		// ini tag and the Postgres `sslmode` field. Bump this once a release
-		// carries the same features, and drop this paragraph when it does.
-		//
-		// This digest predates writefreely-wisp#171, which makes S3 storage
-		// direct only and adds `[storage] image_url_base`. The template
-		// renders that key and the gateway serves the bucket on the blog's
-		// media hostname, but this build does not read the key: it keeps
-		// streaming images through /uploads/ with its own credential, which
-		// still works and does not use the media hostname. Move the pin to a
-		// build containing #171 once it is merged, which is when the media
-		// hostname starts carrying the blog's images.
-		{Name: "app", Image: "ghcr.io/josephquigley/writefreely-wisp@sha256:4d21f45879bd98c8485eb8169ea57fbab925f0cbd5a38ac3c3bdd79901d809ea", Purpose: "the application"},
+		// stack-1 is the fork's toolkit channel: the latest release a
+		// maintainer has promoted as working with what this toolkit renders
+		// (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
+		// this kind's templates: config.ini's locked_settings, [app]
+		// authorized_fetch, the S3 storage with image_url_base, and the
+		// /healthz route the monitor checks. Its first promotion is
+		// 0.21.1+wisp, the first release carrying locked settings, published
+		// as the image tag 0.21.1-wisp. The tag moves by design, so
+		// RepositoryVolumes records what the image declares.
+		{Name: "app", Image: "ghcr.io/josephquigley/writefreely-wisp:stack-1", Purpose: "the application"},
 		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
 	},
 	config.KindUptime: {

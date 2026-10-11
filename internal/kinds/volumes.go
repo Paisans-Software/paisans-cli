@@ -36,7 +36,6 @@ import (
 // and printed null for images that do declare volumes.
 var ImageVolumes = map[string][]string{
 	// Applications, the defaults in catalogue.
-	"ghcr.io/paisans-software/mbin:1.14.0-paisans":            {"/app/var/"},
 	"docker.io/cloudamqp/amqproxy:3.2.0":                      nil,
 	"docker.io/library/rabbitmq:3.13.7-management-alpine":     {"/var/lib/rabbitmq"},
 	"docker.io/valkey/valkey:9.1.2-trixie":                    nil,
@@ -45,8 +44,7 @@ var ImageVolumes = map[string][]string{
 	"ghcr.io/element-hq/synapse:v1.160.0":                     nil,
 	"ghcr.io/element-hq/matrix-authentication-service:1.24.0": nil,
 	"ghcr.io/element-hq/element-web:v1.12.27":                 nil,
-	"ghcr.io/josephquigley/writefreely-wisp@sha256:4d21f45879bd98c8485eb8169ea57fbab925f0cbd5a38ac3c3bdd79901d809ea": nil,
-	"quay.io/oauth2-proxy/oauth2-proxy:v7.15.4": nil,
+	"quay.io/oauth2-proxy/oauth2-proxy:v7.15.4":               nil,
 	// /data at 1.1.0-oidc.3, inspected as above; 1.1.0-oidc.4 is built from
 	// the same Dockerfile, whose only VOLUME is /data, and is to be inspected
 	// once published.
@@ -83,7 +81,7 @@ var ImageVolumes = map[string][]string{
 // design, keyed by repository rather than by reference, so any tag or digest
 // of one answers.
 //
-// The gateway's Caddy is the one such image: the toolkit names
+// The gateway's Caddy is one such image: the toolkit names
 // ghcr.io/paisans-software/caddy:2 and apply renders whichever build that tag
 // names when it plans (see acme.Published), so no reference to it stays fixed
 // for long enough to be a key. Every build comes from the same Dockerfile in
@@ -91,8 +89,19 @@ var ImageVolumes = map[string][]string{
 // (sha256:b401d1cb...) declared none, inspected as above. `paisans apply`
 // inspects the exact build it deploys against the host's copy all the same,
 // so a later build that declared a path is still refused before it runs.
+//
+// The two forks' channel tags are the others: the mbin and writefreely kinds
+// name stack-1, which a maintainer moves to each promoted release
+// (docs/specs/2026-10-11-stack-channels.md). Each fork builds every release
+// from one Dockerfile. Mbin's declares /app/var/ (docker/Dockerfile:9 at
+// Paisans-Software/mbin v1.15.0+paisans), and 1.15.0-paisans, its first
+// promotion, declared exactly that when inspected as above on 2026-10-11.
+// WriteFreely's declares none (Dockerfile at writefreely-wisp develop
+// f95d840), and 0.21.0-wisp printed null inspected the same way.
 var RepositoryVolumes = map[string][]string{
-	acme.Repository: nil,
+	acme.Repository:                          nil,
+	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
+	"ghcr.io/josephquigley/writefreely-wisp": nil,
 }
 
 // DeclaredVolumes is what an image declares, as far as the toolkit has

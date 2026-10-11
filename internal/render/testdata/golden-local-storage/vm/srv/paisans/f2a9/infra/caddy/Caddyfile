@@ -239,7 +239,7 @@ talk.example.org {
 
 	# Open paths: the sign-in itself, federation discovery and what those
 	# pages load. They hold no private content.
-	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /media/*
+	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /healthz /media/*
 	handle @open {
 		import /etc/caddy/snippets/talk.caddy
 	}

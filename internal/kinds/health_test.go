@@ -41,3 +41,13 @@ func TestOnlyUptimePocketIDAndMbinSendMail(t *testing.T) {
 		}
 	}
 }
+
+// The stack-1 images carry a status-only /healthz, which answers 200 when
+// healthy on a private instance too.
+func TestMbinAndWriteFreelyHaveADedicatedHealthRoute(t *testing.T) {
+	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+		if h, _ := kinds.HealthFor(kind); h.Path != "/healthz" || h.Expect != "200" {
+			t.Errorf("%s health is %+v, want /healthz 200", kind, h)
+		}
+	}
+}

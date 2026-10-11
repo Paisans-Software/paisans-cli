@@ -109,20 +109,24 @@ var gates = map[config.Kind]GateSpec{
 			// defaults (framework.yaml:26-31, security.yaml:59-66).
 			AbsentCookies: []string{"PHPSESSID", "REMEMBERME"},
 		}},
-		// Read from the environment until an admin saves settings, after
-		// which a database row wins (SettingsManager.php:105-106,136-163),
-		// which is why the monitor proves it rather than the render. `/`
-		// asking for ActivityPub is ap_instance_front, which needs no
-		// content and is not in the ungated list, so it answers 401
-		// unsigned (AuthorizedFetchSubscriber.php:148-153).
+		// MBIN_AUTHORIZED_FETCH, on unless settings.authorized_fetch turns it
+		// off, and MBIN_USE_FEDERATION_ALLOW_LIST when gated, both named in
+		// MBIN_LOCKED_SETTINGS, so an admin cannot turn either off. The
+		// subscriber gates every ap_* GET route except the instance actor
+		// and discovery (AuthorizedFetchSubscriber.php:52-59,83-90 at
+		// v1.15.0+paisans). `/` asking for ActivityPub is ap_instance_front
+		// (activity_pub.yaml:29), which needs no content and is not in that
+		// list, so it answers 401 unsigned (AuthorizedFetchSubscriber.php:
+		// 148-153). The monitor proves it all the same: it is what shows the
+		// lock holds.
 		SignedFetch: &SignedFetch{
 			Settings: []string{"MBIN_AUTHORIZED_FETCH", "MBIN_USE_FEDERATION_ALLOW_LIST"},
 			Probe:    "/",
 			Expect:   "401",
 		},
 	},
-	// Cited at writefreely-wisp ff9dceb, the commit the pinned image is built
-	// from.
+	// Cited at writefreely-wisp ff9dceb, except signed fetch, which is cited
+	// at v0.21.1+wisp, the first stack-1 release.
 	config.KindWriteFreely: {
 		Gateable: true,
 		OpenPaths: []string{
@@ -152,16 +156,23 @@ var gates = map[config.Kind]GateSpec{
 			// only its absence means anything: a first visit.
 			{Paths: []string{"/"}, Target: "/oauth/generic", AbsentCookies: []string{"wfu"}},
 		},
-		// Signed fetch exists only in private mode: requirePrivateModeAccess
-		// admits a token, a session, or a signature from a host on
-		// federation_allowlist (handle.go:663-690,
-		// federation_allowlist.go:493-544). The instance actor resolves from
-		// configuration rather than any blog (activitypub.go:108-131) and
-		// answers 401 unsigned (errors.go:26). See SignedFetchFor for
-		// private mode.
+		// authorized_fetch requires a valid signature on every ActivityPub
+		// read and inbox delivery, public or private, and leaves only
+		// discovery and the instance actor open (authorized_fetch.go:35-50 at
+		// v0.21.1+wisp, develop f95d840). Private mode is what makes it read
+		// only from the allowlist: with no allowlist, authorized_fetch admits
+		// any signer (federation_allowlist.go:213-216), while private mode
+		// admits a signer only through one (federation_allowlist.go:486-495),
+		// and an allowlist needs private mode (federation_allowlist.go:84-86).
+		// Both are locked in config.ini. See SignedFetchFor.
+		//
+		// A blog's outbox is an ActivityPub only route (authorized_fetch.go:
+		// 28-33), refused before any lookup (authorized_fetch.go:72-98), so
+		// an unsigned GET of any alias answers 401 (federation_allowlist.go:
+		// 336) whether the blog exists or not.
 		SignedFetch: &SignedFetch{
-			Settings: []string{"app.private", "app.federation_allowlist"},
-			Probe:    "/api/collections/{hostname}",
+			Settings: []string{"app.authorized_fetch", "app.private"},
+			Probe:    "/api/collections/{hostname}/outbox",
 			Expect:   "401",
 		},
 	},
@@ -229,16 +240,36 @@ func OpenPathsFor(kind config.Kind) []string {
 }
 
 // SignedFetchFor is how an app refuses an unsigned ActivityPub read, or nil
-// when it does not. WriteFreely checks signatures only in private mode, so a
-// WriteFreely with private turned off has none, whatever its kind records.
+// when it does not: when settings.authorized_fetch turns authorized fetch
+// off, or, for WriteFreely, when private mode is off, since without it the
+// blog has no allowlist and admits a signature from any instance.
 func SignedFetchFor(app config.App) *SignedFetch {
 	sf := gates[app.Kind].SignedFetch
+	if sf == nil || !AuthorizedFetch(app) {
+		return nil
+	}
 	if app.Kind == config.KindWriteFreely {
 		if private, ok := app.Settings["private"].(bool); ok && !private {
 			return nil
 		}
 	}
 	return sf
+}
+
+// AuthorizedFetchSetting is the app setting that turns authorized fetch, a
+// valid HTTP signature on every ActivityPub read, on or off for the mbin and
+// writefreely kinds. Absent means on. README, "Authorized fetch is on by
+// default", has the reasoning.
+const AuthorizedFetchSetting = "authorized_fetch"
+
+// AuthorizedFetch reports whether an app's settings leave authorized fetch
+// on: true unless settings.authorized_fetch is false. A value that is not a
+// boolean reads as on here, and validate refuses it by name.
+func AuthorizedFetch(app config.App) bool {
+	if on, ok := app.Settings[AuthorizedFetchSetting].(bool); ok {
+		return on
+	}
+	return true
 }
 
 // SignedFetchProbe is the path a monitor requests, unsigned, to prove an app

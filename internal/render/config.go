@@ -41,6 +41,7 @@ type settingOwner struct {
 var settingOwners = []settingOwner{
 	{config.KindElement, "brand", "config.json", "brand"},
 
+	{config.KindMbin, "MBIN_AUTHORIZED_FETCH", ".env", "authorized_fetch"},
 	{config.KindMbin, "OAUTH_OIDC_ADMIN_GROUP", ".env", "admin_group"},
 	{config.KindMbin, "OAUTH_OIDC_MEMBER_GROUP", ".env", "member_group"},
 	{config.KindMbin, "S3_BUCKET", ".env", "s3_bucket"},
@@ -54,6 +55,7 @@ var settingOwners = []settingOwner{
 
 	{config.KindPocketID, "FILE_BACKEND", ".env", "file_backend"},
 
+	{config.KindWriteFreely, "app.authorized_fetch", "config.ini", "authorized_fetch"},
 	{config.KindWriteFreely, "app.federation", "config.ini", "federation"},
 	{config.KindWriteFreely, "app.min_username_len", "config.ini", "min_username_len"},
 	{config.KindWriteFreely, "app.private", "config.ini", "private"},

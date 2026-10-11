@@ -192,3 +192,14 @@ func MbinQueue(settings map[string]any) string {
 	}
 	return MbinQueuePostgres
 }
+
+// MbinPrivateAPIProbe is the read a monitor makes, with no token, of a gated
+// Mbin to prove it runs as a private instance. With MBIN_PRIVATE_INSTANCE on,
+// the catch-all access rule refuses a request with no signed-in user
+// (security.yaml:152, PrivateInstanceVoter.php:30-36 at v1.15.0+paisans), and
+// the API firewall's OAuth2 entry point answers that refusal 401
+// (league/oauth2-server-bundle v1.1.1, OAuth2Authenticator.php:60-63). The
+// entries list is a route that exists whatever content does
+// (config/mbin_routes/entry_api.yaml:62), and an instance that is not private
+// answers it 200.
+const MbinPrivateAPIProbe = "/api/entries"

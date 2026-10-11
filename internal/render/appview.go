@@ -262,6 +262,38 @@ func (v appValues) Setting(key, fallback string) string {
 	return fallback
 }
 
+// AuthorizedFetch is whether the app requires a valid HTTP signature on
+// every ActivityPub read: settings.authorized_fetch, on when absent. Mbin and
+// WriteFreely render it always, and lock it, so the configuration is its only
+// source.
+func (v appValues) AuthorizedFetch() bool {
+	return kinds.AuthorizedFetch(config.App{Settings: v.set})
+}
+
+// writefreelyLockedSettings are the database settings config.ini renders, in
+// the fork's registry order, so the configuration is their only source:
+// config.ini names them in locked_settings, and the fork then reads each from
+// the file on every start, never imports it, and refuses to change it from
+// its admin page or `writefreely settings set`.
+//
+// Each name is a key the template renders and an entry in the fork's setting
+// registry (config/settings.go at writefreely-wisp v0.21.1+wisp), and
+// TestWriteFreelyLockedSettingsAreRendered checks both directions against
+// the rendered file, so a setting added to the template without being locked
+// here fails a test. app.federation_allowlist is not rendered, so it stays
+// the admins' to edit, and an allowlist saved while private is off is refused
+// by the fork's own settings page.
+var writefreelyLockedSettings = []string{
+	"app.site_name", "app.theme", "app.open_registration", "app.min_username_len",
+	"app.federation", "app.public_stats", "app.private", "app.authorized_fetch",
+	"app.local_timeline", "uploads.enabled", "uploads.max_size_mb",
+}
+
+// WriteFreelyLockedSettings is config.ini's locked_settings, comma separated.
+func (v appValues) WriteFreelyLockedSettings() string {
+	return strings.Join(writefreelyLockedSettings, ", ")
+}
+
 // SettingBool returns a declared boolean setting, or the fallback.
 func (v appValues) SettingBool(key string, fallback bool) bool {
 	if b, ok := v.set[key].(bool); ok {
