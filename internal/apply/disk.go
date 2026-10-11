@@ -327,3 +327,17 @@ func ComposeImages(content string) ([]string, error) { return composeImages(cont
 func ProbeImages(refs []string, t Transport) (map[string]string, error) {
 	return probeImages(refs, t)
 }
+
+// DiskRefusal is the error Execute stops with when plan's host is short of
+// space, for a caller that checks the plan's disk before Execute does:
+// `paisans apply` without --site pulls every site's images ahead of the
+// install, and refuses a short host with the words its apply would use.
+func DiskRefusal(plan *Plan) error { return diskRefusal(plan) }
+
+// PullImage pulls ref on the host with `docker pull`, by its reference
+// alone: the pull stage runs before a stack's compose file is on the host,
+// and the reference is what that file will name, so the stack's own pull
+// later finds the image present. It returns what docker printed.
+func PullImage(t Transport, ref string) (string, error) {
+	return t.Run("docker pull " + shellQuote(ref))
+}

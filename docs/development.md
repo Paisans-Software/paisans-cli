@@ -294,7 +294,14 @@ worse than one that failed on one, and the difference between "show me" and "do
 it" should be a flag an operator typed rather than a habit they formed.
 `apply` without `--site` keeps both: it runs `apply --site` for each site in
 turn, as one step among the others it runs (`cmd/paisans/converge.go`), and
-is a dry run unless `--execute` is given. That dry run changes nothing on the
+is a dry run unless `--execute` is given. Ahead of those steps it pulls every
+site's images on every host at once (`cmd/paisans/converge_pull.go`), from the
+plan `planSiteApply` makes for the site, with `Plan.Disk.Pulls` as the list
+and `apply.DiskRefusal` as the stop for a short disk; it reports straight to
+each site's line and never through `reporterOverride`, which is one command's
+at a time. Every plan of one `apply` resolves Caddy's tag through one
+`imagedigest.Cache` (`cacheDigests`), so the pull and the steps after it name
+the same build. That dry run changes nothing on the
 servers; the one file it may write is the local secrets file, with the
 generated secrets it lacks, through `fillSecrets`, the path `init` writes
 them with.

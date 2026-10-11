@@ -3366,13 +3366,15 @@ stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
 deployment needs them, and with `--execute` runs them in the same process,
 stopping at the first failure. The table is that order. Every host's
-`host prepare` runs at the same time, up to eight hosts at once; every other
-step runs after the one before it:
+`host prepare` runs at the same time, up to eight hosts at once, and so does
+every site's image pull after it; every other step runs after the one before
+it:
 
 | Phase | Command | When |
 |---|---|---|
 | configuration | `init` | no id, no mesh subnet, or a generated secret missing |
 | hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
+| pull | each site's images (below) | every site; a host that has every image its apply needs pulls nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a member has not joined it |
@@ -3388,6 +3390,29 @@ address. `dns init` needs only the provider's API and the configuration, never
 a host, and nothing in it waits for the stack: Caddy's certificates use DNS
 challenges. A record pointing elsewhere therefore stops the run before
 install, with nothing applied.
+
+**Every site's images are pulled on every host before anything is
+installed.** The install applies one site at a time, and an apply pulls the
+images its stacks name as it recreates them, so on a first deployment each
+host's downloads, gigabytes each, would run in turn while every other host sat
+idle. The pull stage plans each site exactly as its `apply --site` would, and
+pulls on the host the images that plan would pull: the rendered images the host
+does not have, of the stacks the apply will recreate. Each host pulls a few
+images at a time, every host at once, and two sites at one ssh destination pull
+one after the other. Each apply after it finds its images present. It needs
+only Docker, which prepare installs, so it follows prepare directly; ahead of
+`dns`, a host short of space stops the run before a record is published for a
+deployment that cannot start. The same plan carries the free space check (see
+*`apply` checks free space before it pulls*), so a host short of space is
+refused here, before any host has pulled a layer, with the words its apply
+would use, and `--min-free` reaches this check as it reaches each apply.
+Anything else that plan would refuse, such as a file edited on the host, is
+left to the site's apply, which reports it at its own step. The plan names
+Caddy at the build its tag resolved to (see *The provider is declared, and
+its module has to be in the binary*), and an apply resolves each tag once for
+the whole run, so the build pulled here is the one every later step plans,
+even if the tag moves in between. A registry that refuses an image,
+`unauthorized` or `denied`, is reported as a private image, with what to do.
 
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
@@ -3413,9 +3438,9 @@ elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
 The output does not follow the phases. After `configuration` and `sudo` it has
-three sections: `prepare`, one line per site for its `host prepare`; `dns`;
-and `install`, one line per site for every step from founding to pass two that
-is about it, in the order the run first applies each site, then a `storage`
+four sections: `prepare`, one line per site for its `host prepare`; `pull`,
+one line per site for its images; `dns`; and `install`, one line per site for
+every step from founding to pass two that is about it, in the order the run first applies each site, then a `storage`
 line for `storage init` or `storage add` when there is Garage. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
@@ -3451,10 +3476,16 @@ install
   · storage
 ```
 
+The pull lines are drawn the same way, each ending with how many images its
+host pulled, or `nothing to pull`; `-v` lists each image under its site's line
+with the time it took.
+
 A host whose prepare fails does not stop the others: each is prepared, each
 failure is marked on its own line, and the run then stops before install with
-every failed host named. Without a terminal each prepare line is printed once,
-whole, when its host finishes, and with `-v` a host's own output follows its
+every failed host named. A host whose pull fails is the same: every other host
+finishes its pulls, and the run stops before `dns` with each failed host named
+and why. Without a terminal each prepare line is printed once, whole, when its
+host finishes, and with `-v` a host's own output follows its
 line, never another host's. Two sites reached at the same ssh destination are
 prepared one after the other. A sudo password or an ssh host key question a
 host asks during prepare holds the block, one question at a time.
@@ -3510,7 +3541,12 @@ is its site's steps' own dry runs together, and the storage line its step's:
 work, with what each step found, and `✗` when a step would refuse, with the
 refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
-work. `-v` lists each step under its line with its own status:
+work. `-v` lists each step under its line with its own status. Each pull
+line is the plan its site's apply would make: `○` with how many images it
+would pull and the free space they land in, `✓` `nothing to pull`, `✗` with
+the free space refusal `--execute` would stop at, or a dim `·` `after host
+prepare` while its site's prepare has work, since a host without Docker has no
+images to ask about:
 
 ```
 configuration
@@ -3521,6 +3557,12 @@ prepare
   ✓ home-b
   ✓ vm
   ✓ watch
+
+pull
+  · home-a: after host prepare --site home-a
+  ○ home-b: 3 images to pull, 12.4 GiB free
+  ○ vm: 1 image to pull, 6.2 GiB free
+  ✓ watch: nothing to pull
 
 dns
   ○ dns init: 2 records to create
