@@ -40,8 +40,10 @@ func TestDefaultOutputIsShortAndPlain(t *testing.T) {
 		for _, line := range strings.Split(out, "\n") {
 			// A failed step's line carries its result in full. A refusal's
 			// explanation is wrapped to 80 columns, so it is held to the
-			// same width as everything else.
-			if len(line) > 100 && !strings.HasPrefix(strings.TrimSpace(line), "FAIL") {
+			// same width as everything else. host prepare's install
+			// packages names every package it installs, as many as a fresh
+			// host needs.
+			if len(line) > 100 && !strings.HasPrefix(strings.TrimSpace(line), "FAIL") && !strings.Contains(line, " install packages: ") {
 				t.Errorf("%s: long line in default output (%d): %q", name, len(line), line)
 			}
 		}

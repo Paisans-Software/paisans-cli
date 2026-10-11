@@ -14,6 +14,7 @@ package ui
 import (
 	"io"
 	"os"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -97,6 +98,17 @@ func New(w io.Writer, verbose bool) Reporter {
 // NewPlain reports to w without any terminal drawing.
 func NewPlain(w io.Writer, verbose bool) Reporter {
 	return newWriter(w, verbose, false)
+}
+
+// NewTerminalForTest reports to w as New does on a terminal, by a clock the
+// caller controls and with no spinner goroutine: each change to a running
+// line draws it once. It is for a test outside this package that asserts on
+// what a terminal would show.
+func NewTerminalForTest(w io.Writer, verbose bool, clock func() time.Time) Reporter {
+	r := newWriter(w, verbose, true)
+	r.now = clock
+	r.tick = 0
+	return r
 }
 
 // Holder is a reporter that draws on a terminal between lines, and can be

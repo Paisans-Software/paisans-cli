@@ -334,7 +334,7 @@ func TestRealHostPreparesRunTogether(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				output, _, found, _, _, err := prepareRun(r, convergeFlags([]string{"host", "prepare", "--site", site}, o), true)
+				output, _, found, _, _, err := prepareRun(r, nil, convergeFlags([]string{"host", "prepare", "--site", site}, o), true)
 				switch {
 				case err != nil:
 					t.Errorf("execute %v: %s: %v", execute, site, err)

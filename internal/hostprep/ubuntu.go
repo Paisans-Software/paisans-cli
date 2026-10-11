@@ -196,7 +196,7 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		if err != nil {
 			return out, err
 		}
-		out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages", Describe: "packages: install " + strings.Join(install, " "), Command: script})
+		out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: "packages: install " + strings.Join(install, " "), Command: script})
 	}
 	return out, nil
 }
