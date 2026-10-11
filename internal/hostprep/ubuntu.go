@@ -104,11 +104,12 @@ func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
 	return facts, nil
 }
 
-// Packages installs Docker from Docker's own repository rather than Ubuntu's
-// docker.io. The compose plugin this toolkit runs (`docker compose`, v2) is
-// what Docker's repository ships and supports; the toolkit is tested against
-// Docker's packages, and one source for every host keeps two sites from
-// running different engines because they were prepared a month apart.
+// Packages leaves an existing Docker as it is when `docker compose` works
+// with it, whatever its source: the host check has already refused a snap,
+// and an engine or compose plugin older than the toolkit needs. Where Docker
+// is absent it installs it from Docker's own repository, because an install
+// needs one source and that one gives every host it prepares the same
+// engine and compose plugin.
 func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 	var out Section
 	facts, err := u.probePackages(t)
@@ -117,20 +118,23 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 	}
 
 	// Refused, not removed, for the docker.io reason below, and whether or
-	// not compose works with it: every host runs Docker from Docker's own
-	// repository, which is what the toolkit is tested against, and a snap
-	// beside those packages would be a second engine.
+	// not compose works with it. The host check refuses it first; this is
+	// the same rule where the plan is built. A snap's confinement keeps
+	// Docker from bind mounting under /srv, and snapd refreshes it, which
+	// restarts the daemon, on its own schedule.
 	if facts.snapDocker {
-		return out, fmt.Errorf("docker: Docker is installed as a snap, and every host here runs Docker Engine from Docker's own apt repository. Remove it yourself (snap remove docker), after checking nothing running depends on it, and prepare again")
+		return out, fmt.Errorf("docker: Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and prepare again, which installs Docker from Docker's own apt repository")
 	}
 
 	var install []string
 	if facts.composeWorks {
 		out.Present = append(out.Present, "docker: `docker compose` already works")
 	} else {
-		// Refused, not removed. Removing docker.io on a host that is already
-		// running containers from it takes those containers down, and that is
-		// a decision for whoever started them.
+		// A Docker from Ubuntu's archive is accepted when compose works with
+		// it. Where it does not, the install below would conflict with it,
+		// so it is refused, not removed: removing docker.io on a host that is
+		// already running containers from it takes those containers down, and
+		// that is a decision for whoever started them.
 		var conflicts []string
 		for _, p := range dockerConflicts {
 			if facts.installed[p] {
@@ -138,8 +142,16 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 			}
 		}
 		if len(conflicts) > 0 {
-			return out, fmt.Errorf("docker: %s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. Remove them yourself (apt-get remove %s), after checking nothing running depends on them, and prepare again",
-				strings.Join(conflicts, ", "), strings.Join(conflicts, " "))
+			// Ubuntu's docker-compose-v2 is the compose plugin
+			// (/usr/libexec/docker/cli-plugins/docker-compose in its file
+			// list, packages.ubuntu.com, noble-updates, fetched 2026-10-11),
+			// so a docker.io without it can be completed instead.
+			remove := fmt.Sprintf("Remove them yourself (apt-get remove %s)", strings.Join(conflicts, " "))
+			if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
+				remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
+			}
+			return out, fmt.Errorf("docker: %s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. %s, after checking nothing running depends on them, and prepare again",
+				strings.Join(conflicts, ", "), remove)
 		}
 
 		if facts.keyring {

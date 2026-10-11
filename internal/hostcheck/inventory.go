@@ -67,8 +67,18 @@ type Inventory struct {
 // Docker is the engine, if there is one.
 type Docker struct {
 	Present bool
+	// Version is the daemon's version and Client the docker CLI's, as
+	// `docker version` reports them, distribution suffix and all.
 	Version string
-	// Packages names where it came from: docker-ce, docker.io or snap.
+	Client  string
+	// ComposeWorks is whether `docker compose version` answered, and
+	// Compose the version it printed, without a leading "v".
+	ComposeWorks bool
+	Compose      string
+	// ComposeMissing is whether it was asked and did not answer.
+	ComposeMissing bool
+	// Packages names where it came from: docker-ce, docker.io or snap. It
+	// is shown, and only snap is refused.
 	Packages []string
 }
 
@@ -83,7 +93,7 @@ type Docker struct {
 // answered is read.
 const (
 	rootProbe      = "id -u"
-	dockerProbe    = `command -v docker >/dev/null 2>&1 || { echo absent; exit 0; }; docker version --format '{{.Server.Version}}'`
+	dockerProbe    = `command -v docker >/dev/null 2>&1 || { echo absent; exit 0; }; docker version --format '{{.Server.Version}} {{.Client.Version}}' || exit 1; echo "compose $(docker compose version --short 2>/dev/null || echo absent)"`
 	packageProbe   = `dpkg-query -W -f='${Package} ${Status}\n' docker-ce docker.io 2>/dev/null; snap list docker 2>/dev/null; true`
 	containerProbe = `docker ps -aq --no-trunc | xargs -r docker inspect --format '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"pid":{{.State.Pid}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}}}' 2>/dev/null || true`
 	volumeProbe    = `docker volume ls -q | xargs -r docker volume inspect --format '{"name":{{json .Name}},"labels":{{json .Labels}}}' 2>/dev/null || true`
@@ -160,9 +170,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w. Docker is installed and did not answer, so the containers on this host cannot be seen. Start it (Eg: systemctl start docker) and run again", err)
 	}
-	if v := strings.TrimSpace(out); v != "absent" {
-		inv.Docker = Docker{Present: true, Version: v}
-	}
+	inv.Docker = parseDocker(out)
 	if out, err = run("reading Docker's package", packageProbe); err != nil {
 		return nil, err
 	}
