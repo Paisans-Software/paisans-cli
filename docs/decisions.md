@@ -1386,3 +1386,54 @@ machine they share.
 
 `go build ./...`, `go vet ./...`, `go test ./... -count=1`, `-race` on the
 changed packages, and `gofmt -l .` empty. Nothing was run against a host.
+
+## 2026-10-11: Docker is judged by its version, not its source
+
+**Decided.** Founder decision.
+
+### What was decided
+
+The host check stops caring where an existing Docker came from. It accepts
+any source except a snap, provided `docker compose` works and the engine and
+the compose plugin meet minimum versions: engine 25.0.0, daemon and CLI, and
+compose 2.24.0. Below a minimum it refuses, naming the versions found and
+required. A snap stays refused however new it is. When Docker is absent,
+`host prepare` still installs it from Docker's own apt repository. Mixed or
+broken installs remain caught by the existing check that `docker compose`
+works, in `host prepare`.
+
+### Why
+
+What the toolkit depends on is what the engine and compose can do, and that is
+a version. A package name stood in for it badly: Ubuntu's `docker.io` with
+`docker-compose-v2` is current on a supported release, while a `docker-ce`
+installed years ago and never upgraded is not, and only the version tells
+them apart. Until now no version was checked at all: any Docker whose
+`docker compose` answered passed, and one too old for the rendered stacks
+failed only once an apply reached a stack it could not run.
+
+A snap is the exception because its problems are not versioned: its
+confinement keeps Docker from bind mounting under `/srv`, where every stack
+keeps its data, and snapd refreshes it, restarting the daemon and every
+container, on snapd's schedule. A version number reveals neither.
+
+An install still has one source because it needs one, and Docker's repository
+gives every host the toolkit prepares the same engine.
+
+### How the minimums were set
+
+From the code, not from memory: every Docker and Compose behaviour the
+toolkit relies on was listed with the release that introduced it, and each
+minimum is the newest of them. Both are set by `healthcheck.start_interval`
+in the pocket-id template: Docker Engine 25.0.0 (API 1.44) and Docker Compose
+2.24.0, which refuses the key on an older engine. The table, with citations,
+is in `docs/specs/2026-10-11-docker-version-gate.md` and beside the constants
+in `internal/hostcheck/docker.go`. One dependency is not established from a
+citation: how Compose 2.24.0 reads quotes and escapes in an `env_file`, which
+the toolkit's `.env` quoting was observed against on Compose 5.4.0 only. It
+did not set a minimum.
+
+### What was run
+
+`go build ./...`, `go vet ./...`, `go test ./...`, and `gofmt -l .` empty.
+Nothing was run against a host.
