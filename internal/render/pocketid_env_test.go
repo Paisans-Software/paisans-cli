@@ -149,3 +149,12 @@ func TestEveryPocketIDInstanceRendersTheSameConfiguration(t *testing.T) {
 		t.Errorf("the two instances differ beyond the site and the database host:\n%s\n----\n%s", a, b)
 	}
 }
+
+// file_backend left out renders `database`, the backend validate asks for,
+// rather than leaving Pocket ID on its own filesystem default.
+func TestPocketIDFileBackendDefaultsToDatabase(t *testing.T) {
+	env := renderAuth(t, map[string]any{}, nil, nil)
+	if got := envValue(env, "FILE_BACKEND"); got != "database" {
+		t.Errorf("FILE_BACKEND is %q", got)
+	}
+}

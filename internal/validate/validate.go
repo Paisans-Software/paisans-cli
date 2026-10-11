@@ -1051,7 +1051,10 @@ func collides(a, b render.Listener) bool {
 	return a.Overlaps(b)
 }
 
-// pocketIDFileBackend warns about anything other than the database backend.
+// pocketIDFileBackend warns about a backend set to anything other than
+// database. Unset is not warned about: the pocket-id template renders
+// `database` when the setting is absent, so unset already is the backend this
+// check asks for.
 //
 // Its uploads are avatars and admin branding, about a megabyte in total. In
 // Postgres they ride streaming replication, so a promoted site has them
@@ -1064,17 +1067,13 @@ func (c *checker) pocketIDFileBackend() {
 			continue
 		}
 		backend, _ := app.Settings["file_backend"].(string)
-		if backend == "database" {
+		if backend == "" || backend == "database" {
 			continue
-		}
-		shown := backend
-		if shown == "" {
-			shown = "unset, which means filesystem"
 		}
 		c.warn("pocket-id-file-backend", fmt.Sprintf("apps.%s.settings.file_backend", name),
 			"pocket id file backend is not database",
 			"is %s. Prefer `database`: the uploads are about a megabyte of avatars and branding, in Postgres they ride streaming replication with no sync job, and sign in then does not depend on object storage being up. On filesystem, a promoted site serves broken avatars and stock branding mid incident.",
-			shown)
+			backend)
 	}
 }
 
