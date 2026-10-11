@@ -8,3 +8,6 @@ func SettingOwners() []SettingOwner { return settingOwners }
 
 // ComposeSets exposes the compose.yaml scan to a test of its own.
 var ComposeSets = composeSets
+
+// MbinSettingEnv exposes mbinSettingEnv to the external test package.
+var MbinSettingEnv = mbinSettingEnv

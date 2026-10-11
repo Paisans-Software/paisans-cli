@@ -1205,3 +1205,63 @@ two SPF records and a null MX, and its mail would fail.
 `internal/dns/mail_test.go` were checked to fail with `isLockdown` and the
 DKIM comparison broken. `paisans validate` on `examples/paisans.example.yaml`:
 0 refusals. Nothing was run against a DNS provider.
+
+## 2026-10-11: Mbin reads the deployment's mail settings, and the configuration owns them
+
+Founder decision. The design is `docs/specs/2026-10-11-mbin-smtp.md`.
+
+### What was decided
+
+The `mbin` kind sends mail (`kinds.SendsMail`). Its `.env` renders
+`MAILER_DSN` from the app's effective `smtp` settings, `smtps://` for `tls`
+and `smtp://...?require_tls=true` for `starttls`, or `null://null` with a
+warning (`mbin-without-smtp`) when no host resolves; `KBIN_SENDER_EMAIL` from
+`from_address`; and `KBIN_CONTACT_EMAIL` from a new `settings.contact_email`,
+falling back to the sender. `from_name` is not used, since Mbin always names
+the sender after its domain.
+
+Added the same day, founder decision: the `.env` also renders
+`MBIN_LOCKED_SETTINGS`, naming every Mbin database setting the template sets,
+so the paisans fork reads those from the environment on every read and an
+admin cannot change them in Mbin; and a gated app renders
+`MBIN_PRIVATE_INSTANCE=true`. Both are rendered ahead of a pinned image that
+reads them, since an image without the feature ignores the variable.
+
+### Why
+
+Without these, Mbin ran on its image's placeholders: a transport naming a
+host that does not exist, so a contact form message failed rather than being
+sent, and addresses at `mbin.domain.tld`. The toolkit already resolves mail
+per app for two kinds, so a third is the same code path. `require_tls` keeps
+a stripped STARTTLS from sending the password in plaintext. The null
+transport keeps a deployment without mail working, which is why its absence
+is a warning. Locking the settings closes the drift where an admin's first
+save freezes every rendered value in the database.
+
+### What was weighed
+
+* **The DSN in the template or in Go.** In Go, so the encoding of a password
+  a provider issued can be tested; the template only places it.
+* **Percent encoding the userinfo with Go's `url.UserPassword` or in full.**
+  In full: `url.UserPassword` leaves RFC 3986 sub-delimiters such as `$`, `'`
+  and `+` as they are, and full encoding takes PHP's `parse_url` out of the
+  question entirely. Both decode the same through `rawurldecode`.
+* **No transport at all without SMTP.** Leaving `MAILER_DSN` out falls back to
+  the image's `smtp://mailserver`, which fails every send.
+* **The sender with no `from_address`.** `noreply@<hostname>` rather than a
+  refusal: harmless under the null transport, and a warning
+  (`mbin-smtp-without-sender`) when a host resolves, because `dns init` says
+  that name sends no mail.
+* **Which settings to lock.** Every `SettingsDto` field the template renders,
+  which adds `KBIN_DOMAIN` to the ones named in session, so that a test can
+  derive the list rather than trust it. Passthrough keys are the operator's
+  and stay unlocked.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. The
+DSN, rendering, locked list, validate and SendsMail tests were each checked to
+fail with the behaviour they cover removed. The rendered `.env` was passed as
+an `env_file` by Docker Compose v5.4.0 to PHP 8.4 with symfony/mailer
+v7.4.14, which parsed a password holding `@ : / ? # % ' " $` and a space back
+to the same bytes. Nothing was run against a mail server or a deployment.

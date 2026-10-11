@@ -194,9 +194,11 @@ var catalogue = map[config.Kind][]Service{
 // SendsMail reports whether a kind reads the deployment's smtp settings. An
 // app level smtp block on any other kind is refused, because an override
 // nothing reads is ignored without a word. Pocket ID reads them because its
-// whole application configuration is rendered (see PocketIDSettings).
+// whole application configuration is rendered (see PocketIDSettings). Mbin
+// reads them as MAILER_DSN and its sender address, for its contact form and
+// the few account mails it still sends (see MbinContactEmailSetting).
 func SendsMail(kind config.Kind) bool {
-	return kind == config.KindUptime || kind == config.KindPocketID
+	return kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin
 }
 
 // Services returns a kind's services in compose order, which is the order they

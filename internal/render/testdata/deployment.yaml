@@ -80,6 +80,10 @@ apps:
     hostname: talk.example.org
     placement: cluster
     visibility_gate: member
+    settings:
+      # Where the contact form sends to, so the golden .env shows it apart
+      # from the sender the smtp block below gives.
+      contact_email: admins@example.org
     images:
       app: ghcr.io/example-org/mbin:v1.10.1-fork
     # One passthrough key per format, so each merge is visible in the golden
@@ -163,7 +167,7 @@ apps:
       from_name: Example Status
 
 # The deployment's mail server. The uptime app above inherits every field but
-# the one it overrides.
+# the one it overrides, and talk inherits all of them.
 smtp:
   host: smtp.example.org
   security: starttls
