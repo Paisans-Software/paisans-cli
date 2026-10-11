@@ -1900,16 +1900,18 @@ every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
 `paisans.yaml`, since that directory is usually a git repository.
 
-**The keystore then holds the only copy.** Losing the workstation loses every
-secret in the file, so add a second recipient to `.sops.yaml`, another
-admin's key or an offline backup key, and run `sops updatekeys
+**The keystore, or the file you named, then holds the only copy.** Losing it
+loses every secret in the file, so add a second recipient to `.sops.yaml`,
+another admin's key or an offline backup key, and run `sops updatekeys
 secrets.enc.yaml`.
 
 Every later command finds the key on its own: with no `SOPS_AGE_*` variable
 set, paisans reads the keystore item for the deployment id and decrypts with
-it in memory. A variable you set always wins. `SOPS_AGE_KEY_CMD`, a command
-that prints the key, keeps it out of files and the shell's environment, and
-is what `sops` itself needs when you run it by hand; `init` prints the line.
+it in memory. When the item is missing, the keystore cannot be read, or the
+item's key is not a recipient, sops' own search still runs. A variable you
+set always wins. `SOPS_AGE_KEY_CMD`, a command that prints the key, keeps it
+out of files and the shell's environment, and is what `sops` itself needs
+when you run it by hand; `init` prints the line.
 `SOPS_AGE_KEY_FILE` (the key's path), `SOPS_AGE_KEY` (the key itself) and
 `sops/age/keys.txt` in your config directory are read too.
 
