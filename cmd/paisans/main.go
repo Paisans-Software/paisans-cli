@@ -606,6 +606,7 @@ func runApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("apply: --min-free: %w", err)
 	}
+	defer cacheDigests()()
 	if *site == "" {
 		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
@@ -873,6 +874,23 @@ func checkStandby(r ui.Reporter, cfg *config.Config, plan *apply.Plan, site stri
 // while apply plans; see apply.ResolveImages. Tests replace it, so that none
 // reaches a registry.
 var caddyDigests apply.Resolver = imagedigest.Registry{}
+
+// cacheDigests puts an imagedigest.Cache in front of caddyDigests for the
+// rest of an apply, and returns what puts it back. Every plan the apply makes
+// then names the build its first plan resolved Caddy's tag to: without
+// --site that is the pull stage's plan of each site, then each site's apply
+// and pass two, and with it each pass of the one site's apply. An apply run
+// as a step of another finds the cache in place and keeps it, so the whole
+// run shares one. Tests that replace caddyDigests still decide what it
+// answers; the cache only stops it answering twice.
+func cacheDigests() (restore func()) {
+	if _, cached := caddyDigests.(*imagedigest.Cache); cached {
+		return func() {}
+	}
+	saved := caddyDigests
+	caddyDigests = imagedigest.Cached(saved)
+	return func() { caddyDigests = saved }
+}
 
 // planSiteApply is everything apply decides for one site, without doing any
 // of it: the etcd flags the site's member was born with, the render, the plan
