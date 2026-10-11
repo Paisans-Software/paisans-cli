@@ -715,10 +715,10 @@ func runApply(args []string) error {
 	}
 	options := []apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}
 	// An app this site shares with others stays on the build they run,
-	// unless the apply plans them all. As a step of apply without --site (a
-	// checkReporter) it does, and every site resolves through the run's one
-	// cache, so none is read here.
-	if _, step := r.(checkReporter); !step {
+	// unless the apply plans them all: as a step of apply without --site it
+	// does, and every site resolves through the run's one cache, so none is
+	// read here. See planningEverySite.
+	if !planningEverySite {
 		peers, err := readPeers(r, cfg, *site, only, *sudo)
 		if err != nil {
 			return err
@@ -877,6 +877,26 @@ func runApply(args []string) error {
 		return err
 	}
 	return siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
+}
+
+// planningEverySite is set while apply without --site runs, for every
+// `apply --site` step it runs: the run plans every site, so a clustered app
+// moves on all of them together, through the run's one digest cache, and no
+// step holds it on the build the others run. It is the run that says so, not
+// how a step reports, since a step reporting quietly is not a step covering
+// every site.
+//
+// A run that stops after some sites of a clustered app moved leaves them on
+// two builds; an `apply --site` then refuses, naming each site's, and the
+// next apply without --site moves the rest.
+var planningEverySite bool
+
+// planEverySite sets planningEverySite for a run, and returns what puts it
+// back.
+func planEverySite() (restore func()) {
+	saved := planningEverySite
+	planningEverySite = true
+	return func() { planningEverySite = saved }
 }
 
 // readPeers reads, for each app site runs that runs on other sites as well,

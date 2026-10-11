@@ -679,16 +679,30 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		// Each image is pinned to a build here, against the host's copy,
 		// before anything is compared. See ResolveImages.
+		//
+		// A stack this plan leaves alone (outside --only, or held back with
+		// Except) is pinned as a command with no resolver pins it: to what
+		// the host runs, asking no registry. Its file is still compared, so
+		// an edit on the host is still a conflict, but nothing it would
+		// resolve to is planned, listed, or refused over.
 		content := file.Content
 		if images := fileImages(plan.Images[site], file.Path); len(images) > 0 {
-			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, o.resolver, o.peers)
+			stack := stackOf(rel)
+			leftAlone := (onlySet != nil && !onlySet[stack]) || exceptSet[stack]
+			r, peers := o.resolver, o.peers
+			if leftAlone {
+				r, peers = nil, nil
+			}
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, peers)
 			if err != nil {
 				finish(done, err)
 				return nil, err
 			}
 			content = pinned
-			out.Pins = append(out.Pins, pins...)
-			out.Notes = append(out.Notes, notes...)
+			if !leftAlone {
+				out.Pins = append(out.Pins, pins...)
+				out.Notes = append(out.Notes, notes...)
+			}
 		}
 
 		change := Change{

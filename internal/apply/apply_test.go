@@ -690,8 +690,11 @@ func TestARunningGatewayIsReloaded(t *testing.T) {
 // success. The check has to run for this path, and has to run before the
 // recreate.
 func TestAnImageOnlyChangeIsStillChecked(t *testing.T) {
+	// Resolved as apply resolves: a plan without a resolver keeps the
+	// image the host runs, whatever the configuration names.
+	resolve := apply.ResolveImages(&registry{digest: buildA})
 	host := newHost()
-	first, err := apply.Build("vm", plan(t), acmeModule(t), host)
+	first, err := apply.Build("vm", plan(t), acmeModule(t), host, resolve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +710,7 @@ func TestAnImageOnlyChangeIsStillChecked(t *testing.T) {
 	host.commands = nil
 	host.fail = "list-modules"
 
-	p, err := apply.Build("vm", moved, acmeModule(t), host)
+	p, err := apply.Build("vm", moved, acmeModule(t), host, resolve)
 	if err != nil {
 		t.Fatal(err)
 	}

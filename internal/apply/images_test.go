@@ -523,3 +523,180 @@ func TestReadPeersReadsEachSitesComposeFile(t *testing.T) {
 		t.Errorf("home-c, which runs nothing, read as %+v", peers[1])
 	}
 }
+
+// bareAt applies a site with no resolver, as an older toolkit did: every
+// image is the bare configured tag.
+func bareAt(t *testing.T, site string) *fakeHost {
+	t.Helper()
+	host := newHost()
+	p, err := apply.Build(site, plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	host.commands = nil
+	return host
+}
+
+// --only and Except leave the other stacks alone, so their images are not
+// resolved, listed or refused over.
+func TestOnlyAndExceptPinOnlyTheStacksTheyMove(t *testing.T) {
+	host := siteAt(t, "home-a", &registry{digest: buildA})
+	moving := &registry{digest: buildA, digests: map[string]string{mbinTag: buildB}}
+	for name, opt := range map[string]apply.Option{"only": apply.Only("docs"), "except": apply.Except("talk")} {
+		t.Run(name, func(t *testing.T) {
+			p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(moving))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Moved()) != 1 {
+				t.Fatalf("a whole plan moves %+v, want Mbin", p.Moved())
+			}
+			p, err = apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(moving), opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if moved := p.Moved(); len(moved) != 0 {
+				t.Errorf("a plan leaving talk alone lists %+v as moved", moved)
+			}
+			if pin := mbinPin(p); pin != nil {
+				t.Errorf("a plan leaving talk alone pins %+v", pin)
+			}
+			for _, n := range p.Notes {
+				if strings.Contains(n.Text, mbinTag) {
+					t.Errorf("a plan leaving talk alone says %s", n.Text)
+				}
+			}
+			down := &registry{digest: buildA, fail: map[string]error{mbinTag: errors.New("dial tcp: i/o timeout")}}
+			if _, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(down), opt); err != nil {
+				t.Errorf("a registry failing for talk refused a plan leaving talk alone: %v", err)
+			}
+		})
+	}
+}
+
+// Without a resolver the build the host runs is kept whatever the
+// configuration now names, a moved channel or another repository, since a
+// narrower command must not move an image.
+func TestWithoutAResolverAnyDeployedBuildIsKept(t *testing.T) {
+	for _, image := range []string{"ghcr.io/example-org/mbin:v2.0.0-fork", "ghcr.io/other-org/mbin:v1.10.1-fork"} {
+		host := siteAt(t, "home-a", &registry{digest: buildA})
+		before := host.files[talkCompose]
+		rendered := planWith(t, func(cfg *config.Config) {
+			app := cfg.Apps["talk"]
+			app.Images = map[string]string{"app": image}
+			cfg.Apps["talk"] = app
+		})
+		p, err := apply.Build("home-a", rendered, acmeModule(t), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin := pinOf(p, "talk", image)
+		if pin == nil || pin.Reference != mbinTag+"@"+buildA || pin.Source != "deployed" {
+			t.Errorf("%s: planned %+v, want the deployed build", image, pin)
+		}
+		for _, c := range p.Writes() {
+			if c.Path == talkCompose {
+				t.Errorf("%s: a plan without a resolver rewrites talk's compose file", image)
+			}
+		}
+		if err := apply.Execute(p, host); err != nil {
+			t.Fatal(err)
+		}
+		if host.files[talkCompose] != before {
+			t.Errorf("%s: talk's compose file changed", image)
+		}
+	}
+}
+
+// The first apply after an older toolkit pins a bare tag: that is not a new
+// build the plan knows of, and is not reported as one.
+func TestPinningABareTagIsNotAMove(t *testing.T) {
+	host := bareAt(t, "home-a")
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved := p.Moved(); len(moved) != 0 {
+		t.Errorf("pinning a bare tag lists %+v as moved", moved)
+	}
+	pin := mbinPin(p)
+	if pin == nil || !pin.FirstPin() || pin.Moved() {
+		t.Fatalf("planned %+v, want a first pin", pin)
+	}
+	var first bool
+	for _, f := range p.FirstPins() {
+		if f.Image == mbinTag {
+			first = true
+			if !strings.Contains(f.Describe(), "pins "+mbinTag) {
+				t.Errorf("described as %s", f.Describe())
+			}
+		}
+	}
+	if !first {
+		t.Errorf("first pins %+v do not hold Mbin", p.FirstPins())
+	}
+	for _, n := range p.Notes {
+		if strings.Contains(n.Text, mbinTag) && strings.Contains(n.Text, "new build") {
+			t.Errorf("a first pin is called a new build: %s", n.Text)
+		}
+	}
+	// A different bare tag is another build, and a move.
+	other := planWith(t, func(cfg *config.Config) {
+		app := cfg.Apps["talk"]
+		app.Images = map[string]string{"app": "ghcr.io/example-org/mbin:v2.0.0-fork"}
+		cfg.Apps["talk"] = app
+	})
+	p, err = apply.Build("home-a", other, acmeModule(t), host, apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin := pinOf(p, "talk", "ghcr.io/example-org/mbin:v2.0.0-fork"); pin == nil || !pin.Moved() || pin.FirstPin() {
+		t.Errorf("another tag planned %+v, want a move", pin)
+	}
+}
+
+// A host running the bare tag, with the registry down, keeps what it runs:
+// the stack is not refused for running nothing.
+func TestAnUnreachableRegistryKeepsADeployedBareTag(t *testing.T) {
+	host := bareAt(t, "home-a")
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{err: errors.New("dial tcp: i/o timeout")}))
+	if err != nil {
+		t.Fatalf("a host running the tag was refused: %v", err)
+	}
+	pin := mbinPin(p)
+	if pin == nil || pin.Reference != mbinTag || pin.Source != "deployed" {
+		t.Errorf("planned %+v, want the deployed tag kept", pin)
+	}
+	if len(p.Writes()) != 0 {
+		t.Errorf("wrote %v", p.Writes())
+	}
+}
+
+// A site still on the bare tag beside one pinned to a build of that tag is
+// not a disagreement: the apply holds both on the build that is known.
+func TestABareTagBesideItsPinnedBuildIsNotADisagreement(t *testing.T) {
+	pinned := siteAt(t, "home-b", &registry{digest: buildA})
+	bare := bareAt(t, "home-b")
+	cases := map[string]struct {
+		self *fakeHost
+		peer string
+	}{
+		"this site bare": {bareAt(t, "home-a"), pinned.files[talkCompose]},
+		"the other bare": {siteAt(t, "home-a", &registry{digest: buildA}), bare.files[talkCompose]},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			peer := apply.PeerCompose{Site: "home-b", Stack: "talk", Content: tc.peer, Found: true}
+			p, err := apply.Build("home-a", plan(t), acmeModule(t), tc.self, apply.ResolveImages(&registry{digest: buildB}), apply.OtherSites(peer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pin := mbinPin(p); pin == nil || pin.Reference != mbinTag+"@"+buildA || pin.Source != "held" {
+				t.Errorf("planned %+v, want the known build held", pin)
+			}
+		})
+	}
+}

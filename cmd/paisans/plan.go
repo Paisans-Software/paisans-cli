@@ -64,6 +64,14 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 		r.Step(pin.Describe()).End(ui.Pending, "")
 		r.Detail("%s's compose file names %s, and the stack is replaced and health gated as for any new image", pin.Stack, pin.Reference)
 	}
+	// A tag the host runs bare, from before images were pinned, gets the
+	// build it names now written beside it. Which build the host runs under
+	// it is not known, so it is not called a move, but the stack is
+	// recreated once, on the build pinned.
+	for _, pin := range plan.FirstPins() {
+		r.Step(pin.Describe()).End(ui.Pending, "")
+		r.Detail("%s runs %s unpinned; its compose file now names %s, so the stack is recreated once, on that build, and health gated", pin.Stack, pin.Deployed, pin.Reference)
+	}
 
 	var unchanged int
 	var writes []string

@@ -122,8 +122,28 @@ type ImagePin struct {
 // Moved reports whether the plan changes which build the services run,
 // comparing digests rather than references, since a deployment once pinned to
 // a version tag names the same build differently.
+//
+// A deployed reference that names no digest (a stack an older toolkit
+// applied, which runs a bare tag) names no one build: pinning a digest of the
+// same tag beside it is a first pin (see FirstPin), not a move, and only
+// another tag or another image is.
 func (p ImagePin) Moved() bool {
-	return p.Deployed != "" && buildKey(p.Deployed) != buildKey(p.Reference)
+	if p.Deployed == "" {
+		return false
+	}
+	if digestOf(p.Deployed) != "" {
+		return buildKey(p.Deployed) != buildKey(p.Reference)
+	}
+	return nameOf(p.Deployed) != nameOf(p.Reference)
+}
+
+// FirstPin reports whether the plan pins, for the first time, a tag the host
+// runs bare: the build the tag names now is written beside it. Which build
+// the host runs under the bare tag is not known, so it is not called a move;
+// but the compose file changes, so the stack is recreated once, on the build
+// pinned.
+func (p ImagePin) FirstPin() bool {
+	return p.Deployed != "" && digestOf(p.Deployed) == "" && digestOf(p.Reference) != "" && nameOf(p.Reference) == strings.TrimSpace(p.Deployed)
 }
 
 // Describe is the pin as the dry run lists a moved image: the app (or infra),
@@ -131,7 +151,12 @@ func (p ImagePin) Moved() bool {
 // the build it moves to, each by its version label when the build has one
 // (Eg: talk  app  ghcr.io/paisans-software/mbin:stack-1  1.15.0-paisans
 // (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)).
+//
+// A first pin reads `<stack>  <services>  <image>  pins <image> to <build>`.
 func (p ImagePin) Describe() string {
+	if p.FirstPin() {
+		return fmt.Sprintf("%s  %s  %s  pins %s to %s", p.Stack, strings.Join(p.Services, ","), p.Image, p.Deployed, buildLabel(p.Reference, p.Version))
+	}
 	return fmt.Sprintf("%s  %s  %s  %s -> %s", p.Stack, strings.Join(p.Services, ","), p.Image, buildLabel(p.Deployed, p.DeployedVersion), buildLabel(p.Reference, p.Version))
 }
 
@@ -188,6 +213,18 @@ func (p *Plan) Moved() []ImagePin {
 	return out
 }
 
+// FirstPins is every pin that writes a digest beside a tag the host runs
+// bare, in the order the plan lists them. See ImagePin.FirstPin.
+func (p *Plan) FirstPins() []ImagePin {
+	var out []ImagePin
+	for _, pin := range p.Pins {
+		if pin.FirstPin() {
+			out = append(out, pin)
+		}
+	}
+	return out
+}
+
 // pinImages pins every image a compose file names that images lists, as
 // ResolveImages and OtherSites describe. compose is the file as rendered,
 // current and found the host's copy. It returns the file to compare and
@@ -225,7 +262,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 		if pin.Reference != image.Image {
 			pinned[image.Image], lines[image.Image] = pin.Reference, image.Lines
 		}
-		if v, ok := r.(Versioner); ok && pin.Moved() {
+		if v, ok := r.(Versioner); ok && (pin.Moved() || pin.FirstPin()) {
 			// Labels are for the operator's eye. A build without one, or a
 			// registry that will not say, shows its digest alone.
 			pin.Version, _ = v.Version(pin.Reference)
@@ -252,6 +289,25 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 	deployed, _ := deployedRef(host, services)
 	pin.Deployed = deployed
 	ref := kinds.ParseReference(want)
+	label := imageLabel(image)
+	if r == nil {
+		// No resolver is a command with a narrower purpose than moving
+		// images: it keeps whatever the host runs, whatever the
+		// configuration now names (another tag, a channel moved, another
+		// repository), so it never moves an image to a build nobody
+		// planned. The next apply shows and makes that move.
+		if deployed != "" {
+			pin.Reference, pin.Source = deployed, "deployed"
+			return pin, nil, nil
+		}
+		if ref.Digest != "" {
+			pin.Reference, pin.Source = want, "configured"
+			return pin, nil, nil
+		}
+		// Nothing runs: the tag is rendered as it is, and the next apply
+		// pins it.
+		return nil, nil, nil
+	}
 	if ref.Digest != "" || ref.Tag == "" {
 		// A digest names its build already, and the operator who wrote it
 		// gets exactly that build. No tag is `latest`, which validate
@@ -260,7 +316,6 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		pin.Reference, pin.Source = want, "configured"
 		return pin, nil, nil
 	}
-	label := imageLabel(image)
 
 	if len(peers) > 0 {
 		held, notes, err := holdImage(site, image, services, host, peers, r)
@@ -274,35 +329,32 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		// No site of the app runs it yet: it is resolved like any other.
 	}
 
-	var failed error
-	if r != nil {
-		digest, err := r.Digest(want)
-		if err == nil {
-			pin.Reference, pin.Source = want+"@"+digest, "registry"
-			return pin, resolvedNotes(site, label, *pin), nil
-		}
-		failed = err
+	digest, failed := r.Digest(want)
+	if failed == nil {
+		pin.Reference, pin.Source = want+"@"+digest, "registry"
+		return pin, resolvedNotes(site, label, *pin), nil
 	}
 
-	// The registry did not answer, or was not asked. The build the host runs
-	// is the one the operator last saw planned, so it is the safe one to keep,
-	// provided it is a build of the same tag: one of another tag or another
-	// image is not the configuration's.
-	if kinds.ParseReference(deployed).Name == want && digestOf(deployed) != "" {
+	// The registry did not answer. What the host runs is what the operator
+	// last saw planned, so it is the safe thing to keep, provided it is the
+	// same tag, pinned or bare: another tag or another image is not the
+	// configuration's.
+	if deployed != "" && nameOf(deployed) == want {
 		pin.Reference, pin.Source = deployed, "deployed"
-		var notes []Note
-		if failed != nil {
-			notes = append(notes, Note{
-				Hint: fmt.Sprintf("%s: %s stays on the build it runs, %s could not be resolved", site, label, want),
-				Text: fmt.Sprintf("%s: asking the registry which build %s names failed (%v), so the plan keeps %s, the build this site already runs. A newer build, if one exists, reaches the site on the next apply that can reach the registry.", site, want, failed, deployed),
-			})
+		kept := fmt.Sprintf("%s, the build this site already runs", deployed)
+		if digestOf(deployed) == "" {
+			kept = fmt.Sprintf("%s as the site runs it, unpinned, until an apply can resolve it", deployed)
 		}
-		return pin, notes, nil
+		return pin, []Note{{
+			Hint: fmt.Sprintf("%s: %s stays on the build it runs, %s could not be resolved", site, label, want),
+			Text: fmt.Sprintf("%s: asking the registry which build %s names failed (%v), so the plan keeps %s. A newer build, if one exists, reaches the site on the next apply that can reach the registry.", site, want, failed, kept),
+		}}, nil
 	}
-	if failed != nil {
-		return nil, nil, fmt.Errorf("%s: could not resolve which build %s names, for %s: %v. This site runs no build of it to keep instead, and a compose file naming only the tag would never move again. Run apply again once this workstation reaches the registry, or set %s to a digest", site, want, label, failed, image.Setting())
+	runs := "This site runs no build of it to keep instead"
+	if deployed != "" {
+		runs = fmt.Sprintf("This site runs %s, which is not a build of it, so keeping that would not be the configuration's", deployed)
 	}
-	return nil, nil, nil
+	return nil, nil, fmt.Errorf("%s: could not resolve which build %s names, for %s: %v. %s, and a compose file naming only the tag would never move again. Run apply again once this workstation reaches the registry, or set %s to a digest", site, want, label, failed, runs, image.Setting())
 }
 
 // holdImage is the build an app this site shares with sites the apply does
@@ -354,28 +406,19 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		}
 	}
 
-	keys := map[string]bool{}
-	for _, ref := range builds {
-		keys[buildKey(ref)] = true
-	}
-	switch {
-	case len(keys) > 1:
+	switch agreed := agreement(builds); {
+	case !agreed:
 		var each []string
 		for _, name := range siteNames(builds) {
 			each = append(each, name+" runs "+builds[name])
 		}
 		return "", nil, fmt.Errorf("%s: %s runs on %s, and its sites run different builds of %s: %s. An apply covering only some of them cannot choose between them, and two builds against one database is how a migration runs twice or not at all. Run `paisans apply` without --site, which plans every site of %s and moves them to one build", site, image.App, strings.Join(append([]string{site}, all...), ", "), label, strings.Join(each, "; "), image.App)
-	case len(keys) == 0 && len(unread) > 0:
+	case len(builds) == 0 && len(unread) > 0:
 		return "", nil, fmt.Errorf("%s: %s runs on %s as well, which could not be read, and no site of it that could be read runs %s yet, so this apply cannot tell which build to start it on. Run apply again once %s can be reached", site, image.App, strings.Join(unread, ", "), label, strings.Join(unread, ", "))
-	case len(keys) == 0:
+	case len(builds) == 0:
 		return "", nil, nil
 	}
-	// One build, perhaps named two ways (Eg: by an older tag and by the
-	// channel). This site's own name for it changes nothing here.
-	held, ok := builds[site]
-	if !ok {
-		held = builds[siteNames(builds)[0]]
-	}
+	held := heldBuild(site, builds)
 
 	// Say so, and say it louder when the tag names a newer build than the
 	// one kept: that build is what the operator would have got.
@@ -388,6 +431,74 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		}
 	}
 	return held, append(notes, note), nil
+}
+
+// agreement reports whether the sites' builds can be one build. Two digests
+// that differ are two builds. A reference naming no digest (a site an older
+// toolkit applied, which runs a bare tag) names no one build, so it agrees
+// with a digest of the same tag and with the same bare tag, and with nothing
+// else: it is not known to be the pinned build, and not known to differ, and
+// holding it on the pinned one moves it to the build its other sites run.
+func agreement(builds map[string]string) bool {
+	digests := map[string]bool{}
+	names := map[string]bool{}
+	for _, ref := range builds {
+		if d := digestOf(ref); d != "" {
+			digests[d] = true
+		}
+		names[nameOf(ref)] = true
+	}
+	if len(digests) > 1 {
+		return false
+	}
+	if len(digests) == 1 {
+		for _, ref := range builds {
+			if digestOf(ref) == "" && !sameTag(ref, builds) {
+				return false
+			}
+		}
+		return true
+	}
+	return len(names) <= 1
+}
+
+// sameTag reports whether bare, a reference with no digest, is the tag one
+// of builds' digests was resolved from.
+func sameTag(bare string, builds map[string]string) bool {
+	for _, ref := range builds {
+		if digestOf(ref) != "" && nameOf(ref) == bare {
+			return true
+		}
+	}
+	return false
+}
+
+// heldBuild is the build agreeing sites are held on: one pinned by digest
+// when any site runs one, since that one is known, and this site's own name
+// for it when it has one, so this site's file does not change for nothing.
+func heldBuild(site string, builds map[string]string) string {
+	own, ok := builds[site]
+	if ok && digestOf(own) != "" {
+		return own
+	}
+	for _, name := range siteNames(builds) {
+		if digestOf(builds[name]) != "" {
+			return builds[name]
+		}
+	}
+	if ok {
+		return own
+	}
+	return builds[siteNames(builds)[0]]
+}
+
+// nameOf is a reference without its digest: the repository and tag a build
+// was resolved from, or the reference itself when it names no digest.
+func nameOf(ref string) string {
+	if parsed := kinds.ParseReference(ref); parsed.Digest != "" {
+		return parsed.Name
+	}
+	return strings.TrimSpace(ref)
 }
 
 // deployedRef is the reference the given services of a compose file run,
@@ -446,6 +557,8 @@ func resolvedNotes(site, label string, pin ImagePin) []Note {
 	switch {
 	case pin.Deployed == "":
 		return []Note{{Text: fmt.Sprintf("%s: %s, %s, resolves to %s", site, label, pin.Image, digestOf(pin.Reference))}}
+	case pin.FirstPin():
+		return []Note{{Text: fmt.Sprintf("%s: %s, %s, runs as a bare tag and is pinned for the first time, to %s, the build the tag names now; the %s stack's compose file changes once, so its containers are recreated once, on that build", site, label, pin.Image, digestOf(pin.Reference), pin.Stack)}}
 	case pin.Moved():
 		before := digestOf(pin.Deployed)
 		if before == "" {

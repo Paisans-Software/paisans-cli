@@ -144,6 +144,7 @@ func TestListPlanNamesEachMovedImage(t *testing.T) {
 		Pins: []apply.ImagePin{
 			{Stack: "talk", App: "talk", Services: []string{"app"}, Image: tag, Reference: tag + "@" + new, Deployed: tag + "@" + old, Source: "registry", Version: "1.16.0-paisans", DeployedVersion: "1.15.0-paisans"},
 			{Stack: "talk", App: "talk", Services: []string{"valkey"}, Image: "docker.io/valkey/valkey:9.1.2-trixie", Reference: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Deployed: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Source: "registry"},
+			{Stack: "talk", App: "talk", Services: []string{"rabbitmq"}, Image: "docker.io/library/rabbitmq:3.13.7-management-alpine", Reference: "docker.io/library/rabbitmq:3.13.7-management-alpine@" + new, Deployed: "docker.io/library/rabbitmq:3.13.7-management-alpine", Source: "registry"},
 		},
 	}
 	rec := &ui.Recorder{}
@@ -152,7 +153,29 @@ func TestListPlanNamesEachMovedImage(t *testing.T) {
 	if !rec.Has("pending", want) {
 		t.Errorf("the moved image is not listed as %q:\n%s", want, rec.Lines())
 	}
+	// A tag the host runs bare is pinned, and says so rather than claiming a
+	// new build.
+	pinned := "talk  rabbitmq  docker.io/library/rabbitmq:3.13.7-management-alpine  pins docker.io/library/rabbitmq:3.13.7-management-alpine to sha256:3c4d5e6f7a8b"
+	if !rec.Has("pending", pinned) {
+		t.Errorf("the first pin is not listed as %q:\n%s", pinned, rec.Lines())
+	}
 	if strings.Contains(rec.Lines(), "valkey") {
 		t.Errorf("an image that stays is listed:\n%s", rec.Lines())
+	}
+}
+
+// apply without --site plans every site, so its steps hold no clustered app
+// on its other sites' build; a quiet reporter alone is not such a run.
+func TestOnlyARunOverEverySiteSkipsTheOtherSitesBuilds(t *testing.T) {
+	if planningEverySite {
+		t.Fatal("set outside a run")
+	}
+	restore := planEverySite()
+	if !planningEverySite {
+		t.Error("not set inside a run")
+	}
+	restore()
+	if planningEverySite {
+		t.Error("left set after the run")
 	}
 }

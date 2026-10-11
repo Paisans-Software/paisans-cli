@@ -643,6 +643,7 @@ func missingID(path string) bool {
 // needs them and stopped at the first failure. Run again, it reads live state
 // again and carries on. See docs/specs/2026-10-09-apply-converge.md.
 func runConverge(r ui.Reporter, o convergeOptions) error {
+	defer planEverySite()()
 	configPath, secretsPath, execute, sudo := o.Config, o.Secrets, o.Execute, o.Sudo
 	cfg, st, err := convergeRead(configPath, secretsPath)
 	if err != nil {
