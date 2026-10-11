@@ -577,3 +577,39 @@ func TestAProblemIsOneLineNotAFailedStepAndAWarning(t *testing.T) {
 		}
 	}
 }
+
+// Two sites joining at once, the new data site and a witness the join brings
+// in from blank: every site is reached and its clock read once, each joining
+// site gets the blank host's checks, and the witness none of a data site's.
+func TestRunAllChecksEveryJoiningSite(t *testing.T) {
+	prepared(t)
+	r, err := RunAll(fixture(t), []string{"home-b", "vm"}, transportsOf(hosts()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Refused() {
+		t.Fatalf("refused:\n%s", printed(r))
+	}
+	for _, name := range []string{"ssh", "clock"} {
+		for _, site := range []string{"home-a", "home-b", "vm"} {
+			if got := len(find(r, site, name)); got != 1 {
+				t.Errorf("%s checked %d times on %s, want once", name, got, site)
+			}
+		}
+	}
+	for _, site := range []string{"home-b", "vm"} {
+		for _, name := range []string{"host", "prepared", "wireguard", "ports", "mesh", "routes", "storage", "rtt"} {
+			if len(find(r, site, name)) == 0 {
+				t.Errorf("%s not checked on %s", name, site)
+			}
+		}
+	}
+	for _, name := range []string{"platform", "watchdog", "disk"} {
+		if len(find(r, "vm", name)) != 0 {
+			t.Errorf("a data site's %s check was made on the witness", name)
+		}
+	}
+	if _, err := RunAll(fixture(t), []string{"home-b", "nowhere"}, transportsOf(hosts())); err == nil {
+		t.Error("an undeclared joining site was accepted")
+	}
+}

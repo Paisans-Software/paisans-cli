@@ -156,11 +156,31 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageFounding, m))
 		}
 	}
-	// The cluster runs and this member has not joined it.
+	// The cluster runs and these members have not joined it. A data member
+	// joins through its site add. A witness has no site add of its own: it
+	// has no replica, and site add's etcd stage brings every configured
+	// member that is not yet a voter in, witnesses first and one learner at
+	// a time, each added before its etcd starts. So a witness joining beside
+	// a data site is joined by that site's site add, after its mesh gate has
+	// passed with the witness in it. A witness joining with no data site
+	// would make the voters even, which validate refuses; its site add is
+	// planned so that the run stops there, saying what to do.
+	var joining, witnesses []string
 	for _, m := range members {
-		if _, recorded := st.Initial[m]; !recorded && !founding(m) {
-			steps = append(steps, step(stageJoining, "site", "add", m))
+		if _, recorded := st.Initial[m]; recorded || founding(m) {
+			continue
 		}
+		if witness(m) {
+			witnesses = append(witnesses, m)
+		} else {
+			joining = append(joining, m)
+		}
+	}
+	if len(joining) == 0 {
+		joining = witnesses
+	}
+	for _, m := range joining {
+		steps = append(steps, step(stageJoining, "site", "add", m))
 	}
 
 	// A monitor checks every other site and app, so it is applied after
