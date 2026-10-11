@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -59,9 +61,10 @@ func sections(rec *ui.Recorder) []string {
 	return out
 }
 
-// The dry run's plan is three sections, prepare, install and dns, and none
-// of the order's own stages is a heading.
-func TestConvergeDryRunShowsPrepareInstallAndDNS(t *testing.T) {
+// The dry run's plan is three sections, prepare, dns and install, and none
+// of the order's own stages is a heading. dns comes before install: the
+// mesh's endpoint names must resolve before any site's wg-quick starts.
+func TestConvergeDryRunShowsPrepareDNSAndInstall(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{"host prepare --site home-b": "docker, firewall"})
 	rec := recordConverge(t)
@@ -75,7 +78,7 @@ func TestConvergeDryRunShowsPrepareInstallAndDNS(t *testing.T) {
 		}
 	}
 	p, i, d := slices.Index(got, "prepare"), slices.Index(got, "install"), slices.Index(got, "dns")
-	if p < 0 || !(p < i && i < d) {
+	if p < 0 || !(p < d && d < i) {
 		t.Errorf("sections %v", got)
 	}
 	sameLines(t, lines(inSection(rec, "prepare")), []string{
@@ -120,7 +123,9 @@ func TestConvergeDryRunInstallIsOneLine(t *testing.T) {
 			if err := converge(t); err != nil {
 				t.Fatal(err)
 			}
-			got := slices.DeleteFunc(lines(inSection(rec, "install")), func(l string) bool { return strings.HasPrefix(l, "progress ") })
+			got := slices.DeleteFunc(lines(inSection(rec, "install")), func(l string) bool {
+				return strings.HasPrefix(l, "progress ") || strings.HasPrefix(l, "result ")
+			})
 			sameLines(t, got, c.want)
 		})
 	}
@@ -144,9 +149,9 @@ func TestConvergeDryRunInstallNamesTheSiteItChecks(t *testing.T) {
 	sameLines(t, got, []string{"vm", "home-a", "home-b", "watch", "storage", "home-a", "home-b", "vm", "watch"})
 }
 
-// --execute draws each prepare line as its step runs, then one install line
-// for every inner step, whose spinner names the site it has reached, ending
-// done; dns follows.
+// --execute draws each prepare line as its step runs, then dns, then one
+// install line for every inner step, whose spinner names the site it has
+// reached, ending done.
 func TestConvergeRunInstallIsOneLine(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	rec := recordConverge(t)
@@ -165,8 +170,26 @@ func TestConvergeRunInstallIsOneLine(t *testing.T) {
 		"progress watch: " + fixtureSites,
 		"done " + fixtureSites,
 	})
-	if i, d := slices.Index(sections(rec), "install"), slices.Index(sections(rec), "dns"); i < 0 || d < i {
+	if i, d := slices.Index(sections(rec), "install"), slices.Index(sections(rec), "dns"); d < 0 || i < d {
 		t.Errorf("sections %v", sections(rec))
+	}
+	if d, a := slices.Index(*ran, "dns init"), slices.Index(*ran, "apply --site vm"); d < 0 || a < d {
+		t.Errorf("dns init ran after the first install step: %v", *ran)
+	}
+}
+
+// A DNS conflict stops the run before install: no site's wg-quick starts
+// on names that may not resolve.
+func TestConvergeRunDNSConflictStopsBeforeInstall(t *testing.T) {
+	conflict := fmt.Errorf("dns: 1 conflicting record(s), listed above: %w", dns.ErrConflict)
+	ran := fakeConverge(t, map[string]error{"dns init": conflict})
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	if !errors.Is(err, dns.ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	if slices.Contains(sections(rec), "install") || (*ran)[len(*ran)-1] != "dns init" {
+		t.Errorf("ran on past the conflict: %v\n%v", *ran, sections(rec))
 	}
 }
 
@@ -182,7 +205,7 @@ func TestConvergeRunInstallFailureNamesTheSite(t *testing.T) {
 	if !rec.Has("fail", fixtureSites) || rec.Events[rec.Index("fail", fixtureSites)].Extra != "home-a" {
 		t.Errorf("install line:\n%s", rec.Lines())
 	}
-	if slices.Contains(sections(rec), "dns") || (*ran)[len(*ran)-1] != "apply --site home-a" {
+	if (*ran)[len(*ran)-1] != "apply --site home-a" {
 		t.Errorf("ran on past the failure: %v", *ran)
 	}
 }

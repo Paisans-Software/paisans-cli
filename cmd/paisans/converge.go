@@ -49,13 +49,14 @@ func clusterNames(in render.EtcdInitial) []string {
 }
 
 // stage is where in the order a step falls. The operator sees three of
-// them: prepare, install, which is every stage from founding to pass two as
-// one line, and dns.
+// them: prepare, dns, and install, which is every stage from founding to
+// pass two as one line.
 type stage int
 
 const (
 	stageInit stage = iota
 	stagePrepare
+	stageDNS
 	// stageFounding is an etcd member's first apply. Its founding stop is
 	// expected: pass two applies it again.
 	stageFounding
@@ -64,7 +65,6 @@ const (
 	stageStorage
 	// stagePassTwo is every site's apply once more, after the rest.
 	stagePassTwo
-	stageDNS
 )
 
 // installs reports whether a step of st is one of the install line's.
@@ -109,6 +109,13 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	for _, s := range cfg.SiteNames() {
 		steps = append(steps, step(stagePrepare, "host", "prepare", "--site", s))
 	}
+	// dns creates the records that are missing; one pointing elsewhere
+	// stops it. It comes before install: each site's wg-quick resolves its
+	// peers' endpoint names as it starts, and one that does not resolve
+	// fails the mesh interface, so the names must exist before any site is
+	// applied. It needs only the provider's API and the configuration, and
+	// nothing waits for the stack: Caddy's certificates use DNS challenges.
+	steps = append(steps, step(stageDNS, "dns", "init"))
 
 	// A member with no record is still being founded when no member has a
 	// record, or when a record's --initial-cluster lists it: the founding
@@ -183,9 +190,6 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	for _, s := range ordered(func(string) bool { return true }) {
 		steps = append(steps, applyStep(stagePassTwo, s))
 	}
-	// dns creates the records that are missing; one pointing elsewhere
-	// stops it.
-	steps = append(steps, step(stageDNS, "dns", "init"))
 	return steps
 }
 
@@ -709,9 +713,9 @@ type stepStatus struct {
 	reports          []checkReport
 }
 
-// convergeStatus is the dry run's plan: a prepare line per site, one install
-// line for every step from founding to pass two, and dns, each marked with
-// its status; init's line is runConverge's, drawn with the findings. A step
+// convergeStatus is the dry run's plan: a prepare line per site, dns, and
+// one install line for every step from founding to pass two, each marked
+// with its status; init's line is runConverge's, drawn with the findings. A step
 // is checked by its own dry run once every step it waits on is up to date,
 // and is otherwise marked as waiting on the first that is not; until that
 // one runs, its dry run would describe a host about to change. A check that
@@ -1009,10 +1013,11 @@ func showNotes(r ui.Reporter, notes []checkReport) {
 const resumeAdvice = "Run paisans apply --execute again to resume."
 
 // convergeExecute runs every step but init, which runConverge has run: a
-// prepare line per site, as it runs; one install line for every step from
-// founding to pass two, whose spinner names the site it has reached; and dns
-// init, which reports as typed by hand, so a conflicting record it lists is
-// what the stop's advice points at. It stops at the first failure.
+// prepare line per site, as it runs; dns init, which reports as typed by
+// hand, so a conflicting record it lists is what the stop's advice points
+// at; and one install line for every step from founding to pass two, whose
+// spinner names the site it has reached. It stops at the first failure, so
+// a DNS conflict stops the run before any site is applied.
 func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
 	for i := 0; i < len(steps); {
 		s := steps[i]

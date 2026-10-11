@@ -2298,8 +2298,8 @@ A record is deleted only when every one of these holds:
 own records: its SPF beside the toolkit's `v=spf1 -all` would be two SPF
 records, which a receiver ignores, and the null MX would turn its mail away.
 
-Until the prune has run, `dns init` refuses, and so does `apply`, whose last
-stage it is. At every name with mail under `community.domain` it looks for a
+Until the prune has run, `dns init` refuses, and so does `apply`, which runs
+it before any site is applied. At every name with mail under `community.domain` it looks for a
 no-mail record this deployment's `dns init` made (its comment, and exactly a
 no-mail content), and each one it finds is a conflict naming `dns prune
 --execute` as the fix, shown as `remove with dns prune` in place of what is
@@ -3258,12 +3258,20 @@ step runs after the one before it:
 |---|---|---|
 | configuration | `init` | no id, no mesh subnet, or a generated secret missing |
 | hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
+| dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | no member founded yet (below) |
 | joining | `site add <s>` | the cluster runs and a member has not joined it |
 | other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop and moves what earlier steps changed |
-| dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
+
+**DNS comes before any site is applied.** Each site's `wg-quick` resolves its
+peers' `endpoint` names as the mesh interface starts, and one name that does
+not resolve fails the whole interface, so etcd then cannot bind its mesh
+address. `dns init` needs only the provider's API and the configuration, never
+a host, and nothing in it waits for the stack: Caddy's certificates use DNS
+challenges. A record pointing elsewhere therefore stops the run before
+install, with nothing applied.
 
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
@@ -3285,9 +3293,9 @@ elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
 The output does not follow the phases. After `configuration` and `sudo` it has
-three sections: `prepare`, one line per site for its `host prepare`; `install`,
-one line for every step from founding to pass two, naming each site in the
-order the run first applies it; and `dns`. With `--execute` the prepare lines
+three sections: `prepare`, one line per site for its `host prepare`; `dns`;
+and `install`, one line for every step from founding to pass two, naming each
+site in the order the run first applies it. With `--execute` the prepare lines
 are a block of spinners, one per host, each with its own elapsed time; a host
 that finishes leaves the block with its mark, above the hosts still running,
 so the lines end in the order their hosts finish. The install line's spinner
@@ -3362,11 +3370,11 @@ prepare
   ✓ vm
   ✓ watch
 
-install
-  · vm, home-a, home-b, watch: after prepare
-
 dns
   ○ dns init: 2 records to create
+
+install
+  · vm, home-a, home-b, watch: after prepare
 ...
 Nothing changed on the servers. Added 4 generated secrets to secrets.enc.yaml. Re-run with --execute to apply. ...
 ```
