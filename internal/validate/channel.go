@@ -38,7 +38,8 @@ var kindDefault = func(kind config.Kind, service string) string {
 }
 
 // imageChannels warns about an app whose image follows a channel other than
-// the one its kind defaults to.
+// the one its kind defaults to, or follows one when its kind's default
+// follows none.
 //
 // A channel number is the template contract the toolkit renders: stack-2 is
 // promoted only for a release that needs something rendered that a stack-1
@@ -54,7 +55,14 @@ func (c *checker) imageChannels() {
 			declared := app.Images[service]
 			def := kindDefault(app.Kind, service)
 			want, got := channelOf(def), channelOf(declared)
-			if want == "" || got == "" || want == got {
+			if got == "" || want == got {
+				continue
+			}
+			if want == "" {
+				c.warn("image-channel-differs", fmt.Sprintf("apps.%s.images.%s", name, service),
+					"image follows a channel this toolkit does not render",
+					"is %q, which follows %s, and the %s kind defaults to %s, which follows no channel. This toolkit renders for the release its default names, not for any channel's contract, so a release promoted to %s may need settings it does not render, or stop reading ones it does. Name a version tag or a digest instead, or use a toolkit whose %s kind follows %s.",
+					declared, got, app.Kind, def, got, app.Kind, got)
 				continue
 			}
 			c.warn("image-channel-differs", fmt.Sprintf("apps.%s.images.%s", name, service),
