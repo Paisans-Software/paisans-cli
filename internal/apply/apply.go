@@ -211,10 +211,10 @@ type Plan struct {
 	// recordedCaddy is what the manifest Build read recorded for Caddy, kept
 	// when this plan does not settle the compose file.
 	recordedCaddy *render.ManifestCaddy
-	// recordedIngress is what the manifest Build read recorded of the files
+	// recordedWebServer is what the manifest Build read recorded of the files
 	// in the operator's web server's include directory. Apply writes them
 	// after every site is up, so every manifest write keeps them.
-	recordedIngress []render.ManifestIngress
+	recordedWebServer []render.ManifestWebServer
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
 	// imageHistory is the manifest's record of every repository this site
@@ -579,7 +579,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		return nil, err
 	}
 	out.recordedCaddy = manifest.Caddy
-	out.recordedIngress = manifest.Ingress
+	out.recordedWebServer = manifest.WebServer
 	out.imageHistory = manifest.Images
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
@@ -1515,7 +1515,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan), Ingress: plan.recordedIngress}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
 	if err != nil {
 		return err
 	}

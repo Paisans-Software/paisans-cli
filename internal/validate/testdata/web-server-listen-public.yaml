@@ -1,4 +1,4 @@
-# valid.yaml with an ingress block on home-a, which is not a monitor.
+# valid.yaml with a monitor that publishes its app on its public address.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -24,9 +24,6 @@ sites:
     roles: [data, apps]
     address: 10.44.0.1
     endpoint: home-a.example.org:51820
-    ingress:
-      mode: external
-      listen: 127.0.0.1:8480
     ssh:
       host: home-a.local
       user: ubuntu
@@ -50,6 +47,9 @@ sites:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20
+    web_server:
+      managed_by: external
+      listen: 203.0.113.20:8480
     ssh:
       host: watch.local
       user: ubuntu

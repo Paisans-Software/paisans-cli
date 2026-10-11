@@ -1,4 +1,4 @@
-package ingress_test
+package webserver_test
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/ingress"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
 // fakeHost answers a command by the first key it contains, in order, and
@@ -59,10 +59,10 @@ const caddyFiles = `{"apps":{"http":{"servers":{
   {"certificate":"/etc/ssl/blog.example.org/fullchain.pem","key":"/etc/ssl/blog.example.org/privkey.pem"}
 ]}}}}`
 
-func show(t *testing.T, ws ingress.WebServer) string {
+func show(t *testing.T, ws webserver.WebServer) string {
 	t.Helper()
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ws)
+	webserver.Show(&buf, external(t, "127.0.0.1:8480"), ws)
 	return buf.String()
 }
 
@@ -77,11 +77,11 @@ func TestDetectsADockerCaddyThatObtainsItsOwnCertificates(t *testing.T) {
 		{key: "docker exec caddy-1 wget", out: caddyAutomatic},
 	}}
 	sudo := &fakeHost{}
-	ws := ingress.Detect(ingress.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
-	if ws.Server != ingress.ServerCaddy || ws.Container != "caddy-1" || ws.Config != "/opt/caddy/Caddyfile" || ws.Certs != ingress.CertsAutomatic {
+	ws := webserver.Detect(webserver.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
+	if ws.Server != webserver.ServerCaddy || ws.Container != "caddy-1" || ws.Config != "/opt/caddy/Caddyfile" || ws.Certs != webserver.CertsAutomatic {
 		t.Fatalf("got %+v", ws)
 	}
-	if ws.Main != "/etc/caddy/Caddyfile" || len(ws.Mounts) != 2 || ws.Mounts[0] != (ingress.Mount{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}) {
+	if ws.Main != "/etc/caddy/Caddyfile" || len(ws.Mounts) != 2 || ws.Mounts[0] != (webserver.Mount{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}) {
 		t.Errorf("main %q, mounts %+v", ws.Main, ws.Mounts)
 	}
 	if len(sudo.asked) != 0 {
@@ -113,8 +113,8 @@ func TestDetectsADockerCaddyThatLoadsCertificateFiles(t *testing.T) {
 		{key: "docker inspect", out: caddyMounts},
 		{key: "curl", out: caddyFiles},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
-	if ws.Server != ingress.ServerCaddy || ws.Certs != ingress.CertsFiles {
+	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	if ws.Server != webserver.ServerCaddy || ws.Certs != webserver.CertsFiles {
 		t.Fatalf("got %+v", ws)
 	}
 	out := show(t, ws)
@@ -136,8 +136,8 @@ func TestDetectAsksDockerThroughSudoWhenDenied(t *testing.T) {
 		{key: "docker inspect", out: `[{"Source":"/srv/web/nginx.conf","Destination":"/etc/nginx/nginx.conf"}]`},
 		{key: "docker exec web nginx -T", out: "# configuration file /etc/nginx/nginx.conf:\nserver_name blog.example.org;\nssl_certificate /etc/ssl/blog.example.org/cert.pem;\nssl_certificate_key /etc/ssl/blog.example.org/key.pem;\n"},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
-	if !sudo.ran("docker ps") || ws.Server != ingress.ServerNginx || ws.Container != "web" || ws.Config != "/srv/web/nginx.conf" {
+	ws := webserver.Detect(webserver.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
+	if !sudo.ran("docker ps") || ws.Server != webserver.ServerNginx || ws.Container != "web" || ws.Config != "/srv/web/nginx.conf" {
 		t.Fatalf("got %+v\nsudo asked %v", ws, sudo.asked)
 	}
 	if ws.CertFile != "/etc/ssl/status.example.org/cert.pem" || ws.KeyFile != "/etc/ssl/status.example.org/key.pem" {
@@ -152,7 +152,7 @@ func TestDetectWithoutSudoSaysDockerNeedsIt(t *testing.T) {
 		{key: "docker", out: "permission denied while trying to connect to the Docker daemon socket", err: errors.New("exit status 1")},
 		{key: "ss -ltnp", out: "State Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
 	if ws.Server != "" || !strings.Contains(ws.Why, "sudo") {
 		t.Fatalf("got %+v", ws)
 	}
@@ -173,8 +173,8 @@ func TestDetectsABareMetalNginxWithCertbot(t *testing.T) {
 		{key: "nginx -T", out: "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\n# configuration file /etc/nginx/nginx.conf:\nhttp {\n# configuration file /etc/nginx/sites-enabled/blog:\nserver {\n    server_name blog.example.org;\n    ssl_certificate /etc/letsencrypt/live/blog.example.org/fullchain.pem; # managed by Certbot\n    ssl_certificate_key /etc/letsencrypt/live/blog.example.org/privkey.pem; # managed by Certbot\n}\n"},
 		{key: "renewal", out: "authenticator = nginx\n"},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
-	if ws.Server != ingress.ServerNginx || ws.Container != "" || ws.Process != "nginx" || ws.Config != "/etc/nginx/nginx.conf" || ws.Main != ws.Config {
+	ws := webserver.Detect(webserver.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
+	if ws.Server != webserver.ServerNginx || ws.Container != "" || ws.Process != "nginx" || ws.Config != "/etc/nginx/nginx.conf" || ws.Main != ws.Config {
 		t.Fatalf("got %+v", ws)
 	}
 	if ws.CertFile != "/etc/letsencrypt/live/status.example.org/fullchain.pem" || ws.KeyFile != "/etc/letsencrypt/live/status.example.org/privkey.pem" {
@@ -209,7 +209,7 @@ func TestCertbotKeepsTheWebroot(t *testing.T) {
 		{key: "nginx -T", out: "# configuration file /etc/nginx/nginx.conf:\nssl_certificate /etc/letsencrypt/live/blog.example.org/fullchain.pem;\nssl_certificate_key /etc/letsencrypt/live/blog.example.org/privkey.pem;\n"},
 		{key: "renewal", out: "authenticator = webroot\nwebroot_path = /var/www/html,\n"},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
+	ws := webserver.Detect(webserver.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
 	if ws.Certbot != "certbot certonly --webroot -w /var/www/html -d status.example.org" {
 		t.Errorf("certbot %q", ws.Certbot)
 	}
@@ -222,7 +222,7 @@ func TestUnknownWebServerFallsBackToEverySnippet(t *testing.T) {
 		{key: "docker", out: "__PAISANS_NO_DOCKER__\n"},
 		{key: "ss -ltnp", out: "LISTEN 0 4096 127.0.0.1:8480 0.0.0.0:*\n"},
 	}}
-	ws := ingress.Detect(ingress.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
 	if ws.Server != "" || ws.Why == "" {
 		t.Fatalf("got %+v", ws)
 	}
@@ -244,7 +244,7 @@ func TestUnknownWebServerFallsBackToEverySnippet(t *testing.T) {
 func TestDetectOnAnUnreachableHost(t *testing.T) {
 	down := errors.New("watch cannot be reached over ssh")
 	plain := &fakeHost{answers: []answer{{key: "", err: down}}}
-	ws := ingress.Detect(ingress.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
 	if ws.Server != "" || !strings.Contains(ws.Why, "cannot be reached") {
 		t.Fatalf("got %+v", ws)
 	}
@@ -257,7 +257,7 @@ func TestDetectOnlyReads(t *testing.T) {
 		{key: "docker inspect", out: caddyMounts},
 		{key: "curl", out: caddyFiles},
 	}}
-	ingress.Detect(ingress.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
+	webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
 	for _, c := range plain.asked {
 		for _, verb := range []string{"reload", "restart", "POST", "PATCH", "PUT", "DELETE", "rm ", "tee ", ">"} {
 			if strings.Contains(c, verb) && !strings.Contains(c, "2>/dev/null") && !strings.Contains(c, ">/dev/null") {

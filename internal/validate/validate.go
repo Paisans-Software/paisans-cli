@@ -158,7 +158,7 @@ func Check(cfg *config.Config) Result {
 	c.oidcMemberGroupDisagreesWithGate()
 	c.oidcClientUnrestricted()
 	c.monitorRoles()
-	c.ingress()
+	c.webServer()
 	c.smtpOnAKindWithoutMail()
 	c.pocketIDSettingInvalid()
 	c.pocketIDConfigKeyHasASetting()
@@ -1138,7 +1138,7 @@ func (c *checker) portCollision() {
 // same owner under the same key is one listener named twice, such as a
 // service on its mesh address and on loopback, which never overlaps anyway;
 // the same owner under two keys, such as an app published on its mesh
-// address and again on an ingress listen, is two binds like any others.
+// address and again on a web_server listen, is two binds like any others.
 func collides(a, b render.Listener) bool {
 	if a.Owner == b.Owner && a.Key == b.Key {
 		return false

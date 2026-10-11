@@ -34,8 +34,8 @@ is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
 removed site.
-`ingress show` and `ingress check` change nothing: `check` looks at a
-monitor's public hostname as a visitor would, and in ingress mode `external`
+`web-server show` and `web-server check` change nothing: `check` looks at a
+monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
 
@@ -88,8 +88,8 @@ paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
 paisans dns init                          # shows which records it would create
 paisans dns prune                         # shows which records it would delete
-paisans ingress show  --app status        # hand-off sheet for a monitor's web server
-paisans ingress check --app status        # DNS, certificate, sign in, closed upstream
+paisans web-server show  --app status        # hand-off sheet for a monitor's web server
+paisans web-server check --app status        # DNS, certificate, sign in, closed upstream
 security find-generic-password -s acme -w \
   | paisans secrets set external.acme_dns_token
 ```
@@ -241,7 +241,7 @@ each app the leftovers belong to (`Report.Apps`). Its allow list takes the inven
 from `hostcheck.ReadCommands`.
 
 `render`, `apply`, `site add` and `site remove` refuse a site running the
-toolkit's Caddy (a gateway, or a monitor in ingress mode `paisans`) when
+toolkit's Caddy (a gateway, or a monitor in `managed_by` `paisans`) when
 `external.acme_dns_token` is empty. `init` lists it as owed, but rendering without it produced a Caddy that
 starts and then fails every DNS-01 challenge, which a visitor finds rather than
 the operator.
@@ -252,16 +252,16 @@ lets the key live in a keychain rather than in a file or the environment, then
 `SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY` and `sops/age/keys.txt` under the user's
 config directory.
 
-`ingress show --app <name>` and `ingress check --app <name>` are for an app
+`web-server show --app <name>` and `web-server check --app <name>` are for an app
 pinned to a monitor site (`render.ServedBy`); every other app is the
-gateway's and is refused. `internal/ingress` holds both: `For` builds the
+gateway's and is refused. `internal/webserver` holds both: `For` builds the
 target from the configuration, `Detect` finds the web server in front of it
-over ssh, reading only (`internal/ingress/detect.go`), `Show` prints what that
+over ssh, reading only (`internal/webserver/detect.go`), `Show` prints what that
 web server must do and the snippet for it, or for Caddy, nginx and Apache when
 `Detect` found none, and `Check` runs four
 read only checks through `Probes`, a resolver, an HTTPS client that never
 follows a redirect, a dialer and a clock. Behind the toolkit's own Caddy
-(ingress mode `paisans`) there is nothing to hand off, so `Show` says so and
+(`managed_by: paisans`) there is nothing to hand off, so `Show` says so and
 `Check` makes only the DNS and certificate checks (`Target.External`). Tests replace all four and run
 against `httptest` TLS servers with certificates generated in the test, so no
 test touches real DNS or the network. README.md *The monitor has a site of
@@ -269,12 +269,12 @@ its own* has the reasoning; `docs/guides/behind-your-own-web-server.md` is
 the walk-through.
 
 `apply` without `--site` uses the same package once every step has run:
-`writeIngressFiles` (`cmd/paisans/converge_ingress_files.go`) writes each
-app's snippet into the web server's `include_dir` through `ingress.Sync`
-(`internal/ingress/include.go`), recording each file in the manifest
-(`internal/apply/ingressrecord.go`) so `app remove` and `site remove` delete
-it through `ingress.Remove`, and `convergeIngress`
-(`cmd/paisans/converge_ingress.go`) runs `Check` for each app, again for
+`writeWebServerFiles` (`cmd/paisans/converge_webserver_files.go`) writes each
+app's snippet into the web server's `include_dir` through `webserver.Sync`
+(`internal/webserver/include.go`), recording each file in the manifest
+(`internal/apply/webserverrecord.go`) so `app remove` and `site remove` delete
+it through `webserver.Remove`, and `convergeWebServer`
+(`cmd/paisans/converge_webserver.go`) runs `Check` for each app, again for
 about half a minute while only the certificate or sign in fails.
 
 `render` validates, then writes per site artifacts under `--out`. It writes
@@ -301,8 +301,8 @@ a host decides how much is touched* has the reasoning; what the code does:
   listener carrying the `paisans.yaml` key behind it (`render.Listener.Key`),
   plus the `psns-<token>` interface, the endpoint's port (none without an
   endpoint), the mesh subnet, and each subnet the site's stacks pin
-  (`render.SiteNetworks`, with its key; only an app on a monitor in ingress
-  mode `external` pins one), over which a foreign Docker network or route is a
+  (`render.SiteNetworks`, with its key; only an app on a monitor with `managed_by:
+  external` pins one), over which a foreign Docker network or route is a
   conflict, as one over the mesh is. A new listener is added to
   `render.SiteListeners` with its key, and the host check, preflight's ports
   check and validate's collision check all see it.
@@ -1156,7 +1156,7 @@ installed, on a workstation or anywhere else.
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
 | `internal/pocketid` | Pocket ID's REST API, called through curl on the host with everything variable on stdin, or over HTTP from beside it |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
-| `internal/ingress` | a monitor's ingress: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
+| `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
 | `internal/ownership` | what of this deployment is left over on a host, and what foreign relies on its Caddy, from the host check's inventory |
 | `internal/appremove` | `app remove`: which of a host's things are a removed app's, the gate, the plan, and each idempotent step |
@@ -1198,8 +1198,8 @@ all.
 One file in a set is not rendered beside the app: `caddy.snippet.tmpl` lands on
 every gateway, at `/srv/paisans/<token>/infra/caddy/snippets/<app>.caddy`, because that is where
 it is read. An app pinned to a monitor site is the exception: its snippet
-lands on that monitor instead, in ingress mode paisans, and on no site at all
-in mode external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,
+lands on that monitor instead, with `managed_by: paisans`, and on no site at all
+with managed_by: external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,
 certificates and the trusted proxy range, and gives each app a host block that
 imports its snippet. A snippet never hardcodes where its application runs: it
 receives the upstreams from the inventory, which is what keeps a pinned app and

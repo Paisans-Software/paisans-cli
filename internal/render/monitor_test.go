@@ -9,13 +9,13 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// monitorConfig is the fixture with the watch monitor's ingress block set,
+// monitorConfig is the fixture with the watch monitor's web_server block set,
 // nil for the default mode paisans.
-func monitorConfig(t *testing.T, ingress *config.Ingress) *config.Config {
+func monitorConfig(t *testing.T, webServer *config.WebServer) *config.Config {
 	t.Helper()
 	cfg := fixture(t)
 	watch := cfg.Sites["watch"]
-	watch.Ingress = ingress
+	watch.WebServer = webServer
 	cfg.Sites["watch"] = watch
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("the monitor configuration is refused: %v", refusals)
@@ -46,13 +46,13 @@ func TestAPaisansMonitorClaimsEightyAndFourFortyThree(t *testing.T) {
 }
 
 func TestAnExternalListenIsClaimed(t *testing.T) {
-	cfg := monitorConfig(t, &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"})
+	cfg := monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})
 	var found bool
 	for _, l := range render.SiteListeners(cfg, "watch") {
 		if l.Port == 80 || l.Port == 443 {
 			t.Errorf("an external monitor claims %s", l)
 		}
-		if l.Address == "127.0.0.1" && l.Port == 8480 && l.Proto == "tcp" && l.Key == "sites.watch.ingress.listen" && l.Owner == "app status (uptime)" {
+		if l.Address == "127.0.0.1" && l.Port == 8480 && l.Proto == "tcp" && l.Key == "sites.watch.web_server.listen" && l.Owner == "app status (uptime)" {
 			found = true
 		}
 	}
@@ -63,7 +63,7 @@ func TestAnExternalListenIsClaimed(t *testing.T) {
 	// is a collision validate reports, not a container that fails to start.
 	site := cfg.Sites["watch"]
 	site.Roles = append(site.Roles, config.RoleData)
-	site.Ingress.Listen = "127.0.0.1:5432"
+	site.WebServer.Listen = "127.0.0.1:5432"
 	cfg.Sites["watch"] = site
 	if !validate.Check(cfg).Has("port-collision") {
 		t.Fatal("a listen on 5432 beside Postgres is not a collision")
@@ -146,7 +146,7 @@ func TestAPaisansMonitorRunsTheGatewaysCaddy(t *testing.T) {
 }
 
 func TestAnExternalMonitorRunsNoCaddy(t *testing.T) {
-	cfg := monitorConfig(t, &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"})
+	cfg := monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})
 	files := planFiles(mustBuild(t, cfg))
 	for path := range files {
 		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/") {
@@ -184,19 +184,19 @@ func TestAMonitorCarriesTheGateOnlyWhenItsAppIsGated(t *testing.T) {
 // the proxy's own address, which is known only to lie in that network.
 func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 	for _, tc := range []struct {
-		ingress *config.Ingress
-		want    string
+		webServer *config.WebServer
+		want      string
 	}{
 		{nil, "TRUST_PROXY=10.44.0.4/32"},
-		{&config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}, "TRUST_PROXY=10.255.255.1/32"},
-		{&config.Ingress{Mode: config.IngressExternal, Listen: "192.168.1.20:8480"}, "TRUST_PROXY=192.168.0.0/16"},
-		{&config.Ingress{Mode: config.IngressExternal, Listen: "172.20.0.5:8480"}, "TRUST_PROXY=172.16.0.0/12"},
-		{&config.Ingress{Mode: config.IngressExternal, Listen: "100.101.102.103:8480"}, "TRUST_PROXY=100.64.0.0/10"},
-		{&config.Ingress{Mode: config.IngressExternal, Listen: "10.44.0.4:8480"}, "TRUST_PROXY=10.44.0.0/24"},
+		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}, "TRUST_PROXY=10.255.255.1/32"},
+		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "192.168.1.20:8480"}, "TRUST_PROXY=192.168.0.0/16"},
+		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "172.20.0.5:8480"}, "TRUST_PROXY=172.16.0.0/12"},
+		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}, "TRUST_PROXY=100.64.0.0/10"},
+		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "10.44.0.4:8480"}, "TRUST_PROXY=10.44.0.0/24"},
 	} {
-		env := planFiles(mustBuild(t, monitorConfig(t, tc.ingress)))["watch/srv/paisans/f2a9/status/.env"]
+		env := planFiles(mustBuild(t, monitorConfig(t, tc.webServer)))["watch/srv/paisans/f2a9/status/.env"]
 		if !strings.Contains(env, "\n"+tc.want+"\n") || !strings.Contains(env, "\nPUBLIC_BASE_URL=https://status.example.org\n") {
-			t.Errorf("%+v:\n%s", tc.ingress, env)
+			t.Errorf("%+v:\n%s", tc.webServer, env)
 		}
 	}
 }
@@ -207,7 +207,7 @@ func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 // web server's connections arrive from is known. Mode paisans publishes on the
 // mesh address, where its Caddy reaches it, and pins nothing.
 func TestAnExternalAppIsPublishedOnListenOnly(t *testing.T) {
-	compose := planFiles(mustBuild(t, monitorConfig(t, &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"})))["watch/srv/paisans/f2a9/status/compose.yaml"]
+	compose := planFiles(mustBuild(t, monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})))["watch/srv/paisans/f2a9/status/compose.yaml"]
 	for _, want := range []string{`"127.0.0.1:8480:3001"`, "subnet: 10.255.255.0/29", "gateway: 10.255.255.1"} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("missing %s:\n%s", want, compose)
@@ -225,9 +225,9 @@ func TestAnExternalAppIsPublishedOnListenOnly(t *testing.T) {
 // The pinned network is a claim like a port: the host check refuses a host
 // where something else already uses it.
 func TestAnExternalMonitorClaimsItsNetwork(t *testing.T) {
-	cfg := monitorConfig(t, &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"})
+	cfg := monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})
 	got := render.SiteNetworks(cfg, "watch")
-	if len(got) != 1 || got[0].Subnet != "10.255.255.0/29" || got[0].Key != "sites.watch.ingress" || got[0].Project != "paisans-f2a9-status" {
+	if len(got) != 1 || got[0].Subnet != "10.255.255.0/29" || got[0].Key != "sites.watch.web_server" || got[0].Project != "paisans-f2a9-status" {
 		t.Fatalf("%+v", got)
 	}
 	for _, l := range render.SiteListeners(cfg, "watch") {

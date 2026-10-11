@@ -16,9 +16,9 @@ import (
 // with it, and apply does not leave that to `up`: Compose (2.31 and later)
 // recreates a network whose recorded config hash differs from the file's, but
 // it leaves alone a network carrying no recorded hash, which is one created by
-// an older Compose or by hand. The case that matters is ingress mode
+// an older Compose or by hand. The case that matters is managed_by:
 // external, where the uptime app's TRUST_PROXY names the pinned network's
-// gateway (render.IngressGateway). A network left on its old pool makes the
+// gateway (render.WebServerGateway). A network left on its old pool makes the
 // web server's connections arrive from an address TRUST_PROXY does not name,
 // and the login rate limiter then counts every client as the same one.
 //
@@ -123,14 +123,14 @@ func ipv4(ps []pool) []pool {
 // and a gateway only where the file declares one, so that what Docker fills
 // in for itself never reads as a difference. A declared pin must be among
 // the network's subnets, with its gateway. A file that pins nothing leaves
-// the pool to Docker, which never allocates render.IngressNetwork, since that
+// the pool to Docker, which never allocates render.WebServerNetwork, since that
 // subnet is outside its default pools; a network still on it was pinned by
 // an earlier render and keeps that render's gateway.
 func staleNetwork(declared, live []pool) string {
 	declared, live = ipv4(declared), ipv4(live)
 	if len(declared) == 0 {
 		for _, p := range live {
-			if p.Subnet == render.IngressNetwork {
+			if p.Subnet == render.WebServerNetwork {
 				return fmt.Sprintf("its compose network is still pinned to %s, which the compose file no longer declares", p.Subnet)
 			}
 		}

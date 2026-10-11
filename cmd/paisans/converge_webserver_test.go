@@ -9,41 +9,41 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ingress"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
-// fakeIngressCheck replaces checking an app's ingress from this machine:
+// fakeWebServerCheck replaces checking an app's web server from this machine:
 // an app in failing fails with those results on every attempt, and every
 // other passes every check. It returns the apps checked, one entry per
 // attempt.
-func fakeIngressCheck(t *testing.T, failing map[string][]ingress.Result) *[]string {
+func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]string {
 	t.Helper()
 	var checked []string
-	saved, savedSleep := convergeIngressCheck, convergeSleep
-	convergeIngressCheck = func(target ingress.Target) []ingress.Result {
+	saved, savedSleep := convergeWebServerCheck, convergeSleep
+	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checked = append(checked, target.App)
 		if results, ok := failing[target.App]; ok {
 			return results
 		}
-		return []ingress.Result{
-			{Name: ingress.CheckDNS, OK: true, Detail: target.Hostname + " resolves to 203.0.113.20"},
-			{Name: ingress.CheckCertificate, OK: true, Detail: "https://" + target.Hostname + "/ answered 200"},
+		return []webserver.Result{
+			{Name: webserver.CheckDNS, OK: true, Detail: target.Hostname + " resolves to 203.0.113.20"},
+			{Name: webserver.CheckCertificate, OK: true, Detail: "https://" + target.Hostname + "/ answered 200"},
 		}
 	}
 	convergeSleep = func(time.Duration) {}
 	// Writing the site files reaches the monitor's host; here there is
-	// nothing to write. fakeIngressFiles says otherwise.
-	savedFiles := convergeIngressFiles
-	convergeIngressFiles = func(ui.Reporter, *config.Config, string, bool) ([]string, bool) { return nil, false }
-	t.Cleanup(func() { convergeIngressCheck, convergeSleep, convergeIngressFiles = saved, savedSleep, savedFiles })
+	// nothing to write. fakeWebServerFiles says otherwise.
+	savedFiles := convergeWebServerFiles
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool) ([]string, bool) { return nil, false }
+	t.Cleanup(func() { convergeWebServerCheck, convergeSleep, convergeWebServerFiles = saved, savedSleep, savedFiles })
 	fakeWebServer(t, caddyAutomatic)
 	return &checked
 }
 
 // caddyAutomatic is a Caddy in a container that obtains its own
 // certificates, as Detect finds it.
-var caddyAutomatic = ingress.WebServer{Server: ingress.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: ingress.CertsAutomatic}
+var caddyAutomatic = webserver.WebServer{Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: webserver.CertsAutomatic}
 
 // webServerAsks is each time fakeWebServer was asked: the app, and whether
 // through sudo.
@@ -51,19 +51,19 @@ type webServerAsks []string
 
 // fakeWebServer replaces reading the web server in front of an app's host:
 // it finds ws.
-func fakeWebServer(t *testing.T, ws ingress.WebServer) *webServerAsks {
+func fakeWebServer(t *testing.T, ws webserver.WebServer) *webServerAsks {
 	t.Helper()
 	var asked webServerAsks
-	saved := ingressWebServer
-	ingressWebServer = func(_ *config.Config, target ingress.Target, sudo bool) ingress.WebServer {
+	saved := findWebServer
+	findWebServer = func(_ *config.Config, target webserver.Target, sudo bool) webserver.WebServer {
 		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, sudo))
 		return ws
 	}
-	t.Cleanup(func() { ingressWebServer = saved })
+	t.Cleanup(func() { findWebServer = saved })
 	return &asked
 }
 
-// externalWatch makes the fixture's monitor, watch, a site in ingress mode
+// externalWatch makes the fixture's monitor, watch, a site with managed_by:
 // external, which serves status through the operator's own web server.
 func externalWatch(t *testing.T) {
 	t.Helper()
@@ -72,7 +72,7 @@ func externalWatch(t *testing.T) {
 		cfg, st, err := readConvergeState(c, s)
 		if cfg != nil {
 			watch := cfg.Sites["watch"]
-			watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+			watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 			cfg.Sites["watch"] = watch
 		}
 		return cfg, st, err
@@ -80,25 +80,25 @@ func externalWatch(t *testing.T) {
 	t.Cleanup(func() { convergeRead = saved })
 }
 
-// certificateFails is the status app's ingress with no route for its
+// certificateFails is the status app's web server with no route for its
 // hostname at the operator's web server.
-var certificateFails = map[string][]ingress.Result{"status": {
-	{Name: ingress.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
-	{Name: ingress.CheckCertificate, Detail: "the certificate is not valid for status.example.org: it names watch.example.org"},
-	{Name: ingress.CheckSignIn, OK: true, Detail: "https://status.example.org/login/oidc redirects"},
-	{Name: ingress.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
+var certificateFails = map[string][]webserver.Result{"status": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: "the certificate is not valid for status.example.org: it names watch.example.org"},
+	{Name: webserver.CheckSignIn, OK: true, Detail: "https://status.example.org/login/oidc redirects"},
+	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
 }}
 
-// With no app behind an external ingress there is nothing to check: no
+// With no app behind its own web server there is nothing to check: no
 // section, and the run is complete.
-func TestConvergeChecksNoIngressWithoutAnExternalApp(t *testing.T) {
+func TestConvergeChecksNoWebServerWithoutAnExternalApp(t *testing.T) {
 	fakeConverge(t, nil)
-	checked := fakeIngressCheck(t, nil)
+	checked := fakeWebServerCheck(t, nil)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if len(*checked) != 0 || slices.Contains(sections(rec), "ingress") {
+	if len(*checked) != 0 || slices.Contains(sections(rec), "web server") {
 		t.Errorf("checked %v:\n%s", *checked, rec.Lines())
 	}
 	if !rec.Has("result", "Deployment complete.") {
@@ -106,13 +106,13 @@ func TestConvergeChecksNoIngressWithoutAnExternalApp(t *testing.T) {
 	}
 }
 
-// An app behind an external ingress is checked once every step has run, in
+// An app behind its own web server is checked once every step has run, in
 // a section of its own after the pocket id one, a line per app naming its
 // hostname.
-func TestConvergeChecksEachExternalIngress(t *testing.T) {
+func TestConvergeChecksEachExternalWebServer(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	checked := fakeIngressCheck(t, nil)
+	checked := fakeWebServerCheck(t, nil)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
@@ -121,14 +121,14 @@ func TestConvergeChecksEachExternalIngress(t *testing.T) {
 		t.Errorf("checked %v", *checked)
 	}
 	got := sections(rec)
-	if i, j := slices.Index(got, "install"), slices.Index(got, "ingress"); i < 0 || j < i {
+	if i, j := slices.Index(got, "install"), slices.Index(got, "web server"); i < 0 || j < i {
 		t.Errorf("sections %v", got)
 	}
-	if i, j := slices.Index(got, "pocket id"), slices.Index(got, "ingress"); i >= 0 && j < i {
+	if i, j := slices.Index(got, "pocket id"), slices.Index(got, "web server"); i >= 0 && j < i {
 		t.Errorf("sections %v", got)
 	}
 	var shown []string
-	for _, l := range lines(inSection(rec, "ingress")) {
+	for _, l := range lines(inSection(rec, "web server")) {
 		if !strings.HasPrefix(l, "progress ") {
 			shown = append(shown, l)
 		}
@@ -143,17 +143,17 @@ func TestConvergeChecksEachExternalIngress(t *testing.T) {
 // A failed check is a warning naming the app, what failed and how to fix
 // it, and the run does not end as complete: it ends with a problem naming
 // the app.
-func TestConvergeFailedIngressIsNotComplete(t *testing.T) {
+func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	fakeIngressCheck(t, certificateFails)
+	fakeWebServerCheck(t, certificateFails)
 	rec := recordConverge(t)
 	err := converge(t, "--execute")
 	if rec.Has("result", "Deployment complete.") {
 		t.Errorf("said complete:\n%s", rec.Lines())
 	}
 	var p *ui.Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Hint, "status") || !strings.Contains(p.Hint, "ingress check") {
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, "status") || !strings.Contains(p.Hint, "web server check") {
 		t.Fatalf("err = %#v", err)
 	}
 	if !rec.Has("fail", "status") {
@@ -171,8 +171,8 @@ func TestConvergeFailedIngressIsNotComplete(t *testing.T) {
 	}
 	for _, want := range []string{
 		"it names watch.example.org",
-		"paisans ingress show --app status",
-		"paisans ingress check --app status",
+		"paisans web-server show --app status",
+		"paisans web-server check --app status",
 	} {
 		if !strings.Contains(note.Extra, want) {
 			t.Errorf("detail %q lacks %q", note.Extra, want)
@@ -188,21 +188,21 @@ func TestConvergeFailedIngressIsNotComplete(t *testing.T) {
 // A certificate or sign in failure can be an app or a certificate that has
 // only just started, so the check is tried again a few times before it is
 // failed. A DNS failure cannot, and is failed at once.
-func TestConvergeTriesAnIngressAgainOnlyWhenItMayStillCome(t *testing.T) {
+func TestConvergeTriesAnWebServerAgainOnlyWhenItMayStillCome(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	checked := fakeIngressCheck(t, certificateFails)
+	checked := fakeWebServerCheck(t, certificateFails)
 	recordConverge(t)
 	converge(t, "--execute")
-	if len(*checked) != ingressAttempts {
-		t.Errorf("certificate checked %d times, want %d", len(*checked), ingressAttempts)
+	if len(*checked) != webServerAttempts {
+		t.Errorf("certificate checked %d times, want %d", len(*checked), webServerAttempts)
 	}
 
-	dnsFails := map[string][]ingress.Result{"status": {
-		{Name: ingress.CheckDNS, Detail: "status.example.org does not resolve"},
-		{Name: ingress.CheckCertificate, Detail: "https://status.example.org/: no such host"},
+	dnsFails := map[string][]webserver.Result{"status": {
+		{Name: webserver.CheckDNS, Detail: "status.example.org does not resolve"},
+		{Name: webserver.CheckCertificate, Detail: "https://status.example.org/: no such host"},
 	}}
-	checked = fakeIngressCheck(t, dnsFails)
+	checked = fakeWebServerCheck(t, dnsFails)
 	converge(t, "--execute")
 	if len(*checked) != 1 {
 		t.Errorf("dns checked %d times, want 1", len(*checked))
@@ -210,20 +210,20 @@ func TestConvergeTriesAnIngressAgainOnlyWhenItMayStillCome(t *testing.T) {
 }
 
 // A check that passes on a later attempt passes.
-func TestConvergeIngressPassesOnALaterAttempt(t *testing.T) {
+func TestConvergeWebServerPassesOnALaterAttempt(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
 	attempts := 0
-	saved, savedSleep := convergeIngressCheck, convergeSleep
-	convergeIngressCheck = func(target ingress.Target) []ingress.Result {
+	saved, savedSleep := convergeWebServerCheck, convergeSleep
+	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		attempts++
 		if attempts < 3 {
 			return certificateFails["status"]
 		}
-		return []ingress.Result{{Name: ingress.CheckCertificate, OK: true, Detail: "answered 200"}}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "answered 200"}}
 	}
 	convergeSleep = func(time.Duration) {}
-	t.Cleanup(func() { convergeIngressCheck, convergeSleep = saved, savedSleep })
+	t.Cleanup(func() { convergeWebServerCheck, convergeSleep = saved, savedSleep })
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
@@ -233,13 +233,13 @@ func TestConvergeIngressPassesOnALaterAttempt(t *testing.T) {
 	}
 }
 
-// A dry run checks nothing: each app behind an external ingress is a line
+// A dry run checks nothing: each app behind its own web server is a line
 // waiting on --execute.
-func TestConvergeDryRunListsTheIngressCheck(t *testing.T) {
+func TestConvergeDryRunListsTheWebServerCheck(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
 	externalWatch(t)
-	checked := fakeIngressCheck(t, nil)
+	checked := fakeWebServerCheck(t, nil)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
@@ -247,19 +247,19 @@ func TestConvergeDryRunListsTheIngressCheck(t *testing.T) {
 	if len(*checked) != 0 {
 		t.Errorf("a dry run checked %v", *checked)
 	}
-	got := lines(inSection(rec, "ingress"))
+	got := lines(inSection(rec, "web server"))
 	if len(got) < 2 || got[0] != "step status" || !strings.HasPrefix(got[1], "waiting status: ") {
-		t.Errorf("ingress section %q:\n%s", got, rec.Lines())
+		t.Errorf("web server section %q:\n%s", got, rec.Lines())
 	}
 }
 
 // A failed check reads the web server in front of the app, with the run's
 // sudo, and names it in the warning, so the
 // advice says what to add the configuration to. A passing one reads nothing.
-func TestConvergeFailedIngressNamesTheWebServer(t *testing.T) {
+func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	fakeIngressCheck(t, nil)
+	fakeWebServerCheck(t, nil)
 	asked := fakeWebServer(t, caddyAutomatic)
 	recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
@@ -269,12 +269,12 @@ func TestConvergeFailedIngressNamesTheWebServer(t *testing.T) {
 		t.Errorf("a passing check read the web server: %v", *asked)
 	}
 
-	fakeIngressCheck(t, certificateFails)
+	fakeWebServerCheck(t, certificateFails)
 	asked = fakeWebServer(t, caddyAutomatic)
 	rec := recordConverge(t)
 	// The run's --sudo reaches the read: here --sudo=false, as every
 	// converge test runs, since a settled sudo would reach a real host.
-	// TestIngressHostSharesTheRunsSudo shows a read with sudo shares the
+	// TestWebServerHostSharesTheRunsSudo shows a read with sudo shares the
 	// run's answer.
 	converge(t, "--execute")
 	if !slices.Equal(*asked, webServerAsks{"status sudo=false"}) {

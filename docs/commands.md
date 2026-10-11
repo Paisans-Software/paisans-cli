@@ -16,7 +16,7 @@ stack. It runs `init`, `host prepare`, `dns init`, `apply --site`, `site add`,
 `storage init` and `storage add` itself, in the order the deployment needs
 them, each exactly as it runs when typed, pulls every site's images on every
 host at once before the first of them installs anything, and ends by running
-`ingress check`'s checks for each app behind the operator's own web server
+`web-server check`'s checks for each app behind the operator's own web server
 (see *`paisans apply` with no `--site` converges the whole deployment* in
 `README.md`). So the usual way to make any change is to edit `paisans.yaml`
 and run:
@@ -31,7 +31,7 @@ step, working on one host, or reaching for a flag the whole apply does not
 pass on. Every other command is never run by the whole apply. Each is a
 decision an operator makes (removing a site or an app, replacing a key,
 deleting DNS records, making an administrator) or a read (`doctor`,
-`preflight`, `ingress show`).
+`preflight`, `web-server show`).
 
 ## Flags every command shares
 
@@ -52,7 +52,7 @@ it* in `README.md`).
 
 A command exits 0 when it did what it was asked, 1 when it stopped on a
 failure or a refusal, and 2 when its command line cannot run. `storage add`
-also exits 75 when a stage is waiting on Garage. `doctor` and `ingress check`
+also exits 75 when a stage is waiting on Garage. `doctor` and `web-server check`
 exit 1 on any `FAIL`.
 
 ## Configuration and secrets
@@ -209,7 +209,7 @@ site's images on every host at once, so no install waits on a download; `dns
 init`; the founding applies, `site add`, the other sites, storage and pass
 two; a `pocket id` check for an admin; and, for each app behind the
 operator's own web server, its site file written into the web server's
-`include_dir` and `ingress check`'s checks. Each `apply --site` it runs that
+`include_dir` and `web-server check`'s checks. Each `apply --site` it runs that
 covers the whole site, rather than holding apps back until their sign in
 clients exist, ends by sweeping the old images its site's stacks used (see
 *`apply` prunes the images it superseded* in `README.md`).
@@ -226,10 +226,10 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   for before the first step.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
-  when an app failed its ingress check or its site file could not be written,
+  when an app failed its web server check or its site file could not be written,
   names each such app and exits 1 although every step ran. An `include_dir` it
   derives is written into `paisans.yaml`. Without it, every step is checked
-  as its own dry run, the ingress checks are listed as `checked with
+  as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
   local secrets file, as `init` would add them, which it says when it does.
 
@@ -262,7 +262,7 @@ starts, restarts or recreates what changed.
   which no site of the deployment renders and no container uses (`sweep old
   images` in the plan). Without it, it reads and prints the plan. It neither
   writes the site files of an app behind the operator's own web server nor
-  checks its ingress: the whole apply does both.
+  checks its web server: the whole apply does both.
 
 See *Rendered configuration is a build artifact* and the `apply` sections under
 *Bootstrapping a site* in `README.md`.
@@ -554,7 +554,7 @@ paisans app remove docs --delete-data --execute      # and deletes its data, aft
 
 See *`app remove` takes an app off its hosts* in `README.md`.
 
-### `paisans ingress show` and `paisans ingress check`
+### `paisans web-server show` and `paisans web-server check`
 
 For an app pinned to a monitor site behind the operator's own web server.
 `show` prints what that web server must do, with the snippet for the web
@@ -566,8 +566,8 @@ published port is closed from outside; when a check fails, it names the web
 server it finds there.
 
 ```sh
-paisans ingress show  --app status   # the hand-off sheet, for the web server it finds
-paisans ingress check --app status   # from your machine, as a visitor would
+paisans web-server show  --app status   # the hand-off sheet, for the web server it finds
+paisans web-server check --app status   # from your machine, as a visitor would
 ```
 
 * **Alone:** `show` always, to hand the snippet to whoever runs the web
@@ -577,7 +577,7 @@ paisans ingress check --app status   # from your machine, as a visitor would
 * **Flags:** `--app <name>` (required), `--config`, `--sudo` (on: read the web
   server through sudo where the ssh user cannot; `--sudo=false` reads as the
   ssh user alone).
-* **Hosts:** in ingress mode `external`, the monitor over ssh, reading only:
+* **Hosts:** in `managed_by` `external`, the monitor over ssh, reading only:
   `show` always, `check` only when a check fails. `check` otherwise looks at
   the public hostname only.
 * **`--execute`:** not taken. Neither changes anything. `check` exits 1 on any

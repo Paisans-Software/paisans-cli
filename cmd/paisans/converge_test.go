@@ -260,9 +260,9 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	fakeAdminCheck(t, false, nil)
 	fakeDeclaredAdmins(t, registered)
 	fakeEmailFailures(t, nil, nil)
-	// An app's ingress is checked from this machine; here every check
-	// passes. fakeIngressCheck says otherwise.
-	fakeIngressCheck(t, nil)
+	// An app's web server is checked from this machine; here every check
+	// passes. fakeWebServerCheck says otherwise.
+	fakeWebServerCheck(t, nil)
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")

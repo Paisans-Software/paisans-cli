@@ -46,7 +46,7 @@ sites:
       host: vm.example.org
       user: ubuntu
       keys: [alice]
-  # The monitor's own machine, in ingress mode paisans: it runs the
+  # The monitor's own machine, in `managed_by: paisans`: it runs the
   # gateway's Caddy image and serves the monitor's hostname itself.
   watch:
     roles: [monitor]

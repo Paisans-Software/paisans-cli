@@ -13,11 +13,11 @@ import (
 // manifest beside everything else, and an apply that rewrites the manifest
 // keeps them: they are this deployment's until the command that removes
 // them says otherwise.
-func TestApplyKeepsTheIngressRecord(t *testing.T) {
+func TestApplyKeepsTheWebServerRecord(t *testing.T) {
 	host := gatewayAt(t, buildA)
 	d := plan(t).Deployment
-	entry := render.ManifestIngress{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
-	if err := apply.WriteIngressRecord(host, d, []render.ManifestIngress{entry}); err != nil {
+	entry := render.ManifestWebServer{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	if err := apply.WriteWebServerRecord(host, d, []render.ManifestWebServer{entry}); err != nil {
 		t.Fatal(err)
 	}
 	var before render.Manifest
@@ -33,21 +33,21 @@ func TestApplyKeepsTheIngressRecord(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	got, err := apply.ReadIngressRecord(host, d)
+	got, err := apply.ReadWebServerRecord(host, d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []render.ManifestIngress{entry}) {
+	if !reflect.DeepEqual(got, []render.ManifestWebServer{entry}) {
 		t.Errorf("after apply the record is %+v", got)
 	}
 	if manifestCaddy(t, host).Reference == before.Caddy.Reference {
 		t.Errorf("the manifest was not rewritten, so this proves nothing")
 	}
 
-	if err := apply.WriteIngressRecord(host, d, nil); err != nil {
+	if err := apply.WriteWebServerRecord(host, d, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := apply.ReadIngressRecord(host, d); got != nil {
+	if got, _ := apply.ReadWebServerRecord(host, d); got != nil {
 		t.Errorf("emptied record reads %+v", got)
 	}
 }

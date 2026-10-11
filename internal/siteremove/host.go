@@ -14,9 +14,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ingress"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
 // inspect reads the host's inventory. It is a variable so that this
@@ -37,9 +37,9 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
-	// ingress are the files the manifest records in the include directory
+	// webServer are the files the manifest records in the include directory
 	// of the operator's web server.
-	ingress   []render.ManifestIngress
+	webServer []render.ManifestWebServer
 	manifest  bool
 	wireguard bool
 	units     []string
@@ -249,7 +249,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
-	hp.ingress = inv.ManifestIngress
+	hp.webServer = inv.ManifestWebServer
 	// Before anything else is planned: a kept Caddy changes what goes.
 	if hp.caddy, err = p.planCaddy(t, inv); err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func (p *Plan) hostSteps(st *Stage) {
 	if cp != nil && cp.reduce() {
 		add("reduce", "reduce Caddy to the host's sites", "Caddy %s, kept because it serves the host owner's sites (%s): its Caddyfile reduced to the global options, the snippets they may import and `import %s/*.caddy`, staged where the container sees it, validated in it and loaded with caddy reload, then written over %s in place; a failure puts the original back and removes nothing else. Its compose file, Caddyfile, caddy.env, data and config stay, kept with --delete-data too", cp.container.Name, strings.Join(cp.sites, ", "), render.HostSitesMount, p.caddyfile())
 	}
-	for _, f := range hp.ingress {
+	for _, f := range hp.webServer {
 		add("remove", "remove site files", "%s, from the include directory of %s, which is then validated and reloaded; the directory and every other file in it stay", f.Path, f.Server)
 	}
 	if len(hp.containers) > 0 || len(hp.networks) > 0 {
@@ -589,11 +589,11 @@ func (p *Plan) runHost() error {
 	// The operator's web server next, so it stops serving the app before
 	// the app goes. A removal it refuses puts the file back and stops here,
 	// with the manifest that proves the file this deployment's still there.
-	for _, f := range hp.ingress {
+	for _, f := range hp.webServer {
 		p.work("remove site files")
-		switch o := ingress.Remove(ingress.Host{Plain: t}, f); o.Kind {
-		case ingress.Removed, ingress.Gone:
-		case ingress.Edited:
+		switch o := webserver.Remove(webserver.Host{Plain: t}, f); o.Kind {
+		case webserver.Removed, webserver.Gone:
+		case webserver.Edited:
 			p.Kept = append(p.Kept, editedFileKept(p.Site, f.Path))
 		default:
 			return fmt.Errorf("%s: removing %s: %s. The file is back, and the web server runs its previous configuration", p.Site, f.Path, o.Why)
@@ -810,7 +810,7 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 func (p *Plan) hostGoneLeft() string {
 	d := p.dep()
 	web := ""
-	if in := p.cfg.Sites[p.Site].Ingress; in != nil && in.IncludeDir.Path != "" {
+	if in := p.cfg.Sites[p.Site].WebServer; in != nil && in.IncludeDir.Path != "" {
 		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
 	}
 	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, ufw rules commented %s:, the keys %s lists and that record, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",

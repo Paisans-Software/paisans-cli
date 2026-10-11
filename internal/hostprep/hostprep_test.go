@@ -558,7 +558,7 @@ func TestAPaisansMonitorOpensEightyAndFourFortyThree(t *testing.T) {
 		t.Errorf("paisans: got %s, want %s", strings.Join(got, ","), want)
 	}
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	got = nil
 	for _, r := range hostprep.Rules(cfg.Deployment(), watch) {
 		got = append(got, r.String())

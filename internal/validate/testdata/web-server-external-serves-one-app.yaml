@@ -1,4 +1,4 @@
-# valid.yaml with a monitor that publishes its app on its public address.
+# valid.yaml with a second app pinned to a monitor behind an external web server.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -47,9 +47,9 @@ sites:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20
-    ingress:
-      mode: external
-      listen: 203.0.113.20:8480
+    web_server:
+      managed_by: external
+      listen: 127.0.0.1:8480
     ssh:
       host: watch.local
       user: ubuntu
@@ -91,6 +91,10 @@ apps:
     placement: { pinned: watch }
     settings:
       admin_group: admins
+  web:
+    kind: element
+    hostname: web.example.org
+    placement: { pinned: watch }
 
 smtp:
   host: smtp.example.org

@@ -1,4 +1,4 @@
-# valid.yaml with a listen address on a monitor in mode paisans.
+# valid.yaml with a listen address on a monitor with managed_by: paisans.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -47,7 +47,7 @@ sites:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20
-    ingress:
+    web_server:
       listen: 127.0.0.1:8480
     ssh:
       host: watch.local

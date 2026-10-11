@@ -104,11 +104,11 @@ func TestRulesFire(t *testing.T) {
 		{"monitor-without-uptime", "monitor-without-uptime", validate.Refuse},
 		{"uptime-needs-a-monitor-site", "uptime-needs-a-monitor-site", validate.Refuse},
 		{"monitor-without-public-address", "monitor-without-public-address", validate.Refuse},
-		{"ingress-outside-monitor", "ingress-outside-monitor", validate.Refuse},
-		{"ingress-listen-mode", "ingress-listen-mode", validate.Refuse},
-		{"ingress-listen-public", "ingress-listen-public", validate.Refuse},
-		{"ingress-listen-bypasses-firewall", "ingress-listen-bypasses-firewall", validate.Warn},
-		{"ingress-external-serves-one-app", "ingress-external-serves-one-app", validate.Refuse},
+		{"web-server-outside-monitor", "web-server-outside-monitor", validate.Refuse},
+		{"web-server-listen-managed-by", "web-server-listen-managed-by", validate.Refuse},
+		{"web-server-listen-public", "web-server-listen-public", validate.Refuse},
+		{"web-server-listen-bypasses-firewall", "web-server-listen-bypasses-firewall", validate.Warn},
+		{"web-server-external-serves-one-app", "web-server-external-serves-one-app", validate.Refuse},
 		{"voters-share-a-relay", "voters-share-a-relay", validate.Refuse},
 		{"data-site-not-in-cluster", "data-site-not-in-cluster", validate.Refuse},
 		{"async-automatic-failover", "async-automatic-failover", validate.Warn},
@@ -613,7 +613,7 @@ func TestARolelessSiteStillHostsOtherKinds(t *testing.T) {
 // allowed with the firewall warning; anything the internet or another host
 // could be reached on is refused. 10.44.0.1 is RFC 1918 as well as inside the
 // mesh, but it is another site's address, which nothing on this host binds.
-func TestIngressListenAddresses(t *testing.T) {
+func TestWebServerListenAddresses(t *testing.T) {
 	for _, tc := range []struct {
 		listen         string
 		refused, warns bool
@@ -627,50 +627,50 @@ func TestIngressListenAddresses(t *testing.T) {
 	} {
 		cfg := load(t, "uptime-without-smtp")
 		site := cfg.Sites["watch"]
-		site.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: tc.listen}
+		site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: tc.listen}
 		cfg.Sites["watch"] = site
 		result := validate.Check(cfg)
-		if result.Has("ingress-listen-public") != tc.refused || result.Has("ingress-listen-bypasses-firewall") != tc.warns {
+		if result.Has("web-server-listen-public") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
 			t.Errorf("%s: %v", tc.listen, result.Findings)
 		}
 	}
 }
 
 // mode external without listen has nowhere to publish the app.
-func TestExternalIngressNeedsListen(t *testing.T) {
+func TestExternalWebServerNeedsListen(t *testing.T) {
 	cfg := load(t, "uptime-without-smtp")
 	site := cfg.Sites["watch"]
-	site.Ingress = &config.Ingress{Mode: config.IngressExternal}
+	site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
 	cfg.Sites["watch"] = site
-	if !refusedFor(validate.Check(cfg), "ingress-listen-mode", "sites.watch.ingress.listen") {
+	if !refusedFor(validate.Check(cfg), "web-server-listen-managed-by", "sites.watch.web_server.listen") {
 		t.Fatal("external with no listen was not refused")
 	}
 }
 
 // include_dir is where apply writes for the operator's web server: it fits
 // mode external alone, and must be a plain absolute path. false fits either.
-func TestIngressIncludeDir(t *testing.T) {
+func TestWebServerIncludeDir(t *testing.T) {
 	for _, tc := range []struct {
-		mode config.IngressMode
+		mode config.ManagedBy
 		dir  config.IncludeDir
 		rule string
 	}{
-		{config.IngressExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
-		{config.IngressExternal, config.IncludeDir{Off: true}, ""},
-		{config.IngressExternal, config.IncludeDir{Path: "paisans.d"}, "ingress-include-dir-path"},
-		{config.IngressExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "ingress-include-dir-path"},
-		{config.IngressPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "ingress-include-dir-mode"},
+		{config.ManagedByExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
+		{config.ManagedByExternal, config.IncludeDir{Off: true}, ""},
+		{config.ManagedByExternal, config.IncludeDir{Path: "paisans.d"}, "web-server-include-dir-path"},
+		{config.ManagedByExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "web-server-include-dir-path"},
+		{config.ManagedByPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "web-server-include-dir-managed-by"},
 	} {
 		cfg := load(t, "uptime-without-smtp")
 		site := cfg.Sites["watch"]
-		site.Ingress = &config.Ingress{Mode: tc.mode, IncludeDir: tc.dir}
-		if tc.mode == config.IngressExternal {
-			site.Ingress.Listen = "127.0.0.1:8480"
+		site.WebServer = &config.WebServer{ManagedBy: tc.mode, IncludeDir: tc.dir}
+		if tc.mode == config.ManagedByExternal {
+			site.WebServer.Listen = "127.0.0.1:8480"
 		}
 		cfg.Sites["watch"] = site
 		result := validate.Check(cfg)
-		for _, rule := range []string{"ingress-include-dir-path", "ingress-include-dir-mode"} {
-			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.ingress.include_dir") != want {
+		for _, rule := range []string{"web-server-include-dir-path", "web-server-include-dir-managed-by"} {
+			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.web_server.include_dir") != want {
 				t.Errorf("%s %+v: %s refused %v, want %v: %v", tc.mode, tc.dir, rule, !want, want, result.Findings)
 			}
 		}
@@ -695,22 +695,22 @@ func TestACMEProviderNeedsAnImageForAMonitorsCaddy(t *testing.T) {
 func TestACGNATListenIsWarnedNotRefused(t *testing.T) {
 	cfg := load(t, "uptime-without-smtp")
 	site := cfg.Sites["watch"]
-	site.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "100.101.102.103:8480"}
+	site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}
 	cfg.Sites["watch"] = site
 	result := validate.Check(cfg)
-	if result.Has("ingress-listen-public") || !result.Has("ingress-listen-bypasses-firewall") {
+	if result.Has("web-server-listen-public") || !result.Has("web-server-listen-bypasses-firewall") {
 		t.Fatalf("%v", result.Findings)
 	}
 }
 
 // An external monitor's compose network is pinned at 10.255.255.0/29, so a
 // mesh over it would route the mesh into a Docker bridge.
-func TestTheIngressNetworkMustNotOverlapTheMesh(t *testing.T) {
+func TestTheWebServerNetworkMustNotOverlapTheMesh(t *testing.T) {
 	cfg := load(t, "uptime-without-smtp")
 	site := cfg.Sites["watch"]
-	site.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	cfg.Sites["watch"] = site
-	if validate.Check(cfg).Has("ingress-network-overlaps-mesh") {
+	if validate.Check(cfg).Has("web-server-network-overlaps-mesh") {
 		t.Fatal("refused with the usual mesh")
 	}
 	cfg.Mesh.Subnet = "10.255.0.0/16"
@@ -718,7 +718,7 @@ func TestTheIngressNetworkMustNotOverlapTheMesh(t *testing.T) {
 		s.Address = strings.Replace(s.Address, "10.44.", "10.255.", 1)
 		cfg.Sites[name] = s
 	}
-	if !refusedFor(validate.Check(cfg), "ingress-network-overlaps-mesh", "sites.watch.ingress") {
+	if !refusedFor(validate.Check(cfg), "web-server-network-overlaps-mesh", "sites.watch.web_server") {
 		t.Fatalf("%v", validate.Check(cfg).Findings)
 	}
 }

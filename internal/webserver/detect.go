@@ -1,4 +1,4 @@
-package ingress
+package webserver
 
 import (
 	"encoding/json"

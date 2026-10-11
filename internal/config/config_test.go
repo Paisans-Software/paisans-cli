@@ -547,16 +547,16 @@ func monitorSite(extra string) string {
 	return strings.Replace(validConfig, "etcd:\n", site+"etcd:\n", 1) + statusApp("watch", "")
 }
 
-func TestAMonitorSiteLoadsWithIngress(t *testing.T) {
-	cfg, err := config.Load(write(t, monitorSite("    ingress:\n      mode: external\n      listen: 127.0.0.1:8480\n")))
+func TestAMonitorSiteLoadsWithWebServer(t *testing.T) {
+	cfg, err := config.Load(write(t, monitorSite("    web_server:\n      managed_by: external\n      listen: 127.0.0.1:8480\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	watch := cfg.Sites["watch"]
-	if !watch.Has(config.RoleMonitor) || watch.IngressMode() != config.IngressExternal {
+	if !watch.Has(config.RoleMonitor) || watch.WebServerManagedBy() != config.ManagedByExternal {
 		t.Fatalf("watch: %+v", watch)
 	}
-	host, port, ok := watch.Ingress.ListenHostPort()
+	host, port, ok := watch.WebServer.ListenHostPort()
 	if !ok || host != "127.0.0.1" || port != 8480 {
 		t.Fatalf("listen: %s %d %v", host, port, ok)
 	}
@@ -568,29 +568,37 @@ func TestAMonitorSiteLoadsWithIngress(t *testing.T) {
 	}
 }
 
-func TestIngressModeDefaultsToPaisansAndRunsCaddy(t *testing.T) {
+func TestWebServerManagedByDefaultsToPaisansAndRunsCaddy(t *testing.T) {
+	// No web_server block, and a block that leaves managed_by out, are both
+	// managed_by paisans.
+	for _, block := range []string{"", "    web_server:\n      include_dir: false\n"} {
+		cfg, err := config.Load(write(t, monitorSite(block)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Sites["watch"].WebServerManagedBy(); got != config.ManagedByPaisans || !cfg.Sites["watch"].RunsCaddy() {
+			t.Fatalf("%q: managed_by %s, caddy %v", block, got, cfg.Sites["watch"].RunsCaddy())
+		}
+	}
 	cfg, err := config.Load(write(t, monitorSite("")))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := cfg.Sites["watch"].IngressMode(); got != config.IngressPaisans || !cfg.Sites["watch"].RunsCaddy() {
-		t.Fatalf("mode %s, caddy %v", got, cfg.Sites["watch"].RunsCaddy())
 	}
 	if !cfg.Sites["home-a"].RunsCaddy() {
 		t.Fatal("the gateway runs no Caddy")
 	}
 }
 
-func TestIngressShapeIsChecked(t *testing.T) {
-	for _, tc := range []struct{ ingress, want string }{
-		{"    ingress:\n      mode: nginx\n", "sites.watch.ingress.mode: unknown mode"},
-		{"    ingress:\n      mode: external\n      listen: localhost:8480\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      mode: external\n      listen: 127.0.0.1:0\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      mode: external\n      listen: 127.0.0.1\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      proxy: nginx\n", "field proxy not found"},
+func TestWebServerShapeIsChecked(t *testing.T) {
+	for _, tc := range []struct{ webServer, want string }{
+		{"    web_server:\n      managed_by: nginx\n", "sites.watch.web_server.managed_by: unknown value"},
+		{"    web_server:\n      managed_by: external\n      listen: localhost:8480\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      managed_by: external\n      listen: 127.0.0.1:0\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      managed_by: external\n      listen: 127.0.0.1\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      proxy: nginx\n", "field proxy not found"},
 	} {
-		if msg := loadErr(t, monitorSite(tc.ingress)); !strings.Contains(msg, tc.want) {
-			t.Errorf("%q: %s", tc.ingress, msg)
+		if msg := loadErr(t, monitorSite(tc.webServer)); !strings.Contains(msg, tc.want) {
+			t.Errorf("%q: %s", tc.webServer, msg)
 		}
 	}
 }
@@ -606,7 +614,7 @@ func TestACMEProviderIsRequiredForAMonitorsOwnCaddy(t *testing.T) {
 	if msg := loadErr(t, strip(monitorSite(""))); !strings.Contains(msg, "acme.provider: required") {
 		t.Fatalf("paisans mode: %s", msg)
 	}
-	if _, err := config.Load(write(t, strip(monitorSite("    ingress:\n      mode: external\n      listen: 127.0.0.1:8480\n")))); err != nil {
+	if _, err := config.Load(write(t, strip(monitorSite("    web_server:\n      managed_by: external\n      listen: 127.0.0.1:8480\n")))); err != nil {
 		t.Fatalf("external mode needs no provider: %v", err)
 	}
 }

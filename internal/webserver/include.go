@@ -1,4 +1,4 @@
-package ingress
+package webserver
 
 import (
 	"crypto/sha256"
@@ -137,7 +137,7 @@ func FileName(prefix, app string, s Server) string {
 }
 
 // FileContent is what the toolkit writes for t: a header saying whose it
-// is, then the snippet `ingress show` prints for ws.
+// is, then the snippet `web-server show` prints for ws.
 func FileContent(t Target, ws WebServer) string {
 	header := fmt.Sprintf("# %s, the paisans app %s, written by paisans apply.\n# Every apply rewrites it, and app remove and site remove delete it:\n# change paisans.yaml rather than this file.\n", t.Hostname, t.App)
 	switch ws.Server {
@@ -304,14 +304,14 @@ type File struct {
 // hostname moving between two files is never in both at once; then each of
 // files is written. The directory is created when it is missing. It returns
 // the record to keep and an outcome per file.
-func Sync(h Host, ws WebServer, inc Include, files []File, recorded []render.ManifestIngress) ([]render.ManifestIngress, []Outcome) {
+func Sync(h Host, ws WebServer, inc Include, files []File, recorded []render.ManifestWebServer) ([]render.ManifestWebServer, []Outcome) {
 	want := map[string]bool{}
 	for _, f := range files {
 		want[path.Join(inc.Dir, f.Name)] = true
 	}
-	var keep []render.ManifestIngress
+	var keep []render.ManifestWebServer
 	var outcomes []Outcome
-	byPath := map[string]render.ManifestIngress{}
+	byPath := map[string]render.ManifestWebServer{}
 	for _, e := range recorded {
 		if want[e.Path] {
 			byPath[e.Path] = e
@@ -326,7 +326,7 @@ func Sync(h Host, ws WebServer, inc Include, files []File, recorded []render.Man
 	for _, f := range files {
 		p := path.Join(inc.Dir, f.Name)
 		rec, ok := byPath[p]
-		var prev *render.ManifestIngress
+		var prev *render.ManifestWebServer
 		if ok {
 			prev = &rec
 		}
@@ -341,9 +341,9 @@ func Sync(h Host, ws WebServer, inc Include, files []File, recorded []render.Man
 
 // write writes one file, validates the server's whole configuration and
 // reloads it, and puts back what was there when either fails.
-func write(h Host, ws WebServer, p string, f File, rec *render.ManifestIngress) (*render.ManifestIngress, Outcome) {
+func write(h Host, ws WebServer, p string, f File, rec *render.ManifestWebServer) (*render.ManifestWebServer, Outcome) {
 	o := Outcome{App: f.App, Path: p}
-	entry := &render.ManifestIngress{App: f.App, Path: p, SHA256: sum(f.Content), Server: string(ws.Server), Container: ws.Container, Config: ws.Main}
+	entry := &render.ManifestWebServer{App: f.App, Path: p, SHA256: sum(f.Content), Server: string(ws.Server), Container: ws.Container, Config: ws.Main}
 	have, found, err := readFile(h, p)
 	if err != nil {
 		o.Kind, o.Why = Failed, err.Error()
@@ -388,7 +388,7 @@ func write(h Host, ws WebServer, p string, f File, rec *render.ManifestIngress) 
 // configuration and reloads it, and puts the file back when either fails.
 // A file changed since it was written is left, and one already gone is
 // fine.
-func Remove(h Host, e render.ManifestIngress) Outcome {
+func Remove(h Host, e render.ManifestWebServer) Outcome {
 	o := Outcome{App: e.App, Path: e.Path}
 	have, found, err := readFile(h, e.Path)
 	switch {

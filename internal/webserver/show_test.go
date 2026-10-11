@@ -1,4 +1,4 @@
-package ingress_test
+package webserver_test
 
 import (
 	"bytes"
@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ingress"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
 // fixture is the render fixture: status pinned to watch, a monitor in
-// ingress mode paisans with public_address 203.0.113.20.
+// managed_by: paisans with public_address 203.0.113.20.
 func fixture(t *testing.T) *config.Config {
 	t.Helper()
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
@@ -23,13 +23,13 @@ func fixture(t *testing.T) *config.Config {
 }
 
 // external is the fixture's monitor behind the operator's web server.
-func external(t *testing.T, listen string) ingress.Target {
+func external(t *testing.T, listen string) webserver.Target {
 	t.Helper()
 	cfg := fixture(t)
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: listen}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: listen}
 	cfg.Sites["watch"] = watch
-	target, err := ingress.For(cfg, "status")
+	target, err := webserver.For(cfg, "status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +38,9 @@ func external(t *testing.T, listen string) ingress.Target {
 
 func TestForReadsTheMonitor(t *testing.T) {
 	target := external(t, "127.0.0.1:8480")
-	want := ingress.Target{
+	want := webserver.Target{
 		App: "status", Site: "watch", Hostname: "status.example.org",
-		Mode: config.IngressExternal, Listen: "127.0.0.1:8480", ListenHost: "127.0.0.1", ListenPort: 8480,
+		Mode: config.ManagedByExternal, Listen: "127.0.0.1:8480", ListenHost: "127.0.0.1", ListenPort: 8480,
 		PublicAddress: "203.0.113.20", HealthPath: "/healthz", HealthExpect: "200",
 	}
 	if target != want {
@@ -48,21 +48,21 @@ func TestForReadsTheMonitor(t *testing.T) {
 	}
 }
 
-// Only an app a monitor serves has an ingress to hand off: the gateway's
+// Only an app a monitor serves has a web server to hand off: the gateway's
 // apps are the toolkit's own Caddy's.
 func TestForRefusesAnAppTheGatewayServes(t *testing.T) {
 	cfg := fixture(t)
-	if _, err := ingress.For(cfg, "talk"); err == nil || !strings.Contains(err.Error(), "gateway") {
+	if _, err := webserver.For(cfg, "talk"); err == nil || !strings.Contains(err.Error(), "gateway") {
 		t.Fatalf("talk: %v", err)
 	}
-	if _, err := ingress.For(cfg, "nothing"); err == nil || !strings.Contains(err.Error(), "declares no app") {
+	if _, err := webserver.For(cfg, "nothing"); err == nil || !strings.Contains(err.Error(), "declares no app") {
 		t.Fatalf("an undeclared app: %v", err)
 	}
 }
 
 func TestShowHandsOffAnExternalApp(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
+	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
 	out := buf.String()
 	for _, want := range []string{
 		"status.example.org", "http://127.0.0.1:8480", "/healthz",
@@ -73,7 +73,7 @@ func TestShowHandsOffAnExternalApp(t *testing.T) {
 		"proxy_set_header X-Forwarded-Proto $scheme;",
 		"ProxyPass        / http://127.0.0.1:8480/",
 		`RequestHeader set X-Forwarded-Proto "https"`,
-		"paisans ingress check --app status",
+		"paisans web-server check --app status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -90,8 +90,8 @@ func TestShowHandsOffAnExternalApp(t *testing.T) {
 func TestShowWarnsWhenListenIsNotLoopback(t *testing.T) {
 	var buf bytes.Buffer
 	target := external(t, "192.168.1.20:8480")
-	ingress.Show(&buf, target, ingress.WebServer{})
-	hint, detail, ok := ingress.ListenWarning(target)
+	webserver.Show(&buf, target, webserver.WebServer{})
+	hint, detail, ok := webserver.ListenWarning(target)
 	if !ok || !strings.Contains(hint, "ufw") || !strings.Contains(detail, "DOCKER-USER") {
 		t.Fatalf("no warning: %q %q", hint, detail)
 	}
@@ -102,12 +102,12 @@ func TestShowWarnsWhenListenIsNotLoopback(t *testing.T) {
 }
 
 func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
-	target, err := ingress.For(fixture(t), "status")
+	target, err := webserver.For(fixture(t), "status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	ingress.Show(&buf, target, ingress.WebServer{})
+	webserver.Show(&buf, target, webserver.WebServer{})
 	out := buf.String()
 	if !strings.Contains(out, "nothing to hand off") || strings.Contains(out, "proxy_pass") || strings.Contains(out, "YOUR CERTIFICATE") {
 		t.Fatal(out)
@@ -119,7 +119,7 @@ func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
 // server that edge is theirs, so each snippet carries the same refusals.
 func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
+	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
 	out := buf.String()
 	for _, want := range []string{
 		"@refused path /status* /badge/* /metrics /metrics/ /api/v1/*",
@@ -159,7 +159,7 @@ func caddyPathMatches(patterns []string, path string) bool {
 
 func TestEachSnippetRefusesEveryFormOfTheRefusedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
+	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
 	out := buf.String()
 
 	caddy := regexp.MustCompile(`@refused path (.+)`).FindStringSubmatch(out)

@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
+	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
 const siteFile = webDir + "paisans.d/paisans-f2a9-status.caddy"
@@ -16,10 +16,10 @@ const siteFile = webDir + "paisans.d/paisans-f2a9-status.caddy"
 // webOn gives the site's host a Caddy in a container whose include
 // directory holds the toolkit's site file, recorded in the manifest, and a
 // file of the host owner's beside it.
-func webOn(t *testing.T, w *world, site string) *ingresstest.Server {
+func webOn(t *testing.T, w *world, site string) *webservertest.Server {
 	t.Helper()
 	h := w.hosts[site]
-	h.web = ingresstest.New("import /etc/caddy/paisans.d/*\n")
+	h.web = webservertest.New("import /etc/caddy/paisans.d/*\n")
 	content := "status.example.org {\n\treverse_proxy 127.0.0.1:8480\n}\n"
 	h.web.Files[siteFile] = content
 	h.web.Files[webDir+"paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
@@ -27,7 +27,7 @@ func webOn(t *testing.T, w *world, site string) *ingresstest.Server {
 	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
 		t.Fatal(err)
 	}
-	m.Ingress = []render.ManifestIngress{{App: "status", Path: siteFile, SHA256: sum(content), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
+	m.WebServer = []render.ManifestWebServer{{App: "status", Path: siteFile, SHA256: sum(content), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
 	data, _ := json.Marshal(m)
 	h.files[dep.Manifest()] = string(data)
 	return h.web
@@ -98,7 +98,7 @@ func TestSiteRemoveStopsWhenTheWebServerRefuses(t *testing.T) {
 func TestHostGoneSaysWhatTheWebServerStillIncludes(t *testing.T) {
 	w := setup(t)
 	watch := w.cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480", IncludeDir: config.IncludeDir{Path: "/opt/caddy/paisans.d"}}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480", IncludeDir: config.IncludeDir{Path: "/opt/caddy/paisans.d"}}
 	w.cfg.Sites["watch"] = watch
 	// Its app was removed first, as app remove does, while the host was
 	// still there.

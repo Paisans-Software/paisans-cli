@@ -28,11 +28,11 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
 const (
@@ -146,7 +146,7 @@ type host struct {
 	// web is the operator's web server, when the host runs one: the
 	// commands writing or removing a file under webDir and those run in
 	// its container go to it.
-	web *ingresstest.Server
+	web *webservertest.Server
 }
 
 // webDir is where the operator's web server's include directory is.
@@ -1087,7 +1087,7 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 		var m render.Manifest
 		if err := json.Unmarshal([]byte(content), &m); err == nil {
 			inv.ManifestFiles = m.Files
-			inv.ManifestIngress = m.Ingress
+			inv.ManifestWebServer = m.WebServer
 			if inv.ManifestFiles == nil {
 				inv.ManifestFiles = []render.ManifestFile{}
 			}
