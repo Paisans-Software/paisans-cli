@@ -73,8 +73,9 @@ type Plan struct {
 	Site      string
 	Stages    []*Stage
 	Preflight preflight.Report
-	// Notes are things the join leaves for later, on purpose.
-	Notes []string
+	// Owed are the applies the join leaves for later, on purpose, one note a
+	// site.
+	Owed []string
 	// Report receives each stage as a section, the work in it as steps and
 	// each gate as a step of its own. Nil discards it.
 	Report ui.Reporter
@@ -406,10 +407,10 @@ func leader(members []patroniMember) string {
 	return ""
 }
 
-// noteOwed lists what the join leaves on purpose: the leader's patroni.env,
-// which names every etcd member after the join. Applying it recreates the
-// leader's Patroni, a failover, and the join does not need it (see
-// apply.LeaderPatroniEnvNote). Every replica's is applied by stage 7.
+// noteOwed adds to Owed what the join leaves on purpose: the leader's
+// patroni.env, which names every etcd member after the join. Applying it
+// recreates the leader's Patroni, a failover, and the join does not need it
+// (see apply.LeaderPatroniEnvNote). Every replica's is applied by stage 7.
 func (p *Plan) noteOwed(rendered *render.Plan, members []patroniMember) error {
 	name := leader(members)
 	if name == "" || name == p.Site {
@@ -421,7 +422,7 @@ func (p *Plan) noteOwed(rendered *render.Plan, members []patroniMember) error {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	if found && have != want {
-		p.Notes = append(p.Notes, apply.LeaderPatroniEnvNote(name))
+		p.Owed = append(p.Owed, apply.LeaderPatroniEnvNote(name))
 	}
 	return nil
 }

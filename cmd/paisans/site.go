@@ -111,7 +111,7 @@ func runSiteAdd(args []string) error {
 
 	if !*execute {
 		dryRunFound(count(plan.PendingStages(), "stage"), nil)
-		reportRemains(r, plan.Notes)
+		reportOwedApplies(r, plan.Owed)
 		r.Result("Nothing changed. Re-run with --execute to apply.")
 		return nil
 	}
@@ -119,7 +119,7 @@ func runSiteAdd(args []string) error {
 	if err := siteadd.Execute(plan); err != nil {
 		return err
 	}
-	reportRemains(r, plan.Notes)
+	reportOwedApplies(r, plan.Owed)
 	r.Result("%s joined: every gate passed.", site)
 	return nil
 }

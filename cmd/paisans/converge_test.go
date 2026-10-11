@@ -1620,6 +1620,7 @@ func TestConvergeStopIsAProblem(t *testing.T) {
 	}{
 		{"apply --site vm", unreachable, "apply stopped at apply --site vm", []string{"ubuntu@203.0.113.10 cannot be reached over ssh.", "Check that the host is up.", "Run paisans apply --execute again to resume."}, 1},
 		{"apply --site vm", errors.New("vm: boom"), "apply stopped at apply --site vm", []string{"vm: boom.", "Run paisans apply --execute again to resume."}, 1},
+		{"apply --site vm", errors.New("apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:\n  talk: no client"), "apply stopped at apply --site vm", []string{"apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:", "  talk: no client", "Run paisans apply --execute again to resume."}, 1},
 		{"storage add", waiting, "apply is waiting at storage add", []string{"storage add is waiting on Garage at stage 3 (sync): blocks are still moving.", "Nothing failed: Garage is still moving data. Run paisans apply --execute again later."}, 75},
 	} {
 		fakeConverge(t, map[string]error{tc.step: tc.err})
@@ -1637,6 +1638,20 @@ func TestConvergeStopIsAProblem(t *testing.T) {
 		var b strings.Builder
 		if code := reportError(&b, err, false); code != tc.code {
 			t.Errorf("%s: exit %d, want %d", tc.step, code, tc.code)
+		}
+	}
+}
+
+// A hint is ended with a period, but one that ends with a colon introduces
+// the lines after it and is kept as it is.
+func TestSentencesEndAHintOnce(t *testing.T) {
+	for in, want := range map[string]string{
+		"vm: boom":                             "vm: boom.",
+		"vm: boom.":                            "vm: boom.",
+		"talk was refused:\n  talk: no client": "talk was refused:\n  talk: no client",
+	} {
+		if got := sentences(errors.New(in)); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
 	}
 }
