@@ -1168,16 +1168,22 @@ back again. Rerun it whenever the Pocket ID image is bumped: it proves what
 the reconciler assumes about the API, and the static key's user, against the real
 thing.
 
-The passthrough ini merge has a Docker test of its own, behind its own tag:
+The passthrough ini merge and the locked settings have a Docker test of
+their own, behind their own tag:
 
 ```
-go test -tags writefreely_integration -timeout 30m -run TestRenderedPassthroughKeyIsReadByWriteFreely ./internal/render/
+go test -tags writefreely_integration -timeout 30m ./internal/render/
 ```
 
 It boots the pinned WriteFreely fork against the rendered `config.ini`, with a
 Postgres beside it, and asks the application for the passthrough key's value;
-then does the same with that one line removed, as a control. It boots the
-application three times and may pull images, hence the longer timeout.
+then does the same with that one line removed, as a control. Then it boots it
+once more and checks that every name in `locked_settings` is locked at the
+file's value, that `/healthz` answers 200 and that an unsigned read of a blog
+outbox answers 401. It boots the application four times and may pull images,
+hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
+another build, such as a local one of a release not yet promoted to
+`stack-1`.
 
 The one workflow in `.github/workflows` builds the admin reconciler's image,
 and runs only the tests of the packages that image is built from. Nothing runs

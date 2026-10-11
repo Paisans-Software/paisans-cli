@@ -1570,3 +1570,87 @@ wrapped entrypoints were run through Docker Compose against the pinned
 images with a root owned bind at the upload directory: each wrote a file
 there as uid 1000 and uid 1001 respectively. Nothing was run against a
 deployment, and no app was started in local mode end to end.
+
+---
+
+## 2026-10-11: Mbin and WriteFreely lock what the toolkit renders, with authorized fetch on by default
+
+Founder instruction: "Update the toolkit to configure Mbin and WriteFreely
+with the locked settings and authorized fetch configs by default (assuming the
+keys are missing from the yaml)". The goal is that an admin cannot drift from
+`paisans.yaml` through the apps' admin pages. It is the toolkit side of the
+`stack-1` template contract in `docs/specs/2026-10-11-stack-channels.md`.
+
+### What was decided
+
+* `settings.authorized_fetch`, a boolean for `mbin` and `writefreely`, true
+  when absent. Mbin renders `MBIN_AUTHORIZED_FETCH` always and names it in
+  `MBIN_LOCKED_SETTINGS`; WriteFreely renders `[app] authorized_fetch`.
+* WriteFreely's `config.ini` opens with `locked_settings`, naming every
+  database setting the template renders, derived in Go and checked by a test
+  against the fork's registry in both directions.
+* Both kinds' health route is `/healthz`, so a gated app's open paths gain it
+  and the monitor's public check reaches the app.
+* A gated app with `authorized_fetch: false` is refused by the existing
+  `visibility-gate-without-signed-fetch`. A value that is not a boolean is
+  refused (`authorized-fetch-not-a-boolean`), and so is a WriteFreely
+  `min_username_len` or `uploads_max_size_mb` the fork would refuse
+  (`writefreely-setting-invalid`), since a locked value it refuses stops the
+  blog at startup.
+* WriteFreely's signed fetch record is `app.authorized_fetch` with
+  `app.private`, and its probe a blog outbox; a gated Mbin gains a direct
+  check that anonymous `GET /api/entries` answers 401.
+* Both kinds default to the `stack-1` channel tag.
+
+### Why
+
+Both apps keep their settings in a database once an admin saves, so a
+rendered value held only until the first save. Locking is the fork feature
+built for exactly this, and naming every rendered setting rather than a chosen
+few is what lets a test derive the list instead of trusting it.
+
+Authorized fetch on for a public app as well as a gated one: it costs a peer
+nothing that signs its fetches, both forks leave the instance actor and
+discovery open so two such servers can still bootstrap, and it means a
+federating app's read surface answers only identified instances.
+
+### What was weighed
+
+* **Moving WriteFreely's signed fetch to `app.authorized_fetch` alone.** The
+  brief for this change said so. Kept with `app.private` instead: with no
+  allowlist, `authorized_fetch` admits a signature from any instance
+  (federation_allowlist.go:213-216), and only private mode admits a signer
+  solely through the allowlist (federation_allowlist.go:486-495), which an
+  allowlist itself requires (federation_allowlist.go:84-86). Dropping private
+  mode would loosen the gate's federation policy, the founder's 2026-10-08
+  decision, from "reads only from its allow list" to "reads from any signer",
+  and that is not this change's to make.
+* **Keeping the instance actor as WriteFreely's probe.** It is one of the
+  routes `authorized_fetch` leaves open, so under it the probe would test
+  private mode only. The outbox is refused before any lookup, so it needs no
+  blog to exist.
+* **Locking `app.federation_allowlist`.** It is not rendered, and locking an
+  absent key would lock it empty and take the allowlist away from the admins
+  who maintain it.
+* **Rendering `settings_location = database`.** The fork refuses to start
+  when the marker is present and the database holds no settings, which is
+  every new blog's first start, so the toolkit leaves it out and the fork's
+  warning about a read-only file stays a known limit.
+* **A signed fetch check on ungated apps too.** Their settings are locked, so
+  nothing in the app can turn authorized fetch off; the gate's check stays
+  because it proves the gate's security property, which a public app does not
+  have.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./... -count=1`, `gofmt -l .`
+empty, the golden trees regenerated and read. Against a local build of
+writefreely-wisp develop f95d840 (0.21.1+wisp), `go test -tags
+writefreely_integration ./internal/render/` with `PAISANS_WF_IMAGE`: the blog
+started on the rendered `config.ini`, `writefreely settings list` marked all
+eleven names locked at the file's values, `settings set
+app.authorized_fetch false` was refused, `/healthz` answered 200 and an
+unsigned GET of a blog outbox answered 401. Mbin's behaviour was read from the
+fork's source at v1.15.0+paisans, not run; the 1.15.0-paisans image's
+declared volume was inspected from the registry. The `stack-1` tags did not
+exist on the registry when this was written, so nothing here pulls them.
