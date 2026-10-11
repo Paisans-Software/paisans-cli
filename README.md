@@ -31,7 +31,9 @@ paisans site remove home-b --execute       # take a site out of the deployment
 paisans doctor                             # what is unhealthy, and how to recover
 ```
 
-`paisans help` lists every command.
+`paisans help` lists every command, and [docs/commands.md](docs/commands.md)
+describes each one: what it does, when to run it on its own rather than
+through `paisans apply`, its flags, and what it changes.
 
 ## Design rules that everything else follows from
 
@@ -554,13 +556,10 @@ later recreates a network whose recorded configuration changed, but leaves
 one with no record alone (created by an older Compose or by hand), so `apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
-**Helping an operator behind their own web server.** Two commands, neither of
-which reaches a host or changes anything:
-
-```sh
-paisans ingress show  --app status   # the hand-off sheet, from paisans.yaml alone
-paisans ingress check --app status   # from your machine, as a visitor would
-```
+**Helping an operator behind their own web server.** Two commands, `ingress
+show` and `ingress check`, neither of which reaches a host or changes anything.
+How to run them, and their flags, are under *`paisans ingress show` and
+`paisans ingress check`* in [docs/commands.md](docs/commands.md).
 
 `show` prints the hostname, the upstream (`listen`) and the health path; what
 the web server must do (terminate TLS for the hostname, pass `Host`, set
@@ -744,15 +743,17 @@ and drops to it. An image older than that entrypoint ignores the seed.
 etcd quorum is a majority: 1 member survives nothing but works; 3 members
 survive one loss; **2 members survive nothing and are strictly worse than 1.**
 
-So a join must take the cluster from one voter to three in a single operation —
-the second site and a witness together. It can never rest at two.
+So a join that grows the voters takes the cluster from one to three in a single
+operation: the second site and a witness together. It can never rest at two.
 
 With `etcd.members` left out (see *`etcd.members` and `cluster.sites` follow
 from the roles*), that is one edit to the roles: the new site gets `data`
 and the site in the third location gets `witness`, in the same change.
 Giving a second site `data` alone derives two voters, which `validate`
-refuses, naming both ways out: a witness in a third location, or
-`etcd.members` written with one site, which gives up automatic failover.
+refuses, suggesting a witness in a third location first, and naming the
+other way out: `etcd.members` written with one site, which gives up automatic
+failover. The toolkit never demands the witness; it refuses only the two
+voters (see *Nothing here is permanent*).
 
 ## The witness is a third location, not a cloud account
 
@@ -862,32 +863,44 @@ anyone, so there is nothing to lose that way.
 
 ### Nothing here is permanent
 
-A witness holds no data, so relocating one is cheap and scriptable — remove the
+A witness holds no data, so relocating one is cheap in principle: remove the
 member, add the new one. Start with whatever third location is available and
-move it when a better one appears.
+move it when a better one appears. No command does the move yet; the table
+says what does exist.
 
 If a gateway VM is in use, the third location already exists before anyone asks
-for a witness: the join enables the witness role on a machine already running,
+for a witness: the join gives the witness role to a machine already running,
 rather than provisioning a new one.
 
 | Stage | etcd members | Witness |
 |-------|--------------|---------|
-| `init`, no gateway | 1 | none — correct, not missing |
-| `init` with gateway | 1 | gateway serves ingress; witness role dormant |
-| `site add` | 3 | enable on the gateway, or name a third location |
-| later | 3 | `witness move` relocates it |
+| first apply, no gateway | 1 | none: correct, not missing |
+| first apply with a gateway | 1 | the gateway serves ingress and holds no witness role yet |
+| second data site, by `site add` | 3 | given to the gateway, or to a site in a third location, in the same change |
+| later | 3 | not built: no command moves a witness to another site; `site remove` takes one out |
 
-Declining a witness entirely is supported and means **giving up automatic
-failover**: two sites with two voters cannot safely promote anyone, so `site add`
-configures plain streaming replication with a documented manual promote instead.
-That is a legitimate choice. It is a different mode, not a slightly degraded
-version of the same one, and the toolkit should say so plainly. `validate`
-does (`one-voter-no-failover`): a cluster of two or more sites with one etcd
-member gets a warning saying that one member elects nobody, that while the
-voter's site is down every other site's Patroni loses etcd and stops taking
-writes, and that promoting the replica is a manual step. A warning and not a
-refusal, because the mode works as described; what it must not do is pass as
-the automatic one.
+A witness is required only as a concept; the toolkit never demands one.
+Declining it means **giving up automatic failover**, and no command configures
+a separate mode for that: a deployment founded with several data sites and one
+etcd member, `etcd.members` written with that one site, runs plain streaming
+replication, and promoting a replica is a manual step. That is a legitimate
+choice. It is a different mode, not a slightly degraded version of the same
+one, and the toolkit says so plainly. `validate` does
+(`one-voter-no-failover`): a cluster of two or more sites with one etcd member
+gets a warning saying that one member elects nobody, that while the voter's
+site is down every other site's Patroni loses etcd and stops taking writes, and
+that promoting the replica is a manual step. A warning and not a refusal,
+because the mode works as described; what it must not do is pass as the
+automatic one. Two voters are refused rather than warned of (`two-etcd-voters`),
+since they are strictly worse than one, and the refusal's first suggestion is a
+witness.
+
+One voter does not grow by itself. `site add` joins a data site only when
+`etcd.members` lists it, because its stages are an etcd join, and listing it
+beside one voter makes two. So growing a running one-voter cluster through
+`site add` means going from one voter to three in the same change, which is
+what adding a witness with the new data site does (see *Adding a site, and the
+constraint that shapes it*).
 
 ## Configuration
 
@@ -931,7 +944,8 @@ Witnesses come first because a new deployment is founded witness first (see
 *A new deployment is applied witness first*); nothing else reads either list
 for its order. Write a key only to choose something the roles do not say:
 `etcd.members: [home-a]` beside two data sites runs one voter by choice,
-which gives up automatic failover, and listing only some data sites runs
+which gives up automatic failover (`validate` warns, `one-voter-no-failover`;
+see *Nothing here is permanent*), and listing only some data sites runs
 fewer voters than there are data sites. A written key that is empty, or has
 no value, is refused: an empty `etcd.members` leaves Patroni nowhere to keep
 its leader, and an empty `cluster.sites` says nothing that leaving it out
@@ -1538,13 +1552,8 @@ encrypted to the same recipients, and refuses an encrypted file with no
 delete the client at Pocket ID, which it says: delete it there by hand if that
 Pocket ID still runs. A removed site's WireGuard key is safe to prune once no
 site's mesh lists it, which is true after a full `site remove`, or after every
-remaining site's next `apply`.
-
-```sh
-paisans secrets prune             # lists them
-paisans secrets prune --execute   # removes them
-paisans secrets prune --without-record --execute   # no gateway to read; asks for the word prune
-```
+remaining site's next `apply`. How to run it, and its flags, are under
+*`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
 
 **A site running the toolkit's Caddy without its DNS token is refused at
 `render` and `apply`**: a gateway, or a monitor in ingress mode `paisans`. `init`
@@ -2194,12 +2203,8 @@ Every public name a deployment answers on needs a DNS record, and the toolkit
 creates them, not the operator and not an agent working by hand. A record typed
 into a provider's console is a record nothing checks against the configuration,
 and the first anyone hears of a typo is a visitor who cannot reach the site.
-Founder requirement.
-
-```sh
-paisans dns init                # shows what it would create
-paisans dns init --execute      # creates it
-```
+Founder requirement. How to run it, and its flags, are under *`paisans dns
+init`* in [docs/commands.md](docs/commands.md).
 
 **The records are derived, never declared.** Each app's `hostname`, each of its
 role `hostnames`, and the media hostname of each app that stores objects,
@@ -2350,12 +2355,8 @@ configuration implies it now. Founder decision: the toolkit removes such a
 record, not an operator in the provider's console, which amends the earlier
 rule that the toolkit never deletes a record. A deletion by hand is exactly the
 unchecked edit to the zone that `dns init` exists to replace, and the next one
-deletes the wrong name.
-
-```sh
-paisans dns prune               # lists remove and keep, with reasons
-paisans dns prune --execute     # deletes the removes, then confirms each is gone
-```
+deletes the wrong name. How to run it, and its flags, are under *`paisans dns
+prune`* in [docs/commands.md](docs/commands.md).
 
 **`--name <fqdn>` vouches for one name outside the domain.** A hostname
 configured explicitly beside `community.domain` (Eg: an old shared media name
@@ -2986,12 +2987,9 @@ interfaces, firewall policy and other people's containers.
 WireGuard tools, a firewall, and on a data site a `/dev/watchdog` for Patroni.
 **None of that is done by hand.** A step an operator performs from a wiki page
 is a step done differently on every host, and the first time it matters is a
-rebuild at the worst possible moment. So it is a command:
-
-```
-paisans host prepare --site home-a            # shows what it would do
-paisans host prepare --site home-a --execute  # does it
-```
+rebuild at the worst possible moment. So it is a command, `host prepare`.
+How to run it, and its flags, are under *`paisans host prepare`* in
+[docs/commands.md](docs/commands.md).
 
 It reaches the host through the site's `ssh` section with the operator's own
 ssh, exactly as `apply` does. It probes read only, plans only what is missing,
@@ -4514,17 +4512,12 @@ itself run against the Pocket ID app.
 Pocket ID users sign in with passkeys, so there is no password to pipe in, and
 a new administrator cannot sign in at all until they have registered one. For
 a `pocket-id` app the command therefore creates the user as an administrator
-and issues a **one-time login link**:
+and issues a **one-time login link**. How to run it, and its flags, are under
+*`paisans app admin create`* in [docs/commands.md](docs/commands.md).
 
-```sh
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern     # shows what it would do
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern --execute
-```
-
-The dry run marks each step `○`, here for a deployment whose Mbin app reads
-the admin group `admins`:
+The dry run marks each step `○`, here for an administrator `founder` of the
+Pocket ID app `auth`, in a deployment whose Mbin app reads the admin group
+`admins`:
 
 ```
 auth on home-a (pocket-id)
@@ -4823,13 +4816,8 @@ which creates or re-records it. Recorded credentials may be what a running app
 signs people in with, so replacing them is a decision, not a repair.
 
 `apply` never rotates a secret. The command stays for that and for running the
-step alone:
-
-```sh
-paisans oidc client create --app talk             # shows what it would do
-paisans oidc client create --app talk --execute   # does it
-paisans oidc client create --app talk --rotate-secret --execute
-```
+step alone. How to run it, and its flags, are under *`paisans oidc client
+create`* in [docs/commands.md](docs/commands.md).
 
 For an Mbin app that declares no groups, so that its member group is
 `members` and its admin group `admins`, and a Pocket ID that already has both
@@ -5004,13 +4992,9 @@ fails unless a fresh plan is empty.
 
 Taking an app out of `paisans.yaml` and applying stops routing to it and
 leaves the rest on its hosts, as the section on left over files says.
-`app remove` is the decision to take the rest away, made for one app by name:
-
-```sh
-paisans app remove docs                              # shows what it would do
-paisans app remove docs --execute                    # does it, and keeps its data
-paisans app remove docs --delete-data --execute      # and deletes its data, after asking
-```
+`app remove` is the decision to take the rest away, made for one app by name.
+How to run it, and its flags, are under *`paisans app remove`* in
+[docs/commands.md](docs/commands.md).
 
 **It refuses an app still in `paisans.yaml`**, and the infrastructure stack,
 which is never an app. It reads every site before it changes any, and refuses
@@ -5083,31 +5067,74 @@ DNS records stay until `paisans dns prune --execute` deletes the ones
 `dns init` made. And everything kept above is listed again at the end, with
 why.
 
-### `site add` — the gateway and witness
+### Adding the gateway and the witness
 
 The straightforward case, because the VM has a stable address and is the one
-thing everything else can dial.
+thing everything else can dial. There is no command for joining it on its own:
+the VM is declared in `paisans.yaml` like any other site, with its roles, its
+mesh address, its `public_address` and its `ssh` section, and the whole
+deployment is applied (see *`paisans apply` with no `--site` converges the
+whole deployment*):
 
 ```
-paisans site add vm --roles gateway,witness --ssh vm.example.org
+paisans apply             # every step it would run, and what each would change
+paisans apply --execute   # runs them, stopping at the first failure
 ```
 
-1. Preflight the VM.
-2. Generate its keypair; record it.
-3. Render the VM's mesh interface: peer home-a, no endpoint; home-a dials out.
-4. Render home-a's mesh interface: peer vm **with** an endpoint, and `PersistentKeepalive`
-   so the NAT mapping stays open.
-5. Push both; bring both up.
-6. **Verify handshakes in both directions.** Stop here on failure.
-7. etcd stays a single member. The VM does not become a voter yet, because two
-   voters are worse than one. With `etcd.members` left out, the `witness` role
-   is what would make it one, so the VM joins as `gateway` alone and gains
-   `witness` in the join that adds the second data site.
+For a VM joining a running site, home-a, as `roles: [gateway]`, the whole
+apply reads what runs and plans the steps below. If home-a served as the
+gateway until then, handing the role over is the change *Moving the gateway*
+describes.
+
+1. `init`, which generates the VM's WireGuard keypair on the workstation and
+   records it in the secrets file (see *Where WireGuard keys are generated*).
+2. `host prepare` on every site: the VM gets Docker, WireGuard and a firewall
+   following its roles, and home-a, already prepared, plans nothing.
+3. `dns init`, for any record the VM's names need.
+4. `apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
+   interface lists home-a as a peer with no endpoint: home-a dials out.
+5. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
+   as a peer **with** an endpoint, and `PersistentKeepalive` so the NAT mapping
+   stays open, applied with `wg syncconf` so nothing on home-a restarts (see
+   *`apply` brings the mesh interface up before anything binds to it*).
+
+Each apply reads its mesh interface back before any stack starts. None waits
+for a handshake, because a tunnel to a site outside etcd carries no quorum: if
+it does not come up, the VM's own traffic waits and nothing that already runs
+is touched. The handshake gate belongs to the change that puts quorum across
+the tunnel, `site add`'s stage 2, which verifies a handshake in both
+directions before any etcd membership changes (see *The staged gate, and the
+half-joined site*).
+
+etcd stays a single member. The VM does not become a voter yet, because two
+voters are worse than one. With `etcd.members` left out, the `witness` role is
+what would make it one, so the VM joins as `gateway` alone and gains `witness`
+in the change that adds the second data site, below. Declared with both roles
+beside one data site, it would make two voters, which `validate` refuses
+(`two-etcd-voters`), saying to take the witness role off while there is one
+data site to vote.
 
 ### `site add`: a second data site, and the one hard problem
 
+Home-b is declared in `paisans.yaml` at its end state, `roles: [data]`, and the
+VM gains the `witness` role in the same edit, so the voters go from one to
+three at once (see *Adding a site, and the constraint that shapes it*). The
+whole apply then runs `init` for home-b's secrets, `host prepare` on
+home-b, `dns init`, a `site add` for each etcd member the running cluster has
+not admitted, the storage step, and pass two. `site add` is the staged join
+below: it admits the VM to etcd first and home-b after it, one learner at a
+time, then starts home-b's replica.
+
+One step of that is not built yet. The whole apply plans a `site add` for the
+VM as well as for home-b, and `site add` refuses a site whose roles are not
+exactly `[data]`, so the run stops at the VM's. Until the whole apply plans the
+witness's join inside the data site's, as `site add` already performs it, the
+data site's join is run on its own between two whole applies:
+
 ```
-paisans site add home-b      # home-b declared in paisans.yaml at its end state
+paisans apply --execute             # init, host prepare and dns init; stops at site add vm
+paisans site add home-b --execute   # the VM's etcd member, then home-b's, staged
+paisans apply --execute             # finds both admitted, and runs the rest
 ```
 
 Home-b reaches the VM the same way home-a does. Fine.
@@ -5173,10 +5200,9 @@ app stack: give the site the `apps` role, `host prepare` and `apply` it, then
 Pocket ID stands by there while another site's instance is active (see
 *Pocket ID runs on every apps site, and one of them is active*). `docs/specs/2026-10-07-site-add.md` is the approved specification.
 
-```
-paisans site add home-b             # every stage, its steps and its gate
-paisans site add home-b --execute   # runs them, stopping at the first failed gate
-```
+The whole apply runs `site add` for each data site the running cluster has not
+admitted. Running it on its own, and its flags, are under *`paisans site add`*
+in [docs/commands.md](docs/commands.md).
 
 The configuration is the end state, and `site add` plans only what differs
 from the live deployment: the `psns-<token>.conf` on each site, `etcdctl member list`,
@@ -5290,14 +5316,8 @@ The reverse of `site add`, for one site by name. The site stays declared in
 host is reached and its roles say what it holds; everything else is computed
 from the configuration with the site taken out, the end state, and the last
 stage writes that back to the file. `docs/specs/2026-10-08-site-remove.md` is
-the approved specification.
-
-```sh
-paisans site remove home-b                             # refusals, then every stage and its gate
-paisans site remove home-b --execute                   # runs them, stopping at the first failed gate
-paisans site remove home-b --delete-data --execute     # and deletes its data, after asking
-paisans site remove home-b --host-gone --execute       # the host is never coming back
-```
+the approved specification. How to run it, and its flags, are under
+*`paisans site remove`* in [docs/commands.md](docs/commands.md).
 
 **It refuses before anything changes**, with the evidence and what to do:
 
@@ -5487,13 +5507,8 @@ declares has no DNS stage, since its records are still wanted; for one it does
 not declare, the DNS stage follows and is skipped, saying its records are
 deleted by hand, since nothing names its public address.
 `docs/specs/2026-10-09-site-remove-force.md` is the approved specification.
-
-```sh
-paisans site remove monitor-a --force --ssh admin@203.0.113.9                          # dry run
-paisans site remove monitor-a --force --ssh admin@203.0.113.9 --execute --delete-data  # asks for the name
-paisans site remove home-b --force --execute                                           # its declared host, asks for the name
-paisans site remove home-b --force --ssh admin@198.51.100.4 --execute                  # a host it ran on before
-```
+Examples of each form are under *`paisans site remove`* in
+[docs/commands.md](docs/commands.md).
 
 **Which host.** `--ssh user@host[:port]` when given, and it may be any host.
 Otherwise the declared site's own `ssh` section. A site no longer declared
@@ -5550,14 +5565,8 @@ is lost, the id is still on every host the deployment reached, in the
 registry. `paisans host deployments` lists it, and `--id` cleans the host of
 it, reading neither `paisans.yaml` nor the secrets file.
 `docs/specs/2026-10-10-remove-without-config.md` is the approved
-specification.
-
-```sh
-paisans host deployments --ssh admin@203.0.113.9                                   # read only
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9                      # dry run
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute            # asks for the name
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete-data
-```
+specification. How to run both, and their flags, are under *`paisans host
+deployments`* and *`paisans site remove`* in [docs/commands.md](docs/commands.md).
 
 `host deployments` marks each registry entry `✓`: id, token, domain, site,
 roles and root. Under *not in the registry* it warns, `!`, of any

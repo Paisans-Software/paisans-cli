@@ -15,6 +15,11 @@ and no Makefile.
 
 ## Run
 
+[`docs/commands.md`](commands.md) is the operator's reference for every
+command: what it does, when it is run on its own rather than through the whole
+`apply`, its flags and defaults, and what it changes. This section is how the
+code behind each one is laid out.
+
 validate and render touch nothing outside the working directory. init writes
 only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `storage init`,
