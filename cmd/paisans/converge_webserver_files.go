@@ -60,8 +60,8 @@ type siteFile struct {
 // does not include the directory by a wildcard. Each problem with the
 // operator's web server is a warning on its step's line, with the one set
 // of instructions that fixes it; what cannot be read or written on the
-// host is a failure.
-func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, sudo bool) webServerFiles {
+// host is a failure. Only the sites scope covers are written.
+func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, sudo bool, scope webServerScope) webServerFiles {
 	out := webServerFiles{apps: map[string]*siteFile{}}
 	d := cfg.Deployment()
 	head := func() {
@@ -72,7 +72,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 	}
 	for _, site := range cfg.MonitorSites() {
 		s := cfg.Sites[site]
-		if s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil {
+		if !scope.covers(site) || s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil {
 			continue
 		}
 		var apps []string
@@ -81,7 +81,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 				apps = append(apps, app)
 			}
 		}
-		t := convergeHost(site, s, sudo)
+		t := scope.recordHost(cfg, site, sudo)
 		recorded, err := apply.ReadWebServerRecord(t, d)
 		if err != nil {
 			head()
@@ -98,7 +98,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 			continue
 		}
 		head()
-		h := webServerFilesHost(cfg, site, sudo)
+		h := scope.serverHost(cfg, site, sudo)
 		if len(apps) == 0 || s.WebServer.IncludeDir.Off {
 			// Nothing is wanted here any more: what is recorded goes.
 			title := "remove site files on " + site
@@ -108,12 +108,38 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 			continue
 		}
 		for _, app := range apps {
-			sf, mark := writeWebServerFile(r, cfg, configPath, site, app, sudo, h, t, recorded)
+			sf, mark := writeWebServerFile(r, cfg, configPath, site, app, h, t, recorded)
 			out.apps[app] = sf
 			out.add("site file for "+app, mark)
 		}
 	}
 	return out
+}
+
+// webServerScope is which monitor sites the web server step covers: every
+// one, or with site set that one alone, as apply --site applies it, reached
+// through ssh, verbatim, in place of its ssh section when that is set, as
+// apply --site --ssh reaches it.
+type webServerScope struct{ site, ssh string }
+
+// covers reports whether the step covers site.
+func (s webServerScope) covers(site string) bool { return s.site == "" || s.site == site }
+
+// recordHost is how the step reaches site to read and write the record of
+// its site files.
+func (s webServerScope) recordHost(cfg *config.Config, site string, sudo bool) apply.Transport {
+	if s.ssh != "" {
+		return siteTransport(site, cfg.Sites[site], s.ssh, sudo)
+	}
+	return convergeHost(site, cfg.Sites[site], sudo)
+}
+
+// serverHost is how the step reaches site's web server.
+func (s webServerScope) serverHost(cfg *config.Config, site string, sudo bool) webserver.Host {
+	if s.ssh != "" {
+		return webServerHostVia(cfg, site, s.ssh, sudo)
+	}
+	return webServerFilesHost(cfg, site, sudo)
 }
 
 // add counts a step that ended on m.
@@ -128,7 +154,7 @@ func (w *webServerFiles) add(title string, m ui.Mark) {
 
 // writeWebServerFile writes one app's file, and returns what came of it
 // and the mark its step ended on.
-func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app string, sudo bool, h webserver.Host, t apply.Transport, recorded []render.ManifestWebServer) (*siteFile, ui.Mark) {
+func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app string, h webserver.Host, t apply.Transport, recorded []render.ManifestWebServer) (*siteFile, ui.Mark) {
 	sf := &siteFile{h: h, until: "its site file is in place"}
 	step := r.Step("site file for " + app)
 	failed := func(err error) (*siteFile, ui.Mark) {
@@ -147,7 +173,7 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	}
 	optOut := fmt.Sprintf("Or set sites.%s.web_server.include_dir: false, and add what paisans web-server show --app %s prints to your web server yourself.", site, app)
 	step.Progress("read the web server on " + site)
-	ws := findWebServer(cfg, target, sudo)
+	ws := findWebServer(h, target)
 	sf.ws = ws
 	if !ws.Manages() {
 		sf.until = "your web server serves it"

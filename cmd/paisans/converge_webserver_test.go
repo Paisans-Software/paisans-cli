@@ -32,7 +32,9 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 	// Writing the site files reaches the monitor's host; here there is
 	// nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
-	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool) webServerFiles { return webServerFiles{} }
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool, webServerScope) webServerFiles {
+		return webServerFiles{}
+	}
 	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
 	fakeWebServer(t, caddyAutomatic)
 	return &checked
@@ -52,8 +54,8 @@ func fakeWebServer(t *testing.T, ws webserver.WebServer) *webServerAsks {
 	t.Helper()
 	var asked webServerAsks
 	saved := findWebServer
-	findWebServer = func(_ *config.Config, target webserver.Target, sudo bool) webserver.WebServer {
-		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, sudo))
+	findWebServer = func(h webserver.Host, target webserver.Target) webserver.WebServer {
+		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, h.Sudo != nil))
 		return ws
 	}
 	t.Cleanup(func() { findWebServer = saved })

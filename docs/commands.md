@@ -291,9 +291,20 @@ starts, restarts or recreates what changed.
 * **`--execute`:** writes and acts, and an apply of the whole site ends by
   sweeping the old images of repositories its stacks render or have rendered,
   which no site of the deployment renders and no container uses (`sweep old
-  images` in the plan). Without it, it reads and prints the plan. It neither
-  writes the site files of an app behind the operator's own web server nor
-  checks its web server: the whole apply does both.
+  images` in the plan). Without it, it reads and prints the plan. On a monitor
+  with `managed_by: external`, `--execute` then runs the web server step for
+  the apps that monitor serves, as the whole apply does at its end: each
+  app's site file written into `include_dir` (an `include_dir` it derives
+  written into `paisans.yaml`), the configuration validated, a server in a
+  container reloaded and the reload command given for one on the host, then
+  `web-server check`'s checks, a line per app in a `web server` section. It
+  reaches the monitor through the same ssh and sudo as the rest of the apply,
+  `--ssh` included. A problem with the operator's web server ends it on the
+  whole apply's warning with exit status 0, in place of `Applied <n> files to
+  <site>.`; one apply could not do on the host, such as reading or writing the
+  record of its site files, ends it failed with exit status 1. Its dry run
+  lists the check as `checked with --execute`. The applies the whole apply
+  runs as its steps leave the step to it, so it runs once.
 
 See *Rendered configuration is a build artifact* and the `apply` sections under
 *Bootstrapping a site* in `README.md`.

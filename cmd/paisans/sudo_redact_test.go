@@ -74,7 +74,7 @@ func TestTheWebServerStepNeverShowsTheSudoPassword(t *testing.T) {
 	}{
 		{"detect", func(t *testing.T) *filesFake {
 			f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
-			findWebServer = func(_ *config.Config, target webserver.Target, _ bool) webserver.WebServer {
+			findWebServer = func(_ webserver.Host, target webserver.Target) webserver.WebServer {
 				return webserver.Detect(leakyHost(f, ""), target)
 			}
 			return f
