@@ -25,6 +25,32 @@ type Manifest struct {
 	// Version is this manifest's format, not the configuration's.
 	Version int            `json:"version"`
 	Files   []ManifestFile `json:"files"`
+	// Caddy is the build of the gateway's image the site's Caddy runs, set
+	// by apply on a site running Caddy and absent elsewhere. A manifest
+	// written before apply recorded it has none.
+	Caddy *ManifestCaddy `json:"caddy,omitempty"`
+}
+
+// ManifestCaddy is which build of its image a site's Caddy was deployed
+// with, and how apply came by it. The configuration names a tag that moves
+// (see acme.Published), so the compose file's digest is the only fact about
+// what ran, and this keeps it beside the tag it was resolved from in a form
+// an operator can read on the host without parsing YAML.
+type ManifestCaddy struct {
+	// Image is the reference as the configuration names it
+	// (Eg: ghcr.io/paisans-software/caddy:2).
+	Image string `json:"image"`
+	// Reference is what the compose file names and the host pulled: Image
+	// with the digest it resolved to (Eg: ghcr.io/paisans-software/caddy:2@sha256:...).
+	Reference string `json:"reference"`
+	// ResolvedAt is when the apply that first deployed this Reference
+	// resolved it, RFC 3339. A later apply resolving the same build keeps it.
+	ResolvedAt string `json:"resolved_at"`
+	// Source is where the digest came from: "registry" when apply asked the
+	// registry, "deployed" when the registry could not be reached and apply
+	// kept the build the host already ran, "configured" when acme.image named
+	// a digest itself.
+	Source string `json:"source"`
 }
 
 type ManifestFile struct {

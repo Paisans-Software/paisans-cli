@@ -8,7 +8,7 @@ services:
   caddy:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/paisans-software/caddy:2.11.7@sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186
+    image: ghcr.io/paisans-software/caddy:2
     restart: unless-stopped
     network_mode: host
     # Relative to this file, so the path names the caddy/ directory the token

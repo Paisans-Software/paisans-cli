@@ -64,7 +64,7 @@ func TestRulesFire(t *testing.T) {
 		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Warn},
 		{"acme-provider-needs-an-image", "acme-provider-needs-an-image", validate.Refuse},
 		{"acme-image-is-stock-caddy", "acme-image-is-stock-caddy", validate.Refuse},
-		{"acme-image-is-floating", "acme-image-is-floating", validate.Refuse},
+		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
 		{"unknown-hostname-role", "unknown-hostname-role", validate.Refuse},
 		{"duplicate-hostname", "duplicate-hostname", validate.Refuse},
 		{"gate-without-a-gate-app", "gate-without-a-gate-app", validate.Refuse},
@@ -730,4 +730,34 @@ func TestGarageDangerousNamesItsQuorums(t *testing.T) {
 		return
 	}
 	t.Fatal("no garage-consistency-dangerous finding")
+}
+
+// acme.image may follow a moving tag, because apply resolves it to the build
+// it names while it plans. `latest`, and no tag at all, are refused: they move
+// to the next Caddy major version, whose Caddyfile may not be the one the
+// gateway is rendered with.
+func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
+	for _, image := range []string{
+		"ghcr.io/example-org/caddy-route53:2",
+		"ghcr.io/example-org/caddy-route53:2.11",
+		"ghcr.io/example-org/caddy-route53:2.11.4",
+		"ghcr.io/example-org/caddy-route53@sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186",
+		"ghcr.io/paisans-software/caddy:2",
+	} {
+		cfg := load(t, "acme-image-is-latest")
+		cfg.ACME.Image = image
+		if validate.Check(cfg).Has("acme-image-is-latest") {
+			t.Errorf("%s was refused, but a tag inside one major version is resolved at apply", image)
+		}
+	}
+	for _, image := range []string{
+		"ghcr.io/example-org/caddy-route53:latest",
+		"ghcr.io/example-org/caddy-route53",
+	} {
+		cfg := load(t, "acme-image-is-latest")
+		cfg.ACME.Image = image
+		if !refusedFor(validate.Check(cfg), "acme-image-is-latest", "acme.image") {
+			t.Errorf("%s was not refused, and it crosses Caddy major versions", image)
+		}
+	}
 }

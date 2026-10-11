@@ -5847,8 +5847,25 @@ Caddyfile, and which image the gateway runs.
 suggested topology, and etcd's stability is a function of fsync latency, so a
 compile there competes for exactly the resource that placement was chosen
 around. Images with the modules compiled in are published at
-`ghcr.io/paisans-software/caddy`, pinned here by digest because every tag that
-repository publishes moves, exactly as upstream's do.
+`ghcr.io/paisans-software/caddy`, and the default is its major version tag,
+`ghcr.io/paisans-software/caddy:2`.
+
+**The tag moves, and what a host runs does not move with it unplanned.** The
+image is rebuilt whenever upstream Caddy or its base image ships a fix, and the
+major version tag follows every rebuild, so a security fix reaches a deployment
+without a toolkit release, and nothing crosses a major version unasked. `apply`
+asks the registry, while it plans, which build the tag names now, and renders
+that digest beside the tag in the gateway's compose file (Eg:
+`ghcr.io/paisans-software/caddy:2@sha256:...`). A new build is therefore a
+changed compose file: the dry run shows it, naming the build that replaces the
+running one, and the apply pulls it, asks it for its DNS module, validates the
+configuration on it and waits for it to be healthy, as for any image change.
+The registry is asked from the workstation, anonymously; when it cannot be
+reached, the plan keeps the build the site already runs and says so, and a
+site running none is refused until it can be. Each apply records the build in
+the site's manifest, `/srv/paisans/<token>/.paisans-manifest.json`, under
+`caddy`: the tag as configured, the reference the compose file names, when it
+was resolved and whether the digest came from the registry or was kept.
 
 The cost is stated rather than hidden: a deployment's gateway depends on that
 registry and on those images being rebuilt. The escape hatch is what keeps it
@@ -5867,11 +5884,14 @@ the module would never reach the gateway, so it would hold no certificate for
 any hostname. Declaring upstream's own image is **refused** for the same reason,
 and it is the only image a reference alone can be judged by.
 
-An `acme.image` on a tag that does not name one build, meaning `latest` or no
-tag at all, is **refused**, exactly as a floating tag on an app image is. It
-matters more here than there: a rebuild behind a moving tag can drop the
-provider's module, and a gateway that cannot answer a DNS-01 challenge holds no
-certificate for any hostname in the deployment.
+An `acme.image` may name a tag that moves, as the default does, because it is
+resolved the same way: `2`, `2.11` and `2.11.4` are each pinned to the build
+they name when `apply` plans, and a digest is taken as written. `latest`, or no
+tag at all, is **refused**: it moves to the next Caddy major version the day one
+ships, and a major version can change the Caddyfile syntax the gateway is
+rendered with. The gateway's validation gate would stop that apply before the
+new build replaced anything, and every apply after it, until the toolkit caught
+up with the new major version. Naming the major version is the fix.
 
 Everything else is checked at `apply`, by asking the binary which modules it has
 rather than inferring it from a name.
