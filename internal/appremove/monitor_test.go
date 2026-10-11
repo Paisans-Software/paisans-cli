@@ -2,6 +2,7 @@ package appremove
 
 import (
 	"errors"
+	"fmt"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 	"path/filepath"
 	"strings"
@@ -153,4 +154,23 @@ func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 	if len(p.Monitors) != 0 {
 		t.Errorf("monitors planned: %d", len(p.Monitors))
 	}
+}
+
+// A monitor that does not come back healthy fails after everything of the
+// app's is gone, with the cause read from its logs, the logs themselves only
+// with -v, and the apply that finishes it.
+func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
+	cfg, secrets, hosts := watched(t)
+	hosts["watch"].unhealthy = "status"
+	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitors(t, cfg, secrets, hosts, p)
+	err = executor(hosts).Execute(p)
+	if err == nil {
+		t.Fatal("an unhealthy monitor passed")
+	}
+	// as the command wraps it
+	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack status is not healthy", "The app is removed", "paisans apply --site watch --only status --execute")
 }

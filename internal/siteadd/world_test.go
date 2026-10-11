@@ -1,6 +1,7 @@
 package siteadd_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // world is a small deployment in maps: three hosts, an etcd membership, a
@@ -146,6 +148,8 @@ func (h *host) Run(command string) (string, error) {
 		return "/var/lib/docker\n", nil
 	case strings.HasPrefix(command, "df -B1"):
 		return "Avail\n999999999999\n", nil
+	case strings.Contains(command, " logs --no-color --tail 30 "):
+		return unhealthyLogs, nil
 	case w.unhealthy != "" && strings.Contains(command, "/srv/paisans/f2a9/"+w.unhealthy+"/compose.yaml ps --all --format json"):
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
@@ -468,4 +472,34 @@ func mustRender(t *testing.T, w *world) *render.Plan {
 		t.Fatal(err)
 	}
 	return rendered
+}
+
+// unhealthyLogs is the tail of the log of the exited app in an unhealthy
+// stack: the line that says why, and one around it that does not.
+const unhealthyLogs = `app-1  | {"level":"info","msg":"starting up"}
+app-1  | {"level":"fatal","msg":"exiting","error":"database unreachable","stacktrace":"main.main\n\t/src/main.go:12"}
+`
+
+// shortAndVerbose checks how err prints: by default with each of want and
+// no raw log line, and with -v with the log lines.
+func shortAndVerbose(t *testing.T, err error, want ...string) {
+	t.Helper()
+	var plain, verbose bytes.Buffer
+	ui.PrintError(&plain, err, false)
+	ui.PrintError(&verbose, err, true)
+	// Output is wrapped to 80 columns, so a long phrase may span lines.
+	flat := strings.Join(strings.Fields(plain.String()), " ")
+	for _, w := range append(want, "app: database unreachable") {
+		if !strings.Contains(flat, w) {
+			t.Errorf("default output lacks %q:\n%s", w, plain.String())
+		}
+	}
+	for _, raw := range []string{"starting up", "stacktrace", "last 30 log lines"} {
+		if strings.Contains(plain.String(), raw) {
+			t.Errorf("default output shows the raw log (%q):\n%s", raw, plain.String())
+		}
+		if !strings.Contains(verbose.String(), raw) {
+			t.Errorf("verbose output lacks the raw log (%q):\n%s", raw, verbose.String())
+		}
+	}
 }

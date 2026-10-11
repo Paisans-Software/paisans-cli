@@ -58,6 +58,35 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	}
 }
 
+// A monitor that does not come back healthy stops at its stage with the
+// cause read from its logs, the logs themselves only with -v, and the apply
+// that finishes it.
+func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
+	w := setup(t)
+	w.unhealthy = "status"
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil {
+		t.Fatal("an unhealthy monitor passed")
+	}
+	shortAndVerbose(t, err, "site remove home-b stopped at stage 6 (monitor)", "stack status is not healthy", "The removal itself is done", "paisans apply --site watch --only status --execute")
+	if strings.Contains(err.Error(), "run site remove again") {
+		t.Errorf("the failure says to run site remove again, which no longer declares the site: %v", err)
+	}
+}
+
+// An app that does not come back healthy after HAProxy's restart stops the
+// removal at stage 2 with the cause read from its logs, the logs themselves
+// only with -v, and how to resume.
+func TestAnAppUnhealthyAfterHAProxyNamesItsCause(t *testing.T) {
+	w := setup(t)
+	w.unhealthy = "talk"
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil {
+		t.Fatal("an unhealthy app passed")
+	}
+	shortAndVerbose(t, err, "site remove home-b stopped at stage 2 (out of the cluster)", "stack talk is not healthy", "run site remove again")
+}
+
 // A deployment with no monitor site skips the stage. The monitor site itself
 // cannot be the one removed: its uptime app is pinned to it, which is refused.
 func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {

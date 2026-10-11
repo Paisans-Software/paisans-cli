@@ -448,8 +448,8 @@ and `restart` return as soon as containers start. After each stack's action,
 5 minutes until every container of the project is running and every one with a
 healthcheck reports `healthy`; a container without one counts once running.
 A container exited, restarting or `unhealthy` stops the apply at once, a
-timeout stops it too, and either error names the stack and services and carries
-the last 30 log lines of each. The stack stays in the pending record, so the
+timeout stops it too, and either error names the stack and services with one
+line of cause for each, read from its last 30 log lines, which follow with `-v`. The stack stays in the pending record, so the
 next apply resumes there and force-recreates it. The infrastructure stack is
 checked like any other, which covers the gateway's Caddy; Patroni's own wait
 still gates the database bootstrap. `ps` output is read in both shapes Compose

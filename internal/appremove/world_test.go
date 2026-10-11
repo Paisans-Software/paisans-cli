@@ -1,6 +1,7 @@
 package appremove
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 const (
@@ -47,6 +49,8 @@ type host struct {
 	sent       []string
 	// fail makes the first command containing it fail.
 	fail string
+	// unhealthy names an app stack whose container has exited.
+	unhealthy string
 	// db, garage and s3 are the parts of a data site.
 	db     *database
 	garage *garageNode
@@ -97,6 +101,10 @@ func (h *host) Run(command string) (string, error) {
 	}
 	switch {
 	// apply's plumbing around a stack action, for the monitor's reseed
+	case strings.Contains(command, " logs --no-color --tail 30 "):
+		return unhealthyLogs, nil
+	case h.unhealthy != "" && strings.Contains(command, "/"+h.unhealthy+"/compose.yaml ps --all --format json"):
+		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
 	case strings.HasSuffix(command, " up -d"), strings.HasSuffix(command, " restart"), command == "docker image ls --no-trunc --format json", strings.HasPrefix(command, "docker ps -a --format"):
@@ -398,4 +406,34 @@ func state(t *testing.T, cfg *config.Config, app, site string, h *host) SiteStat
 	}
 	st.Dir = dir
 	return st
+}
+
+// unhealthyLogs is the tail of the log of the exited app in an unhealthy
+// stack: the line that says why, and one around it that does not.
+const unhealthyLogs = `app-1  | {"level":"info","msg":"starting up"}
+app-1  | {"level":"fatal","msg":"exiting","error":"database unreachable","stacktrace":"main.main\n\t/src/main.go:12"}
+`
+
+// shortAndVerbose checks how err prints: by default with each of want and
+// no raw log line, and with -v with the log lines.
+func shortAndVerbose(t *testing.T, err error, want ...string) {
+	t.Helper()
+	var plain, verbose bytes.Buffer
+	ui.PrintError(&plain, err, false)
+	ui.PrintError(&verbose, err, true)
+	// Output is wrapped to 80 columns, so a long phrase may span lines.
+	flat := strings.Join(strings.Fields(plain.String()), " ")
+	for _, w := range append(want, "app: database unreachable") {
+		if !strings.Contains(flat, w) {
+			t.Errorf("default output lacks %q:\n%s", w, plain.String())
+		}
+	}
+	for _, raw := range []string{"starting up", "stacktrace", "last 30 log lines"} {
+		if strings.Contains(plain.String(), raw) {
+			t.Errorf("default output shows the raw log (%q):\n%s", raw, plain.String())
+		}
+		if !strings.Contains(verbose.String(), raw) {
+			t.Errorf("verbose output lacks the raw log (%q):\n%s", raw, verbose.String())
+		}
+	}
 }

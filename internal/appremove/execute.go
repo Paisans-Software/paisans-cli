@@ -222,10 +222,23 @@ type MonitorError struct {
 }
 
 func (e *MonitorError) Error() string {
-	return fmt.Sprintf("reseeding the monitor: %v\nThe app is removed, and only the monitor is out of date. Fix the cause and run %s, which does the same as this step", e.Err, apply.MonitorCommands(e.Monitors))
+	return fmt.Sprintf("reseeding the monitor: %v\n%s", e.Err, e.next())
 }
 
-func (e *MonitorError) Unwrap() error { return e.Err }
+// next is what to do about it.
+func (e *MonitorError) next() string {
+	return fmt.Sprintf("The app is removed, and only the monitor is out of date. Fix the cause and run %s, which does the same as this step", apply.MonitorCommands(e.Monitors))
+}
+
+// Unwrap is the reseed's error, or, when that is a Problem, Eg: the health
+// gate's, the Problem with next added, so the default output says what to do
+// and its cause, the log tail, waits for --verbose.
+func (e *MonitorError) Unwrap() error {
+	if p := ui.Around("", e.Err, e.next()); p != nil {
+		return p
+	}
+	return e.Err
+}
 
 // files removes the app's unedited files on one site and then drops the
 // entries of every file removed or already gone, keeping every other entry.

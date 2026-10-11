@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // buildMonitor is stage 8, the last: every monitor site's uptime stack
@@ -35,7 +36,12 @@ func (p *Plan) buildMonitor(rendered *render.Plan) (*Stage, error) {
 	}
 	st.Gate = fmt.Sprintf("the monitor on %s runs on a monitors.json that matches the render, so %s's ping and direct checks exist", strings.Join(sites, ", "), p.Site)
 	byHand := func(err error) error {
-		return fmt.Errorf("%v\nThe join itself is done: every earlier gate passed, and only the monitor is out of date. Fix the cause and run %s, which does the same as this stage", err, apply.MonitorCommands(reseeds))
+		next := fmt.Sprintf("The join itself is done: every earlier gate passed, and only the monitor is out of date. Fix the cause and run %s, which does the same as this stage", apply.MonitorCommands(reseeds))
+		// A Problem, Eg: the health gate's, keeps its cause for --verbose.
+		if pr := ui.Around("", err, next); pr != nil {
+			return pr
+		}
+		return fmt.Errorf("%v\n%s", err, next)
 	}
 	st.run = func() error {
 		for _, m := range reseeds {

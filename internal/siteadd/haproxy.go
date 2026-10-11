@@ -174,7 +174,7 @@ func (p *Plan) restartProxy(site string, apps []string) error {
 		p.work("check " + list + " on " + site)
 	}
 	for _, app := range apps {
-		if err := apply.WaitHealthy(p.dep(), site, app, t, "Site add stopped here, before HAProxy's gate. The app was started against the new HAProxy; read its logs, fix it, and run site add again"); err != nil {
+		if err := apply.WaitHealthy(p.dep(), site, app, t, "The app was started against the new HAProxy; HAProxy's own gate was not reached."); err != nil {
 			return err
 		}
 	}

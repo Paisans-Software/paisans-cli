@@ -1,6 +1,7 @@
 package storageadd_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // world is a Garage cluster in maps: each site's files, its node, and the
@@ -50,6 +52,8 @@ type world struct {
 	// unreachable makes every command or read containing it fail the way
 	// ssh does when it cannot connect, after its retries.
 	unreachable string
+	// unhealthy names an app stack whose container has exited.
+	unhealthy string
 }
 
 // sshDown is what SSHTransport returns when every attempt timed out.
@@ -145,6 +149,10 @@ func (h *host) run(command, stdin string) (string, error) {
 	}
 	switch {
 	// apply's plumbing around a stack action, for the monitor's reseed
+	case strings.Contains(command, " logs --no-color --tail 30 "):
+		return unhealthyLogs, nil
+	case w.unhealthy != "" && strings.Contains(command, "/"+w.unhealthy+"/compose.yaml ps --all --format json"):
+		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
 	case strings.HasPrefix(command, "rm -f '"):
@@ -604,4 +612,34 @@ func (h *host) ran(sub string) int {
 		}
 	}
 	return n
+}
+
+// unhealthyLogs is the tail of the log of the exited app in an unhealthy
+// stack: the line that says why, and one around it that does not.
+const unhealthyLogs = `app-1  | {"level":"info","msg":"starting up"}
+app-1  | {"level":"fatal","msg":"exiting","error":"database unreachable","stacktrace":"main.main\n\t/src/main.go:12"}
+`
+
+// shortAndVerbose checks how err prints: by default with each of want and
+// no raw log line, and with -v with the log lines.
+func shortAndVerbose(t *testing.T, err error, want ...string) {
+	t.Helper()
+	var plain, verbose bytes.Buffer
+	ui.PrintError(&plain, err, false)
+	ui.PrintError(&verbose, err, true)
+	// Output is wrapped to 80 columns, so a long phrase may span lines.
+	flat := strings.Join(strings.Fields(plain.String()), " ")
+	for _, w := range append(want, "app: database unreachable") {
+		if !strings.Contains(flat, w) {
+			t.Errorf("default output lacks %q:\n%s", w, plain.String())
+		}
+	}
+	for _, raw := range []string{"starting up", "stacktrace", "last 30 log lines"} {
+		if strings.Contains(plain.String(), raw) {
+			t.Errorf("default output shows the raw log (%q):\n%s", raw, plain.String())
+		}
+		if !strings.Contains(verbose.String(), raw) {
+			t.Errorf("verbose output lacks the raw log (%q):\n%s", raw, verbose.String())
+		}
+	}
 }

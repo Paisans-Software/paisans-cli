@@ -3679,7 +3679,10 @@ The cause is the newest line that reads as a failure: for a JSON log (etcd,
 most Go services) the `error` field, else `err` or `msg`, of a line whose
 level is error, fatal or panic, never its stack trace; for any other log a
 line that says error, fatal or panic. A log with no such line adds none. The
-30 lines themselves follow with `-v`. The stack stays
+30 lines themselves follow with `-v`. `site add`, `site remove`, `storage
+add` and `app remove` stop the same way when a stack they start or the
+monitor they reseed is not healthy, with their own advice after the cause.
+The stack stays
 in the pending record, so the next apply resumes at it and, by the section
 above, recreates it outright. The infrastructure stack is checked like any
 other, which is also the check on the gateway's Caddy after a reload or an
@@ -5115,7 +5118,8 @@ So on each site whose HAProxy restarts, stage 6 first stops every app stack
 there with `cluster` placement and a kind that uses Postgres (`docker compose
 -f /srv/paisans/<token>/<app>/compose.yaml stop`), restarts HAProxy, starts them again (`up
 -d`), and holds each to `apply`'s health gate; a failure stops the join there
-with the app's logs. The plan lists the outage: stop, restart, start, check. A
+with the cause read from the app's logs, as `apply` shows it, and the logs
+themselves with `-v`. The plan lists the outage: stop, restart, start, check. A
 pinned app has its own Postgres and is left alone. This is one instance of a
 rule the toolkit owns: whatever changes the database path restarts the apps
 that depend on it (see "`apply` restarts the apps whose database path
