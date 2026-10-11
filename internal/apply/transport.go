@@ -98,6 +98,10 @@ type SSHTransport struct {
 	// command line, so it takes precedence over ~/.ssh/config. Like every
 	// other field here it is not used with Destination, which stays verbatim.
 	ConnectTimeout int
+	// RetryLog, when set, receives this transport's retry notices in place
+	// of the package's (SetRetryLog), so commands run at once on several
+	// hosts each keep their own.
+	RetryLog io.Writer
 }
 
 func (t SSHTransport) Describe() string {
@@ -293,6 +297,11 @@ var (
 	contactedMu sync.Mutex
 	contacted   = map[string]bool{}
 )
+
+// askMu makes a first connection that may ask about a host key wait for any
+// other: ssh asks on the terminal itself, and two questions at once, from
+// commands run on several hosts together, would garble each other.
+var askMu sync.Mutex
 
 func firstContact(destination string) bool {
 	contactedMu.Lock()
@@ -506,12 +515,18 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			resume = promptHold()
 			asks = !hostKeyKnown(t)
 		}
+		if asks {
+			askMu.Lock()
+		}
 		err = runSSH(cmd)
 		if asks && (err == nil || !connectionFailed(err, out.String())) {
 			// ssh asked about the host's key and was answered. The blank
 			// line goes before the display resumes, so the spinner redraws
 			// below it rather than leaving a frame above it.
 			blankLineOnTerminal()
+		}
+		if asks {
+			askMu.Unlock()
 		}
 		resume()
 		cleanup()
@@ -535,7 +550,11 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			}
 		}
 		delay := sshRetryDelays[attempt-1]
-		fmt.Fprintf(retryLog, "%s: ssh could not connect (%s), retrying in %s (attempt %d of %d)\n",
+		log := retryLog
+		if t.RetryLog != nil {
+			log = t.RetryLog
+		}
+		fmt.Fprintf(log, "%s: ssh could not connect (%s), retrying in %s (attempt %d of %d)\n",
 			t.Describe(), lastLine(out.String()), delay, attempt+1, len(sshRetryDelays)+1)
 		sleep(delay)
 	}

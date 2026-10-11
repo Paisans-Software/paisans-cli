@@ -3182,8 +3182,10 @@ unit on top of it would fail on an interface that already exists.
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running
 stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
-deployment needs them, and with `--execute` runs them one after another in the
-same process, stopping at the first failure. The table is that order:
+deployment needs them, and with `--execute` runs them in the same process,
+stopping at the first failure. The table is that order. Every host's
+`host prepare` runs at the same time, up to eight hosts at once; every other
+step runs after the one before it:
 
 | Phase | Command | When |
 |---|---|---|
@@ -3218,20 +3220,30 @@ elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 The output does not follow the phases. After `configuration` and `sudo` it has
 three sections: `prepare`, one line per site for its `host prepare`; `install`,
 one line for every step from founding to pass two, naming each site in the
-order the run first applies it; and `dns`. With `--execute` each prepare line
-is drawn as its step runs, and the install line's spinner names the site the
-run has reached:
+order the run first applies it; and `dns`. With `--execute` the prepare lines
+are a block of spinners, one per host, each with its own elapsed time; a host
+that finishes leaves the block with its mark, above the hosts still running,
+so the lines end in the order their hosts finish. The install line's spinner
+names the site the run has reached:
 
 ```
 prepare
-  ✓ home-a: 2.4s
-  ✓ home-b: 2.1s
   ✓ vm: 1.8s
   ✓ watch: 2.0s
+  ✓ home-b: 2.1s
+  ✓ home-a: 2.4s
 
 install
   ⠹ vm, home-a, home-b, watch: home-b: 41s
 ```
+
+A host whose prepare fails does not stop the others: each is prepared, each
+failure is marked on its own line, and the run then stops before install with
+every failed host named. Without a terminal each prepare line is printed once,
+whole, when its host finishes, and with `-v` a host's own output follows its
+line, never another host's. Two sites reached at the same ssh destination are
+prepared one after the other. A sudo password or an ssh host key question a
+host asks during prepare holds the block, one question at a time.
 
 It ends `✓ vm, home-a, home-b, watch: 3m12.0s`, or at a failure
 `✗ vm, home-a, home-b, watch: home-b`, and the stop that follows names the step
@@ -3260,8 +3272,9 @@ overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
 what it wrote, never a value, and the closing line says the secrets were
 added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
-first. A prepare line names each kind of change its site's plan makes, in the
-order docker, wireguard, firewall, ssh keys, watchdog. The install line is each
+first. Every host's prepare is checked at the same time, drawn as with
+`--execute`. A prepare line names each kind of change its site's plan makes,
+in the order docker, wireguard, firewall, ssh keys, watchdog. The install line is each
 of its steps' own dry run together: `✓` when every one is up to date, a dim `·`
 with `after prepare` (or `after init`) while a step waits on one that has not
 run, `○` when there is work, and `✗` naming the site when a step would refuse,

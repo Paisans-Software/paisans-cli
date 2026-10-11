@@ -33,7 +33,9 @@ type writer struct {
 	now      func() time.Time
 	tick     time.Duration
 
-	open   *step
+	open *step
+	// group is the group of lines running at once, while one is.
+	group  *lineGroup
 	frame_ int
 	// held counts the holds in place (see Hold). While any is, nothing is
 	// drawn, so a prompt on the terminal stays readable.
@@ -140,7 +142,7 @@ func (r *writer) spinFrame(s *step, stop chan struct{}) {
 func (r *writer) frame() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.open == nil || !r.terminal {
+	if (r.open == nil && r.group == nil) || !r.terminal {
 		return
 	}
 	r.frame_++
@@ -149,6 +151,10 @@ func (r *writer) frame() {
 
 // drawLocked draws the open step's spinner line, unless a hold is in place.
 func (r *writer) drawLocked() {
+	if r.group != nil {
+		r.drawGroupLocked()
+		return
+	}
 	s := r.open
 	if s == nil || r.held > 0 {
 		return
@@ -223,11 +229,7 @@ func (s *step) End(m Mark, result string) {
 	if result != "" {
 		text += ": " + result
 	}
-	line := "  " + r.mark(m) + " " + text
-	if r.terminal && m == Waiting {
-		// A step that waits is dimmed whole: it is not this run's to plan.
-		line = "  " + dim + "· " + text + reset
-	}
+	line := r.endLine(m, text)
 	if r.terminal {
 		line = clear + line
 	}
@@ -239,6 +241,15 @@ func (s *step) End(m Mark, result string) {
 	if stop != nil {
 		close(stop)
 	}
+}
+
+// endLine is a finished step's line: its mark, then text.
+func (r *writer) endLine(m Mark, text string) string {
+	if r.terminal && m == Waiting {
+		// A step that waits is dimmed whole: it is not this run's to plan.
+		return "  " + dim + "· " + text + reset
+	}
+	return "  " + r.mark(m) + " " + text
 }
 
 func (r *writer) mark(m Mark) string {
@@ -362,6 +373,9 @@ func (r *writer) Hold() (resume func()) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			r.held--
+			if r.held == 0 {
+				r.flushGroupLocked()
+			}
 			r.drawLocked()
 		})
 	}
@@ -378,6 +392,7 @@ func (r *writer) Detail(format string, args ...any) {
 		r.open.details = append(r.open.details, text)
 		return
 	}
+	r.interruptLocked()
 	r.detailLocked(text)
 }
 
@@ -395,6 +410,7 @@ func (r *writer) Trace(label, output string) {
 		r.open.details = append(r.open.details, text)
 		return
 	}
+	r.interruptLocked()
 	r.detailLocked(text)
 }
 
@@ -418,5 +434,8 @@ func (r *writer) detailLocked(text string) {
 func (r *writer) interruptLocked() {
 	if r.terminal && r.open != nil {
 		fmt.Fprint(r.w, clear)
+	}
+	if r.terminal {
+		r.eraseGroupLocked()
 	}
 }
