@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -266,6 +268,61 @@ func TestConvergeInstallAsPrinted(t *testing.T) {
 		inner := "      ○ apply --site vm: 5 changes\n      · apply --site home-a: after apply --site vm\n"
 		if !strings.Contains(out, line) || strings.Contains(out, inner) != verbose || strings.Contains(out, "✓ apply --site watch") != verbose {
 			t.Errorf("verbose %t:\n%s", verbose, out)
+		}
+	}
+}
+
+// On a terminal each prepare line, and the install line, shows the inner
+// step its command has open, in parentheses after the elapsed time: the
+// innermost, the enclosing one again once that ends. The finished lines do
+// not.
+func TestConvergeLinesShowTheirInnerStep(t *testing.T) {
+	fakeConverge(t, nil)
+	var b strings.Builder
+	at := time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)
+	saved := reporterOverride
+	reporterOverride = ui.NewTerminalForTest(&lockedWriter{w: &b}, false, func() time.Time { at = at.Add(1500 * time.Millisecond); return at })
+	t.Cleanup(func() { reporterOverride = saved })
+	savedRun := convergeRun
+	convergeRun = func(args []string) error {
+		r := reporterOverride
+		switch {
+		case isPrepare(args) && siteOf(args) == "home-b":
+			outer := r.Step("install packages: wireguard-tools, ufw")
+			r.Step("start docker").Done("")
+			outer.Done("")
+		case args[0] == "apply" && siteOf(args) == "home-b":
+			r.Step("start talk")
+			r.Step("wait for Patroni primary").Done("")
+		}
+		return savedRun(args)
+	}
+	t.Cleanup(func() { convergeRun = savedRun })
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		`  ⠋ home-b: \d+s \(install packages: wireguard-tools, ufw\)`,
+		`  ⠋ home-b: \d+s \(start docker\)`,
+		`  ⠋ ` + fixtureSites + `: home-b: \d+s \(start talk\)`,
+		`  ⠋ ` + fixtureSites + `: home-b: \d+s \(wait for Patroni primary\)`,
+	} {
+		if !regexp.MustCompile(want).MatchString(out) {
+			t.Errorf("no %q in:\n%q", want, out)
+		}
+	}
+	// The install line goes back to the step enclosing the one that ended,
+	// and past home-b shows none, since apply left it open.
+	if !regexp.MustCompile(`\(wait for Patroni primary\)[^\n]*\r\x1b\[K  ⠋ ` + fixtureSites + `: home-b: \d+s \(start talk\)`).MatchString(out) {
+		t.Errorf("the enclosing step was not shown again:\n%q", out)
+	}
+	if regexp.MustCompile(fixtureSites + `: watch[^\n\r]*\(`).MatchString(out) {
+		t.Errorf("a later site shows home-b's step:\n%q", out)
+	}
+	for _, ended := range regexp.MustCompile(`✓\x1b\[0m [^\n]*`).FindAllString(out, -1) {
+		if strings.Contains(ended, "(") {
+			t.Errorf("a finished line shows an inner step: %q", ended)
 		}
 	}
 }

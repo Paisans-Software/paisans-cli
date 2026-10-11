@@ -391,7 +391,7 @@ func TestExecuteReportsEachStepByItsTitle(t *testing.T) {
 	if err := hostprep.Execute(plan, host, rec); err != nil {
 		t.Fatal(err)
 	}
-	for _, title := range []string{"add docker apt key", "install packages", "enable ufw"} {
+	for _, title := range []string{"add docker apt key", "install packages: ", "enable ufw"} {
 		if !rec.Has("done", title) {
 			t.Errorf("no finished step %q:\n%s", title, rec.Lines())
 		}
@@ -402,13 +402,18 @@ func TestExecuteReportsEachStepByItsTitle(t *testing.T) {
 }
 
 // A title is a verb and its object, short enough to share a line with a
-// result; the sentence behind it is for --verbose.
+// result; the sentence behind it is for --verbose. install packages is the
+// one title as long as its object: it names each package it installs, which
+// is what a run shows while it waits on apt.
 func TestEveryStepHasAShortTitle(t *testing.T) {
 	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range plan.Steps {
+		if strings.HasPrefix(s.Title, "install packages: ") {
+			continue
+		}
 		if s.Title == "" || len(s.Title) > 40 {
 			t.Errorf("step %q has title %q", s.Describe, s.Title)
 		}
@@ -475,7 +480,7 @@ func TestAFreshHostMarksItsStepsPending(t *testing.T) {
 	}
 	rec := &ui.Recorder{}
 	plan.Show(rec)
-	if !rec.Has("pending", "install packages") || !rec.Has("warn", "falling back to softdog") {
+	if !rec.Has("pending", "install packages: ") || !rec.Has("warn", "falling back to softdog") {
 		t.Errorf("got:\n%s", rec.Lines())
 	}
 }
@@ -1702,8 +1707,8 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 				t.Fatal("planned nothing")
 			}
 			for _, s := range plan.Steps {
-				if s.Title == "install packages" {
-					seen[s.Title] = true
+				if strings.HasPrefix(s.Title, "install packages: ") {
+					seen["install packages: <packages>"] = true
 					continue
 				}
 				family, kind := expectedKind(s.Title)
@@ -1719,7 +1724,7 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 		})
 	}
 	for _, family := range []string{
-		"add docker apt key", "add docker apt repo", "install packages", "start docker", "start docker after mesh",
+		"add docker apt key", "add docker apt repo", "install packages: <packages>", "start docker", "start docker after mesh",
 		"load <module>", "load <module> at boot", "enable <module> at boot",
 		"allow <rule>", "adopt rule <rule>", "remove ufw rule <rule>", "deny incoming", "allow outgoing", "enable ufw",
 		"create authorized_keys", "authorize ssh key", "rename ssh key", "share ssh key", "forget ssh key", "release ssh key", "remove ssh key",
@@ -1731,15 +1736,18 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 }
 
 // install packages installs several packages in one step, and is each kind
-// of change its packages make.
+// of change its packages make. Its title names the packages, in the order it
+// installs them.
 func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
 	for name, c := range map[string]struct {
 		probe string
 		want  []string
+		title string
 	}{
-		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall"}},
-		"wireguard":  {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\n", want: []string{"wireguard"}},
-		"ufw":        {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\n", want: []string{"firewall"}},
+		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall"},
+			title: "install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, wireguard-tools, ufw"},
+		"wireguard": {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\n", want: []string{"wireguard"}, title: "install packages: wireguard-tools"},
+		"ufw":       {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\n", want: []string{"firewall"}, title: "install packages: ufw"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			host := preparedHost(false)
@@ -1750,7 +1758,7 @@ func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
 			}
 			var install *hostprep.Step
 			for i, s := range plan.Steps {
-				if s.Title == "install packages" {
+				if strings.HasPrefix(s.Title, "install packages") {
 					install = &plan.Steps[i]
 				}
 			}
@@ -1759,6 +1767,9 @@ func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
 			}
 			if strings.Join(install.Kinds, ",") != strings.Join(c.want, ",") {
 				t.Errorf("%s: kinds %q, want %q", install.Describe, install.Kinds, c.want)
+			}
+			if install.Title != c.title {
+				t.Errorf("title %q, want %q", install.Title, c.title)
 			}
 		})
 	}

@@ -55,7 +55,10 @@ type step struct {
 	// while it is open. The writer's mutex guards it, since the spinner's
 	// goroutine reads it.
 	progress string
-	ended    bool
+	// nested is the step a command nested in this one has open (see Nest),
+	// drawn after the elapsed time; the writer's mutex guards it too.
+	nested string
+	ended  bool
 	// stop closes when this step's spinner must stop. It lives on the step,
 	// not the writer, so ending one step cannot stop another step's spinner.
 	stop chan struct{}
@@ -159,14 +162,30 @@ func (r *writer) drawLocked() {
 	if s == nil || r.held > 0 {
 		return
 	}
-	elapsed := r.now().Sub(s.started)
-	fmt.Fprintf(r.w, "%s  %s %s", clear, frames[r.frame_%len(frames)], s.title)
-	if s.progress != "" {
-		fmt.Fprintf(r.w, ": %s", s.progress)
+	fmt.Fprint(r.w, clear+r.spinnerLine(s.title, s.progress, s.nested, r.now().Sub(s.started)))
+}
+
+// spinnerLine is a running line as it is drawn: the spinner and title, then
+// what it is working on, its elapsed time once it is a second or more, and
+// the step a command nested in it has open, in parentheses. It is cut to the
+// terminal's width, so it never wraps and a redraw stays on its row.
+func (r *writer) spinnerLine(title, progress, nested string, elapsed time.Duration) string {
+	text := "  " + frames[r.frame_%len(frames)] + " " + title
+	if progress != "" {
+		text += ": " + progress
 	}
 	if elapsed >= time.Second {
-		fmt.Fprintf(r.w, ": %ds", int(elapsed.Seconds()))
+		text += fmt.Sprintf(": %ds", int(elapsed.Seconds()))
 	}
+	if nested != "" {
+		text += " (" + nested + ")"
+	}
+	if r.termCols > 1 {
+		if runes := []rune(text); len(runes) > r.termCols-1 {
+			text = string(runes[:r.termCols-1])
+		}
+	}
+	return text
 }
 
 func (s *step) Detail(format string, args ...any) {
@@ -188,6 +207,21 @@ func (s *step) Progress(text string) {
 		return
 	}
 	s.progress = text
+	if r.terminal && r.open == s {
+		r.drawLocked()
+	}
+}
+
+// showNested replaces the nested step the open step shows, as Progress
+// replaces its progress.
+func (s *step) showNested(text string) {
+	r := s.r
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s.ended || s.nested == text {
+		return
+	}
+	s.nested = text
 	if r.terminal && r.open == s {
 		r.drawLocked()
 	}

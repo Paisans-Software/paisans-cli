@@ -128,6 +128,7 @@ type line struct {
 	title    string
 	started  time.Time
 	progress string
+	nested   string
 	details  []string
 	explains []string
 	notes    [][2]string
@@ -202,19 +203,7 @@ func (r *writer) drawGroupLocked() {
 	}
 	now := r.now()
 	for _, l := range g.running {
-		text := "  " + frames[r.frame_%len(frames)] + " " + l.title
-		if l.progress != "" {
-			text += ": " + l.progress
-		}
-		if elapsed := now.Sub(l.started); elapsed >= time.Second {
-			text += fmt.Sprintf(": %ds", int(elapsed.Seconds()))
-		}
-		if r.termCols > 1 {
-			if runes := []rune(text); len(runes) > r.termCols-1 {
-				text = string(runes[:r.termCols-1])
-			}
-		}
-		b.WriteString(clear + text + "\n")
+		b.WriteString(clear + r.spinnerLine(l.title, l.progress, l.nested, now.Sub(l.started)) + "\n")
 	}
 	b.WriteString("\x1b[J")
 	fmt.Fprint(r.w, b.String())
@@ -261,6 +250,19 @@ func (l *line) Progress(text string) {
 		return
 	}
 	l.progress = text
+	if r.group == l.g {
+		r.drawGroupLocked()
+	}
+}
+
+func (l *line) showNested(text string) {
+	r := l.r
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if l.ended || l.nested == text {
+		return
+	}
+	l.nested = text
 	if r.group == l.g {
 		r.drawGroupLocked()
 	}

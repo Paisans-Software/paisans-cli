@@ -3291,17 +3291,21 @@ order the run first applies it; and `dns`. With `--execute` the prepare lines
 are a block of spinners, one per host, each with its own elapsed time; a host
 that finishes leaves the block with its mark, above the hosts still running,
 so the lines end in the order their hosts finish. The install line's spinner
-names the site the run has reached:
+names the site the run has reached. While a line runs, the step its command is
+on follows the elapsed time in parentheses, the innermost one when steps nest,
+replaced as each starts; a host's prepare names the packages it is installing.
+It is gone from the line once the line ends, and output without a terminal
+never shows it:
 
 ```
 prepare
   ✓ vm: 1.8s
   ✓ watch: 2.0s
-  ✓ home-b: 2.1s
-  ✓ home-a: 2.4s
+  ⠹ home-b: 38s (install packages: wireguard-tools, ufw)
+  ⠹ home-a: 38s (start docker)
 
 install
-  ⠹ vm, home-a, home-b, watch: home-b: 41s
+  ⠹ vm, home-a, home-b, watch: home-b: 41s (wait for Patroni primary)
 ```
 
 A host whose prepare fails does not stop the others: each is prepared, each

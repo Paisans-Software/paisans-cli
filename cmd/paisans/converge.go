@@ -263,19 +263,22 @@ func atOnce(keys []string, work func(i int)) {
 // retries come back as reports and its notes for after the line, and a hold
 // for a prompt reaches r, which draws the line. With verbose its own output
 // comes back too. found is whether it told a dry run's summary, and stop is
-// what it found that --execute would stop at.
+// what it found that --execute would stop at. While a step of its own is
+// open, line shows it (ui.Nest); line is nil for none.
 //
 // It touches none of the process's globals, so several run at once: the
 // holds already reach r, which the caller routed them to before starting
 // them, and nothing here routes them anywhere else.
-func prepareRun(r ui.Reporter, args []string, verbose bool) (output, summary string, found bool, stop error, reports []checkReport, err error) {
+func prepareRun(r ui.Reporter, line ui.Step, args []string, verbose bool) (output, summary string, found bool, stop error, reports []checkReport, err error) {
 	var b strings.Builder
 	inner := ui.Discard
 	if verbose {
 		inner = ui.NewPlain(&b, true)
 	}
+	nested, done := ui.Nest(line, inner)
+	defer done()
 	env := prepareEnv{
-		r:       checkReporter{inner, r, &reports},
+		r:       checkReporter{nested, r, &reports},
 		found:   func(s string, e error) { found, summary, stop = true, s, e },
 		retries: retryCollector{&reports},
 	}
@@ -285,7 +288,7 @@ func prepareRun(r ui.Reporter, args []string, verbose bool) (output, summary str
 
 // checkPrepare is a host prepare step's check, as checkStep is any other's.
 func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
-	_, summary, found, stop, reports, err := prepareRun(r, args, false)
+	_, summary, found, stop, reports, err := prepareRun(r, nil, args, false)
 	switch {
 	case err != nil:
 		return "", reports, err
@@ -1055,7 +1058,7 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 		keys[k] = prepareHost(cfg, s, o)
 	}
 	atOnce(keys, func(k int) {
-		output, _, _, _, reports, err := prepareRun(r, convergeFlags(steps[k].Args, o), o.Verbose)
+		output, _, _, _, reports, err := prepareRun(r, lines[k], convergeFlags(steps[k].Args, o), o.Verbose)
 		for _, n := range lineDetails(lines[k], "", output, reports) {
 			lines[k].Note(n.Text, n.Detail)
 		}
@@ -1114,7 +1117,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Progress(p)
 		}
 		start := convergeNow()
-		output, reports, err := convergeQuiet(r, convergeFlags(s.Args, o), o.Verbose)
+		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
 		switch {
 		case err == nil:
@@ -1160,17 +1163,19 @@ func since(start time.Time) string {
 // report kept from the run's output, as checkStep keeps a check's: its
 // warnings, refusals and ssh retries come back as details and its notes for
 // after the line, and a hold for a prompt reaches r, which draws the line's
-// spinner. With verbose the command's own output, as -v prints it, comes
-// back too.
-func convergeQuiet(r ui.Reporter, args []string, verbose bool) (output string, reports []checkReport, err error) {
+// spinner. While a step of its own is open, line shows it (ui.Nest). With
+// verbose the command's own output, as -v prints it, comes back too.
+func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (output string, reports []checkReport, err error) {
 	var b strings.Builder
 	inner := ui.Discard
 	if verbose {
 		inner = ui.NewPlain(&b, true)
 	}
+	nested, done := ui.Nest(line, inner)
 	saved := reporterOverride
-	reporterOverride = checkReporter{inner, r, &reports}
+	reporterOverride = checkReporter{nested, r, &reports}
 	defer func() {
+		done()
 		reporterOverride = saved
 		routeRetries(r)
 		routeHolds(r)
