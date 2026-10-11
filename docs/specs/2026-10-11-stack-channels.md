@@ -1,6 +1,6 @@
 # Fork images follow a toolkit channel
 
-Date: 2026-10-11. Status: draft, awaiting the founder's approval.
+Date: 2026-10-11. Status: approved by the founder in session.
 
 The two forks the toolkit runs, Mbin (`ghcr.io/paisans-software/mbin`) and
 WriteFreely (`ghcr.io/josephquigley/writefreely-wisp`), each publish a moving
