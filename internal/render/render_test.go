@@ -1911,7 +1911,9 @@ func TestAnEnvKeyComposeAlreadySetsIsRefused(t *testing.T) {
 
 // Each entry in the table of settings that own a rendered key has to be true:
 // changing the setting changes the line that key is on. An entry that has gone
-// stale would send an operator to a setting that does nothing.
+// stale would send an operator to a setting that does nothing. Pocket ID's
+// allow_own_account_edit is the exception: it owns its key so that a
+// passthrough key cannot set it, and it renders false whatever it says.
 func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 	cfg := fixture(t)
 	owners := render.SettingOwners()
@@ -1963,6 +1965,12 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 			return ""
 		}
 
+		if o.Kind == config.KindPocketID && o.Setting == kinds.PocketIDAccountEditSetting {
+			if got := line(true); got != "ALLOW_OWN_ACCOUNT_EDIT=false" {
+				t.Errorf("allow_own_account_edit set true rendered %q", got)
+			}
+			continue
+		}
 		changed := line("owner-check-a") != line("owner-check-b") || line(true) != line(false)
 		if !changed {
 			t.Errorf("%s says settings.%s owns %s in %s, but changing the setting does not change that line", o.Kind, o.Setting, o.Key, o.File)

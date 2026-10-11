@@ -44,6 +44,24 @@ func TestPocketIDAlwaysRendersItsConfigurationLocked(t *testing.T) {
 	}
 }
 
+// Account editing is off on every Pocket ID, whether or not the setting is
+// declared: a username feeds other apps' identities, which do not follow a
+// rename.
+func TestPocketIDAlwaysRendersAccountEditingOff(t *testing.T) {
+	for _, settings := range []map[string]any{
+		{"file_backend": "database"},
+		{"file_backend": "database", "allow_own_account_edit": false},
+	} {
+		env := renderAuth(t, settings, nil, nil)
+		if got := envValue(env, "ALLOW_OWN_ACCOUNT_EDIT"); got != "false" {
+			t.Errorf("%v: ALLOW_OWN_ACCOUNT_EDIT is %q", settings, got)
+		}
+		if n := strings.Count(env, "\nALLOW_OWN_ACCOUNT_EDIT="); n != 1 {
+			t.Errorf("%v: ALLOW_OWN_ACCOUNT_EDIT is rendered %d times", settings, n)
+		}
+	}
+}
+
 // Each setting renders its variable, as Pocket ID spells the value, and a
 // value compose would read specially is quoted so it arrives as written.
 func TestPocketIDSettingsRenderTheirVariables(t *testing.T) {

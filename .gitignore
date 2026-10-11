@@ -8,6 +8,7 @@
 # the fixture secrets, where every value is a fixed placeholder. Nothing real
 # goes in this directory.
 !internal/render/testdata/golden/**/.env
+!internal/render/testdata/golden-local-storage/**/.env
 
 # A kind's template set is source, and the templates that render an .env are
 # named for what they produce. The rule above matches them by accident, and the
@@ -19,6 +20,7 @@
 # Except the golden tree's, which are rendered from the throwaway pair in
 # internal/render/testdata/secrets.fixture.yaml and protect nothing.
 !internal/render/testdata/golden/**/*.pem
+!internal/render/testdata/golden-local-storage/**/*.pem
 secrets/
 
 # A real deployment's config names real hosts. The toolkit repo ships only

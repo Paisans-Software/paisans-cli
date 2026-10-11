@@ -161,6 +161,7 @@ func Check(cfg *config.Config) Result {
 	c.webServer()
 	c.smtpOnAKindWithoutMail()
 	c.pocketIDSettingInvalid()
+	c.pocketIDAccountEditOn()
 	c.pocketIDConfigKeyHasASetting()
 	c.pocketIDEmailWithoutSMTP()
 	c.pocketIDAdminUsername()

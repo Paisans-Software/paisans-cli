@@ -46,7 +46,7 @@ func TestPocketIDSettingsAreCheckedAgainstPocketIDsRules(t *testing.T) {
 		"signup_default_groups":                    []any{"provisional", "members"},
 		"require_user_email":                       true,
 		"emails_verified":                          false,
-		"allow_own_account_edit":                   true,
+		"allow_own_account_edit":                   false,
 		"accent_color":                             "#3b82f6",
 		"disable_animations":                       true,
 		"email_login_notification":                 true,
@@ -92,6 +92,22 @@ func TestPocketIDSettingsAreCheckedAgainstPocketIDsRules(t *testing.T) {
 	}
 }
 
+// Account editing is fixed off: the setting may say so, and is refused when
+// it says otherwise.
+func TestPocketIDAccountEditingCannotBeTurnedOn(t *testing.T) {
+	r := validate.Check(withAuth(t, map[string]any{"allow_own_account_edit": true}, nil, nil))
+	if got := findings(r, "pocket-id-account-edit-on"); len(got) != 1 || got[0] != "REFUSE apps.auth.settings.allow_own_account_edit" {
+		t.Errorf("got %v", got)
+	}
+	if r.Has("pocket-id-setting-invalid") {
+		t.Errorf("true was also refused as invalid: %v", r.Findings)
+	}
+	r = validate.Check(withAuth(t, map[string]any{"allow_own_account_edit": false}, nil, nil))
+	if r.Refused() {
+		t.Errorf("false was refused: %v", r.Findings)
+	}
+}
+
 // A setting the kind does not read renders nothing, which for this kind is
 // most likely a misspelling, so it is said.
 func TestAnUnknownPocketIDSettingIsWarnedAbout(t *testing.T) {
@@ -104,7 +120,7 @@ func TestAnUnknownPocketIDSettingIsWarnedAbout(t *testing.T) {
 // A passthrough key for a variable a setting or the smtp block renders is
 // refused even when that setting is absent, so the value has one home.
 func TestAPocketIDConfigKeyWithASettingIsRefused(t *testing.T) {
-	for _, key := range []string{"APP_NAME", "SIGNUP_DEFAULT_USER_GROUP_IDS", "UI_CONFIG_DISABLED", "SMTP_HOST", "SMTP_FROM"} {
+	for _, key := range []string{"APP_NAME", "ALLOW_OWN_ACCOUNT_EDIT", "SIGNUP_DEFAULT_USER_GROUP_IDS", "UI_CONFIG_DISABLED", "SMTP_HOST", "SMTP_FROM"} {
 		r := validate.Check(withAuth(t, nil, map[string]any{key: "x"}, nil))
 		if got := findings(r, "pocket-id-config-key-has-a-setting"); len(got) != 1 || got[0] != "REFUSE apps.auth.config."+key {
 			t.Errorf("%s: got %v", key, got)
