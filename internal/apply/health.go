@@ -2,12 +2,15 @@ package apply
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // How long a stack has to come up healthy after its action, and how often to
@@ -124,7 +127,7 @@ func waitHealthy(plan *Plan, stack string, t Transport) error {
 }
 
 // applyStopped is what a failed gate tells the operator inside an apply.
-const applyStopped = "The apply stopped here and nothing after it was started; the next apply resumes at this stack and recreates it"
+const applyStopped = "Nothing after this stack was started; the next apply recreates it."
 
 // WaitHealthy is the same gate for a command outside apply that has just
 // started a stack: it waits as apply does, and on failure names the services
@@ -171,12 +174,12 @@ func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped
 	return unhealthy(site, stack, compose, fmt.Sprintf("did not come up healthy within %s", healthWait), named, stopped, t)
 }
 
-// unhealthy builds the gate's error, with the tail of each named service's
-// log, since the log is the first thing anyone would ask for.
+// unhealthy builds the gate's error: the stack and its failing services, one
+// line of cause per service read from the tail of its log, and stopped. The
+// tail itself, 30 lines a service, is the Problem's cause, shown with
+// --verbose: by default it is a wall of JSON and stack traces around the one
+// line that matters.
 func unhealthy(site, stack, compose, what string, names []string, stopped string, t Transport) error {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s: stack %s %s: %s. %s",
-		site, stack, what, strings.Join(names, ", "), stopped)
 	seen := map[string]bool{}
 	var services []string
 	for _, name := range names {
@@ -187,14 +190,97 @@ func unhealthy(site, stack, compose, what string, names []string, stopped string
 		}
 	}
 	sort.Strings(services)
+	var causes []string
+	var logs strings.Builder
 	for _, service := range services {
 		out, err := t.Run(fmt.Sprintf("%s logs --no-color --tail 30 %s", compose, shellQuote(service)))
 		if err != nil && out == "" {
 			out = err.Error()
+		} else if cause := logCause(out); cause != "" {
+			causes = append(causes, service+": "+cause)
 		}
-		fmt.Fprintf(&b, "\n\n--- %s, last 30 log lines ---\n%s", service, strings.TrimRight(out, "\n"))
+		if logs.Len() > 0 {
+			logs.WriteString("\n\n")
+		}
+		fmt.Fprintf(&logs, "--- %s, last 30 log lines ---\n%s", service, strings.TrimRight(out, "\n"))
 	}
-	return fmt.Errorf("%s", b.String())
+	p := &ui.Problem{
+		Hint:    fmt.Sprintf("%s: stack %s %s: %s", site, stack, what, strings.Join(names, ", ")),
+		Explain: strings.Join(append(causes, stopped), "\n"),
+	}
+	if logs.Len() > 0 {
+		p.Cause = errors.New(logs.String())
+	}
+	return p
+}
+
+// maxCause is the longest cause line unhealthy shows, in characters.
+const maxCause = 160
+
+// composePrefix is the `name-1  | ` that `docker compose logs` puts before
+// each line.
+var composePrefix = regexp.MustCompile(`^[A-Za-z0-9_.-]+-[0-9]+ +\| ?`)
+
+// plainError is a plain-text log line that reports a failure.
+var plainError = regexp.MustCompile(`(?i)\b(error|fatal|panic)`)
+
+// goFrame is a line of a Go stack trace that is not indented: a call such as
+// `main.main()` or `panic({0x1, 0x2})`, or a goroutine header.
+var goFrame = regexp.MustCompile(`^([\w./*()-]+\(.*\)|goroutine \d+ .*:)$`)
+
+// logCause is the most likely cause of a failure in the tail of one service's
+// log, newest first, or "" when no line reads as one. A JSON line (etcd and
+// most Go services log that way) counts when its level is error, fatal or
+// panic, and gives its error field, else err, else msg; a stack trace field is
+// never read. Any other line counts when it says error, fatal or panic, and
+// is not part of a Go stack trace.
+func logCause(logs string) string {
+	lines := strings.Split(logs, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := composePrefix.ReplaceAllString(strings.TrimRight(lines[i], "\r"), "")
+		var cause string
+		if strings.HasPrefix(strings.TrimSpace(line), "{") {
+			cause = jsonCause(line)
+		} else if line != "" && line == strings.TrimLeft(line, " \t") && !goFrame.MatchString(line) && plainError.MatchString(line) {
+			cause = line
+		}
+		if cause = strings.Join(strings.Fields(cause), " "); cause != "" {
+			if r := []rune(cause); len(r) > maxCause {
+				cause = string(r[:maxCause-3]) + "..."
+			}
+			return cause
+		}
+	}
+	return ""
+}
+
+// jsonCause is logCause's reading of one JSON log line.
+func jsonCause(line string) string {
+	var entry map[string]any
+	if json.Unmarshal([]byte(line), &entry) != nil {
+		return ""
+	}
+	level, _ := entry["level"].(string)
+	if level == "" {
+		level, _ = entry["lvl"].(string)
+	}
+	switch strings.ToLower(level) {
+	case "error", "fatal", "panic", "dpanic", "crit", "critical":
+	default:
+		return ""
+	}
+	for _, key := range []string{"error", "err", "msg", "message"} {
+		switch v := entry[key].(type) {
+		case nil:
+		case string:
+			if v != "" {
+				return v
+			}
+		default:
+			return fmt.Sprint(v)
+		}
+	}
+	return ""
 }
 
 // StackHealthy is the health gate's judgement from one look, for a command
