@@ -24,6 +24,11 @@ func (emptyHost) Run(command string) (string, error) {
 	if out, ok := absentNetworks(command); ok {
 		return out, nil
 	}
+	// The mesh comes up when it is started, with home-a's address in
+	// freshSite.
+	if strings.HasPrefix(command, "ip -br addr show dev psns-") {
+		return "psns-f2a9        UNKNOWN        10.44.0.1/24\n", nil
+	}
 	// Every image is present, so the plan carries no disk check; apply's
 	// own tests cover that.
 	if list, ok := strings.CutPrefix(command, "for r in "); ok {

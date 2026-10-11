@@ -34,6 +34,14 @@ type fakeHost struct {
 	// wgUp is whether psns-f2a9 exists. Starting or restarting the unit brings it
 	// up, the way systemd would.
 	wgUp bool
+	// wgStays makes starting or restarting the unit succeed while psns-f2a9
+	// stays down: the unit's exit status and the kernel disagree.
+	wgStays bool
+	// wgAddress, when set, is the address `ip -br addr show` prints for an
+	// up psns-f2a9 in place of the one its file declares.
+	wgAddress string
+	// journal is what `journalctl -u wg-quick@psns-f2a9` prints.
+	journal string
 	// inputs is what each RunInput call sent on stdin, in order, beside its
 	// command in commands.
 	inputs []string
@@ -169,8 +177,25 @@ func (h *fakeHost) Run(command string) (string, error) {
 		return "down\n", nil
 	}
 	if strings.Contains(command, "enable --now wg-quick@psns-f2a9") || strings.Contains(command, "restart wg-quick@psns-f2a9") {
-		h.wgUp = true
+		h.wgUp = !h.wgStays
 		return "", nil
+	}
+	if strings.Contains(command, "ip -br addr show dev psns-f2a9") {
+		if !h.wgUp {
+			return "", nil
+		}
+		address := h.wgAddress
+		if address == "" {
+			for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+				if v, ok := strings.CutPrefix(line, "Address = "); ok {
+					address = v
+				}
+			}
+		}
+		return "psns-f2a9        UNKNOWN        " + address + " \n", nil
+	}
+	if strings.Contains(command, "journalctl -u wg-quick@psns-f2a9") {
+		return h.journal, nil
 	}
 	if strings.Contains(command, "ps --status running") {
 		if h.running {
@@ -860,6 +885,146 @@ func TestAMeshThatWillNotStartStopsTheApply(t *testing.T) {
 	}
 	if _, ok := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; !ok {
 		t.Error("a failed apply left no record of the actions it owes")
+	}
+}
+
+// wgQuickJournal is what `journalctl -u wg-quick@psns-f2a9` prints after a
+// start that failed on a peer whose endpoint does not resolve: an earlier
+// attempt, then the one that matters.
+const wgQuickJournal = `Oct 11 09:00:01 vm systemd[1]: Starting wg-quick@psns-f2a9.service - WireGuard via wg-quick(8) for psns-f2a9...
+Oct 11 09:00:01 vm wg-quick[811]: [#] ip link add psns-f2a9 type wireguard
+Oct 11 09:00:01 vm wg-quick[811]: Line unrecognized: ` + "`Bogus=1'" + `
+Oct 11 09:00:01 vm wg-quick[811]: [#] ip link delete dev psns-f2a9
+Oct 11 09:05:12 vm systemd[1]: Starting wg-quick@psns-f2a9.service - WireGuard via wg-quick(8) for psns-f2a9...
+Oct 11 09:05:12 vm wg-quick[902]: [#] ip link add psns-f2a9 type wireguard
+Oct 11 09:05:12 vm wg-quick[902]: [#] wg setconf psns-f2a9 /dev/fd/63
+Oct 11 09:05:12 vm wg-quick[902]: Name or service not known: ` + "`health.example.org:51820'" + `
+Oct 11 09:05:12 vm wg-quick[902]: Configuration parsing error
+Oct 11 09:05:12 vm wg-quick[902]: [#] ip link delete dev psns-f2a9
+Oct 11 09:05:12 vm systemd[1]: wg-quick@psns-f2a9.service: Main process exited, code=exited, status=1/FAILURE
+Oct 11 09:05:12 vm systemd[1]: wg-quick@psns-f2a9.service: Failed with result 'exit-code'.
+Oct 11 09:05:12 vm systemd[1]: Failed to start wg-quick@psns-f2a9.service - WireGuard via wg-quick(8) for psns-f2a9.
+`
+
+// meshProblem runs a first apply of home-a on host and returns the problem it
+// stopped with, failing the test if it carried on or touched a container.
+func meshProblem(t *testing.T, host *fakeHost) *ui.Problem {
+	t.Helper()
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = apply.Execute(p, host)
+	if err == nil {
+		t.Fatal("an apply carried on with psns-f2a9 down")
+	}
+	if host.firstCompose() >= 0 {
+		t.Errorf("a stack was started with the mesh down: %v", host.commands)
+	}
+	var problem *ui.Problem
+	if !errors.As(err, &problem) {
+		t.Fatalf("the mesh failure is not a problem for the operator:\n%v", err)
+	}
+	if problem.Hint != "mesh: wg-quick@psns-f2a9 did not come up" {
+		t.Errorf("hint = %q", problem.Hint)
+	}
+	return problem
+}
+
+// A unit whose start reports success while the interface never appears is
+// caught by reading the kernel, before any stack: otherwise etcd is the first
+// to notice, crash looping on an address it cannot bind, and the apply blames
+// the stack.
+func TestAMeshThatIsNotUpAfterItsStartStopsTheApply(t *testing.T) {
+	host := newHost()
+	host.wgStays = true
+	host.journal = wgQuickJournal
+	problem := meshProblem(t, host)
+	if !host.ran("ip -br addr show dev psns-f2a9") {
+		t.Error("the interface was never read after its start")
+	}
+	if !host.ran("journalctl -u wg-quick@psns-f2a9 -n 20 --no-pager") {
+		t.Error("wg-quick's own error was never read")
+	}
+	want := "health.example.org does not resolve from home-a; create its DNS record (paisans dns init) and apply again."
+	if !strings.Contains(problem.Explain, want) {
+		t.Errorf("the explanation does not give the DNS advice:\n%s", problem.Explain)
+	}
+	if strings.Contains(problem.Explain, "systemd[1]") {
+		t.Errorf("the explanation carries whole journal lines, which are for -v:\n%s", problem.Explain)
+	}
+	if problem.Cause == nil || !strings.Contains(problem.Cause.Error(), "Failed with result 'exit-code'") {
+		t.Errorf("the journal is not the cause, for -v: %v", problem.Cause)
+	}
+}
+
+// A start that exits non zero gets the same diagnosis as one that lies.
+func TestAMeshWhoseStartFailsIsExplainedFromItsJournal(t *testing.T) {
+	host := newHost()
+	host.fail = "enable --now wg-quick@psns-f2a9"
+	host.journal = wgQuickJournal
+	problem := meshProblem(t, host)
+	if !strings.Contains(problem.Explain, "health.example.org does not resolve from home-a") {
+		t.Errorf("the explanation does not give the DNS advice:\n%s", problem.Explain)
+	}
+}
+
+// A failure that is not a name shows wg-quick's own line, and only that.
+func TestAMeshFailureQuotesWgQuick(t *testing.T) {
+	host := newHost()
+	host.wgStays = true
+	host.journal = strings.Replace(wgQuickJournal,
+		"Name or service not known: `health.example.org:51820'", "RTNETLINK answers: Operation not supported", 1)
+	problem := meshProblem(t, host)
+	if !strings.Contains(problem.Explain, "wg-quick: RTNETLINK answers: Operation not supported") {
+		t.Errorf("the explanation does not quote wg-quick:\n%s", problem.Explain)
+	}
+	if strings.Contains(problem.Explain, "dns init") || strings.Contains(problem.Explain, "Line unrecognized") {
+		t.Errorf("the explanation quotes the wrong line:\n%s", problem.Explain)
+	}
+}
+
+// An interface that is up without the site's address is not the mesh every
+// service binds.
+func TestAMeshWithoutItsAddressStopsTheApply(t *testing.T) {
+	host := newHost()
+	host.wgAddress = "10.99.0.7/24"
+	problem := meshProblem(t, host)
+	if !strings.Contains(problem.Explain, "10.44.0.1/24") {
+		t.Errorf("the explanation does not name the address it expected:\n%s", problem.Explain)
+	}
+}
+
+// The journal is read for the explanation, not needed for it: a journal that
+// cannot be read still leaves a problem naming the mesh.
+func TestAMeshFailureWithoutAJournalStillNamesTheMesh(t *testing.T) {
+	host := newHost()
+	host.wgStays = true
+	host.fail = "journalctl"
+	problem := meshProblem(t, host)
+	if !strings.Contains(problem.Explain, "journalctl -u wg-quick@psns-f2a9") {
+		t.Errorf("the explanation does not say where to look:\n%s", problem.Explain)
+	}
+}
+
+// A synced mesh is read back too: a sync can leave the interface as it was,
+// and a restart can fail to bring it back.
+func TestARestartedMeshIsReadBack(t *testing.T) {
+	host := applied(t, "home-a")
+	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
+		host.files["/etc/wireguard/psns-f2a9.conf"], "Address = 10.44.0.1/24", "Address = 10.44.0.9/24", 1)
+	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	restart := host.indexOf("restart wg-quick@psns-f2a9")
+	check := host.indexOf("ip -br addr show dev psns-f2a9")
+	if restart < 0 || check < restart {
+		t.Errorf("the restarted mesh was not read back: %v", host.commands)
 	}
 }
 

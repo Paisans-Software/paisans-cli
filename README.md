@@ -3244,6 +3244,19 @@ inside the mesh subnet, which the interface's own `Address` already routes
 interface brought up by hand serves every service just as well, and starting the
 unit on top of it would fail on an interface that already exists.
 
+**The interface is read back before any stack starts.** After it starts,
+restarts or syncs the mesh, `apply` reads `ip -br addr show psns-<token>` and
+carries on only when the interface exists, is not down and holds the site's
+`Address`. The unit's exit status alone is not enough: an etcd started over a
+missing interface crash loops on `bind: cannot assign requested address`, and
+the apply would blame the stack. When the mesh is not up, whether the unit
+failed or the interface is simply absent, the apply stops with
+`mesh: wg-quick@psns-<token> did not come up` and explains it from the unit's
+journal (`journalctl -u wg-quick@psns-<token> -n 20`, through the site's sudo):
+wg-quick's own error line by default, the whole journal with `-v`. A peer
+`Endpoint` whose name does not resolve from the site is the common case, and
+is said as such: create its DNS record with `paisans dns init` and apply again.
+
 ### `paisans apply` with no `--site` converges the whole deployment
 
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running

@@ -170,6 +170,9 @@ type Plan struct {
 	// fails to bind, and a container that cannot bind is restarted in a loop
 	// by Docker rather than reported to the apply.
 	WireGuard WireGuardStep
+	// meshAddress is the Address line of the site's rendered WireGuard file
+	// (Eg: 10.44.0.1/24), which the interface must hold once WireGuard ran.
+	meshAddress string
 	// Bootstrap is the per app database work, nil when this site does none.
 	// It runs after the infrastructure stack and before any app stack, and a
 	// failure stops the apply there. See WithDatabases.
@@ -672,6 +675,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			copied := change
 			wireguard = &copied
 			wireguardBefore = current
+			out.meshAddress = wireguardAddress(file.Content)
 		}
 
 		if change.Stack != "" {
@@ -1076,10 +1080,10 @@ func execute(plan *Plan, t Transport) error {
 	if command := plan.WireGuard.Command(plan.Deployment); command != "" {
 		done := plan.step(plan.WireGuard.Title(plan.Deployment))
 		done.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
-		out, err := t.Run(command)
+		err := bringUpMesh(plan, t, command)
 		finish(done, err)
 		if err != nil {
-			return fmt.Errorf("%s: bringing up %s, so nothing that binds the mesh address was started:\n%s", plan.Site, plan.Deployment.Interface(), out)
+			return err
 		}
 	}
 
