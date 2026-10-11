@@ -77,6 +77,27 @@ func (c *checker) pocketIDConfigKeyHasASetting() {
 	}
 }
 
+// pocketIDAdminUsername refuses an admin whose name Pocket ID would not take
+// as a username, when the deployment runs Pocket ID: apply makes each
+// declared admin a Pocket ID user under that name. Pocket ID wants a letter
+// or digit at both ends (dto/validations.go:21-25 at tag v2.14.0). The admins
+// section already holds names to a letter or digit first and lowercase
+// letters, digits, dots, underscores and hyphens after, so the one rule left
+// is the last character. Refused here, it stops before any host is reached,
+// rather than as a 400 from Pocket ID halfway through a run.
+func (c *checker) pocketIDAdminUsername() {
+	if len(c.pocketIDApps()) == 0 {
+		return
+	}
+	for _, id := range sortedKeys(c.cfg.Admins) {
+		if last := id[len(id)-1]; last == '.' || last == '_' || last == '-' {
+			c.refuse("pocket-id-admin-username", "admins."+id,
+				"admin name is not a pocket id username",
+				"ends in %q. apply makes each admin a Pocket ID user under this name, and Pocket ID takes a username only if it ends in a letter or digit. Rename the admin, and every site's ssh.keys entry for them.", string(last))
+		}
+	}
+}
+
 // pocketIDEmailWithoutSMTP refuses an email toggle turned on without the
 // SMTP host and sender it needs. Pocket ID's admin page refuses the same
 // combination (app-config-email-form.svelte:53-88 at tag v2.14.0); at startup

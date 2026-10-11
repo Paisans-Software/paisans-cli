@@ -70,18 +70,18 @@ type appValues struct {
 
 	// TrustProxy is the proxy an app on a monitor site trusts for the
 	// client's address: the site's own mesh address behind the monitor's own
-	// Caddy, and where the operator's web server connects from in ingress
-	// mode external. See trustProxy.
+	// Caddy, and where the operator's web server connects from with managed_by:
+	// external. See trustProxy.
 	TrustProxy string
 
-	// IngressListen is where an app on a monitor in ingress mode external is
+	// WebServerListen is where an app on a monitor with managed_by: external is
 	// published for the operator's web server, as host:port, instead of its
-	// mesh address. Empty for every other app. IngressNetwork and
-	// IngressGateway pin its compose network, so the address that web
+	// mesh address. Empty for every other app. WebServerNetwork and
+	// WebServerGateway pin its compose network, so the address that web
 	// server's connections arrive from is known (see trustProxy).
-	IngressListen  string
-	IngressNetwork string
-	IngressGateway string
+	WebServerListen  string
+	WebServerNetwork string
+	WebServerGateway string
 
 	// MeshAddress is the mesh address of the site this instance runs on. A
 	// published port binds it and nothing else, and a clustered app reaches
@@ -343,9 +343,9 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		set:             app.Settings,
 	}
 	v.TrustProxy = trustProxy(p.cfg, planned.Name)
-	v.IngressListen = ingressListen(p.cfg, planned.Name)
-	if v.IngressListen != "" {
-		v.IngressNetwork, v.IngressGateway = IngressNetwork, IngressGateway
+	v.WebServerListen = webServerListen(p.cfg, planned.Name)
+	if v.WebServerListen != "" {
+		v.WebServerNetwork, v.WebServerGateway = WebServerNetwork, WebServerGateway
 	}
 	v.ServerName = planned.Hostname
 	if delegated := app.Hostnames[kinds.WellknownRole]; delegated != "" {

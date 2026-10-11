@@ -25,6 +25,11 @@ community:
   domain: example.org
 mesh:
   subnet: 10.44.0.0/24
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -32,8 +37,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 etcd:
   members: [home-a]
 apps:
@@ -55,6 +59,11 @@ mesh:
   subnet: 10.44.0.0/24
 acme:
   provider: desec
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   home-a:
     roles: [data, apps, gateway]
@@ -62,8 +71,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 etcd:
   members: [home-a]
 apps:
@@ -262,6 +270,7 @@ func TestUnknownWatchdogModeIsRefused(t *testing.T) {
 const (
 	fakeKeyA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
 	fakeKeyB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"
+	fakeKeyC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC alice@laptop"
 )
 
 // withSSH replaces minimal's ssh section with the given one, indented as a
@@ -281,8 +290,19 @@ func loadErr(t *testing.T, body string) string {
 	return err.Error()
 }
 
+// withAdmin replaces minimal's admins section with the given one, which may be
+// empty to leave the section out.
+func withAdmin(body, section string) string {
+	start := strings.Index(body, "admins:\n")
+	end := strings.Index(body, "sites:\n")
+	return body[:start] + section + body[end:]
+}
+
+// A site's ssh.keys names admins, and the keys it authorises are theirs,
+// merged in the order the site lists them.
 func TestSSHSectionLoads(t *testing.T) {
-	body := withSSH("    ssh:\n      host: 203.0.113.10\n      user: ubuntu\n      port: 2222\n      keys:\n        alice: " + fakeKeyA + "\n\n        bob: " + fakeKeyB + "\n")
+	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n\n      " + fakeKeyC + "\n  bob:\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	body := withAdmin(withSSH("    ssh:\n      host: 203.0.113.10\n      user: ubuntu\n      port: 2222\n      keys: [bob, alice]\n"), admins)
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
 		t.Fatal(err)
@@ -291,17 +311,39 @@ func TestSSHSectionLoads(t *testing.T) {
 	if site.SSHHost() != "203.0.113.10" || site.SSH.User != "ubuntu" || site.SSH.PortOrDefault() != 2222 {
 		t.Fatalf("section read as %+v", site.SSH)
 	}
+	if a := cfg.Admins["alice"]; a.Name != "Alice Example" || a.Email != "alice@example.org" {
+		t.Errorf("admin alice read as %+v", a)
+	}
 	keys, problems := site.SSH.AuthorizedKeys()
-	if len(problems) > 0 || len(keys) != 2 {
+	if len(problems) > 0 || len(keys) != 3 {
 		t.Fatalf("keys %v, problems %v", keys, problems)
 	}
-	if keys[0].Line != fakeKeyA || keys[0].Name != "alice" || keys[0].Comment != "alice@example.org" || !strings.HasPrefix(keys[0].Fingerprint, "SHA256:") {
-		t.Errorf("first key read as %+v", keys[0])
+	if keys[0].Line != fakeKeyB || keys[0].Name != "bob" {
+		t.Errorf("first key read as %+v, want bob's", keys[0])
+	}
+	if keys[1].Line != fakeKeyA || keys[1].Name != "alice" || keys[1].Comment != "alice@example.org" || !strings.HasPrefix(keys[1].Fingerprint, "SHA256:") {
+		t.Errorf("second key read as %+v", keys[1])
+	}
+	if keys[2].Line != fakeKeyC || keys[2].Name != "alice" {
+		t.Errorf("third key read as %+v, want alice's second", keys[2])
+	}
+}
+
+// Each site gets only the keys of the admins it names.
+func TestSSHKeysAreOnlyTheListedAdmins(t *testing.T) {
+	admins := "admins:\n  alice:\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	cfg, err := config.Load(write(t, withAdmin(minimal, admins)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := cfg.Sites["home-a"].SSH.AuthorizedKeys()
+	if len(keys) != 1 || keys[0].Name != "alice" {
+		t.Errorf("home-a authorises %+v, want alice's key alone", keys)
 	}
 }
 
 func TestSSHDefaultsPortAndHost(t *testing.T) {
-	body := withSSH("    public_address: 203.0.113.20\n    ssh:\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n")
+	body := withSSH("    public_address: 203.0.113.20\n    ssh:\n      user: ubuntu\n      keys: [alice]\n")
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +360,7 @@ func TestSSHDefaultsPortAndHost(t *testing.T) {
 // With neither ssh.host nor public_address, the host is the endpoint's host,
 // the address the other sites already reach this one on.
 func TestSSHHostFallsBackToTheEndpoint(t *testing.T) {
-	body := withSSH("    endpoint: 203.0.113.30:51820\n    ssh:\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n")
+	body := withSSH("    endpoint: 203.0.113.30:51820\n    ssh:\n      user: ubuntu\n      keys: [alice]\n")
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +372,7 @@ func TestSSHHostFallsBackToTheEndpoint(t *testing.T) {
 
 // public_address comes before the endpoint, and ssh.host before both.
 func TestSSHHostPrefersHostThenPublicAddress(t *testing.T) {
-	key := "      keys:\n        alice: " + fakeKeyA + "\n"
+	key := "      keys: [alice]\n"
 	cases := []struct{ name, section, want string }{
 		{"public address", "    endpoint: 203.0.113.30:51820\n    public_address: 203.0.113.20\n    ssh:\n      user: ubuntu\n" + key, "203.0.113.20"},
 		{"host", "    endpoint: 203.0.113.30:51820\n    public_address: 203.0.113.20\n    ssh:\n      host: home-a.local\n      user: ubuntu\n" + key, "home-a.local"},
@@ -358,7 +400,7 @@ func TestSSHStringIsRefused(t *testing.T) {
 }
 
 func TestSSHSectionRefusals(t *testing.T) {
-	key := "      keys:\n        alice: " + fakeKeyA + "\n"
+	key := "      keys: [alice]\n"
 	cases := []struct {
 		name, section, want string
 	}{
@@ -370,15 +412,11 @@ func TestSSHSectionRefusals(t *testing.T) {
 		{"no host, public address or endpoint", "    ssh:\n      user: ubuntu\n" + key, "ssh.host: required, because the site has neither public_address nor endpoint"},
 		{"user in host", "    ssh:\n      host: ubuntu@home-a.local\n      user: ubuntu\n" + key, "neither a hostname nor an IP address"},
 		{"no key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n", "ssh.keys: required"},
-		{"empty keys", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: {}\n", "ssh.keys: required"},
-		{"keys a list", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        - " + fakeKeyA + "\n", "ssh.keys must map each key's name"},
-		{"not a key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: ssh-ed25519 not-base64\n", "ssh.keys.alice: not an OpenSSH public key"},
-		{"private key path", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: ~/.ssh/id_ed25519\n", "not an OpenSSH public key"},
-		{"options", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: from=\"203.0.113.0/24\" " + fakeKeyA + "\n", "carries options"},
-		{"duplicate key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n        alice-laptop: " + strings.Replace(fakeKeyA, "alice", "alice-laptop", 1) + "\n", "ssh.keys.alice-laptop: the same key as keys.alice"},
-		{"duplicate name", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n        alice: " + fakeKeyB + "\n", "ssh.keys.alice is already given on line"},
-		{"bad name", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        \"Alice Smith\": " + fakeKeyA + "\n", "not a key name this toolkit accepts"},
-		{"public_key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      public_key: |\n        " + fakeKeyA + "\n        " + fakeKeyB + "\n", "ssh.public_key is replaced by ssh.keys, which names each key. Write:\n  keys:\n    alice: ssh-ed25519 AAAAC3NzaC1l... alice@example.org\n    bob: ssh-ed25519 AAAAC3NzaC1l... bob@example.org"},
+		{"empty keys", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: []\n", "ssh.keys: required"},
+		{"keys a mapping", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n", "ssh.keys must list the admins who may log in"},
+		{"unknown admin", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: [alice, carol]\n", "sites.home-a.ssh.keys: carol is not in the admins section"},
+		{"admin twice", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: [alice, alice]\n", "sites.home-a.ssh.keys: alice is listed twice"},
+		{"public_key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      public_key: |\n        " + fakeKeyA + "\n", "field public_key not found"},
 		{"unknown key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      public_keys: " + fakeKeyA + "\n", "field public_keys not found"},
 	}
 	for _, c := range cases {
@@ -391,9 +429,41 @@ func TestSSHSectionRefusals(t *testing.T) {
 	}
 }
 
+func TestAdminSectionRefusals(t *testing.T) {
+	admin := func(id, body string) string {
+		return "admins:\n  " + id + ":\n" + body
+	}
+	keyed := func(lines ...string) string {
+		return "    keys: |\n      " + strings.Join(lines, "\n      ") + "\n"
+	}
+	cases := []struct {
+		name, section, want string
+	}{
+		{"missing", "", "sites.home-a.ssh.keys: alice is not in the admins section"},
+		{"no email", admin("alice", keyed(fakeKeyA)), "admins.alice.email: required"},
+		{"not an email", admin("alice", "    email: Alice <alice@example.org>\n"+keyed(fakeKeyA)), "admins.alice.email: \"Alice <alice@example.org>\" is not an email address alone"},
+		{"no keys", admin("alice", "    email: alice@example.org\n"), "admins.alice.keys: required"},
+		{"not a key", admin("alice", "    email: alice@example.org\n"+keyed("ssh-ed25519 not-base64")), "admins.alice.keys: line 1 is not an OpenSSH public key"},
+		{"private key path", admin("alice", "    email: alice@example.org\n"+keyed("~/.ssh/id_ed25519")), "not an OpenSSH public key"},
+		{"options", admin("alice", "    email: alice@example.org\n"+keyed("from=\"203.0.113.0/24\" "+fakeKeyA)), "admins.alice.keys: line 1 carries options"},
+		{"key twice", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA, strings.Replace(fakeKeyA, "alice@example.org", "alice@laptop", 1))), "admins.alice.keys: line 2 is a key the admin already lists"},
+		{"key shared", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)) + "  bob:\n    email: bob@example.org\n" + keyed(fakeKeyA), "admins.bob.keys: line 1 is admins.alice's key too"},
+		{"bad name", "admins:\n  \"Alice Smith\":\n    email: alice@example.org\n" + keyed(fakeKeyB) + admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA))[len("admins:\n"):], "admins.Alice Smith: not a name this toolkit accepts"},
+		{"unknown field", admin("alice", "    email: alice@example.org\n    public_keys: x\n"+keyed(fakeKeyA)), "field public_keys not found"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := loadErr(t, withAdmin(minimal, c.section))
+			if !strings.Contains(msg, c.want) {
+				t.Errorf("want %q in the refusal, got:\n%s", c.want, msg)
+			}
+		})
+	}
+}
+
 func TestSSHHostAcceptsHostnamesAndAddresses(t *testing.T) {
 	for _, host := range []string{"home-a.local", "vm.example.org", "203.0.113.10", "2001:db8::10", "home-a"} {
-		body := withSSH("    ssh:\n      host: \"" + host + "\"\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n")
+		body := withSSH("    ssh:\n      host: \"" + host + "\"\n      user: ubuntu\n      keys: [alice]\n")
 		if msg := loadErr(t, body); msg != "" {
 			t.Errorf("host %s refused: %s", host, msg)
 		}
@@ -460,7 +530,7 @@ func TestSMTPShapeIsChecked(t *testing.T) {
 // exists to host that app. With nothing pinned it is almost certainly a
 // mistake.
 func TestARolelessSiteIsAcceptedOnlyWhenSomethingIsPinnedToIt(t *testing.T) {
-	site := "  mon:\n    roles: []\n    address: 10.44.0.9\n    ssh:\n      host: mon.local\n      user: ubuntu\n      keys:\n        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org\n"
+	site := "  mon:\n    roles: []\n    address: 10.44.0.9\n    ssh:\n      host: mon.local\n      user: ubuntu\n      keys: [alice]\n"
 	withSite := strings.Replace(validConfig, "etcd:\n", site+"etcd:\n", 1)
 	if _, err := config.Load(write(t, withSite)); err == nil || !strings.Contains(err.Error(), "sites.mon.roles") {
 		t.Fatalf("a role-less site with nothing pinned to it loaded: %v", err)
@@ -473,20 +543,20 @@ func TestARolelessSiteIsAcceptedOnlyWhenSomethingIsPinnedToIt(t *testing.T) {
 // monitorSite is validConfig with a watch site holding the monitor role and
 // extra appended to its entry, before the uptime app is pinned there.
 func monitorSite(extra string) string {
-	site := "  watch:\n    roles: [monitor]\n    address: 10.44.0.9\n    public_address: 203.0.113.20\n    ssh:\n      host: watch.local\n      user: ubuntu\n      keys:\n        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org\n" + extra
+	site := "  watch:\n    roles: [monitor]\n    address: 10.44.0.9\n    public_address: 203.0.113.20\n    ssh:\n      host: watch.local\n      user: ubuntu\n      keys: [alice]\n" + extra
 	return strings.Replace(validConfig, "etcd:\n", site+"etcd:\n", 1) + statusApp("watch", "")
 }
 
-func TestAMonitorSiteLoadsWithIngress(t *testing.T) {
-	cfg, err := config.Load(write(t, monitorSite("    ingress:\n      mode: external\n      listen: 127.0.0.1:8480\n")))
+func TestAMonitorSiteLoadsWithWebServer(t *testing.T) {
+	cfg, err := config.Load(write(t, monitorSite("    web_server:\n      managed_by: external\n      listen: 127.0.0.1:8480\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	watch := cfg.Sites["watch"]
-	if !watch.Has(config.RoleMonitor) || watch.IngressMode() != config.IngressExternal {
+	if !watch.Has(config.RoleMonitor) || watch.WebServerManagedBy() != config.ManagedByExternal {
 		t.Fatalf("watch: %+v", watch)
 	}
-	host, port, ok := watch.Ingress.ListenHostPort()
+	host, port, ok := watch.WebServer.ListenHostPort()
 	if !ok || host != "127.0.0.1" || port != 8480 {
 		t.Fatalf("listen: %s %d %v", host, port, ok)
 	}
@@ -498,29 +568,37 @@ func TestAMonitorSiteLoadsWithIngress(t *testing.T) {
 	}
 }
 
-func TestIngressModeDefaultsToPaisansAndRunsCaddy(t *testing.T) {
+func TestWebServerManagedByDefaultsToPaisansAndRunsCaddy(t *testing.T) {
+	// No web_server block, and a block that leaves managed_by out, are both
+	// managed_by paisans.
+	for _, block := range []string{"", "    web_server:\n      include_dir: false\n"} {
+		cfg, err := config.Load(write(t, monitorSite(block)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Sites["watch"].WebServerManagedBy(); got != config.ManagedByPaisans || !cfg.Sites["watch"].RunsCaddy() {
+			t.Fatalf("%q: managed_by %s, caddy %v", block, got, cfg.Sites["watch"].RunsCaddy())
+		}
+	}
 	cfg, err := config.Load(write(t, monitorSite("")))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := cfg.Sites["watch"].IngressMode(); got != config.IngressPaisans || !cfg.Sites["watch"].RunsCaddy() {
-		t.Fatalf("mode %s, caddy %v", got, cfg.Sites["watch"].RunsCaddy())
 	}
 	if !cfg.Sites["home-a"].RunsCaddy() {
 		t.Fatal("the gateway runs no Caddy")
 	}
 }
 
-func TestIngressShapeIsChecked(t *testing.T) {
-	for _, tc := range []struct{ ingress, want string }{
-		{"    ingress:\n      mode: nginx\n", "sites.watch.ingress.mode: unknown mode"},
-		{"    ingress:\n      mode: external\n      listen: localhost:8480\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      mode: external\n      listen: 127.0.0.1:0\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      mode: external\n      listen: 127.0.0.1\n", "sites.watch.ingress.listen"},
-		{"    ingress:\n      proxy: nginx\n", "field proxy not found"},
+func TestWebServerShapeIsChecked(t *testing.T) {
+	for _, tc := range []struct{ webServer, want string }{
+		{"    web_server:\n      managed_by: nginx\n", "sites.watch.web_server.managed_by: unknown value"},
+		{"    web_server:\n      managed_by: external\n      listen: localhost:8480\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      managed_by: external\n      listen: 127.0.0.1:0\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      managed_by: external\n      listen: 127.0.0.1\n", "sites.watch.web_server.listen"},
+		{"    web_server:\n      proxy: nginx\n", "field proxy not found"},
 	} {
-		if msg := loadErr(t, monitorSite(tc.ingress)); !strings.Contains(msg, tc.want) {
-			t.Errorf("%q: %s", tc.ingress, msg)
+		if msg := loadErr(t, monitorSite(tc.webServer)); !strings.Contains(msg, tc.want) {
+			t.Errorf("%q: %s", tc.webServer, msg)
 		}
 	}
 }
@@ -536,7 +614,7 @@ func TestACMEProviderIsRequiredForAMonitorsOwnCaddy(t *testing.T) {
 	if msg := loadErr(t, strip(monitorSite(""))); !strings.Contains(msg, "acme.provider: required") {
 		t.Fatalf("paisans mode: %s", msg)
 	}
-	if _, err := config.Load(write(t, strip(monitorSite("    ingress:\n      mode: external\n      listen: 127.0.0.1:8480\n")))); err != nil {
+	if _, err := config.Load(write(t, strip(monitorSite("    web_server:\n      managed_by: external\n      listen: 127.0.0.1:8480\n")))); err != nil {
 		t.Fatalf("external mode needs no provider: %v", err)
 	}
 }

@@ -188,3 +188,33 @@ func TestRunDNSInitRefusesBeforeContactingAProvider(t *testing.T) {
 		t.Fatalf("prune: the token leaked into an error: %v", err)
 	}
 }
+
+// Inside apply, dns init does not repeat the configuration's findings, which
+// apply's own configuration section already showed. Run by hand, it shows
+// them. The fixture's garage is consistency dangerous, which warns; desec
+// stops the command after the findings and before any provider is called.
+func TestDNSInitInsideApplyLeavesTheFindingsToIt(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml")
+	secrets := filepath.Join("..", "..", "internal", "render", "testdata", "secrets.fixture.yaml")
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(data), "    endpoint: vm.example.org:51820\n",
+		"    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
+	edited = strings.Replace(edited, "    replication: 2\n", "    replication: 2\n    consistency: dangerous\n", 1)
+	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, inside := range []bool{false, true} {
+		rec := &ui.Recorder{}
+		savedReporter, savedInside := reporterOverride, insideApply
+		reporterOverride, insideApply = rec, inside
+		_ = runDNSInit([]string{"--config", path, "--secrets", secrets})
+		reporterOverride, insideApply = savedReporter, savedInside
+		if shown := rec.Has("warn", "garage consistency is dangerous"); shown == inside {
+			t.Errorf("inside apply %t: the garage warning shown %t, events %v", inside, shown, rec.Events)
+		}
+	}
+}

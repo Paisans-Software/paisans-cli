@@ -54,14 +54,16 @@ func runGatewayMove(args []string) error {
 		return err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, *configPath, result)
+	if !insideApply {
+		reportFindings(r, *configPath, result)
+	}
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "")
 	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -83,7 +85,9 @@ func runGatewayMove(args []string) error {
 		if !*execute || r.Verbose() {
 			plan.Show(r)
 		}
-		r.Result("%s is the only gateway. Nothing to move.", plan.To)
+		if !insideApply {
+			r.Result("%s is the only gateway. Nothing to move.", plan.To)
+		}
 		return nil
 	}
 	// The move writes to both gateways' hosts: the record and the marker,
@@ -104,6 +108,8 @@ func runGatewayMove(args []string) error {
 	if err := gatewaymove.Execute(plan); err != nil {
 		return err
 	}
-	r.Result("The gateway moved from %s to %s: every gate passed.", plan.From, plan.To)
+	if !insideApply {
+		r.Result("The gateway moved from %s to %s: every gate passed.", plan.From, plan.To)
+	}
 	return nil
 }

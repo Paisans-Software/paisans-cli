@@ -148,7 +148,7 @@ type siteView struct {
 	IsEtcd    bool
 	IsGarage  bool
 	// RunsCaddy is set where the toolkit's Caddy runs: a gateway, and a
-	// monitor in ingress mode paisans, which serves its own apps.
+	// monitor with managed_by: paisans, which serves its own apps.
 	RunsCaddy bool
 	// Heartbeats is every monitor off this site, which its host pushes a
 	// heartbeat to from its infrastructure stack. See heartbeat.go.

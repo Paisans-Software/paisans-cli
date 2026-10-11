@@ -53,14 +53,17 @@ func clusterNames(in render.EtcdInitial) []string {
 	return out
 }
 
-// stage is where in the order a step falls. The operator sees three of
-// them: prepare, dns, and install, which is every stage from founding to
-// pass two as a line per site and one for storage.
+// stage is where in the order a step falls. The operator sees four of
+// them: prepare, pull, dns, and install, which is every stage from founding
+// to pass two as a line per site and one for storage.
 type stage int
 
 const (
 	stageInit stage = iota
 	stagePrepare
+	// stagePull is each site's images, pulled on every host at once ahead
+	// of the install. No command runs it alone; see converge_pull.go.
+	stagePull
 	stageDNS
 	// stageFounding is an etcd member's first apply. Its founding stop is
 	// expected: pass two applies it again.
@@ -77,7 +80,8 @@ const (
 // installs reports whether a step of st is one of the install lines'.
 func (st stage) installs() bool { return st >= stageFounding && st <= stagePassTwo }
 
-// convergeStep is one existing command the plan runs.
+// convergeStep is one existing command the plan runs, or one site's pull,
+// which the run does itself.
 type convergeStep struct {
 	Stage stage
 	// Title is the command as typed less its common flags: what a stop
@@ -115,6 +119,15 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	// plans nothing.
 	for _, s := range cfg.SiteNames() {
 		steps = append(steps, step(stagePrepare, "host", "prepare", "--site", s))
+	}
+	// Every site's images, on every host at once: an install applies one
+	// site at a time, and each apply would otherwise wait on its own host's
+	// downloads while the rest sat idle. A pull needs Docker, which prepare
+	// installs, and nothing else, so it follows prepare directly. Ahead of
+	// dns, a host short of space for its images stops the run before the
+	// provider is asked to publish names for a deployment that cannot start.
+	for _, s := range cfg.SiteNames() {
+		steps = append(steps, step(stagePull, "pull", "--site", s))
 	}
 	// dns creates the records that are missing; one pointing elsewhere
 	// stops it. It comes before install: each site's wg-quick resolves the
@@ -163,11 +176,31 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageFounding, m))
 		}
 	}
-	// The cluster runs and this member has not joined it.
+	// The cluster runs and these members have not joined it. A data member
+	// joins through its site add. A witness has no site add of its own: it
+	// has no replica, and site add's etcd stage brings every configured
+	// member that is not yet a voter in, witnesses first and one learner at
+	// a time, each added before its etcd starts. So a witness joining beside
+	// a data site is joined by that site's site add, after its mesh gate has
+	// passed with the witness in it. A witness joining with no data site
+	// would make the voters even, which validate refuses; its site add is
+	// planned so that the run stops there, saying what to do.
+	var joining, witnesses []string
 	for _, m := range members {
-		if _, recorded := st.Initial[m]; !recorded && !founding(m) {
-			steps = append(steps, step(stageJoining, "site", "add", m))
+		if _, recorded := st.Initial[m]; recorded || founding(m) {
+			continue
 		}
+		if witness(m) {
+			witnesses = append(witnesses, m)
+		} else {
+			joining = append(joining, m)
+		}
+	}
+	if len(joining) == 0 {
+		joining = witnesses
+	}
+	for _, m := range joining {
+		steps = append(steps, step(stageJoining, "site", "add", m))
 	}
 
 	// A monitor checks every other site and app, so it is applied after
@@ -254,34 +287,21 @@ const defaultPrepareAtOnce = 8
 // it to one, to run them in order.
 var prepareAtOnce = defaultPrepareAtOnce
 
-// atOnce runs work for every index of keys, up to prepareAtOnce at a time,
-// and returns once each has. Indices sharing a key run one after another, in
-// order: two sites reached at one ssh destination are one machine, whose
-// package manager takes one run at a time. With prepareAtOnce one, every
+// atOnce runs work for every index below n, up to prepareAtOnce at a time,
+// and returns once each has. Each index is a site, and a site is a machine of
+// its own (validate refuses two sites at one ssh destination), so no two of
+// them wait on one host's package manager. With prepareAtOnce one, every
 // index runs in order.
-func atOnce(keys []string, work func(i int)) {
-	var chains [][]int
-	chain := map[string]int{}
-	for i, k := range keys {
-		c, ok := chain[k]
-		if !ok {
-			c = len(chains)
-			chain[k] = c
-			chains = append(chains, nil)
-		}
-		chains[c] = append(chains[c], i)
-	}
+func atOnce(n int, work func(i int)) {
 	slots := make(chan struct{}, max(prepareAtOnce, 1))
 	var wg sync.WaitGroup
-	for _, c := range chains {
+	for i := range n {
 		slots <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-slots }()
-			for _, i := range c {
-				work(i)
-			}
+			work(i)
 		}()
 	}
 	wg.Wait()
@@ -487,7 +507,7 @@ func readConvergeState(configPath, secretsPath string) (*config.Config, converge
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); errors.Is(err, fs.ErrNotExist) {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); errors.Is(err, fs.ErrNotExist) {
 		why = append(why, "no secrets file yet")
 	} else if err != nil {
 		// A file that is there and does not read (no age key, most often)
@@ -524,7 +544,7 @@ func convergeSecretsPath(configPath, secretsPath string) string {
 // would drop, and one encrypted with no .sops.yaml recipient beside it,
 // which writing would leave in plaintext. Why it failed is a ui.Problem.
 func convergeGenerate(cfg *config.Config, path string) (names, recipients []string, left string, err error) {
-	secrets, err := config.LoadSecrets(path)
+	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
 		return nil, nil, "", generateProblem(path, err)
 	}
@@ -710,7 +730,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	steps := convergePlan(cfg, st)
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
-		convergeAdmins(r, cfg, o, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		// A dry run's admin problem is shown on its line; it stops nothing.
+		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		convergeWebServerPending(r, cfg)
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
 		if len(generated) > 0 {
@@ -727,9 +749,27 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// check draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	convergeAdmins(r, cfg, o, func(string) bool { return true })
+	links, adminErr := convergeAdmins(r, cfg, o, true, func(string) bool { return true })
+	// The links are printed last, after the result, whatever it is: a run
+	// that fails after issuing them has still issued them.
+	defer printLoginLinks(links)
+	// An app the operator's own web server serves is running, but not yet
+	// known to be reachable: the run is complete only once it is.
+	unwritten, headed := convergeWebServerFiles(r, cfg, configPath, sudo)
+	failed := convergeWebServer(r, cfg, sudo, headed)
+	for _, app := range unwritten {
+		if !slices.Contains(failed, app) {
+			failed = append(failed, app)
+		}
+	}
 	convergeLeft(r, cfg, secretsPath, configPath)
-	r.Result("%s is converged: every step ran.", configPath)
+	if len(failed) > 0 {
+		return errors.Join(webServerFailed(failed), adminErr)
+	}
+	if adminErr != nil {
+		return adminErr
+	}
+	r.Result("Deployment complete.")
 	return nil
 }
 
@@ -740,7 +780,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 // sentences is err's hint as a sentence, then its explanation.
 func sentences(err error) string {
 	hint, explain := ui.Describe(err)
-	lines := []string{strings.TrimSuffix(hint, ".") + "."}
+	lines := []string{sentence(hint)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
@@ -755,11 +795,20 @@ func convergeStop(hint string, err error, next string) error {
 	if errors.As(err, &w) {
 		inner, explain = w.Hint()+": "+w.Detail, ""
 	}
-	lines := []string{strings.TrimSuffix(inner, ".") + "."}
+	lines := []string{sentence(inner)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
 	return &ui.Problem{Hint: hint, Explain: strings.Join(append(lines, next), "\n"), Cause: err}
+}
+
+// sentence is hint ended with one period, or as it is when it ends with a
+// colon, which introduces the lines after it.
+func sentence(hint string) string {
+	if strings.HasSuffix(hint, ":") {
+		return hint
+	}
+	return strings.TrimSuffix(hint, ".") + "."
 }
 
 // stepStatus is one step's status in a dry run.
@@ -775,8 +824,8 @@ type stepStatus struct {
 	reports          []checkReport
 }
 
-// convergeStatus is the dry run's plan: a prepare line per site, dns, and
-// an install line per site and one for storage, each marked with its
+// convergeStatus is the dry run's plan: a prepare line per site, a pull
+// line per site, dns, and an install line per site and one for storage, each marked with its
 // status; init's line is runConverge's, drawn with the findings. A step
 // is checked by its own dry run once every step it waits on is up to date,
 // and is otherwise marked as waiting on the first that is not; until that
@@ -810,9 +859,14 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 		}
 		return stepStatus{}, false
 	}
-	// checked is s's status from its own dry run. It reads and writes
-	// nothing shared, so the prepare lines run it on every host at once.
+	// checked is s's status from its own dry run, or for a pull, from the
+	// plan its site's apply would make. It reads and writes nothing shared,
+	// so the prepare and pull lines run it on every host at once.
+	pulls := newPuller(cfg, o)
 	checked := func(s convergeStep) stepStatus {
+		if s.Stage == stagePull {
+			return pulls.pullStatus(s)
+		}
 		var st stepStatus
 		summary, reports, err := convergeCheck(r, convergeFlags(s.Args, o))
 		st.reports = reports
@@ -850,14 +904,13 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 			j := installEnd(steps, i)
 			installStatus(r, steps[i:j], func(k int) stepStatus { return check(i + k) })
 			i = j
-		case s.Stage == stagePrepare:
+		case s.Stage == stagePrepare || s.Stage == stagePull:
 			// Every host's check runs at once, each on its own line.
-			j := prepareEnd(steps, i)
+			j := stageEnd(steps, i)
 			group := steps[i:j]
-			r.Section("prepare")
-			lines := ui.Group(r, prepareTitles(group)...)
+			r.Section(map[stage]string{stagePrepare: "prepare", stagePull: "pull"}[s.Stage])
+			lines := ui.Group(r, siteTitles(group)...)
 			statuses := make([]stepStatus, len(group))
-			var keys []string
 			var unsettled []int
 			for k := range group {
 				st, ok := settled(i + k)
@@ -867,9 +920,8 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 					continue
 				}
 				unsettled = append(unsettled, k)
-				keys = append(keys, prepareHost(cfg, group[k], o))
 			}
-			atOnce(keys, func(n int) {
+			atOnce(len(unsettled), func(n int) {
 				k := unsettled[n]
 				statuses[k] = checked(group[k])
 				endStatus(lines[k], statuses[k])
@@ -990,36 +1042,23 @@ func endStatus(line ui.Line, st stepStatus) {
 	line.End(st.mark, st.result)
 }
 
-// prepareEnd is the index after the prepare steps that start at from.
-func prepareEnd(steps []convergeStep, from int) int {
+// stageEnd is the index after the steps of the stage steps[from] is in,
+// starting at from.
+func stageEnd(steps []convergeStep, from int) int {
 	to := from
-	for to < len(steps) && steps[to].Stage == stagePrepare {
+	for to < len(steps) && steps[to].Stage == steps[from].Stage {
 		to++
 	}
 	return to
 }
 
-// prepareTitles are the prepare lines' titles: each step's site.
-func prepareTitles(steps []convergeStep) []string {
+// siteTitles are the prepare or pull lines' titles: each step's site.
+func siteTitles(steps []convergeStep) []string {
 	titles := make([]string, len(steps))
 	for i, s := range steps {
 		titles[i] = stepSite(s)
 	}
 	return titles
-}
-
-// prepareHost is the machine a prepare step reaches: its site's ssh
-// destination, which two sites may share.
-func prepareHost(cfg *config.Config, s convergeStep, o convergeOptions) string {
-	site := stepSite(s)
-	if cfg == nil {
-		return site
-	}
-	sc, ok := cfg.Sites[site]
-	if !ok {
-		return site
-	}
-	return siteTransport(site, sc, "", o.Sudo).Describe()
 }
 
 // installEnd is the index after the install steps that start at from.
@@ -1102,7 +1141,7 @@ func showNotes(r ui.Reporter, notes []checkReport) {
 const resumeAdvice = "Run paisans apply --execute again to resume."
 
 // convergeExecute runs every step but init, which runConverge has run: a
-// prepare line per site, as it runs; dns init, which reports as typed by
+// prepare line per site, as it runs; a pull line per site, likewise; dns init, which reports as typed by
 // hand, so a conflicting record it lists is what the stop's advice points
 // at; and an install line per site and one for storage, each spinning while
 // one of its steps runs. It stops at the first failure, so a DNS conflict
@@ -1114,8 +1153,14 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 		case s.Stage == stageInit:
 			i++
 		case s.Stage == stagePrepare:
-			j := prepareEnd(steps, i)
+			j := stageEnd(steps, i)
 			if err := convergePrepareAll(r, cfg, steps[i:j], o); err != nil {
+				return err
+			}
+			i = j
+		case s.Stage == stagePull:
+			j := stageEnd(steps, i)
+			if err := convergePullAll(r, cfg, steps[i:j], o); err != nil {
 				return err
 			}
 			i = j
@@ -1127,7 +1172,10 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			i = j
 		default:
 			r.Section(map[stage]string{stageDNS: "dns", stageGateway: "gateway"}[s.Stage])
-			if err := convergeRun(convergeFlags(s.Args, o)); err != nil {
+			insideApply = true
+			err := convergeRun(convergeFlags(s.Args, o))
+			insideApply = false
+			if err != nil {
 				if errors.Is(err, dns.ErrConflict) {
 					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans apply --execute again.")
 				}
@@ -1145,13 +1193,9 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 // naming each.
 func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
 	r.Section("prepare")
-	lines := ui.Group(r, prepareTitles(steps)...)
+	lines := ui.Group(r, siteTitles(steps)...)
 	errs := make([]error, len(steps))
-	keys := make([]string, len(steps))
-	for k, s := range steps {
-		keys[k] = prepareHost(cfg, s, o)
-	}
-	atOnce(keys, func(k int) {
+	atOnce(len(steps), func(k int) {
 		output, _, _, _, reports, err := prepareRun(r, lines[k], convergeFlags(steps[k].Args, o), o.Verbose)
 		for _, n := range lineDetails(lines[k], "", output, reports) {
 			lines[k].Note(n.Text, n.Detail)
@@ -1167,6 +1211,13 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 	// the retries and holds elsewhere; what follows draws on r.
 	routeRetries(r)
 	routeHolds(r)
+	return groupStop("host prepare", steps, errs)
+}
+
+// groupStop is how a stage whose hosts ran at once stops, once every one
+// has ended: not at all when none failed, at the one step that did, or at
+// the stage, what, on every site that failed, each named with why.
+func groupStop(what string, steps []convergeStep, errs []error) error {
 	var failed []int
 	for k, err := range errs {
 		if err != nil {
@@ -1188,7 +1239,7 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 		causes = append(causes, errs[k])
 	}
 	return &ui.Problem{
-		Hint:    "apply stopped at host prepare on " + strings.Join(sites, ", "),
+		Hint:    "apply stopped at " + what + " on " + strings.Join(sites, ", "),
 		Explain: strings.Join(append(explain, resumeAdvice), "\n"),
 		Cause:   errors.Join(causes...),
 	}
@@ -1226,14 +1277,20 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
 		databases := err != nil && !final && errors.Is(err, apply.ErrDatabasesWait)
+		var why string
+		switch {
+		case founding:
+			why = foundingPause(err)
+		case databases:
+			why = databasesPause(err)
+		case err == nil && !final && last[k] != i:
+			why = revisitPause(steps, i)
+		}
 		switch {
 		case err == nil:
 			line.Detail("%s", innerLine(ui.OK, s.Title, since(start)))
-		case founding:
-			line.Detail("%s", innerLine(ui.OK, s.Title, "stopped for the other etcd members"))
-			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
-		case databases:
-			line.Detail("%s", innerLine(ui.OK, s.Title, "waiting for the primary's databases"))
+		case founding || databases:
+			line.Detail("%s", innerLine(ui.OK, s.Title, why))
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
@@ -1244,15 +1301,11 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		switch {
 		case databases && last[k] == i:
 			again = append(again, i)
-			line.Pause("waiting for the primary's databases")
+			line.Pause(why)
 		case (err == nil || founding) && (final || last[k] == i):
 			line.Done("")
-		case founding:
-			line.Pause("stopped for the other etcd members")
-		case databases:
-			line.Pause("waiting for the primary's databases")
-		case err == nil:
-			line.Pause("again in pass two")
+		case err == nil || founding || databases:
+			line.Pause(why)
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
@@ -1274,6 +1327,66 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		}
 	}
 	return nil
+}
+
+// revisitPause is why the line of steps[i], which is visited again, pauses
+// after it: until the places of the steps between it and its next visit
+// are done, in the order they run.
+func revisitPause(steps []convergeStep, i int) string {
+	place := installPlace(steps[i])
+	var between []string
+	for _, s := range steps[i+1:] {
+		p := installPlace(s)
+		if p == place {
+			break
+		}
+		if !slices.Contains(between, p) {
+			between = append(between, p)
+		}
+	}
+	switch len(between) {
+	case 0:
+		return ""
+	case 1:
+		return "paused until " + between[0] + " is done"
+	}
+	return "paused until " + andList(between) + " are done"
+}
+
+// foundingPause is why a founding stop pauses its line: until the founding
+// members err names as not started run etcd.
+func foundingPause(err error) string {
+	var wait *apply.FoundingWaitError
+	switch {
+	case !errors.As(err, &wait) || len(wait.Unstarted) == 0:
+		return "paused until the other founding members run etcd"
+	case len(wait.Unstarted) == 1:
+		return "paused until " + wait.Unstarted[0] + " runs etcd"
+	}
+	return "paused until " + andList(wait.Unstarted) + " run etcd"
+}
+
+// databasesPause is why a replica's stop pauses its line: until the
+// leader's site err names creates the app databases.
+func databasesPause(err error) string {
+	leader := "the leader"
+	var wait *apply.DatabasesWaitError
+	if errors.As(err, &wait) && wait.Leader != "" {
+		leader = wait.Leader
+	}
+	return "paused until " + leader + " creates its databases"
+}
+
+// andList is names as a sentence lists them, "a, b and c"; past four, the
+// first three and how many more.
+func andList(names []string) string {
+	if len(names) > 4 {
+		names = append(names[:3:3], fmt.Sprintf("%d more", len(names)-3))
+	}
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // convergeNow is the clock an inner step of an install line is timed by.
@@ -1330,7 +1443,7 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 
 // convergeWaits is the titles of the earlier steps that steps[i] waits on,
 // in the order they ran: init, for every step once it has work; the site's
-// host prepare, for every step on a site; each witness's earlier apply, for
+// host prepare, for every step on a site, its pull included; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
 // runs; the site's earlier apply or site add and the storage step, for an
 // apply in pass two; and the host prepare and first apply of each Garage
@@ -1345,7 +1458,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	// first is the title of the first earlier apply or site add of site.
 	first := func(site string) []string {
 		for _, e := range earlier {
-			if e.Stage != stagePassTwo && stepSite(e) == site && e.Args[0] != "host" {
+			if e.Stage.installs() && e.Stage != stagePassTwo && stepSite(e) == site {
 				return []string{e.Title}
 			}
 		}
@@ -1353,6 +1466,8 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	}
 	prepare := func(site string) string { return "host prepare --site " + site }
 	switch {
+	case s.Args[0] == "pull":
+		waits = append(waits, prepare(stepSite(s)))
 	case s.Args[0] == "apply" || s.Args[0] == "site":
 		site := stepSite(s)
 		waits = append(waits, prepare(site))
@@ -1395,7 +1510,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 // step about a site names it last.
 func stepSite(s convergeStep) string {
 	switch strings.Join(s.Args[:min(2, len(s.Args))], " ") {
-	case "apply --site", "site add", "host prepare", "storage init":
+	case "apply --site", "pull --site", "site add", "host prepare", "storage init":
 		return s.Args[len(s.Args)-1]
 	}
 	return ""
@@ -1456,6 +1571,17 @@ func (c checkReporter) Refuse(hint, explanation string) {
 	*c.reports = append(*c.reports, checkReport{Text: joinDetail("✗ "+hint, explanation)})
 }
 
+// reportOwedApplies notes each apply a command leaves owed on a site, as
+// reportRemains does, but not for a step of converge (a checkReporter):
+// converge's pass two applies every site again, which makes each of them,
+// and a note naming another site would read as a second line for it.
+func reportOwedApplies(r ui.Reporter, lines []string) {
+	if _, step := r.(checkReporter); step {
+		return
+	}
+	reportRemains(r, lines)
+}
+
 // RetryLog is where the check's ssh retries go: kept, as a detail of the
 // step's line.
 func (c checkReporter) RetryLog() io.Writer { return retryCollector{c.reports} }
@@ -1512,19 +1638,19 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); err == nil {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); err == nil {
 		for _, key := range secretsgen.OwedNames(cfg, secrets) {
 			r.Note("secrets: "+key+" is owed and only you can provide it", "paisans secrets set "+key+" < value")
 		}
 	}
 }
 
-// convergeAdmins names each Pocket ID app that has no admin, which only the
-// operator can create. An app is asked, in a step of its own, only once up
+// convergeAnyAdmin names each Pocket ID app that has no admin, for a
+// deployment that declares no admins, so only the operator can create one. An app is asked, in a step of its own, only once up
 // says it is running; one that is not is named by nothing, since the plan
 // already says what brings it up. A check that fails names the app with why,
 // and fails nothing else.
-func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
+func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
 	section := false
 	for _, app := range cfg.AppNames() {
 		if cfg.Apps[app].Kind != config.KindPocketID || !up(app) {

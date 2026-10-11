@@ -1,7 +1,8 @@
 # Development
 
-The toolkit is a single Go binary. Contributors need a Go toolchain;
-operators need nothing.
+The toolkit is a single Go binary, `cmd/paisans`. A second, `cmd/admin-reconciler`,
+is built into the image that runs beside Pocket ID, so no operator builds it.
+Contributors need a Go toolchain; operators need nothing.
 
 ## Build
 
@@ -9,9 +10,15 @@ operators need nothing.
 go build ./cmd/paisans
 ```
 
-Go 1.26 or newer. There is no code generation step and no Makefile.
+Go 1.25.8 or newer, the `go` line in `go.mod`. There is no code generation step
+and no Makefile.
 
 ## Run
+
+[`docs/commands.md`](commands.md) is the operator's reference for every
+command: what it does, when it is run on its own rather than through the whole
+`apply`, its flags and defaults, and what it changes. This section is how the
+code behind each one is laid out.
 
 validate and render touch nothing outside the working directory. init writes
 only local files, and reads every site over ssh to settle the mesh subnet.
@@ -19,12 +26,18 @@ only local files, and reads every site over ssh to settle the mesh subnet.
 `storage add`, `storage rotate-key`, `app admin create`, `app remove` and `oidc client
 create` reach a machine, and each changes
 it only with `--execute`. `preflight` and `doctor`
-reach every site and never change one; `failover test` changes which site
+reach every site and never change one, and `host deployments` reads the one
+host `--ssh` names, with no `paisans.yaml`, and changes nothing. `secrets
+prune` reads each gateway's deployment record and rewrites only the local
+secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
-machine, only the DNS provider's API, and change it only with `--execute`.
-`ingress show` reads `paisans.yaml` alone; `ingress check` reaches no host
-over ssh and changes nothing, looking at a monitor's public hostname as a
-visitor would.
+machine, only the DNS provider's API, and change it only with `--execute`;
+`site remove` also deletes there the A and AAAA records `dns init` made for the
+removed site.
+`web-server show` and `web-server check` change nothing: `check` looks at a
+monitor's public hostname as a visitor would, and in `managed_by` `external`
+both read the monitor's web server over ssh, `show` always and `check` when a
+check fails.
 
 Each command that changes a host first claims it in the host registry,
 `/var/lib/paisans/registry.json`, and its dry run only reads that registry;
@@ -40,11 +53,21 @@ subnet, and a claim refuses another deployment's same interface, same port or
 overlapping subnet. It carries the site's roles too (`roles`, sorted and
 comma joined so the awk matches one with `index()`), and a claim refuses
 `gateway` or `data` when another deployment on the host holds the same role.
+A site is one machine: `registry.Check` and `registry.Claim` refuse a host
+that runs another site of this deployment (`internal/registry/machine.go`),
+read from this deployment's entry, which names the site, or with no entry from
+the `Address` line of `/etc/wireguard/psns-<token>.conf`. The awk merge
+refuses the same thing under the lock, for two claims racing, and `Merge`
+mirrors it. `validate` refuses two sites with one mesh address
+(`duplicate-site-address`) and two at one ssh host and port or one dial
+endpoint (`sites-share-a-machine`), so `apply` without `--site` runs every
+site's prepare and pull at once with no host shared between them.
 `apply` and `host prepare` also read the host's routes,
 addresses, Docker networks and Docker's address pools before they claim it,
 and refuse an overlap with the mesh subnet; `internal/mesh` holds the parsing
-and the overlap test as pure functions, and `cmd/paisans/mesh.go` the probes
-over the transport. README.md "Two deployments on one host never share a mesh"
+and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
+`mesh.Host`); `cmd/paisans/mesh.go` turns a clash into the refusal
+(`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
 ```
@@ -65,8 +88,8 @@ paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
 paisans dns init                          # shows which records it would create
 paisans dns prune                         # shows which records it would delete
-paisans ingress show  --app status        # hand-off sheet for a monitor's web server
-paisans ingress check --app status        # DNS, certificate, sign in, closed upstream
+paisans web-server show  --app status        # hand-off sheet for a monitor's web server
+paisans web-server check --app status        # DNS, certificate, sign in, closed upstream
 security find-generic-password -s acme -w \
   | paisans secrets set external.acme_dns_token
 ```
@@ -95,9 +118,11 @@ about it are load bearing:
   therefore the intended way to fill in a site or an app added to the
   configuration later, and the second run of an unchanged deployment writes
   nothing at all.
-* **It generates only what it can.** A DNS token is issued by a provider and an
-  OIDC client lives at a running identity provider, where creating one is a
-  mutation a human approves. Both are reported as owed, with the reason,
+* **It generates only what it can.** A DNS token is issued by a provider, a
+  mail password by the mail provider (`external.smtp_password`, when an app
+  sends mail through a host and has no password of its own), and an OIDC
+  client lives at a running identity provider, where creating one is a
+  mutation a human approves. Each is reported as owed, with the reason,
   rather than invented or left silent. An owed client of a kind with a known
   shape (`kinds.OIDCClient`) says that `apply --execute` creates it, since
   declaring the app is the approval for its client.
@@ -114,6 +139,14 @@ exists so a credential issued elsewhere never touches a terminal or an editor:
 an argument is in shell history and `ps`, a prompt is in scrollback, and `sops`
 opens the whole decrypted file in an editor.
 
+A whole `apply --execute` does the same, once Pocket ID runs, for every admin
+the `admins` section declares (`cmd/paisans/converge_admins.go`), through
+`appadmin` with `Request.Declared`: the account is also found by its email, a
+24 hour link is issued to each admin with no `PASSKEY_ADDED` audit event, and
+with mail Pocket ID emails one too (`Request.EmailLink`); its log is read for
+a failed send. Every link is printed after the run's result. See *`apply`
+makes the declared admins and hands each a login link* in `README.md`.
+
 `app admin create --app <pocket-id app> --username <u> --email <e>` makes
 sure one user exists, is verified, is an administrator of Pocket ID, and is in
 every admin group the apps signing in through it read (`kinds.OIDCClient`),
@@ -128,12 +161,14 @@ its email marked verified, through Pocket ID's API and prints a one-time login
 link once, on `--execute`, valid twenty minutes; `--login-link` issues a fresh
 one for an account that exists. It refuses a piped password rather than dropping it. It
 reads `apps.<app>.static_api_key` from the secrets file, so it takes
-`--secrets`, and it never uses sudo, because curl needs no root.
+`--secrets`. Its calls to Pocket ID never use sudo, because curl needs no root;
+only the claim `--execute` makes in the host registry, which is root's, does.
 
 `oidc client create --app <name>` creates an app's client at the deployment's
 Pocket ID, restricted to the member and admin groups the app's `settings`
 name (`member_group` and `admin_group`, defaulting to `members` and
-`admins`), with a launch URL so Pocket ID's dashboard lists it, and records its ID and
+`admins`; uptime's one group is `admin_group`, used as both, with no default
+because `validate` requires it), with a launch URL so Pocket ID's dashboard lists it, and records its ID and
 secret under `oidc_clients.<app>`. Every step is printed with what it sends and
 nothing changes without `--execute`. The secret is generated on the
 workstation and written to the secrets file before Pocket ID is sent it, and is
@@ -205,8 +240,9 @@ and the foreign users as `info`. Both name `paisans app remove <app>` for
 each app the leftovers belong to (`Report.Apps`). Its allow list takes the inventory's probes
 from `hostcheck.ReadCommands`.
 
-`render` and `apply` refuse a gateway site when `external.acme_dns_token` is
-empty. `init` lists it as owed, but rendering without it produced a Caddy that
+`render`, `apply`, `site add` and `site remove` refuse a site running the
+toolkit's Caddy (a gateway, or a monitor in `managed_by` `paisans`) when
+`external.acme_dns_token` is empty. `init` lists it as owed, but rendering without it produced a Caddy that
 starts and then fails every DNS-01 challenge, which a visitor finds rather than
 the operator.
 
@@ -216,38 +252,58 @@ lets the key live in a keychain rather than in a file or the environment, then
 `SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY` and `sops/age/keys.txt` under the user's
 config directory.
 
-`ingress show --app <name>` and `ingress check --app <name>` are for an app
+`web-server show --app <name>` and `web-server check --app <name>` are for an app
 pinned to a monitor site (`render.ServedBy`); every other app is the
-gateway's and is refused. `internal/ingress` holds both: `For` builds the
-target from the configuration, `Show` prints what the web server in front of
-it must do and a snippet for Caddy, nginx and Apache, and `Check` runs four
+gateway's and is refused. `internal/webserver` holds both: `For` builds the
+target from the configuration, `Detect` finds the web server in front of it
+over ssh, reading only (`internal/webserver/detect.go`), `Show` prints what that
+web server must do and the snippet for it, or for Caddy, nginx and Apache when
+`Detect` found none, and `Check` runs four
 read only checks through `Probes`, a resolver, an HTTPS client that never
-follows a redirect, a dialer and a clock. Tests replace all four and run
+follows a redirect, a dialer and a clock. Behind the toolkit's own Caddy
+(`managed_by: paisans`) there is nothing to hand off, so `Show` says so and
+`Check` makes only the DNS and certificate checks (`Target.External`). Tests replace all four and run
 against `httptest` TLS servers with certificates generated in the test, so no
 test touches real DNS or the network. README.md *The monitor has a site of
 its own* has the reasoning; `docs/guides/behind-your-own-web-server.md` is
 the walk-through.
 
-`render` validates, then writes per site artifacts under `--out`. It writes
-files and stops: pushing them to a host is a later slice.
+`apply` without `--site` uses the same package once every step has run:
+`writeWebServerFiles` (`cmd/paisans/converge_webserver_files.go`) writes each
+app's snippet into the web server's `include_dir` through `webserver.Sync`
+(`internal/webserver/include.go`), recording each file in the manifest
+(`internal/apply/webserverrecord.go`) so `app remove` and `site remove` delete
+it through `webserver.Remove`, and `convergeWebServer`
+(`cmd/paisans/converge_webserver.go`) runs `Check` for each app, again for
+about half a minute while only the certificate or sign in fails.
 
-The example validates with exactly one warning, and that warning is
-deliberate. Its Synapse stack is pinned to the site that also holds the witness
-role, which the design warns about rather than refuses.
+`render` validates, then writes per site artifacts under `--out`. It writes
+files and stops: pushing them to a host is `apply`'s work.
+
+The example validates with exactly two warnings, and both are deliberate. Its
+Synapse stack is pinned to the site that also holds the witness role, which the
+design warns about rather than refuses, and its Garage keeps replication 2 on
+two sites, so uploads stop while either is down, a trade its comment explains.
 
 ## The host check, before anything changes
 
 `host prepare`, `apply`, `site add` (on the site being added) and `prune`
 each run `internal/hostcheck` first, and so do `storage rotate-key` (on every
-site the app runs on) and `storage add` (every Garage site and the gateway), in a dry run as well as with `--execute`, and
+site the app runs on), `storage add` (every Garage site, the gateway and every
+monitor site), and `site add`, `site remove` and `app remove` on every monitor
+site they reseed, in a dry run as well as with `--execute`, and
 print its report above their own plan. `cmd/paisans/hostcheck.go` holds the
-one gate they share, `hostGate`. README.md *The host check: what is already on
+one gate they share, `hostGate`, and `gateSites`, which runs it on several
+sites before any of them changes. README.md *The host check: what is already on
 a host decides how much is touched* has the reasoning; what the code does:
 
 * **Claims** (`hostcheck.ClaimsFor`) are `render.SiteListeners`, each
   listener carrying the `paisans.yaml` key behind it (`render.Listener.Key`),
   plus the `psns-<token>` interface, the endpoint's port (none without an
-  endpoint) and the mesh subnet. A new listener is added to
+  endpoint), the mesh subnet, and each subnet the site's stacks pin
+  (`render.SiteNetworks`, with its key; only an app on a monitor with `managed_by:
+  external` pins one), over which a foreign Docker network or route is a
+  conflict, as one over the mesh is. A new listener is added to
   `render.SiteListeners` with its key, and the host check, preflight's ports
   check and validate's collision check all see it.
 * **Inventory** (`hostcheck.Inspect`) runs one probe per fact and changes
@@ -261,21 +317,31 @@ a host decides how much is touched* has the reasoning; what the code does:
   `docker inspect`, `docker volume inspect`, `docker network inspect`,
   `ss -Hltnup`, `/proc/`, `ip -o link`, `ip -j route`, `ufw status verbose`,
   `is-active firewalld`, `/srv/caddy.d/`); a fake transport elsewhere that reaches one of
-  these commands has to answer it.
+  these commands has to answer it. The `docker version` probe prints the
+  daemon's and the CLI's versions on its first line and `compose <version>`
+  or `compose absent` on the next; a fake that answers the first line alone
+  reads as a Docker whose compose was not reported, which is not refused.
+* **Docker** (`hostcheck.MinEngine`, `hostcheck.MinCompose`, in
+  `internal/hostcheck/docker.go`) is refused by `Report.Refusal` before the
+  class is: a snap, or an engine, CLI or compose plugin below the minimum.
+  The source package is shown and otherwise ignored. A new dependency on a
+  Docker or Compose feature goes in the table in
+  `docs/specs/2026-10-11-docker-version-gate.md` with the release that
+  introduced it, and raises the constant when it is newer.
 * **Classification** (`hostcheck.Classify`) is a pure function of the
   claims and the inventory, tested with recorded output: a clean host with
   an empty Docker, the toolkit's own running stack, a foreign host network
   Caddy against a site that claims 80 and 443 and one that does not, a
   foreign Postgres, a published port with no listener, a foreign `psns-<token>`, a
-  network over the mesh, and the three ways a shared host's firewall is
-  refused.
+  network over the mesh, the three ways a shared host's firewall is
+  refused, and Docker from each source at old and current versions.
 
 What "shared" changes, and where:
 
 | Command | On a shared host |
 |---|---|
 | `host prepare` | `hostprep.Shared()`: the profile's `Firewall` gets `hostWide` false and plans only its own `paisans-<token>:` rules, never `ufw default` or `ufw --force enable` |
-| `apply` | `apply.KeepImages()`, as `--keep-images` |
+| `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
 | `storage rotate-key` | `apply.KeepImages()` in the switch's apply on that site |
@@ -294,7 +360,14 @@ worse than one that failed on one, and the difference between "show me" and "do
 it" should be a flag an operator typed rather than a habit they formed.
 `apply` without `--site` keeps both: it runs `apply --site` for each site in
 turn, as one step among the others it runs (`cmd/paisans/converge.go`), and
-is a dry run unless `--execute` is given. That dry run changes nothing on the
+is a dry run unless `--execute` is given. Ahead of those steps it pulls every
+site's images on every host at once (`cmd/paisans/converge_pull.go`), from the
+plan `planSiteApply` makes for the site, with `Plan.Disk.Pulls` as the list
+and `apply.DiskRefusal` as the stop for a short disk; it reports straight to
+each site's line and never through `reporterOverride`, which is one command's
+at a time. Every plan of one `apply` resolves Caddy's tag through one
+`imagedigest.Cache` (`cacheDigests`), so the pull and the steps after it name
+the same build. That dry run changes nothing on the
 servers; the one file it may write is the local secrets file, with the
 generated secrets it lacks, through `fillSecrets`, the path `init` writes
 them with.
@@ -364,7 +437,8 @@ its cause. Everything needed to act goes in the hint or the explanation, never
 only in the cause, since having to re-run a failed apply with `-v` to learn
 why it failed is the thing this avoids. `Unwrap` returns the cause, so
 `errors.Is` sees through a `Problem` to `apply.ErrUnreachable` or
-`storageadd.ErrWaiting`, and exit 75 is decided that way. A typed error with
+`storageadd.ErrWaiting`, and exit 75, a gate waiting on Garage, is decided
+that way. A typed error with
 its own wording (`storageadd.Waiting`, `config.LoadError`) unwraps to its
 `Problem`. Any other error prints whole in the same form, its first line as
 the hint. Name a file in a hint with `ui.ShortPath`, never in a command meant
@@ -463,8 +537,9 @@ every rendered image with `docker image inspect` in one loop that prints
 `present <id> <ref>` or `absent <ref>` per image; an output missing any image
 is an error rather than "present", so a garbled probe cannot skip the check.
 When a recreated stack names an absent image, `Build` reads Docker's data root
-and its free space, and `Plan.Disk` carries the numbers; the dry run prints
-them as `check disk:`, and `Execute` refuses first, before the pending record.
+and its free space, and `Plan.Disk` carries the numbers; `Build` reports them
+on its `disk space` step, so a dry run shows them, and `Execute` refuses first,
+before the pending record.
 The default is 3 GiB, `apply --min-free <size>` overrides it for one run, and
 the refusal quotes `docker system df`. README.md "`apply` checks free space
 before it pulls" has the reasoning.
@@ -474,13 +549,35 @@ before it pulls" has the reasoning.
 the rendered images' IDs and what every container uses (`docker ps -a` names
 plus `docker container inspect` IDs), and runs `docker image rm <id>` for each
 image from that stack's repositories that no stack of the site renders and no
-container uses. A failed removal goes to `Progress` as a warning. `Build` lists
-the same candidates, without the container filter, as `Plan.Prunes`, printed
-as `prune` lines. `apply --keep-images` skips both, and so does a host the host
+container uses. A failed removal is a warning (`<stack>: old images left in
+place`), since the stack is already healthy. `Build` lists the same
+candidates, without the container filter, as `Plan.Prunes`, which a dry run
+shows as a `prune old images` step under each stack. `apply --keep-images`
+skips both, and so does a host the host
 check found shared. IDs are compared by
 prefix with `sha256:` stripped, since Docker prints them full or 12
-characters short. README.md "`apply` prunes the images it superseded" has the
-reasoning.
+characters short. The keep set is every image the site renders, held back or
+not, and every image any other site of the deployment renders
+(`Plan.deploymentImages`, read from the render's compose files, where another
+site's Caddy is its configured tag).
+
+**A whole apply ends with the sweep** (`internal/apply/sweep.go`). The
+manifest's `images` field (`render.ManifestImage`: a repository and every
+reference rendered from it) is the site's history: `writeManifest` writes the
+union of what `Build` read and what the plan renders, so it only grows, and a
+manifest without it reads as an empty history. When `Plan.Whole()` and not
+`KeepImages`, `Build` reads the host once (`sweepRead`: other deployments' roots
+under `/srv/paisans/`, `docker image ls`, the IDs of the keep set, and every
+container's image, ending in a marker line so a cut answer is refused) and
+fills `Plan.Sweep` with what `superseded` picks over the recorded and rendered
+repositories, less what `Plan.Prunes` already lists. `Execute` reads again
+after the pending record is removed and runs `docker image rm <id>` for each.
+Another deployment's root on the host makes both read nothing to remove, with a
+note in the plan. Every failure is a warning or a note. The pull stage plans
+with `apply.SkipSweepRead()`, since it executes none of its plans. A no-op
+whole apply costs two extra round trips, one in `Build` and one in `Execute`,
+plus one per removed image. README.md "`apply` prunes the images it
+superseded" has the reasoning.
 
 **An image's declared volume must be mounted at exactly its path.** Docker
 gives every new container an anonymous volume for a `VOLUME` nothing mounts,
@@ -598,8 +695,10 @@ is planned again with the new credentials and executed. Any other site
 ensures first and applies once. An app with no recorded client is held back
 when Pocket ID cannot be asked, which exits 0; a refused client holds its app
 back and exits 1 once the rest is applied, and so does an app whose recorded
-client Pocket ID does not hold (`keepsRecorded`): apply creates a client only
-when nothing is recorded. The second pass gets `apply.After(first)`, so an
+credentials apply will not replace (`keepsRecorded`): partly recorded, or a
+client named after the app under another ID. Fully recorded credentials for a
+client Pocket ID does not have are replaced, with `oidcclient.Plan.Replaces`
+naming the recorded ID. The second pass gets `apply.After(first)`, so an
 `--overwrite` or `--recreate` the first pass carried out is not repeated, and
 a held app's database path restart is owed in the pending record
 (`DatabasePath`) and runs once when the app is released. `planWithClients`
@@ -648,15 +747,19 @@ design. What the code relies on, and what is easy to undo:
   site and then the other configured members.
 * **Every wait is a count of polls**, the wait over the interval, so the tests
   replace `sleep` with nothing (`SetFast` in `export_test.go`) and still end.
-* **`internal/preflight` is a stub here**, with the agreed signature, replaced
-  by the preflight branch.
+* **Stage 1 is `internal/preflight`**, through `runPreflight`, a variable so
+  that the tests here, which drive the later stages against fake hosts, stand
+  in a passing report; preflight's own checks are tested in its package. A
+  re-run of a join that has started skips stage 1, because the new site's own
+  mesh interface now holds the port preflight's ports check refuses.
 
 The tests in `internal/siteadd` run a three host world in maps: etcd's
 membership, Patroni's members, each HAProxy's served configuration and the
 handshakes implied by each `psns-<token>.conf`. They cover the dry run changing nothing,
 a whole join leaving nothing to do, the mesh rollback, the promotion retry and
 its limit, resuming after a stopped learner and after a failed replica gate,
-and the stage 5 and 6 gates failing.
+the stage 5 and 6 gates failing, each replica's `patroni.env` brought up to
+date, and the monitor reseeded last.
 
 ## `site remove`, and what each removal is proven by
 
@@ -880,7 +983,7 @@ README's *One connection per host, shared*), and is pinned by a test of the
 exact argument list (`internal/apply/transport_test.go`):
 
 ```
-ssh -o ControlMaster=auto -o ControlPath=/tmp/psns-XXXX/%C -o ControlPersist=60 -p 22 -o IdentitiesOnly=yes -i /tmp/paisans-ssh-XXXX/key-1.pub -i /tmp/paisans-ssh-XXXX/key-2.pub ubuntu@203.0.113.10 <command>
+ssh -o ControlMaster=auto -o ControlPath=/tmp/psns-XXXX/%C -o ControlPersist=60 -p 22 -o IdentitiesOnly=yes -i /tmp/paisans-ssh-XXXX/key-1.pub -i /tmp/paisans-ssh-XXXX/key-2.pub ubuntu@203.0.113.10 "sh -c 'eval \"\$(printf %s <command, base64> | base64 -d)\"'"
 ```
 
 The `-i` files are the listed **public** keys, written per invocation into a
@@ -1056,6 +1159,21 @@ back again. Rerun it whenever the Pocket ID image is bumped: it proves what
 the reconciler assumes about the API, and the static key's user, against the real
 thing.
 
+The passthrough ini merge has a Docker test of its own, behind its own tag:
+
+```
+go test -tags writefreely_integration -timeout 30m -run TestRenderedPassthroughKeyIsReadByWriteFreely ./internal/render/
+```
+
+It boots the pinned WriteFreely fork against the rendered `config.ini`, with a
+Postgres beside it, and asks the application for the passthrough key's value;
+then does the same with that one line removed, as a control. It boots the
+application three times and may pull images, hence the longer timeout.
+
+The one workflow in `.github/workflows` builds the admin reconciler's image,
+and runs only the tests of the packages that image is built from. Nothing runs
+`go test ./...` or any tagged test for you, so run them before a pull request.
+
 ## Fixtures and secrets
 
 `internal/render/testdata/secrets.fixture.yaml` is plaintext on purpose. Every
@@ -1080,21 +1198,28 @@ installed, on a workstation or anywhere else.
 | `cmd/admin-reconciler` | the admin reconciler's binary and its image's Dockerfile: the pass loop, `/healthz`, and `healthcheck` |
 | `internal/adminreconciler` | one admin reconciler pass: who to add to `admins` and who to remove, the two writes, the floor under removals, and what `/healthz` says |
 | `internal/config` | loading `paisans.yaml`, and decrypting `secrets.enc.yaml` |
+| `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
+| `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
 | `internal/deployment` | a deployment's id and token, and every name, path and label derived from them |
 | `internal/registry` | a host's record of the deployments on it, and the locked claim every writing command makes |
+| `internal/deployrecord` | the gateway's record of the sites, apps and Pocket ID groups the deployment has deployed, which `apply` adds to and only a removal takes from |
 | `internal/mesh` | reading a host's routes, addresses and Docker networks and pools, the overlap test, and `init`'s subnet roll |
 | `internal/validate` | the rules, and nothing else |
 | `internal/secretsgen` | what a deployment's secrets are, and which of them the toolkit may invent |
 | `internal/kinds` | what an application kind is: its compose services, and the image each runs by default |
+| `internal/acme` | what each ACME DNS provider needs: its Caddy module, the image that carries it, and its Caddyfile directive |
 | `internal/render` | placement, templates, and the writer |
 | `internal/dns` | which public records a deployment needs, creating the missing ones at the DNS provider, and pruning the ones it created that nothing wants |
 | `internal/apply` | what to push to a host, what to restart, and the gates before either |
-| `internal/siteadd` | joining a new data site: six staged, gated, resumable stages |
-| `internal/siteremove` | taking a site out: its refusals, five staged, gated, resumable stages, the host's cleaning with each removal proven, and the gateway's Caddy hand over |
+| `internal/siteadd` | joining a new data site: eight staged, gated, resumable stages |
+| `internal/siteremove` | taking a site out: its refusals, six staged, gated, resumable stages, the host's cleaning with each removal proven, and the gateway's Caddy hand over |
+| `internal/garage` | `storage init`: one site's Garage layout, and each app's S3 key and bucket; and the Garage commands and S3 requests other commands send, each with its secret kept off the command line |
+| `internal/storageadd` | `storage add`: joining every Garage site into one cluster, and a change of replication factor, in staged, gated, resumable stages |
+| `internal/rotatekey` | `storage rotate-key`: replacing one app's S3 key in staged, gated stages, resumed from the secrets file |
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
 | `internal/pocketid` | Pocket ID's REST API, called through curl on the host with everything variable on stdin, or over HTTP from beside it |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
-| `internal/ingress` | a monitor's ingress: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
+| `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
 | `internal/ownership` | what of this deployment is left over on a host, and what foreign relies on its Caddy, from the host check's inventory |
 | `internal/appremove` | `app remove`: which of a host's things are a removed app's, the gate, the plan, and each idempotent step |
@@ -1129,14 +1254,15 @@ holds what needs the whole deployment to know: the database host for this app's
 placement, the object storage endpoint, this app's own secrets and its client at
 the identity provider. **The template decides what goes into which file, under
 what names, in what format; Go decides nothing about an application's
-configuration.** That is why two of the five kinds can be configured by files
-rather than environment at all.
+configuration.** That is why three of the eight kinds, element, synapse and
+writefreely, configure their application by a file rather than environment at
+all.
 
 One file in a set is not rendered beside the app: `caddy.snippet.tmpl` lands on
 every gateway, at `/srv/paisans/<token>/infra/caddy/snippets/<app>.caddy`, because that is where
 it is read. An app pinned to a monitor site is the exception: its snippet
-lands on that monitor instead, in ingress mode paisans, and on no site at all
-in mode external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,
+lands on that monitor instead, with `managed_by: paisans`, and on no site at all
+with managed_by: external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,
 certificates and the trusted proxy range, and gives each app a host block that
 imports its snippet. A snippet never hardcodes where its application runs: it
 receives the upstreams from the inventory, which is what keeps a pinned app and
@@ -1154,12 +1280,14 @@ same way an unknown `images` key is. `synapse` has a second role,
 objects has `media`, and it is the one role that exists without being
 declared: `kinds.MediaHostname` derives `<label>-media.<domain>` from the
 app's own hostname, and `hostnames.media` only overrides it. It is also the one
-route the app's gate does not follow, because a media hostname is never gated. `gate` works
-the other way: it names which of the `oauth2-proxy` kind's two named snippets,
-`gate_provisional` or `gate_members`, an app's own snippet imports.
-`internal/render/site.go`'s `renderGateSnippets` renders those named snippets
-onto the gateway once per `oauth2-proxy` app declared, however many other
-apps' snippets go on to import them by name. Both are read in
+route the app's gate does not follow, because a media hostname is never gated.
+`visibility_gate` works the other way: `member` or `provisional` names which of
+the `oauth2-proxy` kind's two named snippets, `gate_member` or
+`gate_provisional`, the app's host block in the gateway `Caddyfile` imports
+ahead of the app's own snippet. `internal/render/site.go`'s
+`renderGateSnippets` renders those named snippets onto the gateway once per
+`oauth2-proxy` app declared, and the `Caddyfile` imports them at its top level,
+however many host blocks go on to import them by name. Both are read in
 `internal/render/appview.go`'s `values`, the same function that assembles
 everything else a template set is given, so a snippet template sees them as
 ordinary fields rather than as a special case.
@@ -1215,9 +1343,11 @@ roles, and an operator uses it.
 
 `secrets.enc.yaml` therefore carries `apps.<name>.database_password` for every
 app that uses Postgres, clustered or pinned, and rendering fails by name when
-one is missing. WriteFreely is the exception and needs none: it has never
-supported Postgres and runs on a SQLite file in its own data directory, which
-is what keeps one blog from adding a second database engine to operate.
+one is missing. The kinds with no Postgres need none: Element is a static
+client with no server side state, oauth2-proxy keeps its session in a cookie,
+and uptime keeps its own SQLite file under `/data`. WriteFreely is not among
+them, because the `writefreely` kind is the writefreely-wisp fork, which
+connects to Postgres.
 
 `apply` creates the roles and databases for clustered apps, on a site in
 `cluster.sites`, after the infrastructure stack and before any app stack. It
@@ -1335,7 +1465,7 @@ No `backup`. `site add` exists for sites that all declare an endpoint; the
 relay for sites behind NAT is still design. `storage add` joins Garage nodes,
 changes the replication factor, sizes each node and can stop one to prove
 failover, and has run against containers; replacing a Garage node is not
-built, and removing one goes with its site, in `site remove`. Its first stage is `preflight`, and
+built, and removing one goes with its site, in `site remove`. `site add`'s first stage is `preflight`, and
 `failover test` exists; both are described above. `apply`
 pushes files, brings up the mesh interface, creates clustered apps' roles and databases, and
 takes the narrowest action that makes the rest live. `site add` has never been
@@ -1360,8 +1490,10 @@ of the stack's bind mounted directories; the header of
 `templates/mbin/compose.yaml.tmpl` says which containers cope with a root
 owned directory and which do not.
 
-If you find yourself writing a transport layer, that is the next slice and it
-wants its own review.
+The transport layer is `apply.SSHTransport`, described above under *Why ssh is
+shelled out to and sops is not*. If you find yourself writing a second one,
+that wants its own review, because every command reaches a host through the
+first.
 
 Two claims used to live in this section and are corrected here rather than
 left to go on being read. **Secret generation exists**: `internal/secretsgen`

@@ -231,7 +231,13 @@ func diskRefusal(plan *Plan) error {
 			fmt.Fprintf(&b, "\n  %s (%s)", p.Ref, shortID(p.ID))
 		}
 	}
-	fmt.Fprintf(&b, "\n\nAn apply prunes the images it superseded after each stack comes up healthy, unless --keep-images was given, so an earlier --keep-images run is one place space went. Free space on the host, or lower the threshold for this run with --min-free <size> (Eg: 2G) if the pull is known to fit.")
+	if len(plan.Sweep) > 0 {
+		fmt.Fprintf(&b, "\n\nOld images this apply would sweep at its end, removable now by hand with `docker image rm <id>` if no container uses them:")
+		for _, p := range plan.Sweep {
+			fmt.Fprintf(&b, "\n  %s (%s)", p.Ref, shortID(p.ID))
+		}
+	}
+	fmt.Fprintf(&b, "\n\nAn apply prunes the images it superseded after each stack comes up healthy, and a whole apply ends by sweeping every old image of the repositories its stacks use or used, unless --keep-images was given, so an earlier --keep-images run is one place space went. Free space on the host, or lower the threshold for this run with --min-free <size> (Eg: 2G) if the pull is known to fit.")
 	return fmt.Errorf("%s", b.String())
 }
 
@@ -265,7 +271,7 @@ func (p *Plan) probeImages(need int64, t Transport) error {
 	if len(p.Actions) == 0 {
 		return nil
 	}
-	ids, err := probeImages(allRefs(images), t)
+	ids, err := probeImages(p.keepRefs(), t)
 	if err != nil {
 		return err
 	}
@@ -314,7 +320,7 @@ func (p *Plan) probePrunes(ids map[string]string, t Transport) error {
 	for _, action := range p.Actions {
 		stacks = append(stacks, action.Stack)
 	}
-	p.Prunes = superseded(stacks, p.images, ids, listed, nil)
+	p.Prunes = superseded(stackScopes(stacks, p.images), p.keepRefs(), ids, listed, nil)
 	return nil
 }
 
@@ -326,4 +332,18 @@ func ComposeImages(content string) ([]string, error) { return composeImages(cont
 // have.
 func ProbeImages(refs []string, t Transport) (map[string]string, error) {
 	return probeImages(refs, t)
+}
+
+// DiskRefusal is the error Execute stops with when plan's host is short of
+// space, for a caller that checks the plan's disk before Execute does:
+// `paisans apply` without --site pulls every site's images ahead of the
+// install, and refuses a short host with the words its apply would use.
+func DiskRefusal(plan *Plan) error { return diskRefusal(plan) }
+
+// PullImage pulls ref on the host with `docker pull`, by its reference
+// alone: the pull stage runs before a stack's compose file is on the host,
+// and the reference is what that file will name, so the stack's own pull
+// later finds the image present. It returns what docker printed.
+func PullImage(t Transport, ref string) (string, error) {
+	return t.Run("docker pull " + shellQuote(ref))
 }

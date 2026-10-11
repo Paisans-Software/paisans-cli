@@ -510,12 +510,54 @@ func TestBuildStopsOnAProbeThatNeverReachedTheHost(t *testing.T) {
 // --verbose, so that sentence stays short.
 func TestTheLeftForYouHintsStayShort(t *testing.T) {
 	for _, line := range []string{
-		storageadd.AppConfigNote(strings.Repeat("s", 20), 9999),
+		storageadd.AppConfigNote(strings.Repeat("s", 20), []string{"/srv/paisans/f2a9/talk/.env", "/srv/paisans/f2a9/wisp/.env"}),
 		storageadd.MediaNote,
 	} {
 		if hint, _, _ := strings.Cut(line, ". "); len(hint) > 100 {
 			t.Errorf("%d characters: %s", len(hint), hint)
 		}
+	}
+}
+
+// An app .env on a site that differs from the render is owed an apply there,
+// and the note names the file that differs rather than guessing at why.
+func TestAnOutOfDateAppEnvIsNamed(t *testing.T) {
+	w := growing(t)
+	var site, path string
+	for _, name := range w.cfg.SiteNames() {
+		for p := range w.hosts[name].files {
+			if strings.HasSuffix(p, "/.env") && !strings.Contains(p, "/infra/") && (path == "" || p < path) {
+				site, path = name, p
+			}
+		}
+		if path != "" {
+			break
+		}
+	}
+	if path == "" {
+		t.Fatal("the fixture renders no app .env")
+	}
+	h := w.hosts[site]
+	h.files[path] += "S3_ENDPOINT=http://stale.example:3900\n"
+	h.recordManifest()
+	p := w.build(storageadd.Options{ChangeReplication: true})
+	want := site + ": run `paisans apply --site " + site + "` when acceptable. Its apps are out of date in 1 file, " + path + ": it differs from the render, and the apply brings it up to date and recreates its app"
+	if len(p.Owed) != 1 || p.Owed[0] != want {
+		t.Errorf("owed:\n%q\nwant\n%q", p.Owed, want)
+	}
+	for _, n := range p.Notes {
+		if strings.Contains(n, "apply --site") {
+			t.Errorf("an owed apply is among the notes: %s", n)
+		}
+	}
+}
+
+// Several files are counted in the plural and each is named.
+func TestAppConfigNoteNamesEveryFile(t *testing.T) {
+	got := storageadd.AppConfigNote("home-a", []string{"/srv/paisans/f2a9/talk/.env", "/srv/paisans/f2a9/wisp/.env"})
+	want := "home-a: run `paisans apply --site home-a` when acceptable. Its apps are out of date in 2 files, /srv/paisans/f2a9/talk/.env and /srv/paisans/f2a9/wisp/.env: they differ from the render, and the apply brings them up to date and recreates their apps"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
 

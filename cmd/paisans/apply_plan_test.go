@@ -31,6 +31,13 @@ func (emptyHost) Run(command string) (string, error) {
 	}
 	// Every image is present, so the plan carries no disk check; apply's
 	// own tests cover that.
+	// The sweep's read: no images beyond the rendered ones, and no
+	// containers.
+	sweep := strings.Contains(command, "echo paisans-sweep-end")
+	if sweep {
+		_, loop, _ := strings.Cut(command, "for r in ")
+		command = "for r in " + loop
+	}
 	if list, ok := strings.CutPrefix(command, "for r in "); ok {
 		list, _, _ = strings.Cut(list, "; do")
 		// The volume probe asks the same loop what each image declares:
@@ -47,7 +54,13 @@ func (emptyHost) Run(command string) (string, error) {
 			}
 			out.WriteString("\n")
 		}
+		if sweep {
+			out.WriteString("paisans-sweep-end\n")
+		}
 		return out.String(), nil
+	}
+	if sweep {
+		return "paisans-sweep-end\n", nil
 	}
 	return "down\n", nil
 }
@@ -80,6 +93,11 @@ mesh:
   subnet: 10.44.0.0/24
 acme:
   provider: desec
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -87,8 +105,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 cluster:
   sites: [home-a]
   port: 5000

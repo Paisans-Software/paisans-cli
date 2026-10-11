@@ -84,6 +84,9 @@ b=${b%% |*}
 cmd=$(printf %s "$b" | base64 -d 2>/dev/null)
 case "$cmd" in
 *"for n in "*) l=${cmd#*for n in }; l=${l%%; do*}; for n in $l; do echo "absent $(printf %s "$n" | tr -d "'")"; done;;
+*paisans-sweep-end*) l=${cmd#*for r in }; l=${l%%; do*}
+	for r in $l; do echo "present sha256:0123456789abcdef $(printf %s "$r" | tr -d "'")"; done
+	echo paisans-sweep-end;;
 *"for r in "*) l=${cmd#*for r in }; l=${l%%; do*}
 	for r in $l; do
 		r=$(printf %s "$r" | tr -d "'")

@@ -113,6 +113,10 @@ type Plan struct {
 	Stages []*Stage
 	// Notes are things the join leaves for later, on purpose.
 	Notes []string
+	// Owed are the applies the join leaves for later, one note a site whose
+	// app configuration differs from the render: an apply of that site
+	// brings it up to date.
+	Owed []string
 	// Report receives each stage as a section, the work in it as steps and
 	// each gate as a step of its own. Nil discards it.
 	Report ui.Reporter
@@ -387,8 +391,8 @@ func (p *Plan) node(site string) *node {
 	return nil
 }
 
-// noteOwed lists the apps sites whose rendered files differ from what is on
-// them. S3_ENDPOINT follows the first listed Garage site, so reordering
+// noteOwed adds to Owed the apps sites whose rendered files differ from what
+// is on them. S3_ENDPOINT follows the first listed Garage site, so reordering
 // storage.garage.sites changes every app's .env; that apply recreates the app
 // and is the operator's to time, so the join does not run it.
 func (p *Plan) noteOwed() error {
@@ -406,18 +410,27 @@ func (p *Plan) noteOwed() error {
 		if err != nil {
 			return err
 		}
-		if n := len(sp.Writes()); n > 0 {
-			p.Notes = append(p.Notes, appConfigNote(name, n))
+		var paths []string
+		for _, c := range sp.Writes() {
+			paths = append(paths, c.Path)
+		}
+		if len(paths) > 0 {
+			p.Owed = append(p.Owed, appConfigNote(name, paths))
 		}
 	}
 	return nil
 }
 
 // appConfigNote is what a join leaves for the operator when an app's .env on
-// site no longer matches the render. Its first sentence is what shows without
-// --verbose, so it carries the command.
-func appConfigNote(site string, files int) string {
-	return fmt.Sprintf("%s: run `paisans apply --site %s` when acceptable. Its apps are out of date in %d file(s); their configuration differs from the render, Eg: S3_ENDPOINT after storage.garage.sites was reordered, and the apply brings it up to date and recreates those apps", site, site, files)
+// site no longer matches the render, naming each file that differs. Its first
+// sentence is what shows without --verbose, so it carries the command.
+func appConfigNote(site string, files []string) string {
+	what := fmt.Sprintf("1 file, %s: it differs from the render, and the apply brings it up to date and recreates its app", files[0])
+	if len(files) > 1 {
+		last := len(files) - 1
+		what = fmt.Sprintf("%d files, %s and %s: they differ from the render, and the apply brings them up to date and recreates their apps", len(files), strings.Join(files[:last], ", "), files[last])
+	}
+	return fmt.Sprintf("%s: run `paisans apply --site %s` when acceptable. Its apps are out of date in %s", site, site, what)
 }
 
 // appEnvFiles is every app .env the render places on site.

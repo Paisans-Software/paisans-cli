@@ -604,7 +604,7 @@ func TestTheDNSTokenIsOwedForAMonitorsOwnCaddy(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("a monitor in ingress mode paisans needs the token, and it was not owed")
+	t.Fatal("a monitor with managed_by: paisans needs the token, and it was not owed")
 }
 
 // Outline's and WriteFreely's clients are created by apply like Mbin's, and

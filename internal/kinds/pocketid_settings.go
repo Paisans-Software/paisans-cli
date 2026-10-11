@@ -315,6 +315,40 @@ func PocketIDEnv(settings map[string]any) []PocketIDEnvVar {
 	return out
 }
 
+// PocketIDAdminEmailSetting is the toggle that lets the API email a user a
+// login link, which apply's admin step uses to send each declared admin
+// theirs.
+const PocketIDAdminEmailSetting = "email_one_time_access_as_admin"
+
+// PocketIDSettingsFor is an app's settings with the defaults the kind adds:
+// when the app can send mail, PocketIDAdminEmailSetting is true unless the
+// settings set it, so a deployment that can send mail emails its admins their
+// login links. canMail is an SMTP host and a sender both resolving, which is
+// what Pocket ID's admin page asks before it turns any email on (see
+// pocketIDEmailWithoutSMTP in internal/validate). The settings passed in are
+// not changed.
+func PocketIDSettingsFor(settings map[string]any, canMail bool) map[string]any {
+	if !canMail {
+		return settings
+	}
+	if v, ok := settings[PocketIDAdminEmailSetting]; ok && v != nil {
+		return settings
+	}
+	out := make(map[string]any, len(settings)+1)
+	for k, v := range settings {
+		out[k] = v
+	}
+	out[PocketIDAdminEmailSetting] = true
+	return out
+}
+
+// PocketIDAdminEmail reports whether a Pocket ID app will email its admins
+// their login links: it can send mail and the toggle is not set false.
+func PocketIDAdminEmail(settings map[string]any, canMail bool) bool {
+	v, _ := PocketIDSettingsFor(settings, canMail)[PocketIDAdminEmailSetting].(bool)
+	return canMail && v
+}
+
 // PocketIDEmailEnabled reports which email toggles are on, by setting key.
 func PocketIDEmailEnabled(settings map[string]any) []string {
 	var out []string

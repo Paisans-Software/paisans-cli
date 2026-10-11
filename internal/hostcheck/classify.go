@@ -409,7 +409,13 @@ func contains(list []string, s string) bool {
 // is not already up and denying (or rejecting) by default, because on a
 // shared host the toolkit never sets the default policy or enables ufw
 // itself.
+//
+// Before either, a Docker the toolkit cannot run is refused: a snap, or an
+// engine or compose plugin older than MinEngine or MinCompose.
 func (r *Report) Refusal() error {
+	if err := dockerRefusal(r.Host, r.Inventory.Docker); err != nil {
+		return err
+	}
 	switch r.Class {
 	case Conflicted:
 		// The conflicts are listed here rather than with the report's other
@@ -473,6 +479,12 @@ func (r *Report) Show(rep ui.Reporter) {
 	docker := "absent"
 	if inv.Docker.Present {
 		docker = inv.Docker.Version
+		switch {
+		case inv.Docker.ComposeWorks:
+			docker += ", compose " + inv.Docker.Compose
+		case inv.Docker.ComposeMissing:
+			docker += ", `docker compose` does not work"
+		}
 	}
 	if len(inv.Docker.Packages) > 0 {
 		docker += " (" + strings.Join(inv.Docker.Packages, ", ") + ")"

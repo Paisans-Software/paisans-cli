@@ -980,7 +980,7 @@ func TestADeclaredImageReachesTheGateway(t *testing.T) {
 
 // A deployment where Caddy runs nowhere is legitimate: internal/config
 // requires acme.provider only when a site runs it, a gateway or a monitor in
-// ingress mode paisans. The renderer must not demand a Caddy image for a site
+// managed_by: paisans. The renderer must not demand a Caddy image for a site
 // that will never run Caddy, or a config that validation accepts fails to
 // render anyway, over an image nothing needs.
 func TestNoGatewayNeedsNoACMEProvider(t *testing.T) {
@@ -994,7 +994,7 @@ func TestNoGatewayNeedsNoACMEProvider(t *testing.T) {
 	vm.Roles = []config.Role{config.RoleWitness}
 	cfg.Sites["vm"] = vm
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	cfg.Sites["watch"] = watch
 
 	plan, err := render.Build(cfg, secrets)

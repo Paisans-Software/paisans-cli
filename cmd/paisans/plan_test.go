@@ -33,6 +33,25 @@ func TestListPlanMarksStepsPendingInOrderWithReasonsAsDetail(t *testing.T) {
 	}
 }
 
+// The sweep is the plan's last step, with each image it would remove.
+func TestListPlanEndsWithTheSweep(t *testing.T) {
+	plan := &apply.Plan{
+		Site: "home-a", Transport: "ubuntu@192.0.2.10",
+		Actions:       []apply.Action{{Stack: "infra", Recreate: true}},
+		GatewayReload: true,
+		Sweep:         []apply.Prune{{Ref: "ghcr.io/example-org/mbin:v1.9.0", ID: "sha256:0123456789abcdef"}},
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	listPlan(rec, plan)
+	sweep := rec.Index("pending", "sweep old images")
+	if sweep < 0 || sweep < rec.Index("pending", "reload gateway") || sweep < rec.Index("pending", "recreate infra") {
+		t.Fatalf("the sweep is missing or not last:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "ghcr.io/example-org/mbin:v1.9.0") {
+		t.Errorf("the swept image is not named:\n%s", rec.Lines())
+	}
+}
+
 // A file edited on the host is a refusal in the plan itself, so a dry run
 // says at once that nothing would be applied.
 func TestListPlanRefusesConflicts(t *testing.T) {

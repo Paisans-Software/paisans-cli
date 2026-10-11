@@ -109,7 +109,7 @@ func TestRetryLinesStayOffAStdoutThatCarriesData(t *testing.T) {
 	t.Cleanup(func() { apply.SetRetryLog(nil) })
 	var err error
 	stdout, stderr := captureOutput(t, func() {
-		err = runIngress([]string{"show", "-v", "--app", "status", "--config", fixtureConfig()})
+		err = runWebServer([]string{"show", "-v", "--app", "status", "--config", fixtureConfig()})
 		retryOnce(t)
 	})
 	if err != nil {

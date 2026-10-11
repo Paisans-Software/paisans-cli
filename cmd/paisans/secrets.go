@@ -76,7 +76,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func requireACMEToken(cfg *config.Config, secrets *config.Secrets, sites []strin
 	}
 	for _, site := range sites {
 		if cfg.Sites[site].RunsCaddy() {
-			return fmt.Errorf("%s runs the toolkit's Caddy (a gateway, or a monitor in ingress mode paisans), and secrets external.acme_dns_token is empty, so it could obtain no certificate. Get a token from %s scoped to this zone, then pipe it in: `paisans secrets set external.acme_dns_token < token-file`", site, cfg.ACME.Provider)
+			return fmt.Errorf("%s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans), and secrets external.acme_dns_token is empty, so it could obtain no certificate. Get a token from %s scoped to this zone, then pipe it in: `paisans secrets set external.acme_dns_token < token-file`", site, cfg.ACME.Provider)
 		}
 	}
 	return nil

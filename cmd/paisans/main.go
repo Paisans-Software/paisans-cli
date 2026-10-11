@@ -84,8 +84,8 @@ Usage:
   paisans oidc client create --app <name> [--rotate-secret]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--site <name>] [--ssh <destination>] [--execute]
-  paisans ingress show  --app <name> [--config paisans.yaml]
-  paisans ingress check --app <name> [--config paisans.yaml]
+  paisans web-server show  --app <name> [--config paisans.yaml] [--sudo=false]
+  paisans web-server check --app <name> [--config paisans.yaml] [--sudo=false]
 
 Commands:
   validate   Load the configuration and report every problem found.
@@ -216,15 +216,16 @@ Commands:
              secret in the secrets file. The secret is never printed.
              Writes nothing without --execute. Supports the mbin, outline,
              writefreely and uptime kinds.
-  ingress    show: for an app pinned to a monitor site, print what the web
+  web-server show: for an app pinned to a monitor site, print what the web
              server in front of it must do (terminate TLS for its hostname,
              pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled
-             in for Caddy, nginx and Apache. From paisans.yaml alone.
+             in for the web server it finds on the monitor over ssh, read
+             only, or for Caddy, nginx and Apache when it finds none.
              check: from this machine, check that the hostname resolves to
              the monitor, that /healthz answers with a valid certificate,
              that sign in redirects with an https callback, and that the
              published port is closed from outside. Reads only; exits 1 on
-             any FAIL. With the toolkit's own Caddy in front (ingress mode
+             any FAIL. With the toolkit's own Caddy in front (managed_by:
              paisans), only the first two apply.
 
 host prepare, host deployments, apply, prune, site add, site remove, storage
@@ -240,8 +241,10 @@ another deployment there holds this one's token, WireGuard interface or listen
 port, or a mesh subnet overlapping this one's. apply and host prepare also
 refuse when anything else on the host overlaps the mesh subnet. dns init and dns
 prune reach no host, only the DNS provider's API, and change it only with
---execute; site remove also deletes the removed site's records there. ingress check reaches no host over ssh and changes nothing: it
-looks at a monitor's public hostname as any visitor could.
+--execute; site remove also deletes the removed site's records there. web-server
+show and web-server check change nothing: check looks at a monitor's public
+hostname as any visitor could, and with managed_by: external both read the
+monitor's web server over ssh, show always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
@@ -291,8 +294,8 @@ func main() {
 		err = runApp(os.Args[2:])
 	case "oidc":
 		err = runOIDC(os.Args[2:])
-	case "ingress":
-		err = runIngress(os.Args[2:])
+	case "web-server":
+		err = runWebServer(os.Args[2:])
 	case "storage":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "init":
@@ -440,10 +443,10 @@ func runInit(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	switch {
 	case errors.Is(err, iofs.ErrNotExist):
-		secrets = &config.Secrets{Version: 1}
+		secrets = &config.Secrets{Version: config.SecretsVersion, ID: cfg.ID}
 	case err != nil:
 		return err
 	}
@@ -550,7 +553,7 @@ func runRender(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -617,6 +620,7 @@ func runApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("apply: --min-free: %w", err)
 	}
+	defer cacheDigests()()
 	if *site == "" {
 		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
@@ -642,7 +646,7 @@ func runApply(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -781,10 +785,16 @@ func runApply(args []string) error {
 		if clients != nil {
 			changes += clients.steps
 		}
+		// The sweep removes images and writes nothing, so it is its own part
+		// of the summary rather than a change.
+		summary := count(changes, "change")
+		if len(plan.Sweep) > 0 {
+			summary = strings.TrimPrefix(summary+", "+plural(len(plan.Sweep), "old image")+" to sweep", ", ")
+		}
 		// A plan --execute would refuse, Eg: a file edited on the host, is
 		// where the run would stop, not work it would do.
-		dryRunFound(count(changes, "change"), apply.Refusal(plan))
-		if changes == 0 {
+		dryRunFound(summary, apply.Refusal(plan))
+		if changes == 0 && len(plan.Sweep) == 0 {
 			r.Result("%s is up to date. Nothing to apply.", *site)
 			return err
 		}
@@ -885,6 +895,23 @@ func checkStandby(r ui.Reporter, cfg *config.Config, plan *apply.Plan, site stri
 // reaches a registry.
 var caddyDigests apply.Resolver = imagedigest.Registry{}
 
+// cacheDigests puts an imagedigest.Cache in front of caddyDigests for the
+// rest of an apply, and returns what puts it back. Every plan the apply makes
+// then names the build its first plan resolved Caddy's tag to: without
+// --site that is the pull stage's plan of each site, then each site's apply
+// and pass two, and with it each pass of the one site's apply. An apply run
+// as a step of another finds the cache in place and keeps it, so the whole
+// run shares one. Tests that replace caddyDigests still decide what it
+// answers; the cache only stops it answering twice.
+func cacheDigests() (restore func()) {
+	if _, cached := caddyDigests.(*imagedigest.Cache); cached {
+		return func() {}
+	}
+	saved := caddyDigests
+	caddyDigests = imagedigest.Cached(saved)
+	return func() { caddyDigests = saved }
+}
+
 // planSiteApply is everything apply decides for one site, without doing any
 // of it: the etcd flags the site's member was born with, the render, the plan
 // and the databases it bootstraps. `storage rotate-key` switches an app with
@@ -962,7 +989,7 @@ func runStorageInit(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1153,6 +1180,11 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	return nil
 }
 
+// insideApply is set while apply runs dns init or gateway move as one of its
+// steps. Apply has already shown the configuration's findings and ends on a
+// result of its own, so the step shows neither.
+var insideApply bool
+
 // runDNSInit creates the public DNS records a deployment needs, at the
 // provider acme.provider names, using the token that already answers ACME
 // challenges. It is modelled on runStorageInit: a dry run by default, and
@@ -1201,7 +1233,9 @@ func runDNSInit(args []string) error {
 	if err := dns.Execute(ctx, provider, plan, r); err != nil {
 		return err
 	}
-	r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+	if !insideApply {
+		r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+	}
 	return nil
 }
 
@@ -1267,7 +1301,9 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 		return nil, nil, nil, nil, false, err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, *configPath, result)
+	if !insideApply {
+		reportFindings(r, *configPath, result)
+	}
 	if result.Refused() {
 		return nil, nil, nil, nil, false, refused(*configPath, len(result.Refusals()), "")
 	}
@@ -1279,7 +1315,7 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return nil, nil, nil, nil, false, err
 	}

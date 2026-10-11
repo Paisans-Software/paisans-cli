@@ -52,7 +52,7 @@ func (r Rule) String() string {
 
 // Rules derives a site's inbound rules from its roles and its dial endpoint.
 // Nothing is listed per site: a site that gains the gateway role, or the
-// monitor role in ingress mode paisans, gains 80 and 443 on its next prepare,
+// monitor role with managed_by: paisans, gains 80 and 443 on its next prepare,
 // and one that loses it has them removed by the same prepare, since the
 // profile removes a rule it added once nothing derives it any more. SSH is
 // the exception and is never removed; see the profile's Firewall. Its port is

@@ -9,8 +9,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 )
 
-// What follows makes the keys in a site's ssh.keys the login user's
-// authorized keys, without taking the file over.
+// What follows makes the keys of the admins a site's ssh.keys names the login
+// user's authorized keys, without taking the file over.
 //
 // authorized_keys is shared with whoever else manages the host: cloud-init
 // puts the provider's key there, an operator may add a restricted key by
@@ -233,7 +233,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, s config.SSH) (out
 					Kinds:    []string{KindSSHKeys},
 					Label:    "rename",
 					Title:    "rename ssh key",
-					Describe: fmt.Sprintf("ssh: record key %s as %s, which ssh.keys called %s", k.Fingerprint, k.Name, was),
+					Describe: fmt.Sprintf("ssh: record key %s as %s's, which was recorded as %s's", k.Fingerprint, k.Name, was),
 					Command:  Locked(writeOwned(d, user, owned)),
 				})
 			}

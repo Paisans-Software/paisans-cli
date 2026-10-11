@@ -1,4 +1,4 @@
-# valid.yaml with a monitor that publishes its app on a LAN address.
+# valid.yaml with a second app pinned to a monitor behind an external web server.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -14,6 +14,11 @@ mesh:
 acme:
   provider: desec
 
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -22,16 +27,14 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -39,20 +42,18 @@ sites:
     ssh:
       host: vm.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   watch:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20
-    ingress:
-      mode: external
-      listen: 192.168.1.20:8480
+    web_server:
+      managed_by: external
+      listen: 127.0.0.1:8480
     ssh:
       host: watch.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
 cluster:
   sites: [home-a, home-b]
@@ -90,6 +91,10 @@ apps:
     placement: { pinned: watch }
     settings:
       admin_group: admins
+  web:
+    kind: element
+    hostname: web.example.org
+    placement: { pinned: watch }
 
 smtp:
   host: smtp.example.org

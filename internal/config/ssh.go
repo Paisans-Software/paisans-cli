@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/mail"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,9 +31,15 @@ type SSH struct {
 	User string `yaml:"user"`
 	// Port is the SSH port. Zero means 22.
 	Port int `yaml:"port"`
-	// Keys are the public keys that may log in, each under a name the
-	// deployment knows it by.
-	Keys KeyList `yaml:"keys"`
+	// Admins names the admins who may log in, each an entry of the top-level
+	// admins section. A site lists people rather than keys because one admin's
+	// keys are the same on every site they reach, and a key written out once
+	// per site is a key that gets rotated on some sites and not others.
+	Admins []string `yaml:"keys"`
+	// Keys are the public keys of the admins listed, in the order the list
+	// names them and each admin lists their keys. Load fills it; each key is
+	// named after its admin.
+	Keys KeyList `yaml:"-"`
 
 	// declared records that the key was present at all, so a missing
 	// section and an empty one get different messages.
@@ -58,8 +66,10 @@ func (s *SSH) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i]
-		if key.Value == "public_key" {
-			return fmt.Errorf("line %d: ssh.public_key is replaced by ssh.keys, which names each key. Write:\n%s", key.Line, keysSection(node.Content[i+1].Value))
+		if key.Value == "keys" {
+			if v := node.Content[i+1]; v.Kind != yaml.SequenceNode && !(v.Kind == yaml.ScalarNode && v.Tag == "!!null") {
+				return fmt.Errorf("line %d: ssh.keys must list the admins who may log in, by their name in the admins section, Eg: keys: [alice]", v.Line)
+			}
 		}
 		if !sshKeys[key.Value] {
 			return fmt.Errorf("line %d: field %s not found in an ssh section. Its keys are host, user, port and keys", key.Line, key.Value)
@@ -103,76 +113,24 @@ func (s Site) SSHHost() string {
 	return host
 }
 
-// keysSection is the ssh.keys section that says what a public_key said, each
-// key named by its comment up to the @, so a refusal can show what to write.
-// A key's base64 is shortened: the line is the operator's to paste, and a
-// whole one wraps past any terminal.
-func keysSection(publicKey string) string {
-	out := "  keys:\n"
-	n := 0
-	for _, line := range strings.Split(publicKey, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		n++
-		name := fmt.Sprintf("key%d", n)
-		if fields := strings.Fields(line); len(fields) > 2 {
-			if local, _, _ := strings.Cut(fields[2], "@"); keyName.MatchString(strings.ToLower(local)) {
-				name = strings.ToLower(local)
-			}
-		}
-		shown := line
-		if fields := strings.Fields(line); len(fields) > 1 && len(fields[1]) > 12 {
-			fields[1] = fields[1][:12] + "..."
-			shown = strings.Join(fields, " ")
-		}
-		out += "    " + name + ": " + shown + "\n"
-	}
-	return out
-}
-
-// NamedKey is one entry of ssh.keys: a name and the .pub line it names.
+// NamedKey is one public key a site authorises: the admin it belongs to and
+// the .pub line.
 type NamedKey struct {
 	Name string
 	Line string
 }
 
-// KeyList is ssh.keys, in the order the file lists it.
+// KeyList is the keys a site authorises, in the order its ssh.keys names the
+// admins.
 type KeyList []NamedKey
 
 // keyName is what a key may be called: it goes into a command line and a
 // file on the host.
 var keyName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 
-// UnmarshalYAML reads ssh.keys, a mapping from a key's name to its .pub line,
-// keeping the file's order. A name given twice is refused here, since yaml.v3
-// does not check a mapping read node by node.
-func (k *KeyList) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("line %d: ssh.keys must map each key's name to its public key, Eg: alice: ssh-ed25519 AAAA... alice@example.org", node.Line)
-	}
-	seen := map[string]int{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		name, value := node.Content[i], node.Content[i+1]
-		if first, dup := seen[name.Value]; dup {
-			return fmt.Errorf("line %d: ssh.keys.%s is already given on line %d. Name each key once", name.Line, name.Value, first)
-		}
-		seen[name.Value] = name.Line
-		if value.Kind != yaml.ScalarNode {
-			return fmt.Errorf("line %d: ssh.keys.%s must be one public key, the whole line of the .pub file", value.Line, name.Value)
-		}
-		*k = append(*k, NamedKey{Name: name.Value, Line: value.Value})
-	}
-	return nil
-}
-
 // AuthorizedKey is one public key, as an authorized_keys line carries it.
 type AuthorizedKey struct {
-	// Name is what ssh.keys calls the key; empty for a line read off a host.
+	// Name is the admin the key belongs to; empty for a line read off a host.
 	Name string
 	// Line is the key as written, without options: type, base64, comment.
 	Line string
@@ -209,8 +167,9 @@ func ParseKeyLine(line string) (AuthorizedKey, []string, error) {
 	}, options, nil
 }
 
-// AuthorizedKeys parses ssh.keys. A name this toolkit does not accept is a
-// problem, and so is a line that is not a plain key and a key listed twice.
+// AuthorizedKeys parses the keys the site authorises. A name this toolkit
+// does not accept is a problem, and so is a line that is not a plain key and a
+// key listed twice.
 //
 // Options (`from=`, `command=`, `restrict` and the rest) are refused rather
 // than carried. They change what a key may do, and a line that host prepare
@@ -223,20 +182,20 @@ func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 	seen := map[string]string{}
 	for _, nk := range s.Keys {
 		if !keyName.MatchString(nk.Name) {
-			problems = append(problems, fmt.Sprintf("keys.%s: not a key name this toolkit accepts. Use a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters", nk.Name))
+			problems = append(problems, fmt.Sprintf("%s: not a name this toolkit accepts. Use a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters", nk.Name))
 			continue
 		}
 		key, options, err := ParseKeyLine(strings.TrimSpace(nk.Line))
 		switch {
 		case err != nil:
-			problems = append(problems, fmt.Sprintf("keys.%s: not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org", nk.Name, err))
+			problems = append(problems, fmt.Sprintf("%s: not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org", nk.Name, err))
 			continue
 		case len(options) > 0:
-			problems = append(problems, fmt.Sprintf("keys.%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone", nk.Name, strings.Join(options, ",")))
+			problems = append(problems, fmt.Sprintf("%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone", nk.Name, strings.Join(options, ",")))
 			continue
 		}
 		if first, dup := seen[key.Fingerprint]; dup {
-			problems = append(problems, fmt.Sprintf("keys.%s: the same key as keys.%s (%s). List each key once", nk.Name, first, key.Fingerprint))
+			problems = append(problems, fmt.Sprintf("%s: the same key as %s lists (%s). List each key once", nk.Name, first, key.Fingerprint))
 			continue
 		}
 		seen[key.Fingerprint] = nk.Name
@@ -266,7 +225,7 @@ func isHostname(s string) bool {
 }
 
 // sshProblems is structural's check of one site's ssh section.
-func sshProblems(name string, site Site) []string {
+func sshProblems(name string, site Site, known map[string]Admin) []string {
 	s := site.SSH
 	var problems []string
 	add := func(format string, args ...any) {
@@ -291,12 +250,110 @@ func sshProblems(name string, site Site) []string {
 	case s.Host != "" && net.ParseIP(s.Host) == nil && !isHostname(s.Host):
 		add("sites.%s.ssh.host: %q is neither a hostname nor an IP address. Give only the host; the user and port have keys of their own.", name, s.Host)
 	}
-	keys, keyProblems := s.AuthorizedKeys()
-	for _, p := range keyProblems {
-		add("sites.%s.ssh.%s.", name, p)
+	if len(s.Admins) == 0 {
+		add("sites.%s.ssh.keys: required. Name at least one admin from the admins section, Eg: keys: [alice]; host prepare makes their keys the user's authorized keys.", name)
 	}
-	if len(keys) == 0 && len(keyProblems) == 0 {
-		add("sites.%s.ssh.keys: required. Name at least one public key, Eg: alice: ssh-ed25519 AAAA... alice@example.org; host prepare makes these the user's authorized keys.", name)
+	listed := map[string]bool{}
+	for _, admin := range s.Admins {
+		switch {
+		case listed[admin]:
+			add("sites.%s.ssh.keys: %s is listed twice. Name each admin once.", name, admin)
+		case !hasAdmin(known, admin):
+			add("sites.%s.ssh.keys: %s is not in the admins section. Declare the admin there with an email and keys, or name one who is.", name, admin)
+		}
+		listed[admin] = true
+	}
+	return problems
+}
+
+// Admin is one person who may log in to the sites that name them.
+type Admin struct {
+	// Name is the admin's full name. Optional; it is for the people reading
+	// the file.
+	Name string `yaml:"name"`
+	// Email is how the admin is reached. Required, so that a key in the file
+	// always leads to somebody who can say whether it is still theirs.
+	Email string `yaml:"email"`
+	// Keys is the admin's public keys, one whole .pub line per line, usually
+	// written as a block (keys: |).
+	Keys string `yaml:"keys"`
+}
+
+// KeyLines is the admin's keys, one per non-blank line.
+func (a Admin) KeyLines() []string {
+	var out []string
+	for _, line := range strings.Split(a.Keys, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// resolveKeys fills each site's ssh.Keys from the admins its ssh.keys names.
+// An admin the section does not declare contributes nothing; structural
+// reports it.
+func (c *Config) resolveKeys() {
+	for name, site := range c.Sites {
+		site.SSH.Keys = nil
+		for _, id := range site.SSH.Admins {
+			for _, line := range c.Admins[id].KeyLines() {
+				site.SSH.Keys = append(site.SSH.Keys, NamedKey{Name: id, Line: line})
+			}
+		}
+		c.Sites[name] = site
+	}
+}
+
+// adminProblems is structural's check of the admins section. Each key is
+// checked here, once, rather than on every site that names its admin, and a
+// key may belong to one admin only: two admins sharing a key cannot be told
+// apart on a host, and taking one off a site would leave the other's access
+// depending on a key nobody listed for them.
+func (c *Config) adminProblems() []string {
+	var problems []string
+	add := func(format string, args ...any) {
+		problems = append(problems, fmt.Sprintf(format, args...))
+	}
+	ids := make([]string, 0, len(c.Admins))
+	for id := range c.Admins {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	owner := map[string]string{}
+	for _, id := range ids {
+		a := c.Admins[id]
+		if !keyName.MatchString(id) {
+			add("admins.%s: not a name this toolkit accepts, since it is recorded on each host beside the admin's keys. Use a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters.", id)
+		}
+		if a.Email == "" {
+			add("admins.%s.email: required. Give the address the admin is reached at, Eg: %s@example.org.", id, id)
+		} else if addr, err := mail.ParseAddress(a.Email); err != nil || addr.Address != a.Email {
+			add("admins.%s.email: %q is not an email address alone, Eg: %s@example.org.", id, a.Email, id)
+		}
+		lines := a.KeyLines()
+		if len(lines) == 0 {
+			add("admins.%s.keys: required. Give at least one public key, the whole line of the .pub file, one per line, Eg:\n  keys: |\n    ssh-ed25519 AAAA... %s@example.org", id, id)
+		}
+		for n, line := range lines {
+			key, options, err := ParseKeyLine(line)
+			switch {
+			case err != nil:
+				add("admins.%s.keys: line %d is not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org.", id, n+1, err)
+				continue
+			case len(options) > 0:
+				add("admins.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone.", id, n+1, strings.Join(options, ","))
+				continue
+			}
+			switch first, dup := owner[key.Fingerprint]; {
+			case dup && first == id:
+				add("admins.%s.keys: line %d is a key the admin already lists (%s). List each key once.", id, n+1, key.Fingerprint)
+			case dup:
+				add("admins.%s.keys: line %d is admins.%s's key too (%s). A key belongs to one admin.", id, n+1, first, key.Fingerprint)
+			default:
+				owner[key.Fingerprint] = id
+			}
+		}
 	}
 	return problems
 }
@@ -352,4 +409,9 @@ func ParseDestination(s string) (Destination, error) {
 // Destination is where the site's ssh section reaches it.
 func (s Site) Destination() Destination {
 	return Destination{User: s.SSH.User, Host: s.SSHHost(), Port: s.SSH.PortOrDefault()}
+}
+
+func hasAdmin(admins map[string]Admin, id string) bool {
+	_, ok := admins[id]
+	return ok
 }

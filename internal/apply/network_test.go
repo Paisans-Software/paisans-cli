@@ -18,13 +18,13 @@ const (
 	unpinnedPool = `[{"Subnet":"172.18.0.0/16","Gateway":"172.18.0.1"}]`
 )
 
-// external renders the fixture with the monitor site in ingress mode
+// external renders the fixture with the monitor site with managed_by:
 // external, which pins the uptime app's compose network.
 func external(t *testing.T) *render.Plan {
 	t.Helper()
 	return planWith(t, func(cfg *config.Config) {
 		watch := cfg.Sites["watch"]
-		watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+		watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 		cfg.Sites["watch"] = watch
 	})
 }
@@ -56,7 +56,7 @@ func statusAction(t *testing.T, p *apply.Plan) apply.Action {
 	return apply.Action{}
 }
 
-// Switching to ingress mode external pins the network, and the network the
+// Switching to managed_by: external pins the network, and the network the
 // host already has keeps the pool Docker gave it. The plan takes the stack
 // down first, so that `up` creates the network the compose file declares,
 // and building the plan changes nothing on the host.
@@ -89,7 +89,7 @@ func TestPinningANetworkTakesTheStackDown(t *testing.T) {
 	}
 }
 
-// Leaving ingress mode external drops the pin, and a network still on the
+// Leaving managed_by: external drops the pin, and a network still on the
 // pinned pool would keep its old gateway, which TRUST_PROXY no longer names.
 func TestDroppingAPinTakesTheStackDown(t *testing.T) {
 	host := appliedFrom(t, "watch", external(t))

@@ -7,8 +7,10 @@ import (
 )
 
 // Prune is one image an apply would remove once the stack it was superseded
-// in is healthy.
+// in is healthy, or in its sweep at the end.
 type Prune struct {
+	// Stack is the stack whose repositories the image is from, empty for an
+	// image the sweep removes.
 	Stack string
 	// Ref is how the image is shown: repository:tag, or repository@id for an
 	// image whose tag moved on.
@@ -100,21 +102,40 @@ func sameID(a, b string) bool {
 	return strings.HasPrefix(b, a)
 }
 
-// superseded picks the images to prune for the stacks named, in order. An
-// image qualifies when it is from a repository one of those stacks renders,
-// is not an image any stack of this site renders (by ID or by
-// repository:tag), and is not in inUse. Comparing against the whole site
-// rather than the one stack keeps a shared repository safe: two apps pinning
-// different postgres tags never prune each other's.
-func superseded(stacks []string, images map[string][]string, ids map[string]string, listed []listedImage, inUse []string) []Prune {
+// pruneScope is where a prune looks: the repositories it may remove images
+// of, and the stack its removals are reported under, empty for the sweep.
+type pruneScope struct {
+	stack string
+	repos map[string]bool
+}
+
+// stackScopes is a scope per stack named, each the repositories that stack
+// renders.
+func stackScopes(stacks []string, images map[string][]string) []pruneScope {
+	var out []pruneScope
+	for _, stack := range stacks {
+		repos := map[string]bool{}
+		for _, ref := range images[stack] {
+			repos[repository(ref)] = true
+		}
+		out = append(out, pruneScope{stack: stack, repos: repos})
+	}
+	return out
+}
+
+// superseded picks the images to prune in the scopes given, in order. An
+// image qualifies when it is from one of a scope's repositories, is not an
+// image keep names (by ID or by repository:tag), and is not in inUse.
+// Comparing against everything the deployment renders rather than the one
+// stack keeps a shared repository safe: two apps pinning different postgres
+// tags never prune each other's.
+func superseded(scopes []pruneScope, keep []string, ids map[string]string, listed []listedImage, inUse []string) []Prune {
 	keepRefs := map[string]bool{}
 	var keepIDs []string
-	for _, refs := range images {
-		for _, ref := range refs {
-			keepRefs[normalRef(ref)] = true
-			if id := ids[ref]; id != "" {
-				keepIDs = append(keepIDs, id)
-			}
+	for _, ref := range keep {
+		keepRefs[normalRef(ref)] = true
+		if id := ids[ref]; id != "" {
+			keepIDs = append(keepIDs, id)
 		}
 	}
 	used := func(image listedImage) bool {
@@ -128,13 +149,9 @@ func superseded(stacks []string, images map[string][]string, ids map[string]stri
 	}
 	taken := map[string]bool{}
 	var out []Prune
-	for _, stack := range stacks {
-		repos := map[string]bool{}
-		for _, ref := range images[stack] {
-			repos[repository(ref)] = true
-		}
+	for _, scope := range scopes {
 		for _, image := range listed {
-			if !repos[repository(image.Repository)] || taken[image.ID] || image.ID == "" {
+			if !scope.repos[repository(image.Repository)] || taken[image.ID] || image.ID == "" {
 				continue
 			}
 			if keepRefs[normalRef(image.Repository+":"+image.Tag)] || used(image) {
@@ -154,10 +171,28 @@ func superseded(stacks []string, images map[string][]string, ids map[string]stri
 			if image.Tag == "" || image.Tag == "<none>" {
 				ref = image.Repository + "@" + shortID(image.ID)
 			}
-			out = append(out, Prune{Stack: stack, Ref: ref, ID: image.ID})
+			out = append(out, Prune{Stack: scope.stack, Ref: ref, ID: image.ID})
 		}
 	}
 	return out
+}
+
+// keepRefs is every image no prune may remove: what each stack of this site
+// renders, held back or not. Another site's images are on another machine,
+// since a site is one. Sorted and without repeats.
+func (p *Plan) keepRefs() []string {
+	return allRefs(p.images)
+}
+
+// inUseImages reads the containerImages answer, one image per line.
+func inUseImages(out string) []string {
+	var inUse []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			inUse = append(inUse, line)
+		}
+	}
+	return inUse
 }
 
 // pruneStack removes the images one healthy stack superseded. Everything is
@@ -169,7 +204,8 @@ func pruneStack(plan *Plan, stack string, t Transport) {
 	warn := func(format string, args ...any) {
 		plan.warn(stack+": old images left in place", fmt.Sprintf(format, args...))
 	}
-	ids, err := probeImages(allRefs(plan.images), t)
+	keep := plan.keepRefs()
+	ids, err := probeImages(keep, t)
 	if err != nil {
 		warn("%v", err)
 		return
@@ -189,13 +225,7 @@ func pruneStack(plan *Plan, stack string, t Transport) {
 		warn("listing what containers use: %v", err)
 		return
 	}
-	var inUse []string
-	for _, line := range strings.Split(used, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			inUse = append(inUse, line)
-		}
-	}
-	for _, p := range superseded([]string{stack}, plan.images, ids, listed, inUse) {
+	for _, p := range superseded(stackScopes([]string{stack}, plan.images), keep, ids, listed, inUseImages(used)) {
 		if out, err := t.Run("docker image rm " + shellQuote(p.ID)); err != nil {
 			warn("could not remove %s (%s): %s", p.Ref, shortID(p.ID), firstLine(strings.TrimSpace(out)))
 			continue

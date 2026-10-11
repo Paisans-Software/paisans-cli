@@ -15,6 +15,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
@@ -137,6 +138,8 @@ func Check(cfg *config.Config) Result {
 	c.garageCapacities()
 	c.garageAvailability()
 	c.siteOutsideMesh()
+	c.duplicateSiteAddress()
+	c.sitesShareAMachine()
 	c.imageServices()
 	c.floatingImages()
 	c.clusterPlacementWithoutACluster()
@@ -155,11 +158,12 @@ func Check(cfg *config.Config) Result {
 	c.oidcMemberGroupDisagreesWithGate()
 	c.oidcClientUnrestricted()
 	c.monitorRoles()
-	c.ingress()
+	c.webServer()
 	c.smtpOnAKindWithoutMail()
 	c.pocketIDSettingInvalid()
 	c.pocketIDConfigKeyHasASetting()
 	c.pocketIDEmailWithoutSMTP()
+	c.pocketIDAdminUsername()
 	c.pocketIDSMTPSender()
 	c.mbinSMTPSender()
 	c.mbinContactEmail()
@@ -229,11 +233,14 @@ func (c *checker) witnessSharesFailureDomain() {
 // worse than one, so a join goes from one to three in a single operation and
 // never rests at two.
 //
+// Either way the first way out is a witness: a site with the witness role in a
+// third location, which makes three voters and gives automatic failover. The
+// toolkit never demands one, so declaring one voter stays the other way out.
 // A derived pair came from the roles, so the advice is in their terms: with
-// one data site the witness has no tie to break and its role comes off;
-// otherwise a witness in a third location makes three, or one voter is
-// written out.
+// one data site the witness has no tie to break and its role comes off.
 func (c *checker) twoVoters() {
+	const witness = "Add a witness: a site in a third location, one that fails independently of both, with the witness role (Eg: `roles: [witness]`)"
+	const failover = ", which makes three voters and gives automatic failover."
 	members := c.cfg.Etcd.Members
 	if len(members) != 2 {
 		return
@@ -241,25 +248,25 @@ func (c *checker) twoVoters() {
 	if !c.cfg.Etcd.MembersDerived {
 		c.refuse("two-etcd-voters", "etcd.members",
 			"etcd has exactly two voters",
-			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. Declare one member, or three.",
-			members[0], members[1])
+			"exactly two etcd voters (%s and %s). Two voters are strictly worse than one: a majority of two is two, so either failing stops the cluster. %s Or declare one member, which gives up automatic failover.",
+			members[0], members[1], witness+" and listed in etcd.members"+failover)
 		return
 	}
-	var data, witness []string
+	var data, witnesses []string
 	for _, name := range members {
 		if c.cfg.Sites[name].Has(config.RoleData) {
 			data = append(data, name)
 		} else {
-			witness = append(witness, name)
+			witnesses = append(witnesses, name)
 		}
 	}
 	one := members[0]
 	if len(data) > 0 {
 		one = data[0]
 	}
-	fix := fmt.Sprintf("Give a site in a third location, one that fails independently of both, the witness role, which makes three voters; or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", one)
-	if len(data) == 1 && len(witness) == 1 {
-		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witness[0], data[0])
+	fix := fmt.Sprintf("%s Or write `etcd.members: [%s]` to run one voter, which gives up automatic failover.", witness+failover, one)
+	if len(data) == 1 && len(witnesses) == 1 {
+		fix = fmt.Sprintf("With one data site the witness has no tie to break: take the witness role off %s, and %s is the one voter.", witnesses[0], data[0])
 	}
 	c.refuse("two-etcd-voters", c.cfg.EtcdMembersKey(),
 		"etcd has exactly two voters",
@@ -659,6 +666,94 @@ func (c *checker) siteOutsideMesh() {
 	}
 }
 
+// duplicateSiteAddress refuses two sites with one mesh address.
+//
+// Every service on a site binds its mesh address, and every other site routes
+// that address to it through its WireGuard peer. Two sites holding one address
+// would each get the other's traffic and neither could tell, so there is no
+// way to apply it that works.
+func (c *checker) duplicateSiteAddress() {
+	first := map[string]string{}
+	for _, name := range c.cfg.SiteNames() {
+		address := c.cfg.Sites[name].Address
+		if address == "" {
+			continue
+		}
+		if earlier, taken := first[address]; taken {
+			c.refuse("duplicate-site-address", fmt.Sprintf("sites.%s.address", name),
+				"two sites have the same mesh address",
+				"is %s, which sites.%s.address already is. Every site binds its services to its own mesh address and every other site routes that address to it, so two sites on one address each receive the other's traffic. Give each site an address of its own inside mesh.subnet.",
+				address, earlier)
+			continue
+		}
+		first[address] = name
+	}
+}
+
+// sitesShareAMachine refuses two sites that are certainly one machine.
+//
+// A site is a machine. Everything a deployment owns on a host is named for the
+// deployment, not the site: its root /srv/paisans/<token>, its compose
+// projects, its WireGuard interface psns-<token>, its entry in the host's
+// registry. Two sites of one deployment on one machine would overwrite each
+// other's files and containers. Roles combine on one site, and a second
+// environment is a second deployment, so nothing needs two sites on one
+// machine.
+//
+// The file can only see a machine through how it is reached, so two things
+// are compared, each of which reaches exactly one machine:
+//
+//   - the ssh destination, host and port after their defaults (ssh.host or
+//     public_address or the endpoint's host; port 22). The login user is
+//     left out: two users on one host and port are still one machine.
+//   - the endpoint other sites dial (config.Site.DialEndpoint). One address
+//     and UDP port is delivered to one machine, behind NAT or not.
+//
+// A shared public_address alone is not compared. Two sites behind one router
+// share the router's public address, each reached on a port forwarded to it,
+// and that is a correct home lab, not one machine. The apply's claim on each
+// host is what catches the rest (internal/registry), since two different
+// names for one machine look different in a file.
+func (c *checker) sitesShareAMachine() {
+	advice := "A site is a machine: a deployment names its files, containers and WireGuard interface for itself and not for the site, so two of its sites on one machine overwrite each other. To combine roles, give one site several roles; a second environment is a second deployment."
+	ssh := map[string]string{}
+	dial := map[string]string{}
+	for _, name := range c.cfg.SiteNames() {
+		site := c.cfg.Sites[name]
+		if host := site.SSHHost(); host != "" {
+			where := sshKey(host, site.SSH.PortOrDefault())
+			if earlier, taken := ssh[where]; taken {
+				c.refuse("sites-share-a-machine", fmt.Sprintf("sites.%s.ssh", name),
+					"two sites are reached at one ssh destination",
+					"reaches %s, as sites.%s.ssh does, so the two are one machine. %s",
+					where, earlier, advice)
+			} else {
+				ssh[where] = name
+			}
+		}
+		if endpoint := site.DialEndpoint(); endpoint != "" {
+			where := strings.ToLower(endpoint)
+			if earlier, taken := dial[where]; taken {
+				c.refuse("sites-share-a-machine", fmt.Sprintf("sites.%s.endpoint", name),
+					"two sites are dialled at one endpoint",
+					"is dialled at %s, as sites.%s is, and one address and port reaches one machine. %s Behind one router, forward a port of its own to each site.",
+					endpoint, earlier, advice)
+			} else {
+				dial[where] = name
+			}
+		}
+	}
+}
+
+// sshKey is one ssh host and port, written the same way however the file
+// spelt them: a hostname in lowercase, an address in its canonical form.
+func sshKey(host string, port int) string {
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
+}
+
 // meshIsNotPrivate warns about a mesh on publicly routable space.
 //
 // Preflight checks that the subnet does not collide with anything a host
@@ -1043,7 +1138,7 @@ func (c *checker) portCollision() {
 // same owner under the same key is one listener named twice, such as a
 // service on its mesh address and on loopback, which never overlaps anyway;
 // the same owner under two keys, such as an app published on its mesh
-// address and again on an ingress listen, is two binds like any others.
+// address and again on a web_server listen, is two binds like any others.
 func collides(a, b render.Listener) bool {
 	if a.Owner == b.Owner && a.Key == b.Key {
 		return false
