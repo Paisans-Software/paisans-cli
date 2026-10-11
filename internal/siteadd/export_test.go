@@ -34,7 +34,7 @@ func PromoteAttempts() int { return promoteAttempts }
 // test binary's run, and returns a function that restores it.
 func PassPreflight() func() {
 	saved := runPreflight
-	runPreflight = func(*config.Config, string, map[string]apply.Transport) (preflight.Report, error) {
+	runPreflight = func(*config.Config, []string, map[string]apply.Transport) (preflight.Report, error) {
 		return preflight.Report{}, nil
 	}
 	return func() { runPreflight = saved }
@@ -44,8 +44,19 @@ func PassPreflight() func() {
 // restores it.
 func SetPreflight(report preflight.Report) func() {
 	saved := runPreflight
-	runPreflight = func(*config.Config, string, map[string]apply.Transport) (preflight.Report, error) {
+	runPreflight = func(*config.Config, []string, map[string]apply.Transport) (preflight.Report, error) {
 		return report, nil
+	}
+	return func() { runPreflight = saved }
+}
+
+// RecordPreflight passes stage 1 as PassPreflight does, recording the sites
+// each run was asked to check, and returns a function that restores it.
+func RecordPreflight(got *[][]string) func() {
+	saved := runPreflight
+	runPreflight = func(_ *config.Config, sites []string, _ map[string]apply.Transport) (preflight.Report, error) {
+		*got = append(*got, append([]string(nil), sites...))
+		return preflight.Report{}, nil
 	}
 	return func() { runPreflight = saved }
 }

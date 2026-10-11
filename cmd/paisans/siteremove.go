@@ -103,7 +103,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	if a.secrets == "" {
 		a.secrets = filepath.Join(filepath.Dir(a.config), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(a.secrets)
+	secrets, err := config.LoadDeploymentSecrets(a.secrets, cfg.ID)
 	if err != nil {
 		return err
 	}

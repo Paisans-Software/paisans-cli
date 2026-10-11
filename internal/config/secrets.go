@@ -12,8 +12,14 @@ import (
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
+
+// SecretsVersion is the format of the secrets file this toolkit reads and
+// writes. It is the file's own, and changes independently of paisans.yaml's
+// version.
+const SecretsVersion = 1
 
 // Secrets is the decrypted content of secrets.enc.yaml. Nothing here is ever
 // written back out except into a rendered artifact.
@@ -22,7 +28,15 @@ import (
 // because someone else issued them, and captured after a running service
 // minted them.
 type Secrets struct {
-	Version     int                       `yaml:"version"`
+	// Version is the file's format, SecretsVersion when written. A file
+	// without one is read as this format and written with it.
+	Version int `yaml:"version"`
+	// ID is the id of the deployment the file belongs to, paisans.yaml's id.
+	// The file holds that deployment's credentials and the state captured
+	// from its running services, so LoadDeploymentSecrets refuses it for any
+	// other. A file without one is accepted and carries the id from its next
+	// write.
+	ID          string                    `yaml:"id,omitempty"`
 	Cluster     ClusterSecrets            `yaml:"cluster"`
 	Storage     StorageSecrets            `yaml:"storage"`
 	Sites       map[string]SiteSecrets    `yaml:"sites"`
@@ -111,14 +125,51 @@ func LoadSecrets(path string) (*Secrets, error) {
 	strict := yaml.NewDecoder(bytes.NewReader(plain))
 	strict.KnownFields(true)
 	s.UnknownKeys = strict.Decode(&Secrets{}) != nil
-	if s.Version != 1 {
+	if s.Version < 0 || s.Version > SecretsVersion {
 		return nil, &ui.Problem{
 			Hint:    fmt.Sprintf("%s is a version %d secrets file", ui.ShortPath(path), s.Version),
-			Explain: "This toolkit reads version 1. Use the toolkit release that wrote it.",
-			Cause:   fmt.Errorf("%s: version: expected 1, got %d", path, s.Version),
+			Explain: fmt.Sprintf("It was written by a newer toolkit; this one reads version %d. Use the toolkit release that wrote it, or a later one.", SecretsVersion),
+			Cause:   fmt.Errorf("%s: version: expected at most %d, got %d", path, SecretsVersion, s.Version),
 		}
 	}
+	if s.Version == 0 {
+		s.Version = SecretsVersion
+	}
 	return &s, nil
+}
+
+// LoadDeploymentSecrets is LoadSecrets for the deployment whose id is id,
+// and is how every command reads them. A file another deployment wrote is
+// refused: its OIDC client credentials and Pocket ID group IDs name objects
+// at that deployment's services, and nothing else would notice them used
+// here. A file without an id is given this one, which its next write keeps.
+func LoadDeploymentSecrets(path, id string) (*Secrets, error) {
+	s, err := LoadSecrets(path)
+	if err != nil {
+		return nil, err
+	}
+	if s.ID != "" && id != "" && s.ID != id {
+		return nil, foreignSecretsProblem(path, s.ID, id)
+	}
+	if s.ID == "" {
+		s.ID = id
+	}
+	return s, nil
+}
+
+// foreignSecretsProblem says that the file at path belongs to deployment
+// theirs rather than ours. The ids are shortened to their tokens, the way
+// names on a host carry them, unless the tokens are the same.
+func foreignSecretsProblem(path, theirs, ours string) error {
+	a, b := deployment.Deployment{ID: theirs}.Token()+"…", deployment.Deployment{ID: ours}.Token()+"…"
+	if a == b {
+		a, b = theirs, ours
+	}
+	return &ui.Problem{
+		Hint:    fmt.Sprintf("%s belongs to deployment %s, not %s", ui.ShortPath(path), a, b),
+		Explain: "It holds another deployment's credentials and the state captured from its running services, such as OIDC clients and Pocket ID group IDs, so it is not read for this one. To start this deployment fresh, move that file aside and run paisans init; paisans apply creates a new one as well.",
+		Cause:   fmt.Errorf("%s: id: %s, and the configuration's id is %s", path, theirs, ours),
+	}
 }
 
 // errNoKey and errTampered are what decryptSOPS found, for decryptProblem to

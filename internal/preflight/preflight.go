@@ -139,11 +139,19 @@ var inspectHost = hostcheck.Run
 // a host says is a Check, so the operator sees every problem at once rather
 // than the first.
 func Run(cfg *config.Config, newSite string, transports map[string]apply.Transport) (Report, error) {
-	site, ok := cfg.Sites[newSite]
-	if !ok {
-		return Report{}, fmt.Errorf("preflight: no site %q is declared. Declared sites are %s", newSite, strings.Join(cfg.SiteNames(), ", "))
+	return RunAll(cfg, []string{newSite}, transports)
+}
+
+// RunAll is Run for several sites joining at once, Eg: a new data site and the
+// new witness its join brings in. Every site is reached and its clock read
+// once, and each joining site gets the checks of a blank host, by its roles.
+func RunAll(cfg *config.Config, joining []string, transports map[string]apply.Transport) (Report, error) {
+	for _, name := range joining {
+		if _, ok := cfg.Sites[name]; !ok {
+			return Report{}, fmt.Errorf("preflight: no site %q is declared. Declared sites are %s", name, strings.Join(cfg.SiteNames(), ", "))
+		}
 	}
-	r := &runner{cfg: cfg, newSite: newSite, site: site, transports: transports, reachable: map[string]bool{}}
+	r := &runner{cfg: cfg, transports: transports, reachable: map[string]bool{}}
 
 	// SSH first, everywhere, because every other check needs it.
 	for _, name := range cfg.SiteNames() {
@@ -152,8 +160,12 @@ func Run(cfg *config.Config, newSite string, transports map[string]apply.Transpo
 	for _, name := range cfg.SiteNames() {
 		r.clock(name)
 	}
-	if r.reachable[newSite] {
-		t := transports[newSite]
+	for _, name := range joining {
+		r.newSite, r.site, r.hostReport = name, cfg.Sites[name], nil
+		if !r.reachable[name] {
+			continue
+		}
+		t := transports[name]
 		r.host(t)
 		r.hostPrepare(t)
 		r.registry(t)
@@ -171,7 +183,8 @@ func Run(cfg *config.Config, newSite string, transports map[string]apply.Transpo
 }
 
 type runner struct {
-	cfg        *config.Config
+	cfg *config.Config
+	// newSite is the joining site being checked, and site its declaration.
 	newSite    string
 	site       config.Site
 	transports map[string]apply.Transport

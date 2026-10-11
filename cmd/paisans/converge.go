@@ -156,11 +156,31 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageFounding, m))
 		}
 	}
-	// The cluster runs and this member has not joined it.
+	// The cluster runs and these members have not joined it. A data member
+	// joins through its site add. A witness has no site add of its own: it
+	// has no replica, and site add's etcd stage brings every configured
+	// member that is not yet a voter in, witnesses first and one learner at
+	// a time, each added before its etcd starts. So a witness joining beside
+	// a data site is joined by that site's site add, after its mesh gate has
+	// passed with the witness in it. A witness joining with no data site
+	// would make the voters even, which validate refuses; its site add is
+	// planned so that the run stops there, saying what to do.
+	var joining, witnesses []string
 	for _, m := range members {
-		if _, recorded := st.Initial[m]; !recorded && !founding(m) {
-			steps = append(steps, step(stageJoining, "site", "add", m))
+		if _, recorded := st.Initial[m]; recorded || founding(m) {
+			continue
 		}
+		if witness(m) {
+			witnesses = append(witnesses, m)
+		} else {
+			joining = append(joining, m)
+		}
+	}
+	if len(joining) == 0 {
+		joining = witnesses
+	}
+	for _, m := range joining {
+		steps = append(steps, step(stageJoining, "site", "add", m))
 	}
 
 	// A monitor checks every other site and app, so it is applied after
@@ -438,7 +458,7 @@ func readConvergeState(configPath, secretsPath string) (*config.Config, converge
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); errors.Is(err, fs.ErrNotExist) {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); errors.Is(err, fs.ErrNotExist) {
 		why = append(why, "no secrets file yet")
 	} else if err != nil {
 		// A file that is there and does not read (no age key, most often)
@@ -475,7 +495,7 @@ func convergeSecretsPath(configPath, secretsPath string) string {
 // would drop, and one encrypted with no .sops.yaml recipient beside it,
 // which writing would leave in plaintext. Why it failed is a ui.Problem.
 func convergeGenerate(cfg *config.Config, path string) (names, recipients []string, left string, err error) {
-	secrets, err := config.LoadSecrets(path)
+	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
 		return nil, nil, "", generateProblem(path, err)
 	}
@@ -688,7 +708,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 // sentences is err's hint as a sentence, then its explanation.
 func sentences(err error) string {
 	hint, explain := ui.Describe(err)
-	lines := []string{strings.TrimSuffix(hint, ".") + "."}
+	lines := []string{sentence(hint)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
@@ -703,11 +723,20 @@ func convergeStop(hint string, err error, next string) error {
 	if errors.As(err, &w) {
 		inner, explain = w.Hint()+": "+w.Detail, ""
 	}
-	lines := []string{strings.TrimSuffix(inner, ".") + "."}
+	lines := []string{sentence(inner)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
 	return &ui.Problem{Hint: hint, Explain: strings.Join(append(lines, next), "\n"), Cause: err}
+}
+
+// sentence is hint ended with one period, or as it is when it ends with a
+// colon, which introduces the lines after it.
+func sentence(hint string) string {
+	if strings.HasSuffix(hint, ":") {
+		return hint
+	}
+	return strings.TrimSuffix(hint, ".") + "."
 }
 
 // stepStatus is one step's status in a dry run.
@@ -1397,6 +1426,17 @@ func (c checkReporter) Refuse(hint, explanation string) {
 	*c.reports = append(*c.reports, checkReport{Text: joinDetail("✗ "+hint, explanation)})
 }
 
+// reportOwedApplies notes each apply a command leaves owed on a site, as
+// reportRemains does, but not for a step of converge (a checkReporter):
+// converge's pass two applies every site again, which makes each of them,
+// and a note naming another site would read as a second line for it.
+func reportOwedApplies(r ui.Reporter, lines []string) {
+	if _, step := r.(checkReporter); step {
+		return
+	}
+	reportRemains(r, lines)
+}
+
 // RetryLog is where the check's ssh retries go: kept, as a detail of the
 // step's line.
 func (c checkReporter) RetryLog() io.Writer { return retryCollector{c.reports} }
@@ -1453,7 +1493,7 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); err == nil {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); err == nil {
 		for _, key := range secretsgen.OwedNames(cfg, secrets) {
 			r.Note("secrets: "+key+" is owed and only you can provide it", "paisans secrets set "+key+" < value")
 		}

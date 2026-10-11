@@ -364,6 +364,9 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 		if !execute && (!c.executing || r.Verbose()) {
 			listClientPlan(r, app, c.idp, where, plan)
 		}
+		if !execute && !c.executing && plan.Replaces != "" {
+			r.Warn(replacing(app, plan.Replaces, false), "")
+		}
 		for _, w := range plan.Warnings {
 			c.warn(w)
 		}
@@ -412,6 +415,9 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 			c.refuse(p.app, err)
 			continue
 		}
+		if p.plan.Replaces != "" {
+			r.Warn(replacing(p.app, p.plan.Replaces, true), "")
+		}
 		if rec.wrote && len(c.recipients) == 0 {
 			warnUnencrypted(r, c.secretsPath)
 		}
@@ -426,11 +432,15 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 	return nil
 }
 
-// keepsRecorded refuses an app whose recorded credentials Pocket ID does not
-// hold as that app's client. apply creates a client only when nothing is
-// recorded; replacing recorded credentials is the operator's call, made with
-// `oidc client create`, which re-records them. Session owner decision,
-// 2026-10-08.
+// keepsRecorded refuses an app whose recorded credentials apply cannot
+// safely replace. Nothing recorded, or credentials Pocket ID holds as the
+// app's client, are planned as they are. Fully recorded credentials for a
+// client Pocket ID does not have are replaced: apply creates the client and
+// records the new credentials over them, since nothing can be signing in with
+// a client that does not exist. Partly recorded credentials, and a client
+// named after the app under another ID, which may be what a running app signs
+// in with, are the operator's call, made with `oidc client create`, which
+// re-records them.
 func keepsRecorded(app string, rec oidcclient.Recorded, state oidcclient.State) error {
 	var why string
 	switch {
@@ -439,13 +449,26 @@ func keepsRecorded(app string, rec oidcclient.Recorded, state oidcclient.State) 
 	case rec.ClientID == "" || rec.ClientSecret == "":
 		why = fmt.Sprintf("oidc_clients.%s is only partly recorded", app)
 	case state.Client == nil:
-		why = fmt.Sprintf("oidc_clients.%s.client_id is %s, and Pocket ID has no client named %s", app, rec.ClientID, app)
+		return nil
 	case state.Client.ID != rec.ClientID:
 		why = fmt.Sprintf("oidc_clients.%s.client_id is %s, and Pocket ID's client %s has ID %s", app, rec.ClientID, app, state.Client.ID)
 	default:
 		return nil
 	}
-	return fmt.Errorf("%s. apply does not replace recorded credentials: run `paisans oidc client create --app %s` to create or re-record the client, then apply again", why, app)
+	return fmt.Errorf("%s. apply does not replace these credentials: run `paisans oidc client create --app %s` to create or re-record the client, then apply again", why, app)
+}
+
+// replacing is the line that says app's recorded client is not at Pocket ID
+// and a new one takes its place, created already or only planned.
+func replacing(app, recordedID string, created bool) string {
+	short := recordedID
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	if created {
+		return fmt.Sprintf("%s: recorded client %s is not at Pocket ID; created a new one", app, short)
+	}
+	return fmt.Sprintf("%s: recorded client %s is not at Pocket ID; a new one replaces it", app, short)
 }
 
 // pocketIDWhere is the site to call Pocket ID on, as `oidc client create`

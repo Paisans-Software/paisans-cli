@@ -406,6 +406,39 @@ func TestAnInterruptedRunSendsTheRecordedSecret(t *testing.T) {
 	}
 }
 
+// Credentials recorded for a client Pocket ID does not have are replaced: the
+// client is created as from nothing, the new credentials are recorded over the
+// stale ones, and the plan says which recorded client it replaces.
+func TestRecordedCredentialsForAMissingClientAreReplaced(t *testing.T) {
+	f := newFake()
+	stale := Recorded{ClientID: "stale-client-id-not-real", ClientSecret: "stale-secret-not-real-0001"}
+	p := plan(t, f, talk(), stale)
+	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{CreateGroup, CreateClient, AddSecret}) {
+		t.Fatalf("planned %v", kinds(p))
+	}
+	if p.Replaces != stale.ClientID {
+		t.Errorf("Replaces is %q", p.Replaces)
+	}
+	if !strings.Contains(p.Steps[1].Detail, stale.ClientID) {
+		t.Errorf("the create step does not name the client it replaces: %s", p.Steps[1].Detail)
+	}
+	for _, s := range p.Steps {
+		if strings.Contains(s.Title+s.Detail, stale.ClientSecret) {
+			t.Error("a plan line carries the recorded secret")
+		}
+	}
+	rec := &memRecorder{rec: stale}
+	if err := Execute(p, api(f), rec, secretSource("replacing-secret-not-real-01")); err != nil {
+		t.Fatal(err)
+	}
+	if rec.rec != (Recorded{ClientID: "c-1", ClientSecret: "replacing-secret-not-real-01"}) {
+		t.Errorf("recorded %q", rec.rec.ClientID)
+	}
+	if again := plan(t, f, talk(), rec.rec); len(again.Steps) != 0 || again.Replaces != "" {
+		t.Errorf("a second run plans %v, replacing %q", kinds(again), again.Replaces)
+	}
+}
+
 // If the secret cannot be recorded, Pocket ID is sent nothing.
 func TestARecordFailureSendsNothing(t *testing.T) {
 	f := newFake()
