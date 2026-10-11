@@ -578,7 +578,9 @@ sites:
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
   a configuration it does not own. `paisans apply` without `--site` runs
-  `paisans web-server check` for each such app once every step has run, a line
+  `paisans web-server check` for each such app once every step has run, and
+  `paisans apply --site` on such a monitor runs it for the apps the monitor
+  serves once its stacks are up, a line
   per app in a `web server` section, and does not call the deployment complete
   while one fails: the app's line is a warning, `!`, with the checks that
   failed under it, an error several of them share said once, then the web
@@ -595,10 +597,15 @@ sites:
   The check runs once, and once more only after apply reloaded a web server
   in a container (below), since waiting on that web server is not the
   toolkit's to do; a dry run lists the check without running it.
+  `apply --site` on such a monitor runs the whole step, the site files below
+  and then the check, reaching the monitor through the ssh and sudo the rest
+  of its apply uses, and ends the same way, on the warning or the failure in
+  place of `Applied <n> files to <site>.`. The applies a full apply runs as
+  its steps leave the step to the full apply, which runs it once.
   `docs/guides/behind-your-own-web-server.md` walks through it.
 
 **The toolkit writes its own file, never the operator's configuration.** In
-`managed_by: external` `paisans apply` without `--site` puts each app's site, the snippet `web-server show`
+`managed_by: external` `paisans apply` puts each app's site, the snippet `web-server show`
 prints for the web server it finds, in a file of its own in `include_dir`, a
 directory on the host the web server includes with one line the operator adds
 once:

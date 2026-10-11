@@ -80,9 +80,14 @@ rules, each commented `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 with `managed_by: external`;
 your web server's rules are yours.
 
+Once the monitor's stacks are up, `apply --site watch --execute` goes on to
+your web server: it writes the site file of step 3 and runs the check of step
+6. Until your configuration includes the toolkit's directory it ends on a
+warning, `!`, that says what to add, with exit status 0.
+
 ## 3. Include the toolkit's directory
 
-`paisans apply --execute`, run without `--site`, writes the monitor's site,
+`paisans apply --execute`, with or without `--site watch`, writes the monitor's site,
 filled in for the web server it finds, into a file of its own, `paisans-<token>-status.caddy` or
 `.conf`, in a directory beside your server's main configuration:
 `/etc/caddy/paisans.d`, `/etc/nginx/paisans.d` or `/etc/apache2/paisans.d` on
@@ -389,8 +394,9 @@ Run it again after every change until no check fails and it ends with
 `4 checks passed.`
 
 `paisans apply --execute` without `--site` runs the same checks for every app
-behind your own web server once every other step has run, in a `web server`
-section:
+behind your own web server once every other step has run, and `paisans apply
+--site watch --execute` runs them for the monitor's apps once its stacks are
+up, in a `web server` section:
 
 ```
 web server
@@ -403,8 +409,9 @@ front of the app, read with the sudo password the run asked for at its start.
 When the app's site file step above already warned, the check's line says
 only that it fails until that is fixed, so each problem comes with one set of
 instructions. The run ends on a warning, `! Deployment complete, but 1 app
-failed its web server check: status`, rather than `Deployment complete.`,
-since a visitor cannot use the app yet. Every step ran, so the exit status is
+failed its web server check: status`, rather than `Deployment complete.`, or
+`Applied <n> files to watch.` for `apply --site watch`, since a visitor cannot
+use the app yet. Every step ran, so the exit status is
 still 0. What apply could not do on the host, such as reaching it over ssh to
 read the record of its site files, is a failure instead, `✗`, and the run
 exits 1. The check runs once, and once more after apply reloaded a server in a
