@@ -136,7 +136,7 @@ func TestSyncWritesValidatesAndReloads(t *testing.T) {
 	s := webservertest.New("")
 	f := statusFile(t, dockerCaddy)
 	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, nil)
-	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Path != statusPath {
+	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Path != statusPath || out[0].Reload.Kind != webserver.Reloaded {
 		t.Fatalf("outcomes %+v", out)
 	}
 	content := s.Files[statusPath]
@@ -182,27 +182,88 @@ func TestSyncRemovesAFileTheServerRefuses(t *testing.T) {
 	s := webservertest.New("")
 	s.Validate = "Error: adapting config using caddyfile: ambiguous site definition: status.example.org"
 	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
-	if len(out) != 1 || out[0].Kind != webserver.Failed || !strings.Contains(out[0].Why, "ambiguous site definition") {
+	if len(out) != 1 || out[0].Kind != webserver.Refused || !strings.Contains(out[0].Why, "ambiguous site definition") {
 		t.Fatalf("outcomes %+v", out)
 	}
 	if _, ok := s.Files[statusPath]; ok || len(record) != 0 {
 		t.Errorf("the refused file stayed: %v, record %+v", s.Files, record)
 	}
-	if s.Ran("reload") {
+	if s.Ran("reload") || s.Ran("restart") {
 		t.Errorf("reloaded after a failed validate: %v", s.Asked)
 	}
 }
 
-// A refused rewrite puts back the file it replaced, and keeps its record.
+// A host that cannot be reached is a failure of its own, apart from a
+// server refusing the change: nothing was written.
+func TestSyncFailsOnAHostItCannotReach(t *testing.T) {
+	s := webservertest.New("")
+	s.Unreachable = true
+	_, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	if len(out) != 1 || out[0].Kind != webserver.Failed || !strings.Contains(out[0].Why, "cannot be reached") {
+		t.Fatalf("outcomes %+v", out)
+	}
+}
+
+// A server in a container whose graceful reload fails is restarted, and
+// the outcome says so with the reload's error.
+func TestSyncRestartsAContainerWhoseReloadFails(t *testing.T) {
+	s := webservertest.New("")
+	s.Reload = "Error: loading new config: admin endpoint disabled"
+	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Reload.Kind != webserver.Restarted || !strings.Contains(out[0].Reload.Why, "admin endpoint disabled") {
+		t.Fatalf("outcomes %+v", out)
+	}
+	if !s.Ran("docker restart 'caddy-1'") || len(record) != 1 || s.Files[statusPath] == "" {
+		t.Errorf("record %+v, asked %v", record, s.Asked)
+	}
+}
+
+// A server on the host itself is validated and never reloaded: the
+// outcome carries the command that reloads it, its systemd unit's when one
+// is active, for the operator to run.
+func TestSyncLeavesTheReloadOfABareMetalServer(t *testing.T) {
+	for _, c := range []struct {
+		ws    webserver.WebServer
+		units []string
+		want  string
+	}{
+		{webserver.WebServer{Server: webserver.ServerCaddy, Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: webserver.CertsAutomatic}, []string{"caddy"}, "sudo systemctl reload caddy"},
+		{webserver.WebServer{Server: webserver.ServerCaddy, Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: webserver.CertsAutomatic}, nil, "caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"},
+		{webserver.WebServer{Server: webserver.ServerNginx, Process: "nginx", Config: "/etc/nginx/nginx.conf", Main: "/etc/nginx/nginx.conf"}, []string{"nginx"}, "sudo systemctl reload nginx"},
+		{webserver.WebServer{Server: webserver.ServerNginx, Process: "nginx", Config: "/etc/nginx/nginx.conf", Main: "/etc/nginx/nginx.conf"}, nil, "sudo nginx -s reload"},
+		{webserver.WebServer{Server: webserver.ServerApache, Process: "apache2", Config: "/etc/apache2/apache2.conf", Main: "/etc/apache2/apache2.conf"}, []string{"apache2"}, "sudo systemctl reload apache2"},
+		{webserver.WebServer{Server: webserver.ServerApache, Process: "httpd", Config: "/etc/httpd/conf/httpd.conf", Main: "/etc/httpd/conf/httpd.conf"}, []string{"httpd"}, "sudo systemctl reload httpd"},
+		{webserver.WebServer{Server: webserver.ServerApache, Process: "httpd", Config: "/etc/httpd/conf/httpd.conf", Main: "/etc/httpd/conf/httpd.conf"}, nil, "sudo apachectl graceful"},
+	} {
+		s := webservertest.New("")
+		s.Units = c.units
+		inc := webserver.Include{Dir: "/etc/x/paisans.d", Seen: "/etc/x/paisans.d"}
+		record, out := webserver.Sync(host(s), c.ws, inc, []webserver.File{statusFile(t, c.ws)}, nil)
+		if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Reload.Kind != webserver.OperatorReloads || out[0].Reload.Command != c.want {
+			t.Errorf("%s %v: outcomes %+v", c.ws.Server, c.units, out)
+			continue
+		}
+		if len(record) != 1 || !s.Ran("validate") && !s.Ran("nginx -t") && !s.Ran("configtest") {
+			t.Errorf("%s: record %+v, asked %v", c.ws.Server, record, s.Asked)
+		}
+		if s.Ran("reload --config") || s.Ran("-s reload") || s.Ran("graceful") || s.Ran("systemctl reload") || s.Ran("restart") {
+			t.Errorf("%s: a server on the host itself was reloaded: %v", c.ws.Server, s.Asked)
+		}
+	}
+}
+
+// A rewrite whose reload and restart both fail puts back the file it
+// replaced, and keeps its record.
 func TestSyncRestoresTheFileARefusedRewriteReplaced(t *testing.T) {
 	s := webservertest.New("")
 	f := statusFile(t, dockerCaddy)
 	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, nil)
 	before := s.Files[statusPath]
 	s.Reload = "Error: loading new config: http.handlers.reverse_proxy: upstream unreachable"
+	s.Restart = "Error response from daemon: container caddy-1 is restarting"
 	f.Content = strings.Replace(f.Content, "status.example.org", "uptime.example.org", -1)
 	kept, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, record)
-	if out[0].Kind != webserver.Failed || !strings.Contains(out[0].Why, "did not reload") {
+	if out[0].Kind != webserver.Refused || !strings.Contains(out[0].Why, "did not reload") || !strings.Contains(out[0].Why, "is restarting") {
 		t.Fatalf("outcomes %+v", out)
 	}
 	if s.Files[statusPath] != before || len(kept) != 1 || kept[0] != record[0] {
@@ -258,7 +319,7 @@ func TestRemove(t *testing.T) {
 	e := record[0]
 
 	s.Validate = "Error: a site of the operator's imports a snippet from it"
-	if o := webserver.Remove(host(s), e); o.Kind != webserver.Failed || s.Files[statusPath] == "" {
+	if o := webserver.Remove(host(s), e); o.Kind != webserver.Refused || s.Files[statusPath] == "" {
 		t.Errorf("refused removal: %+v, file %q", o, s.Files[statusPath])
 	}
 	s.Validate = ""
@@ -276,8 +337,8 @@ func TestRemove(t *testing.T) {
 }
 
 // Where the ssh user may not write, as under /etc on bare metal, the write
-// goes through sudo, and the server's own commands with it only when they
-// are refused too.
+// goes through sudo, and the server's validation with it only when it is
+// refused too.
 func TestSyncUsesSudoOnlyWhereRefused(t *testing.T) {
 	s := webservertest.New("")
 	s.Denied = true
@@ -292,7 +353,7 @@ func TestSyncUsesSudoOnlyWhereRefused(t *testing.T) {
 	if !strings.Contains(content, "ssl_certificate     /etc/letsencrypt/live/status.example.org/fullchain.pem;") {
 		t.Errorf("file:\n%s", content)
 	}
-	if !s.Ran("sudo set -e; mkdir -p") || s.Ran("sudo nginx -t") || !s.Ran("nginx -s reload") {
+	if !s.Ran("sudo set -e; mkdir -p") || s.Ran("sudo nginx -t") || !s.Ran("nginx -t") || s.Ran("nginx -s reload") {
 		t.Errorf("asked %v", s.Asked)
 	}
 }

@@ -50,7 +50,7 @@ type recStep struct {
 func (s *recStep) Done(result string) { s.r.add("done", s.title, result) }
 func (s *recStep) Fail(err error)     { s.r.add("fail", s.title, err.Error()) }
 func (s *recStep) End(m Mark, result string) {
-	s.r.add(map[Mark]string{OK: "done", Failed: "fail", Pending: "pending", Waiting: "waiting"}[m], s.title, result)
+	s.r.add(map[Mark]string{OK: "done", Failed: "fail", Pending: "pending", Waiting: "waiting", Warned: "warned"}[m], s.title, result)
 }
 func (s *recStep) Detail(f string, a ...any) { s.r.add("detail", fmt.Sprintf(f, a...), s.title) }
 func (s *recStep) Progress(text string)      { s.r.add("progress", text, s.title) }

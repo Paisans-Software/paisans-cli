@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -31,58 +32,150 @@ func externalApps(cfg *config.Config) []string {
 
 // convergeWebServer checks each app served through a web server the operator
 // runs, as `paisans web-server check --app <app>` does, a line per app in a
-// section of its own. A failed check is a warning naming what failed, with
-// the failing checks' own lines, the web server found in front of the app
-// and how to fix it. It returns the apps that failed. headed is whether the
-// section is already open, with the steps writing the apps' site files.
-func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo, headed bool) []string {
+// section of its own. A failed check is a warning on the app's line, with the
+// failing checks, each error said once, and one set of instructions: none
+// of its own where the app's site file step already gave them, since the
+// check fails because of what that step reported. Where the site file is in
+// place and unchanged, the server's configuration is validated first, and
+// a server in a container reloaded and the app checked once more, which
+// takes in an edit of the operator's. It returns the apps that failed their
+// check, and the steps that failed outright.
+func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webServerFiles) (warned, failed []string) {
 	apps := externalApps(cfg)
 	if len(apps) == 0 {
-		return nil
+		return nil, nil
 	}
-	if !headed {
+	if !files.headed {
 		r.Section("web server")
 	}
-	var failed []string
 	for _, app := range apps {
 		s := r.Step(app)
-		advice := fmt.Sprintf("Add what paisans web-server show --app %s prints to the web server in front of it, then run paisans web-server check --app %s.", app, app)
 		target, err := webserver.For(cfg, app)
 		if err != nil {
 			s.Fail(err)
+			r.Explain(errLine(err))
 			failed = append(failed, app)
-			r.Note(app+": could not check its web server ("+errLine(err)+")", advice)
 			continue
 		}
+		sf := files.apps[app]
 		results := webServerResults(s, target)
-		var names, lines []string
+		var advice string
+		if !passed(results) && sf != nil && sf.until == "" && sf.path != "" && !sf.reloaded {
+			advice = reloadAgain(s, sf, target, &results)
+		}
 		for _, res := range results {
 			mark := "✓"
 			if !res.OK {
 				mark = "✗"
-				names = append(names, res.Name)
-				lines = append(lines, res.Detail)
 			}
 			s.Detail("%s %s: %s", mark, res.Name, res.Detail)
 		}
-		if len(names) == 0 {
+		if passed(results) {
 			s.Done(target.Hostname)
 			continue
 		}
-		// What serves it is read only now, through the sudo the run
-		// settled, so a passing app costs no ssh. The line spins while
-		// it is read.
-		s.Progress("read the web server on " + target.Site)
-		ws := findWebServer(cfg, target, sudo)
-		s.End(ui.Failed, target.Hostname)
-		failed = append(failed, app)
-		checks := "check"
-		if len(names) > 1 {
-			checks += "s"
+		var ws webserver.WebServer
+		if sf != nil && sf.ws.Server != "" {
+			ws = sf.ws
+		} else if sf == nil || sf.until == "" {
+			// What serves it is read only now, through the sudo the
+			// run settled, so a passing app costs no ssh. The line
+			// spins while it is read.
+			s.Progress("read the web server on " + target.Site)
+			ws = findWebServer(cfg, target, sudo)
 		}
-		r.Note(fmt.Sprintf("%s: the %s %s failed", app, andList(names), checks), strings.Join(append(lines, ws.Summary(), advice), "\n"))
+		s.End(ui.Warned, target.Hostname)
+		warned = append(warned, app)
+		checks := failedChecks(results, ws)
+		if sf != nil && sf.until != "" {
+			// The site file step said what to do; this follows from it.
+			if len(checks) == 1 {
+				r.Explain(fmt.Sprintf("%s, expected until %s, see above.", checks[0], sf.until))
+			} else {
+				r.Explain(fmt.Sprintf("%s\nThese are expected until %s, see above.", strings.Join(checks, "\n"), sf.until))
+			}
+			continue
+		}
+		if advice == "" {
+			advice = fmt.Sprintf("Add what paisans web-server show --app %s prints to the web server in front of it, then run paisans web-server check --app %s.", app, app)
+			if sf != nil && sf.path != "" {
+				advice = fmt.Sprintf("Its site file, %s, is in place, and %s runs it. Read %s's log for why it does not serve %s, then run paisans web-server check --app %s.", sf.path, ws.Server, ws.Server, target.Hostname, app)
+			}
+		}
+		r.Explain(strings.Join(append(checks, ws.Summary(), advice), "\n"))
 	}
-	return failed
+	return warned, failed
+}
+
+// reloadAgain validates the configuration of the server in front of an app
+// whose site file is in place and unchanged, but whose check failed: the
+// server may run a configuration older than an edit of the operator's. A
+// server in a container is reloaded and the app checked once more; one on
+// the host itself is the operator's to reload. It returns the advice for a
+// check that still fails, empty for the usual.
+func reloadAgain(s ui.Step, sf *siteFile, target webserver.Target, results *[]webserver.Result) string {
+	s.Progress("validate " + string(sf.ws.Server))
+	reload, err := webserver.ValidateAndReload(sf.h, sf.ws)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s\nNothing was reloaded. Fix the configuration, then run paisans apply --execute again.", err)
+	case reload.Kind == webserver.OperatorReloads:
+		return fmt.Sprintf("%s's configuration is valid, and %s runs on the host itself, so apply leaves its reload to you. If it has not been reloaded since its site file was written, reload it:\n\n    %s\n\nthen run paisans web-server check --app %s.", sf.ws.Server, sf.ws.Server, reload.Command, target.App)
+	case reload.Kind == webserver.Restarted:
+		s.Detail("%s's reload failed, so its container was restarted: %s", sf.ws.Server, reload.Why)
+	default:
+		s.Detail("%s validated and reloaded", sf.ws.Server)
+	}
+	*results = webServerResults(s, target)
+	return ""
+}
+
+// passed reports whether every check passed.
+func passed(results []webserver.Result) bool {
+	for _, res := range results {
+		if !res.OK {
+			return false
+		}
+	}
+	return true
+}
+
+// httpsDetail is a request's failure as Check words it: the address, then
+// the client's error, which repeats it.
+var httpsDetail = regexp.MustCompile(`^https://[^/\s]+(/\S*): (?:Get "[^"]*": )?(.*)$`)
+
+// failedChecks is a line per distinct error among the checks that failed,
+// naming the checks that met it: a request by its path, any other check by
+// its name. Caddy answers a name it has no certificate for with a TLS
+// internal error, so behind a Caddy that error says so.
+func failedChecks(results []webserver.Result, ws webserver.WebServer) []string {
+	var whys []string
+	labels := map[string][]string{}
+	for _, res := range results {
+		if res.OK {
+			continue
+		}
+		label, why := res.Name, res.Detail
+		if m := httpsDetail.FindStringSubmatch(res.Detail); m != nil {
+			if p := strings.Trim(m[1], "/"); p != "" {
+				label = p
+			}
+			why = m[2]
+		}
+		if _, ok := labels[why]; !ok {
+			whys = append(whys, why)
+		}
+		labels[why] = append(labels[why], label)
+	}
+	var out []string
+	for _, why := range whys {
+		text := strings.TrimPrefix(why, "remote error: ")
+		if why == "remote error: tls: internal error" && ws.Server == webserver.ServerCaddy {
+			text += " (caddy has no certificate for this name)"
+		}
+		out = append(out, andList(labels[why])+": "+text)
+	}
+	return out
 }
 
 // webServerResults checks target once. The web server in front of it is the
@@ -92,13 +185,32 @@ func webServerResults(s ui.Step, target webserver.Target) []webserver.Result {
 	return convergeWebServerCheck(target)
 }
 
-// webServerFailed is how a run whose every step ran ends when an app failed
-// its web server check: not complete, since a visitor cannot reach it as they
-// should. Alone it is the run's warning; beside a failure it is part of it.
-func webServerFailed(apps []string) *ui.Problem {
+// webServerFailed is how a run whose every step ran ends when what is left
+// is the operator's web server: apps that failed their check, or a site
+// file step that warned. It is not complete, since a visitor cannot reach
+// the app as they should, or will not once the server restarts. Alone it
+// is the run's warning; beside a failure it is part of it.
+func webServerFailed(checked, warned []string) *ui.Problem {
+	if len(warned) == len(checked) {
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("Deployment complete, but %s failed its web server check: %s", plural(len(checked), "app"), andList(checked)),
+			Explain: "Every step ran. Fix each app's web server as noted above, then run paisans web-server check --app <app> to check it again.",
+		}
+	}
 	return &ui.Problem{
-		Hint:    fmt.Sprintf("Deployment complete, but %s failed its web server check: %s", plural(len(apps), "app"), andList(apps)),
-		Explain: "Every step ran. Fix each app's web server as noted above, then run paisans web-server check --app <app> to check it again.",
+		Hint:    "Deployment complete, but the web server needs you: " + andList(warned),
+		Explain: "Every step ran. Do what is noted above for each, then run paisans web-server check --app <app> to check each app again.",
+	}
+}
+
+// webServerBroken is how a run ends when a web server step failed outright:
+// what it needed on the host could not be read or written, or the
+// configuration is wrong. That is not the operator's web server, so the
+// run fails.
+func webServerBroken(steps []string) *ui.Problem {
+	return &ui.Problem{
+		Hint:    fmt.Sprintf("Deployment not complete: %s failed: %s", plural(len(steps), "web server step"), andList(steps)),
+		Explain: "Every other step ran. Fix what is noted above, then run paisans apply --execute again.",
 	}
 }
 

@@ -106,21 +106,29 @@ one to use instead.
 
 You need not add it first: an apply that finds no line writes nothing, warns
 with the exact line for your server, and ends without `Deployment complete.`.
-Add it, then apply again:
+The site file's line carries the instructions, and the app's check below it
+says only that it fails until the file is in place. Add the line, then apply
+again:
 
 ```
 web server
-  ✗ site file for status   caddy does not include /etc/caddy/paisans.d
-  ! status: caddy does not include /etc/caddy/paisans.d, so nothing was written
-      Add this line to /opt/caddy/Caddyfile, at the top level of the
-      Caddyfile, outside every site block, once:
-
-          import /etc/caddy/paisans.d/*
+  ! site file for status: caddy does not include /etc/caddy/paisans.d
+       Nothing was written. Add this line to /opt/caddy/Caddyfile, at the top
+       level of the Caddyfile, outside every site block, once:
+           import /etc/caddy/paisans.d/*
+       then run paisans apply --execute again. It is a wildcard so that the
+       server still starts, without the paisans sites, if the directory is ever
+       gone.
+       Or set sites.watch.web_server.include_dir: false, and add what paisans
+       web-server show --app status prints to your web server yourself.
+  ! status: status.example.org
+       healthz and login/oidc: tls: internal error (caddy has no certificate for
+       this name), expected until its site file is in place, see above.
 ```
 
 With the line there, apply creates the directory if it is missing, writes the
-file, validates your whole configuration and reloads the server, and records
-the directory in `paisans.yaml`:
+file, validates your whole configuration, reloads a server in a container
+(below), and records the directory in `paisans.yaml`:
 
 ```
 web server
@@ -131,19 +139,25 @@ web server
 
 The `include_dir` line is added under the site's `web_server`, every other line
 and comment of `paisans.yaml` kept. Change it there to use another directory:
-the next apply moves the file. When validating or reloading fails, apply puts
-back what was there, so your server keeps the configuration it ran, and warns
-with the server's own error; a certificate certbot has not obtained yet is the
-usual cause, and the warning names the `certbot certonly` command. An
-unchanged file is not written again and nothing is reloaded.
+the next apply moves the file. When your configuration does not validate with
+the file, apply puts back what was there and reloads nothing, so your server
+keeps the configuration it ran, and warns with the server's own error; a
+certificate certbot has not obtained yet is the usual cause, and the warning
+names the `certbot certonly` command. An unchanged file is not written again
+and nothing is reloaded, unless the app's check then fails: apply validates
+again, in case you edited the configuration, reloads a server in a container
+and checks the app once more.
 
-**A web server in a container** reads the directory where the container sees
-it. Apply takes the host path from the mount of the configuration's
-directory, so with `/opt/caddy` mounted at `/etc/caddy` the file goes in
-`/opt/caddy/paisans.d` and the line is `import /etc/caddy/paisans.d/*`,
-validated and reloaded with `docker exec`. A container that mounts its
-Caddyfile alone has no such directory: apply records nothing and warns with
-the mount to add to its compose service,
+**A web server in a Docker container** is reloaded by apply once its
+configuration validates: gracefully, through `docker exec` (`caddy reload`,
+`nginx -s reload`, `apachectl graceful`), and with `docker restart` when that
+fails, the step's line saying which. It reads the directory where the
+container sees it. Apply takes the host path from the mount of the
+configuration's directory, so with `/opt/caddy` mounted at `/etc/caddy` the
+file goes in `/opt/caddy/paisans.d` and the line is `import
+/etc/caddy/paisans.d/*`. A container that mounts its Caddyfile alone has no
+such directory: apply records nothing and warns with the mount to add to its
+compose service,
 
 ```yaml
     volumes:
@@ -153,12 +167,30 @@ the mount to add to its compose service,
 
 after which, with the container recreated, the next apply finds it.
 
+**A web server on the host itself** is yours to restart, so apply validates
+its configuration with the file and does not reload it. The site file's line
+is a warning with the command that reloads it, the systemd unit's when one is
+active, and the run ends on that warning until you have:
+
+```
+web server
+  ! site file for status: /etc/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy not reloaded
+       caddy's configuration is valid with it, and caddy runs on the host
+       itself, so apply leaves its reload to you:
+           sudo systemctl reload caddy
+       then run paisans web-server check --app status.
+```
+
+Without an active unit the command is `caddy reload --config <your Caddyfile>
+--adapter caddyfile`, `sudo nginx -s reload` or `sudo apachectl graceful`.
+
 **The files are the toolkit's, and only they are.** Each is recorded in the
 deployment's manifest. `paisans app remove --app status`, `paisans site
 remove`, including `--force` on an abandoned host, and an apply where the
 app's hostname left the site or `include_dir` changed delete that file and
-nothing else, never the directory or another file in it, then validate and
-reload the same way. A file you edited is left where it is and reported. With
+nothing else, never the directory or another file in it, then validate the
+same way, reloading a server in a container and naming the reload command for
+one on the host. A file you edited is left where it is and reported. With
 `site remove --host-gone` the host is not reached, so the file stays, and the
 command says so.
 
@@ -270,14 +302,20 @@ web server
   ✓ status   status.example.org
 ```
 
-When one fails it marks the app's line failed, notes which check failed with
-that check's own line and the web server it finds in front of the app, read
-with the sudo password the run asked for at its start, and ends on a warning,
-`! Deployment complete, but 1 app failed its web server check: status`, rather
-than `Deployment complete.`, since a visitor cannot use the app yet. Every step
-ran, so the exit status is still 0. The check runs once: an app or certificate
-that has only just started can fail `certificate` or `sign in`, and
-`paisans web-server check` checks it again when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
+When one fails the app's line is a warning, `!`, with the checks that failed
+under it, an error several share said once, and the web server it finds in
+front of the app, read with the sudo password the run asked for at its start.
+When the app's site file step above already warned, the check's line says
+only that it fails until that is fixed, so each problem comes with one set of
+instructions. The run ends on a warning, `! Deployment complete, but 1 app
+failed its web server check: status`, rather than `Deployment complete.`,
+since a visitor cannot use the app yet. Every step ran, so the exit status is
+still 0. What apply could not do on the host, such as reaching it over ssh to
+read the record of its site files, is a failure instead, `✗`, and the run
+exits 1. The check runs once, and once more after apply reloaded a server in a
+container: an app or certificate that has only just started can fail
+`certificate` or `sign in`, and `paisans web-server check` checks it again
+when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
 check --app status` until it passes.
 
 ## Afterwards

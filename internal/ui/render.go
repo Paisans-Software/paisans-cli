@@ -296,6 +296,8 @@ func (r *writer) mark(m Mark) string {
 			return yellow + "○" + reset
 		case Waiting:
 			return dim + "·" + reset
+		case Warned:
+			return yellow + "!" + reset
 		default:
 			return red + "✗" + reset
 		}
@@ -307,6 +309,8 @@ func (r *writer) mark(m Mark) string {
 		return "todo"
 	case Waiting:
 		return "wait"
+	case Warned:
+		return "WARN"
 	default:
 		return "FAIL"
 	}

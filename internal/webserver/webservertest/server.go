@@ -6,6 +6,7 @@ package webservertest
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -18,9 +19,11 @@ type Server struct {
 	// Config is what reading the server's configuration answers: the
 	// Caddyfile, nginx -T's output, or Apache's include lines.
 	Config string
-	// Validate fails the configuration check with its text when set, and
-	// Reload the reload.
-	Validate, Reload string
+	// Validate fails the configuration check with its text when set,
+	// Reload the reload, and Restart a container's restart.
+	Validate, Reload, Restart string
+	// Units are the systemd units active on the host.
+	Units []string
 	// Denied refuses the ssh user every write.
 	Denied bool
 	// Unreachable fails every command as ssh does for a host it cannot
@@ -71,6 +74,17 @@ func (s *Server) run(command string, sudo bool) (string, error) {
 		return "mkdir: cannot create directory: Permission denied\n", errors.New("exit status 1")
 	}
 	switch {
+	case strings.HasPrefix(command, "systemctl is-active"):
+		f := strings.Fields(command)
+		if slices.Contains(s.Units, f[len(f)-1]) {
+			return "", nil
+		}
+		return "", errors.New("exit status 3")
+	case strings.HasPrefix(command, "docker restart "):
+		if s.Restart != "" {
+			return s.Restart + "\n", errors.New("exit status 1")
+		}
+		return args[0] + "\n", nil
 	case strings.Contains(command, "then cat"):
 		if content, ok := s.Files[args[0]]; ok {
 			return content, nil

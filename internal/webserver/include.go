@@ -3,6 +3,7 @@ package webserver
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -263,8 +264,37 @@ type Outcome struct {
 	App  string
 	Path string
 	Kind OutcomeKind
-	// Why is the server's error for Failed, and why the file is left for
-	// Edited.
+	// Why is the server's error for Refused, what could not be done for
+	// Failed, and why the file is left for Edited.
+	Why string
+	// Reload is what became of the server, for Written and Removed.
+	Reload Reload
+}
+
+// ReloadKind is what became of a web server once its configuration
+// validated with a change.
+type ReloadKind int
+
+const (
+	// NotReloaded is a server nothing was asked of.
+	NotReloaded ReloadKind = iota
+	// Reloaded is a server in a container reloaded gracefully inside it.
+	Reloaded
+	// Restarted is a server in a container whose graceful reload failed,
+	// restarted with docker restart.
+	Restarted
+	// OperatorReloads is a server on the host itself: validated, and left
+	// for the operator to reload, since it is theirs to restart.
+	OperatorReloads
+)
+
+// Reload is what became of a web server once its configuration validated.
+type Reload struct {
+	Kind ReloadKind
+	// Command reloads a server on the host itself, for the operator to
+	// run, with OperatorReloads.
+	Command string
+	// Why is the graceful reload's error, with Restarted.
 	Why string
 }
 
@@ -275,20 +305,24 @@ const (
 	// Unchanged is a file already as it should be: nothing written, the
 	// server not reloaded.
 	Unchanged OutcomeKind = iota
-	// Written is a file written, the configuration validated and the server
-	// reloaded.
+	// Written is a file written and the configuration validated, with
+	// Reload what became of the server.
 	Written
-	// Removed is a file deleted, the configuration validated and the server
-	// reloaded.
+	// Removed is a file deleted and the configuration validated, with
+	// Reload what became of the server.
 	Removed
 	// Gone is a recorded file already deleted.
 	Gone
 	// Edited is a file left as it is: changed on the host since apply wrote
 	// it, or there and never recorded as this deployment's.
 	Edited
-	// Failed is a file whose write or removal the server refused, or that
-	// could not be reached: its previous content is back, and the server
+	// Refused is a file whose write or removal the server refused, its
+	// configuration invalid with it, or a server in a container neither
+	// reloaded nor restarted: its previous content is back, and the server
 	// runs its previous configuration.
+	Refused
+	// Failed is a file that could not be read, written or removed on the
+	// host: nothing was asked of the server.
 	Failed
 )
 
@@ -340,7 +374,8 @@ func Sync(h Host, ws WebServer, inc Include, files []File, recorded []render.Man
 }
 
 // write writes one file, validates the server's whole configuration and
-// reloads it, and puts back what was there when either fails.
+// reloads it as control.apply does, and puts back what was there when that
+// fails.
 func write(h Host, ws WebServer, p string, f File, rec *render.ManifestWebServer) (*render.ManifestWebServer, Outcome) {
 	o := Outcome{App: f.App, Path: p}
 	entry := &render.ManifestWebServer{App: f.App, Path: p, SHA256: sum(f.Content), Server: string(ws.Server), Container: ws.Container, Config: ws.Main}
@@ -365,7 +400,8 @@ func write(h Host, ws WebServer, p string, f File, rec *render.ManifestWebServer
 		return rec, o
 	}
 	ctl := control{server: ws.Server, container: ws.Container, main: ws.Main}
-	if why := ctl.apply(h); why != "" {
+	reload, why := ctl.apply(h)
+	if why != "" {
 		if found {
 			err = writeFile(h, p, have)
 		} else {
@@ -374,18 +410,19 @@ func write(h Host, ws WebServer, p string, f File, rec *render.ManifestWebServer
 		if err != nil {
 			why += "; and putting back what was there failed: " + err.Error()
 		}
-		o.Kind, o.Why = Failed, why
+		o.Kind, o.Why = Refused, why
 		if found {
 			return rec, o
 		}
 		return nil, o
 	}
-	o.Kind = Written
+	o.Kind, o.Reload = Written, reload
 	return entry, o
 }
 
 // Remove deletes one recorded file, validates the server's whole
-// configuration and reloads it, and puts the file back when either fails.
+// configuration and reloads it as control.apply does, and puts the file
+// back when that fails.
 // A file changed since it was written is left, and one already gone is
 // fine.
 func Remove(h Host, e render.ManifestWebServer) Outcome {
@@ -407,28 +444,44 @@ func Remove(h Host, e render.ManifestWebServer) Outcome {
 		return o
 	}
 	ctl := control{server: Server(e.Server), container: e.Container, main: e.Config}
-	if why := ctl.apply(h); why != "" {
+	reload, why := ctl.apply(h)
+	if why != "" {
 		if err := writeFile(h, e.Path, have); err != nil {
 			why += "; and putting the file back failed: " + err.Error()
 		}
-		o.Kind, o.Why = Failed, why
+		o.Kind, o.Why = Refused, why
 		return o
 	}
-	o.Kind = Removed
+	o.Kind, o.Reload = Removed, reload
 	return o
 }
 
-// control validates and reloads one web server.
+// ValidateAndReload validates ws's whole configuration and, for a server in
+// a container, reloads it, as writing a file does; a server on the host
+// itself is left for the operator to reload. The error is the server's own
+// when it refuses, and nothing is reloaded then.
+func ValidateAndReload(h Host, ws WebServer) (Reload, error) {
+	reload, why := control{server: ws.Server, container: ws.Container, main: ws.Main}.apply(h)
+	if why != "" {
+		return Reload{}, errors.New(why)
+	}
+	return reload, nil
+}
+
+// control validates one web server, and reloads one in a container.
 type control struct {
 	server    Server
 	container string
 	main      string
 }
 
-// apply validates the server's whole configuration and reloads it, and is
-// the server's own error when either fails, the server left on the
-// configuration it ran.
-func (c control) apply(h Host) string {
+// apply validates the server's whole configuration, and is the server's own
+// error when it fails, the server left on the configuration it ran. A
+// server in a container is then reloaded gracefully inside it, and
+// restarted when that fails. One on the host itself is the operator's to
+// restart, so it is not reloaded: the command that reloads it is returned
+// for them to run.
+func (c control) apply(h Host) (Reload, string) {
 	var validate, reload string
 	switch c.server {
 	case ServerCaddy:
@@ -439,15 +492,47 @@ func (c control) apply(h Host) string {
 	case ServerApache:
 		validate, reload = "apachectl configtest", "apachectl graceful"
 	default:
-		return "there is no way to validate and reload " + string(c.server)
+		return Reload{}, "there is no way to validate and reload " + string(c.server)
 	}
 	if out, err := serverRun(h, c.container, validate+" 2>&1"); err != nil {
-		return string(c.server) + " refused the configuration: " + serverError(out, err)
+		return Reload{}, string(c.server) + " refused the configuration: " + serverError(out, err)
 	}
-	if out, err := serverRun(h, c.container, reload+" 2>&1"); err != nil {
-		return string(c.server) + " did not reload: " + serverError(out, err)
+	if c.container == "" {
+		return Reload{Kind: OperatorReloads, Command: c.reloadCommand(h)}, ""
 	}
-	return ""
+	out, err := serverRun(h, c.container, reload+" 2>&1")
+	if err == nil {
+		return Reload{Kind: Reloaded}, ""
+	}
+	why := serverError(out, err)
+	if back, err := run(h, "docker restart "+quote(c.container)+" 2>&1"); err != nil {
+		return Reload{}, string(c.server) + " did not reload: " + why + "; and docker restart " + c.container + " failed: " + serverError(back, err)
+	}
+	return Reload{Kind: Restarted, Why: why}, ""
+}
+
+// units are the systemd units each server runs as on the host itself.
+var units = map[Server][]string{
+	ServerCaddy:  {"caddy"},
+	ServerNginx:  {"nginx"},
+	ServerApache: {"apache2", "httpd"},
+}
+
+// reloadCommand is what reloads a server on the host itself: its systemd
+// unit's reload when one is active, otherwise the server's own.
+func (c control) reloadCommand(h Host) string {
+	for _, unit := range units[c.server] {
+		if _, err := h.Plain.Run("systemctl is-active --quiet " + unit); err == nil {
+			return "sudo systemctl reload " + unit
+		}
+	}
+	switch c.server {
+	case ServerCaddy:
+		return "caddy reload --config " + c.main + " --adapter caddyfile"
+	case ServerNginx:
+		return "sudo nginx -s reload"
+	}
+	return "sudo apachectl graceful"
 }
 
 // serverError is the lines of a server's answer that say what is wrong:

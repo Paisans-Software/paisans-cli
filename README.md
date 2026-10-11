@@ -580,14 +580,20 @@ sites:
   a configuration it does not own. `paisans apply` without `--site` runs
   `paisans web-server check` for each such app once every step has run, a line
   per app in a `web server` section, and does not call the deployment complete
-  while one fails: it names the app, what failed, the web server `web-server show`
-  finds in front of it, read through the sudo the run settled at its start,
-  and the `web-server show` and `web-server check` commands to fix it with,
-  and ends on a warning, `! Deployment complete, but 1 app failed its web
-  server check`, with exit status 0: every step ran, and the web server is the
-  operator's. The check runs once, since waiting on that web server is not the
-  toolkit's to do; a dry run lists the check without running it. `docs/guides/behind-your-own-web-server.md`
-  walks through it.
+  while one fails: the app's line is a warning, `!`, with the checks that
+  failed under it, an error several of them share said once, then the web
+  server `web-server show` finds in front of it, read through the sudo the run
+  settled at its start, and the `web-server show` and `web-server check`
+  commands to fix it with. Where the app's site file step above already
+  warned with its own instructions, the check's line gives none of its own:
+  it names what failed and says that is expected until that step's problem is
+  fixed. Each problem has one line and one set of instructions. The run ends on
+  a warning, `! Deployment complete, but 1 app failed its web server check`,
+  with exit status 0: every step ran, and the web server is the operator's.
+  The check runs once, and once more only after apply reloaded a web server
+  in a container (below), since waiting on that web server is not the
+  toolkit's to do; a dry run lists the check without running it.
+  `docs/guides/behind-your-own-web-server.md` walks through it.
 
 **The toolkit writes its own file, never the operator's configuration.** In
 `managed_by: external` `paisans apply` without `--site` puts each app's site, the snippet `web-server show`
@@ -603,20 +609,50 @@ once:
 
 The file is named for the deployment, `paisans-<token>-<app>.caddy` or
 `.conf`, so two deployments writing in one directory never collide. Apply
-writes it before the web server check, validates the server's whole
+writes it before the web server check and validates the server's whole
 configuration (`caddy validate`, `nginx -t`, `apachectl configtest`, inside
-the container for one in a container) and reloads it (`caddy reload`, `nginx
--s reload`, `apachectl graceful`). When either fails it puts back what was
-there, so the server keeps the configuration it ran, and warns with the
-server's own error. A file already as it should be is not written and nothing
-is reloaded. Each file goes into the deployment's manifest with what removing
-it needs, so its removal is driven by that record: `app remove`, `site
-remove` (with `--force` too) and an apply where the app's hostname moved off
-the site or `include_dir` changed delete the file, and only that file, never
-the directory or anything else in it, then validate and reload the same way.
-A file changed on the host since apply wrote it is left and reported; one
+the container for one in a container). When the configuration does not
+validate it puts back what was there, reloads nothing, and warns with the
+server's own error, so the server keeps the configuration it ran. What
+happens once it validates depends on where the server runs:
+
+* **In a Docker container**, apply reloads it gracefully inside the container
+  (`caddy reload`, `nginx -s reload`, `apachectl graceful`, through `docker
+  exec`), and when that fails restarts the container with `docker restart`;
+  the step's line says which. Only when the restart fails too does it put
+  back what was there and warn.
+* **On the host itself**, apply does not reload or restart it: the server is
+  the operator's to restart. The step's line is a warning that the file was
+  written and the server not reloaded, with the command that reloads it,
+  `sudo systemctl reload caddy` (or `nginx`, `apache2`, `httpd`) when that
+  systemd unit is active, otherwise `caddy reload --config <its Caddyfile>
+  --adapter caddyfile`, `sudo nginx -s reload` or `sudo apachectl graceful`,
+  and the run ends on the warning.
+
+A file already as it should be is not written and nothing is reloaded, unless
+the app's web server check then fails: apply validates the configuration
+again, in case the operator edited it, reloads a server in a container and
+checks the app once more, or for one on the host gives the reload command.
+Each file goes into the deployment's manifest with what removing it needs, so
+its removal is driven by that record: `app remove`, `site remove` (with
+`--force` too) and an apply where the app's hostname moved off the site or
+`include_dir` changed delete the file, and only that file, never the
+directory or anything else in it, then validate the same way, reloading a
+server in a container and naming the reload command for one on the host. A
+file changed on the host since apply wrote it is left and reported; one
 already gone is fine. `site remove --host-gone` reaches nothing, and says the
 files may still be there.
+
+Everything about the operator's web server is a warning, `!`, on its step's
+line, and leaves the run's exit status 0: a web server not determined, one
+apply has no file for, no directory it reads to write in (a container
+mounting its configuration file alone), no line including the directory or a
+literal one, a configuration it refuses, a file edited on the host, a reload
+left to the operator, and a failed web server check. What apply itself could
+not do is a failure, `✗`, and the run ends failed with exit status 1: the
+monitor's host not reached over ssh, the record of its site files not read
+or written, a site file not read, written or removed there, or `paisans.yaml`
+not written.
 
 The line must be a wildcard, because the directory may go: a deployment
 removed, or the directory deleted by hand. Caddy's `import` of a glob that
@@ -3766,8 +3802,9 @@ dry run a line per app, `checked with --execute` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends
 `Deployment complete.`; one where an app failed its web server check, or its site
-file was not written, ends on a warning naming those apps instead and exits 0,
-or 1 when something else failed as well. With
+file step warned, ends on a warning naming those apps instead and exits 0, or
+1 when something else failed as well, a web server step that could not reach
+or write what it needs on the host included. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
 above the hosts still running, so the lines end in the order their hosts

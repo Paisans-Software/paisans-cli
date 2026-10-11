@@ -59,6 +59,10 @@ func fileEdited(site, path string) string {
 	return fmt.Sprintf("%s: an edited file kept; delete it once nothing needs it, then run this again. It is %s, edited on the host since apply wrote it, so it stays with its manifest entry until it is deleted by hand", site, path)
 }
 
+func reloadLeft(site, server, command string) string {
+	return fmt.Sprintf("%s: reload %s, which runs on the host itself, so that it stops serving the removed site file: its configuration validated without it, and this command does not restart a web server it does not run. Reload it with: %s", site, server, command)
+}
+
 func secretsLeft(app, keys string) string {
 	return fmt.Sprintf("secrets: remove %s's entries from the secrets file with sops. This command never edits it, so remove them once nothing needs them: %s", app, keys)
 }

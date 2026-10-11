@@ -235,9 +235,14 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   for before the first step.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
-  when an app failed its web server check or its site file could not be written,
-  ends on a warning naming each such app and exits 0, since every step ran and
-  the web server is the operator's; with another failure as well it exits 1. An `include_dir` it
+  when an app failed its web server check or its site file step warned, ends
+  on a warning naming each such app and exits 0, since every step ran and the
+  web server is the operator's; with another failure as well, or a web server
+  step that could not reach or write what it needs on the host, it exits 1.
+  Each problem with the operator's web server is one `!` line with one set of
+  instructions. A web server in a Docker container is validated and reloaded
+  after its site file changes, restarted when the reload fails; one on the
+  host itself is validated, and the warning gives the command to reload it. An `include_dir` it
   derives is written into `paisans.yaml`. Without it, every step is checked
   as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
@@ -325,8 +330,10 @@ See *Preflight* in `README.md`.
 Takes a site out of the running deployment in gated stages: its data out, out
 of the cluster, its host cleaned of what is provably this deployment's (on a
 monitor behind the operator's own web server, the site files apply wrote into
-its `include_dir` included), its DNS records deleted, and its entry out of
-`paisans.yaml`.
+its `include_dir` included, after which a web server in a Docker container is
+validated and reloaded, and one on the host itself validated and left for the
+operator to reload with the command it names), its DNS records deleted, and
+its entry out of `paisans.yaml`.
 
 ```sh
 paisans site remove home-b                             # refusals, then every stage and its gate
@@ -584,7 +591,9 @@ See *`oidc client create` makes an app's client at Pocket ID* in `README.md`.
 Takes an app that has left `paisans.yaml` off every host, once a whole apply
 on each site has marked its files left over. For an app behind the operator's
 own web server it also deletes the site file apply wrote into the web
-server's `include_dir`, then validates and reloads that web server.
+server's `include_dir`, then validates that web server and reloads it when it
+runs in a Docker container. One on the host itself is the operator's to
+reload: what is left at the end gives the command.
 
 ```sh
 paisans app remove docs                              # shows what it would do
