@@ -112,3 +112,29 @@ func TestHostGoneSaysWhatTheWebServerStillIncludes(t *testing.T) {
 		t.Errorf("remains:\n%s", left)
 	}
 }
+
+// A web server on the host itself is validated after the removal and not
+// reloaded: what is left says the command that reloads it.
+func TestSiteRemoveLeavesTheReloadOfABareMetalServer(t *testing.T) {
+	w := setup(t)
+	web := webOn(t, w, "watch")
+	web.Units = []string{"caddy"}
+	h := w.hosts["watch"]
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	m.WebServer[0].Container = ""
+	data, _ := json.Marshal(m)
+	h.files[dep.Manifest()] = string(data)
+	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := web.Files[siteFile]; ok || !web.Ran("caddy validate") || web.Ran("caddy reload") || web.Ran("systemctl reload") {
+		t.Errorf("files %v, asked %v", web.Files, web.Asked)
+	}
+	if left := strings.Join(p.Remains(), "\n"); !strings.Contains(left, "sudo systemctl reload caddy") {
+		t.Errorf("remains:\n%s", left)
+	}
+}

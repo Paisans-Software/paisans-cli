@@ -105,3 +105,27 @@ func TestAppRemoveStopsWhenTheServerRefuses(t *testing.T) {
 		t.Errorf("not put back: %v %v", server.Files, server.Asked)
 	}
 }
+
+// A web server on the host itself is validated after the removal and not
+// reloaded: what is left says the command that reloads it.
+func TestAppRemoveLeavesTheReloadOfABareMetalServer(t *testing.T) {
+	cfg := fixture(t)
+	server := webservertest.New("")
+	server.Units = []string{"nginx"}
+	content := "status.example.org {\n}\n"
+	path := "/etc/nginx/paisans.d/paisans-f2a9-status.conf"
+	server.Files[path] = content
+	entry := render.ManifestWebServer{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
+	m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
+	h := webHost{server, map[string]string{manifestPath: string(m)}}
+	e := &Executor{}
+	if err := e.webServer(h, cfg.Deployment(), SitePlan{Site: "watch", WebServer: []render.ManifestWebServer{entry}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := server.Files[path]; ok || !server.Ran("nginx -t") || server.Ran("nginx -s reload") || server.Ran("systemctl reload") {
+		t.Errorf("files %v, asked %v", server.Files, server.Asked)
+	}
+	if !strings.Contains(strings.Join(e.Kept, "\n"), "sudo systemctl reload nginx") {
+		t.Errorf("kept %v", e.Kept)
+	}
+}

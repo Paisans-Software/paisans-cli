@@ -22,6 +22,8 @@ import (
 type manifestHost struct {
 	files  map[string]string
 	writes int
+	// unreachable fails every read as ssh does for a host it cannot reach.
+	unreachable bool
 }
 
 func (h *manifestHost) Describe() string { return "watch.example.org" }
@@ -30,6 +32,9 @@ func (h *manifestHost) Run(command string) (string, error) {
 }
 func (h *manifestHost) RunInput(command, _ string) (string, error) { return h.Run(command) }
 func (h *manifestHost) ReadFile(path string) (string, bool, error) {
+	if h.unreachable {
+		return "", false, errors.New("watch.example.org: ssh: connect to host watch.example.org port 22: Connection timed out")
+	}
 	content, ok := h.files[path]
 	return content, ok, nil
 }
@@ -180,13 +185,13 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf("paisans.yaml was edited:\n%s", after)
 	}
-	i := rec.Index("note", "status: caddy does not include /etc/caddy/paisans.d")
-	if i < 0 {
+	i := rec.Index("warned", "site file for status")
+	if i < 0 || rec.Events[i].Extra != "caddy does not include /etc/caddy/paisans.d" || rec.Events[i+1].Kind != "explain" {
 		t.Fatalf("no warning:\n%s", rec.Lines())
 	}
 	for _, want := range []string{"    import /etc/caddy/paisans.d/*\n", "/opt/caddy/Caddyfile", "include_dir: false"} {
-		if !strings.Contains(rec.Events[i].Extra, want) {
-			t.Errorf("warning lacks %q:\n%s", want, rec.Events[i].Extra)
+		if !strings.Contains(rec.Events[i+1].Text, want) {
+			t.Errorf("warning lacks %q:\n%s", want, rec.Events[i+1].Text)
 		}
 	}
 }
@@ -200,8 +205,8 @@ func TestApplyRefusesALiteralInclude(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err == nil {
 		t.Fatal("complete")
 	}
-	i := rec.Index("note", "status: caddy includes /etc/caddy/paisans.d in a way apply does not write into")
-	if i < 0 || !strings.Contains(rec.Events[i].Extra, "Replace it with:\n\n    import /etc/caddy/paisans.d/*") {
+	i := rec.Index("warned", "site file for status")
+	if i < 0 || rec.Events[i].Extra != "caddy includes /etc/caddy/paisans.d by a path, not a wildcard" || !strings.Contains(rec.Events[i+1].Text, "Replace it with:\n\n    import /etc/caddy/paisans.d/*") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
 	if len(f.server.Files) != 0 {
@@ -277,8 +282,8 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf("paisans.yaml was edited:\n%s", after)
 	}
-	i := rec.Index("note", "status: no directory caddy reads to write its site file in")
-	if i < 0 || !strings.Contains(rec.Events[i].Extra, "- /opt/caddy/paisans.d:/etc/caddy/paisans.d") {
+	i := rec.Index("warned", "site file for status")
+	if i < 0 || rec.Events[i].Extra != "no directory caddy reads to write in" || !strings.Contains(rec.Events[i+1].Text, "- /opt/caddy/paisans.d:/etc/caddy/paisans.d") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
 	if len(f.server.Files) != 0 {
@@ -287,22 +292,194 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 }
 
 // A file the server refuses is removed again, nothing is reloaded, and
-// the server's error is in the warning.
+// the server's error is on the step's warning. The run ends on a warning.
 func TestApplyReportsTheServersRefusal(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
 	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	f.server.Validate = "Error: ambiguous site definition: status.example.org"
 	rec := recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err == nil {
-		t.Fatal("complete")
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if !errors.As(err, &w) {
+		t.Fatalf("err %v", err)
 	}
-	if len(f.server.Files) != 0 || f.server.Ran("reload") {
+	if len(f.server.Files) != 0 || f.server.Ran("reload") || f.server.Ran("restart") {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	i := rec.Index("note", "watch: the web server refused the change to "+statusFile)
-	if i < 0 || !strings.Contains(rec.Events[i].Extra, "ambiguous site definition") {
+	i := rec.Index("warned", "site file for status")
+	if i < 0 || rec.Events[i].Extra != "caddy refused "+statusFile || !strings.Contains(rec.Events[i+1].Text, "ambiguous site definition") {
 		t.Fatalf("output:\n%s", rec.Lines())
+	}
+}
+
+// A Docker server whose graceful reload fails is restarted, and the step
+// says so.
+func TestApplyRestartsAWebServerWhoseReloadFails(t *testing.T) {
+	fakeConverge(t, nil)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f.server.Reload = "Error: sending configuration to instance: connection refused"
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.server.Ran("docker restart 'caddy-1'") || f.server.Files[statusFile] == "" {
+		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
+	}
+	if i := rec.Index("done", "site file for status"); i < 0 || rec.Events[i].Extra != statusFile+" written, container caddy-1 restarted: its reload failed" {
+		t.Errorf("output:\n%s", rec.Lines())
+	}
+}
+
+// bareCaddy is a Caddy on the host itself, run by systemd.
+var bareCaddy = webserver.WebServer{
+	Server: webserver.ServerCaddy, Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile",
+	Certs: webserver.CertsAutomatic,
+}
+
+// A web server on the host itself is validated with the file and not
+// reloaded: the step warns with the command that reloads it, the check
+// failing until then says no more than that it follows, and the run ends
+// on a warning.
+func TestApplyLeavesTheReloadOfABareMetalServer(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, certificateFails)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, bareCaddy, "import /etc/caddy/paisans.d/*\n")
+	f.server.Units = []string{"caddy"}
+	rec := recordConverge(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if !errors.As(err, &w) {
+		t.Fatalf("err %v", err)
+	}
+	const file = "/etc/caddy/paisans.d/paisans-f2a9-status.caddy"
+	if f.server.Files[file] == "" || !f.server.Ran("caddy validate") || f.server.Ran("caddy reload") || f.server.Ran("systemctl reload") || f.server.Ran("restart") {
+		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
+	}
+	var shown []string
+	for _, l := range lines(inSection(rec, "web server")) {
+		if !strings.HasPrefix(l, "progress ") && !strings.HasPrefix(l, "note watch: include_dir set") {
+			shown = append(shown, l)
+		}
+	}
+	sameLines(t, shown, []string{
+		"step site file for status",
+		"warned site file for status: " + file + " written, caddy not reloaded",
+		"explain caddy's configuration is valid with it, and caddy runs on the host itself, so apply leaves its reload to you:\n\n    sudo systemctl reload caddy\n\nthen run paisans web-server check --app status.",
+		"step status",
+		"warned status: status.example.org",
+		"explain certificate: the certificate is not valid for status.example.org: it names watch.example.org, expected until caddy is reloaded, see above.",
+	})
+}
+
+// tlsInternal is the status app's checks against a Caddy with no
+// certificate for its hostname: each HTTPS request fails the same way.
+var tlsInternal = map[string][]webserver.Result{"status": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: `https://status.example.org/healthz: Get "https://status.example.org/healthz": remote error: tls: internal error`},
+	{Name: webserver.CheckSignIn, Detail: `https://status.example.org/login/oidc: Get "https://status.example.org/login/oidc": remote error: tls: internal error`},
+	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
+}}
+
+// Where the site file step warned with its own instructions, the check
+// that fails because of it gives none of its own: one line naming what
+// failed, the same error said once, and that it follows from the step
+// above. Each line is a warning, and the run ends on one.
+func TestApplyGivesOneSetOfInstructionsPerProblem(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, tlsInternal)
+	path := externalFixture(t)
+	ws := mountedCaddy
+	ws.Mounts = []webserver.Mount{{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
+	fakeWebServerFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
+	rec := recordConverge(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if !errors.As(err, &w) {
+		t.Fatalf("err %v", err)
+	}
+	var b strings.Builder
+	if code := reportError(&b, err, false); code != 0 {
+		t.Errorf("exit %d:\n%s", code, b.String())
+	}
+	var shown []string
+	for _, l := range lines(inSection(rec, "web server")) {
+		if !strings.HasPrefix(l, "progress ") {
+			shown = append(shown, l)
+		}
+	}
+	if len(shown) != 6 {
+		t.Fatalf("section:\n%s", strings.Join(shown, "\n"))
+	}
+	sameLines(t, []string{shown[0], shown[1], shown[3], shown[4], shown[5]}, []string{
+		"step site file for status",
+		"warned site file for status: no directory caddy reads to write in",
+		"step status",
+		"warned status: status.example.org",
+		"explain healthz and login/oidc: tls: internal error (caddy has no certificate for this name), expected until its site file is in place, see above.",
+	})
+	if !strings.HasPrefix(shown[2], "explain The container caddy-1 mounts /opt/caddy/Caddyfile alone") || strings.Count(shown[2], "paisans web-server show --app status") != 1 {
+		t.Errorf("the site file's instructions:\n%s", shown[2])
+	}
+}
+
+// A site file already in place on a Docker server whose check fails is
+// validated and the server reloaded, to take in an edit of the operator's,
+// and the app checked once more.
+func TestApplyReloadsAndChecksAgainWhenTheCheckFails(t *testing.T) {
+	fakeConverge(t, nil)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	checks := 0
+	saved := convergeWebServerCheck
+	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
+		checks++
+		if checks == 1 {
+			return tlsInternal["status"]
+		}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"}}
+	}
+	t.Cleanup(func() { convergeWebServerCheck = saved })
+	f.server.Asked = nil
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	if checks != 2 || f.server.Ran("printf") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
+		t.Errorf("checked %d times, asked %v", checks, f.server.Asked)
+	}
+	if !rec.Has("done", "status") || !rec.Has("result", "Deployment complete.") {
+		t.Errorf("output:\n%s", rec.Lines())
+	}
+}
+
+// A host that cannot be reached for the record of its site files is a
+// failure, not a warning: the step is marked failed with the error, and the
+// run ends failed, exit 1.
+func TestApplyFailsWhereTheSiteFilesRecordCannotBeRead(t *testing.T) {
+	fakeConverge(t, nil)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f.manifest.unreachable = true
+	rec := recordConverge(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) {
+		t.Fatalf("err %#v", err)
+	}
+	var b strings.Builder
+	if code := reportError(&b, err, false); code != 1 || !strings.HasPrefix(b.String(), "FAIL ") {
+		t.Errorf("exit %d:\n%s", code, b.String())
+	}
+	i := rec.Index("fail", "site files on watch")
+	if i < 0 || rec.Events[i+1].Kind != "explain" || !strings.Contains(rec.Events[i+1].Text, "Connection timed out") {
+		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
 

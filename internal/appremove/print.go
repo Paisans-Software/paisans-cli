@@ -72,7 +72,7 @@ func (p *Plan) Show(r ui.Reporter) {
 			}
 		}
 		for _, f := range s.WebServer {
-			line("remove site files", "%s, from the include directory of %s, which is then validated and reloaded", f.Path, f.Server)
+			line("remove site files", "%s, from the include directory of %s, which is then validated, and reloaded when it runs in a container", f.Path, f.Server)
 		}
 		dir := s.Dir
 		switch {

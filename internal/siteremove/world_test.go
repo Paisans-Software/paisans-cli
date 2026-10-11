@@ -144,8 +144,8 @@ type host struct {
 	// manifest's files.
 	filesAnswer func(string) (string, error)
 	// web is the operator's web server, when the host runs one: the
-	// commands writing or removing a file under webDir and those run in
-	// its container go to it.
+	// commands writing or removing a file under webDir, those run in its
+	// container and its own on the host go to it.
 	web *webservertest.Server
 }
 
@@ -157,7 +157,8 @@ func (h *host) webCommand(command string) bool {
 		return false
 	}
 	return strings.HasPrefix(command, "if [ -e '"+webDir) || strings.HasPrefix(command, "rm -f -- '"+webDir) ||
-		strings.Contains(command, "mkdir -p '"+webDir) || strings.HasPrefix(command, "docker exec 'caddy-1' sh -c")
+		strings.Contains(command, "mkdir -p '"+webDir) || strings.HasPrefix(command, "docker exec 'caddy-1' sh -c") ||
+		strings.HasPrefix(command, "caddy validate") || strings.HasPrefix(command, "systemctl is-active")
 }
 
 func (h *host) Describe() string { return h.name }

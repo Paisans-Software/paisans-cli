@@ -32,7 +32,7 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 	// Writing the site files reaches the monitor's host; here there is
 	// nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
-	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool) ([]string, bool) { return nil, false }
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool) webServerFiles { return webServerFiles{} }
 	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
 	fakeWebServer(t, caddyAutomatic)
 	return &checked
@@ -158,31 +158,23 @@ func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 	if code := reportError(&b, err, false); code != 0 || !strings.HasPrefix(b.String(), "WARN Deployment complete, but 1 app failed its web server check: status") {
 		t.Errorf("exit %d:\n%s", code, b.String())
 	}
-	if !rec.Has("fail", "status") {
-		t.Errorf("no failed line:\n%s", rec.Lines())
+	i := rec.Index("warned", "status")
+	if i < 0 || rec.Events[i+1].Kind != "explain" || rec.Has("fail", "status") || rec.Has("note", "status") {
+		t.Fatalf("not one warning line:\n%s", rec.Lines())
 	}
-	i := rec.Index("note", "status")
-	if i < 0 {
-		t.Fatalf("no warning:\n%s", rec.Lines())
-	}
-	note := rec.Events[i]
-	for _, want := range []string{"certificate"} {
-		if !strings.Contains(note.Text, want) {
-			t.Errorf("hint %q lacks %q", note.Text, want)
-		}
-	}
+	explain := rec.Events[i+1].Text
 	for _, want := range []string{
-		"it names watch.example.org",
+		"certificate: the certificate is not valid for status.example.org: it names watch.example.org",
 		"paisans web-server show --app status",
 		"paisans web-server check --app status",
 	} {
-		if !strings.Contains(note.Extra, want) {
-			t.Errorf("detail %q lacks %q", note.Extra, want)
+		if !strings.Contains(explain, want) {
+			t.Errorf("detail %q lacks %q", explain, want)
 		}
 	}
 	for _, passed := range []string{"resolves to", "redirects", "refused"} {
-		if strings.Contains(note.Extra, passed) {
-			t.Errorf("detail %q names a check that passed", note.Extra)
+		if strings.Contains(explain, passed) {
+			t.Errorf("detail %q names a check that passed", explain)
 		}
 	}
 }
@@ -269,8 +261,8 @@ func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	if !slices.Equal(*asked, webServerAsks{"status sudo=false"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	i := rec.Index("note", "status")
-	if i < 0 || !strings.Contains(rec.Events[i].Extra, caddyAutomatic.Summary()) {
+	i := rec.Index("warned", "status")
+	if i < 0 || !strings.Contains(rec.Events[i+1].Text, caddyAutomatic.Summary()) {
 		t.Errorf("the warning does not name the web server:\n%s", rec.Lines())
 	}
 }

@@ -314,8 +314,9 @@ func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
 }
 
 // webServer removes the app's files from the include directory of the
-// operator's web server, validating and reloading the server after each,
-// and drops their entries from the manifest. A file edited on the host is
+// operator's web server, validating the server after each and reloading
+// one in a container, and drops their entries from the manifest. One on
+// the host itself is the operator's to reload, and what is left says how. A file edited on the host is
 // kept, and one already gone is fine. A removal the server refuses puts the
 // file back and stops the run, which a run again resumes.
 func (e *Executor) webServer(h Host, d deployment.Deployment, s SitePlan) error {
@@ -325,11 +326,14 @@ func (e *Executor) webServer(h Host, d deployment.Deployment, s SitePlan) error 
 	drop := map[string]bool{}
 	var failed error
 	for _, entry := range s.WebServer {
-		e.work("remove site file").Detail("%s, then validate and reload %s", entry.Path, entry.Server)
+		e.work("remove site file").Detail("%s, then validate %s", entry.Path, entry.Server)
 		o := webserver.Remove(webserver.Host{Plain: h}, entry)
 		switch o.Kind {
 		case webserver.Removed, webserver.Gone:
 			drop[entry.Path] = true
+			if o.Reload.Kind == webserver.OperatorReloads {
+				e.Kept = append(e.Kept, reloadLeft(s.Site, entry.Server, o.Reload.Command))
+			}
 		case webserver.Edited:
 			e.Kept = append(e.Kept, fileEdited(s.Site, entry.Path))
 		default:

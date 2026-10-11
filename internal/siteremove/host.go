@@ -508,7 +508,7 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("reduce", "reduce Caddy to the host's sites", "Caddy %s, kept because it serves the host owner's sites (%s): its Caddyfile reduced to the global options, the snippets they may import and `import %s/*.caddy`, staged where the container sees it, validated in it and loaded with caddy reload, then written over %s in place; a failure puts the original back and removes nothing else. Its compose file, Caddyfile, caddy.env, data and config stay, kept with --delete-data too", cp.container.Name, strings.Join(cp.sites, ", "), render.HostSitesMount, p.caddyfile())
 	}
 	for _, f := range hp.webServer {
-		add("remove", "remove site files", "%s, from the include directory of %s, which is then validated and reloaded; the directory and every other file in it stay", f.Path, f.Server)
+		add("remove", "remove site files", "%s, from the include directory of %s, which is then validated, and reloaded when it runs in a container; the directory and every other file in it stay", f.Path, f.Server)
 	}
 	if len(hp.containers) > 0 || len(hp.networks) > 0 {
 		add("remove", "remove containers and networks", "every container and network with this deployment's label: %s", strings.Join(append(append([]string{}, hp.containers...), hp.networks...), ", "))
@@ -586,13 +586,17 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
-	// The operator's web server next, so it stops serving the app before
-	// the app goes. A removal it refuses puts the file back and stops here,
+	// The operator's web server next, so one in a container stops serving
+	// the app before the app goes; one on the host itself is left for the
+	// operator to reload. A removal it refuses puts the file back and stops here,
 	// with the manifest that proves the file this deployment's still there.
 	for _, f := range hp.webServer {
 		p.work("remove site files")
 		switch o := webserver.Remove(webserver.Host{Plain: t}, f); o.Kind {
 		case webserver.Removed, webserver.Gone:
+			if o.Reload.Kind == webserver.OperatorReloads {
+				p.Kept = append(p.Kept, reloadLeft(p.Site, f.Server, o.Reload.Command))
+			}
 		case webserver.Edited:
 			p.Kept = append(p.Kept, editedFileKept(p.Site, f.Path))
 		default:

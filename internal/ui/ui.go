@@ -81,6 +81,9 @@ const (
 	// Waiting is a step a dry run cannot plan until an earlier one has run:
 	// a dim ·.
 	Waiting
+	// Warned is a step that ended on something left to the operator, which
+	// does not fail the command: !.
+	Warned
 )
 
 // New reports to w, drawing with colour and a spinner when w is a terminal

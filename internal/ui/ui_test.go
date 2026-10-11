@@ -403,7 +403,7 @@ func TestSectionAndWarningClearTheSpinnerLine(t *testing.T) {
 	}
 }
 
-// A dry run's status line ends a step with one of four marks. Piped, each is
+// A dry run's status line ends a step with one of its marks. Piped, each is
 // a word in the mark's column; the result follows the title either way.
 func TestPlainEndMarksAreWords(t *testing.T) {
 	var b strings.Builder
@@ -413,17 +413,19 @@ func TestPlainEndMarksAreWords(t *testing.T) {
 	r.Step("apply --site a").End(ui.Pending, "3 changes")
 	r.Step("apply --site b").End(ui.Waiting, "after host prepare --site b")
 	r.Step("dns init").End(ui.Failed, "the provider did not answer")
+	r.Step("site file for status").End(ui.Warned, "no directory to write in")
 	want := "  ok   host prepare --site a\n" +
 		"  todo apply --site a: 3 changes\n" +
 		"  wait apply --site b: after host prepare --site b\n" +
-		"  FAIL dns init: the provider did not answer\n"
+		"  FAIL dns init: the provider did not answer\n" +
+		"  WARN site file for status: no directory to write in\n"
 	if b.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
 
-// On a terminal pending is a yellow ○ and waiting a dim line with a ·, each
-// replacing the spinner as a finished step does.
+// On a terminal pending is a yellow ○, waiting a dim line with a · and a
+// warning a yellow !, each replacing the spinner as a finished step does.
 func TestTerminalEndMarks(t *testing.T) {
 	for _, c := range []struct {
 		mark ui.Mark
@@ -433,10 +435,11 @@ func TestTerminalEndMarks(t *testing.T) {
 		{ui.Failed, "\r\x1b[K  \x1b[31m✗\x1b[0m a: boom"},
 		{ui.Pending, "\r\x1b[K  \x1b[33m○\x1b[0m a: 3 changes"},
 		{ui.Waiting, "\r\x1b[K  \x1b[2m· a: after b\x1b[0m"},
+		{ui.Warned, "\r\x1b[K  \x1b[33m!\x1b[0m a: left to you"},
 	} {
 		var b strings.Builder
 		r := ui.NewForTest(&b, false, true, func() time.Time { return time.Time{} })
-		result := map[ui.Mark]string{ui.Failed: "boom", ui.Pending: "3 changes", ui.Waiting: "after b"}[c.mark]
+		result := map[ui.Mark]string{ui.Failed: "boom", ui.Pending: "3 changes", ui.Waiting: "after b", ui.Warned: "left to you"}[c.mark]
 		r.Step("a").End(c.mark, result)
 		out := b.String()
 		last := out[strings.LastIndex(out, "\r\x1b[K"):]
@@ -452,8 +455,9 @@ func TestRecorderKeepsEachMark(t *testing.T) {
 	rec.Step("b").End(ui.Pending, "3 changes")
 	rec.Step("c").End(ui.Waiting, "after a")
 	rec.Step("d").End(ui.Failed, "boom")
+	rec.Step("f").End(ui.Warned, "left to you")
 	ui.Discard.Step("e").End(ui.Pending, "x")
-	for _, want := range []ui.Event{{"done", "a", ""}, {"pending", "b", "3 changes"}, {"waiting", "c", "after a"}, {"fail", "d", "boom"}} {
+	for _, want := range []ui.Event{{"done", "a", ""}, {"pending", "b", "3 changes"}, {"waiting", "c", "after a"}, {"fail", "d", "boom"}, {"warned", "f", "left to you"}} {
 		if !slices.Contains(rec.Events, want) {
 			t.Errorf("no %+v in:\n%s", want, rec.Lines())
 		}

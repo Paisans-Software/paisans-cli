@@ -755,21 +755,32 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	defer printLoginLinks(links)
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	unwritten, headed := convergeWebServerFiles(r, cfg, configPath, sudo)
-	failed := convergeWebServer(r, cfg, sudo, headed)
-	for _, app := range unwritten {
-		if !slices.Contains(failed, app) {
-			failed = append(failed, app)
+	files := convergeWebServerFiles(r, cfg, configPath, sudo)
+	checked, broken := convergeWebServer(r, cfg, sudo, files)
+	// An app whose site file step warned is named once, by the app.
+	warned := slices.Clone(checked)
+	for _, title := range files.warned {
+		if name := strings.TrimPrefix(title, "site file for "); !slices.Contains(warned, name) {
+			warned = append(warned, name)
 		}
 	}
+	broken = append(files.failed, broken...)
 	convergeLeft(r, cfg, secretsPath, configPath)
-	if len(failed) > 0 {
+	if len(broken) > 0 {
+		// What apply needed on the host could not be done: that is not
+		// the operator's web server, and the run fails.
 		if adminErr != nil {
-			return errors.Join(webServerFailed(failed), adminErr)
+			return errors.Join(webServerBroken(broken), adminErr)
+		}
+		return webServerBroken(broken)
+	}
+	if len(warned) > 0 {
+		if adminErr != nil {
+			return errors.Join(webServerFailed(checked, warned), adminErr)
 		}
 		// Every step ran, and what is left is the operator's own web
 		// server: the run ends on a warning, not a failure.
-		return &ui.Warning{Problem: *webServerFailed(failed)}
+		return &ui.Warning{Problem: *webServerFailed(checked, warned)}
 	}
 	if adminErr != nil {
 		return adminErr
