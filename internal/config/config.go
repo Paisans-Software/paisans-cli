@@ -93,11 +93,14 @@ type Config struct {
 	// ACME is how certificates are obtained. It is deployment wide rather than
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
-	ACME    ACME            `yaml:"acme"`
-	Sites   map[string]Site `yaml:"sites"`
-	Cluster Cluster         `yaml:"cluster"`
-	Etcd    Etcd            `yaml:"etcd"`
-	Storage Storage         `yaml:"storage"`
+	ACME ACME `yaml:"acme"`
+	// Admins is the people who may log in to the sites, under the name a
+	// site's ssh.keys lists them by.
+	Admins  map[string]Admin `yaml:"admins"`
+	Sites   map[string]Site  `yaml:"sites"`
+	Cluster Cluster          `yaml:"cluster"`
+	Etcd    Etcd             `yaml:"etcd"`
+	Storage Storage          `yaml:"storage"`
 	// SMTP is how apps send mail, the default for every app that sends any.
 	// An app's own smtp block overrides it field by field: see SMTPFor.
 	SMTP SMTP           `yaml:"smtp"`
@@ -618,6 +621,7 @@ func load(path string, noSubnet bool) (*Config, error) {
 		return nil, parseProblem(path, "a configuration", err)
 	}
 	cfg.deriveLists(written)
+	cfg.resolveKeys()
 	if cfg.Storage.Garage.Capacity == "" {
 		cfg.Storage.Garage.Capacity = "100G"
 	}
@@ -868,8 +872,9 @@ func (c *Config) structural(noSubnet bool) error {
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
 			add("sites.%s.watchdog: unknown mode %q. Valid modes are auto, required, softdog and off.", name, site.Watchdog)
 		}
-		problems = append(problems, sshProblems(name, site)...)
+		problems = append(problems, sshProblems(name, site, c.Admins)...)
 	}
+	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if app.Kind == "" {
