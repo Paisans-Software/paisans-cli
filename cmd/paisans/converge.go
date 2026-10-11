@@ -1147,28 +1147,41 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 // steps first reach them: it spins while one of its steps runs, waits
 // between them with the time they took, and ends once its last step has.
 // A data member's founding stop is expected, and the run carries on: pass
-// two applies it again. Each step is listed under its line with its own
-// result, which -v shows with the step's own output; its notes follow the
-// line at every verbosity. A failure ends its line and the run, leaving the
-// other lines as they stand.
+// two applies it again. So is a replica's stop for the app databases, on any
+// of its site's applies, since only the Patroni leader's site creates them
+// and which site leads is known only once Patroni runs. A later visit to the
+// site resumes it; when the stop is on the site's last visit, the site is
+// applied once more after every other step, by which time the leader's site
+// has had its own last visit, and a stop then ends the run. Each step is
+// listed under its line with its own result, which -v shows with the step's
+// own output; its notes follow the line at every verbosity. A failure ends
+// its line and the run, leaving the other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
 	places := installPlaces(steps)
 	lines, done := ui.Ordered(r, places...)
 	defer done()
 	last := lastVisits(steps)
-	for i, s := range steps {
+	// again is each step whose site waited for its databases on its last
+	// visit, to be run once more at the end.
+	var again []int
+	run := func(i int, final bool) error {
+		s := steps[i]
 		k := slices.Index(places, installPlace(s))
 		line := lines[k]
 		line.Start()
 		start := convergeNow()
 		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
+		databases := err != nil && !final && errors.Is(err, apply.ErrDatabasesWait)
 		switch {
 		case err == nil:
 			line.Detail("%s", innerLine(ui.OK, s.Title, since(start)))
 		case founding:
 			line.Detail("%s", innerLine(ui.OK, s.Title, "stopped for the other etcd members"))
+			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
+		case databases:
+			line.Detail("%s", innerLine(ui.OK, s.Title, "waiting for the primary's databases"))
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
@@ -1177,10 +1190,15 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Note(n.Text, n.Detail)
 		}
 		switch {
-		case (err == nil || founding) && last[k] == i:
+		case databases && last[k] == i:
+			again = append(again, i)
+			line.Pause("waiting for the primary's databases")
+		case (err == nil || founding) && (final || last[k] == i):
 			line.Done("")
 		case founding:
 			line.Pause("stopped for the other etcd members")
+		case databases:
+			line.Pause("waiting for the primary's databases")
 		case err == nil:
 			line.Pause("again in pass two")
 		case errors.Is(err, storageadd.ErrWaiting):
@@ -1190,6 +1208,17 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		default:
 			line.Fail(err)
 			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
+		}
+		return nil
+	}
+	for i := range steps {
+		if err := run(i, false); err != nil {
+			return err
+		}
+	}
+	for _, i := range again {
+		if err := run(i, true); err != nil {
+			return err
 		}
 	}
 	return nil
