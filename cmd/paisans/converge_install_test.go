@@ -458,6 +458,49 @@ func TestConvergeRunIsQuietAndKeepsDiagnosticsForVerbose(t *testing.T) {
 	}
 }
 
+// An apply a step leaves owed on another site is not noted under converge,
+// whose pass two applies every site again: it would read as a second line
+// for that site. The step's other notes still show after its line.
+func TestConvergeLeavesOutAppliesItsPassTwoMakes(t *testing.T) {
+	owed := "home-a: run `paisans apply --site home-a` when acceptable. Its apps are out of date in 1 file, /srv/paisans/f2a9/talk/.env: it differs from the render, and the apply brings it up to date and recreates its app"
+	kept := "smoke test skipped: no app serves objects publicly. There is no bucket to put a probe through"
+	report := func() {
+		r := reporterOverride
+		reportRemains(r, []string{kept})
+		reportOwedApplies(r, []string{owed})
+	}
+	fakeConverge(t, nil)
+	saved := convergeRun
+	convergeRun = func(args []string) error {
+		if args[0] == "storage" {
+			report()
+		}
+		return saved(args)
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Has("note", "home-a: run") || !rec.Has("note", "smoke test skipped") {
+		t.Errorf("--execute:\n%s", rec.Lines())
+	}
+
+	// A dry run's check runs the step under the same reporter.
+	dry := &ui.Recorder{}
+	_, reports, err := checkStep(dry, []string{"storage", "add"}, func([]string) error { report(); dryRunFound("", nil); return nil })
+	if err != nil || len(reports) != 1 || reports[0].Text != "smoke test skipped: no app serves objects publicly" {
+		t.Errorf("dry run: %v, %+v", err, reports)
+	}
+
+	// Run by hand, the command notes it.
+	alone := &ui.Recorder{}
+	reportOwedApplies(alone, []string{owed})
+	if !alone.Has("note", "home-a: run `paisans apply --site home-a` when acceptable") {
+		t.Errorf("by hand:\n%s", alone.Lines())
+	}
+}
+
 // As printed without a terminal: a line per site and one for storage, and
 // -v lists each line's inner steps under it, each with its own mark and
 // result.

@@ -132,7 +132,7 @@ func TestAJoinCompletesAndLeavesNothingToDo(t *testing.T) {
 	if err := siteadd.Execute(again); err != nil {
 		t.Errorf("re-running a finished join fails its gates: %v", err)
 	}
-	if len(again.Notes) == 0 {
+	if len(again.Owed) == 0 {
 		t.Error("home-a's stale patroni.env is not noted")
 	}
 

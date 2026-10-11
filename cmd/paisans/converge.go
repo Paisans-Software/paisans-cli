@@ -688,7 +688,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 // sentences is err's hint as a sentence, then its explanation.
 func sentences(err error) string {
 	hint, explain := ui.Describe(err)
-	lines := []string{strings.TrimSuffix(hint, ".") + "."}
+	lines := []string{sentence(hint)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
@@ -703,11 +703,20 @@ func convergeStop(hint string, err error, next string) error {
 	if errors.As(err, &w) {
 		inner, explain = w.Hint()+": "+w.Detail, ""
 	}
-	lines := []string{strings.TrimSuffix(inner, ".") + "."}
+	lines := []string{sentence(inner)}
 	if explain != "" {
 		lines = append(lines, explain)
 	}
 	return &ui.Problem{Hint: hint, Explain: strings.Join(append(lines, next), "\n"), Cause: err}
+}
+
+// sentence is hint ended with one period, or as it is when it ends with a
+// colon, which introduces the lines after it.
+func sentence(hint string) string {
+	if strings.HasSuffix(hint, ":") {
+		return hint
+	}
+	return strings.TrimSuffix(hint, ".") + "."
 }
 
 // stepStatus is one step's status in a dry run.
@@ -1395,6 +1404,17 @@ func (c checkReporter) Note(hint, detail string) {
 
 func (c checkReporter) Refuse(hint, explanation string) {
 	*c.reports = append(*c.reports, checkReport{Text: joinDetail("✗ "+hint, explanation)})
+}
+
+// reportOwedApplies notes each apply a command leaves owed on a site, as
+// reportRemains does, but not for a step of converge (a checkReporter):
+// converge's pass two applies every site again, which makes each of them,
+// and a note naming another site would read as a second line for it.
+func reportOwedApplies(r ui.Reporter, lines []string) {
+	if _, step := r.(checkReporter); step {
+		return
+	}
+	reportRemains(r, lines)
 }
 
 // RetryLog is where the check's ssh retries go: kept, as a detail of the

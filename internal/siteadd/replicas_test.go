@@ -87,7 +87,7 @@ func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 			t.Errorf("the leader is planned for: %v", s)
 		}
 	}
-	notes := strings.Join(p.Notes, "\n")
+	notes := strings.Join(p.Owed, "\n")
 	if !strings.Contains(notes, "home-a leads") || !strings.Contains(notes, "next restart") {
 		t.Errorf("the leader's patroni.env is not noted:\n%s", notes)
 	}
