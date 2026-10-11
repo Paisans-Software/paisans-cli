@@ -1,8 +1,8 @@
-// Package ingresstest is a fake host running a web server, for the tests of
+// Package webservertest is a fake host running a web server, for the tests of
 // the commands that write the toolkit's files into its include directory.
-// It answers the commands internal/ingress sends, keeps the files they
+// It answers the commands internal/webserver sends, keeps the files they
 // write, and records every command, so a test reads what reached the host.
-package ingresstest
+package webservertest
 
 import (
 	"errors"
@@ -100,7 +100,7 @@ func (s *Server) run(command string, sudo bool) (string, error) {
 }
 
 // quoted is every single-quoted word of a command, unquoted, in order: the
-// way internal/ingress quotes each path and content.
+// way internal/webserver quotes each path and content.
 func quoted(command string) []string {
 	var out []string
 	for i := 0; i < len(command); i++ {

@@ -680,7 +680,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's admin problem is shown on its line; it stops nothing.
 		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
-		convergeIngressPending(r, cfg)
+		convergeWebServerPending(r, cfg)
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
 		if len(generated) > 0 {
@@ -703,8 +703,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	defer printLoginLinks(links)
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	unwritten, headed := convergeIngressFiles(r, cfg, configPath, sudo)
-	failed := convergeIngress(r, cfg, sudo, headed)
+	unwritten, headed := convergeWebServerFiles(r, cfg, configPath, sudo)
+	failed := convergeWebServer(r, cfg, sudo, headed)
 	for _, app := range unwritten {
 		if !slices.Contains(failed, app) {
 			failed = append(failed, app)
@@ -712,7 +712,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if len(failed) > 0 {
-		return errors.Join(ingressFailed(failed), adminErr)
+		return errors.Join(webServerFailed(failed), adminErr)
 	}
 	if adminErr != nil {
 		return adminErr

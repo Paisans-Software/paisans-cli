@@ -475,8 +475,8 @@ of the gateway's Caddyfile, and `dns init` points its hostname at the
 monitor's `public_address` (and `public_address6`), which is why that address
 is required. A monitor reached only through the gateway would go dark at
 exactly the moment it is needed. What is in front of it is the site's
-`ingress` block, which only a monitor site may carry
-(`ingress-outside-monitor`):
+`web_server` block, which only a monitor site may carry
+(`web-server-outside-monitor`):
 
 ```yaml
 sites:
@@ -484,13 +484,13 @@ sites:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20  # the mesh dials it here, on 51820
-    ingress:
-      mode: external              # paisans (default) or external
+    web_server:
+      managed_by: external        # paisans (default) or external
       listen: 127.0.0.1:8480      # external only, and required there
       # include_dir: /etc/nginx/paisans.d   # external only; apply derives it, false opts out
 ```
 
-* **`mode: paisans`**, the default, runs the toolkit's Caddy on the monitor,
+* **`managed_by: paisans`**, the default, runs the toolkit's Caddy on the monitor,
   the same image the gateway runs, in its `infra` stack with host networking
   and certificates over DNS-01 through `acme.provider`, with a host block for
   each app pinned there and nothing else. It claims tcp 80 and 443, and
@@ -502,22 +502,22 @@ sites:
   of the rendered `caddy.env` describes (and *Certificates use DNS-01,
   everywhere* in `docs/development.md`); then the token on either machine can
   write challenges and nothing else.
-* **`mode: external`** runs the app and nothing in front of it, for a machine
+* **`managed_by: external`** runs the app and nothing in front of it, for a machine
   that already runs a web server on 80 and 443. The app is published on
   `listen` alone: nothing dials its mesh address, since the gateway does not
   route it and the monitor does not check its own container. Its compose
   network is pinned at `10.255.255.0/29`, outside Docker's default pools, so
   the address the web server's connections arrive from is known; `validate`
-  refuses a mesh over it (`ingress-network-overlaps-mesh`), and the host
+  refuses a mesh over it (`web-server-network-overlaps-mesh`), and the host
   check refuses a host where a foreign network or route already holds it.
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
   a configuration it does not own. `paisans apply` without `--site` runs
-  `paisans ingress check` for each such app once every step has run, a line
-  per app in an `ingress` section, and does not call the deployment complete
-  while one fails: it names the app, what failed, the web server `ingress show`
+  `paisans web-server check` for each such app once every step has run, a line
+  per app in a `web server` section, and does not call the deployment complete
+  while one fails: it names the app, what failed, the web server `web-server show`
   finds in front of it, read through the sudo the run settled at its start,
-  and the `ingress show` and `ingress check` commands to fix it with, and
+  and the `web-server show` and `web-server check` commands to fix it with, and
   exits 1. A certificate or sign
   in failure, which an app or certificate that has only just started can
   cause, is tried again for about half a minute first; a dry run lists the
@@ -525,7 +525,7 @@ sites:
   walks through it.
 
 **The toolkit writes its own file, never the operator's configuration.** In
-`mode: external` `paisans apply` without `--site` puts each app's site, the snippet `ingress show`
+`managed_by: external` `paisans apply` without `--site` puts each app's site, the snippet `web-server show`
 prints for the web server it finds, in a file of its own in `include_dir`, a
 directory on the host the web server includes with one line the operator adds
 once:
@@ -538,7 +538,7 @@ once:
 
 The file is named for the deployment, `paisans-<token>-<app>.caddy` or
 `.conf`, so two deployments writing in one directory never collide. Apply
-writes it before the ingress check, validates the server's whole
+writes it before the web server check, validates the server's whole
 configuration (`caddy validate`, `nginx -t`, `apachectl configtest`, inside
 the container for one in a container) and reloads it (`caddy reload`, `nginx
 -s reload`, `apachectl graceful`). When either fails it puts back what was
@@ -568,7 +568,7 @@ instead; either way the run does not end as complete.
 
 `include_dir` unset, apply derives it beside the server's main configuration,
 `<its directory>/paisans.d`, and writes it into `paisans.yaml` under the
-site's `ingress`, in place, keeping every comment, with a warning saying so
+site's `web_server`, in place, keeping every comment, with a warning saying so
 (`watch: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
 recorded only once the server is found to include it. For a server in a
 container the directory must be visible inside it: the host path comes from
@@ -577,19 +577,19 @@ the container sees it. A container that mounts its configuration file alone
 has no such directory, so nothing is recorded, and the warning names the
 mount to add to its compose file. `include_dir: false` writes nothing, for a
 server apply has no snippet for or an operator who keeps the configuration by
-hand: `ingress show` prints the snippet to copy, as it always does. `validate`
-refuses `include_dir` outside `mode: external` (`ingress-include-dir-mode`)
+hand: `web-server show` prints the snippet to copy, as it always does. `validate`
+refuses `include_dir` outside `managed_by: external` (`web-server-include-dir-managed-by`)
 and anything but a plain absolute path, since it goes into the server's
-configuration and into commands on the host (`ingress-include-dir-path`).
+configuration and into commands on the host (`web-server-include-dir-path`).
 
-`listen` belongs to `mode: external` alone, which cannot work without it
-(`ingress-listen-mode`). Docker publishes a port with its own iptables rules,
+`listen` belongs to `managed_by: external` alone, which cannot work without it
+(`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
 in front of ufw, so a `listen` the internet can reach would expose the app
 around the web server whatever the firewall says: only loopback, a private LAN
 address (RFC 1918, or `100.64.0.0/10` as Tailscale uses) or the site's own
-mesh address are accepted (`ingress-listen-public`), and all but loopback warn
-that ufw does not cover them (`ingress-listen-bypasses-firewall`). One `listen` publishes one app, so an
-external monitor hosts the monitor alone (`ingress-external-serves-one-app`).
+mesh address are accepted (`web-server-listen-public`), and all but loopback warn
+that ufw does not cover them (`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
+external monitor hosts the monitor alone (`web-server-external-serves-one-app`).
 
 Either way the app is rendered for a proxy in front of it:
 `PUBLIC_BASE_URL=https://<hostname>`, from which the fork builds its sign in
@@ -604,7 +604,7 @@ is reached by the web server's own address, which Docker's forwarding keeps
 and which the toolkit knows only by its network, so it is that private block
 or the mesh subnet.
 
-Switching an existing site between the two modes moves that pin, and the
+Switching an existing site between the two `managed_by` values moves that pin, and the
 network on the host has to move with it, or `TRUST_PROXY` names a gateway the
 web server's connections no longer come from. `apply` therefore asks the host
 how each stack it recreates has its compose network addressed, and where that
@@ -624,10 +624,10 @@ later recreates a network whose recorded configuration changed, but leaves
 one with no record alone (created by an older Compose or by hand), so `apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
-**Helping an operator behind their own web server.** Two commands, `ingress
-show` and `ingress check`, neither of which changes anything.
-How to run them, and their flags, are under *`paisans ingress show` and
-`paisans ingress check`* in [docs/commands.md](docs/commands.md).
+**Helping an operator behind their own web server.** Two commands, `web-server
+show` and `web-server check`, neither of which changes anything.
+How to run them, and their flags, are under *`paisans web-server show` and
+`paisans web-server check`* in [docs/commands.md](docs/commands.md).
 
 `show` prints the hostname, the upstream (`listen`) and the health path; what
 the web server must do (terminate TLS for the hostname, pass `Host`, set
@@ -660,10 +660,10 @@ hostname, and its days to expiry; the sign in redirect naming a callback under
 answering, on the public addresses. Any other dial failure, such as no route
 from where the check runs, says nothing about the port: one conclusive answer
 still passes, naming the family that could not be reached (commonly IPv6 from
-a home connection), and with none the check fails as inconclusive. In `mode:
+a home connection), and with none the check fails as inconclusive. With `managed_by:
 external` a check that fails also reads the web server, as `show` does, and
 names it, so the fix lands on the right configuration; a passing check reaches
-no host. In `mode: paisans` there is nothing to hand off, and `check`
+no host. In `managed_by: paisans` there is nothing to hand off, and `check`
 runs only the first two.
 
 **Moving an existing monitor.** A deployment whose uptime hostname already has
@@ -755,8 +755,8 @@ missed and the next one late, since a push that fails outright takes about
 33 s (10 s timeout, two retries). The threshold is the same two as every
 other check; the fork evaluates heartbeats every 15 s, so it costs one such
 tick. The monitor's own site pushes to no one with one monitor, and so gets
-no heartbeat, and a monitor site with no other role in `mode: external`
-therefore still runs no infrastructure stack (in `mode: paisans` its Caddy
+no heartbeat, and a monitor site with no other role in `managed_by: external`
+therefore still runs no infrastructure stack (in `managed_by: paisans` its Caddy
 already gives it one). With two monitors on two sites every site pushes to
 both, each monitor site pushes to the other, and each seed expects the
 other's site, which is what notices a monitor's host dying. Declaring a
@@ -803,7 +803,7 @@ member, which `monitor-shares-a-site` warns about on a data site.
 
 **At the edge** the monitor's Caddy refuses `/status*`, `/badge/*`, `/metrics`
 and the token API `/api/v1/*` with 404 whatever the app's own settings say,
-and `ingress show` carries the same refusal into each snippet for an
+and `web-server show` carries the same refusal into each snippet for an
 operator's own web server. The app is Express with its default routing, which
 ignores case and a trailing slash, so every refusal does too: `/metrics/` and
 `/STATUS` are refused as well. The
@@ -963,7 +963,7 @@ rather than provisioning a new one.
 | Stage | etcd members | Witness |
 |-------|--------------|---------|
 | first apply, no gateway | 1 | none: correct, not missing |
-| first apply with a gateway | 1 | the gateway serves ingress and holds no witness role yet |
+| first apply with a gateway | 1 | the gateway serves every app and holds no witness role yet |
 | second data site, by `site add` | 3 | given to the gateway, or to a site in a third location, in the same change |
 | later | 3 | not built: no command moves a witness to another site; `site remove` takes one out |
 
@@ -1698,7 +1698,7 @@ remaining site's next `apply`. How to run it, and its flags, are under
 *`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
 
 **A site running the toolkit's Caddy without its DNS token is refused at
-`render` and `apply`**: a gateway, or a monitor in ingress mode `paisans`. `init`
+`render` and `apply`**: a gateway, or a monitor in `managed_by` `paisans`. `init`
 lists `external.acme_dns_token` as owed rather than refusing, because an
 install is assembled in steps. Rendering without it is different: the gateway's
 Caddy starts, loads its configuration, and fails every DNS-01 challenge, so no
@@ -2092,8 +2092,8 @@ address is the control, because Docker writes its own iptables rules for a
 published port, ahead of the host's, so a port published on all interfaces of
 a host with a public address is reachable from the internet whatever ufw says.
 A cloud VM holding the apps role is exactly that host. The one port published
-elsewhere is the uptime app's on a monitor in ingress mode `external`, the one
-app that mode allows, which binds the site's `listen` for the operator's own
+elsewhere is the uptime app's on a monitor with `managed_by: external`, the one
+app that setting allows, which binds the site's `listen` for the operator's own
 web server, under the rules in *The monitor has a site of its own*; nothing
 that kind serves can be gated.
 
@@ -2112,9 +2112,9 @@ a real data and apps site: Spilo's bg_mon took 8080 before Mbin could publish
 there. `validate` lists what each site binds (WireGuard's 51820/udp, etcd's
 2379 and 2380, Postgres, the Patroni API and bg_mon on a data site, HAProxy's
 cluster and stats ports where it runs, Garage's 3900 to 3903, Caddy's 80 and
-443 on every address of the gateway and of a monitor in ingress mode `paisans`,
+443 on every address of the gateway and of a monitor in `managed_by` `paisans`,
 and every app's published ports, counting a clustered app on every apps site,
-a pinned one on its own, and one on a monitor in ingress mode `external` at
+a pinned one on its own, and one on a monitor in `managed_by` `external` at
 its `listen`) and refuses
 any two that overlap, naming both and the port. The list is read from the same
 constants the rendered files use, so the check cannot drift from what lands on
@@ -3234,7 +3234,7 @@ which a package upgrade replaces, untouched.
 | the site's `ssh.port`, 22 unless declared | every site |
 | the port the site is dialled on, UDP, WireGuard | sites with a `public_address` or an `endpoint` (see *Where the mesh dials a site*) |
 | everything arriving on `psns-<token>` | every site |
-| 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in ingress mode paisans |
+| 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in `managed_by: paisans` |
 | `br-+` to the site's mesh address, cluster port | sites with the apps role |
 | `br-+` to the site's mesh address, Garage's S3 port | sites with the apps role that are also Garage sites |
 | `br-+` to the site's mesh address, the port of each other app that runs there | sites an uptime monitor runs on, so its direct checks of those apps arrive |
@@ -3652,12 +3652,12 @@ them, a `pocket id` section asks each Pocket ID app whose sites' steps are all
 up to date, or have run, whether it has an admin (`check <app> for an admin`),
 since one not running yet cannot answer, and names `app admin create` for one
 that has none. Then, when an app is served behind the operator's own web
-server, an `ingress` section: with `--execute` a line for each site file
-written into `include_dir` and a line per app for its ingress check, and in a
+server, a `web server` section: with `--execute` a line for each site file
+written into `include_dir` and a line per app for its web server check, and in a
 dry run a line per app, `checked with --execute` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends
-`Deployment complete.`; one where an app failed its ingress check, or its site
+`Deployment complete.`; one where an app failed its web server check, or its site
 file was not written, names those apps instead and exits 1. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
@@ -5983,7 +5983,7 @@ at, and "could not look" is not "looked and it was fine".
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, and the release at the end of `ldd --version`'s first line | any of the three differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
-| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in ingress mode paisans; `listen` for a monitor in ingress mode external; each app's published port |
+| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in `managed_by: paisans`; `listen` for a monitor in `managed_by: external`; each app's published port |
 | Mesh | new site | `ip -j route`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
 | Routes | new site | `ip -j route` | a route overlaps `mesh.subnet`, other than one through `psns-<token>` |
 | Disk | new data site | the leader's `sum(pg_database_size(...))`, through its Patroni container's `psql`; `df` on the deepest existing directory towards `/srv/paisans/<token>/infra/postgres` | free space is under that plus 2 GiB |

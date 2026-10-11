@@ -127,14 +127,14 @@ sites:
     address: 10.44.0.4
     endpoint: watch.example.org:51820
     public_address: 203.0.113.20
-    # What is in front of the monitor. Left out, it is mode paisans: the
+    # What is in front of the monitor. Left out, it is managed_by: paisans: the
     # toolkit's own Caddy, the gateway's image, with certificates over DNS-01.
     # On a machine that already runs a web server on 80 and 443, hand the app
-    # to that server instead; `paisans ingress show --app status` prints what
+    # to that server instead; `paisans web-server show --app status` prints what
     # to put in it, and docs/guides/behind-your-own-web-server.md walks
     # through it.
-    # ingress:
-    #   mode: external
+    # web_server:
+    #   managed_by: external
     #   listen: 127.0.0.1:8480
     ssh:
       host: watch.example.org

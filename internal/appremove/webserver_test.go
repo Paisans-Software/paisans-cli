@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
-	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
 // webHost is a monitor whose web server includes the toolkit's directory:
 // commands go to the web server, and the manifest is a file of its own.
 type webHost struct {
-	*ingresstest.Server
+	*webservertest.Server
 	manifest map[string]string
 }
 
@@ -38,20 +38,20 @@ const manifestPath = "/srv/paisans/f2a9/.paisans-manifest.json"
 func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	cfg := fixture(t)
 	d := cfg.Deployment()
-	server := ingresstest.New("")
+	server := webservertest.New("")
 	server.Files["/opt/caddy/paisans.d/paisans-f2a9-status.caddy"] = "status.example.org {\n}\n"
 	server.Files["/opt/caddy/paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
-	status := render.ManifestIngress{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: sum("status.example.org {\n}\n"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
-	other := render.ManifestIngress{App: "other", Path: "/opt/caddy/paisans.d/paisans-f2a9-other.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
-	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/status/compose.yaml", SHA256: "cd"}}, Ingress: []render.ManifestIngress{other, status}})
+	status := render.ManifestWebServer{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: sum("status.example.org {\n}\n"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	other := render.ManifestWebServer{App: "other", Path: "/opt/caddy/paisans.d/paisans-f2a9-other.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/status/compose.yaml", SHA256: "cd"}}, WebServer: []render.ManifestWebServer{other, status}})
 	h := webHost{server, map[string]string{manifestPath: string(m)}}
 
-	sp, err := planSite(cfg, "status", SiteState{Site: "watch", Inventory: &hostcheck.Inventory{Manifest: true, ManifestFiles: []render.ManifestFile{}, ManifestIngress: []render.ManifestIngress{other, status}}})
+	sp, err := planSite(cfg, "status", SiteState{Site: "watch", Inventory: &hostcheck.Inventory{Manifest: true, ManifestFiles: []render.ManifestFile{}, ManifestWebServer: []render.ManifestWebServer{other, status}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sp.Ingress) != 1 || sp.Ingress[0] != status || sp.Empty() {
-		t.Fatalf("planned %+v", sp.Ingress)
+	if len(sp.WebServer) != 1 || sp.WebServer[0] != status || sp.Empty() {
+		t.Fatalf("planned %+v", sp.WebServer)
 	}
 	rec := &ui.Recorder{}
 	(&Plan{App: "status", Sites: []SitePlan{sp}}).Show(rec)
@@ -60,7 +60,7 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	}
 
 	e := &Executor{}
-	if err := e.ingress(h, d, sp); err != nil {
+	if err := e.webServer(h, d, sp); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := server.Files[status.Path]; ok {
@@ -74,13 +74,13 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	}
 	var after render.Manifest
 	json.Unmarshal([]byte(h.manifest[manifestPath]), &after)
-	if len(after.Ingress) != 1 || after.Ingress[0] != other || len(after.Files) != 1 {
+	if len(after.WebServer) != 1 || after.WebServer[0] != other || len(after.Files) != 1 {
 		t.Errorf("manifest %+v", after)
 	}
 
 	// Run again, the file is already gone: nothing to do, nothing reloaded.
 	server.Asked = nil
-	if err := e.ingress(h, d, sp); err != nil || server.Ran("reload") {
+	if err := e.webServer(h, d, sp); err != nil || server.Ran("reload") {
 		t.Errorf("again: %v %v", err, server.Asked)
 	}
 }
@@ -89,15 +89,15 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 // and stops the run with the server's error.
 func TestAppRemoveStopsWhenTheServerRefuses(t *testing.T) {
 	cfg := fixture(t)
-	server := ingresstest.New("")
+	server := webservertest.New("")
 	content := "status.example.org {\n}\n"
 	path := "/etc/nginx/paisans.d/paisans-f2a9-status.conf"
 	server.Files[path] = content
 	server.Validate = "nginx: [emerg] unknown directive in /etc/nginx/nginx.conf:12"
-	entry := render.ManifestIngress{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
-	m, _ := json.Marshal(render.Manifest{Version: 1, Ingress: []render.ManifestIngress{entry}})
+	entry := render.ManifestWebServer{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
+	m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
 	h := webHost{server, map[string]string{manifestPath: string(m)}}
-	err := (&Executor{}).ingress(h, cfg.Deployment(), SitePlan{Site: "watch", Ingress: []render.ManifestIngress{entry}})
+	err := (&Executor{}).webServer(h, cfg.Deployment(), SitePlan{Site: "watch", WebServer: []render.ManifestWebServer{entry}})
 	if err == nil || !strings.Contains(err.Error(), "unknown directive") {
 		t.Fatalf("err %v", err)
 	}

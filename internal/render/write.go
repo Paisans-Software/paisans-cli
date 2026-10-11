@@ -36,12 +36,12 @@ type Manifest struct {
 	// manifest written before apply recorded it has none, and its history
 	// starts with the next apply.
 	Images []ManifestImage `json:"images,omitempty"`
-	// Ingress are the files apply wrote into the include directory of the
-	// operator's web server, on a monitor site in ingress mode external.
+	// WebServer are the files apply wrote into the include directory of the
+	// operator's web server, on a monitor site with managed_by: external.
 	// They are outside the deployment root, so they are listed apart from
 	// Files, with what removing one needs: the server to validate and
 	// reload once it is gone.
-	Ingress []ManifestIngress `json:"ingress,omitempty"`
+	WebServer []ManifestWebServer `json:"web_server,omitempty"`
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every
@@ -53,9 +53,9 @@ type ManifestImage struct {
 	References []string `json:"references"`
 }
 
-// ManifestIngress is one file apply wrote for the operator's web server,
+// ManifestWebServer is one file apply wrote for the operator's web server,
 // which proves it this deployment's to the command that removes it.
-type ManifestIngress struct {
+type ManifestWebServer struct {
 	// App is the app the file serves.
 	App string `json:"app"`
 	// Path is the file on the host, absolute.

@@ -88,7 +88,7 @@ func (p *planner) heartbeatToken(site string) (string, error) {
 // HeartbeatURL is where a site pushes to one monitor: the fork's ping route
 // at the monitor's public hostname, through DNS and whatever serves that
 // hostname, and never the mesh. The monitor's Caddy snippet, and the
-// snippets `paisans ingress show` prints for an operator's own web server,
+// snippets `paisans web-server show` prints for an operator's own web server,
 // let /ping/* through.
 func HeartbeatURL(hostname, token string) string {
 	return "https://" + hostname + "/ping/" + token

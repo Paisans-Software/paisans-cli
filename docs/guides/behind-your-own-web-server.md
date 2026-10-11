@@ -2,15 +2,15 @@
 
 The uptime monitor runs on a site of its own, with the `monitor` role, and
 serves its own hostname rather than going through the gateway. By default the
-toolkit runs its own Caddy there (`ingress` mode `paisans`), which needs ports
+toolkit runs its own Caddy there (`managed_by: paisans`), which needs ports
 80 and 443 to itself. This guide is for the other case: the machine you want
 the monitor on already runs a web server on 80 and 443, and that web server is
 going to stay in front of it.
 
-In this mode the toolkit runs the monitor's container and nothing in front of
+With `managed_by: external` the toolkit runs the monitor's container and nothing in front of
 it, published on `listen` alone. Your web server terminates TLS and proxies to
 the container. No DNS token goes on this machine, since the toolkit obtains
-no certificate here; in mode `paisans` the monitor's Caddy holds the same
+no certificate here; with `managed_by: paisans` the monitor's Caddy holds the same
 zone token the gateway does, which a challenge only zone can narrow (see the
 header of the rendered `caddy.env`). The
 certificate, and renewing it, are yours: the toolkit cannot know how your
@@ -28,8 +28,8 @@ sites:
     roles: [monitor]
     address: 10.44.0.4                # its mesh address
     public_address: 203.0.113.20      # what the internet and the mesh reach it on
-    ingress:
-      mode: external
+    web_server:
+      managed_by: external
       listen: 127.0.0.1:8480          # where your web server proxies to
 
 apps:
@@ -59,7 +59,7 @@ and `validate` refuses a mesh over it.
 
 The site needs no other role, and should have none of `gateway` or `witness`,
 which are refused: the monitor exists to report their failures. Pin no other
-app there either: `validate` refuses one, because in this mode your web server
+app there either: `validate` refuses one, because with `managed_by: external` your web server
 is handed the monitor alone and nothing would route the other.
 
 ## 2. Check the configuration and apply it
@@ -77,7 +77,7 @@ web server is *shared*, which is fine here: nothing the monitor claims is
 taken. On a shared host the toolkit leaves ufw's default policy alone, so ufw
 must already be active and deny incoming by default, and it only adds its own
 rules, each commented `paisans-<token>:` with the deployment's token. It does
-not open 80 or 443 in this mode;
+not open 80 or 443 with `managed_by: external`;
 your web server's rules are yours.
 
 ## 3. Include the toolkit's directory
@@ -109,7 +109,7 @@ with the exact line for your server, and ends without `Deployment complete.`.
 Add it, then apply again:
 
 ```
-ingress
+web server
   ✗ site file for status   caddy does not include /etc/caddy/paisans.d
   ! status: caddy does not include /etc/caddy/paisans.d, so nothing was written
       Add this line to /opt/caddy/Caddyfile, at the top level of the
@@ -123,13 +123,13 @@ file, validates your whole configuration and reloads the server, and records
 the directory in `paisans.yaml`:
 
 ```
-ingress
+web server
   ✓ site file for status   /opt/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy reloaded
   ! watch: include_dir set to /opt/caddy/paisans.d in paisans.yaml
   ✓ status                 status.example.org
 ```
 
-The `include_dir` line is added under the site's `ingress`, every other line
+The `include_dir` line is added under the site's `web_server`, every other line
 and comment of `paisans.yaml` kept. Change it there to use another directory:
 the next apply moves the file. When validating or reloading fails, apply puts
 back what was there, so your server keeps the configuration it ran, and warns
@@ -164,13 +164,13 @@ command says so.
 
 To keep the configuration by hand instead, or for a server apply writes no
 file for (anything but Caddy, nginx and Apache), set `include_dir: false`
-under the site's `ingress`: apply writes nothing, and you copy the snippet
-`ingress show` prints, below.
+under the site's `web_server`: apply writes nothing, and you copy the snippet
+`web-server show` prints, below.
 
 ## 4. Get the hand-off sheet
 
 ```sh
-paisans ingress show --app status
+paisans web-server show --app status
 ```
 
 It reads the machine's web server over ssh, changing nothing, and prints:
@@ -243,13 +243,13 @@ again.
 ## 6. Check it from your machine
 
 ```sh
-paisans ingress check --app status
+paisans web-server check --app status
 ```
 
 It changes nothing: it looks at the monitor as a visitor would, and marks
 each check passed (`ok`, or ✓ at a terminal) or failed (`FAIL`, or ✗), with
 what fixes a failure. When a check fails it also reads the web server over
-ssh, as `ingress show` does, and names it.
+ssh, as `web-server show` does, and names it.
 
 | Check | Passes when | When it fails |
 |---|---|---|
@@ -262,34 +262,34 @@ Run it again after every change until no check fails and it ends with
 `4 checks passed.`
 
 `paisans apply --execute` without `--site` runs the same checks for every app
-behind your own web server once every other step has run, in an `ingress`
+behind your own web server once every other step has run, in a `web server`
 section:
 
 ```
-ingress
+web server
   ✓ status   status.example.org
 ```
 
 When one fails it marks the app's line failed, notes which check failed with
 that check's own line and the web server it finds in front of the app, read
 with the sudo password the run asked for at its start, and ends with `Deployment complete, but 1 app failed
-its ingress check: status` and exit status 1 rather than `Deployment
+its web server check: status` and exit status 1 rather than `Deployment
 complete.`, since every step ran but a visitor cannot use the app yet. A
 failing `certificate` or `sign in` check, which an app or certificate that has
 only just started can cause, is tried again for about half a minute before it
-is reported. Fix what it names with steps 3 to 5, then run `paisans ingress
+is reported. Fix what it names with steps 3 to 5, then run `paisans web-server
 check --app status` until it passes.
 
 ## Afterwards
 
 The monitor checks its own public URL, `https://<hostname>/healthz`, every
 minute, and the fork warns 14 days before the certificate there expires. In
-this mode that check is the only thing that notices a renewal that silently
+`managed_by: external` that check is the only thing that notices a renewal that silently
 stopped, so keep the monitor's email channel working. Where the deployment
 has a second monitor on a second `monitor` site, that one checks this URL
 too, so a monitor whose host has died is still reported.
 
 Changing your web server, its certificate or its address needs nothing from
 the toolkit. Changing `listen` does: edit `paisans.yaml`, apply the site, and
-update the upstream in your web server to match, then run `ingress check`
+update the upstream in your web server to match, then run `web-server check`
 again.

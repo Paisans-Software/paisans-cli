@@ -49,8 +49,8 @@ sites:
     roles: [monitor]
     address: 10.44.0.5
     public_address: 203.0.113.50
-    ingress:
-      mode: external
+    web_server:
+      managed_by: external
       listen: 127.0.0.1:8480
     ssh:
       user: ubuntu

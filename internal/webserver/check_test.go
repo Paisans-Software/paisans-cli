@@ -1,4 +1,4 @@
-package ingress_test
+package webserver_test
 
 import (
 	"context"
@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ingress"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
 // now is the clock every check runs at, so days to expiry are exact.
@@ -97,7 +97,7 @@ func good() world {
 	}
 }
 
-func (w world) probes(t *testing.T) ingress.Probes {
+func (w world) probes(t *testing.T) webserver.Probes {
 	t.Helper()
 	cert, pool := selfSigned(t, w.certName, w.notAfter)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -124,7 +124,7 @@ func (w world) probes(t *testing.T) ingress.Probes {
 		},
 	}
 	t.Cleanup(transport.CloseIdleConnections)
-	return ingress.Probes{
+	return webserver.Probes{
 		Resolver: resolver{"status.example.org": w.resolves},
 		Client:   &http.Client{Transport: transport, Timeout: 5 * time.Second},
 		Dial: func(_ context.Context, _, address string) (net.Conn, error) {
@@ -150,12 +150,12 @@ func (w world) probes(t *testing.T) ingress.Probes {
 	}
 }
 
-func run(t *testing.T, w world, target ingress.Target) []ingress.Result {
+func run(t *testing.T, w world, target webserver.Target) []webserver.Result {
 	t.Helper()
-	return ingress.Check(context.Background(), target, w.probes(t))
+	return webserver.Check(context.Background(), target, w.probes(t))
 }
 
-func result(t *testing.T, results []ingress.Result, name string) ingress.Result {
+func result(t *testing.T, results []webserver.Result, name string) webserver.Result {
 	t.Helper()
 	for _, r := range results {
 		if r.Name == name {
@@ -163,7 +163,7 @@ func result(t *testing.T, results []ingress.Result, name string) ingress.Result 
 		}
 	}
 	t.Fatalf("no %s result in %+v", name, results)
-	return ingress.Result{}
+	return webserver.Result{}
 }
 
 func TestCheckPassesAWellConfiguredProxy(t *testing.T) {
@@ -176,11 +176,11 @@ func TestCheckPassesAWellConfiguredProxy(t *testing.T) {
 			t.Errorf("%s: %+v", r.Name, r)
 		}
 	}
-	if d := result(t, results, ingress.CheckCertificate).Detail; !strings.Contains(d, "60 more days") {
+	if d := result(t, results, webserver.CheckCertificate).Detail; !strings.Contains(d, "60 more days") {
 		t.Errorf("days to expiry not printed: %s", d)
 	}
 	rec := &ui.Recorder{}
-	if ingress.Report(rec, results) || !rec.Has("done", "check dns") {
+	if webserver.Report(rec, results) || !rec.Has("done", "check dns") {
 		t.Errorf("Report reported a failure:\n%s", rec.Lines())
 	}
 }
@@ -188,7 +188,7 @@ func TestCheckPassesAWellConfiguredProxy(t *testing.T) {
 func TestCheckFailsWhenTheNameDoesNotResolveToTheSite(t *testing.T) {
 	w := good()
 	w.resolves = []string{"203.0.113.10"}
-	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckDNS)
+	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckDNS)
 	if r.OK || !strings.Contains(r.Detail, "203.0.113.10") || !strings.Contains(r.Fix, "203.0.113.20") || !strings.Contains(r.Fix, "paisans dns init") {
 		t.Fatalf("%+v", r)
 	}
@@ -198,7 +198,7 @@ func TestCheckFailsACertificateForAnotherName(t *testing.T) {
 	w := good()
 	w.certName = "other.example.org"
 	results := run(t, w, external(t, "127.0.0.1:8480"))
-	r := result(t, results, ingress.CheckCertificate)
+	r := result(t, results, webserver.CheckCertificate)
 	if r.OK || !strings.Contains(r.Detail, "not valid for status.example.org") || !strings.Contains(r.Fix, "YOUR CERTIFICATE") {
 		t.Fatalf("%+v", r)
 	}
@@ -206,7 +206,7 @@ func TestCheckFailsACertificateForAnotherName(t *testing.T) {
 		t.Fatalf("one failing item stopped the run: %+v", results)
 	}
 	rec := &ui.Recorder{}
-	if !ingress.Report(rec, results) || !rec.Has("fail", "check certificate") || !rec.Has("refuse", "not valid for status.example.org") {
+	if !webserver.Report(rec, results) || !rec.Has("fail", "check certificate") || !rec.Has("refuse", "not valid for status.example.org") {
 		t.Errorf("Report:\n%s", rec.Lines())
 	}
 	// The fix is the refusal's explanation, so it shows without --verbose.
@@ -218,7 +218,7 @@ func TestCheckFailsACertificateForAnotherName(t *testing.T) {
 func TestCheckFailsAnExpiredCertificate(t *testing.T) {
 	w := good()
 	w.notAfter = now.Add(-time.Hour)
-	if r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckCertificate); r.OK || !strings.Contains(r.Detail, "expired") {
+	if r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckCertificate); r.OK || !strings.Contains(r.Detail, "expired") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -226,7 +226,7 @@ func TestCheckFailsAnExpiredCertificate(t *testing.T) {
 func TestCheckFailsAnUnhealthyAnswer(t *testing.T) {
 	w := good()
 	w.health = http.StatusBadGateway
-	if r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckCertificate); r.OK || !strings.Contains(r.Detail, "502") || !strings.Contains(r.Fix, "http://127.0.0.1:8480") {
+	if r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckCertificate); r.OK || !strings.Contains(r.Detail, "502") || !strings.Contains(r.Fix, "http://127.0.0.1:8480") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -234,7 +234,7 @@ func TestCheckFailsAnUnhealthyAnswer(t *testing.T) {
 func TestCheckFailsAnHTTPCallback(t *testing.T) {
 	w := good()
 	w.location = "https://id.example.org/authorize?redirect_uri=http%3A%2F%2Fstatus.example.org%2Flogin%2Foidc%2Fcallback"
-	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckSignIn)
+	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckSignIn)
 	if r.OK || !strings.Contains(r.Detail, "http://status.example.org/login/oidc/callback") || !strings.Contains(r.Fix, "paisans apply --site watch") {
 		t.Fatalf("%+v", r)
 	}
@@ -243,7 +243,7 @@ func TestCheckFailsAnHTTPCallback(t *testing.T) {
 func TestCheckFailsWhenSignInIsNotConfigured(t *testing.T) {
 	w := good()
 	w.location = "/login"
-	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckSignIn)
+	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckSignIn)
 	if r.OK || !strings.Contains(r.Detail, "back to /login") || !strings.Contains(r.Fix, "paisans oidc client create --app status") {
 		t.Fatalf("%+v", r)
 	}
@@ -252,21 +252,21 @@ func TestCheckFailsWhenSignInIsNotConfigured(t *testing.T) {
 func TestCheckFailsAnUpstreamReachableAroundTheProxy(t *testing.T) {
 	w := good()
 	w.upstreamUp = true
-	r := result(t, run(t, w, external(t, "192.168.1.20:8480")), ingress.CheckUpstream)
+	r := result(t, run(t, w, external(t, "192.168.1.20:8480")), webserver.CheckUpstream)
 	if r.OK || !strings.Contains(r.Detail, "203.0.113.20:8480") || !strings.Contains(r.Fix, "DOCKER-USER") {
 		t.Fatalf("%+v", r)
 	}
 }
 
-// In ingress mode paisans the toolkit's own Caddy is in front, so only the
+// With managed_by: paisans the toolkit's own Caddy is in front, so only the
 // name and the certificate are the operator's to check.
 func TestCheckRunsOnlyTheFirstTwoInPaisansMode(t *testing.T) {
-	target, err := ingress.For(fixture(t), "status")
+	target, err := webserver.For(fixture(t), "status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	results := run(t, good(), target)
-	if len(results) != 2 || results[0].Name != ingress.CheckDNS || results[1].Name != ingress.CheckCertificate {
+	if len(results) != 2 || results[0].Name != webserver.CheckDNS || results[1].Name != webserver.CheckCertificate {
 		t.Fatalf("%+v", results)
 	}
 	for _, r := range results {
@@ -282,7 +282,7 @@ func TestCheckRunsOnlyTheFirstTwoInPaisansMode(t *testing.T) {
 func TestCheckFailsAnAddressTheSiteDoesNotDeclare(t *testing.T) {
 	w := good()
 	w.resolves = []string{"203.0.113.20", "203.0.113.10"}
-	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckDNS)
+	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckDNS)
 	if r.OK || !strings.Contains(r.Detail, "203.0.113.10") || !strings.Contains(r.Fix, "203.0.113.10") {
 		t.Fatalf("%+v", r)
 	}
@@ -300,7 +300,7 @@ func TestCheckTreatsOnlyRefusedOrTimedOutAsClosed(t *testing.T) {
 	}{{timeout, true}, {context.DeadlineExceeded, true}, {unreachable, false}} {
 		w := good()
 		w.dialErr = tc.err
-		r := result(t, run(t, w, external(t, "127.0.0.1:8480")), ingress.CheckUpstream)
+		r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckUpstream)
 		if r.OK != tc.ok {
 			t.Errorf("%v: %+v", tc.err, r)
 		}
@@ -314,10 +314,10 @@ func TestCheckTreatsOnlyRefusedOrTimedOutAsClosed(t *testing.T) {
 func TestCheckDialsTheIPv6AddressToo(t *testing.T) {
 	cfg := fixture(t)
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	watch.PublicAddress6 = "2001:db8::20"
 	cfg.Sites["watch"] = watch
-	target, err := ingress.For(cfg, "status")
+	target, err := webserver.For(cfg, "status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestCheckDialsTheIPv6AddressToo(t *testing.T) {
 	w := good()
 	w.resolves = []string{"203.0.113.20", "2001:db8::20"}
 	w.dialled = &dialled
-	r := result(t, run(t, w, target), ingress.CheckUpstream)
+	r := result(t, run(t, w, target), webserver.CheckUpstream)
 	if !r.OK || strings.Join(dialled, ",") != "203.0.113.20:8480,[2001:db8::20]:8480" {
 		t.Fatalf("%+v dialled %v", r, dialled)
 	}
@@ -338,10 +338,10 @@ func TestCheckDialsTheIPv6AddressToo(t *testing.T) {
 func TestCheckPassesWhenOneFamilyIsConclusive(t *testing.T) {
 	cfg := fixture(t)
 	watch := cfg.Sites["watch"]
-	watch.Ingress = &config.Ingress{Mode: config.IngressExternal, Listen: "127.0.0.1:8480"}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	watch.PublicAddress6 = "2001:db8::20"
 	cfg.Sites["watch"] = watch
-	target, err := ingress.For(cfg, "status")
+	target, err := webserver.For(cfg, "status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,13 +351,13 @@ func TestCheckPassesWhenOneFamilyIsConclusive(t *testing.T) {
 	w.resolves = []string{"203.0.113.20", "2001:db8::20"}
 	w.dialled = &dialled
 	w.dialErrs = map[string]error{"[2001:db8::20]:8480": noRoute}
-	r := result(t, run(t, w, target), ingress.CheckUpstream)
+	r := result(t, run(t, w, target), webserver.CheckUpstream)
 	if !r.OK || !strings.Contains(r.Detail, "refused, or the host did not answer") || !strings.Contains(r.Detail, "IPv6") || !strings.Contains(r.Detail, "2001:db8::20") {
 		t.Fatalf("%+v", r)
 	}
 
 	w.dialErrs["203.0.113.20:8480"] = noRoute
-	if r := result(t, run(t, w, target), ingress.CheckUpstream); r.OK || !strings.Contains(r.Detail, "inconclusive") {
+	if r := result(t, run(t, w, target), webserver.CheckUpstream); r.OK || !strings.Contains(r.Detail, "inconclusive") {
 		t.Fatalf("no conclusive answer passed: %+v", r)
 	}
 }

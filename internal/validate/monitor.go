@@ -100,14 +100,14 @@ func (c *checker) hostsUptime(site string) bool {
 	return false
 }
 
-// ingress checks a site's ingress block. README.md: "The monitor has a site
+// webServer checks a site's web_server block. README.md: "The monitor has a site
 // of its own".
 //
 // Only a monitor may carry one: a gateway always runs the toolkit's Caddy,
 // and every other site is reached through the gateway, so the block would be
 // ignored anywhere else. listen is where Docker publishes the app for the
-// operator's own web server, so it belongs to mode external alone and that
-// mode cannot work without it. Docker publishes a port in front of ufw, so a
+// operator's own web server, so it belongs to managed_by external alone, which
+// cannot work without it. Docker publishes a port in front of ufw, so a
 // listen address the internet could reach would expose the app around the
 // proxy whatever the firewall says: only loopback, a private LAN address
 // (RFC 1918, or carrier grade NAT space as Tailscale uses) or the site's own
@@ -115,59 +115,59 @@ func (c *checker) hostsUptime(site string) bool {
 // One listen publishes one app, so an external monitor hosts the monitor and
 // nothing else: a second app pinned there would be routed by nothing.
 // include_dir is where apply writes that app's file for the operator's web
-// server, so it too belongs to mode external, and it is written into that
+// server, so it too belongs to managed_by external, and it is written into that
 // server's configuration and into shell commands, so it is held to a plain
 // absolute path.
-func (c *checker) ingress() {
+func (c *checker) webServer() {
 	for _, name := range c.cfg.SiteNames() {
 		site := c.cfg.Sites[name]
-		if site.Ingress == nil {
+		if site.WebServer == nil {
 			continue
 		}
-		key := fmt.Sprintf("sites.%s.ingress", name)
+		key := fmt.Sprintf("sites.%s.web_server", name)
 		if !site.Has(config.RoleMonitor) {
-			c.refuse("ingress-outside-monitor", key,
-				"ingress is declared on a site without the monitor role",
+			c.refuse("web-server-outside-monitor", key,
+				"web_server is declared on a site without the monitor role",
 				"is declared on %s, which does not hold the monitor role. A gateway always runs the toolkit's Caddy, and every other site is reached through the gateway, so the block would be ignored. Remove it, or give the site the monitor role.", name)
 			continue
 		}
-		mode, listen := site.IngressMode(), site.Ingress.Listen
-		if dir := site.Ingress.IncludeDir; !dir.Unset() && mode != config.IngressExternal {
-			c.refuse("ingress-include-dir-mode", key+".include_dir",
-				"ingress include_dir does not fit its mode",
-				"is set, but the ingress mode is paisans, where the toolkit's own Caddy serves the app and no other web server includes anything. Remove include_dir, or set mode: external.")
+		managedBy, listen := site.WebServerManagedBy(), site.WebServer.Listen
+		if dir := site.WebServer.IncludeDir; !dir.Unset() && managedBy != config.ManagedByExternal {
+			c.refuse("web-server-include-dir-managed-by", key+".include_dir",
+				"web_server include_dir does not fit its managed_by",
+				"is set, but managed_by is paisans, where the toolkit's own Caddy serves the app and no other web server includes anything. Remove include_dir, or set managed_by: external.")
 		} else if p := config.IncludeDirProblem(dir.Path); dir.Path != "" && p != "" {
-			c.refuse("ingress-include-dir-path", key+".include_dir",
-				"ingress include_dir is not a plain absolute path",
+			c.refuse("web-server-include-dir-path", key+".include_dir",
+				"web_server include_dir is not a plain absolute path",
 				"is %q, which %s. It is written into your web server's configuration and into commands on the host, so it must be an absolute path in its clean form, without spaces, quotes or glob characters, for example /etc/nginx/paisans.d.", dir.Path, p)
 		}
 		switch {
-		case mode == config.IngressPaisans && listen != "":
-			c.refuse("ingress-listen-mode", key+".listen",
-				"ingress listen does not fit its mode",
-				"is set, but the ingress mode is paisans, where the toolkit's own Caddy serves the app and nothing is published for another web server. Remove listen, or set mode: external if your own web server is to proxy to it.")
+		case managedBy == config.ManagedByPaisans && listen != "":
+			c.refuse("web-server-listen-managed-by", key+".listen",
+				"web_server listen does not fit its managed_by",
+				"is set, but managed_by is paisans, where the toolkit's own Caddy serves the app and nothing is published for another web server. Remove listen, or set managed_by: external if your own web server is to proxy to it.")
 			continue
-		case mode == config.IngressExternal && listen == "":
-			c.refuse("ingress-listen-mode", key+".listen",
-				"ingress listen does not fit its mode",
-				"is required with mode: external. It is where the app is published for your web server to proxy to, for example 127.0.0.1:8480.")
+		case managedBy == config.ManagedByExternal && listen == "":
+			c.refuse("web-server-listen-managed-by", key+".listen",
+				"web_server listen does not fit its managed_by",
+				"is required with managed_by: external. It is where the app is published for your web server to proxy to, for example 127.0.0.1:8480.")
 			continue
-		case mode != config.IngressExternal:
+		case managedBy != config.ManagedByExternal:
 			continue
 		}
-		if _, network, err := net.ParseCIDR(render.IngressNetwork); err == nil {
+		if _, network, err := net.ParseCIDR(render.WebServerNetwork); err == nil {
 			if _, mesh, err := net.ParseCIDR(c.cfg.Mesh.Subnet); err == nil && (mesh.Contains(network.IP) || network.Contains(mesh.IP)) {
-				c.refuse("ingress-network-overlaps-mesh", key,
-					"ingress network overlaps the mesh subnet",
-					"puts the app on the compose network %s, which this toolkit pins so that the address your web server's connections arrive from is known, and mesh.subnet %s overlaps it. The mesh would be routed into a Docker bridge. Declare a mesh outside %s.", render.IngressNetwork, c.cfg.Mesh.Subnet, render.IngressNetwork)
+				c.refuse("web-server-network-overlaps-mesh", key,
+					"web_server network overlaps the mesh subnet",
+					"puts the app on the compose network %s, which this toolkit pins so that the address your web server's connections arrive from is known, and mesh.subnet %s overlaps it. The mesh would be routed into a Docker bridge. Declare a mesh outside %s.", render.WebServerNetwork, c.cfg.Mesh.Subnet, render.WebServerNetwork)
 			}
 		}
 		if pinned := c.cfg.PinnedTo(name); len(pinned) > 1 {
-			c.refuse("ingress-external-serves-one-app", key+".listen",
-				"external ingress serves one app but several are pinned",
-				"publishes one app, but %s are pinned to %s. With mode: external nothing but your own web server is in front of the site, and it is handed the monitor alone, so the others would be routed by nothing. Pin them elsewhere, or use mode: paisans.", strings.Join(pinned, ", "), name)
+			c.refuse("web-server-external-serves-one-app", key+".listen",
+				"an external web server serves one app but several are pinned",
+				"publishes one app, but %s are pinned to %s. With managed_by: external nothing but your own web server is in front of the site, and it is handed the monitor alone, so the others would be routed by nothing. Pin them elsewhere, or use managed_by: paisans.", strings.Join(pinned, ", "), name)
 		}
-		host, _, ok := site.Ingress.ListenHostPort()
+		host, _, ok := site.WebServer.ListenHostPort()
 		if !ok {
 			continue // the loader has already reported this
 		}
@@ -175,12 +175,12 @@ func (c *checker) ingress() {
 		switch {
 		case ip.IsLoopback():
 		case host == site.Address || (!c.cfg.Mesh.Contains(host) && (ip.IsPrivate() || cgnat.Contains(ip))):
-			c.warn("ingress-listen-bypasses-firewall", key+".listen",
-				"ingress listens on a non-loopback address the firewall misses",
+			c.warn("web-server-listen-bypasses-firewall", key+".listen",
+				"web_server listens on a non-loopback address the firewall misses",
 				"is %s, which is not loopback. Docker publishes a port with its own iptables rules, in front of ufw, so the firewall does not protect it: anything that can reach %s can reach the app around your web server. Prefer 127.0.0.1 when the web server runs on this machine.", listen, host)
 		default:
-			c.refuse("ingress-listen-public", key+".listen",
-				"ingress listens on a public address",
+			c.refuse("web-server-listen-public", key+".listen",
+				"web_server listens on a public address",
 				"is %s. The app would be published where the proxy is not in front of it, and Docker's rules bypass ufw. Use loopback (127.0.0.1), a private LAN address (RFC 1918, or 100.64.0.0/10 as Tailscale uses), or this site's own mesh address, %s.", listen, site.Address)
 		}
 	}

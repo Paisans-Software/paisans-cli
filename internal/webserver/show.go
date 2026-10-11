@@ -1,4 +1,4 @@
-package ingress
+package webserver
 
 import (
 	"fmt"
@@ -8,25 +8,25 @@ import (
 )
 
 // certificateMarker is the line in each snippet where the operator's own
-// certificate goes. The toolkit obtains no certificate in ingress mode
+// certificate goes. The toolkit obtains no certificate with managed_by:
 // external: it cannot know how an unfamiliar web server gets one, and it must
 // not edit a configuration it does not own.
 const certificateMarker = "YOUR CERTIFICATE"
 
 // Show prints the hand-off sheet for a target: what the web server in front
 // of the app must do, and the same filled in for the web server ws found, or
-// for Caddy, nginx and Apache when none was. In ingress mode paisans the
+// for Caddy, nginx and Apache when none was. With managed_by: paisans the
 // toolkit's own Caddy is in front, and the sheet says there is nothing to
 // hand off.
 func Show(w io.Writer, t Target, ws WebServer) {
 	if !t.External() {
-		fmt.Fprintf(w, "%s is served by the toolkit's own Caddy on %s (ingress mode paisans): nothing to hand off.\n", t.App, t.Site)
+		fmt.Fprintf(w, "%s is served by the toolkit's own Caddy on %s (managed_by: paisans): nothing to hand off.\n", t.App, t.Site)
 		fmt.Fprintf(w, "Its certificate for %s is obtained over DNS-01 through acme.provider, and %s points at %s.\n", t.Hostname, t.Hostname, addresses(t))
-		fmt.Fprintf(w, "`paisans ingress check --app %s` checks the name and the certificate from this machine.\n", t.App)
+		fmt.Fprintf(w, "`paisans web-server check --app %s` checks the name and the certificate from this machine.\n", t.App)
 		return
 	}
 
-	fmt.Fprintf(w, "Ingress for %s on %s (ingress mode external)\n\n", t.App, t.Site)
+	fmt.Fprintf(w, "Web server for %s on %s (managed_by: external)\n\n", t.App, t.Site)
 	fmt.Fprintf(w, "  hostname   %s\n", t.Hostname)
 	fmt.Fprintf(w, "  DNS        %s must point at %s\n", t.Hostname, addresses(t))
 	fmt.Fprintf(w, "  upstream   %s\n", t.Upstream())
@@ -73,7 +73,7 @@ func Show(w io.Writer, t Target, ws WebServer) {
 		fmt.Fprintln(w)
 		apache()
 	}
-	fmt.Fprintf(w, "\nThen run `paisans ingress check --app %s` from this machine.\n", t.App)
+	fmt.Fprintf(w, "\nThen run `paisans web-server check --app %s` from this machine.\n", t.App)
 }
 
 // ListenWarning is the warning for a listen address that is not loopback. It

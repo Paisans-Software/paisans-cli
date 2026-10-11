@@ -83,8 +83,8 @@ Usage:
   paisans oidc client create --app <name> [--rotate-secret]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--site <name>] [--ssh <destination>] [--execute]
-  paisans ingress show  --app <name> [--config paisans.yaml] [--sudo=false]
-  paisans ingress check --app <name> [--config paisans.yaml] [--sudo=false]
+  paisans web-server show  --app <name> [--config paisans.yaml] [--sudo=false]
+  paisans web-server check --app <name> [--config paisans.yaml] [--sudo=false]
 
 Commands:
   validate   Load the configuration and report every problem found.
@@ -207,7 +207,7 @@ Commands:
              secret in the secrets file. The secret is never printed.
              Writes nothing without --execute. Supports the mbin, outline,
              writefreely and uptime kinds.
-  ingress    show: for an app pinned to a monitor site, print what the web
+  web-server show: for an app pinned to a monitor site, print what the web
              server in front of it must do (terminate TLS for its hostname,
              pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled
              in for the web server it finds on the monitor over ssh, read
@@ -216,7 +216,7 @@ Commands:
              the monitor, that /healthz answers with a valid certificate,
              that sign in redirects with an https callback, and that the
              published port is closed from outside. Reads only; exits 1 on
-             any FAIL. With the toolkit's own Caddy in front (ingress mode
+             any FAIL. With the toolkit's own Caddy in front (managed_by:
              paisans), only the first two apply.
 
 host prepare, host deployments, apply, prune, site add, site remove, storage
@@ -232,9 +232,9 @@ another deployment there holds this one's token, WireGuard interface or listen
 port, or a mesh subnet overlapping this one's. apply and host prepare also
 refuse when anything else on the host overlaps the mesh subnet. dns init and dns
 prune reach no host, only the DNS provider's API, and change it only with
---execute; site remove also deletes the removed site's records there. ingress
-show and ingress check change nothing: check looks at a monitor's public
-hostname as any visitor could, and in ingress mode external both read the
+--execute; site remove also deletes the removed site's records there. web-server
+show and web-server check change nothing: check looks at a monitor's public
+hostname as any visitor could, and with managed_by: external both read the
 monitor's web server over ssh, show always and check when a check fails.
 Everything else writes files locally and stops.
 
@@ -283,8 +283,8 @@ func main() {
 		err = runApp(os.Args[2:])
 	case "oidc":
 		err = runOIDC(os.Args[2:])
-	case "ingress":
-		err = runIngress(os.Args[2:])
+	case "web-server":
+		err = runWebServer(os.Args[2:])
 	case "storage":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "init":

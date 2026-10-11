@@ -11,10 +11,10 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ingress"
-	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-stack/internal/webserver"
+	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
 // manifestHost is a monitor's host as far as its manifest goes: a file
@@ -39,7 +39,7 @@ func (h *manifestHost) WriteFile(path, content string, _ uint32) error {
 	return nil
 }
 
-func (h *manifestHost) record(t *testing.T) []render.ManifestIngress {
+func (h *manifestHost) record(t *testing.T) []render.ManifestWebServer {
 	t.Helper()
 	var m render.Manifest
 	if content, ok := h.files["/srv/paisans/f2a9/.paisans-manifest.json"]; ok {
@@ -47,27 +47,27 @@ func (h *manifestHost) record(t *testing.T) []render.ManifestIngress {
 			t.Fatal(err)
 		}
 	}
-	return m.Ingress
+	return m.WebServer
 }
 
 // filesFake is the monitor's host for writing its site file: the web
 // server on it, its manifest, and the sudo each was reached with.
 type filesFake struct {
-	server   *ingresstest.Server
+	server   *webservertest.Server
 	manifest *manifestHost
 	sudo     []string
 }
 
-// fakeIngressFiles writes the site files for real, on a fake monitor host
+// fakeWebServerFiles writes the site files for real, on a fake monitor host
 // running ws, whose configuration reads conf.
-func fakeIngressFiles(t *testing.T, ws ingress.WebServer, conf string) *filesFake {
+func fakeWebServerFiles(t *testing.T, ws webserver.WebServer, conf string) *filesFake {
 	t.Helper()
-	f := &filesFake{server: ingresstest.New(conf), manifest: &manifestHost{files: map[string]string{}}}
-	savedFiles, savedHost, savedConverge := convergeIngressFiles, ingressFilesHost, convergeHost
-	convergeIngressFiles = writeIngressFiles
-	ingressFilesHost = func(_ *config.Config, site string, sudo bool) ingress.Host {
+	f := &filesFake{server: webservertest.New(conf), manifest: &manifestHost{files: map[string]string{}}}
+	savedFiles, savedHost, savedConverge := convergeWebServerFiles, webServerFilesHost, convergeHost
+	convergeWebServerFiles = writeWebServerFiles
+	webServerFilesHost = func(_ *config.Config, site string, sudo bool) webserver.Host {
 		f.sudo = append(f.sudo, fmt.Sprintf("%s sudo=%v", site, sudo))
-		h := ingress.Host{Plain: f.server.Plain()}
+		h := webserver.Host{Plain: f.server.Plain()}
 		if sudo {
 			h.Sudo = f.server.Sudo()
 		}
@@ -79,17 +79,19 @@ func fakeIngressFiles(t *testing.T, ws ingress.WebServer, conf string) *filesFak
 		}
 		return savedConverge(name, site, sudo)
 	}
-	t.Cleanup(func() { convergeIngressFiles, ingressFilesHost, convergeHost = savedFiles, savedHost, savedConverge })
+	t.Cleanup(func() {
+		convergeWebServerFiles, webServerFilesHost, convergeHost = savedFiles, savedHost, savedConverge
+	})
 	fakeWebServer(t, ws)
 	return f
 }
 
 // mountedCaddy is a Caddy in a container with its configuration directory
 // mounted whole.
-var mountedCaddy = ingress.WebServer{
-	Server: ingress.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile",
-	Mounts: []ingress.Mount{{Source: "/opt/caddy", Destination: "/etc/caddy"}},
-	Certs:  ingress.CertsAutomatic,
+var mountedCaddy = webserver.WebServer{
+	Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile",
+	Mounts: []webserver.Mount{{Source: "/opt/caddy", Destination: "/etc/caddy"}},
+	Certs:  webserver.CertsAutomatic,
 }
 
 const statusFile = "/opt/caddy/paisans.d/paisans-f2a9-status.caddy"
@@ -112,7 +114,7 @@ func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
 	before, _ := os.ReadFile(path)
-	f := fakeIngressFiles(t, mountedCaddy, "{\n\temail ops@example.org\n}\nimport /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "{\n\temail ops@example.org\n}\nimport /etc/caddy/paisans.d/*\n")
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
@@ -137,7 +139,7 @@ func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 	if i := rec.Index("done", "site file for status"); i < 0 || rec.Events[i].Extra != statusFile+" written, caddy reloaded" || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
-	got := lines(inSection(rec, "ingress"))
+	got := lines(inSection(rec, "web server"))
 	if i, j := slices.Index(got, "step site file for status"), slices.Index(got, "step status"); i < 0 || j < i {
 		t.Errorf("the file is not written ahead of the check:\n%s", strings.Join(got, "\n"))
 	}
@@ -162,7 +164,7 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
 	before, _ := os.ReadFile(path)
-	f := fakeIngressFiles(t, mountedCaddy, "blog.example.org {\n\treverse_proxy 127.0.0.1:2368\n}\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "blog.example.org {\n\treverse_proxy 127.0.0.1:2368\n}\n")
 	rec := recordConverge(t)
 	err := convergeAt(t, path, "--execute")
 	var p *ui.Problem
@@ -193,7 +195,7 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 func TestApplyRefusesALiteralInclude(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/paisans-f2a9-status.caddy\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/paisans-f2a9-status.caddy\n")
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err == nil {
 		t.Fatal("complete")
@@ -215,7 +217,7 @@ func TestApplyWithIncludeDirFalseWritesNothing(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	os.WriteFile(path, []byte(strings.Replace(string(data), "      listen: 127.0.0.1:8480\n", "      listen: 127.0.0.1:8480\n      include_dir: false\n", 1)), 0o600)
 	before, _ := os.ReadFile(path)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
@@ -236,7 +238,7 @@ func TestApplyWithIncludeDirFalseWritesNothing(t *testing.T) {
 func TestApplyWithIncludeDirFalseRemovesWhatItWrote(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
@@ -266,8 +268,8 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 	path := externalFixture(t)
 	before, _ := os.ReadFile(path)
 	ws := mountedCaddy
-	ws.Mounts = []ingress.Mount{{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
-	f := fakeIngressFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
+	ws.Mounts = []webserver.Mount{{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
+	f := fakeWebServerFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err == nil {
 		t.Fatal("complete")
@@ -289,7 +291,7 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 func TestApplyReportsTheServersRefusal(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	f.server.Validate = "Error: ambiguous site definition: status.example.org"
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err == nil {
@@ -305,12 +307,12 @@ func TestApplyReportsTheServersRefusal(t *testing.T) {
 }
 
 // The site files are written with the run's sudo: the host they are
-// written through is the one ingressHost builds, which shares the answer
-// the run settled (TestIngressHostSharesTheRunsSudo).
+// written through is the one webServerHost builds, which shares the answer
+// the run settled (TestWebServerHostSharesTheRunsSudo).
 func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
@@ -318,10 +320,10 @@ func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
 	if !slices.Equal(f.sudo, []string{"watch sudo=false"}) {
 		t.Errorf("reached %v", f.sudo)
 	}
-	h := ingressFilesHost
-	ingressFilesHost = ingressHost
-	defer func() { ingressFilesHost = h }()
-	got := ingressFilesHost(fixture(t), "watch", true)
+	h := webServerFilesHost
+	webServerFilesHost = webServerHost
+	defer func() { webServerFilesHost = h }()
+	got := webServerFilesHost(fixture(t), "watch", true)
 	if s, ok := got.Sudo.(apply.SSHTransport); !ok || s.Auth != sudoAuthFor(s.Describe()) {
 		t.Errorf("sudo %#v", got.Sudo)
 	}
@@ -332,7 +334,7 @@ func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
 func TestApplyRewritesTheSiteFileForARenamedHostname(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeIngressFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
 	recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)

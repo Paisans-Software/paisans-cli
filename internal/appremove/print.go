@@ -71,7 +71,7 @@ func (p *Plan) Show(r ui.Reporter) {
 				edited("keep /%s and its manifest entry: edited on the host since apply wrote it", f.Entry.Path)
 			}
 		}
-		for _, f := range s.Ingress {
+		for _, f := range s.WebServer {
 			line("remove site files", "%s, from the include directory of %s, which is then validated and reloaded", f.Path, f.Server)
 		}
 		dir := s.Dir
