@@ -194,6 +194,36 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	return h.runningHost.ReadFile(path)
 }
 
+// cleaningHost is an idHost that a removal empties: once its registry entry
+// is taken out, the registry no longer lists it and no unit is left.
+type cleaningHost struct {
+	idHost
+	removed bool
+}
+
+func (h *cleaningHost) Run(command string) (string, error) {
+	if strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) {
+		h.removed = true
+		return "", nil
+	}
+	if h.removed && strings.Contains(command, `echo "unit $f"`) {
+		return "", nil
+	}
+	return h.idHost.Run(command)
+}
+
+func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
+	if path == registry.Path && h.removed {
+		reg, err := registry.Parse([]byte(h.registry))
+		if err != nil {
+			return "", false, err
+		}
+		data, err := registry.Encode(registry.Remove(reg, monitorID))
+		return string(data), true, err
+	}
+	return h.idHost.ReadFile(path)
+}
+
 // Every --id run says DNS was not modified, in one line and the comment to
 // search for, since with no configuration there is no provider to ask.
 func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
@@ -233,5 +263,31 @@ func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	err := runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// An --id run that cleans the host ends on one line naming the host and the
+// deployment it was cleaned of.
+func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
+	withHost(t, &cleaningHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}})
+	saved := isTerminal
+	isTerminal = func(*os.File) bool { return true }
+	t.Cleanup(func() { isTerminal = saved })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteString("watch\n")
+	w.Close()
+	defer r.Close()
+	rec := &ui.Recorder{}
+	reporterOverride = rec
+	t.Cleanup(func() { reporterOverride = nil })
+	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--sudo=false", "--execute"}, r, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "admin@192.0.2.30:22 is cleaned of deployment " + monitorID + "."
+	if !rec.Has("result", want) {
+		t.Errorf("no result %q in:\n%s", want, rec.Lines())
 	}
 }

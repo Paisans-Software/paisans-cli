@@ -1595,3 +1595,193 @@ func TestParseAddedRulesTellsOursFromTheirs(t *testing.T) {
 		t.Error("a host without ufw was not reported")
 	}
 }
+
+// expectedKind is the kind a step of each title is, by what the title says
+// it changes. install packages is left out: its kinds are its packages'.
+func expectedKind(title string) (family, kind string) {
+	switch {
+	case strings.HasPrefix(title, "add docker apt "), title == "start docker", title == "start docker after mesh":
+		return title, hostprep.KindDocker
+	case title == "deny incoming", title == "allow outgoing", title == "enable ufw":
+		return title, hostprep.KindFirewall
+	case strings.HasPrefix(title, "allow "):
+		return "allow <rule>", hostprep.KindFirewall
+	case strings.HasPrefix(title, "adopt rule "):
+		return "adopt rule <rule>", hostprep.KindFirewall
+	case strings.HasPrefix(title, "remove ufw rule "):
+		return "remove ufw rule <rule>", hostprep.KindFirewall
+	case title == "create authorized_keys", strings.HasSuffix(title, " ssh key"):
+		return title, hostprep.KindSSHKeys
+	case strings.HasPrefix(title, "load ") && strings.HasSuffix(title, " at boot"):
+		return "load <module> at boot", hostprep.KindWatchdog
+	case strings.HasPrefix(title, "enable ") && strings.HasSuffix(title, " at boot"):
+		return "enable <module> at boot", hostprep.KindWatchdog
+	case strings.HasPrefix(title, "load "):
+		return "load <module>", hostprep.KindWatchdog
+	}
+	return title, ""
+}
+
+// Every step says what kind of change it is, so a dry run can sum a plan up
+// as the kinds it would change: each step of every title, in plans that
+// between them build every one.
+func TestEveryStepCarriesItsKind(t *testing.T) {
+	plans := map[string]func(t *testing.T) (*hostprep.Plan, error){
+		"fresh data site": func(t *testing.T) (*hostprep.Plan, error) {
+			return hostprep.Build("home-a", fixture(t), freshHost())
+		},
+		"keys added": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			delete(host.files, authorizedKeys)
+			delete(host.files, ownedKeys)
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+		},
+		"key removed": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.files[authorizedKeys] = keyCloud + "\n" + keyAlice + "\n" + keyCarol + "\n"
+			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nadded " + fingerprint(keyCarol) + " carol\n"
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+		},
+		"key forgotten": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.files[ownedKeys] += "added " + fingerprint(keyCarol) + " carol\n"
+			return hostprep.Build("home-a", fixture(t), host)
+		},
+		"key released": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.files[authorizedKeys] = keyAlice + "\n" + keyCarol + "\n"
+			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nshared " + fingerprint(keyCarol) + " carol\n"
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host)
+		},
+		"key shared": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.files[authorizedKeys] = keyAlice + "\n" + keyBob + "\n"
+			host.files[theirKeys] = "added " + fingerprint(keyBob) + " bob-work\n"
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+		},
+		"key renamed": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice-old\n"
+			return hostprep.Build("home-a", fixture(t), host)
+		},
+		"stale rule": func(t *testing.T) (*hostprep.Plan, error) {
+			cfg := fixture(t)
+			vm := cfg.Sites["vm"]
+			vm.Roles = []config.Role{config.RoleWitness}
+			cfg.Sites["vm"] = vm
+			return hostprep.Build("vm", cfg, preparedHost(true))
+		},
+		"legacy rule": func(t *testing.T) (*hostprep.Plan, error) {
+			host := preparedHost(false)
+			host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\n"
+			return hostprep.Build("home-a", fixture(t), host)
+		},
+		"watchdog unit disabled": func(t *testing.T) (*hostprep.Plan, error) {
+			fresh := freshHost()
+			plan, err := hostprep.Build("home-a", fixture(t), fresh)
+			if err != nil {
+				return nil, err
+			}
+			if err := hostprep.Execute(plan, fresh, ui.Discard); err != nil {
+				return nil, err
+			}
+			host := preparedHost(false)
+			host.files["/etc/systemd/system/paisans-f2a9-watchdog.service"] = fresh.files["/etc/systemd/system/paisans-f2a9-watchdog.service"]
+			host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n"
+			return hostprep.Build("home-a", fixture(t), host)
+		},
+	}
+	seen := map[string]bool{}
+	for name, build := range plans {
+		t.Run(name, func(t *testing.T) {
+			plan, err := build(t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Steps) == 0 {
+				t.Fatal("planned nothing")
+			}
+			for _, s := range plan.Steps {
+				if s.Title == "install packages" {
+					seen[s.Title] = true
+					continue
+				}
+				family, kind := expectedKind(s.Title)
+				seen[family] = true
+				if kind == "" {
+					t.Errorf("no kind expected for %q; add it to expectedKind", s.Title)
+					continue
+				}
+				if strings.Join(s.Kinds, ",") != kind {
+					t.Errorf("%q has kinds %q, want [%s]", s.Title, s.Kinds, kind)
+				}
+			}
+		})
+	}
+	for _, family := range []string{
+		"add docker apt key", "add docker apt repo", "install packages", "start docker", "start docker after mesh",
+		"load <module>", "load <module> at boot", "enable <module> at boot",
+		"allow <rule>", "adopt rule <rule>", "remove ufw rule <rule>", "deny incoming", "allow outgoing", "enable ufw",
+		"create authorized_keys", "authorize ssh key", "rename ssh key", "share ssh key", "forget ssh key", "release ssh key", "remove ssh key",
+	} {
+		if !seen[family] {
+			t.Errorf("no plan here builds %q", family)
+		}
+	}
+}
+
+// install packages installs several packages in one step, and is each kind
+// of change its packages make.
+func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
+	for name, c := range map[string]struct {
+		probe string
+		want  []string
+	}{
+		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall"}},
+		"wireguard":  {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\n", want: []string{"wireguard"}},
+		"ufw":        {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\n", want: []string{"firewall"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			host := preparedHost(false)
+			host.responses[probePackages] = c.probe
+			plan, err := hostprep.Build("home-a", fixture(t), host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var install *hostprep.Step
+			for i, s := range plan.Steps {
+				if s.Title == "install packages" {
+					install = &plan.Steps[i]
+				}
+			}
+			if install == nil {
+				t.Fatalf("no install step:\n%s", printed(plan))
+			}
+			if strings.Join(install.Kinds, ",") != strings.Join(c.want, ",") {
+				t.Errorf("%s: kinds %q, want %q", install.Describe, install.Kinds, c.want)
+			}
+		})
+	}
+}
+
+// A plan's kinds are each kind its steps change, once, in a fixed order, so
+// two runs that plan the same kinds say the same thing.
+func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
+	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(plan.Kinds(), ", "); got != "docker, wireguard, firewall, watchdog" {
+		t.Errorf("a fresh data site's kinds are %q", got)
+	}
+	shuffled := &hostprep.Plan{Section: hostprep.Section{Steps: []hostprep.Step{
+		{Kinds: []string{"watchdog"}}, {Kinds: []string{"ssh keys"}}, {Kinds: []string{"mystery"}},
+		{Kinds: []string{"firewall", "docker"}}, {Kinds: []string{"wireguard"}}, {Kinds: []string{"docker"}},
+	}}}
+	if got := strings.Join(shuffled.Kinds(), ", "); got != "docker, wireguard, firewall, ssh keys, watchdog, mystery" {
+		t.Errorf("kinds %q", got)
+	}
+	if got := (&hostprep.Plan{}).Kinds(); len(got) != 0 {
+		t.Errorf("an empty plan has kinds %q", got)
+	}
+}

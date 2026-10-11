@@ -900,7 +900,7 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	fakeConverge(t, nil)
 	checked := fakeChecks(t, map[string]any{
-		"host prepare --site home-b": "3 changes",
+		"host prepare --site home-b": "docker, firewall",
 		"apply --site vm":            "5 changes",
 		"host prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
 		"dns init":                   "2 records to create",
@@ -911,7 +911,7 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	}
 	sameLines(t, statuses(rec), []string{
 		"✓ host prepare --site home-a",
-		"○ host prepare --site home-b: 3 changes",
+		"○ host prepare --site home-b: docker, firewall",
 		"✓ host prepare --site vm",
 		"✗ host prepare --site watch: ssh: connect to host watch.local: timed out",
 		"○ apply --site vm: 5 changes",
@@ -1064,17 +1064,21 @@ func TestCheckStepFails(t *testing.T) {
 }
 
 // Each command's dry run says what it would change: host prepare on an
-// empty host, through the fake ssh, has steps to run.
+// empty host, through the fake ssh, names each kind of change it would make,
+// in a fixed order, and storage add counts its steps.
 func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
 	recordConverge(t)
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
-	for _, args := range [][]string{{"host", "prepare", "--site", "home-a"}, {"storage", "add"}} {
-		summary, _, err := checkStep(ui.Discard, convergeFlags(args, o), runStep)
+	for args, want := range map[string]*regexp.Regexp{
+		"host prepare --site home-a": regexp.MustCompile(`^docker, wireguard, firewall, ssh keys, watchdog$`),
+		"storage add":                regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`),
+	} {
+		summary, _, err := checkStep(ui.Discard, convergeFlags(strings.Fields(args), o), runStep)
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
-		if !regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`).MatchString(summary) {
+		if !want.MatchString(summary) {
 			t.Errorf("%v: summary %q", args, summary)
 		}
 	}
@@ -1179,9 +1183,9 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 		{
 			name:  "no etcd",
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = nil },
-			found: map[string]any{"host prepare --site vm": "1 change"},
+			found: map[string]any{"host prepare --site vm": "ssh keys"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "○ host prepare --site vm: 1 change", "✓ host prepare --site watch",
+				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "○ host prepare --site vm: ssh keys", "✓ host prepare --site watch",
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
 				"· apply --site vm: after host prepare --site vm",

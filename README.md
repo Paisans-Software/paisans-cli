@@ -3199,11 +3199,16 @@ overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
 what it wrote, never a value, and the closing line says the secrets were
 added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
-first:
+first. A `host prepare` line names each kind of change its site's plan makes,
+in the order docker, wireguard, firewall, ssh keys, watchdog:
 
 ```
 configuration
   ✓ init: generated 4 secrets into secrets.enc.yaml (cluster.admin_password, cluster.standby_password, cluster.superuser_password and 1 more)
+
+hosts
+  ○ host prepare --site home-a: docker, wireguard, firewall, ssh keys, watchdog
+  ✓ host prepare --site vm
 ...
 Nothing changed on the servers. Added 4 generated secrets to secrets.enc.yaml. Re-run with --execute to apply. ...
 ```
