@@ -1149,3 +1149,54 @@ every watched site, three heartbeat entries in the monitor's seed, and the
 image pin. `paisans validate` on `examples/paisans.example.yaml`: 0 refusals.
 Nothing was run against a host or the registry; the fork release and curl's
 image tag are to be checked against their registries before this ships.
+
+## 2026-10-11: Every published name says whether it has mail, and prune removes the no-mail records
+
+Founder decision. The design is `docs/specs/2026-10-11-dns-mail-lockdown.md`.
+
+### What was decided
+
+`dns init` publishes the records a DNS provider recommends for a domain that
+sends no mail: `v=spf1 -all` on `community.domain` and on every name it gives
+an address record, and on the domain a null MX, an empty key at
+`*._domainkey` and a DMARC policy of reject for the domain and every name
+under it. A name with mail of its own gets none of them: one listed in
+`community.mail_domains`, or the domain of any `from_address` the toolkit
+configures. When the domain itself has mail, its DMARC policy is checked and
+warned about, never written. `dns prune` may delete a TXT or MX record that
+holds exactly one of those no-mail contents, which widens a delete path that
+was address records only.
+
+### Why
+
+A name with an address record can be forged as a sender whether or not anyone
+sends from it. The domain's DMARC `sp=reject` covers every hostname for
+receivers that enforce DMARC; the SPF record on each hostname covers
+receivers that check SPF alone, and SPF applies only to the exact name. The
+toolkit already knows every name and every sender it configures, so deriving
+the records costs an operator nothing and cannot lock out the toolkit's own
+mail. Prune has to be able to remove the no-mail records, because a
+community that adopts hosted mail at its domain would otherwise be left with
+two SPF records and a null MX, and its mail would fail.
+
+### What was weighed
+
+* **A list, not a switch.** `community.mail: external` would cover the common
+  case of hosted mail at the domain, but not a domain with mail at the apex
+  and a mailing list service on a subdomain. The list is the same length in
+  the common case.
+* **Hosted mail at the domain still locks down the hostnames.** Being entirely
+  hands off once mail is declared would leave every hostname forgeable to
+  receivers that check SPF alone.
+* **DMARC is compared by effect.** Exact comparison would make a record an
+  operator gave a reporting address a conflict on every run.
+* **Prune ties a no-mail record by its exact content, not its address.** These
+  records point at nothing, and a TXT or MX that says anything but "no mail"
+  is somebody's mail, whatever its comment says.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`; the tests in
+`internal/dns/mail_test.go` were checked to fail with `isLockdown` and the
+DKIM comparison broken. `paisans validate` on `examples/paisans.example.yaml`:
+0 refusals. Nothing was run against a DNS provider.

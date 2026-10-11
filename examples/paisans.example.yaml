@@ -17,6 +17,14 @@ community:
   # ONE-WAY DOOR. Federation identity is the hostname, and remote instances
   # have recorded it. Changing this after federating is a rebuild, not a rename.
   domain: example.org
+  # Names under the domain whose mail somebody other than this toolkit runs
+  # (Eg: the domain itself on Google Workspace, Fastmail or Proton Mail).
+  # `paisans dns init` publishes no mail records at them. Every other name it
+  # publishes gets records saying it sends and receives no mail, so nobody can
+  # forge mail from it, and left out, that includes the domain itself. The
+  # domain of smtp.from_address below, and of any app's own from_address, is
+  # one of these without being listed.
+  # mail_domains: [example.org]
 
 mesh:
   # The private network every site sits on. Declared, not derived: applications

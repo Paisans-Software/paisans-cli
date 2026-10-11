@@ -79,6 +79,9 @@ type cfRecord struct {
 	TTL     int    `json:"ttl"`
 	Proxied bool   `json:"proxied"`
 	Comment string `json:"comment,omitempty"`
+	// Priority is an MX record's preference. It is a pointer so that a null
+	// MX's preference of 0 is sent rather than omitted.
+	Priority *int `json:"priority,omitempty"`
 }
 
 func (c *cloudflare) LookupZone(ctx context.Context, name string) (string, bool, error) {
@@ -124,7 +127,11 @@ func (c *cloudflare) Records(ctx context.Context, zoneID, name string) ([]Record
 }
 
 func (r cfRecord) record() Record {
-	return Record{Type: strings.ToUpper(r.Type), Name: r.Name, Content: r.Content, Proxied: r.Proxied, ID: r.ID, Comment: r.Comment}
+	out := Record{Type: strings.ToUpper(r.Type), Name: r.Name, Content: r.Content, Proxied: r.Proxied, ID: r.ID, Comment: r.Comment}
+	if r.Priority != nil {
+		out.Priority = *r.Priority
+	}
+	return out
 }
 
 // allRecordsPerPage is how many records each page of a whole zone listing
@@ -170,7 +177,8 @@ func (c *cloudflare) Delete(ctx context.Context, zoneID, recordID string) error 
 }
 
 // Create adds an unproxied record with automatic TTL, carrying the record's
-// Comment. In Cloudflare's API a ttl of 1 means automatic.
+// Comment, and for an MX record its priority. In Cloudflare's API a ttl of 1
+// means automatic.
 func (c *cloudflare) Create(ctx context.Context, zoneID string, record Record) error {
 	body := cfRecord{
 		Type:    record.Type,
@@ -179,6 +187,10 @@ func (c *cloudflare) Create(ctx context.Context, zoneID string, record Record) e
 		TTL:     1,
 		Proxied: false,
 		Comment: record.Comment,
+	}
+	if record.Type == "MX" {
+		priority := record.Priority
+		body.Priority = &priority
 	}
 	var created cfRecord
 	_, err := c.do(ctx, http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/dns_records", nil, body, &created)
