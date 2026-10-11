@@ -131,7 +131,23 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 // member has its record: it is applied, not added.
 func TestConvergeResumesAFoundingAfterAFailure(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"founding: apply --site home-a", "founding: apply --site home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"other sites: apply --site vm", "founding: apply --site home-a", "founding: apply --site home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+}
+
+// A witness that has its record, though no data member it lists has one, is
+// applied before them: their founding is refused until its etcd runs.
+func TestConvergeAppliesARecordedWitnessBeforeTheFoundingMembers(t *testing.T) {
+	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
+	lines := titles(steps)
+	witness := slices.IndexFunc(lines, func(l string) bool { return strings.HasSuffix(l, "apply --site vm") })
+	for _, data := range []string{"founding: apply --site home-a", "founding: apply --site home-b"} {
+		if i := slices.Index(lines, data); i < 0 || witness < 0 || witness > i {
+			t.Errorf("the witness's apply does not come before %q:\n%s", data, strings.Join(lines, "\n"))
+		}
+	}
+	if steps[witness].Stage == stageFounding {
+		t.Errorf("a recorded witness is applied as founding: %s", lines[witness])
+	}
 }
 
 func TestConvergeRunsInitFirstWhenItHasWork(t *testing.T) {
@@ -1200,7 +1216,8 @@ func convergeShaped(t *testing.T, edit func(*config.Config), recorded map[string
 }
 
 // What each step waits on, for each shape of deployment: a member joining
-// through site add, one Garage site, no etcd, no Garage, and a monitor in
+// through site add, a witness with its record before the data members are
+// founded, one Garage site, no etcd, no Garage, and a monitor in
 // etcd.members.
 func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 	founded := initial("home-a", "vm")
@@ -1225,6 +1242,25 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"· apply --site home-a: after storage add",
 				"· apply --site home-b: after site add home-b",
 				"· apply --site vm: after storage add",
+				"· apply --site watch: after storage add",
+			},
+		},
+		{
+			name:     "a recorded witness",
+			edit:     func(*config.Config) {},
+			recorded: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")},
+			found:    map[string]any{"apply --site vm": "1 change"},
+			want: []string{
+				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ dns init",
+				"○ apply --site vm: 1 change",
+				"· apply --site home-a: after apply --site vm",
+				"· apply --site home-b: after apply --site vm",
+				"✓ apply --site watch",
+				"· storage add: after apply --site home-a",
+				"· apply --site home-a: after the earlier apply --site home-a",
+				"· apply --site home-b: after the earlier apply --site home-b",
+				"· apply --site vm: after the earlier apply --site vm",
 				"· apply --site watch: after storage add",
 			},
 		},

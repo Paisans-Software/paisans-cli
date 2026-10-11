@@ -3346,7 +3346,7 @@ step runs after the one before it:
 | configuration | `init` | no id, no mesh subnet, or a generated secret missing |
 | hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
-| founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | no member founded yet (below) |
+| founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a member has not joined it |
 | other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |

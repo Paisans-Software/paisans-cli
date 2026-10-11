@@ -134,16 +134,25 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		_, recorded := st.Initial[m]
 		return !recorded && (len(st.Initial) == 0 || listed[m])
 	}
-	// A witness is founded first, since nothing waits on it. A data
+	// Every witness is applied before a data member is founded, since that
+	// member's gate refuses it while a witness's etcd does not run: one
+	// still being founded is founded there, and one with its record is
+	// applied, which plans nothing when its etcd already runs. A data
 	// member's apply may stop until the other members run, and pass two
 	// resumes it.
+	witness := func(m string) bool { return cfg.Sites[m].Has(config.RoleWitness) }
+	dataFounding := slices.ContainsFunc(members, func(m string) bool { return founding(m) && !witness(m) })
 	for _, m := range members {
-		if founding(m) && cfg.Sites[m].Has(config.RoleWitness) {
+		switch {
+		case !witness(m):
+		case founding(m):
 			steps = append(steps, applyStep(stageFounding, m))
+		case dataFounding:
+			steps = append(steps, applyStep(stageOthers, m))
 		}
 	}
 	for _, m := range members {
-		if founding(m) && !cfg.Sites[m].Has(config.RoleWitness) {
+		if founding(m) && !witness(m) {
 			steps = append(steps, applyStep(stageFounding, m))
 		}
 	}
@@ -1240,7 +1249,7 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 
 // convergeWaits is the titles of the earlier steps that steps[i] waits on,
 // in the order they ran: init, for every step once it has work; the site's
-// host prepare, for every step on a site; each founding witness's apply, for
+// host prepare, for every step on a site; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
 // runs; the site's earlier apply or site add and the storage step, for an
 // apply in pass two; and the host prepare and first apply of each Garage
@@ -1268,7 +1277,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		waits = append(waits, prepare(site))
 		if s.Stage == stageFounding && !cfg.Sites[site].Has(config.RoleWitness) {
 			for _, e := range earlier {
-				if e.Stage == stageFounding && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
+				if e.Stage != stagePassTwo && e.Args[0] == "apply" && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
 					waits = append(waits, e.Title)
 				}
 			}
