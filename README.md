@@ -279,7 +279,9 @@ placement: { pinned: vm }
 upstream ships it: its own compose file, its own Postgres container, its own
 volumes. No etcd, no Patroni, no HAProxy, no shared cluster. A single-site
 install is every app pinned to the only site, which is why this costs a new
-adopter nothing.
+adopter nothing. Its uploaded files go to Garage when the deployment runs one,
+or with `storage: local` into a directory of its own stack, so that they go
+with it too (see *A pinned app may keep its files on its own disk*, below).
 
 `cluster` is the opt-in variant: drop the stack's own `postgres` service, point
 it at its own site's HAProxy (rule 2), put its media in Garage. One compose
@@ -2231,7 +2233,9 @@ are state inside a running service that no manifest describes, so they are a
 separate command: `paisans storage init --site <name>`.
 
 It checks what a site's Garage node already has and creates only what is
-missing, so running it again is safe. It assigns the cluster layout only when
+missing, so running it again is safe. An app with `storage: local` keeps its
+files on its own disk and gets neither key nor bucket (see *A pinned app may
+keep its files on its own disk*). It assigns the cluster layout only when
 the site is the one Garage site; joining several is `storage add`, below. Like `apply`, it prints a plan and
 writes nothing without `--execute`.
 
@@ -2412,8 +2416,8 @@ Founder requirement. How to run it, and its flags, are under *`paisans dns
 init`* in [docs/commands.md](docs/commands.md).
 
 **The records are derived, never declared.** Each app's `hostname`, each of its
-role `hostnames`, and the media hostname of each app that stores objects,
-derived or declared, get an A record pointing at the gateway site's
+role `hostnames`, and the media hostname of each app that keeps objects in
+Garage, derived or declared, get an A record pointing at the gateway site's
 `public_address`, except an app pinned to a monitor site, whose names point at
 that monitor's own `public_address` (see *The monitor has a site of its
 own*). A site whose `endpoint` is a name rather than

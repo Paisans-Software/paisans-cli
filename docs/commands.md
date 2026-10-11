@@ -400,7 +400,8 @@ See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
 ### `paisans storage init`
 
 Provisions object storage on one site: each app's key and bucket, and the
-layout when it is the only Garage site.
+layout when it is the only Garage site. An app whose `storage` is `local`
+keeps its files on its own disk and is skipped: no key, no bucket.
 
 * **Alone:** the whole apply runs it after every site is up when
   `storage.garage.sites` lists one site. Typed alone, it provisions an app's
@@ -415,7 +416,9 @@ See *`storage init` provisions object storage* in `README.md`.
 ### `paisans storage add`
 
 Joins every site in `storage.garage.sites` into one Garage cluster in gated
-stages: connect, layout, sync, provision, media routes, a smoke test.
+stages: connect, layout, sync, provision, media routes, a smoke test. An app
+whose `storage` is `local` is skipped: the provision and media route stages
+give it no key, no bucket and no media route.
 
 * **Alone:** the whole apply runs it in place of `storage init` when there are
   several Garage sites. Typed alone, it is for its own flags, which the whole
@@ -454,7 +457,8 @@ See *Replacing an app's key: `storage rotate-key`* in `README.md`.
 
 Creates the public DNS records the configuration implies, at the provider
 `acme.provider` names. Creates only what is missing, never updates or deletes,
-and refuses if a record conflicts.
+and refuses if a record conflicts. An app whose `storage` is `local` has no
+media hostname, so it gets no media record.
 
 ```sh
 paisans dns init                # shows what it would create
