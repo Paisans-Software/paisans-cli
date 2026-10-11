@@ -297,11 +297,20 @@ func TestConvergeDryRunRunsNothing(t *testing.T) {
 }
 
 func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the founding stop: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
+}
+
+// foundingWait is a founding member's stop for the others' etcd, as apply
+// returns it.
+func foundingWait(site string, unstarted ...string) error {
+	return &ui.Problem{
+		Hint:  site + " is waiting on " + strings.Join(unstarted, ", ") + " to start etcd.",
+		Cause: &apply.FoundingWaitError{Site: site, Unstarted: unstarted},
+	}
 }
 
 // databasesWait is a replica's stop for the app databases, as apply returns
@@ -309,7 +318,7 @@ func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
 func databasesWait(site, leader string) error {
 	return &ui.Problem{
 		Hint:  site + " is waiting on " + leader + " to create databases auth, talk",
-		Cause: fmt.Errorf("%s: %w %s: auth, talk", site, apply.ErrDatabasesWait, leader),
+		Cause: &apply.DatabasesWaitError{Site: site, Leader: leader, Missing: []string{"auth", "talk"}},
 	}
 }
 
@@ -338,14 +347,14 @@ func waitsFor(t *testing.T, site, leader string, n int) {
 // stop ends the run, and pass two, home-a first, creates the databases and
 // then starts home-b's apps.
 func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	waitsFor(t, "home-b", "home-a", 1)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the databases wait: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
-	if !rec.Has("detail", "✓ apply --site home-b: waiting for the primary's databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+	if !rec.Has("detail", "✓ apply --site home-b: paused until home-a creates its databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
 		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
 	}
 }
@@ -1698,13 +1707,13 @@ func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 // install line lists it as its inner step's result, and its reason under it,
 // without a doubled stop or a trailing blank.
 func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
+	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
+		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: paused until home-b runs etcd"
 	})
 	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
 		t.Errorf("inner result:\n%s", rec.Lines())

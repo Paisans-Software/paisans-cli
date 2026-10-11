@@ -3437,13 +3437,15 @@ The install steps still run one at a time, in the order of the table, so the
 install lines are a block that keeps its order: a site's line is a dim `·`
 until the run reaches it, spins while one of its steps runs, and between its
 steps, such as a founding stop and pass two, is a dim `·` again with the time
-its steps have taken so far and what it waits for. Its time is its steps'
-together, and it ends `✓` once its last step has:
+its steps have taken so far and what it waits for: the sites a founding stop
+waits on to run etcd, the site a replica waits on to create its databases, or
+otherwise the places the run visits before it comes back. Its time is its
+steps' together, and it ends `✓` once its last step has:
 
 ```
 install
-  · vm: 22.0s (again in pass two)
-  · home-a: 31.0s (stopped for the other etcd members)
+  · vm: 22.0s, paused until home-a, home-b, watch and storage are done
+  · home-a: 31.0s, paused until home-b runs etcd
   ⠹ home-b: 41s (wait for Patroni primary)
   · watch
   · storage
@@ -3463,8 +3465,8 @@ and how to resume:
 
 ```
 install
-  · vm: 22.0s (again in pass two)
-  · home-a: 31.0s (stopped for the other etcd members)
+  · vm: 22.0s, paused until home-a, home-b, watch and storage are done
+  · home-a: 31.0s, paused until home-b runs etcd
   ✗ home-b: 41.0s
   · watch
   · storage
@@ -3483,7 +3485,7 @@ install
       ✓ apply --site vm: 22.0s
       ✓ apply --site vm: 42.3s
   ✓ home-a: 89.5s
-      ✓ apply --site home-a: stopped for the other etcd members
+      ✓ apply --site home-a: paused until home-b runs etcd
         home-a is waiting on home-b to start etcd.
       ✓ apply --site home-a: 58.5s
   ...

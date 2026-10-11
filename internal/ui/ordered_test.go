@@ -46,33 +46,33 @@ func TestAnOrderedGroupKeepsItsLinesInPlace(t *testing.T) {
 	c.add(22 * time.Second)
 	ui.Frame(r)
 	sameRows(t, s.lines(), []string{"install", "  ⠙ home-a: 22s", "  · home-b", "  · storage"})
-	lines[0].Detail("✓ apply --site home-a: stopped for the other etcd members")
-	lines[0].Pause("stopped for the other etcd members")
+	lines[0].Detail("✓ apply --site home-a: paused until home-b runs etcd")
+	lines[0].Pause("paused until home-b runs etcd")
 	c.add(5 * time.Second)
 	ui.Frame(r)
-	sameRows(t, s.lines(), []string{"install", "  · home-a: 22.0s (stopped for the other etcd members)", "  · home-b", "  · storage"})
+	sameRows(t, s.lines(), []string{"install", "  · home-a: 22.0s, paused until home-b runs etcd", "  · home-b", "  · storage"})
 
 	lines[1].Start()
 	c.add(3 * time.Second)
-	lines[1].Pause("again in pass two")
+	lines[1].Pause("paused until storage is done")
 	lines[2].Start()
 	c.add(4 * time.Second)
 	lines[2].Done("")
 	// storage ended, but a line above it has not: it stays in its row.
-	sameRows(t, s.lines(), []string{"install", "  · home-a: 22.0s (stopped for the other etcd members)", "  · home-b: 3.0s (again in pass two)", "  ✓ storage: 4.0s"})
+	sameRows(t, s.lines(), []string{"install", "  · home-a: 22.0s, paused until home-b runs etcd", "  · home-b: 3.0s, paused until storage is done", "  ✓ storage: 4.0s"})
 
 	lines[0].Start()
 	c.add(48 * time.Second)
 	ui.Frame(r)
-	sameRows(t, s.lines(), []string{"install", "  ⠸ home-a: 70s", "  · home-b: 3.0s (again in pass two)", "  ✓ storage: 4.0s"})
+	sameRows(t, s.lines(), []string{"install", "  ⠸ home-a: 70s", "  · home-b: 3.0s, paused until storage is done", "  ✓ storage: 4.0s"})
 	lines[0].Detail("✓ apply --site home-a: 48.0s")
 	lines[0].Done("")
 	sameRows(t, s.lines(), []string{
 		"install",
 		"  ✓ home-a: 70.0s",
-		"      ✓ apply --site home-a: stopped for the other etcd members",
+		"      ✓ apply --site home-a: paused until home-b runs etcd",
 		"      ✓ apply --site home-a: 48.0s",
-		"  · home-b: 3.0s (again in pass two)",
+		"  · home-b: 3.0s, paused until storage is done",
 		"  ✓ storage: 4.0s",
 	})
 	lines[1].Start()
@@ -82,7 +82,7 @@ func TestAnOrderedGroupKeepsItsLinesInPlace(t *testing.T) {
 	sameRows(t, s.lines(), []string{
 		"install",
 		"  ✓ home-a: 70.0s",
-		"      ✓ apply --site home-a: stopped for the other etcd members",
+		"      ✓ apply --site home-a: paused until home-b runs etcd",
 		"      ✓ apply --site home-a: 48.0s",
 		"  ✓ home-b: 4.0s",
 		"  ✓ storage: 4.0s",
@@ -104,7 +104,7 @@ func TestAnOrderedGroupThatStopsLeavesTheRestWaiting(t *testing.T) {
 	lines[0].Start()
 	c.add(2 * time.Second)
 	lines[0].Note("secrets: smtp.password is owed", "paisans secrets set smtp.password < value")
-	lines[0].Pause("stopped for the other etcd members")
+	lines[0].Pause("paused until home-b runs etcd")
 	lines[1].Start()
 	c.add(3 * time.Second)
 	lines[1].Explain("Mount it, then apply.")
@@ -114,7 +114,7 @@ func TestAnOrderedGroupThatStopsLeavesTheRestWaiting(t *testing.T) {
 	s := &screen{}
 	s.Write([]byte(b.String()))
 	sameRows(t, s.lines(), []string{
-		"  · home-a: 2.0s (stopped for the other etcd members)",
+		"  · home-a: 2.0s, paused until home-b runs etcd",
 		"  ! secrets: smtp.password is owed",
 		"       paisans secrets set smtp.password < value",
 		"  ✗ home-b: 3.0s",
@@ -143,10 +143,31 @@ func TestAnOrderedLineShowsItsNestedStep(t *testing.T) {
 	ui.Frame(r)
 	sameRows(t, s.lines(), []string{"  ⠙ home-a: 2s (wait for Patroni primary)", "  · home-b"})
 	finish()
-	lines[0].Pause("again in pass two")
-	sameRows(t, s.lines(), []string{"  · home-a: 2.0s (again in pass two)", "  · home-b"})
+	lines[0].Pause("paused until storage is done")
+	sameRows(t, s.lines(), []string{"  · home-a: 2.0s, paused until storage is done", "  · home-b"})
 	lines[0].Done("")
 	lines[1].Done("")
+	done()
+}
+
+// A paused line shows why after its time, or after its title alone when
+// its visits took under a second.
+func TestAPausedLineShowsWhyAfterItsTime(t *testing.T) {
+	s := &screen{}
+	c := newManual()
+	r := ui.NewForTest(s, false, true, c.now)
+	lines, done := ui.Ordered(r, "home-a", "home-b", "storage")
+	lines[0].Start()
+	c.add(39200 * time.Millisecond)
+	lines[0].Pause("paused until storage and home-b are done")
+	lines[1].Start()
+	c.add(500 * time.Millisecond)
+	lines[1].Pause("paused until storage is done")
+	sameRows(t, s.lines(), []string{
+		"  · home-a: 39.2s, paused until storage and home-b are done",
+		"  · home-b: paused until storage is done",
+		"  · storage",
+	})
 	done()
 }
 
@@ -188,7 +209,7 @@ func TestAPlainOrderedGroupPrintsLinesInOrder(t *testing.T) {
 	c.add(2 * time.Second)
 	lines[0].Detail("a detail")
 	lines[0].Progress("docker")
-	lines[0].Pause("again in pass two")
+	lines[0].Pause("paused until storage is done")
 	lines[2].Start()
 	c.add(time.Second)
 	lines[2].Done("")
@@ -215,7 +236,7 @@ func TestAnOrderedGroupOnARecorderKeepsTheOrder(t *testing.T) {
 	rec := &ui.Recorder{}
 	lines, done := ui.Ordered(rec, "home-a", "home-b", "home-c")
 	lines[0].Start()
-	lines[0].Pause("stopped for the other etcd members")
+	lines[0].Pause("paused until home-b runs etcd")
 	lines[1].Start()
 	lines[1].Done("")
 	lines[0].Start()

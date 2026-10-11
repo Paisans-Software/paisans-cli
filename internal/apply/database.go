@@ -277,6 +277,34 @@ var ErrFoundingWait = errors.New("waiting on")
 // them.
 var ErrDatabasesWait = errors.New("waiting for databases from")
 
+// FoundingWaitError is the founding stop's cause, which is ErrFoundingWait:
+// Site's etcd is up and Unstarted, the other founding members, have not
+// started theirs.
+type FoundingWaitError struct {
+	Site      string
+	Unstarted []string
+}
+
+func (e *FoundingWaitError) Error() string {
+	return fmt.Sprintf("%s: etcd is %v %s", e.Site, ErrFoundingWait, strings.Join(e.Unstarted, ", "))
+}
+
+func (e *FoundingWaitError) Unwrap() error { return ErrFoundingWait }
+
+// DatabasesWaitError is the replica's stop's cause, which is
+// ErrDatabasesWait: Site waits for Leader, the Patroni leader's site, to
+// create the app databases Missing.
+type DatabasesWaitError struct {
+	Site, Leader string
+	Missing      []string
+}
+
+func (e *DatabasesWaitError) Error() string {
+	return fmt.Sprintf("%s: %v %s: %s", e.Site, ErrDatabasesWait, e.Leader, strings.Join(e.Missing, ", "))
+}
+
+func (e *DatabasesWaitError) Unwrap() error { return ErrDatabasesWait }
+
 // runBootstrap waits for a primary and creates what is missing. A replica
 // creates nothing and stops unless every app database already exists;
 // anything else that goes wrong stops the apply before any app stack is
@@ -288,7 +316,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 			Explain: fmt.Sprintf(
 				"The infrastructure stack is up. A new etcd cluster settles its version only once every founding member runs, and Patroni takes no leader key before that, so no app database was created and no app stack was started. Apply %s, then apply this site again: it resumes here.",
 				strings.Join(waiting, ", then ")),
-			Cause: fmt.Errorf("%s: etcd is %w %s", plan.Site, ErrFoundingWait, strings.Join(waiting, ", ")),
+			Cause: &FoundingWaitError{Site: plan.Site, Unstarted: waiting},
 		}
 	}
 	done := plan.step("wait for Patroni primary")
@@ -392,7 +420,7 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 		Explain: fmt.Sprintf(
 			"The infrastructure stack is up. Patroni here is a replica, and the primary, on %s, creates the app roles and databases, so no app stack was started. Apply %s, then apply this site again: it resumes here.",
 			leader, leader),
-		Cause: fmt.Errorf("%s: %w %s: %s", plan.Site, ErrDatabasesWait, leader, strings.Join(missing, ", ")),
+		Cause: &DatabasesWaitError{Site: plan.Site, Leader: leader, Missing: missing},
 	}
 }
 

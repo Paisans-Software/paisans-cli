@@ -1203,14 +1203,20 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
 		databases := err != nil && !final && errors.Is(err, apply.ErrDatabasesWait)
+		var why string
+		switch {
+		case founding:
+			why = foundingPause(err)
+		case databases:
+			why = databasesPause(err)
+		case err == nil && !final && last[k] != i:
+			why = revisitPause(steps, i)
+		}
 		switch {
 		case err == nil:
 			line.Detail("%s", innerLine(ui.OK, s.Title, since(start)))
-		case founding:
-			line.Detail("%s", innerLine(ui.OK, s.Title, "stopped for the other etcd members"))
-			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
-		case databases:
-			line.Detail("%s", innerLine(ui.OK, s.Title, "waiting for the primary's databases"))
+		case founding || databases:
+			line.Detail("%s", innerLine(ui.OK, s.Title, why))
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
@@ -1221,15 +1227,11 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		switch {
 		case databases && last[k] == i:
 			again = append(again, i)
-			line.Pause("waiting for the primary's databases")
+			line.Pause(why)
 		case (err == nil || founding) && (final || last[k] == i):
 			line.Done("")
-		case founding:
-			line.Pause("stopped for the other etcd members")
-		case databases:
-			line.Pause("waiting for the primary's databases")
-		case err == nil:
-			line.Pause("again in pass two")
+		case err == nil || founding || databases:
+			line.Pause(why)
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
@@ -1251,6 +1253,66 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		}
 	}
 	return nil
+}
+
+// revisitPause is why the line of steps[i], which is visited again, pauses
+// after it: until the places of the steps between it and its next visit
+// are done, in the order they run.
+func revisitPause(steps []convergeStep, i int) string {
+	place := installPlace(steps[i])
+	var between []string
+	for _, s := range steps[i+1:] {
+		p := installPlace(s)
+		if p == place {
+			break
+		}
+		if !slices.Contains(between, p) {
+			between = append(between, p)
+		}
+	}
+	switch len(between) {
+	case 0:
+		return ""
+	case 1:
+		return "paused until " + between[0] + " is done"
+	}
+	return "paused until " + andList(between) + " are done"
+}
+
+// foundingPause is why a founding stop pauses its line: until the founding
+// members err names as not started run etcd.
+func foundingPause(err error) string {
+	var wait *apply.FoundingWaitError
+	switch {
+	case !errors.As(err, &wait) || len(wait.Unstarted) == 0:
+		return "paused until the other founding members run etcd"
+	case len(wait.Unstarted) == 1:
+		return "paused until " + wait.Unstarted[0] + " runs etcd"
+	}
+	return "paused until " + andList(wait.Unstarted) + " run etcd"
+}
+
+// databasesPause is why a replica's stop pauses its line: until the
+// leader's site err names creates the app databases.
+func databasesPause(err error) string {
+	leader := "the leader"
+	var wait *apply.DatabasesWaitError
+	if errors.As(err, &wait) && wait.Leader != "" {
+		leader = wait.Leader
+	}
+	return "paused until " + leader + " creates its databases"
+}
+
+// andList is names as a sentence lists them, "a, b and c"; past four, the
+// first three and how many more.
+func andList(names []string) string {
+	if len(names) > 4 {
+		names = append(names[:3:3], fmt.Sprintf("%d more", len(names)-3))
+	}
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // convergeNow is the clock an inner step of an install line is timed by.
