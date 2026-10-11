@@ -41,6 +41,12 @@ func (p *Problem) Error() string {
 
 func (p *Problem) Unwrap() error { return p.Cause }
 
+// Warning is a command's last word when it did what it was asked but left
+// something for the operator to do: printed as a Problem is, behind a
+// yellow ! (WARN off a terminal) rather than a failure's mark, and the
+// command exits 0.
+type Warning struct{ Problem }
+
 // maxWidth is the widest prose is wrapped to, however wide the terminal: a
 // longer line is harder to read, not easier.
 const maxWidth = 80
@@ -50,6 +56,10 @@ const maxWidth = 80
 // other error, its first line as the hint and the rest as the explanation.
 // A first line longer than 80 characters is cut at its first sentence.
 func Describe(err error) (hint, explain string) {
+	var w *Warning
+	if errors.As(err, &w) {
+		return w.Hint, w.Explain
+	}
 	var p *Problem
 	if errors.As(err, &p) {
 		return p.Hint, p.Explain
@@ -66,7 +76,8 @@ func Describe(err error) (hint, explain string) {
 }
 
 // PrintError writes the error that ends a command to w, in the visual
-// language of a refusal: a red ✗ (FAIL off a terminal) and the hint, then the
+// language of a refusal: a red ✗ (FAIL off a terminal), or a Warning's yellow
+// ! (WARN), and the hint, then the
 // explanation indented and wrapped to the terminal, at most 80 columns. With
 // verbose, the cause chain follows, one link a line, with full paths.
 func PrintError(w io.Writer, err error, verbose bool) {
@@ -78,10 +89,15 @@ func printError(w io.Writer, err error, verbose, terminal bool, width int) {
 		width = maxWidth
 	}
 	hint, explain := Describe(err)
+	mark, plain := red+"✗"+reset, "FAIL"
+	var warn *Warning
+	if errors.As(err, &warn) {
+		mark, plain = yellow+"!"+reset, "WARN"
+	}
 	if terminal {
-		fmt.Fprintf(w, "%s✗%s %s\n", red, reset, hint)
+		fmt.Fprintf(w, "%s %s\n", mark, hint)
 	} else {
-		fmt.Fprintf(w, "FAIL %s\n", hint)
+		fmt.Fprintf(w, "%s %s\n", plain, hint)
 	}
 	for _, line := range Wrap(explain, width-2) {
 		fmt.Fprintf(w, "  %s\n", line)

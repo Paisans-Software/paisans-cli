@@ -167,8 +167,8 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	f := fakeWebServerFiles(t, mountedCaddy, "blog.example.org {\n\treverse_proxy 127.0.0.1:2368\n}\n")
 	rec := recordConverge(t)
 	err := convergeAt(t, path, "--execute")
-	var p *ui.Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Hint, "status") {
+	var w *ui.Warning
+	if !errors.As(err, &w) || !strings.Contains(w.Hint, "status") {
 		t.Fatalf("err %v", err)
 	}
 	if rec.Has("result", "Deployment complete.") {

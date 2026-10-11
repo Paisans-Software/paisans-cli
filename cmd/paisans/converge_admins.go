@@ -247,8 +247,9 @@ func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o conve
 	}
 }
 
-// printLoginLinks writes every link issued, after the run's result. Each is a
-// credential: it goes to loginLinkOut once and is kept nowhere, so it is
+// printLoginLinks writes every link issued, after the run's result, set apart
+// by a blank line before and after, each link in italics on a terminal. Each
+// is a credential: it goes to loginLinkOut once and is kept nowhere, so it is
 // printed whether output is a terminal or a pipe, which is how an operator
 // copies it to pass on.
 func printLoginLinks(links []declaredAdmin) {
@@ -256,19 +257,23 @@ func printLoginLinks(links []declaredAdmin) {
 		return
 	}
 	apps := map[string]bool{}
-	width := 0
 	for _, d := range links {
 		apps[d.App] = true
-		width = max(width, len(d.ID))
+	}
+	names := make([]string, len(links))
+	width := 0
+	for i, d := range links {
+		names[i] = d.ID
+		if len(apps) > 1 {
+			names[i] += " on " + d.App
+		}
+		width = max(width, len(names[i]))
 	}
 	fmt.Fprintf(loginLinkOut, "\nLogin links, each valid for %s and for one sign in. Treat each as a password:\n", humanTTL(links[0].ExpiresIn))
-	for _, d := range links {
-		name := d.ID
-		if len(apps) > 1 {
-			name += " on " + d.App
-		}
-		fmt.Fprintf(loginLinkOut, "  %-*s  %s\n", width, name, d.Link)
+	for i, d := range links {
+		fmt.Fprintf(loginLinkOut, "  %-*s  %s\n", width, names[i], ui.Italic(loginLinkOut, d.Link))
 	}
+	fmt.Fprintln(loginLinkOut)
 }
 
 // humanTTL is a link's lifetime as a reader says it.

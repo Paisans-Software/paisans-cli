@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -14,13 +13,12 @@ import (
 )
 
 // fakeWebServerCheck replaces checking an app's web server from this machine:
-// an app in failing fails with those results on every attempt, and every
-// other passes every check. It returns the apps checked, one entry per
-// attempt.
+// an app in failing fails with those results, and every other passes every
+// check. It returns the apps checked, one entry per check.
 func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]string {
 	t.Helper()
 	var checked []string
-	saved, savedSleep := convergeWebServerCheck, convergeSleep
+	saved := convergeWebServerCheck
 	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checked = append(checked, target.App)
 		if results, ok := failing[target.App]; ok {
@@ -31,12 +29,11 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 			{Name: webserver.CheckCertificate, OK: true, Detail: "https://" + target.Hostname + "/ answered 200"},
 		}
 	}
-	convergeSleep = func(time.Duration) {}
 	// Writing the site files reaches the monitor's host; here there is
 	// nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
 	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool) ([]string, bool) { return nil, false }
-	t.Cleanup(func() { convergeWebServerCheck, convergeSleep, convergeWebServerFiles = saved, savedSleep, savedFiles })
+	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
 	fakeWebServer(t, caddyAutomatic)
 	return &checked
 }
@@ -141,8 +138,9 @@ func TestConvergeChecksEachExternalWebServer(t *testing.T) {
 }
 
 // A failed check is a warning naming the app, what failed and how to fix
-// it, and the run does not end as complete: it ends with a problem naming
-// the app.
+// it, and the run does not end as complete: it ends with a warning naming
+// the app, and exits 0, since every step ran and the web server is the
+// operator's.
 func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
@@ -152,9 +150,13 @@ func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 	if rec.Has("result", "Deployment complete.") {
 		t.Errorf("said complete:\n%s", rec.Lines())
 	}
-	var p *ui.Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Hint, "status") || !strings.Contains(p.Hint, "web server check") {
+	var w *ui.Warning
+	if !errors.As(err, &w) || !strings.Contains(w.Hint, "status") || !strings.Contains(w.Hint, "web server check") {
 		t.Fatalf("err = %#v", err)
+	}
+	var b strings.Builder
+	if code := reportError(&b, err, false); code != 0 || !strings.HasPrefix(b.String(), "WARN Deployment complete, but 1 app failed its web server check: status") {
+		t.Errorf("exit %d:\n%s", code, b.String())
 	}
 	if !rec.Has("fail", "status") {
 		t.Errorf("no failed line:\n%s", rec.Lines())
@@ -185,51 +187,38 @@ func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 	}
 }
 
-// A certificate or sign in failure can be an app or a certificate that has
-// only just started, so the check is tried again a few times before it is
-// failed. A DNS failure cannot, and is failed at once.
-func TestConvergeTriesAnWebServerAgainOnlyWhenItMayStillCome(t *testing.T) {
+// A failed web server check alongside a failure of apply's own ends as
+// that failure: the failure's mark and exit 1.
+func TestConvergeFailedWebServerAndAdminFails(t *testing.T) {
+	fakeConverge(t, nil)
+	externalWatch(t)
+	fakeWebServerCheck(t, certificateFails)
+	fakeDeclaredAdmins(t, func(string, string, bool) (declaredAdmin, error) {
+		return declaredAdmin{}, errors.New("POST /api/users: 400 email already in use")
+	})
+	recordLinks(t)
+	recordConverge(t)
+	err := converge(t, "--execute")
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) {
+		t.Fatalf("err = %#v", err)
+	}
+	var b strings.Builder
+	if code := reportError(&b, err, false); code != 1 || !strings.HasPrefix(b.String(), "FAIL ") {
+		t.Errorf("exit %d:\n%s", code, b.String())
+	}
+}
+
+// The web server in front of an app is the operator's, so its check runs
+// once, whatever fails: waiting on it is not apply's to do.
+func TestConvergeChecksAWebServerOnce(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
 	checked := fakeWebServerCheck(t, certificateFails)
 	recordConverge(t)
 	converge(t, "--execute")
-	if len(*checked) != webServerAttempts {
-		t.Errorf("certificate checked %d times, want %d", len(*checked), webServerAttempts)
-	}
-
-	dnsFails := map[string][]webserver.Result{"status": {
-		{Name: webserver.CheckDNS, Detail: "status.example.org does not resolve"},
-		{Name: webserver.CheckCertificate, Detail: "https://status.example.org/: no such host"},
-	}}
-	checked = fakeWebServerCheck(t, dnsFails)
-	converge(t, "--execute")
-	if len(*checked) != 1 {
-		t.Errorf("dns checked %d times, want 1", len(*checked))
-	}
-}
-
-// A check that passes on a later attempt passes.
-func TestConvergeWebServerPassesOnALaterAttempt(t *testing.T) {
-	fakeConverge(t, nil)
-	externalWatch(t)
-	attempts := 0
-	saved, savedSleep := convergeWebServerCheck, convergeSleep
-	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
-		attempts++
-		if attempts < 3 {
-			return certificateFails["status"]
-		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "answered 200"}}
-	}
-	convergeSleep = func(time.Duration) {}
-	t.Cleanup(func() { convergeWebServerCheck, convergeSleep = saved, savedSleep })
-	rec := recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if attempts != 3 || !rec.Has("done", "status") || !rec.Has("result", "Deployment complete.") {
-		t.Errorf("attempts %d:\n%s", attempts, rec.Lines())
+	if !slices.Equal(*checked, []string{"status"}) {
+		t.Errorf("checked %v, want once", *checked)
 	}
 }
 

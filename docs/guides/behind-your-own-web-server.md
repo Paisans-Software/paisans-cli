@@ -272,12 +272,12 @@ web server
 
 When one fails it marks the app's line failed, notes which check failed with
 that check's own line and the web server it finds in front of the app, read
-with the sudo password the run asked for at its start, and ends with `Deployment complete, but 1 app failed
-its web server check: status` and exit status 1 rather than `Deployment
-complete.`, since every step ran but a visitor cannot use the app yet. A
-failing `certificate` or `sign in` check, which an app or certificate that has
-only just started can cause, is tried again for about half a minute before it
-is reported. Fix what it names with steps 3 to 5, then run `paisans web-server
+with the sudo password the run asked for at its start, and ends on a warning,
+`! Deployment complete, but 1 app failed its web server check: status`, rather
+than `Deployment complete.`, since a visitor cannot use the app yet. Every step
+ran, so the exit status is still 0. The check runs once: an app or certificate
+that has only just started can fail `certificate` or `sign in`, and
+`paisans web-server check` checks it again when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
 check --app status` until it passes.
 
 ## Afterwards

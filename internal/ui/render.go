@@ -15,6 +15,7 @@ const (
 	red    = "\x1b[31m"
 	yellow = "\x1b[33m"
 	dim    = "\x1b[2m"
+	ital   = "\x1b[3m"
 	reset  = "\x1b[0m"
 	clear  = "\r\x1b[K"
 )

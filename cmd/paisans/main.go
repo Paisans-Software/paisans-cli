@@ -357,6 +357,12 @@ func reportError(w io.Writer, err error, verbose bool) int {
 	if errors.Is(err, storageadd.ErrWaiting) {
 		return 75
 	}
+	// Not a failure either: the command did what it was asked, and what is
+	// left is the operator's to do.
+	var warn *ui.Warning
+	if errors.As(err, &warn) {
+		return 0
+	}
 	return 1
 }
 

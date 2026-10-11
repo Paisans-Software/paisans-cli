@@ -50,8 +50,9 @@ holds this one's token, WireGuard interface or listen port, or an overlapping
 mesh subnet (see *A deployment has an id, and a host knows every deployment on
 it* in `README.md`).
 
-A command exits 0 when it did what it was asked, 1 when it stopped on a
-failure or a refusal, and 2 when its command line cannot run. `storage add`
+A command exits 0 when it did what it was asked, including when it ends on a
+warning (`!`, `WARN` off a terminal), 1 when it stopped on a failure or a
+refusal, and 2 when its command line cannot run. `storage add`
 also exits 75 when a stage is waiting on Garage. `doctor` and `web-server check`
 exit 1 on any `FAIL`.
 
@@ -235,7 +236,8 @@ clients exist, ends by sweeping the old images its site's stacks used (see
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
   when an app failed its web server check or its site file could not be written,
-  names each such app and exits 1 although every step ran. An `include_dir` it
+  ends on a warning naming each such app and exits 0, since every step ran and
+  the web server is the operator's; with another failure as well it exits 1. An `include_dir` it
   derives is written into `paisans.yaml`. Without it, every step is checked
   as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
