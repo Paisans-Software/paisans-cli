@@ -594,9 +594,17 @@ sites:
   line and one set of instructions. The run ends on
   a warning, `! Deployment complete, but 1 app failed its web server check`,
   with exit status 0: every step ran, and the web server is the operator's.
-  The check runs once, and once more only after apply reloaded a web server
-  in a container (below), since waiting on that web server is not the
-  toolkit's to do; a dry run lists the check without running it.
+  A certificate or sign in failure is what a web server still obtaining its
+  certificate gives, for a while after its site is written or it is
+  reloaded, so the check waits on it: it checks again after 2, 4, 8 and 16
+  seconds and then 30, a minute in all, the line saying meanwhile what it
+  waits for (`waiting for caddy's certificate`), and passes with how long it
+  waited (`status.example.org, after 14s`). After a minute it fails on the
+  last check's result. A failure waiting cannot fix, such as a name that does
+  not resolve or an app reachable around the web server, fails at once. A
+  site file already in place and unchanged is checked once, and waited on
+  only after apply reloaded its web server in a container (below). A dry run
+  lists the check without running it.
   `apply --site` on such a monitor runs the whole step, the site files below
   and then the check, reaching the monitor through the ssh and sudo the rest
   of its apply uses, and ends the same way, on the warning or the failure in
@@ -663,7 +671,8 @@ happens once it validates depends on where the server runs:
 A file already as it should be is not written and nothing is reloaded, unless
 the app's web server check then fails: apply validates the configuration
 again, in case the operator edited it, reloads a server in a container and
-checks the app once more, or for one on the host gives the reload command.
+checks the app again, waiting on it as after any reload, or for one on the
+host gives the reload command.
 Each file goes into the deployment's manifest with what removing it needs, so
 its removal is driven by that record: `app remove`, `site remove` (with
 `--force` too) and an apply where the app's hostname moved off the site or

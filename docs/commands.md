@@ -297,7 +297,11 @@ starts, restarts or recreates what changed.
   app's site file written into `include_dir` (an `include_dir` it derives
   written into `paisans.yaml`), the configuration validated, a server in a
   container reloaded and the reload command given for one on the host, then
-  `web-server check`'s checks, a line per app in a `web server` section. It
+  `web-server check`'s checks, a line per app in a `web server` section. A
+  certificate or sign in failure, which a web server still obtaining its
+  certificate gives, is checked again after 2, 4, 8 and 16 seconds and then
+  30, up to a minute in all, the line saying what it waits for; any other
+  failure, such as DNS, is reported at once. It
   reaches the monitor through the same ssh and sudo as the rest of the apply,
   `--ssh` included. A problem with the operator's web server ends it on the
   whole apply's warning with exit status 0, in place of `Applied <n> files to
@@ -657,8 +661,10 @@ paisans web-server check --app status   # from your machine, as a visitor would
 
 * **Alone:** `show` always, to hand the snippet to whoever runs the web
   server. The whole apply writes that snippet into the web server's
-  `include_dir` and runs `check`'s checks after every step, so `check` is
-  typed alone to check again once the web server is fixed.
+  `include_dir` and runs `check`'s checks after every step, waiting up to a
+  minute on a certificate or sign in failure and reporting a DNS or routing
+  failure at once, so `check` is typed alone to check again once the web
+  server is fixed. Typed alone it checks once.
 * **Flags:** `--app <name>` (required), `--config`, `--sudo` (on: read the web
   server through sudo where the ssh user cannot; `--sudo=false` reads as the
   ssh user alone).
