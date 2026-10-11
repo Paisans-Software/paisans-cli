@@ -568,6 +568,17 @@ func (h *host) Run(command string) (string, error) {
 		return w.garage(h, command[strings.Index(command, "/garage ")+len("/garage "):])
 
 	// the mesh
+	case strings.Contains(command, "ip -br addr show dev psns-f2a9"):
+		if !h.wgUp {
+			return "", nil
+		}
+		address := ""
+		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+			if v, ok := strings.CutPrefix(line, "Address = "); ok {
+				address = v
+			}
+		}
+		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
 	case strings.Contains(command, "ip link show psns-f2a9"):
 		if h.wgUp {
 			return "up\n", nil
