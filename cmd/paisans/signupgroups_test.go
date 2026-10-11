@@ -15,8 +15,9 @@ import (
 // The fixture's Pocket ID, auth, declares signup_default_groups [members,
 // newcomers], and the fixture secrets record both IDs as the fake holds them.
 // The fake has no talk client while the fixture records one, so the client
-// step refuses talk throughout; these tests read the group step's own verdict,
-// groupsErr, rather than the apply's.
+// step creates talk in place of the recorded one; these tests read the group
+// step's own verdict, groupsErr, rather than the apply's, and one that must see
+// the group step alone runs with --only auth.
 
 // authEnv renders the fixture with the step's secrets and returns auth's
 // .env on home-a.
@@ -50,7 +51,7 @@ func TestSignupGroupsAlreadyRecordedPlanNothing(t *testing.T) {
 	fake := withIDPFake(t)
 	path := tempSecrets(t)
 	before, _ := os.ReadFile(path)
-	c := stepFor(t, "home-a", path)
+	c := stepFor(t, "home-a", path, "auth")
 	stdout, _ := captureOutput(t, func() {
 		if err := c.ensure(true, false); err != nil {
 			t.Fatal(err)

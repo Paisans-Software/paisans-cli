@@ -4738,12 +4738,18 @@ Pocket ID untouched. The secrets file is written through the same recorder, re-e
 recipients in `.sops.yaml`, and a plan that would write an encrypted file with
 no recipient is refused before Pocket ID is sent anything.
 
-**`apply` creates a client only when nothing is recorded for the app.** If
-the secrets file holds a client ID and secret and Pocket ID has no such client,
-or holds the app's client under another ID, `apply` refuses that app rather
-than replacing what is recorded, and names `oidc client create --app <name>`,
-which creates or re-records it. Recorded credentials may be what a running app
-signs people in with, so replacing them is a decision, not a repair.
+**`apply` creates a client when nothing is recorded for the app, or when what
+is recorded is a client Pocket ID does not have.** If the secrets file holds a
+client ID and secret and Pocket ID has no client named after the app, as after
+Pocket ID is started on a fresh database, `apply` creates the client and records
+its credentials over the stale ones, saying so in one line
+(`talk: recorded client <id> is not at Pocket ID; created a new one`); a dry
+run lists the create with the rest of the plan. Nothing can be signing in with a
+client that does not exist, so nothing is lost. Two cases are refused for that
+app instead, naming `oidc client create --app <name>`, which creates or
+re-records the client: credentials only partly recorded, and a client named
+after the app under another ID than the recorded one. That client may be what a
+running app signs people in with, so replacing it is a decision, not a repair.
 
 `apply` never rotates a secret. The command stays for that and for running the
 step alone:

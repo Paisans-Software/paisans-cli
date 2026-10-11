@@ -151,6 +151,10 @@ type Plan struct {
 	State    State
 	Present  []string
 	Steps    []Step
+	// Replaces is the recorded client ID of a client Pocket ID does not have,
+	// whose credentials the plan's new client is recorded over. Empty when
+	// nothing recorded is replaced.
+	Replaces string
 	// Warnings are things the operator should know and the plan does not
 	// change. They do not stop the run.
 	Warnings []string
@@ -174,6 +178,11 @@ type Plan struct {
 // Neither is a choice anybody made. A launch URL set to anything else may be
 // deliberate and is left alone, with a warning when the operator has chosen a
 // different one in the configuration.
+//
+// Credentials recorded for a client Pocket ID does not have are planned over
+// as if nothing were recorded, and the plan names the client it replaces
+// (Plan.Replaces). Nothing can be signing in with a client that does not
+// exist, so nothing is lost by recording a new one in its place.
 func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 	p := &Plan{Desired: d, Recorded: rec, State: s}
 
@@ -196,7 +205,12 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 
 	if client == nil {
 		body, _ := json.Marshal(d.newClient())
-		p.Steps = append(p.Steps, Step{Kind: CreateClient, Title: "create OIDC client " + d.App, Detail: fmt.Sprintf("create client %s: POST /api/oidc/clients %s", d.App, body)})
+		line := fmt.Sprintf("create client %s: POST /api/oidc/clients %s", d.App, body)
+		if rec.ClientID != "" {
+			p.Replaces = rec.ClientID
+			line += fmt.Sprintf(". It replaces the recorded client %s, which Pocket ID does not have", rec.ClientID)
+		}
+		p.Steps = append(p.Steps, Step{Kind: CreateClient, Title: "create OIDC client " + d.App, Detail: line})
 	} else if d.LaunchURL != "" {
 		current := ""
 		if client.LaunchURL != nil {

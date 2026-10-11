@@ -415,21 +415,94 @@ func TestApplyHoldsBackWhenItsOwnPocketIDNeverAnswers(t *testing.T) {
 	}
 }
 
-// apply creates a client only when nothing is recorded. Recorded credentials
-// that Pocket ID does not hold, or holds under another client, are refused
-// rather than replaced, and the operator is pointed at the command.
-func TestApplyNeverReplacesRecordedCredentials(t *testing.T) {
+// Credentials recorded for a client Pocket ID does not have are replaced:
+// nothing can be signing in with a client that does not exist. apply creates
+// the client, records the new credentials over the stale ones, and says so.
+func TestApplyReplacesRecordedCredentialsForAMissingClient(t *testing.T) {
+	fake := withIDPFake(t)
+	path := tempSecrets(t)
+	c := stepFor(t, "home-a", path, "talk")
+	var err error
+	stdout, stderr := captureOutput(t, func() { err = c.ensure(true, false) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := config.LoadSecrets(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := secrets.OIDCClients["talk"]
+	if got.ClientID != "c-1" || got.ClientSecret == "fixture-not-a-secret-talk-secret" {
+		t.Errorf("recorded id %q, and the secret replaced: %t", got.ClientID, got.ClientSecret != "fixture-not-a-secret-talk-secret")
+	}
+	if len(fake.prefixes) != 1 || !strings.HasPrefix(got.ClientSecret, fake.prefixes[0]) {
+		t.Error("Pocket ID was not sent the recorded secret")
+	}
+	if !strings.Contains(stdout, "talk: recorded client fixture- is not at Pocket ID; created a new one") {
+		t.Errorf("output:\n%s", stdout)
+	}
+	if strings.Contains(stdout+stderr, got.ClientSecret) || strings.Contains(stdout+stderr, "fixture-not-a-secret-talk-secret") {
+		t.Error("a secret was printed")
+	}
+	if err := c.result(); err != nil {
+		t.Error(err)
+	}
+	if len(c.heldApps()) != 0 {
+		t.Errorf("held %v", c.heldApps())
+	}
+}
+
+// A dry run lists the replacement as planned work, not as a refusal.
+func TestApplyDryRunListsTheReplacementOfAMissingClient(t *testing.T) {
+	fake := withIDPFake(t)
+	path := tempSecrets(t)
+	before, _ := os.ReadFile(path)
+	c := stepFor(t, "home-a", path, "talk")
+	rec := &ui.Recorder{Verbose_: true}
+	c.report = rec
+	captureOutput(t, func() { c.ensure(false, c.pocketIDHere()) })
+	if !rec.Has("pending", "create OIDC client talk") || !rec.Has("pending", "create client secret for talk") {
+		t.Errorf("the dry run does not plan the client:\n%s", rec.Lines())
+	}
+	if !rec.Has("warn", "talk: recorded client fixture- is not at Pocket ID; a new one replaces it") {
+		t.Errorf("the dry run does not say the client is replaced:\n%s", rec.Lines())
+	}
+	if rec.Has("refuse", "talk") || len(c.refused) != 0 {
+		t.Errorf("the dry run refused talk:\n%s", rec.Lines())
+	}
+	if fake.mutated {
+		t.Error("a dry run mutated Pocket ID")
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Error("a dry run wrote the secrets file")
+	}
+}
+
+// Recorded credentials apply cannot safely replace are refused, and the
+// operator is pointed at the command: a client named after the app under
+// another ID may be what a running app signs in with, and half a record says
+// something went wrong that a person should look at.
+func TestApplyRefusesRecordedCredentialsItCannotReplace(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		client *pocketid.OIDCClient
+		name    string
+		client  *pocketid.OIDCClient
+		partial bool
 	}{
-		{"no client at Pocket ID", nil},
-		{"another client ID", &pocketid.OIDCClient{ID: "c-other", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/oidc/verify"}, PkceEnabled: true}},
+		{"another client ID", &pocketid.OIDCClient{ID: "c-other", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/oidc/verify"}, PkceEnabled: true}, false},
+		{"partly recorded, no client at Pocket ID", nil, true},
+		{"partly recorded, another client ID", &pocketid.OIDCClient{ID: "c-other", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/oidc/verify"}, PkceEnabled: true}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := withIDPFake(t)
 			fake.client = tc.client
 			path := tempSecrets(t)
+			if tc.partial {
+				secrets, _ := config.LoadSecrets(path)
+				_ = secrets.Set("oidc_clients.talk.client_secret", "")
+				if err := config.WriteSecrets(path, secrets, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
 			before, _ := os.ReadFile(path)
 			c := stepFor(t, "home-a", path)
 			var err error
