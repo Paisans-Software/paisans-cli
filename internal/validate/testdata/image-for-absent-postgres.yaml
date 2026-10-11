@@ -68,7 +68,7 @@ apps:
     placement: cluster
     images:
       # cluster placement means no database of its own, so nothing renders this.
-      postgres: postgres:17-alpine
+      postgres: postgres:17-trixie
     settings:
       s3_bucket: docs-uploads
   auth:

@@ -55,7 +55,13 @@ var ImageVolumes = map[string][]string{
 	// `docker image inspect` on a local build on 2026-10-08.
 	"ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d": nil,
 	// A pinned app's own database, one per postgres_version the toolkit
-	// knows. The path moved in 18; see PostgresDataMount.
+	// knows. The path moved in 18; see PostgresDataMount. The Debian trixie
+	// tags are the default (render.appImages); their VOLUME and PGDATA were
+	// read with `docker image inspect` on 2026-10-11 and match the Alpine
+	// tags', which stay for an app that pins one.
+	"postgres:16-trixie": {"/var/lib/postgresql/data"},
+	"postgres:17-trixie": {"/var/lib/postgresql/data"},
+	"postgres:18-trixie": {"/var/lib/postgresql"},
 	"postgres:16-alpine": {"/var/lib/postgresql/data"},
 	"postgres:17-alpine": {"/var/lib/postgresql/data"},
 	"postgres:18-alpine": {"/var/lib/postgresql"},

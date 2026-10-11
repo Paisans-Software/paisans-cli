@@ -15,7 +15,8 @@ import (
 // so a cluster's data sits in a subdirectory named for its major version and
 // `pg_upgrade --link` can see two versions under one mount. Both were read
 // from postgres:16-alpine, 17-alpine and 18-alpine with `docker image
-// inspect` on 2026-10-07.
+// inspect` on 2026-10-07, and from 16-trixie, 17-trixie and 18-trixie, the
+// default since, on 2026-10-11.
 //
 // The old target is worse than leaky on 18. The image's entrypoint finds a
 // mount at /var/lib/postgresql/data, takes it for a database of an older
@@ -26,7 +27,7 @@ import (
 //
 // The major is read from the image's tag when the image is the official one,
 // because an app may pin an older image than the cluster's (the fixture's
-// Synapse runs postgres:17-alpine beside a cluster at 18), and the mount has
+// Synapse runs postgres:17-trixie beside a cluster at 18), and the mount has
 // to match what the container runs. Any other image falls back to the
 // cluster's version; `paisans apply` checks the result against what that
 // image really declares.

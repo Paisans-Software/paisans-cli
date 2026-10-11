@@ -120,7 +120,7 @@ apps:
     placement: { pinned: vm }
     visibility_gate: public
     images:
-      postgres: postgres:17-alpine
+      postgres: postgres:17-trixie
     # A yaml key in homeserver.yaml. Not url_preview_enabled: Synapse
     # v1.160.0's synapse/config/repository.py raises a ConfigError for it
     # unless url_preview_ip_range_blacklist is also set, and a list is not a

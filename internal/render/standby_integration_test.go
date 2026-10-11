@@ -288,7 +288,7 @@ func TestStandbyWrapperWithTwoRealInstances(t *testing.T) {
 	docker("network", "create", network)
 	t.Cleanup(func() { exec.Command("docker", "network", "rm", network).Run() })
 	docker("run", "-d", "--name", pg, "--network", network, "--network-alias", "pg",
-		"-e", "POSTGRES_USER=pid", "-e", "POSTGRES_PASSWORD=pid", "-e", "POSTGRES_DB=pid", "postgres:17-alpine")
+		"-e", "POSTGRES_USER=pid", "-e", "POSTGRES_PASSWORD=pid", "-e", "POSTGRES_DB=pid", "postgres:17-trixie")
 	t.Cleanup(func() { exec.Command("docker", "rm", "-f", pg).Run() })
 	deadline := time.Now().Add(60 * time.Second)
 	for exec.Command("docker", "exec", pg, "pg_isready", "-U", "pid", "-d", "pid").Run() != nil {
