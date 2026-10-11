@@ -50,6 +50,9 @@ type Inventory struct {
 	// ManifestFiles is every file that record lists, nil when there is
 	// none or it is unreadable.
 	ManifestFiles []render.ManifestFile
+	// ManifestIngress is every file that record lists in the include
+	// directory of the operator's web server.
+	ManifestIngress []render.ManifestIngress
 	// HostSites are the *.caddy files in the host's own render.HostSitesDir,
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
@@ -249,6 +252,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		var m render.Manifest
 		if json.Unmarshal([]byte(content), &m) == nil {
 			inv.ManifestFiles = m.Files
+			inv.ManifestIngress = m.Ingress
 			for _, f := range m.Files {
 				if f.Path == d.WireGuardConf() {
 					inv.ManifestWireGuard = true

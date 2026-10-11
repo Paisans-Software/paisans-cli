@@ -128,7 +128,10 @@ type SitePlan struct {
 	Networks   []string
 	Volumes    []string
 	Files      []File
-	Dir        Dir
+	// Ingress are the app's files in the include directory of the
+	// operator's web server, as the manifest records them.
+	Ingress []render.ManifestIngress
+	Dir     Dir
 	// DataEntries are the stack directory's top level entries that hold no
 	// manifest file: what the app wrote, bind mounted data and uploads.
 	DataEntries []string
@@ -136,7 +139,7 @@ type SitePlan struct {
 
 // Empty reports whether nothing of the app is on the site.
 func (s SitePlan) Empty() bool {
-	return len(s.Containers) == 0 && len(s.Networks) == 0 && len(s.Volumes) == 0 && len(s.Files) == 0 && !s.Dir.Exists
+	return len(s.Containers) == 0 && len(s.Networks) == 0 && len(s.Volumes) == 0 && len(s.Files) == 0 && len(s.Ingress) == 0 && !s.Dir.Exists
 }
 
 // edited reports whether any file under dir is kept as edited.
@@ -435,6 +438,11 @@ func planSite(cfg *config.Config, app string, st SiteState) (SitePlan, error) {
 		}
 	}
 	sort.Slice(sp.Files, func(i, j int) bool { return sp.Files[i].Entry.Path < sp.Files[j].Entry.Path })
+	for _, e := range inv.ManifestIngress {
+		if e.App == app {
+			sp.Ingress = append(sp.Ingress, e)
+		}
+	}
 	for _, e := range st.Dir.Entries {
 		if !owned[e] {
 			sp.DataEntries = append(sp.DataEntries, e)

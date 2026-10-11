@@ -14,7 +14,9 @@ no certificate here; in mode `paisans` the monitor's Caddy holds the same
 zone token the gateway does, which a challenge only zone can narrow (see the
 header of the rendered `caddy.env`). The
 certificate, and renewing it, are yours: the toolkit cannot know how your
-server obtains one, and it does not edit a configuration it does not own.
+server obtains one, and it does not edit a configuration it does not own. It
+writes the monitor's site into a file of its own, in a directory your server
+includes with one line you add once (step 3).
 
 `README.md` has the reasoning, under *The monitor has a site of its own*.
 
@@ -78,13 +80,100 @@ rules, each commented `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 in this mode;
 your web server's rules are yours.
 
-## 3. Get the hand-off sheet
+## 3. Include the toolkit's directory
+
+`paisans apply --execute`, run without `--site`, writes the monitor's site,
+filled in for the web server it finds, into a file of its own, `paisans-<token>-status.caddy` or
+`.conf`, in a directory beside your server's main configuration:
+`/etc/caddy/paisans.d`, `/etc/nginx/paisans.d` or `/etc/apache2/paisans.d` on
+the machine itself. Your configuration includes that directory with one line,
+which you add once:
+
+| Server | Add | Where |
+|---|---|---|
+| Caddy | `import /etc/caddy/paisans.d/*` | at the top level of the Caddyfile, outside every site block |
+| nginx | `include /etc/nginx/paisans.d/*.conf;` | inside the `http` block |
+| Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` | at the top level, beside the server's other includes |
+
+The line must be a wildcard. If the directory is ever gone, a removed
+deployment or a cleanup by hand, Caddy's `import` of a glob, nginx's `include`
+of a glob and Apache's `IncludeOptional` simply include nothing, and the server
+starts without the paisans sites. A line naming the file or the directory
+itself, or Apache's plain `Include`, makes the next restart or reload fail,
+which takes down every site on the machine, yours included. Apply reads your
+configuration before it writes anything and refuses such a line, naming the
+one to use instead.
+
+You need not add it first: an apply that finds no line writes nothing, warns
+with the exact line for your server, and ends without `Deployment complete.`.
+Add it, then apply again:
+
+```
+ingress
+  ✗ site file for status   caddy does not include /etc/caddy/paisans.d
+  ! status: caddy does not include /etc/caddy/paisans.d, so nothing was written
+      Add this line to /opt/caddy/Caddyfile, at the top level of the
+      Caddyfile, outside every site block, once:
+
+          import /etc/caddy/paisans.d/*
+```
+
+With the line there, apply creates the directory if it is missing, writes the
+file, validates your whole configuration and reloads the server, and records
+the directory in `paisans.yaml`:
+
+```
+ingress
+  ✓ site file for status   /opt/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy reloaded
+  ! watch: include_dir set to /opt/caddy/paisans.d in paisans.yaml
+  ✓ status                 status.example.org
+```
+
+The `include_dir` line is added under the site's `ingress`, every other line
+and comment of `paisans.yaml` kept. Change it there to use another directory:
+the next apply moves the file. When validating or reloading fails, apply puts
+back what was there, so your server keeps the configuration it ran, and warns
+with the server's own error; a certificate certbot has not obtained yet is the
+usual cause, and the warning names the `certbot certonly` command. An
+unchanged file is not written again and nothing is reloaded.
+
+**A web server in a container** reads the directory where the container sees
+it. Apply takes the host path from the mount of the configuration's
+directory, so with `/opt/caddy` mounted at `/etc/caddy` the file goes in
+`/opt/caddy/paisans.d` and the line is `import /etc/caddy/paisans.d/*`,
+validated and reloaded with `docker exec`. A container that mounts its
+Caddyfile alone has no such directory: apply records nothing and warns with
+the mount to add to its compose service,
+
+```yaml
+    volumes:
+      - /opt/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - /opt/caddy/paisans.d:/etc/caddy/paisans.d
+```
+
+after which, with the container recreated, the next apply finds it.
+
+**The files are the toolkit's, and only they are.** Each is recorded in the
+deployment's manifest. `paisans app remove --app status`, `paisans site
+remove`, including `--force` on an abandoned host, and an apply where the
+app's hostname left the site or `include_dir` changed delete that file and
+nothing else, never the directory or another file in it, then validate and
+reload the same way. A file you edited is left where it is and reported. With
+`site remove --host-gone` the host is not reached, so the file stays, and the
+command says so.
+
+To keep the configuration by hand instead, or for a server apply writes no
+file for (anything but Caddy, nginx and Apache), set `include_dir: false`
+under the site's `ingress`: apply writes nothing, and you copy the snippet
+`ingress show` prints, below.
+
+## 4. Get the hand-off sheet
 
 ```sh
 paisans ingress show --app status
 ```
 
-It prints, from `paisans.yaml` alone:
+It reads the machine's web server over ssh, changing nothing, and prints:
 
 * the hostname, the upstream (`http://127.0.0.1:8480`) and the health path,
   `/healthz`;
@@ -100,14 +189,38 @@ It prints, from `paisans.yaml` alone:
     slash, because the app's routing ignores both: the status page lists
     every monitor, mesh addresses included, and `/metrics` is public whenever
     no API token exists;
-* a filled in snippet for Caddy, nginx and Apache. Each has a line marked
-  `YOUR CERTIFICATE` where your own certificate lines go;
+* one line saying which web server it found, where, and how it comes by its
+  certificates, for you to check, such as:
+
+  ```
+  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates
+  ```
+
+* the snippet for that web server, filled in;
 * a warning when `listen` is not loopback.
 
-Copy the snippet for your server into its configuration, put your certificate
-lines where it says, and reload the server.
+It looks for a container publishing 443 or 80 first, then for the process
+listening on 443 or 80 on the machine itself, using sudo only where docker or
+`ss` need it; it asks for the password once. What the snippet says about the
+certificate follows what it found:
 
-## 4. Publish the name
+| Found | Certificate in the snippet |
+|---|---|
+| Caddy whose admin API shows it obtains its own certificates | no `tls` line: Caddy obtains this one too |
+| Caddy loading certificate files for its other sites | a `tls` line naming files for this hostname by the same pattern |
+| nginx or Apache with certificates under `/etc/letsencrypt/live/` | the files certbot will write for this hostname, after the `certbot certonly` command that obtains them the way your other certificates were |
+| nginx or Apache with other certificate files | files for this hostname by the same pattern, where the paths name a host |
+| nothing it could read | the Caddy, nginx and Apache snippets, Caddy's `tls` line commented out and each marked `YOUR CERTIFICATE`, with the line above saying what could not be determined |
+
+When Caddy also serves a listener bound to a private address only, such as a
+Tailscale one, the snippet says which listener the site belongs on.
+
+This snippet is what apply writes into the include directory. With
+`include_dir: false`, copy it into your web server's configuration yourself,
+obtain the certificate if the sheet says to, and reload the server.
+`--sudo=false` reads as the ssh user alone.
+
+## 5. Publish the name
 
 The hostname must resolve to the monitor's `public_address`, not the
 gateway's.
@@ -127,25 +240,45 @@ it never updates a record, and `dns prune` keeps one whose name is still
 wanted. Change that record by hand at the provider, then run `dns init`
 again.
 
-## 5. Check it from your machine
+## 6. Check it from your machine
 
 ```sh
 paisans ingress check --app status
 ```
 
-It changes nothing and reaches no host over ssh: it looks at the monitor as a
-visitor would, and marks each check passed (`ok`, or ✓ at a terminal) or
-failed (`FAIL`, or ✗), with what fixes a failure.
+It changes nothing: it looks at the monitor as a visitor would, and marks
+each check passed (`ok`, or ✓ at a terminal) or failed (`FAIL`, or ✗), with
+what fixes a failure. When a check fails it also reads the web server over
+ssh, as `ingress show` does, and names it.
 
 | Check | Passes when | When it fails |
 |---|---|---|
-| `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 4; delete any other record for the name by hand |
-| `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 3, or the proxy if the answer is not 200 |
+| `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 5; delete any other record for the name by hand |
+| `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 4, or the proxy if the answer is not 200 |
 | `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`, then `paisans apply --site watch`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or drop the port in Docker's `DOCKER-USER` chain. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
 Run it again after every change until no check fails and it ends with
 `4 checks passed.`
+
+`paisans apply --execute` without `--site` runs the same checks for every app
+behind your own web server once every other step has run, in an `ingress`
+section:
+
+```
+ingress
+  ✓ status   status.example.org
+```
+
+When one fails it marks the app's line failed, notes which check failed with
+that check's own line and the web server it finds in front of the app, read
+with the sudo password the run asked for at its start, and ends with `Deployment complete, but 1 app failed
+its ingress check: status` and exit status 1 rather than `Deployment
+complete.`, since every step ran but a visitor cannot use the app yet. A
+failing `certificate` or `sign in` check, which an app or certificate that has
+only just started can cause, is tried again for about half a minute before it
+is reported. Fix what it names with steps 3 to 5, then run `paisans ingress
+check --app status` until it passes.
 
 ## Afterwards
 

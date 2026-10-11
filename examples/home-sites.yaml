@@ -25,6 +25,12 @@ mesh:
 acme:
   provider: cloudflare
 
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+
 sites:
   # The gateway and one tiebreaker. Its public_address is what the other sites
   # dial (on 51820, with no endpoint written) and what the DNS records point
@@ -35,8 +41,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
   # A second dialled voter, on another provider. It holds no data and serves
   # nothing; it exists so that losing vm does not leave the homes' etcd
@@ -47,8 +52,7 @@ sites:
     public_address: 198.51.100.20
     ssh:
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
   # The homes: no endpoint and no public_address, so they only dial out.
   # ssh.host is required, since there is no public address to default to: a
@@ -61,8 +65,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
   home-b:
     roles: [data, apps]
@@ -70,8 +73,7 @@ sites:
     ssh:
       host: home-b.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
   # The monitor, on a third VPS, so it does not go dark with the gateway it
   # reports on.
@@ -81,8 +83,7 @@ sites:
     public_address: 203.0.113.20
     ssh:
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
 cluster:
   port: 5000

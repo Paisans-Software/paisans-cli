@@ -114,6 +114,10 @@ func (c *checker) hostsUptime(site string) bool {
 // mesh address are accepted, and all but loopback with a warning.
 // One listen publishes one app, so an external monitor hosts the monitor and
 // nothing else: a second app pinned there would be routed by nothing.
+// include_dir is where apply writes that app's file for the operator's web
+// server, so it too belongs to mode external, and it is written into that
+// server's configuration and into shell commands, so it is held to a plain
+// absolute path.
 func (c *checker) ingress() {
 	for _, name := range c.cfg.SiteNames() {
 		site := c.cfg.Sites[name]
@@ -128,6 +132,15 @@ func (c *checker) ingress() {
 			continue
 		}
 		mode, listen := site.IngressMode(), site.Ingress.Listen
+		if dir := site.Ingress.IncludeDir; !dir.Unset() && mode != config.IngressExternal {
+			c.refuse("ingress-include-dir-mode", key+".include_dir",
+				"ingress include_dir does not fit its mode",
+				"is set, but the ingress mode is paisans, where the toolkit's own Caddy serves the app and no other web server includes anything. Remove include_dir, or set mode: external.")
+		} else if p := config.IncludeDirProblem(dir.Path); dir.Path != "" && p != "" {
+			c.refuse("ingress-include-dir-path", key+".include_dir",
+				"ingress include_dir is not a plain absolute path",
+				"is %q, which %s. It is written into your web server's configuration and into commands on the host, so it must be an absolute path in its clean form, without spaces, quotes or glob characters, for example /etc/nginx/paisans.d.", dir.Path, p)
+		}
 		switch {
 		case mode == config.IngressPaisans && listen != "":
 			c.refuse("ingress-listen-mode", key+".listen",

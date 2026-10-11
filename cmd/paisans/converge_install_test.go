@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -206,7 +205,7 @@ func TestConvergeRunInstallFailureFailsItsSite(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	sameLines(t, lines(inSection(rec, "install")), []string{
-		"step vm", "waiting vm: again in pass two",
+		"step vm", "waiting vm: paused until home-a, home-b, watch and storage are done",
 		"step home-a", "fail home-a: home-a: boom",
 		"step home-b", "waiting home-b",
 		"step watch", "waiting watch",
@@ -335,7 +334,7 @@ func onATerminal(t *testing.T, verbose bool, at func(title string)) *screen {
 // the time it has taken and why, and ends once, with the time both visits
 // took together.
 func TestConvergeInstallRevisitsASiteOnATerminal(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
+	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	var atStorage, atPassTwo []string
 	visits := 0
 	var s *screen
@@ -355,17 +354,17 @@ func TestConvergeInstallRevisitsASiteOnATerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameLines(t, atStorage, []string{
-		"  · vm: 10.0s (again in pass two)",
-		"  · home-a: 10.0s (stopped for the other etcd members)",
-		"  · home-b: 10.0s (again in pass two)",
-		"  · watch: 10.0s (again in pass two)",
+		"  · vm: 10.0s, paused until home-a, home-b, watch and storage are done",
+		"  · home-a: 10.0s, paused until home-b runs etcd",
+		"  · home-b: 10.0s, paused until watch, storage and home-a are done",
+		"  · watch: 10.0s, paused until storage, home-a, home-b and vm are done",
 		"  ⠋ storage: 10s (apply the layout)",
 	})
 	sameLines(t, atPassTwo, []string{
-		"  · vm: 10.0s (again in pass two)",
+		"  · vm: 10.0s, paused until home-a, home-b, watch and storage are done",
 		"  ⠋ home-a: 20s (wait for Patroni primary)",
-		"  · home-b: 10.0s (again in pass two)",
-		"  · watch: 10.0s (again in pass two)",
+		"  · home-b: 10.0s, paused until watch, storage and home-a are done",
+		"  · watch: 10.0s, paused until storage, home-a, home-b and vm are done",
 		"  ✓ storage: 10.0s",
 	})
 	sameLines(t, s.section("install"), []string{
@@ -386,12 +385,56 @@ func TestConvergeInstallFailureOnATerminal(t *testing.T) {
 		t.Fatal("no error")
 	}
 	sameLines(t, s.section("install"), []string{
-		"  · vm: 10.0s (again in pass two)",
-		"  · home-a: 10.0s (again in pass two)",
+		"  · vm: 10.0s, paused until home-a, home-b, watch and storage are done",
+		"  · home-a: 10.0s, paused until home-b, watch and storage are done",
 		"  ✗ home-b: 10.0s",
 		"  · watch",
 		"  · storage",
 	})
+}
+
+// A replica's stop for the app databases pauses its line until the leader's
+// site has created them, and a founding stop until every member it waits on
+// runs etcd.
+func TestAnInstallLinePausesUntilWhatItWaitsOn(t *testing.T) {
+	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b", "vm")})
+	waitsFor(t, "home-b", "home-a", 1)
+	var atStorage []string
+	var s *screen
+	s = onATerminal(t, false, func(title string) {
+		if title == "storage add" {
+			atStorage = s.section("install")
+		}
+	})
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	sameLines(t, atStorage, []string{
+		"  · vm: 10.0s, paused until home-a, home-b, watch and storage are done",
+		"  · home-a: 10.0s, paused until home-b and vm run etcd",
+		"  · home-b: 10.0s, paused until home-a creates its databases",
+		"  · watch: 10.0s, paused until storage, home-a, home-b and vm are done",
+		"  ⠋ storage",
+	})
+}
+
+// A pause names places as a sentence lists them, and past four only the
+// first three and how many more.
+func TestAndList(t *testing.T) {
+	for _, c := range []struct {
+		names []string
+		want  string
+	}{
+		{[]string{"vm"}, "vm"},
+		{[]string{"vm", "storage"}, "vm and storage"},
+		{[]string{"vm", "home-a", "storage"}, "vm, home-a and storage"},
+		{[]string{"vm", "home-a", "home-b", "storage"}, "vm, home-a, home-b and storage"},
+		{[]string{"vm", "home-a", "home-b", "watch", "storage"}, "vm, home-a, home-b and 2 more"},
+	} {
+		if got := andList(c.names); got != c.want {
+			t.Errorf("andList(%q) = %q, want %q", c.names, got, c.want)
+		}
+	}
 }
 
 // A prepare step that fails fails its own line, naming nothing more.
@@ -539,7 +582,7 @@ func TestConvergeInstallAsPrinted(t *testing.T) {
 // failure, and with -v it is listed under its site's line with its reason.
 func TestConvergeRunInstallAsPrinted(t *testing.T) {
 	for _, verbose := range []bool{false, true} {
-		fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
+		fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 		var b strings.Builder
 		saved := reporterOverride
 		reporterOverride = ui.NewPlain(&b, verbose)
@@ -554,7 +597,7 @@ func TestConvergeRunInstallAsPrinted(t *testing.T) {
 		out := b.String()
 		quiet := "\ninstall\n  ok   vm\n  ok   home-a\n  ok   home-b\n  ok   watch\n  ok   storage\n\npocket id\n"
 		listed := "  ok   home-a\n" +
-			"      ✓ apply --site home-a: stopped for the other etcd members\n" +
+			"      ✓ apply --site home-a: paused until home-b runs etcd\n" +
 			"        home-a is waiting on home-b to start etcd.\n" +
 			"      ✓ apply --site home-a\n" +
 			"  ok   home-b\n"

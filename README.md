@@ -487,6 +487,7 @@ sites:
     ingress:
       mode: external              # paisans (default) or external
       listen: 127.0.0.1:8480      # external only, and required there
+      # include_dir: /etc/nginx/paisans.d   # external only; apply derives it, false opts out
 ```
 
 * **`mode: paisans`**, the default, runs the toolkit's Caddy on the monitor,
@@ -511,8 +512,75 @@ sites:
   check refuses a host where a foreign network or route already holds it.
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
-  a configuration it does not own. `docs/guides/behind-your-own-web-server.md`
+  a configuration it does not own. `paisans apply` without `--site` runs
+  `paisans ingress check` for each such app once every step has run, a line
+  per app in an `ingress` section, and does not call the deployment complete
+  while one fails: it names the app, what failed, the web server `ingress show`
+  finds in front of it, read through the sudo the run settled at its start,
+  and the `ingress show` and `ingress check` commands to fix it with, and
+  exits 1. A certificate or sign
+  in failure, which an app or certificate that has only just started can
+  cause, is tried again for about half a minute first; a dry run lists the
+  check without running it. `docs/guides/behind-your-own-web-server.md`
   walks through it.
+
+**The toolkit writes its own file, never the operator's configuration.** In
+`mode: external` `paisans apply` without `--site` puts each app's site, the snippet `ingress show`
+prints for the web server it finds, in a file of its own in `include_dir`, a
+directory on the host the web server includes with one line the operator adds
+once:
+
+| Server | The one line |
+|---|---|
+| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile |
+| nginx | `include /etc/nginx/paisans.d/*.conf;`, inside the `http` block |
+| Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` |
+
+The file is named for the deployment, `paisans-<token>-<app>.caddy` or
+`.conf`, so two deployments writing in one directory never collide. Apply
+writes it before the ingress check, validates the server's whole
+configuration (`caddy validate`, `nginx -t`, `apachectl configtest`, inside
+the container for one in a container) and reloads it (`caddy reload`, `nginx
+-s reload`, `apachectl graceful`). When either fails it puts back what was
+there, so the server keeps the configuration it ran, and warns with the
+server's own error. A file already as it should be is not written and nothing
+is reloaded. Each file goes into the deployment's manifest with what removing
+it needs, so its removal is driven by that record: `app remove`, `site
+remove` (with `--force` too) and an apply where the app's hostname moved off
+the site or `include_dir` changed delete the file, and only that file, never
+the directory or anything else in it, then validate and reload the same way.
+A file changed on the host since apply wrote it is left and reported; one
+already gone is fine. `site remove --host-gone` reaches nothing, and says the
+files may still be there.
+
+The line must be a wildcard, because the directory may go: a deployment
+removed, or the directory deleted by hand. Caddy's `import` of a glob that
+matches nothing, nginx's `include` of one and Apache's `IncludeOptional` all
+start with an empty or missing directory, without the paisans sites. A line
+naming a file or the directory itself, or Apache's plain `Include`, fails the
+next start or reload once it is gone, and takes down every site the server
+carries, the operator's own included. So apply reads the server's
+configuration first (the Caddyfile, `nginx -T`, Apache's include lines) and
+writes nothing unless it includes the directory by a wildcard that takes in
+the toolkit's files: with no such line it warns with the exact line to add,
+and with a literal one it warns with the line it found and the one to use
+instead; either way the run does not end as complete.
+
+`include_dir` unset, apply derives it beside the server's main configuration,
+`<its directory>/paisans.d`, and writes it into `paisans.yaml` under the
+site's `ingress`, in place, keeping every comment, with a warning saying so
+(`watch: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
+recorded only once the server is found to include it. For a server in a
+container the directory must be visible inside it: the host path comes from
+the mount of the configuration's directory, and the line names the path as
+the container sees it. A container that mounts its configuration file alone
+has no such directory, so nothing is recorded, and the warning names the
+mount to add to its compose file. `include_dir: false` writes nothing, for a
+server apply has no snippet for or an operator who keeps the configuration by
+hand: `ingress show` prints the snippet to copy, as it always does. `validate`
+refuses `include_dir` outside `mode: external` (`ingress-include-dir-mode`)
+and anything but a plain absolute path, since it goes into the server's
+configuration and into commands on the host (`ingress-include-dir-path`).
 
 `listen` belongs to `mode: external` alone, which cannot work without it
 (`ingress-listen-mode`). Docker publishes a port with its own iptables rules,
@@ -564,9 +632,26 @@ How to run them, and their flags, are under *`paisans ingress show` and
 `show` prints the hostname, the upstream (`listen`) and the health path; what
 the web server must do (terminate TLS for the hostname, pass `Host`, set
 `X-Forwarded-For` and `X-Forwarded-Proto`, refuse what the toolkit's own edge
-refuses, below); a filled in snippet for Caddy, nginx and Apache, each marked
-where the operator's certificate lines go; and the ufw warning when `listen`
-is not loopback. `check` reports pass or fail, with the fix, for: the hostname
+refuses, below); the snippet for the web server in front of the monitor; and
+the ufw warning when `listen` is not loopback. It finds that web server over
+ssh, reading only, through the transport `apply` uses: the container
+publishing 443 or 80 (`docker ps`, through sudo when docker refuses the ssh
+user), and its configuration from the container's mounts; failing that, the
+process listening on 443 or 80 (`sudo ss -ltnp`). For Caddy it asks the admin
+API on `localhost:2019`, on the host or inside the container: a Caddy that
+obtains its own certificates gets no `tls` line, one that loads certificate
+files gets a `tls` line following their pattern for the new name, and where a
+server is bound to a private address only the snippet says which listener the
+site belongs on. For nginx (`nginx -T`) and Apache it reads the certificate
+files the configuration names; under `/etc/letsencrypt/live/` it names the
+files certbot will write for the new name and the `certbot certonly` command,
+with the authenticator the existing renewals use. A line above the snippet
+says what was found, such as `web server: caddy (docker container caddy-1,
+config /opt/caddy/Caddyfile), obtains its own certificates`, so it can be
+checked before anything is copied. When nothing could be read, or the server
+has no snippet, that line says why and the sheet carries the Caddy, nginx and
+Apache snippets, with Caddy's `tls` line commented out. sudo is asked for once,
+and only when a command needs it; `--sudo=false` reads as the ssh user alone. `check` reports pass or fail, with the fix, for: the hostname
 resolving to the monitor's `public_address` (and `public_address6`) and to
 nothing else, so a stale record still on the gateway fails;
 `https://<hostname>/healthz` answering with a certificate valid for the
@@ -2488,8 +2573,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
     watchdog: auto   # auto | required | softdog | off; auto when absent
 ```
 
@@ -2578,9 +2662,23 @@ fail on every fork.
 
 ### Every site has an `ssh` section
 
-Every site, the gateway included, declares one:
+Every site, the gateway included, declares one. Its `keys` names admins from
+the top level `admins` section, and the site authorises every key those admins
+list:
 
 ```yaml
+admins:
+  alice:
+    name: Alice Example    # optional
+    email: alice@example.org
+    keys: |                # required: one whole .pub line per line
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC alice@laptop
+  bob:
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+
 sites:
   vm:
     roles: [gateway, witness]
@@ -2590,9 +2688,7 @@ sites:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
       user: ubuntu         # required, and must already exist on the host
       port: 22             # optional: empty or 0 means 22
-      keys:                # required: each key's name, then its .pub line
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
-        bob: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+      keys: [alice, bob]   # required: the admins who may log in
 ```
 
 | Key | Required | Refused when |
@@ -2600,15 +2696,24 @@ sites:
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
 | `user` | yes | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
 | `port` | no | outside 1 to 65535 |
-| `keys` | yes | not a mapping; a name that is not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most; a name given twice; a value that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key under two names, by fingerprint |
+| `keys` | yes | not a list; empty; an admin the `admins` section does not declare; an admin listed twice |
+
+Each entry of `admins`:
+
+| Key | Required | Refused when |
+|-----|----------|--------------|
+| the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
+| `name` | no | |
+| `email` | yes | not an email address alone, Eg: `alice@example.org` |
+| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two admins, by fingerprint |
 
 `host` defaults to `public_address`, and without that to the host in
 `endpoint`, because on most sites they are the same address written twice.
 `endpoint` comes last because it may name a router that forwards only
 WireGuard's port; there the connection fails and nothing is changed. The user name is held to a conservative form because it
-goes into commands and a file name on the host, and so is a key's name, which
-`host prepare` records on the host so an operator can trace a key there back
-to this file. Options are refused rather than carried: a line `host prepare` writes
+goes into commands and a file name on the host, and so is an admin's name,
+which `host prepare` records on the host beside each of their keys so an
+operator can trace a key there back to this file. Options are refused rather than carried: a line `host prepare` writes
 and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
 
@@ -2616,9 +2721,19 @@ The section replaced a single string, `ssh: home-a.local`. That form is now
 refused, and the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
-`ssh.public_key`, a block of unnamed key lines, is refused the same way: the
-refusal prints the `keys` section to write, each key named by its comment up
-to the `@`.
+
+#### Keys belong to admins, and sites name admins
+
+An admin's keys are the same on every site they reach, so they are written
+once, under the admin, and each site names the people who may log in. A key
+written out per site is a key that gets rotated on some sites and missed on
+others; written once, rotating it is one edit and a `host prepare` of each site
+that names the admin.
+
+`email` is required so that every key in the file leads to somebody who can
+say whether it is still theirs. A key belongs to one admin: two admins sharing
+a key cannot be told apart on a host, and taking one of them off a site would
+leave the other's access resting on a key nobody listed for them.
 
 #### Public keys, not a path to a private key
 
@@ -2630,8 +2745,9 @@ private key or where one lives. The toolkit never reads a private key at all.
 
 The same list is the record of who may log in: `host prepare` makes those keys
 the login user's authorized keys (see *host prepare manages the login user's
-authorized keys*). Adding an admin is adding their `.pub` line and preparing
-again; removing one is deleting it and preparing again.
+authorized keys*). Giving an admin a site is adding their name to its
+`ssh.keys` and preparing again; taking it away is removing the name and
+preparing again.
 
 #### How the operator's ssh uses them
 
@@ -2997,8 +3113,9 @@ On a **shared** host:
   both decide the other services' traffic as well, and enabling a deny
   default under a web server the toolkit knows nothing about takes it off
   the network. It still adds and removes its own `paisans-<token>:` rules.
-* **No image is removed**, as with `apply --keep-images`, because an image the
-  toolkit renders (`caddy`, `postgres`) may be what a foreign project runs.
+* **No image is removed**, as with `apply --keep-images`, and nothing is
+  swept, because an image the toolkit renders (`caddy`, `postgres`) may be
+  what a foreign project runs.
 * **Docker is left alone**, as it already is whenever `docker compose` works,
   and Ubuntu's `docker.io` without a working `docker compose`, and a Docker
   snap, are still refused rather than removed.
@@ -3186,7 +3303,7 @@ That binding is the renderer's, not `host prepare`'s.
 
 #### host prepare manages the login user's authorized keys
 
-`host prepare` makes every key in `ssh.keys` an authorized key of
+`host prepare` makes every key of every admin in `ssh.keys` an authorized key of
 `ssh.user`, in `~<user>/.ssh/authorized_keys`. When the directory or the file
 is missing it is created, 0700 and 0600, owned by the user. A user that does
 not exist is refused: creating users is out of scope.
@@ -3224,7 +3341,7 @@ For a listed key:
 | `authorized_keys` holds | This sidecar | Another sidecar | The plan says | What happens |
 |-------------------------|--------------|-----------------|---------------|--------------|
 | nothing for the key | | | `○ authorize ssh key` | appended verbatim, recorded `added` |
-| the key | lists it | | `✓` | nothing; `○ rename ssh key` if `ssh.keys` now calls it something else |
+| the key | lists it | | `✓` | nothing; `○ rename ssh key` if the key now belongs to a different admin |
 | the key | does not list it | lists it | `○ share ssh key` | recorded `shared` |
 | the key | does not list it | does not list it | `✓` | nothing; not recorded, so never removed |
 | the key, only with options | | | `✓ …: not paisans` | nothing; adding the plain key would undo the restriction |
@@ -3422,13 +3539,15 @@ stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
 deployment needs them, and with `--execute` runs them in the same process,
 stopping at the first failure. The table is that order. Every host's
-`host prepare` runs at the same time, up to eight hosts at once; every other
-step runs after the one before it:
+`host prepare` runs at the same time, up to eight hosts at once, and so does
+every site's image pull after it; every other step runs after the one before
+it:
 
 | Phase | Command | When |
 |---|---|---|
 | configuration | `init` | no id, no mesh subnet, or a generated secret missing |
 | hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
+| pull | each site's images (below) | every site; a host that has every image its apply needs pulls nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
@@ -3444,6 +3563,29 @@ address. `dns init` needs only the provider's API and the configuration, never
 a host, and nothing in it waits for the stack: Caddy's certificates use DNS
 challenges. A record pointing elsewhere therefore stops the run before
 install, with nothing applied.
+
+**Every site's images are pulled on every host before anything is
+installed.** The install applies one site at a time, and an apply pulls the
+images its stacks name as it recreates them, so on a first deployment each
+host's downloads, gigabytes each, would run in turn while every other host sat
+idle. The pull stage plans each site exactly as its `apply --site` would, and
+pulls on the host the images that plan would pull: the rendered images the host
+does not have, of the stacks the apply will recreate. Each host pulls a few
+images at a time, every host at once, and two sites at one ssh destination pull
+one after the other. Each apply after it finds its images present. It needs
+only Docker, which prepare installs, so it follows prepare directly; ahead of
+`dns`, a host short of space stops the run before a record is published for a
+deployment that cannot start. The same plan carries the free space check (see
+*`apply` checks free space before it pulls*), so a host short of space is
+refused here, before any host has pulled a layer, with the words its apply
+would use, and `--min-free` reaches this check as it reaches each apply.
+Anything else that plan would refuse, such as a file edited on the host, is
+left to the site's apply, which reports it at its own step. The plan names
+Caddy at the build its tag resolved to (see *The provider is declared, and
+its module has to be in the binary*), and an apply resolves each tag once for
+the whole run, so the build pulled here is the one every later step plans,
+even if the tag moves in between. A registry that refuses an image,
+`unauthorized` or `denied`, is reported as a private image, with what to do.
 
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
@@ -3471,12 +3613,12 @@ elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 The output does not follow the phases. After `configuration`, `sudo` and
 `etcd members`, which reads each member's founding record on a line of its own
 (`read <s>'s etcd record`, `founded` or `not founded yet`), because founding
-and joining are decided from them, it has three sections: `prepare`, one line
-per site for its `host prepare`; `dns`;
-and `install`, one line per site for every step from founding to pass two that
-is about it, in the order the run first applies each site, then a `storage`
-line for `storage init` or `storage add` when there is Garage. Last, a
-`pocket id` section asks each Pocket ID app whose sites' steps are all up to
+and joining are decided from them, it has four sections: `prepare`, one line
+per site for its `host prepare`; `pull`, one line per site for its images;
+`dns`; and `install`, one line per site for every step from founding to pass
+two that is about it, in the order the run first applies each site, then a
+`storage` line for `storage init` or `storage add` when there is Garage. Last,
+a `pocket id` section asks each Pocket ID app whose sites' steps are all up to
 date, or have run, whether it has an admin (`check <app> for an admin`), since
 one not running yet cannot answer, and names
 `app admin create` for one that has none, and a note names `secrets set` for
@@ -3501,22 +3643,30 @@ The install steps still run one at a time, in the order of the table, so the
 install lines are a block that keeps its order: a site's line is a dim `·`
 until the run reaches it, spins while one of its steps runs, and between its
 steps, such as a founding stop and pass two, is a dim `·` again with the time
-its steps have taken so far and what it waits for. Its time is its steps'
-together, and it ends `✓` once its last step has:
+its steps have taken so far and what it waits for: the sites a founding stop
+waits on to run etcd, the site a replica waits on to create its databases, or
+otherwise the places the run visits before it comes back. Its time is its
+steps' together, and it ends `✓` once its last step has:
 
 ```
 install
-  · vm: 22.0s (again in pass two)
-  · home-a: 31.0s (stopped for the other etcd members)
+  · vm: 22.0s, paused until home-a, home-b, watch and storage are done
+  · home-a: 31.0s, paused until home-b runs etcd
   ⠹ home-b: 41s (wait for Patroni primary)
   · watch
   · storage
 ```
 
+The pull lines are drawn the same way, each ending with how many images its
+host pulled, or `nothing to pull`; `-v` lists each image under its site's line
+with the time it took.
+
 A host whose prepare fails does not stop the others: each is prepared, each
 failure is marked on its own line, and the run then stops before install with
-every failed host named. Without a terminal each prepare line is printed once,
-whole, when its host finishes, and with `-v` a host's own output follows its
+every failed host named. A host whose pull fails is the same: every other host
+finishes its pulls, and the run stops before `dns` with each failed host named
+and why. Without a terminal each prepare line is printed once, whole, when its
+host finishes, and with `-v` a host's own output follows its
 line, never another host's. Two sites reached at the same ssh destination are
 prepared one after the other. A sudo password or an ssh host key question a
 host asks during prepare holds the block, one question at a time.
@@ -3527,8 +3677,8 @@ and how to resume:
 
 ```
 install
-  · vm: 22.0s (again in pass two)
-  · home-a: 31.0s (stopped for the other etcd members)
+  · vm: 22.0s, paused until home-a, home-b, watch and storage are done
+  · home-a: 31.0s, paused until home-b runs etcd
   ✗ home-b: 41.0s
   · watch
   · storage
@@ -3547,7 +3697,7 @@ install
       ✓ apply --site vm: 22.0s
       ✓ apply --site vm: 42.3s
   ✓ home-a: 89.5s
-      ✓ apply --site home-a: stopped for the other etcd members
+      ✓ apply --site home-a: paused until home-b runs etcd
         home-a is waiting on home-b to start etcd.
       ✓ apply --site home-a: 58.5s
   ...
@@ -3572,7 +3722,12 @@ is its site's steps' own dry runs together, and the storage line its step's:
 work, with what each step found, and `✗` when a step would refuse, with the
 refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
-work. `-v` lists each step under its line with its own status:
+work. `-v` lists each step under its line with its own status. Each pull
+line is the plan its site's apply would make: `○` with how many images it
+would pull and the free space they land in, `✓` `nothing to pull`, `✗` with
+the free space refusal `--execute` would stop at, or a dim `·` `after host
+prepare` while its site's prepare has work, since a host without Docker has no
+images to ask about:
 
 ```
 configuration
@@ -3583,6 +3738,12 @@ prepare
   ✓ home-b
   ✓ vm
   ✓ watch
+
+pull
+  · home-a: after host prepare --site home-a
+  ○ home-b: 3 images to pull, 12.4 GiB free
+  ○ vm: 1 image to pull, 6.2 GiB free
+  ✓ watch: nothing to pull
 
 dns
   ○ dns init: 2 records to create
@@ -4396,12 +4557,54 @@ image. Waiting for the gate is the point: until the new image is healthy, the
 old one is what a rollback would run. `apply --keep-images` skips pruning for
 one run, for an operator who wants to keep that image a while longer.
 
-**The toolkit removes only what its own stacks superseded.** An image no
+**A whole apply ends by sweeping.** Pruning after a stack's gate reaches only
+what that stack's action superseded, so three kinds of old image would stay
+for good: one an earlier `--keep-images` run kept or whose removal failed, in a
+stack this apply does not move; any image at all when an apply moves nothing;
+and every image of an app taken out of the configuration, whose repository no
+stack renders any more. So the site's manifest records every image repository
+its stacks have rendered, with each reference rendered from it, and each apply
+adds what it renders to that record and drops nothing: it is what the stack
+uses and has used. As its last step, once every stack is healthy and the
+manifest is written, every whole `apply` removes each image that is all three
+of:
+
+* from a repository in that record, or one the site renders now,
+* not an image any site of the deployment renders, by ID or by tag, so a
+  digest-pinned image (Eg: the gateway's Caddy, which `docker image ls` shows
+  untagged) is kept by its ID, and an image the pull stage fetched for a stack
+  not started yet is kept because it is rendered, and
+* not used by any container, running or stopped, the same test as above.
+
+The dry run lists them as one `sweep old images` step, and its summary line
+counts them (Eg: `2 old images to sweep`). Each failed read or removal is a
+warning, never a failed apply. A manifest written before the record existed
+starts it at the next apply.
+
+Only a **whole** apply sweeps. One narrowed by `--only`, the pass that holds
+apps back until their sign-in clients exist, and the scoped applies inside
+`site add`, `storage add` and the others are each a step of a larger change,
+and the whole apply that finishes it sweeps. A step that swept could remove
+the image a later step of the same change is about to start from.
+
+**The toolkit removes only images of repositories it rendered.** An image no
 container uses may still be one the toolkit never pulled and knows nothing
-about: an operator's own tools, an image staged by hand for a later apply.
-**No previous versions are kept by default** because of the disk this is for:
-on a 10 GB host one extra Mbin image is 1.4 GB, and `--keep-images` covers the
-rollback case when an operator actually wants it.
+about: an operator's own tools, an image staged by hand for a later apply. A
+repository that never appeared in a compose file this deployment rendered is
+never in the record, so the sweep never reaches it. **No previous versions are
+kept by default** because of the disk this is for: on a 10 GB host one extra
+Mbin image is 1.4 GB, and `--keep-images`, which skips the sweep as well,
+covers the rollback case when an operator actually wants it.
+
+**Another deployment on the host stops the sweep.** Two deployments may share
+one Docker engine, and what the other renders is in its own files, which this
+apply does not read. A host whose containers include another deployment's is
+shared and removes nothing (*The host check: what is already on a host decides
+how much is touched*); a host holding another deployment's root under
+`/srv/paisans/` with no container running sweeps nothing either, and the plan
+says which root it found. Two sites of one deployment reached at the same ssh
+destination need no such rule: each keeps every image any site of the
+deployment renders.
 
 ### Every volume an image declares is mounted, and `apply` checks it
 

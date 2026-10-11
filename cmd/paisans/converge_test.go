@@ -27,6 +27,7 @@ import (
 var stageLabels = map[stage]string{
 	stageInit:     "configuration",
 	stagePrepare:  "hosts",
+	stagePull:     "pull",
 	stageFounding: "founding",
 	stageJoining:  "joining",
 	stageOthers:   "other sites",
@@ -68,14 +69,19 @@ func sameLines(t *testing.T, got, want []string) {
 }
 
 // hostsAndDNS, foundingPhase and the rest are the fixture's plan, phase by
-// phase, where a test does not change them. dns follows the hosts, before
-// any apply: the mesh's endpoint names must resolve before wg-quick starts.
+// phase, where a test does not change them. Each site's pull follows the
+// hosts, and dns follows the pulls, before any apply: the mesh's endpoint
+// names must resolve before wg-quick starts.
 var (
 	hostsAndDNS = []string{
 		"hosts: host prepare --site home-a",
 		"hosts: host prepare --site home-b",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 	}
 	foundingPhase = []string{
@@ -96,13 +102,14 @@ func blankPlan() []string {
 	return slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: apply --site watch", "storage: storage add"}, passTwoPhase)
 }
 
-// commands is plan lines as the commands a run runs: no phase, and no init,
-// which runs before the plan is read again.
+// commands is plan lines as the commands a run runs: no phase, no init,
+// which runs before the plan is read again, and no pull, which the run does
+// itself rather than through a command.
 func commands(lines []string) []string {
 	var out []string
 	for _, l := range lines {
-		_, title, _ := strings.Cut(l, ": ")
-		if title != "init" {
+		stage, title, _ := strings.Cut(l, ": ")
+		if title != "init" && stage != "pull" {
 			out = append(out, title)
 		}
 	}
@@ -223,6 +230,16 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	var full [][]string
 	savedRun, savedRead, savedCheck := convergeRun, convergeReadInitial, convergeCheck
 	savedPrepare, savedAtOnce := convergePrepare, prepareAtOnce
+	savedPullPlan, savedPull := convergePullPlan, convergePullImage
+	// Each site's pull reads the plan its apply would make, which reaches a
+	// host; here every image is present. fakePulls says otherwise.
+	convergePullPlan = func(_ *config.Config, _ *config.Secrets, site string, _ apply.Transport, _ ...apply.Option) (*apply.Plan, error) {
+		return &apply.Plan{Site: site}, nil
+	}
+	convergePullImage = func(_ apply.Transport, ref string) (string, error) {
+		t.Errorf("pulled %s with every image present", ref)
+		return "", nil
+	}
 	// Each host's prepare goes through the step runner below, one host at
 	// a time and in order, reporting as a step under apply does; allAtOnce
 	// runs them together.
@@ -239,6 +256,9 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// Asking Pocket ID for an admin reaches a host too; here it has none.
 	// fakeAdminCheck says otherwise.
 	fakeAdminCheck(t, false, nil)
+	// An app's ingress is checked from this machine; here every check
+	// passes. fakeIngressCheck says otherwise.
+	fakeIngressCheck(t, nil)
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")
@@ -262,6 +282,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	t.Cleanup(func() {
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
+		convergePullPlan, convergePullImage = savedPullPlan, savedPull
 		if now, _ := os.ReadFile(fixtureSecretsPath()); string(now) != string(fixtureBefore) {
 			t.Errorf("%s was rewritten: add the generated secret it lacks to it, and restore it", fixtureSecretsPath())
 		}
@@ -297,11 +318,20 @@ func TestConvergeDryRunRunsNothing(t *testing.T) {
 }
 
 func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the founding stop: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
+}
+
+// foundingWait is a founding member's stop for the others' etcd, as apply
+// returns it.
+func foundingWait(site string, unstarted ...string) error {
+	return &ui.Problem{
+		Hint:  site + " is waiting on " + strings.Join(unstarted, ", ") + " to start etcd.",
+		Cause: &apply.FoundingWaitError{Site: site, Unstarted: unstarted},
+	}
 }
 
 // databasesWait is a replica's stop for the app databases, as apply returns
@@ -309,7 +339,7 @@ func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
 func databasesWait(site, leader string) error {
 	return &ui.Problem{
 		Hint:  site + " is waiting on " + leader + " to create databases auth, talk",
-		Cause: fmt.Errorf("%s: %w %s: auth, talk", site, apply.ErrDatabasesWait, leader),
+		Cause: &apply.DatabasesWaitError{Site: site, Leader: leader, Missing: []string{"auth", "talk"}},
 	}
 }
 
@@ -338,14 +368,14 @@ func waitsFor(t *testing.T, site, leader string, n int) {
 // stop ends the run, and pass two, home-a first, creates the databases and
 // then starts home-b's apps.
 func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": fmt.Errorf("home-a: etcd is %w home-b", apply.ErrFoundingWait)})
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	waitsFor(t, "home-b", "home-a", 1)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the databases wait: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
-	if !rec.Has("detail", "✓ apply --site home-b: waiting for the primary's databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+	if !rec.Has("detail", "✓ apply --site home-b: paused until home-a creates its databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
 		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
 	}
 }
@@ -550,6 +580,10 @@ func TestConvergeFoundsAMonitorMemberAndAppliesItLast(t *testing.T) {
 		"hosts: host prepare --site home-b",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 		"founding: apply --site vm",
 		"founding: apply --site home-a",
@@ -632,6 +666,8 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	for _, s := range steps {
 		commands[strings.Join(s.Args[:min(2, len(s.Args))], " ")] = true
 	}
+	// A pull is not a command: the run pulls a site's images itself.
+	steps = slices.DeleteFunc(steps, func(s convergeStep) bool { return s.Stage == stagePull })
 	for _, want := range []string{"init", "host prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
 		if !commands[want] {
 			t.Fatalf("the plans hold no %s step: %v", want, commands)
@@ -671,8 +707,7 @@ func derivedWithNewDataSite(t *testing.T) *config.Config {
     ssh:
       host: home-c.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   vm:
 `, 1)
 	path := filepath.Join(t.TempDir(), "paisans.yaml")
@@ -702,6 +737,11 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 		"hosts: host prepare --site home-c",
 		"hosts: host prepare --site vm",
 		"hosts: host prepare --site watch",
+		"pull: pull --site home-a",
+		"pull: pull --site home-b",
+		"pull: pull --site home-c",
+		"pull: pull --site vm",
+		"pull: pull --site watch",
 		"dns: dns init",
 		"joining: site add home-c",
 		"other sites: apply --site watch",
@@ -1008,7 +1048,7 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 
 // statuses is each plan step's status as "mark title: result", in order,
 // from the events of the dry run's steps but the etcd reads: a prepare line
-// as the host prepare it checked, and each install line as the inner steps
+// as the host prepare it checked, a pull line as its pull, and each install line as the inner steps
 // it lists, so the install steps are grouped by line (see byLine).
 func statuses(rec *ui.Recorder) []string {
 	var out []string
@@ -1029,8 +1069,11 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		title := e.Text
-		if section == "prepare" {
+		switch section {
+		case "prepare":
 			title = "host prepare --site " + title
+		case "pull":
+			title = "pull --site " + title
 		}
 		line := mark + " " + title
 		if e.Extra != "" {
@@ -1092,7 +1135,10 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 	}
 	var want []string
 	for _, l := range blankPlan() {
-		_, title, _ := strings.Cut(l, ": ")
+		stage, title, _ := strings.Cut(l, ": ")
+		if stage == "pull" {
+			title += ": nothing to pull"
+		}
 		want = append(want, "✓ "+title)
 	}
 	sameLines(t, statuses(rec), byLine(want))
@@ -1125,6 +1171,11 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		"○ host prepare --site home-b: docker, firewall",
 		"✓ host prepare --site vm",
 		"✗ host prepare --site watch: ssh: connect to host watch.local: timed out",
+		// A pull line waiting on its prepare ends first, unchecked.
+		"· pull --site home-b: after host prepare --site home-b",
+		"· pull --site watch: after host prepare --site watch",
+		"✓ pull --site home-a: nothing to pull",
+		"✓ pull --site vm: nothing to pull",
 		"○ dns init: 2 records to create",
 		"○ apply --site vm: 5 changes",
 		"· apply --site home-a: after apply --site vm",
@@ -1189,6 +1240,10 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		"✓ host prepare --site home-b",
 		"✓ host prepare --site vm",
 		"✓ host prepare --site watch",
+		"✓ pull --site home-a: nothing to pull",
+		"✓ pull --site home-b: nothing to pull",
+		"✓ pull --site vm: nothing to pull",
+		"✓ pull --site watch: nothing to pull",
 		"✓ dns init",
 		"✓ apply --site watch",
 		"○ storage add: 1 stage",
@@ -1459,9 +1514,33 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			if err := convergeShaped(t, c.edit, c.recorded); err != nil {
 				t.Fatal(err)
 			}
-			sameLines(t, statuses(rec), byLine(c.want))
+			sameLines(t, statuses(rec), byLine(withPulls(c.want)))
 		})
 	}
+}
+
+// withPulls is a dry run's statuses with each site's pull line put in after
+// the prepare lines, as the dry run draws them: a pull whose prepare is up
+// to date has nothing to pull, here, and one whose prepare is not waits on
+// it, unchecked, and so ends first.
+func withPulls(want []string) []string {
+	var waiting, checked []string
+	end := 0
+	for i, l := range want {
+		mark, title, _ := strings.Cut(l, " ")
+		site, isPrepare := strings.CutPrefix(title, "host prepare --site ")
+		if !isPrepare {
+			continue
+		}
+		site, _, _ = strings.Cut(site, ":")
+		if mark == "✓" {
+			checked = append(checked, "✓ pull --site "+site+": nothing to pull")
+		} else {
+			waiting = append(waiting, "· pull --site "+site+": after host prepare --site "+site)
+		}
+		end = i + 1
+	}
+	return slices.Concat(want[:end], waiting, checked, want[end:])
 }
 
 // editedFixture is the fixture configuration with each old replaced by its
@@ -1698,13 +1777,13 @@ func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 // install line lists it as its inner step's result, and its reason under it,
 // without a doubled stop or a trailing blank.
 func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
+	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
+		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: paused until home-b runs etcd"
 	})
 	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
 		t.Errorf("inner result:\n%s", rec.Lines())

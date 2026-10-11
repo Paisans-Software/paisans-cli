@@ -302,7 +302,7 @@ What "shared" changes, and where:
 | Command | On a shared host |
 |---|---|
 | `host prepare` | `hostprep.Shared()`: the profile's `Firewall` gets `hostWide` false and plans only its own `paisans-<token>:` rules, never `ufw default` or `ufw --force enable` |
-| `apply` | `apply.KeepImages()`, as `--keep-images` |
+| `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
 | `storage rotate-key` | `apply.KeepImages()` in the switch's apply on that site |
@@ -321,7 +321,14 @@ worse than one that failed on one, and the difference between "show me" and "do
 it" should be a flag an operator typed rather than a habit they formed.
 `apply` without `--site` keeps both: it runs `apply --site` for each site in
 turn, as one step among the others it runs (`cmd/paisans/converge.go`), and
-is a dry run unless `--execute` is given. That dry run changes nothing on the
+is a dry run unless `--execute` is given. Ahead of those steps it pulls every
+site's images on every host at once (`cmd/paisans/converge_pull.go`), from the
+plan `planSiteApply` makes for the site, with `Plan.Disk.Pulls` as the list
+and `apply.DiskRefusal` as the stop for a short disk; it reports straight to
+each site's line and never through `reporterOverride`, which is one command's
+at a time. Every plan of one `apply` resolves Caddy's tag through one
+`imagedigest.Cache` (`cacheDigests`), so the pull and the steps after it name
+the same build. That dry run changes nothing on the
 servers; the one file it may write is the local secrets file, with the
 generated secrets it lacks, through `fillSecrets`, the path `init` writes
 them with.
@@ -510,8 +517,28 @@ shows as a `prune old images` step under each stack. `apply --keep-images`
 skips both, and so does a host the host
 check found shared. IDs are compared by
 prefix with `sha256:` stripped, since Docker prints them full or 12
-characters short. README.md "`apply` prunes the images it superseded" has the
-reasoning.
+characters short. The keep set is every image the site renders, held back or
+not, and every image any other site of the deployment renders
+(`Plan.deploymentImages`, read from the render's compose files, where another
+site's Caddy is its configured tag).
+
+**A whole apply ends with the sweep** (`internal/apply/sweep.go`). The
+manifest's `images` field (`render.ManifestImage`: a repository and every
+reference rendered from it) is the site's history: `writeManifest` writes the
+union of what `Build` read and what the plan renders, so it only grows, and a
+manifest without it reads as an empty history. When `Plan.Whole()` and not
+`KeepImages`, `Build` reads the host once (`sweepRead`: other deployments' roots
+under `/srv/paisans/`, `docker image ls`, the IDs of the keep set, and every
+container's image, ending in a marker line so a cut answer is refused) and
+fills `Plan.Sweep` with what `superseded` picks over the recorded and rendered
+repositories, less what `Plan.Prunes` already lists. `Execute` reads again
+after the pending record is removed and runs `docker image rm <id>` for each.
+Another deployment's root on the host makes both read nothing to remove, with a
+note in the plan. Every failure is a warning or a note. The pull stage plans
+with `apply.SkipSweepRead()`, since it executes none of its plans. A no-op
+whole apply costs two extra round trips, one in `Build` and one in `Execute`,
+plus one per removed image. README.md "`apply` prunes the images it
+superseded" has the reasoning.
 
 **An image's declared volume must be mounted at exactly its path.** Docker
 gives every new container an anonymous volume for a `VOLUME` nothing mounts,

@@ -1,0 +1,107 @@
+package appremove
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
+	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
+)
+
+// webHost is a monitor whose web server includes the toolkit's directory:
+// commands go to the web server, and the manifest is a file of its own.
+type webHost struct {
+	*ingresstest.Server
+	manifest map[string]string
+}
+
+func (h webHost) Run(command string) (string, error)         { return h.Plain().Run(command) }
+func (h webHost) RunInput(command, _ string) (string, error) { return h.Run(command) }
+func (h webHost) Describe() string                           { return "watch" }
+func (h webHost) ReadFile(path string) (string, bool, error) {
+	c, ok := h.manifest[path]
+	return c, ok, nil
+}
+func (h webHost) WriteFile(path, content string, _ uint32) error {
+	h.manifest[path] = content
+	return nil
+}
+
+const manifestPath = "/srv/paisans/f2a9/.paisans-manifest.json"
+
+// app remove deletes the app's own file from the web server's include
+// directory, and nothing else there, validates and reloads the server, and
+// drops the file's entry from the manifest, keeping every other.
+func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	server := ingresstest.New("")
+	server.Files["/opt/caddy/paisans.d/paisans-f2a9-status.caddy"] = "status.example.org {\n}\n"
+	server.Files["/opt/caddy/paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
+	status := render.ManifestIngress{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: sum("status.example.org {\n}\n"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	other := render.ManifestIngress{App: "other", Path: "/opt/caddy/paisans.d/paisans-f2a9-other.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/status/compose.yaml", SHA256: "cd"}}, Ingress: []render.ManifestIngress{other, status}})
+	h := webHost{server, map[string]string{manifestPath: string(m)}}
+
+	sp, err := planSite(cfg, "status", SiteState{Site: "watch", Inventory: &hostcheck.Inventory{Manifest: true, ManifestFiles: []render.ManifestFile{}, ManifestIngress: []render.ManifestIngress{other, status}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sp.Ingress) != 1 || sp.Ingress[0] != status || sp.Empty() {
+		t.Fatalf("planned %+v", sp.Ingress)
+	}
+	rec := &ui.Recorder{}
+	(&Plan{App: "status", Sites: []SitePlan{sp}}).Show(rec)
+	if !rec.Has("detail", status.Path+", from the include directory of caddy") {
+		t.Errorf("plan:\n%s", rec.Lines())
+	}
+
+	e := &Executor{}
+	if err := e.ingress(h, d, sp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := server.Files[status.Path]; ok {
+		t.Error("the site file stayed")
+	}
+	if _, ok := server.Files["/opt/caddy/paisans.d/blog.caddy"]; !ok {
+		t.Error("somebody else's file went")
+	}
+	if !server.Ran("caddy validate") || !server.Ran("caddy reload") {
+		t.Errorf("asked %v", server.Asked)
+	}
+	var after render.Manifest
+	json.Unmarshal([]byte(h.manifest[manifestPath]), &after)
+	if len(after.Ingress) != 1 || after.Ingress[0] != other || len(after.Files) != 1 {
+		t.Errorf("manifest %+v", after)
+	}
+
+	// Run again, the file is already gone: nothing to do, nothing reloaded.
+	server.Asked = nil
+	if err := e.ingress(h, d, sp); err != nil || server.Ran("reload") {
+		t.Errorf("again: %v %v", err, server.Asked)
+	}
+}
+
+// A removal the web server refuses puts the file back, keeps its entry,
+// and stops the run with the server's error.
+func TestAppRemoveStopsWhenTheServerRefuses(t *testing.T) {
+	cfg := fixture(t)
+	server := ingresstest.New("")
+	content := "status.example.org {\n}\n"
+	path := "/etc/nginx/paisans.d/paisans-f2a9-status.conf"
+	server.Files[path] = content
+	server.Validate = "nginx: [emerg] unknown directive in /etc/nginx/nginx.conf:12"
+	entry := render.ManifestIngress{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
+	m, _ := json.Marshal(render.Manifest{Version: 1, Ingress: []render.ManifestIngress{entry}})
+	h := webHost{server, map[string]string{manifestPath: string(m)}}
+	err := (&Executor{}).ingress(h, cfg.Deployment(), SitePlan{Site: "watch", Ingress: []render.ManifestIngress{entry}})
+	if err == nil || !strings.Contains(err.Error(), "unknown directive") {
+		t.Fatalf("err %v", err)
+	}
+	if server.Files[path] != content || server.Ran("reload") || h.manifest[manifestPath] != string(m) {
+		t.Errorf("not put back: %v %v", server.Files, server.Asked)
+	}
+}

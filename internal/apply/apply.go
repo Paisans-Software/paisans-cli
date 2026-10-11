@@ -189,6 +189,9 @@ type Plan struct {
 	// as Build saw them. Execute reads the host again after each stack is
 	// healthy, and removes only what no container uses by then.
 	Prunes []Prune
+	// Sweep is what the whole apply's last step would remove, as Build saw
+	// the host: see sweepImages. Empty for a plan that does not sweep.
+	Sweep []Prune
 	// Volumes is the check of every acted on image's declared volumes
 	// against what its service mounts, nil when no stack moves. Any uncovered
 	// path refuses the apply before anything is written. See VolumeCheck.
@@ -198,7 +201,8 @@ type Plan struct {
 	// before the first container that mounts it, when it is missing, and
 	// never touches what is inside it.
 	HostSites bool
-	// KeepImages skips pruning for this run, as --keep-images does.
+	// KeepImages skips pruning and the sweep for this run, as --keep-images
+	// does.
 	KeepImages bool
 	// Caddy is the build of its image this site's Caddy is planned to run,
 	// nil when the site runs no Caddy or this plan does not touch its
@@ -207,8 +211,19 @@ type Plan struct {
 	// recordedCaddy is what the manifest Build read recorded for Caddy, kept
 	// when this plan does not settle the compose file.
 	recordedCaddy *render.ManifestCaddy
+	// recordedIngress is what the manifest Build read recorded of the files
+	// in the operator's web server's include directory. Apply writes them
+	// after every site is up, so every manifest write keeps them.
+	recordedIngress []render.ManifestIngress
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
+	// deploymentImages is what every other site of the deployment renders.
+	// No prune removes one: two sites reached at one ssh destination share
+	// Docker, and the pull stage pulls a site's images before its apply.
+	deploymentImages []string
+	// imageHistory is the manifest's record of every repository this site
+	// has rendered, as Build read it. See imageRecord.
+	imageHistory []render.ManifestImage
 	// scoped marks a plan built with Scope: it writes its files and syncs
 	// the mesh, and leaves every stack, gate and other file to its caller.
 	scoped bool
@@ -394,10 +409,12 @@ type options struct {
 	minFree    int64
 	minFreeSet bool
 	keepImages bool
-	only       []string
-	except     []string
-	after      []*Plan
-	dbApps     []string
+	// noSweepRead leaves Plan.Sweep unread; see SkipSweepRead.
+	noSweepRead bool
+	only        []string
+	except      []string
+	after       []*Plan
+	dbApps      []string
 	// replicationChange lets a garage.toml with a different
 	// replication_factor replace the deployed one. Only `storage add
 	// --change-replication` sets it; see GarageReplication.
@@ -419,6 +436,13 @@ func Report(r ui.Reporter) Option {
 // layout aside first; any other caller gets the refusal in Build.
 func ReplicationChange() Option {
 	return func(o *options) { o.replicationChange = true }
+}
+
+// SkipSweepRead leaves Plan.Sweep empty, for a caller that plans a site only
+// to pull its images and never executes the plan: Build then asks the host
+// nothing about what the sweep would remove. Execute sweeps all the same.
+func SkipSweepRead() Option {
+	return func(o *options) { o.noSweepRead = true }
 }
 
 // KeepImages leaves superseded images on the host for this run, as
@@ -554,11 +578,14 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	used := map[string]bool{}
 
-	entries, recordedCaddy, err := readManifest(t, d)
+	entries, manifest, err := readManifest(t, d)
 	if err != nil {
 		return nil, err
 	}
-	out.recordedCaddy = recordedCaddy
+	out.recordedCaddy = manifest.Caddy
+	out.recordedIngress = manifest.Ingress
+	out.imageHistory = manifest.Images
+	out.deploymentImages = otherSitesImages(site, plan)
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
 		recorded[path] = entry.SHA256
@@ -930,6 +957,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", site, err)
+	}
+	if out.sweeps() && !o.noSweepRead {
+		out.probeSweep(t)
 	}
 
 	out.GatewayReload = isGateway && (routingChanged || resumed.GatewayReload)
@@ -1323,6 +1353,11 @@ func execute(plan *Plan, t Transport) error {
 			return fmt.Errorf("%s: everything was applied, but the record of owed actions could not be removed, so the next apply will repeat them: %w", plan.Site, err)
 		}
 	}
+	// Last, with every stack healthy and the manifest recording what this
+	// site uses: nothing after it could want an image it removes.
+	if plan.sweeps() {
+		sweepImages(plan, t)
+	}
 	return nil
 }
 
@@ -1405,26 +1440,27 @@ func stackOrder(stacks map[string]bool) []string {
 }
 
 // readManifest returns what the last apply recorded: its files, keyed by
-// path relative to the site root, and its record of the site's Caddy build,
-// nil when it has none. A host with no manifest is a first apply, which is
-// ordinary.
-func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, *render.ManifestCaddy, error) {
+// path relative to the site root, and the manifest itself, for its record of
+// the site's Caddy build, of the images it rendered and of the files written
+// for the operator's web server. A host with no manifest is a first apply,
+// which is ordinary.
+func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, render.Manifest, error) {
+	var m render.Manifest
 	content, found, err := t.ReadFile(manifestPath(d))
 	if err != nil {
-		return nil, nil, err
+		return nil, m, err
 	}
 	if !found {
-		return map[string]render.ManifestFile{}, nil, nil
+		return map[string]render.ManifestFile{}, m, nil
 	}
-	var m render.Manifest
 	if err := json.Unmarshal([]byte(content), &m); err != nil {
-		return nil, nil, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
+		return nil, m, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 	}
 	out := make(map[string]render.ManifestFile, len(m.Files))
 	for _, file := range m.Files {
 		out[file.Path] = file
 	}
-	return out, m.Caddy, nil
+	return out, m, nil
 }
 
 // now is the clock a left over mark is stamped with; tests replace it.
@@ -1484,7 +1520,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan)}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan), Ingress: plan.recordedIngress}, "", "  ")
 	if err != nil {
 		return err
 	}
