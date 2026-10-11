@@ -72,6 +72,27 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	}
 }
 
+// A monitor that does not come back healthy stops at its stage with the
+// cause read from its logs, the logs themselves only with -v, and the apply
+// that finishes it by hand.
+func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
+	cfg, secrets := fixture(t)
+	cfg.Storage.Garage.Replication = 1
+	w := newWorld(t, cfg, secrets)
+	w.provisioned(1, "home-a")
+	w.deployGarage("home-b", 1)
+	watch := w.hosts["watch"]
+	watch.files[seed] = strings.Replace(watch.files[seed], `"home-b — ping"`, `"home-x — ping"`, 1)
+	watch.recordManifest()
+	w.unhealthy = "status"
+
+	err := storageadd.Execute(w.build(storageadd.Options{}))
+	if err == nil {
+		t.Fatal("an unhealthy monitor passed")
+	}
+	shortAndVerbose(t, err, "(monitor)", "stack status is not healthy", "The join itself is done", "paisans apply --site watch --only status --execute", "run storage add again")
+}
+
 // A deployment with no monitor site skips the stage.
 func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	cfg, secrets := fixture(t)

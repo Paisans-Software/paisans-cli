@@ -507,7 +507,13 @@ func (p *Plan) check(st *Stage) error {
 }
 
 func (p *Plan) fail(st *Stage, err error) error {
-	return fmt.Errorf("storage add stopped at stage %d (%s), and nothing after it ran: %v\nFix the cause and run storage add again: it resumes at the first stage whose gate does not pass", st.Number, st.Name, err)
+	head := fmt.Sprintf("storage add stopped at stage %d (%s)", st.Number, st.Name)
+	const next = "Fix the cause and run storage add again: it resumes at the first stage whose gate does not pass"
+	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
+	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
+		return pr
+	}
+	return fmt.Errorf("%s, and nothing after it ran: %v\n%s", head, err, next)
 }
 
 // Show lists the plan as an operator reads it: a section per stage, each kind

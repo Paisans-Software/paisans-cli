@@ -56,6 +56,20 @@ func TestAFailedReseedNamesTheApplyAndKeepsTheJoin(t *testing.T) {
 	}
 }
 
+// A monitor that does not come back healthy stops the join at its stage with
+// the cause read from its logs, the logs themselves only with -v, and the
+// apply that finishes it by hand.
+func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.unhealthy = "status"
+	err := siteadd.Execute(build(t, w))
+	if err == nil {
+		t.Fatal("an unhealthy monitor passed")
+	}
+	shortAndVerbose(t, err, "stopped at stage 8 (monitor)", "stack status is not healthy", "The join itself is done", "paisans apply --site watch --only status --execute")
+}
+
 // A deployment with no monitor site skips the stage.
 func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	defer siteadd.SetFast()()

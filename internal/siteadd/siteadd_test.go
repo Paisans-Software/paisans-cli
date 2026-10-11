@@ -379,8 +379,9 @@ func TestHAProxyRestartsWithItsDatabaseAppsStopped(t *testing.T) {
 	}
 }
 
-// An app that does not come back healthy stops the join at stage 6, with its
-// logs, and HAProxy's own gate is not reached.
+// An app that does not come back healthy stops the join at stage 6, with
+// the cause read from its logs (the logs themselves with -v), and HAProxy's
+// own gate is not reached.
 func TestAnAppUnhealthyAfterHAProxyStopsAtStage6(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
@@ -389,6 +390,7 @@ func TestAnAppUnhealthyAfterHAProxyStopsAtStage6(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "stack talk is not healthy") || !strings.Contains(err.Error(), "last 30 log lines") {
 		t.Fatalf("want a stage 6 failure naming talk, got %v", err)
 	}
+	shortAndVerbose(t, err, "site add home-b stopped at stage 6 (haproxy)", "stack talk is not healthy", "run site add again")
 	if w.hosts["home-a"].ran("/stats;csv") > 2 {
 		t.Error("HAProxy's gate ran after an app failed")
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // monitorStage is the stage number of the monitor's reseed, the last.
@@ -43,7 +44,12 @@ func (p *Plan) buildMonitor() (*Stage, error) {
 	}
 	st.Gate = fmt.Sprintf("the monitor on %s runs on a monitors.json that matches the render without %s, so its ping and direct checks are deleted", strings.Join(sites, ", "), p.Site)
 	byHand := func(err error) error {
-		return fmt.Errorf("%v\nThe removal itself is done: every earlier gate passed, %s no longer declares %s, and only the monitor is out of date. Fix the cause and run %s, which does the same as this stage", err, p.ConfigPath, p.Site, apply.MonitorCommands(reseeds))
+		next := fmt.Sprintf("The removal itself is done: every earlier gate passed, %s no longer declares %s, and only the monitor is out of date. Fix the cause and run %s, which does the same as this stage", p.ConfigPath, p.Site, apply.MonitorCommands(reseeds))
+		// A Problem, Eg: the health gate's, keeps its cause for --verbose.
+		if pr := ui.Around("", err, next); pr != nil {
+			return pr
+		}
+		return fmt.Errorf("%v\n%s", err, next)
 	}
 	st.run = func() error {
 		for _, m := range reseeds {

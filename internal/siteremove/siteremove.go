@@ -621,12 +621,21 @@ func Execute(p *Plan) error {
 func stageTitle(st *Stage) string { return fmt.Sprintf("stage %d, %s", st.Number, st.Name) }
 
 func (p *Plan) fail(st *Stage, err error) error {
+	head := fmt.Sprintf("site remove %s stopped at stage %d (%s)", p.Site, st.Number, st.Name)
 	if st.Number == monitorStage {
 		// The configuration no longer declares the site, so there is no
 		// site remove to run again; the stage's own error names the apply.
-		return fmt.Errorf("site remove %s stopped at stage %d (%s): %v", p.Site, st.Number, st.Name, err)
+		if pr := ui.Around(head, err, ""); pr != nil {
+			return pr
+		}
+		return fmt.Errorf("%s: %v", head, err)
 	}
-	return fmt.Errorf("site remove %s stopped at stage %d (%s), and nothing after it ran: %v\nFix the cause and run site remove again: it resumes at the first stage with anything left to do", p.Site, st.Number, st.Name, err)
+	const next = "Fix the cause and run site remove again: it resumes at the first stage with anything left to do"
+	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
+	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
+		return pr
+	}
+	return fmt.Errorf("%s, and nothing after it ran: %v\n%s", head, err, next)
 }
 
 // Show lists the plan as an operator reads it: a section per stage, each

@@ -518,21 +518,32 @@ func Execute(p *Plan) error {
 
 func stageTitle(st *Stage) string { return fmt.Sprintf("stage %d, %s", st.Number, st.Name) }
 
+// resumeAdvice is how a stopped join goes on.
+const resumeAdvice = "Fix the cause and run site add again: it resumes at the first stage whose gate does not pass"
+
 func (p *Plan) fail(st *Stage, err error) error {
-	msg := fmt.Sprintf("site add %s stopped at stage %d (%s), and nothing after it ran: %v", p.Site, st.Number, st.Name, err)
+	head := fmt.Sprintf("site add %s stopped at stage %d (%s)", p.Site, st.Number, st.Name)
+	var after []string
 	// A host that could not be asked has not said the stage failed. Rolling
 	// back on that would undo a stage that may well have worked, on the
 	// strength of an ssh timeout, and would most likely fail to reach the
 	// same host anyway.
 	if st.rollback != nil && errors.Is(err, apply.ErrUnreachable) {
-		msg += "\nA host could not be reached, so nothing was rolled back"
+		after = append(after, "A host could not be reached, so nothing was rolled back", resumeAdvice)
 	} else if st.rollback != nil {
 		if rerr := st.rollback(); rerr != nil {
-			return fmt.Errorf("%s\nRolling back failed too, so the mesh may hold the new peer on some sites: %v", msg, rerr)
+			after = append(after, fmt.Sprintf("Rolling back failed too, so the mesh may hold the new peer on some sites: %v", rerr))
+		} else {
+			after = append(after, st.OnFailure+". Done.", resumeAdvice)
 		}
-		msg += "\n" + st.OnFailure + ". Done."
+	} else {
+		after = append(after, resumeAdvice)
 	}
-	return fmt.Errorf("%s\nFix the cause and run site add again: it resumes at the first stage whose gate does not pass", msg)
+	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
+	if pr := ui.Around(head, err, strings.Join(append([]string{"Nothing after it ran."}, after...), "\n")); pr != nil {
+		return pr
+	}
+	return fmt.Errorf("%s, and nothing after it ran: %v\n%s", head, err, strings.Join(after, "\n"))
 }
 
 // Show lists the plan as an operator reads it: a section per stage, each step

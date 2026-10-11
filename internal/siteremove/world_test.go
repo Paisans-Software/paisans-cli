@@ -1,6 +1,7 @@
 package siteremove_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -30,6 +31,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 const (
@@ -100,6 +102,8 @@ type world struct {
 	// while its member key in etcd, which the old process wrote, still says
 	// streaming.
 	neverStreams string
+	// unhealthy names an app stack whose container has exited.
+	unhealthy string
 }
 
 type host struct {
@@ -602,6 +606,10 @@ func (h *host) Run(command string) (string, error) {
 	case strings.HasSuffix(command, "restart haproxy"):
 		w.served[h.name] = h.files[root+"/infra/haproxy/haproxy.cfg"]
 		return "", nil
+	case strings.Contains(command, " logs --no-color --tail 30 "):
+		return unhealthyLogs, nil
+	case w.unhealthy != "" && strings.Contains(command, "/"+w.unhealthy+"/compose.yaml ps --all --format json"):
+		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
 
@@ -1305,4 +1313,34 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// unhealthyLogs is the tail of the log of the exited app in an unhealthy
+// stack: the line that says why, and one around it that does not.
+const unhealthyLogs = `app-1  | {"level":"info","msg":"starting up"}
+app-1  | {"level":"fatal","msg":"exiting","error":"database unreachable","stacktrace":"main.main\n\t/src/main.go:12"}
+`
+
+// shortAndVerbose checks how err prints: by default with each of want and
+// no raw log line, and with -v with the log lines.
+func shortAndVerbose(t *testing.T, err error, want ...string) {
+	t.Helper()
+	var plain, verbose bytes.Buffer
+	ui.PrintError(&plain, err, false)
+	ui.PrintError(&verbose, err, true)
+	// Output is wrapped to 80 columns, so a long phrase may span lines.
+	flat := strings.Join(strings.Fields(plain.String()), " ")
+	for _, w := range append(want, "app: database unreachable") {
+		if !strings.Contains(flat, w) {
+			t.Errorf("default output lacks %q:\n%s", w, plain.String())
+		}
+	}
+	for _, raw := range []string{"starting up", "stacktrace", "last 30 log lines"} {
+		if strings.Contains(plain.String(), raw) {
+			t.Errorf("default output shows the raw log (%q):\n%s", raw, plain.String())
+		}
+		if !strings.Contains(verbose.String(), raw) {
+			t.Errorf("verbose output lacks the raw log (%q):\n%s", raw, verbose.String())
+		}
+	}
 }
