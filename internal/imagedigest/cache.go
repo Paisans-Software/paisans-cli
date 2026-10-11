@@ -28,6 +28,16 @@ type Cache struct {
 	mu      sync.Mutex
 	digests map[string]string
 	asking  map[string]*resolution
+	// versions are the version labels Version read, by reference. A build
+	// named by its digest never changes, so an answer is kept for the run
+	// like a digest is.
+	versions map[string]string
+}
+
+// Versioner reads the version label of a build named by its digest, as
+// Registry.Version does.
+type Versioner interface {
+	Version(ref string) (string, error)
 }
 
 // resolution is one call to the wrapped resolver, which later calls for the
@@ -40,7 +50,7 @@ type resolution struct {
 
 // Cached is a Cache in front of r.
 func Cached(r Resolver) *Cache {
-	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}}
+	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}}
 }
 
 // Digest is the digest ref was first resolved to, resolving it now if it has
@@ -70,4 +80,28 @@ func (c *Cache) Digest(ref string) (string, error) {
 	c.mu.Unlock()
 	close(res.done)
 	return res.digest, res.err
+}
+
+// Version is the wrapped resolver's Version for ref, asked once per run, and
+// empty with no error when the wrapped resolver reads no labels. A failed
+// read is asked again the next time, as a failed resolution is.
+func (c *Cache) Version(ref string) (string, error) {
+	v, ok := c.r.(Versioner)
+	if !ok {
+		return "", nil
+	}
+	c.mu.Lock()
+	if version, ok := c.versions[ref]; ok {
+		c.mu.Unlock()
+		return version, nil
+	}
+	c.mu.Unlock()
+	version, err := v.Version(ref)
+	if err != nil {
+		return "", err
+	}
+	c.mu.Lock()
+	c.versions[ref] = version
+	c.mu.Unlock()
+	return version, nil
 }

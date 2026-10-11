@@ -232,6 +232,16 @@ func split(ref string) (host, repo, tag string, err error) {
 		return "", "", "", fmt.Errorf("%s names no tag to resolve", ref)
 	}
 	name, tag = name[:colon], name[colon+1:]
+	host, repo = locate(name)
+	if repo == "" || tag == "" {
+		return "", "", "", fmt.Errorf("%s is not a reference this lookup can read", ref)
+	}
+	return host, repo, tag, nil
+}
+
+// locate is the registry host and the repository a name without a tag or a
+// digest is on, by Docker's defaults, as split describes.
+func locate(name string) (host, repo string) {
 	first, rest, found := strings.Cut(name, "/")
 	if found && (strings.ContainsAny(first, ".:") || first == "localhost") {
 		host, repo = first, rest
@@ -244,8 +254,5 @@ func split(ref string) (host, repo, tag string, err error) {
 			repo = "library/" + repo
 		}
 	}
-	if repo == "" || tag == "" {
-		return "", "", "", fmt.Errorf("%s is not a reference this lookup can read", ref)
-	}
-	return host, repo, tag, nil
+	return host, repo
 }
