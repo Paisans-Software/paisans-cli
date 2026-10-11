@@ -697,7 +697,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	routeHolds(r)
 	convergeAdmins(r, cfg, o, func(string) bool { return true })
 	convergeLeft(r, cfg, secretsPath, configPath)
-	r.Result("%s is converged: every step ran.", configPath)
+	r.Result("Deployment complete.")
 	return nil
 }
 
@@ -1104,7 +1104,10 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			i = j
 		default:
 			r.Section("dns")
-			if err := convergeRun(convergeFlags(s.Args, o)); err != nil {
+			dnsInsideApply = true
+			err := convergeRun(convergeFlags(s.Args, o))
+			dnsInsideApply = false
+			if err != nil {
 				if errors.Is(err, dns.ErrConflict) {
 					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans apply --execute again.")
 				}
