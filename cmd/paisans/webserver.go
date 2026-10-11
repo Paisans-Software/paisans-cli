@@ -91,6 +91,9 @@ func runWebServer(args []string) error {
 			ws, _ = ui.Get(r, "read the web server on "+target.Site, func() (webserver.WebServer, error) {
 				return findWebServer(webServerHost(cfg, target.Site, *sudo), target), nil
 			})
+			if hint, detail, ok := webserver.ACMEDNSWarning(target, ws); ok {
+				r.Warn(hint, detail)
+			}
 		}
 		// Redacted as the reporter's lines are, since what it found on
 		// the host is printed with the sheet.

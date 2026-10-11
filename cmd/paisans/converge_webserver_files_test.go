@@ -670,3 +670,26 @@ func TestApplyRewritesTheSiteFileForARenamedHostname(t *testing.T) {
 		t.Errorf("record %+v", got)
 	}
 }
+
+// A global acme_dns reaches the site's own issuer too: the file is written,
+// valid and harmless, and the step warns with the line to rewrite, as any
+// other problem with the operator's web server does.
+func TestApplyWarnsOfAGlobalACMEDNS(t *testing.T) {
+	fakeConverge(t, nil)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, acmeDNSCaddy, "{\n\tacme_dns cloudflare {$CF_API_TOKEN}\n}\nimport /etc/caddy/paisans.d/*\n")
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err == nil || !strings.Contains(err.Error(), "the web server needs you: status") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(f.server.Files[statusFile], "issuer acme") || !f.server.Ran("caddy reload") {
+		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
+	}
+	i := rec.Index("warned", "site file for status")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, "acme_dns") {
+		t.Fatalf("output:\n%s", rec.Lines())
+	}
+	if !rec.Has("explain", "cert_issuer acme {") {
+		t.Errorf("no rewrite:\n%s", rec.Lines())
+	}
+}

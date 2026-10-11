@@ -193,3 +193,95 @@ func TestShowPlacesTheCaddySiteAfterTheGlobalOptions(t *testing.T) {
 		t.Fatal(buf.String())
 	}
 }
+
+const siteIssuer = "\ttls {\n\t\tissuer acme\n\t}\n"
+
+// A Caddy that obtains its own certificates gives the site an issuer of its
+// own, so a DNS challenge set globally through cert_issuer does not apply
+// to it. Where Caddy loads files, the site loads its own.
+func TestCaddySnippetHasItsOwnIssuerOnlyWhereCaddyObtainsCertificates(t *testing.T) {
+	target := external(t, "127.0.0.1:8480")
+	for _, c := range []struct {
+		name   string
+		ws     webserver.WebServer
+		issuer bool
+	}{
+		{"automatic", webserver.WebServer{Server: webserver.ServerCaddy, Certs: webserver.CertsAutomatic}, true},
+		{"automatic with acme_dns", webserver.WebServer{Server: webserver.ServerCaddy, Certs: webserver.CertsAutomatic, DNS: webserver.DNSACME}, true},
+		{"files", webserver.WebServer{Server: webserver.ServerCaddy, Certs: webserver.CertsFiles, CertFile: "/etc/ssl/s/fullchain.pem", KeyFile: "/etc/ssl/s/privkey.pem"}, false},
+		{"folder", webserver.WebServer{Server: webserver.ServerCaddy, Certs: webserver.CertsFolder, Folder: "/etc/ssl/caddy"}, false},
+		{"not determined", webserver.WebServer{Server: webserver.ServerCaddy}, false},
+		{"nginx", webserver.WebServer{Server: webserver.ServerNginx, Certs: webserver.CertsFiles}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			content := webserver.FileContent(target, c.ws)
+			if got := strings.Contains(content, siteIssuer); got != c.issuer {
+				t.Errorf("issuer %v, want %v:\n%s", got, c.issuer, content)
+			}
+			var buf bytes.Buffer
+			webserver.Show(&buf, target, c.ws)
+			if got := strings.Contains(buf.String(), "    \ttls {\n    \t\tissuer acme\n    \t}\n"); got != c.issuer {
+				t.Errorf("sheet: issuer %v, want %v:\n%s", got, c.issuer, buf.String())
+			}
+		})
+	}
+}
+
+// A global acme_dns reaches the site's own issuer too, so the warning says
+// so and gives the line rewritten as a cert_issuer, the provider's
+// arguments as they are, but for a value that is not a placeholder.
+func TestACMEDNSWarningRewritesTheLineAsACertIssuer(t *testing.T) {
+	target := external(t, "127.0.0.1:8480")
+	for _, c := range []struct {
+		name, conf, found, rewrite string
+	}{
+		{
+			"placeholder",
+			"{\n\temail admin@example.org\n\tacme_dns cloudflare {$CF_API_TOKEN}\n}\n",
+			"    acme_dns cloudflare {$CF_API_TOKEN}\n",
+			"    cert_issuer acme {\n        dns cloudflare {$CF_API_TOKEN}\n    }\n",
+		},
+		{
+			"literal value",
+			"{\n\tacme_dns cloudflare abc123literal\n}\n",
+			"    acme_dns cloudflare <value>\n",
+			"    cert_issuer acme {\n        dns cloudflare <value>\n    }\n",
+		},
+		{
+			"block",
+			"{\n\tacme_dns cloudflare {\n\t\tapi_token {env.CF_API_TOKEN}\n\t}\n}\n",
+			"    acme_dns cloudflare {\n        api_token {env.CF_API_TOKEN}\n    }\n",
+			"    cert_issuer acme {\n        dns cloudflare {\n            api_token {env.CF_API_TOKEN}\n        }\n    }\n",
+		},
+		{
+			"global dns",
+			"{\n\tdns cloudflare {$CF_API_TOKEN}\n\tacme_dns\n}\n",
+			"    acme_dns\n",
+			"    cert_issuer acme {\n        dns\n    }\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ws := detectCaddy(t, c.conf)
+			hint, detail, ok := webserver.ACMEDNSWarning(target, ws)
+			if !ok {
+				t.Fatalf("no warning for %+v", ws)
+			}
+			if !strings.Contains(hint, "acme_dns") {
+				t.Errorf("hint %q", hint)
+			}
+			for _, want := range []string{c.found, c.rewrite, "status.example.org", "ZeroSSL", "HTTP-01", "/opt/caddy/Caddyfile"} {
+				if !strings.Contains(detail, want) {
+					t.Errorf("detail lacks %q:\n%s", want, detail)
+				}
+			}
+			if strings.Contains(detail, "abc123literal") {
+				t.Errorf("detail prints a value from the Caddyfile:\n%s", detail)
+			}
+		})
+	}
+	for _, conf := range []string{"{\n\temail admin@example.org\n}\n", "{\n\tcert_issuer acme {\n\t\tdns cloudflare {$CF_API_TOKEN}\n\t}\n}\n"} {
+		if hint, _, ok := webserver.ACMEDNSWarning(target, detectCaddy(t, conf)); ok {
+			t.Errorf("a warning for %q: %s", conf, hint)
+		}
+	}
+}
