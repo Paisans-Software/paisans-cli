@@ -84,11 +84,28 @@ func (p *Plan) probeEtcd() error {
 			problems = append(problems, fmt.Sprintf("%s is still a learner", site))
 		}
 	}
+	// Every member the end state keeps has to be in etcd already: a site
+	// whose join never finished is a voter the configuration counts and etcd
+	// does not.
+	listed := map[string]bool{}
+	for _, m := range members {
+		listed[apply.EtcdMemberSite(p.cfg, m)] = true
+	}
+	var missing []string
+	for _, site := range p.end.Etcd.Members {
+		if !listed[site] {
+			missing = append(missing, site)
+			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install (paisans apply) first", site, p.cfg.EtcdMembersKey()))
+		}
+	}
 	healthy, err := p.etcdHealth(members)
 	if err != nil {
 		return err
 	}
-	after, up := 0, 0
+	// The voters after the site leaves are the live voters but the site,
+	// with the leaving witness still among them, and every end state member
+	// etcd does not list yet, counted as down.
+	after, up := len(missing), 0
 	for _, m := range members {
 		site := apply.EtcdMemberSite(p.cfg, m)
 		if site == p.Site || m.IsLearner {
@@ -312,6 +329,33 @@ func (p *Plan) probeGarage() error {
 		if zone == p.Site {
 			p.garage.node = id
 		}
+	}
+	// Every Garage site that stays needs a node in the layout, and enough
+	// nodes have to stay for the replication factor: otherwise `garage layout
+	// apply` refuses the removal halfway through stage 1.
+	staying := 0
+	inLayout := map[string]bool{}
+	for _, zone := range zones {
+		inLayout[zone] = true
+		if zone != p.Site {
+			staying++
+		}
+	}
+	if staying < p.cfg.Storage.Garage.Replication {
+		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run paisans storage add for the sites missing from it first. Nothing was changed", p.Site, staying, p.Site, p.cfg.Storage.Garage.Replication)
+	}
+	var missing []string
+	for _, site := range p.end.Storage.Garage.Sites {
+		if !inLayout[site] {
+			missing = append(missing, site)
+		}
+	}
+	if len(missing) > 0 {
+		verb := "is"
+		if len(missing) > 1 {
+			verb = "are"
+		}
+		return fmt.Errorf("site remove %s: %s %s in storage.garage.sites but not in Garage's layout yet. Run paisans storage add first. Nothing was changed", p.Site, strings.Join(missing, ", "), verb)
 	}
 	status, err := t.Run(gcmd(p, "status"))
 	if err != nil {
