@@ -104,6 +104,25 @@ func TestParseEtcdMembers(t *testing.T) {
 	}
 }
 
+// The cluster ID comes from the response header, as a full uint64, and is
+// 0 when the header has none.
+func TestParseEtcdCluster(t *testing.T) {
+	big := `{"header":{"cluster_id":17237436991929493444,"member_id":2,"raft_term":3},"members":[]}`
+	for _, tc := range []struct {
+		out  string
+		want uint64
+	}{{memberListOne, 1}, {big, 17237436991929493444}, {`{"header":{},"members":[]}`, 0}} {
+		c, err := apply.ParseEtcdCluster(tc.out)
+		if err != nil || c.ID != tc.want {
+			t.Errorf("ParseEtcdCluster(%s) = %d, %v, want %d", tc.out, c.ID, err, tc.want)
+		}
+	}
+	c, _ := apply.ParseEtcdCluster(memberListOne)
+	if len(c.Members) != 1 || c.Members[0].Name != "home-a" {
+		t.Errorf("members = %v", c.Members)
+	}
+}
+
 // apply on a site of a cluster whose live membership differs from
 // etcd.members refuses to touch the infrastructure stack, and says to use
 // site add; the same apply against a matching membership proceeds.

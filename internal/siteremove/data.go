@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -46,18 +47,27 @@ func (p *Plan) probeEtcd() error {
 	if len(p.cfg.Etcd.Members) == 0 {
 		return nil
 	}
-	var members []apply.EtcdMember
+	// Every remaining member whose etcd runs answers, so that one which
+	// founded a cluster of its own is found whichever of them comes first.
+	var views []etcdView
 	for _, name := range p.end.Etcd.Members {
-		list, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep())
+		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep())
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: %w", p.Site, name, err)
 		}
-		if !running {
-			continue
+		if running {
+			views = append(views, etcdView{name, cluster})
 		}
-		for _, m := range list {
-			if apply.EtcdMemberSite(p.cfg, m) == name && !m.IsLearner {
-				p.etcd.control, members = name, list
+	}
+	views, err := p.oneEtcdCluster(views)
+	if err != nil {
+		return err
+	}
+	var members []apply.EtcdMember
+	for _, v := range views {
+		for _, m := range v.cluster.Members {
+			if apply.EtcdMemberSite(p.cfg, m) == v.site && !m.IsLearner {
+				p.etcd.control, members = v.site, v.cluster.Members
 			}
 		}
 		if p.etcd.control != "" {
@@ -135,6 +145,109 @@ func (p *Plan) probeEtcd() error {
 		return fmt.Errorf("site remove %s: etcd is not healthy enough to change its membership:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
 	}
 	return nil
+}
+
+// etcdView is the etcd cluster as one remaining site's etcd answers it.
+type etcdView struct {
+	site    string
+	cluster apply.EtcdCluster
+}
+
+// key identifies the cluster a view is of: its cluster ID when every view
+// has one, and otherwise the set of member IDs it lists.
+func (v etcdView) key(byID bool) string {
+	if byID {
+		return strconv.FormatUint(v.cluster.ID, 16)
+	}
+	var ids []string
+	for _, m := range v.cluster.Members {
+		ids = append(ids, m.HexID())
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
+}
+
+// oneEtcdCluster refuses when the remaining sites' etcds do not all answer
+// as one cluster, as when one restarted on a wiped data directory and
+// founded a cluster of its own, naming the sites that are out of step; and
+// otherwise returns the views. The cluster most of them answer for is the
+// real one, and between as many, the one that lists more of the answering
+// sites as members.
+func (p *Plan) oneEtcdCluster(views []etcdView) ([]etcdView, error) {
+	byID := true
+	for _, v := range views {
+		byID = byID && v.cluster.ID != 0
+	}
+	var keys []string
+	groups := map[string][]etcdView{}
+	for _, v := range views {
+		k := v.key(byID)
+		if groups[k] == nil {
+			keys = append(keys, k)
+		}
+		groups[k] = append(groups[k], v)
+	}
+	if len(keys) <= 1 {
+		return views, nil
+	}
+	lists := func(k string) int {
+		n := 0
+		for _, v := range views {
+			for _, m := range groups[k][0].cluster.Members {
+				if apply.EtcdMemberSite(p.cfg, m) == v.site {
+					n++
+					break
+				}
+			}
+		}
+		return n
+	}
+	better := func(a, b string) int {
+		if d := len(groups[a]) - len(groups[b]); d != 0 {
+			return d
+		}
+		return lists(a) - lists(b)
+	}
+	best, tied := keys[0], false
+	for _, k := range keys[1:] {
+		switch d := better(k, best); {
+		case d > 0:
+			best, tied = k, false
+		case d == 0:
+			tied = true
+		}
+	}
+	if tied {
+		var sites []string
+		for _, v := range views {
+			sites = append(sites, v.site)
+		}
+		return nil, fmt.Errorf("site remove %s: the etcds on %s belong to different clusters, so their membership cannot be changed safely. Run paisans doctor on %s. Nothing was changed", p.Site, joinAnd(sites), joinAnd(sites))
+	}
+	var odd, agree []string
+	for _, v := range views {
+		if v.key(byID) == best {
+			agree = append(agree, v.site+"'s")
+		} else {
+			odd = append(odd, v.site)
+		}
+	}
+	var possessive []string
+	for _, site := range odd {
+		possessive = append(possessive, site+"'s")
+	}
+	if len(odd) == 1 {
+		return nil, fmt.Errorf("site remove %s: %s etcd belongs to a different cluster than %s, so its membership cannot be changed safely. Run paisans doctor on %s. Nothing was changed", p.Site, possessive[0], joinAnd(agree), odd[0])
+	}
+	return nil, fmt.Errorf("site remove %s: %s etcds belong to a different cluster than %s, so their membership cannot be changed safely. Run paisans doctor on %s. Nothing was changed", p.Site, joinAnd(possessive), joinAnd(agree), joinAnd(odd))
+}
+
+// joinAnd joins a list as prose: "a", "a and b", "a, b and c".
+func joinAnd(list []string) string {
+	if len(list) <= 1 {
+		return strings.Join(list, "")
+	}
+	return strings.Join(list[:len(list)-1], ", ") + " and " + list[len(list)-1]
 }
 
 // etcdHealth asks the control site for every member's health, by site.
@@ -329,6 +442,13 @@ func (p *Plan) probeGarage() error {
 		if zone == p.Site {
 			p.garage.node = id
 		}
+	}
+	// `garage layout apply` commits every staged change, so a change left
+	// staged by someone else would go live with the removal. The site's own
+	// removal, staged by a run stopped before its apply, is the one change a
+	// resumed run carries on with.
+	if staged := storageadd.LayoutStaged(out); staged.Any() && (p.garage.node == "" || !staged.Only(p.garage.node)) {
+		return fmt.Errorf("site remove %s: Garage has staged layout changes that site remove would apply along with its own. Apply them with paisans storage add, or revert them with garage layout revert --yes, first. Nothing was changed", p.Site)
 	}
 	// Every Garage site that stays needs a node in the layout, and enough
 	// nodes have to stay for the replication factor: otherwise `garage layout
