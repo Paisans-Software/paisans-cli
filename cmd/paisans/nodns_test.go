@@ -25,8 +25,13 @@ func TestMain(m *testing.M) {
 	// about the move says otherwise.
 	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
 	// No test reaches the workstation's keystore: init makes and reads age
-	// keys in memory. A test about the keystore sets its own.
+	// keys in memory. A test about the keystore sets its own. Nor does a
+	// SOPS_AGE_* variable from the shell running the tests decide which key
+	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
+	for _, name := range config.AgeVariables() {
+		os.Unsetenv(name)
+	}
 	os.Exit(m.Run())
 }
 

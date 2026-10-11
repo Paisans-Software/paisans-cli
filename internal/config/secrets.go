@@ -188,6 +188,10 @@ var AgeKeystore keystore.Store = keystore.Platform()
 // not read.
 var ageVariables = []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD", "SOPS_AGE_SSH_PRIVATE_KEY_FILE", "SOPS_AGE_SSH_PRIVATE_KEY_CMD"}
 
+// AgeVariables returns the SOPS_AGE_* variable names, for a caller that has
+// to clear them.
+func AgeVariables() []string { return append([]string(nil), ageVariables...) }
+
 // AgeVariableSet returns the first of the SOPS_AGE_* variables that is set,
 // and whether there is one. While one is, decryption uses it and never reads
 // the keystore, so init says so rather than promising the keystore is read.
