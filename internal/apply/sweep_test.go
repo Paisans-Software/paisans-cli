@@ -106,25 +106,25 @@ func TestTheSweepRunsLast(t *testing.T) {
 func TestTheSweepReachesRecordedRepositoriesOnly(t *testing.T) {
 	host := applied(t, "home-a")
 	recordHistory(t, host, render.ManifestImage{Repository: "example/removed-app", References: []string{"example/removed-app:1"}})
-	// home-a renders postgres:18-alpine, and vm's chat renders
-	// postgres:17-alpine, which on home-a is an old version like any other.
+	// home-a renders postgres:18-trixie, and vm's chat renders
+	// postgres:17-trixie, which on home-a is an old version like any other.
 	host.images = imageLine("example/removed-app", "1", fakeID("removed")) +
 		imageLine("example/removed-app", "<none>", fakeID("removed, older")) +
 		imageLine("example/operators-own", "1", fakeID("operator")) +
-		imageLine("postgres", "17-alpine", fakeID("postgres:17-alpine")) +
-		imageLine("postgres", "16-alpine", fakeID("postgres:16-alpine"))
+		imageLine("postgres", "17-trixie", fakeID("postgres:17-trixie")) +
+		imageLine("postgres", "16-trixie", fakeID("postgres:16-trixie"))
 
 	p, _ := applyAgain(t, "home-a", host)
 	got := removedRefs(host)
-	want := []string{fakeID("removed"), fakeID("removed, older"), fakeID("postgres:17-alpine"), fakeID("postgres:16-alpine")}
+	want := []string{fakeID("removed"), fakeID("removed, older"), fakeID("postgres:17-trixie"), fakeID("postgres:16-trixie")}
 	if !slices.Equal(got, want) {
-		t.Errorf("removed %v, want the removed app's two images, postgres:17-alpine and postgres:16-alpine", got)
+		t.Errorf("removed %v, want the removed app's two images, postgres:17-trixie and postgres:16-trixie", got)
 	}
 	var planned []string
 	for _, s := range p.Sweep {
 		planned = append(planned, s.Ref)
 	}
-	if strings.Join(planned, " ") != "example/removed-app:1 example/removed-app@"+strings.TrimPrefix(fakeID("removed, older"), "sha256:")[:12]+" postgres:17-alpine postgres:16-alpine" {
+	if strings.Join(planned, " ") != "example/removed-app:1 example/removed-app@"+strings.TrimPrefix(fakeID("removed, older"), "sha256:")[:12]+" postgres:17-trixie postgres:16-trixie" {
 		t.Errorf("the plan sweeps %v", planned)
 	}
 }

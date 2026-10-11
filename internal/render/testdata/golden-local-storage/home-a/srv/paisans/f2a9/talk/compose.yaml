@@ -170,7 +170,7 @@ services:
   postgres:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: postgres:18-alpine
+    image: postgres:18-trixie
     restart: unless-stopped
     environment:
       POSTGRES_DB: talk

@@ -87,6 +87,9 @@ func TestUncoveredIsExactMatchOnly(t *testing.T) {
 // an older one than the cluster runs.
 func TestPostgresDataMountFollowsTheImage(t *testing.T) {
 	for _, tc := range []struct{ image, cluster, want string }{
+		{"postgres:16-trixie", "18", "/var/lib/postgresql/data"},
+		{"postgres:17-trixie", "18", "/var/lib/postgresql/data"},
+		{"postgres:18-trixie", "17", "/var/lib/postgresql"},
 		{"postgres:16-alpine", "18", "/var/lib/postgresql/data"},
 		{"postgres:17-alpine", "18", "/var/lib/postgresql/data"},
 		{"docker.io/library/postgres:17.6", "18", "/var/lib/postgresql/data"},
