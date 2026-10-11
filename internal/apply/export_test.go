@@ -177,3 +177,7 @@ func SetMux(bases []string, exits *[][]string) func() {
 
 // ControlPathMax exposes the longest socket directory allowed.
 const ControlPathMax = controlPathMax
+
+// LogCause exposes the reader that picks one failing service's cause out of
+// the tail of its log.
+var LogCause = logCause

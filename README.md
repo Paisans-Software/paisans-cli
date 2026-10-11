@@ -3589,8 +3589,23 @@ does not ship, and refusing such a stack would refuse most of them.
 | a container `exited`, `dead` or `restarting`, or a healthcheck `unhealthy` | stops now |
 | still polling after five minutes | stops |
 
-A stop names the stack and the services, carries the last 30 log lines of each
-(`docker compose logs --tail 30`), and starts nothing after it. The stack stays
+A stop names the stack and the services, with one line of cause for each read
+from its last 30 log lines (`docker compose logs --tail 30`), and starts
+nothing after it:
+
+```
+✗ apply stopped at apply --site site-b
+  site-b: stack infra is not healthy: etcd (restarting, exit code 0).
+  etcd: listen tcp 10.45.0.1:2380: bind: cannot assign requested address
+  Nothing after this stack was started; the next apply recreates it.
+  Run paisans apply --execute again to resume.
+```
+
+The cause is the newest line that reads as a failure: for a JSON log (etcd,
+most Go services) the `error` field, else `err` or `msg`, of a line whose
+level is error, fatal or panic, never its stack trace; for any other log a
+line that says error, fatal or panic. A log with no such line adds none. The
+30 lines themselves follow with `-v`. The stack stays
 in the pending record, so the next apply resumes at it and, by the section
 above, recreates it outright. The infrastructure stack is checked like any
 other, which is also the check on the gateway's Caddy after a reload or an
