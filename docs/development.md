@@ -328,7 +328,11 @@ a step, so it is the one path to a spinner. On a
 terminal the open step shows a spinner with the elapsed time. When output is
 piped, or `NO_COLOR` is set, or `TERM` is `dumb`, there is no colour, no cursor
 movement and no spinner, and the words `ok`, `FAIL` and `WARN` stand in for the
-glyphs, so a log from cron or CI reads cleanly.
+glyphs, so a log from cron or CI reads cleanly. A step that works through
+several things, Eg: the install line of `apply` without `--site`, names the one
+it has reached with `Step.Progress`: the text follows the title on the spinner
+line, is not part of the finished line, and prints nothing when output is
+piped, so a log gets one line for the step rather than one per change.
 
 Anything that asks on the terminal holds the spinner first (`ui.Hold`), since a
 frame clears the line it draws on and would erase the question. The sudo

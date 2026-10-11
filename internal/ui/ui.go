@@ -60,6 +60,11 @@ type Step interface {
 	End(m Mark, result string)
 	// Detail attaches a verbose line to this step.
 	Detail(format string, args ...any)
+	// Progress is what the open step is working on now, drawn after its
+	// title on the spinner line, Eg: the site a run over several sites has
+	// reached. Each call replaces the last. It is not part of the finished
+	// line, and output that draws nothing between lines prints nothing.
+	Progress(text string)
 }
 
 // Mark is how a step ended.
@@ -162,3 +167,4 @@ func (discardStep) Done(string)           {}
 func (discardStep) Fail(error)            {}
 func (discardStep) End(Mark, string)      {}
 func (discardStep) Detail(string, ...any) {}
+func (discardStep) Progress(string)       {}

@@ -8,7 +8,7 @@ import (
 
 // Event is one thing a Recorder was told.
 type Event struct {
-	Kind  string // section step done fail pending waiting warn note refuse detail trace result
+	Kind  string // section step done fail pending waiting progress warn note refuse detail trace result
 	Text  string // the title, hint or text
 	Extra string // a step's result, a warning's or note's detail, a refusal's explanation, a fail's error
 }
@@ -53,6 +53,7 @@ func (s *recStep) End(m Mark, result string) {
 	s.r.add(map[Mark]string{OK: "done", Failed: "fail", Pending: "pending", Waiting: "waiting"}[m], s.title, result)
 }
 func (s *recStep) Detail(f string, a ...any) { s.r.add("detail", fmt.Sprintf(f, a...), s.title) }
+func (s *recStep) Progress(text string)      { s.r.add("progress", text, s.title) }
 
 // Index is the position of the first event of kind whose Text contains text,
 // or -1.

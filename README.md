@@ -3182,8 +3182,8 @@ unit on top of it would fail on an interface that already exists.
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running
 stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
-deployment needs them, prints that plan, and with `--execute` runs them one
-after another in the same process, stopping at the first failure:
+deployment needs them, and with `--execute` runs them one after another in the
+same process, stopping at the first failure. The table is that order:
 
 | Phase | Command | When |
 |---|---|---|
@@ -3215,6 +3215,44 @@ the toolkit cannot generate (`secrets set`), and a DNS record pointing
 elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
+The output does not follow the phases. After `configuration` and `sudo` it has
+three sections: `prepare`, one line per site for its `host prepare`; `install`,
+one line for every step from founding to pass two, naming each site in the
+order the run first applies it; and `dns`. With `--execute` each prepare line
+is drawn as its step runs, and the install line's spinner names the site the
+run has reached:
+
+```
+prepare
+  ✓ home-a: 2.4s
+  ✓ home-b: 2.1s
+  ✓ vm: 1.8s
+  ✓ watch: 2.0s
+
+install
+  ⠹ vm, home-a, home-b, watch: home-b: 41s
+```
+
+It ends `✓ vm, home-a, home-b, watch: 3m12.0s`, or at a failure
+`✗ vm, home-a, home-b, watch: home-b`, and the stop that follows names the step
+and how to resume. While they run the steps print nothing of their own but
+their notes, what only the operator can do, which follow the line; their
+warnings are kept for `-v`. `-v` lists each step under the line, with its
+result and its own output:
+
+```
+install
+  ✓ vm, home-a, home-b, watch: 3m12.0s
+      ✓ apply --site vm: 22.0s
+      ✓ apply --site home-a: stopped for the other etcd members
+        home-a is waiting on home-b to start etcd.
+      ✓ apply --site home-b: 58.3s
+      ...
+```
+
+`dns init` reports as it does when typed, so a conflicting record it lists is
+on screen above the stop that asks for it to be changed.
+
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
 subnet and the secrets file reads but lacks a generated secret, it generates
 the missing ones into that file, as `init` would: only what is missing, nothing
@@ -3222,16 +3260,29 @@ overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
 what it wrote, never a value, and the closing line says the secrets were
 added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
-first. A `host prepare` line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog:
+first. A prepare line names each kind of change its site's plan makes, in the
+order docker, wireguard, firewall, ssh keys, watchdog. The install line is each
+of its steps' own dry run together: `✓` when every one is up to date, a dim `·`
+with `after prepare` (or `after init`) while a step waits on one that has not
+run, `○` when there is work, and `✗` naming the site when a step would refuse,
+with the refusal below it. A refusal outranks a wait, and a wait outranks work.
+`-v` lists each step under the line with its own status:
 
 ```
 configuration
   ✓ init: generated 4 secrets into secrets.enc.yaml (cluster.admin_password, cluster.standby_password, cluster.superuser_password and 1 more)
 
-hosts
-  ○ host prepare --site home-a: docker, wireguard, firewall, ssh keys, watchdog
-  ✓ host prepare --site vm
+prepare
+  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog
+  ✓ home-b
+  ✓ vm
+  ✓ watch
+
+install
+  · vm, home-a, home-b, watch: after prepare
+
+dns
+  ○ dns init: 2 records to create
 ...
 Nothing changed on the servers. Added 4 generated secrets to secrets.enc.yaml. Re-run with --execute to apply. ...
 ```

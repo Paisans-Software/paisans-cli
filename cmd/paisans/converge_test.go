@@ -22,11 +22,24 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// titles is the plan as "phase: title" lines.
+// stageLabels names each stage for a test's plan lines. The run shows none
+// of them: its sections are prepare, install and dns.
+var stageLabels = map[stage]string{
+	stageInit:     "configuration",
+	stagePrepare:  "hosts",
+	stageFounding: "founding",
+	stageJoining:  "joining",
+	stageOthers:   "other sites",
+	stageStorage:  "storage",
+	stagePassTwo:  "pass two",
+	stageDNS:      "dns",
+}
+
+// titles is the plan as "stage: title" lines.
 func titles(steps []convergeStep) []string {
 	var out []string
 	for _, s := range steps {
-		out = append(out, s.Phase+": "+s.Title)
+		out = append(out, stageLabels[s.Stage]+": "+s.Title)
 	}
 	return out
 }
@@ -128,7 +141,7 @@ func TestConvergeAppliesEachSiteOnceBeforePassTwo(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{})
 	seen := map[string]int{}
 	for _, s := range steps {
-		if s.Phase != "pass two" && len(s.Args) > 0 && s.Args[0] == "apply" {
+		if s.Stage != stagePassTwo && len(s.Args) > 0 && s.Args[0] == "apply" {
 			seen[s.Title]++
 		}
 	}
@@ -591,9 +604,8 @@ func TestConvergeSaysWhatInitIsFor(t *testing.T) {
 	if !st.NeedsInit || st.InitWhy != "no secrets file yet" {
 		t.Errorf("NeedsInit %t, why %q", st.NeedsInit, st.InitWhy)
 	}
-	steps := convergePlan(fixture(t), convergeState{NeedsInit: true, InitWhy: "no mesh subnet"})
-	if steps[0].Why != "no mesh subnet" {
-		t.Errorf("init's reason %q", steps[0].Why)
+	if got := initWhy(convergeState{NeedsInit: true, InitWhy: "no mesh subnet"}); got != "no mesh subnet" {
+		t.Errorf("init's reason %q", got)
 	}
 }
 
@@ -668,7 +680,7 @@ func TestConvergeReadsEachEtcdRecordInAStep(t *testing.T) {
 		}
 		sameLines(t, read, fixture(t).Etcd.Members)
 		findings, first := rec.Index("warn", ""), rec.Index("step", "etcd record")
-		plan := rec.Index("section", "hosts")
+		plan := rec.Index("section", "prepare")
 		if findings < 0 || !(findings < first && first < plan) {
 			t.Errorf("%v: findings at %d, first read at %d, plan at %d:\n%s", args, findings, first, plan, rec.Lines())
 		}
@@ -853,15 +865,32 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 }
 
 // statuses is each plan step's status as "mark title: result", in order,
-// from the events of the dry run's steps but the etcd reads.
+// from the events of the dry run's steps but the etcd reads: a prepare line
+// as the host prepare it checked, and the install line as the inner steps
+// it lists.
 func statuses(rec *ui.Recorder) []string {
 	var out []string
+	section := ""
 	for _, e := range rec.Events {
+		if e.Kind == "section" {
+			section = e.Text
+			continue
+		}
+		if section == "install" {
+			if e.Kind == "detail" && e.Extra != "" && !strings.HasPrefix(e.Text, " ") {
+				out = append(out, e.Text)
+			}
+			continue
+		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
 		if mark == "" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
-		line := mark + " " + e.Text
+		title := e.Text
+		if section == "prepare" {
+			title = "host prepare --site " + title
+		}
+		line := mark + " " + title
 		if e.Extra != "" {
 			line += ": " + e.Extra
 		}
@@ -919,9 +948,9 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		"· apply --site home-b: after host prepare --site home-b",
 		"· apply --site watch: after host prepare --site watch",
 		"· storage add: after host prepare --site home-b",
-		"· apply --site home-a: after apply --site home-a in founding",
+		"· apply --site home-a: after the earlier apply --site home-a",
 		"· apply --site home-b: after host prepare --site home-b",
-		"· apply --site vm: after apply --site vm in founding",
+		"· apply --site vm: after the earlier apply --site vm",
 		"· apply --site watch: after host prepare --site watch",
 		"○ dns init: 2 records to create",
 	})
@@ -988,19 +1017,6 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 	})
 	if !slices.Contains(*checked, "storage add") {
 		t.Errorf("storage add not checked: %v", *checked)
-	}
-}
-
-// -v says why each step is in the plan, under its line.
-func TestConvergeDryRunSaysWhyWhenVerbose(t *testing.T) {
-	fakeConverge(t, nil)
-	fakeChecks(t, nil)
-	rec := recordConverge(t)
-	if err := converge(t, "-v"); err != nil {
-		t.Fatal(err)
-	}
-	if i := rec.Index("detail", "a witness is founded first"); i < 0 || rec.Events[i].Extra != "apply --site vm" {
-		t.Errorf("no why under the witness's line:\n%s", rec.Lines())
 	}
 }
 
@@ -1173,8 +1189,8 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"○ apply --site home-b: 2 changes",
 				"✓ apply --site watch",
 				"· storage init --site home-a: after apply --site home-a",
-				"· apply --site home-a: after apply --site home-a in founding",
-				"· apply --site home-b: after apply --site home-b in founding",
+				"· apply --site home-a: after the earlier apply --site home-a",
+				"· apply --site home-b: after the earlier apply --site home-b",
 				"· apply --site vm: after storage init --site home-a",
 				"· apply --site watch: after storage init --site home-a",
 				"✓ dns init",
@@ -1211,7 +1227,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
 				"✓ apply --site vm",
-				"· apply --site watch: after apply --site watch in other sites",
+				"· apply --site watch: after the earlier apply --site watch",
 				"✓ dns init",
 			},
 		},
@@ -1226,10 +1242,10 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"· apply --site home-b: after apply --site vm",
 				"· apply --site watch: after apply --site vm",
 				"· storage add: after apply --site home-a",
-				"· apply --site home-a: after apply --site home-a in founding",
-				"· apply --site home-b: after apply --site home-b in founding",
-				"· apply --site vm: after apply --site vm in founding",
-				"· apply --site watch: after apply --site watch in founding",
+				"· apply --site home-a: after the earlier apply --site home-a",
+				"· apply --site home-b: after the earlier apply --site home-b",
+				"· apply --site vm: after the earlier apply --site vm",
+				"· apply --site watch: after the earlier apply --site watch",
 				"✓ dns init",
 			},
 		},
@@ -1369,13 +1385,16 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	pending := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "pending" && e.Text == "apply --site vm" })
+	pending := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "pending" && e.Text == fixtureSites })
+	inner := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
+		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "○ apply --site vm: 5 changes"
+	})
 	detail := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "apply --site vm" && e.Text == "! held back from this apply"
+		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "  ! held back from this apply"
 	})
 	note := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "note" && e.Text == "owed" })
-	if pending < 0 || detail < 0 || note < 0 || detail > pending || note < pending {
-		t.Errorf("pending %d, detail %d, note %d:\n%s", pending, detail, note, rec.Lines())
+	if pending < 0 || inner < 0 || detail != inner+1 || note < 0 || detail > pending || note < pending {
+		t.Errorf("pending %d, inner %d, detail %d, note %d:\n%s", pending, inner, detail, note, rec.Lines())
 	}
 }
 
@@ -1453,22 +1472,28 @@ func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 	if i < 0 {
 		t.Errorf("no explanation:\n%s", rec.Lines())
 	}
-	if f := rec.Index("fail", "host prepare --site watch"); f < 0 || f+1 != i {
+	if f := rec.Index("fail", "watch"); f < 0 || f+1 != i {
 		t.Errorf("the explanation does not follow the step's line:\n%s", rec.Lines())
 	}
 }
 
-// The founding stop's note is its hint and explanation, without a doubled
-// stop or a trailing blank.
-func TestTheFoundingNoteReadsCleanly(t *testing.T) {
+// The founding stop is expected, so it is no failure and no note: the
+// install line lists it as its inner step's result, and its reason under it,
+// without a doubled stop or a trailing blank.
+func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
 	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "home-a is waiting on home-b to start etcd.", Cause: apply.ErrFoundingWait}})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	i := rec.Index("note", "founding stop")
-	if i < 0 || rec.Events[i].Extra != "home-a is waiting on home-b to start etcd." {
-		t.Errorf("note:\n%s", rec.Lines())
+	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
+		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
+	})
+	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
+		t.Errorf("inner result:\n%s", rec.Lines())
+	}
+	if rec.Has("note", "founding") || rec.Has("fail", "") || !rec.Has("done", fixtureSites) {
+		t.Errorf("the founding stop read as a failure or a note:\n%s", rec.Lines())
 	}
 }
 
@@ -1733,7 +1758,7 @@ func TestAFailedChecksAdviceFollowsItsLine(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	fail := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "fail" && e.Text == "host prepare --site home-a" })
+	fail := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "fail" && e.Text == "home-a" })
 	if fail < 0 || fail+1 >= len(rec.Events) || rec.Events[fail+1] != (ui.Event{Kind: "explain", Text: "Remove it if not in use or run paisans init to pick a free subnet."}) {
 		t.Errorf("after the ✗ line:\n%s", rec.Lines())
 	}
