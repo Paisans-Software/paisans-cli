@@ -29,6 +29,8 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
+	// No test waits between two web server checks.
+	fakeWebServerClock()
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}

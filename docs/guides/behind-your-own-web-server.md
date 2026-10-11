@@ -206,7 +206,7 @@ certificate certbot has not obtained yet is the usual cause, and the warning
 names the `certbot certonly` command. An unchanged file is not written again
 and nothing is reloaded, unless the app's check then fails: apply validates
 again, in case you edited the configuration, reloads a server in a container
-and checks the app once more.
+and checks the app again.
 
 **A web server in a Docker container** is reloaded by apply once its
 configuration validates: gracefully, through `docker exec` (`caddy reload`,
@@ -467,10 +467,25 @@ failed its web server check: status`, rather than `Deployment complete.`, or
 use the app yet. Every step ran, so the exit status is
 still 0. What apply could not do on the host, such as reaching it over ssh to
 read the record of its site files, is a failure instead, `✗`, and the run
-exits 1. The check runs once, and once more after apply reloaded a server in a
-container: an app or certificate that has only just started can fail
-`certificate` or `sign in`, and `paisans web-server check` checks it again
-when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
+exits 1.
+
+A web server that has just taken in a site file, or been reloaded, may still
+be obtaining its certificate; Caddy refuses the name meanwhile, so
+`certificate` and `sign in` fail. Those two are checked again after 2, 4, 8
+and 16 seconds and then 30, a minute in all, and the line says what it waits
+for:
+
+```
+web server
+  ⠋ status: waiting for caddy's certificate: 14s
+```
+
+It passes as soon as every check does, `✓ status   status.example.org, after
+14s`, and after a minute fails on the last check's result. Waiting cannot fix
+a name that does not resolve or an app reachable around the web server, so
+those fail at once. A site file already in place and unchanged is checked
+once, and waited on only after apply reloaded a server in a container.
+`paisans web-server check` checks once, when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
 check --app status` until it passes.
 
 ## Afterwards

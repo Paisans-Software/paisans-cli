@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -594,6 +595,49 @@ func TestApplyReloadsAndChecksAgainWhenTheCheckFails(t *testing.T) {
 		t.Errorf("checked %d times, asked %v", checks, f.server.Asked)
 	}
 	if !rec.Has("done", "status") || !rec.Has("result", "Deployment complete.") {
+		t.Errorf("output:\n%s", rec.Lines())
+	}
+}
+
+// A site file just written and its Caddy just reloaded may leave Caddy still
+// obtaining the certificate, so the check waits for it, saying so. A site
+// file in place and unchanged is checked once, since this run changed
+// nothing to wait on, and only after the reload is waited on.
+func TestApplyWaitsForTheCertificateOfAReloadedServer(t *testing.T) {
+	fakeConverge(t, nil)
+	path := externalFixture(t)
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	waits := recordWaits(t)
+	checks := 0
+	saved := convergeWebServerCheck
+	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
+		checks++
+		if checks < 3 {
+			return tlsInternal["status"]
+		}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"}}
+	}
+	t.Cleanup(func() { convergeWebServerCheck = saved })
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	if checks != 3 || len(*waits) != 2 || !rec.Has("progress", "waiting for caddy's certificate") {
+		t.Errorf("checked %d times, waited %v:\n%s", checks, *waits, rec.Lines())
+	}
+
+	checks, *waits = 0, nil
+	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
+		checks++
+		return tlsInternal["status"]
+	}
+	f.server.Asked = nil
+	rec = recordConverge(t)
+	convergeAt(t, path, "--execute")
+	if !f.server.Ran("caddy reload") || checks != len(*waits)+2 || total(*waits) != time.Minute {
+		t.Errorf("checked %d times, waited %v, asked %v", checks, *waits, f.server.Asked)
+	}
+	if !rec.Has("warned", "status") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
