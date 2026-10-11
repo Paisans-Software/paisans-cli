@@ -274,6 +274,39 @@ func TestExampleValidates(t *testing.T) {
 	}
 }
 
+// The home sites example must validate with only the Garage warning its two
+// sites at replication 2 carry, and taking its second dialled voter away must
+// be refused: that witness is the reason the layout exists.
+func TestHomeSitesExampleValidates(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "home-sites.yaml"))
+	if err != nil {
+		t.Fatalf("loading the example: %v", err)
+	}
+	result := validate.Check(cfg)
+	if result.Refused() {
+		t.Fatalf("the example was refused: %v", result.Refusals())
+	}
+	var rules []string
+	for _, w := range result.Warnings() {
+		rules = append(rules, w.Rule)
+	}
+	if strings.Join(rules, ",") != "garage-two-sites-stop-uploads" {
+		t.Fatalf("unexpected warnings on the example: %v", result.Warnings())
+	}
+
+	vm2 := cfg.Sites["vm2"]
+	vm2.PublicAddress = ""
+	vm2.SSH.Host = "vm2.local"
+	cfg.Sites["vm2"] = vm2
+	refused := false
+	for _, f := range validate.Check(cfg).Refusals() {
+		refused = refused || f.Rule == "voters-share-a-relay"
+	}
+	if !refused {
+		t.Fatal("with vm2 not dialled, the example should be refused as voters-share-a-relay")
+	}
+}
+
 // One fixture per refusal must name its rule in the failure, because the
 // message is the only thing an operator sees.
 func TestRefusalMessagesAreActionable(t *testing.T) {

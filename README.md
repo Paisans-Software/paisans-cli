@@ -900,6 +900,8 @@ be reviewed by someone who cannot read the secrets.
 
 See [`examples/paisans.example.yaml`](examples/paisans.example.yaml) and
 [`examples/secrets.example.yaml`](examples/secrets.example.yaml).
+[`examples/home-sites.yaml`](examples/home-sites.yaml) is a smaller layout whose
+data sites are home connections nothing can dial.
 
 ### The config declares intent; etcd holds truth
 
@@ -1069,6 +1071,14 @@ port: `host prepare` opens it on the host, and a cloud provider's own firewall,
 where there is one, has to let it through as well. `validate` refuses an
 endpoint that is neither `host:port` nor `:port`, a port outside 1 to 65535, and
 a port alone on a site with no `public_address`.
+
+A deployment can keep its data on home connections that nothing can dial at
+all, with no static address, no dynamic DNS name and no forwarded port. The
+homes dial out, and the sites that are dialled are small VPSs: the gateway, and
+a second witness so that two of the three etcd voters are dialled (see *The
+voters that survive one loss must still dial each other*).
+[`examples/home-sites.yaml`](examples/home-sites.yaml) is that layout, with
+what it survives.
 
 ### Two deployments on one host never share a mesh
 
