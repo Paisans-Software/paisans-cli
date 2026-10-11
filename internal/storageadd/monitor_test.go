@@ -1,3 +1,7 @@
+//go:build !garage_integration
+
+// Fake-cluster tests of the monitor reseed, with the ones in storageadd_test.go.
+
 package storageadd_test
 
 import (
