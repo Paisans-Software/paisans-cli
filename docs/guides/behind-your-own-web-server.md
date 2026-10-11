@@ -91,9 +91,55 @@ which you add once:
 
 | Server | Add | Where |
 |---|---|---|
-| Caddy | `import /etc/caddy/paisans.d/*` | at the top level of the Caddyfile, outside every site block |
+| Caddy | `import /etc/caddy/paisans.d/*` | at the top level of the Caddyfile, after the global options block if it has one, outside every site block and snippet |
 | nginx | `include /etc/nginx/paisans.d/*.conf;` | inside the `http` block |
 | Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` | at the top level, beside the server's other includes |
+
+Caddy requires its global options block, the one that opens with `{` alone,
+to come first in the Caddyfile. Put the import after it:
+
+```
+{
+    email admin@example.org
+}
+
+import /etc/caddy/paisans.d/*
+
+example.org {
+    ...
+}
+```
+
+An import above the global options block works while the directory is empty,
+and once apply writes a site file, the site it imports comes ahead of the
+options and Caddy refuses the whole configuration with `server block without
+any key is global configuration, and if used, it must be first`. Apply reads
+the Caddyfile first, and for an import above the global options block, or
+one inside a site block or snippet, it writes nothing and warns with where to
+move the line:
+
+```
+web server
+  ! site file for status: caddy imports /etc/caddy/paisans.d above its global options block
+       Nothing was written. /opt/caddy/Caddyfile has:
+           import /etc/caddy/paisans.d/*
+       above its global options block, the block that opens with { alone.
+       Caddy requires that block to come first, so once a site file is in
+       the directory the site it holds comes ahead of the options, and Caddy
+       refuses the whole configuration: server block without any key is
+       global configuration, and if used, it must be first. Move the import
+       line to after the global options block:
+           {
+               email admin@example.org
+           }
+
+           import /etc/caddy/paisans.d/*
+
+           example.org {
+               ...
+           }
+       then run paisans apply --execute again.
+```
 
 The line must be a wildcard. If the directory is ever gone, a removed
 deployment or a cleanup by hand, Caddy's `import` of a glob, nginx's `include`
@@ -115,8 +161,19 @@ then apply again:
 web server
   ! site file for status: caddy does not include /etc/caddy/paisans.d
        Nothing was written. Add this line to /opt/caddy/Caddyfile, at the top
-       level of the Caddyfile, outside every site block, once:
+       level of the Caddyfile, after the global options block if it has one,
+       outside every site block and snippet, once:
            import /etc/caddy/paisans.d/*
+       as here:
+           {
+               email admin@example.org
+           }
+
+           import /etc/caddy/paisans.d/*
+
+           example.org {
+               ...
+           }
        then run paisans apply --execute again. It is a wildcard so that the
        server still starts, without the paisans sites, if the directory is ever
        gone.

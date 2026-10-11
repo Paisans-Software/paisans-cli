@@ -183,3 +183,13 @@ func TestEachSnippetRefusesEveryFormOfTheRefusedPaths(t *testing.T) {
 		}
 	}
 }
+
+// A site block pasted into a Caddyfile by hand goes where the toolkit's
+// import would: after the global options block, which Caddy requires first.
+func TestShowPlacesTheCaddySiteAfterTheGlobalOptions(t *testing.T) {
+	var buf bytes.Buffer
+	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{Server: webserver.ServerCaddy})
+	if !strings.Contains(buf.String(), "at the top level of the Caddyfile, after the global options block if it has one") {
+		t.Fatal(buf.String())
+	}
+}

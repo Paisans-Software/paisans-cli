@@ -180,15 +180,25 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	}
 	state, found, err := webserver.CheckInclude(h, ws, inc.Seen, name)
 	line, where := webserver.IncludeLine(ws.Server, inc.Seen)
+	example := webserver.IncludeExample(ws.Server, inc.Seen)
 	switch {
 	case err != nil:
 		return failed(err)
 	case state == webserver.IncludeMissing:
+		if example != "" {
+			example = "as here:\n\n" + example + "\n"
+		}
 		return warned(fmt.Sprintf("%s does not include %s", ws.Server, inc.Seen),
-			fmt.Sprintf("Nothing was written. Add this line to %s, %s, once:\n\n    %s\n\nthen run paisans apply --execute again. It is a wildcard so that the server still starts, without the paisans sites, if the directory is ever gone.\n%s", conf, where, line, optOut))
+			fmt.Sprintf("Nothing was written. Add this line to %s, %s, once:\n\n    %s\n\n%sthen run paisans apply --execute again. It is a wildcard so that the server still starts, without the paisans sites, if the directory is ever gone.\n%s", conf, where, line, example, optOut))
 	case state == webserver.IncludeRefused:
 		return warned(fmt.Sprintf("%s includes %s by a path, not a wildcard", ws.Server, inc.Seen),
 			fmt.Sprintf("Nothing was written. %s has:\n\n    %s\n\nand %s. Replace it with:\n\n    %s\n\nthen run paisans apply --execute again.", conf, found, webserver.RefusedWhy(ws.Server, found), line))
+	case state == webserver.IncludeAboveOptions:
+		return warned(fmt.Sprintf("%s imports %s above its global options block", ws.Server, inc.Seen),
+			fmt.Sprintf("Nothing was written. %s has:\n\n    %s\n\nabove its global options block, the block that opens with { alone. Caddy requires that block to come first, so once a site file is in the directory the site it holds comes ahead of the options, and Caddy refuses the whole configuration: server block without any key is global configuration, and if used, it must be first. Move the import line to after the global options block:\n\n%s\nthen run paisans apply --execute again.", conf, found, webserver.IncludeExample(ws.Server, inc.Seen)))
+	case state == webserver.IncludeInBlock:
+		return warned(fmt.Sprintf("%s imports %s inside a block", ws.Server, inc.Seen),
+			fmt.Sprintf("Nothing was written. %s has:\n\n    %s\n\ninside a block: a site, a snippet or the global options. The site files hold site blocks, which Caddy reads only at the top level, so it would refuse the whole configuration once one is in the directory. Move the import line out of every block, to the top level of the Caddyfile, after the global options block if it has one:\n\n%s\nthen run paisans apply --execute again.", conf, found, webserver.IncludeExample(ws.Server, inc.Seen)))
 	}
 	if dir.Unset() {
 		// Recorded only once the server is known to read it, so a
