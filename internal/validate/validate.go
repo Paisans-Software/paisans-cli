@@ -1663,7 +1663,7 @@ func (c *checker) watchdogOffOnDataSite() {
 		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
 			c.warn("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
 				"watchdog is off on a data site",
-				"is off on a site holding the data role. Patroni is rendered with PATRONI_WATCHDOG_MODE=off, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
+				"is off on a site holding the data role. patroni.env sets the watchdog mode to off inside SPILO_CONFIGURATION, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
 		}
 	}
 }

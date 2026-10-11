@@ -761,3 +761,27 @@ func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
 		}
 	}
 }
+
+// The watchdog warning names the mechanism that is actually rendered. Spilo
+// strips every PATRONI_* variable before it starts Patroni, so the mode is set
+// in SPILO_CONFIGURATION, and a warning that sent the operator looking for
+// PATRONI_WATCHDOG_MODE in patroni.env would send them looking for nothing.
+func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
+	result := validate.Check(load(t, "watchdog-off-on-data-site"))
+	found := false
+	for _, f := range result.Findings {
+		if f.Rule != "watchdog-off-on-data-site" {
+			continue
+		}
+		found = true
+		if !strings.Contains(f.Message, "SPILO_CONFIGURATION") {
+			t.Errorf("the warning does not name SPILO_CONFIGURATION: %s", f.Message)
+		}
+		if strings.Contains(f.Message, "PATRONI_WATCHDOG_MODE") {
+			t.Errorf("the warning names PATRONI_WATCHDOG_MODE, which Spilo never passes to Patroni: %s", f.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("the watchdog warning did not fire: %v", result.Findings)
+	}
+}
