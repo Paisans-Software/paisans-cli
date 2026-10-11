@@ -37,12 +37,12 @@ type Plan struct {
 	// HostSites names the sites whose Caddy mounts the host's own
 	// HostSitesDir, which apply creates there when it is missing.
 	HostSites map[string]bool
-	// CaddyImages is the reference each site running Caddy names in its
-	// infrastructure compose file, as the configuration decides it: the
-	// published image's major version tag, or acme.image. A tag here is not
-	// what a host runs. apply resolves it to the build it names while it
-	// plans, and pins that digest into the file with PinCaddyImage.
-	CaddyImages map[string]string
+	// Images is, for each site, every image reference its compose files name
+	// that the configuration decides: each app stack's images, and the
+	// gateway's Caddy image. A tag here is not what a host runs. apply
+	// resolves it to the build it names while it plans, and pins that digest
+	// into each line naming it with PinImages. See listImages.
+	Images map[string][]ComposeImage
 }
 
 // appPort is the port an application listens on inside its container. The
@@ -169,8 +169,6 @@ type planner struct {
 	// etcdInitial is how each etcd member was first started, by site, as
 	// read from its host. See EtcdInitialPath.
 	etcdInitial map[string]EtcdInitial
-	// caddyImages is Plan.CaddyImages, filled as each site renders.
-	caddyImages map[string]string
 }
 
 // Build produces the plan for a configuration. It assumes validation has
@@ -203,12 +201,16 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	return &Plan{Files: files, Deployment: cfg.Deployment(), HostSites: hostSites, CaddyImages: p.caddyImages}, nil
+	images, err := p.listImages(files)
+	if err != nil {
+		return nil, err
+	}
+	return &Plan{Files: files, Deployment: cfg.Deployment(), HostSites: hostSites, Images: images}, nil
 }
 
 // newPlanner is a planner with every site laid out and no app placed yet.
 func newPlanner(cfg *config.Config, secrets *config.Secrets) *planner {
-	p := &planner{cfg: cfg, secrets: secrets, mesh: cfg.Mesh.Subnet, sites: map[string]*siteView{}, caddyImages: map[string]string{}}
+	p := &planner{cfg: cfg, secrets: secrets, mesh: cfg.Mesh.Subnet, sites: map[string]*siteView{}}
 	for _, name := range cfg.SiteNames() {
 		site := cfg.Sites[name]
 		p.order = append(p.order, name)

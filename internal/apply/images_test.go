@@ -3,6 +3,7 @@ package apply_test
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,36 +17,96 @@ const (
 	buildA = "sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186"
 	buildB = "sha256:0c5a1ad0b7e4b2c6f0d3d0e5a2b9e8f7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1"
 
+	caddyTag     = "ghcr.io/paisans-software/caddy:2"
+	mbinTag      = "ghcr.io/example-org/mbin:v1.10.1-fork"
 	infraCompose = "/srv/paisans/f2a9/infra/compose.yaml"
+	talkCompose  = "/srv/paisans/f2a9/talk/compose.yaml"
 	manifestFile = "/srv/paisans/f2a9/.paisans-manifest.json"
 )
 
-// registry is a resolver that names one build for every tag, or fails.
+// registry is a fake resolver: each reference in digests names that build,
+// any other names digest, and a reference in fail, or every one when err is
+// set, cannot be resolved. versions answers Version, which makes it an
+// apply.Versioner.
 type registry struct {
-	digest string
-	err    error
-	asked  []string
+	digest   string
+	err      error
+	digests  map[string]string
+	fail     map[string]error
+	versions map[string]string
+	asked    []string
 }
 
 func (r *registry) Digest(ref string) (string, error) {
 	r.asked = append(r.asked, ref)
-	return r.digest, r.err
+	if err := r.fail[ref]; err != nil {
+		return "", err
+	}
+	if r.err != nil {
+		return "", r.err
+	}
+	if d, ok := r.digests[ref]; ok {
+		return d, nil
+	}
+	return r.digest, nil
 }
 
-func manifestCaddy(t *testing.T, host *fakeHost) *render.ManifestCaddy {
+func (r *registry) Version(ref string) (string, error) {
+	return r.versions[ref], nil
+}
+
+// caddyAt is a registry naming caddy for Caddy's tag and buildA for every
+// other image, so a test moves the gateway alone.
+func caddyAt(caddy string) *registry {
+	return &registry{digest: buildA, digests: map[string]string{caddyTag: caddy}}
+}
+
+func (r *registry) times(ref string) int {
+	n := 0
+	for _, asked := range r.asked {
+		if asked == ref {
+			n++
+		}
+	}
+	return n
+}
+
+func manifestPins(t *testing.T, host *fakeHost) []render.ManifestPin {
 	t.Helper()
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(host.files[manifestFile]), &m); err != nil {
 		t.Fatal(err)
 	}
-	return m.Caddy
+	return m.Pins
 }
 
-// gatewayAt applies the fixture's gateway with the registry naming build.
+func manifestPin(t *testing.T, host *fakeHost, stack, service string) *render.ManifestPin {
+	t.Helper()
+	for _, pin := range manifestPins(t, host) {
+		if pin.Stack == stack && pin.Service == service {
+			return &pin
+		}
+	}
+	return nil
+}
+
+func manifestCaddy(t *testing.T, host *fakeHost) *render.ManifestPin {
+	t.Helper()
+	return manifestPin(t, host, "infra", "caddy")
+}
+
+// gatewayAt applies the fixture's gateway with the registry naming build for
+// Caddy and buildA for everything else.
 func gatewayAt(t *testing.T, build string) *fakeHost {
 	t.Helper()
+	return siteAt(t, "vm", caddyAt(build))
+}
+
+// siteAt applies one site of the fixture with r resolving its images.
+func siteAt(t *testing.T, site string, r apply.Resolver) *fakeHost {
+	t.Helper()
 	host := newHost()
-	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: build}))
+	p, err := apply.Build(site, plan(t), acmeModule(t), host, apply.ResolveImages(r))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,22 +117,33 @@ func gatewayAt(t *testing.T, build string) *fakeHost {
 	return host
 }
 
+func pinOf(p *apply.Plan, stack, image string) *apply.ImagePin {
+	for i := range p.Pins {
+		if p.Pins[i].Stack == stack && p.Pins[i].Image == image {
+			return &p.Pins[i]
+		}
+	}
+	return nil
+}
+
+func mbinPin(p *apply.Plan) *apply.ImagePin { return pinOf(p, "talk", mbinTag) }
+
 // The configuration names Caddy by a tag that moves, and the host is handed
 // the build that tag named when apply planned, with the record of it.
 func TestTheCaddyTagIsPinnedToTheBuildItNames(t *testing.T) {
 	defer apply.SetNow(func() time.Time { return time.Date(2026, 10, 11, 17, 0, 0, 0, time.UTC) })()
 	host := newHost()
-	digests := &registry{digest: buildA}
+	digests := caddyAt(buildA)
 	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(digests))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(digests.asked) != 1 || digests.asked[0] != "ghcr.io/paisans-software/caddy:2" {
+	if digests.times(caddyTag) != 1 {
 		t.Fatalf("the registry was asked about %v, want the published tag once", digests.asked)
 	}
-	want := "ghcr.io/paisans-software/caddy:2@" + buildA
-	if p.Caddy == nil || p.Caddy.Reference != want || p.Caddy.Source != "registry" {
-		t.Fatalf("planned %+v, want %s from the registry", p.Caddy, want)
+	want := caddyTag + "@" + buildA
+	if c := p.Caddy(); c == nil || c.Reference != want || c.Source != "registry" {
+		t.Fatalf("planned %+v, want %s from the registry", c, want)
 	}
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
@@ -80,7 +152,7 @@ func TestTheCaddyTagIsPinnedToTheBuildItNames(t *testing.T) {
 		t.Errorf("the compose file does not name the build:\n%s", host.files[infraCompose])
 	}
 	got := manifestCaddy(t, host)
-	if got == nil || *got != (render.ManifestCaddy{Image: "ghcr.io/paisans-software/caddy:2", Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
+	if got == nil || *got != (render.ManifestPin{Stack: "infra", Service: "caddy", Image: caddyTag, Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
 		t.Errorf("the manifest records %+v", got)
 	}
 
@@ -107,7 +179,7 @@ func TestTheCaddyTagIsPinnedToTheBuildItNames(t *testing.T) {
 // the plan says which build replaces which.
 func TestANewBuildIsAPlannedGatewayChange(t *testing.T) {
 	host := gatewayAt(t, buildA)
-	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildB}))
+	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(caddyAt(buildB)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +190,11 @@ func TestANewBuildIsAPlannedGatewayChange(t *testing.T) {
 	if !p.GatewayChanging || p.ACMEModule == "" {
 		t.Fatal("a new Caddy build is not checked as a gateway change")
 	}
-	if !p.Caddy.Moved() {
+	if !p.Caddy().Moved() {
 		t.Error("the plan does not call a new digest a move")
+	}
+	if moved := p.Moved(); len(moved) != 1 || moved[0].Stack != "infra" {
+		t.Errorf("the plan lists %+v as moved", moved)
 	}
 	var said bool
 	for _, n := range p.Notes {
@@ -136,7 +211,7 @@ func TestANewBuildIsAPlannedGatewayChange(t *testing.T) {
 	if !host.ran("list-modules") {
 		t.Error("the new build was not checked for its DNS module")
 	}
-	if got := manifestCaddy(t, host); got == nil || got.Reference != "ghcr.io/paisans-software/caddy:2@"+buildB {
+	if got := manifestCaddy(t, host); got == nil || got.Reference != caddyTag+"@"+buildB {
 		t.Errorf("the manifest records %+v after the move", got)
 	}
 }
@@ -152,12 +227,12 @@ func TestAnUnreachableRegistryKeepsTheDeployedBuild(t *testing.T) {
 	if len(p.Writes()) != 0 {
 		t.Fatalf("an unreachable registry moved %v", p.Writes())
 	}
-	if p.Caddy == nil || p.Caddy.Source != "deployed" || p.Caddy.Reference != "ghcr.io/paisans-software/caddy:2@"+buildA {
-		t.Fatalf("planned %+v, want the deployed build kept", p.Caddy)
+	if c := p.Caddy(); c == nil || c.Source != "deployed" || c.Reference != caddyTag+"@"+buildA {
+		t.Fatalf("planned %+v, want the deployed build kept", c)
 	}
 	var warned bool
 	for _, n := range p.Notes {
-		if n.Hint != "" && strings.Contains(n.Text, "no route to host") {
+		if n.Hint != "" && strings.Contains(n.Text, "no route to host") && strings.Contains(n.Text, caddyTag) {
 			warned = true
 		}
 	}
@@ -169,11 +244,12 @@ func TestAnUnreachableRegistryKeepsTheDeployedBuild(t *testing.T) {
 // With nothing deployed to keep, an unresolved tag would be written as it is
 // and never move again, so the plan stops instead.
 func TestAnUnreachableRegistryWithNothingDeployedStops(t *testing.T) {
-	_, err := apply.Build("vm", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{err: errors.New("dial tcp: no route to host")}))
+	r := &registry{digest: buildA, fail: map[string]error{caddyTag: errors.New("dial tcp: no route to host")}}
+	_, err := apply.Build("vm", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r))
 	if err == nil {
 		t.Fatal("a gateway was planned with an unresolved Caddy tag")
 	}
-	for _, want := range []string{"ghcr.io/paisans-software/caddy:2", "no route to host", "acme.image"} {
+	for _, want := range []string{caddyTag, "no route to host", "acme.image"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q:\n%v", want, err)
 		}
@@ -202,22 +278,248 @@ func TestADeclaredDigestIsNotResolved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(digests.asked) != 0 {
+	if digests.times(image) != 0 || digests.times(caddyTag) != 0 {
 		t.Errorf("the registry was asked about %v", digests.asked)
 	}
-	if p.Caddy == nil || p.Caddy.Reference != image || p.Caddy.Source != "configured" {
-		t.Errorf("planned %+v", p.Caddy)
+	if c := p.Caddy(); c == nil || c.Reference != image || c.Source != "configured" {
+		t.Errorf("planned %+v", c)
 	}
 }
 
-// A site running no Caddy has no image to resolve.
-func TestASiteWithoutCaddyAsksNothing(t *testing.T) {
+// A site running no Caddy has no Caddy image to resolve.
+func TestASiteWithoutCaddyAsksNothingAboutCaddy(t *testing.T) {
 	digests := &registry{digest: buildA}
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(digests))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(digests.asked) != 0 || p.Caddy != nil {
-		t.Errorf("a site without Caddy asked %v and planned %+v", digests.asked, p.Caddy)
+	if digests.times(caddyTag) != 0 || p.Caddy() != nil {
+		t.Errorf("a site without Caddy asked %v and planned %+v", digests.asked, p.Caddy())
+	}
+}
+
+// An app's image named by a tag is pinned on every line naming it: Mbin's
+// application and its messenger consumers run one image, and run one build
+// of it. Each service the configuration names is recorded.
+func TestAnAppTagIsPinnedOnEveryLineNamingIt(t *testing.T) {
+	defer apply.SetNow(func() time.Time { return time.Date(2026, 10, 11, 17, 0, 0, 0, time.UTC) })()
+	host := newHost()
+	digests := &registry{digest: buildA}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(digests))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digests.times(mbinTag) != 1 {
+		t.Errorf("the registry was asked about Mbin's tag %d times, want once", digests.times(mbinTag))
+	}
+	pin := mbinPin(p)
+	want := mbinTag + "@" + buildA
+	if pin == nil || pin.Reference != want || pin.Source != "registry" || strings.Join(pin.Services, ",") != "app" {
+		t.Fatalf("planned %+v", pin)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	compose := host.files[talkCompose]
+	if n := strings.Count(compose, "    image: "+want+"\n"); n != 2 {
+		t.Errorf("the build is named on %d lines, want the app's and the messenger's:\n%s", n, compose)
+	}
+	if strings.Contains(compose, "image: "+mbinTag+"\n") {
+		t.Error("a line still names the bare tag")
+	}
+	if got := manifestPin(t, host, "talk", "app"); got == nil || *got != (render.ManifestPin{Stack: "talk", Service: "app", Image: mbinTag, Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
+		t.Errorf("the manifest records %+v", got)
+	}
+	// The gate's two keys share one image, and are recorded apart.
+	for _, service := range []string{"members", "provisional"} {
+		if got := manifestPin(t, host, "gate", service); got == nil || got.Reference != "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@"+buildA {
+			t.Errorf("the gate's %s is recorded as %+v", service, got)
+		}
+	}
+}
+
+// An app image declared with a digest is that build, untouched.
+func TestADeclaredAppDigestIsLeftAlone(t *testing.T) {
+	image := "ghcr.io/example-org/mbin@" + buildB
+	rendered := planWith(t, func(cfg *config.Config) {
+		app := cfg.Apps["talk"]
+		app.Images = map[string]string{"app": image}
+		cfg.Apps["talk"] = app
+	})
+	digests := &registry{digest: buildA}
+	host := newHost()
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.ResolveImages(digests))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digests.times(image) != 0 {
+		t.Errorf("a digest was resolved: %v", digests.asked)
+	}
+	pin := pinOf(p, "talk", image)
+	if pin == nil || pin.Reference != image || pin.Source != "configured" {
+		t.Errorf("planned %+v", pin)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(host.files[talkCompose], "    image: "+image+"\n"); n != 2 {
+		t.Errorf("the declared digest is named on %d lines", n)
+	}
+}
+
+// An app whose registry cannot be reached keeps the build it runs; a new
+// stack, which runs none, is refused.
+func TestAnUnreachableRegistryKeepsAnAppsBuildAndRefusesANewOne(t *testing.T) {
+	host := siteAt(t, "home-a", &registry{digest: buildA})
+	down := &registry{err: errors.New("dial tcp: no route to host")}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(down))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Writes()) != 0 {
+		t.Fatalf("an unreachable registry moved %v", p.Writes())
+	}
+	if pin := mbinPin(p); pin == nil || pin.Source != "deployed" || pin.Reference != mbinTag+"@"+buildA {
+		t.Errorf("planned %+v, want the deployed build kept", pin)
+	}
+
+	_, err = apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildA, fail: map[string]error{mbinTag: errors.New("dial tcp: no route to host")}}))
+	if err == nil {
+		t.Fatal("a new Mbin stack was planned with an unresolved tag")
+	}
+	for _, want := range []string{mbinTag, "no route to host", "apps.talk.images.app"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%v", want, err)
+		}
+	}
+}
+
+// A clustered app runs on home-a and home-b. An apply of home-a alone keeps
+// it on the build home-b runs, and says a newer one exists, even on a home-a
+// that runs none yet.
+func TestASiteApplyHoldsAMultiSiteAppOnItsDeployedBuild(t *testing.T) {
+	homeB := siteAt(t, "home-b", &registry{digest: buildA})
+	peer := apply.PeerCompose{Site: "home-b", Stack: "talk", Content: homeB.files[talkCompose], Found: true}
+
+	for name, host := range map[string]*fakeHost{"deployed": siteAt(t, "home-a", &registry{digest: buildA}), "new": newHost()} {
+		t.Run(name, func(t *testing.T) {
+			p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildB}), apply.OtherSites(peer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pin := mbinPin(p)
+			if pin == nil || pin.Reference != mbinTag+"@"+buildA || pin.Source != "held" {
+				t.Fatalf("planned %+v, want the build home-b runs", pin)
+			}
+			var said bool
+			for _, n := range p.Notes {
+				if n.Hint != "" && strings.Contains(n.Text, "home-b") && strings.Contains(n.Text, buildB) && strings.Contains(n.Text, "without --site") {
+					said = true
+				}
+			}
+			if !said {
+				t.Errorf("no warning says the app stays and a newer build exists: %+v", p.Notes)
+			}
+			// An app with no other site in the plan's word moves as usual.
+			if docs := pinOf(p, "docs", "outlinewiki/outline:1.10.0"); docs == nil || !strings.HasSuffix(docs.Reference, buildB) {
+				t.Errorf("docs planned %+v", docs)
+			}
+		})
+	}
+
+	// No site runs it yet: it is resolved like any image.
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildB}), apply.OtherSites(apply.PeerCompose{Site: "home-b", Stack: "talk"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin := mbinPin(p); pin == nil || pin.Reference != mbinTag+"@"+buildB || pin.Source != "registry" {
+		t.Errorf("a first deployment planned %+v", pin)
+	}
+}
+
+// Sites that already run different builds of a clustered app are refused,
+// naming each site's build. Every image of the app's stack is held together,
+// so the first one the file lists is the one named.
+func TestDisagreeingSitesRefuse(t *testing.T) {
+	homeB := siteAt(t, "home-b", &registry{digest: buildB})
+	homeA := siteAt(t, "home-a", &registry{digest: buildA})
+	peer := apply.PeerCompose{Site: "home-b", Stack: "talk", Content: homeB.files[talkCompose], Found: true}
+	_, err := apply.Build("home-a", plan(t), acmeModule(t), homeA, apply.ResolveImages(&registry{digest: buildA}), apply.OtherSites(peer))
+	if err == nil {
+		t.Fatal("sites running two builds of one app were planned")
+	}
+	for _, want := range []string{"home-a runs ", "@" + buildA + ";", "home-b runs ", "@" + buildB, "without --site"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%v", want, err)
+		}
+	}
+}
+
+// A peer that cannot be read is left out with a warning when this site runs
+// a build to stay on, and refuses a site that runs none.
+func TestAnUnreadablePeer(t *testing.T) {
+	peer := apply.PeerCompose{Site: "home-b", Stack: "talk", Err: errors.New("ssh: connect: no route to host")}
+	host := siteAt(t, "home-a", &registry{digest: buildA})
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildB}), apply.OtherSites(peer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin := mbinPin(p); pin == nil || pin.Reference != mbinTag+"@"+buildA || pin.Source != "held" {
+		t.Errorf("planned %+v, want home-a's own build kept", pin)
+	}
+	if _, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildB}), apply.OtherSites(peer)); err == nil || !strings.Contains(err.Error(), "home-b") {
+		t.Errorf("a new site beside an unreadable one was planned: %v", err)
+	}
+}
+
+// The dry run's line for a moved image names the app, the service, the
+// reference as configured and both builds, by version where the build has
+// a label.
+func TestAMovedImageIsDescribedWithItsVersions(t *testing.T) {
+	host := siteAt(t, "home-a", &registry{digest: buildA})
+	r := &registry{digest: buildA, digests: map[string]string{mbinTag: buildB}, versions: map[string]string{
+		mbinTag + "@" + buildA: "1.15.0-paisans",
+		mbinTag + "@" + buildB: "1.16.0-paisans",
+	}}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := p.Moved()
+	if len(moved) != 1 {
+		t.Fatalf("moved %+v, want Mbin alone", moved)
+	}
+	want := "talk  app  " + mbinTag + "  1.15.0-paisans (sha256:b401d1cb1807) -> 1.16.0-paisans (sha256:0c5a1ad0b7e4)"
+	if got := moved[0].Describe(); got != want {
+		t.Errorf("described as\n%s\nwant\n%s", got, want)
+	}
+	// Without labels, the digests alone.
+	moved[0].Version, moved[0].DeployedVersion = "", ""
+	if got := moved[0].Describe(); got != "talk  app  "+mbinTag+"  sha256:b401d1cb1807 -> sha256:0c5a1ad0b7e4" {
+		t.Errorf("described as %s", got)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(manifestPins(t, host), func(m render.ManifestPin) bool {
+		return m.Stack == "talk" && m.Reference == mbinTag+"@"+buildB
+	}) {
+		t.Errorf("the manifest does not record the move: %+v", manifestPins(t, host))
+	}
+}
+
+// ReadPeers reads the app's compose file on each other site, saying which
+// have none.
+func TestReadPeersReadsEachSitesComposeFile(t *testing.T) {
+	homeB := siteAt(t, "home-b", &registry{digest: buildA})
+	peers := apply.ReadPeers(plan(t).Deployment, "talk", map[string]apply.Transport{"home-b": homeB, "home-c": newHost()})
+	if len(peers) != 2 || peers[0].Site != "home-b" || peers[1].Site != "home-c" {
+		t.Fatalf("read %+v", peers)
+	}
+	if !peers[0].Found || peers[0].Content != homeB.files[talkCompose] || peers[0].Stack != "talk" {
+		t.Errorf("home-b read as %+v", peers[0])
+	}
+	if peers[1].Found || peers[1].Err != nil {
+		t.Errorf("home-c, which runs nothing, read as %+v", peers[1])
 	}
 }

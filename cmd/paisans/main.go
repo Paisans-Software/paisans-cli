@@ -714,6 +714,17 @@ func runApply(args []string) error {
 		return err
 	}
 	options := []apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}
+	// An app this site shares with others stays on the build they run,
+	// unless the apply plans them all. As a step of apply without --site (a
+	// checkReporter) it does, and every site resolves through the run's one
+	// cache, so none is read here.
+	if _, step := r.(checkReporter); !step {
+		peers, err := readPeers(r, cfg, *site, only, *sudo)
+		if err != nil {
+			return err
+		}
+		options = append(options, apply.OtherSites(peers...))
+	}
 	// On a shared host an image the toolkit renders (caddy, postgres) may
 	// be what a foreign project runs from, so none is removed.
 	if *keepImages || host.Shared() {
@@ -868,6 +879,36 @@ func runApply(args []string) error {
 	return siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
 }
 
+// readPeers reads, for each app site runs that runs on other sites as well,
+// its compose file on each of them, for apply.OtherSites: an apply of one
+// site keeps a clustered app on the build its other sites run. With only, it
+// reads the apps named there alone, since no other stack moves. A site that
+// cannot be read is reported to Build, which decides what that means for the
+// app, rather than stopping here.
+func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string, sudo bool) ([]apply.PeerCompose, error) {
+	sites := render.AppSites(cfg)
+	var peers []apply.PeerCompose
+	for _, app := range cfg.AppNames() {
+		if !contains(sites[app], site) || len(sites[app]) < 2 || (len(only) > 0 && !contains(only, app)) {
+			continue
+		}
+		others := map[string]apply.Transport{}
+		for _, name := range sites[app] {
+			if name != site {
+				others[name] = siteTransport(name, cfg.Sites[name], "", sudo)
+			}
+		}
+		read, err := ui.Get(r, "read "+app+" on its other sites", func() ([]apply.PeerCompose, error) {
+			return apply.ReadPeers(cfg.Deployment(), app, others), nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, read...)
+	}
+	return peers, nil
+}
+
 // siteApplied is how apply --site --execute ends once site's stacks are up:
 // the web server step for the apps served by site's web server, when it has
 // managed_by: external, reaching site as the apply did, then the result, or
@@ -923,26 +964,27 @@ func checkStandby(r ui.Reporter, cfg *config.Config, plan *apply.Plan, site stri
 	return nil
 }
 
-// caddyDigests is what resolves the gateway's Caddy tag to the build it names
-// while apply plans; see apply.ResolveImages. Tests replace it, so that none
-// reaches a registry.
-var caddyDigests apply.Resolver = imagedigest.Registry{}
+// imageDigests is what resolves the tags images are named by (each app's,
+// and the gateway's Caddy) to the builds they name while apply plans; see
+// apply.ResolveImages. Tests replace it, so that none reaches a registry.
+var imageDigests apply.Resolver = imagedigest.Registry{}
 
-// cacheDigests puts an imagedigest.Cache in front of caddyDigests for the
+// cacheDigests puts an imagedigest.Cache in front of imageDigests for the
 // rest of an apply, and returns what puts it back. Every plan the apply makes
-// then names the build its first plan resolved Caddy's tag to: without
-// --site that is the pull stage's plan of each site, then each site's apply
-// and pass two, and with it each pass of the one site's apply. An apply run
-// as a step of another finds the cache in place and keeps it, so the whole
-// run shares one. Tests that replace caddyDigests still decide what it
-// answers; the cache only stops it answering twice.
+// then names the build its first plan resolved each tag to: without --site
+// that is the pull stage's plan of each site, then each site's apply and pass
+// two, so every site of a clustered app moves to one build; with it, each
+// pass of the one site's apply. An apply run as a step of another finds the
+// cache in place and keeps it, so the whole run shares one. Tests that
+// replace imageDigests still decide what it answers; the cache only stops it
+// answering twice.
 func cacheDigests() (restore func()) {
-	if _, cached := caddyDigests.(*imagedigest.Cache); cached {
+	if _, cached := imageDigests.(*imagedigest.Cache); cached {
 		return func() {}
 	}
-	saved := caddyDigests
-	caddyDigests = imagedigest.Cached(saved)
-	return func() { caddyDigests = saved }
+	saved := imageDigests
+	imageDigests = imagedigest.Cached(saved)
+	return func() { imageDigests = saved }
 }
 
 // planSiteApply is everything apply decides for one site, without doing any
@@ -950,6 +992,10 @@ func cacheDigests() (restore func()) {
 // and the databases it bootstraps. `storage rotate-key` switches an app with
 // exactly this, scoped by apply.Only, so a rotation's switch is the apply an
 // operator would have typed rather than a second path to the same host.
+//
+// Images are resolved through imageDigests unless options say otherwise: they
+// follow it, so a caller's apply.ResolveImages(nil) keeps every deployed
+// build.
 func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
 	// An etcd member keeps the flags it was born with, read from its host,
 	// so that etcd.members growing never changes a running member's compose
@@ -968,7 +1014,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append(options, apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(caddyDigests))
+	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests)}, options...)
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err

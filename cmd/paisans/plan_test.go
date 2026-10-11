@@ -129,3 +129,30 @@ func TestListPlanPlainMarksStepsTodo(t *testing.T) {
 		t.Errorf("a step is a padded item:\n%s", out)
 	}
 }
+
+// A dry run names each image whose build moves, with the versions and the
+// digests it goes between, at every verbosity; an image that stays is not
+// listed.
+func TestListPlanNamesEachMovedImage(t *testing.T) {
+	const (
+		old = "sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+		new = "sha256:3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
+		tag = "ghcr.io/paisans-software/mbin:stack-1"
+	)
+	plan := &apply.Plan{
+		Site: "home-a", Transport: "ubuntu@192.0.2.10",
+		Pins: []apply.ImagePin{
+			{Stack: "talk", App: "talk", Services: []string{"app"}, Image: tag, Reference: tag + "@" + new, Deployed: tag + "@" + old, Source: "registry", Version: "1.16.0-paisans", DeployedVersion: "1.15.0-paisans"},
+			{Stack: "talk", App: "talk", Services: []string{"valkey"}, Image: "docker.io/valkey/valkey:9.1.2-trixie", Reference: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Deployed: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Source: "registry"},
+		},
+	}
+	rec := &ui.Recorder{}
+	listPlan(rec, plan)
+	want := "talk  app  " + tag + "  1.15.0-paisans (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)"
+	if !rec.Has("pending", want) {
+		t.Errorf("the moved image is not listed as %q:\n%s", want, rec.Lines())
+	}
+	if strings.Contains(rec.Lines(), "valkey") {
+		t.Errorf("an image that stays is listed:\n%s", rec.Lines())
+	}
+}

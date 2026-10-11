@@ -57,6 +57,14 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 		}
 	}
 
+	// Each image whose build this apply changes, with the builds it goes
+	// between, at every verbosity: a tag that moved (a fork's channel
+	// promoted, Caddy rebuilt) shows here as the release it brings.
+	for _, pin := range plan.Moved() {
+		r.Step(pin.Describe()).End(ui.Pending, "")
+		r.Detail("%s's compose file names %s, and the stack is replaced and health gated as for any new image", pin.Stack, pin.Reference)
+	}
+
 	var unchanged int
 	var writes []string
 	for _, change := range plan.Changes {
