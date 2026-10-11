@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -253,9 +254,12 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// A dry run's checks are each step's own dry run, which reaches a host;
 	// here every step is up to date. fakeChecks says otherwise.
 	convergeCheck = func(ui.Reporter, []string) (string, []checkReport, error) { return "", nil, nil }
-	// Asking Pocket ID for an admin reaches a host too; here it has none.
-	// fakeAdminCheck says otherwise.
+	// Asking Pocket ID for an admin reaches a host too; here it has none,
+	// and every declared admin has registered. fakeAdminCheck and
+	// fakeDeclaredAdmins say otherwise.
 	fakeAdminCheck(t, false, nil)
+	fakeDeclaredAdmins(t, registered)
+	fakeEmailFailures(t, nil, nil)
 	// An app's ingress is checked from this machine; here every check
 	// passes. fakeIngressCheck says otherwise.
 	fakeIngressCheck(t, nil)
@@ -523,7 +527,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase))...))
 }
 
-// The dry run names what only the operator can do.
+// The dry run names what is left, the declared admins among it.
 func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	fakeConverge(t, nil)
 	out := ""
@@ -533,7 +537,7 @@ func TestConvergeSaysWhatIsLeft(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, want := range []string{"app admin create"} {
+	for _, want := range []string{"alice on auth"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("does not say %q:\n%s", want, out)
 		}
@@ -1065,7 +1069,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "pocket id" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
@@ -1829,29 +1833,86 @@ func adminNotes(rec *ui.Recorder) []string {
 
 const authAdminCommand = "paisans app admin create --app auth --username <name> --email <address>"
 
-// A dry run in which a step that brings Pocket ID up is not up to date names
-// no admin, and does not ask: the app is not running yet.
-func TestConvergeDryRunNamesNoAdminBeforePocketIDRuns(t *testing.T) {
+// fakeDeclaredAdmins replaces making a declared admin: answer gives the
+// outcome for each app and admin. It returns the calls, as "app/id", with
+// "!" after one that executes.
+func fakeDeclaredAdmins(t *testing.T, answer func(app, id string, execute bool) (declaredAdmin, error)) *[]string {
+	t.Helper()
+	var asked []string
+	saved := convergeDeclaredAdmin
+	convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredAdmin, error) {
+		call := app + "/" + id
+		if execute {
+			call += "!"
+		}
+		asked = append(asked, call)
+		d, err := answer(app, id, execute)
+		d.App, d.ID, d.Email = app, id, cfg.Admins[id].Email
+		return d, err
+	}
+	t.Cleanup(func() { convergeDeclaredAdmin = saved })
+	return &asked
+}
+
+// registered is an admin who has a passkey: nothing to do.
+func registered(string, string, bool) (declaredAdmin, error) { return declaredAdmin{}, nil }
+
+// unregistered is an admin with no account yet: created, linked, and emailed
+// when emailed is set.
+func unregistered(emailed bool) func(string, string, bool) (declaredAdmin, error) {
+	return func(_, id string, execute bool) (declaredAdmin, error) {
+		d := declaredAdmin{Titles: []string{"create administrator " + id, "issue login link for " + id}}
+		if execute {
+			d.Created, d.Link, d.ExpiresIn, d.Emailed = true, "https://id.example.org/lc/tok-not-real-"+id, adminLinkTTL, emailed
+		}
+		return d, nil
+	}
+}
+
+// fakeEmailFailures replaces reading Pocket ID's log: it answers failed, by
+// address, and returns the addresses asked about.
+func fakeEmailFailures(t *testing.T, failed map[string]string, err error) *[]string {
+	t.Helper()
+	var asked []string
+	saved := convergeEmailFailures
+	convergeEmailFailures = func(_ *config.Config, _ string, _ convergeOptions, addresses []string) (map[string]string, error) {
+		asked = append(asked, addresses...)
+		return failed, err
+	}
+	t.Cleanup(func() { convergeEmailFailures = saved })
+	return &asked
+}
+
+// recordLinks captures what is printed as login links.
+func recordLinks(t *testing.T) *strings.Builder {
+	t.Helper()
+	var b strings.Builder
+	saved := loginLinkOut
+	loginLinkOut = &b
+	t.Cleanup(func() { loginLinkOut = saved })
+	return &b
+}
+
+// A dry run in which a step that brings Pocket ID up is not up to date asks
+// nothing about its admins: the app is not running yet.
+func TestConvergeDryRunAsksNoAdminBeforePocketIDRuns(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{"apply --site home-b": "2 changes"})
-	asked := fakeAdminCheck(t, false, nil)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 0 {
-		t.Errorf("asked %v for an admin", *asked)
-	}
-	if notes := adminNotes(rec); len(notes) != 0 || rec.Has("step", "for an admin") {
-		t.Errorf("named an admin:\n%s", rec.Lines())
+	if len(*asked) != 0 || rec.Has("step", "alice on auth") {
+		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
 	}
 }
 
-// Init with work is a step that brings Pocket ID up, so no admin is named.
-func TestConvergeDryRunNamesNoAdminWhileInitHasWork(t *testing.T) {
+// Init with work is a step that brings Pocket ID up, so nothing is asked.
+func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	asked := fakeAdminCheck(t, false, nil)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	saved := convergeRead
 	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
 		cfg, st, err := readConvergeState(c, s)
@@ -1863,66 +1924,160 @@ func TestConvergeDryRunNamesNoAdminWhileInitHasWork(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 0 || len(adminNotes(rec)) != 0 {
+	if len(*asked) != 0 {
 		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
 	}
 }
 
-// With every step that brings Pocket ID up ✓, it is asked, in a step of its
-// own, even while a step about another site is pending; with no admin, that
-// is named as a fact with the command.
-func TestConvergeDryRunNamesAMissingAdmin(t *testing.T) {
+// With Pocket ID up, a dry run plans each declared admin on a line of its
+// own, pending with what would happen, and issues nothing.
+func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, map[string]any{"apply --site watch": "1 change", "dns init": "2 records to create"})
-	asked := fakeAdminCheck(t, false, nil)
+	fakeChecks(t, map[string]any{"apply --site watch": "1 change"})
+	asked := fakeDeclaredAdmins(t, unregistered(false))
+	links := recordLinks(t)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, []string{"auth"}) {
+	if !slices.Equal(*asked, []string{"auth/alice"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	sameLines(t, adminNotes(rec), []string{"Pocket ID auth has no admin yet | " + authAdminCommand})
-	step := rec.Index("step", "check auth for an admin")
-	note := rec.Index("note", "Pocket ID auth")
-	if step < 0 || note < step {
-		t.Errorf("the check is not a step ahead of its note:\n%s", rec.Lines())
+	if !rec.Has("pending", "alice on auth") {
+		t.Errorf("no pending line for alice:\n%s", rec.Lines())
+	}
+	if links.Len() != 0 {
+		t.Errorf("a dry run printed links: %q", links.String())
 	}
 }
 
-// An admin that exists is not named.
-func TestConvergeDryRunNamesNoAdminWhenOneExists(t *testing.T) {
+// An admin with a passkey is marked registered.
+func TestConvergeDryRunMarksARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	asked := fakeAdminCheck(t, true, nil)
+	fakeDeclaredAdmins(t, registered)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 1 || len(adminNotes(rec)) != 0 {
-		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
-	}
-	if !rec.Has("done", "check auth for an admin") {
-		t.Errorf("the check's step did not end done:\n%s", rec.Lines())
+	if !rec.Has("done", "alice on auth") {
+		t.Errorf("alice is not marked done:\n%s", rec.Lines())
 	}
 }
 
-// A check that fails names the admin anyway, with why it could not check on
-// one line, and does not fail the dry run.
-func TestConvergeDryRunSaysWhenItCouldNotCheckForAnAdmin(t *testing.T) {
+// A run makes each admin and prints each link once, after the result.
+func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, nil)
-	fakeAdminCheck(t, false, errors.New("GET /api/users: curl: (7) connection refused\nmore detail"))
+	asked := fakeDeclaredAdmins(t, unregistered(false))
+	links := recordLinks(t)
 	rec := recordConverge(t)
-	if err := converge(t); err != nil {
+	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, adminNotes(rec), []string{"Pocket ID auth: could not check for an admin (GET /api/users: curl: (7) connection refused) | " + authAdminCommand})
+	if !slices.Equal(*asked, []string{"auth/alice!"}) {
+		t.Errorf("asked %v", *asked)
+	}
+	if !rec.Has("done", "alice on auth") || !rec.Has("result", "Deployment complete.") {
+		t.Errorf("output:\n%s", rec.Lines())
+	}
+	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n"
+	if links.String() != want {
+		t.Errorf("links %q\nwant %q", links.String(), want)
+	}
+	if strings.Contains(rec.Lines(), "tok-not-real") {
+		t.Errorf("a link reached the report:\n%s", rec.Lines())
+	}
 }
 
-// A run that completed asks, and names a missing admin.
-func TestConvergeRunNamesAMissingAdmin(t *testing.T) {
+// A registered admin gets no link and the run prints none.
+func TestConvergeRunPrintsNoLinkForARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
+	fakeDeclaredAdmins(t, registered)
+	links := recordLinks(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if links.Len() != 0 {
+		t.Errorf("printed %q", links.String())
+	}
+}
+
+// An emailed admin's line says sent when Pocket ID logged no failure, and
+// failed with Pocket ID's error when it did. Neither fails the run.
+func TestConvergeRunReportsEachEmail(t *testing.T) {
+	for _, tc := range []struct {
+		failed map[string]string
+		mark   string
+		result string
+	}{
+		{nil, "done", "sent"},
+		{map[string]string{"alice@example.org": "dial tcp: i/o timeout"}, "fail", "failed: dial tcp: i/o timeout"},
+	} {
+		fakeConverge(t, nil)
+		fakeDeclaredAdmins(t, unregistered(true))
+		asked := fakeEmailFailures(t, tc.failed, nil)
+		recordLinks(t)
+		rec := recordConverge(t)
+		if err := converge(t, "--execute"); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(*asked, []string{"alice@example.org"}) {
+			t.Errorf("asked about %v", *asked)
+		}
+		found := false
+		for _, e := range rec.Events {
+			if e.Kind == tc.mark && e.Text == "email alice a login link" && strings.Contains(e.Extra, tc.result) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no %s line saying %q:\n%s", tc.mark, tc.result, rec.Lines())
+		}
+	}
+}
+
+// An admin who could not be made fails the run, and a link already issued is
+// still printed.
+func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
+	fakeConverge(t, nil)
+	saved := convergeRead
+	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
+		cfg, st, err := readConvergeState(c, s)
+		cfg.Admins["bob"] = config.Admin{Email: "bob@example.org"}
+		return cfg, st, err
+	}
+	t.Cleanup(func() { convergeRead = saved })
+	fakeDeclaredAdmins(t, func(app, id string, execute bool) (declaredAdmin, error) {
+		if id == "bob" {
+			return declaredAdmin{}, errors.New("POST /api/users: 400 email already in use")
+		}
+		return unregistered(false)(app, id, execute)
+	})
+	links := recordLinks(t)
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	if err == nil || !strings.Contains(err.Error(), "bob") {
+		t.Fatalf("err = %v", err)
+	}
+	if rec.Has("result", "Deployment complete.") {
+		t.Error("said complete")
+	}
+	if !strings.Contains(links.String(), "alice") {
+		t.Errorf("links %q", links.String())
+	}
+}
+
+// A deployment that declares no admins is checked for any admin, and one
+// with none is named with the command that makes one.
+func TestConvergeWithoutDeclaredAdminsNamesAMissingAdmin(t *testing.T) {
+	fakeConverge(t, nil)
+	saved := convergeRead
+	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
+		cfg, st, err := readConvergeState(c, s)
+		cfg.Admins = nil
+		return cfg, st, err
+	}
+	t.Cleanup(func() { convergeRead = saved })
 	asked := fakeAdminCheck(t, false, nil)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
@@ -1934,18 +2089,40 @@ func TestConvergeRunNamesAMissingAdmin(t *testing.T) {
 	sameLines(t, adminNotes(rec), []string{"Pocket ID auth has no admin yet | " + authAdminCommand})
 }
 
-// A run that stopped names no admin and does not ask.
-func TestConvergeStoppedRunNamesNoAdmin(t *testing.T) {
+// A run that stopped asks about no admin.
+func TestConvergeStoppedRunAsksNoAdmin(t *testing.T) {
 	fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
-	asked := fakeAdminCheck(t, false, nil)
-	rec := recordConverge(t)
+	asked := fakeDeclaredAdmins(t, unregistered(false))
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("the run did not stop")
 	}
-	if len(*asked) != 0 || len(adminNotes(rec)) != 0 {
-		t.Errorf("asked %v:\n%s", *asked, rec.Lines())
+	if len(*asked) != 0 {
+		t.Errorf("asked %v", *asked)
 	}
 }
+
+// apply asks for each declared admin as the table in the spec says: the key
+// as the username, the name split at its first space, verified, a 24 hour
+// link, emailed when the deployment has SMTP.
+func TestAdminRequest(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Admins["alice"] = config.Admin{Name: "Alice van Example", Email: "alice@example.org"}
+	req := adminRequest(cfg, "auth", "alice")
+	if req.Username != "alice" || req.Email != "alice@example.org" || req.FirstName != "Alice" || req.LastName != "van Example" ||
+		!req.Declared || req.LinkTTL != 24*time.Hour || req.PublicURL != "https://"+cfg.Apps["auth"].Hostname {
+		t.Errorf("request %+v", req)
+	}
+	if req.EmailLink != cfg.CanMail("auth") || !req.EmailLink {
+		t.Errorf("EmailLink %t, CanMail %t; the fixture can mail", req.EmailLink, cfg.CanMail("auth"))
+	}
+	cfg.SMTP = config.SMTP{}
+	cfg.Apps["auth"] = withoutSMTP(cfg.Apps["auth"])
+	if adminRequest(cfg, "auth", "alice").EmailLink {
+		t.Error("emails without SMTP")
+	}
+}
+
+func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
 
 // The check asks the Pocket ID app admin create would call, with its key, read
 // only, through the run's sudo, and answers whether a user is an admin.
@@ -1998,12 +2175,10 @@ func TestConvergeRunAdminCheckHoldsTheRunsReporter(t *testing.T) {
 	}
 	run := recordHolds(t)
 	t.Cleanup(func() { convergeRun = saved; routeHolds(ui.Discard) })
-	savedCheck := convergeAdminCheck
-	convergeAdminCheck = func(*config.Config, string, convergeOptions) (bool, error) {
+	fakeDeclaredAdmins(t, func(string, string, bool) (declaredAdmin, error) {
 		holdOutput()()
-		return true, nil
-	}
-	t.Cleanup(func() { convergeAdminCheck = savedCheck })
+		return declaredAdmin{}, nil
+	})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}

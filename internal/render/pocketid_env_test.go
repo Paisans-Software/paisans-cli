@@ -158,3 +158,38 @@ func TestPocketIDFileBackendDefaultsToDatabase(t *testing.T) {
 		t.Errorf("FILE_BACKEND is %q", got)
 	}
 }
+
+// With SMTP, Pocket ID may email an admin a login link unless the settings
+// say otherwise: apply's admin step sends one. Without SMTP it renders
+// nothing, so Pocket ID's own default, off, holds.
+func TestPocketIDAdminEmailDefaultsOnWithSMTP(t *testing.T) {
+	smtp := &config.SMTP{Security: config.SMTPTLS, FromAddress: "id@example.org"}
+	const name = "EMAIL_ONE_TIME_ACCESS_AS_ADMIN_ENABLED"
+	if got := envValue(renderAuth(t, nil, smtp, fixtureSecrets(t)), name); got != "true" {
+		t.Errorf("with SMTP and the setting unset, %s=%q, want true", name, got)
+	}
+	off := map[string]any{"email_one_time_access_as_admin": false}
+	if got := envValue(renderAuth(t, off, smtp, fixtureSecrets(t)), name); got != "false" {
+		t.Errorf("with the setting false, %s=%q, want false", name, got)
+	}
+
+	cfg := fixture(t)
+	cfg.SMTP = config.SMTP{}
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env := planFiles(plan)[authEnvA]; strings.Contains(env, "\n"+name+"=") {
+		t.Errorf("%s rendered with no SMTP:\n%s", name, env)
+	}
+	// A host with no sender cannot send either.
+	cfg = fixture(t)
+	cfg.SMTP.FromAddress = ""
+	plan, err = render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env := planFiles(plan)[authEnvA]; strings.Contains(env, "\n"+name+"=") {
+		t.Errorf("%s rendered with no sender:\n%s", name, env)
+	}
+}
