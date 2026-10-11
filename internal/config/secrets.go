@@ -9,10 +9,12 @@ import (
 
 	"github.com/getsops/sops/v3"
 	"github.com/getsops/sops/v3/aes"
+	sopsage "github.com/getsops/sops/v3/age"
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/keystore"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -103,7 +105,11 @@ type OIDCClient struct {
 // Decryption happens here, on a workstation, and never on a host. What that
 // buys is blast radius: root on one host yields that host's rendered secrets,
 // not another site's.
-func LoadSecrets(path string) (*Secrets, error) {
+func LoadSecrets(path string) (*Secrets, error) { return loadSecrets(path, "") }
+
+// loadSecrets is LoadSecrets for the deployment id, whose key decryption
+// looks for in the keystore. "" looks nowhere but where sops does.
+func loadSecrets(path, id string) (*Secrets, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, readProblem(path, "Run paisans init to create it, or name the file with --secrets.", err)
@@ -111,7 +117,7 @@ func LoadSecrets(path string) (*Secrets, error) {
 	plain := data
 	encrypted := looksEncrypted(data)
 	if encrypted {
-		plain, err = decryptSOPS(data)
+		plain, err = decryptSOPS(data, id)
 		if err != nil {
 			return nil, decryptProblem(path, err)
 		}
@@ -144,7 +150,7 @@ func LoadSecrets(path string) (*Secrets, error) {
 // at that deployment's services, and nothing else would notice them used
 // here. A file without an id is given this one, which its next write keeps.
 func LoadDeploymentSecrets(path, id string) (*Secrets, error) {
-	s, err := LoadSecrets(path)
+	s, err := loadSecrets(path, id)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +178,25 @@ func foreignSecretsProblem(path, theirs, ours string) error {
 	}
 }
 
+// AgeKeystore is where decryption looks for a deployment's age key when no
+// SOPS_AGE_* variable names one, and where init keeps the key it makes.
+// Tests replace it.
+var AgeKeystore keystore.Store = keystore.Platform()
+
+// ageVariables are the variables through which an operator names an age key
+// to sops. Any one of them set means the operator chose, and the keystore is
+// not read.
+var ageVariables = []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD", "SOPS_AGE_SSH_PRIVATE_KEY_FILE", "SOPS_AGE_SSH_PRIVATE_KEY_CMD"}
+
+func ageVariableSet() bool {
+	for _, name := range ageVariables {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // errNoKey and errTampered are what decryptSOPS found, for decryptProblem to
 // say in an operator's words.
 var (
@@ -185,17 +210,29 @@ var (
 // tells them nothing they can act on. The embedded sops (v3.13.3,
 // age/keysource.go) reads a key from SOPS_AGE_KEY_CMD, SOPS_AGE_KEY_FILE,
 // SOPS_AGE_KEY and sops/age/keys.txt under the user's config directory; the
-// command comes first, since it lets the key live in a keychain.
+// command comes first, since it lets the key live in a keychain. With a
+// deployment id, paisans reads the keystore item for it first; see dataKey.
 func decryptProblem(path string, err error) error {
 	cause := fmt.Errorf("decrypting %s: %w", path, err)
 	name := ui.ShortPath(path)
+	const noKey = "Set SOPS_AGE_KEY_CMD to a command that prints your key, Eg: a Keychain lookup, so the key is never stored in a file or the environment. SOPS_AGE_KEY_FILE (its path), SOPS_AGE_KEY (the key itself) and sops/age/keys.txt in your config directory are read too. Your public key must be a recipient in .sops.yaml; if it was added recently, run sops updatekeys on the file."
+	var miss *keystoreMiss
+	var stale *notRecipient
 	switch {
-	case errors.Is(err, errNoKey):
+	case errors.As(err, &stale):
 		return &ui.Problem{
-			Hint:    name + " cannot be decrypted: no usable age key was found",
-			Explain: "Set SOPS_AGE_KEY_CMD to a command that prints your key, Eg: a Keychain lookup, so the key is never stored in a file or the environment. SOPS_AGE_KEY_FILE (its path), SOPS_AGE_KEY (the key itself) and sops/age/keys.txt in your config directory are read too. Your public key must be a recipient in .sops.yaml; if it was added recently, run sops updatekeys on the file.",
+			Hint:    fmt.Sprintf("the keystore key for deployment %s… is not a recipient of %s", deployment.Deployment{ID: stale.id}.Token(), name),
+			Explain: fmt.Sprintf("%s holds a key that opens none of the recipients in %s, and no other key was found. Either the item is from another key, or .sops.yaml changed after the file was encrypted. Add the item's recipient to .sops.yaml and run sops updatekeys %s, or set SOPS_AGE_KEY_CMD to the right key.", stale.item, name, name),
 			Cause:   cause,
 		}
+	case errors.As(err, &miss):
+		return &ui.Problem{
+			Hint:    name + " cannot be decrypted: no usable age key was found",
+			Explain: noKey + " paisans also looked for " + miss.item + " and found none.",
+			Cause:   cause,
+		}
+	case errors.Is(err, errNoKey):
+		return &ui.Problem{Hint: name + " cannot be decrypted: no usable age key was found", Explain: noKey, Cause: cause}
 	case errors.Is(err, errTampered):
 		return &ui.Problem{
 			Hint:    name + " was changed after it was encrypted",
@@ -219,15 +256,15 @@ func looksEncrypted(data []byte) bool {
 	return len(probe.SOPS) > 0
 }
 
-func decryptSOPS(data []byte) ([]byte, error) {
+func decryptSOPS(data []byte, id string) ([]byte, error) {
 	store := &sopsyaml.Store{}
 	tree, err := store.LoadEncryptedFile(data)
 	if err != nil {
 		return nil, err
 	}
-	key, err := tree.Metadata.GetDataKey()
+	key, err := dataKey(&tree.Metadata, id)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errNoKey, err)
+		return nil, err
 	}
 	cipher := aes.NewCipher()
 	mac, err := tree.Decrypt(key, cipher)
@@ -239,6 +276,91 @@ func decryptSOPS(data []byte) ([]byte, error) {
 	}
 	return store.EmitPlainFile(tree.Branches)
 }
+
+// dataKey opens the file's data key. With an id and no variable set, the
+// key in the keystore item for id is tried first, in memory: nothing is set
+// in the environment, so no child paisans starts can inherit it. sops'
+// own search runs when there is no item, and when the item's key is not a
+// recipient, so a stale item never hides a key sops would find.
+func dataKey(m *sops.Metadata, id string) ([]byte, error) {
+	if id == "" || ageVariableSet() {
+		return sopsDataKey(m)
+	}
+	identity, err := AgeKeystore.Get(id)
+	if errors.Is(err, keystore.ErrUnavailable) {
+		return sopsDataKey(m)
+	}
+	if errors.Is(err, keystore.ErrNotFound) {
+		key, err := sopsDataKey(m)
+		if errors.Is(err, errNoKey) {
+			return nil, &keystoreMiss{item: AgeKeystore.Describe(id), err: err}
+		}
+		return key, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", AgeKeystore.Describe(id), err)
+	}
+	if key, ok := keystoreDataKey(m, identity); ok {
+		return key, nil
+	}
+	key, err := sopsDataKey(m)
+	if errors.Is(err, errNoKey) {
+		return nil, &notRecipient{id: id, item: AgeKeystore.Describe(id), err: err}
+	}
+	return key, err
+}
+
+func sopsDataKey(m *sops.Metadata) ([]byte, error) {
+	key, err := m.GetDataKey()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errNoKey, err)
+	}
+	return key, nil
+}
+
+// keystoreDataKey tries identity against each age recipient of a file with
+// one key group, which is every file the toolkit writes. A file with more
+// groups splits its data key between them, and is left to sops.
+func keystoreDataKey(m *sops.Metadata, identity string) ([]byte, bool) {
+	if len(m.KeyGroups) != 1 {
+		return nil, false
+	}
+	var ids sopsage.ParsedIdentities
+	if err := ids.Import(identity); err != nil {
+		return nil, false
+	}
+	for _, k := range m.KeyGroups[0] {
+		mk, ok := k.(*sopsage.MasterKey)
+		if !ok {
+			continue
+		}
+		c := *mk
+		ids.ApplyToMasterKey(&c)
+		if key, err := c.Decrypt(); err == nil {
+			return key, true
+		}
+	}
+	return nil, false
+}
+
+// keystoreMiss is no usable key, with no keystore item for the deployment.
+type keystoreMiss struct {
+	item string
+	err  error
+}
+
+func (e *keystoreMiss) Error() string { return e.err.Error() }
+func (e *keystoreMiss) Unwrap() error { return e.err }
+
+// notRecipient is a keystore item whose key opens none of the file's
+// recipients, and no other key sops could find.
+type notRecipient struct {
+	id, item string
+	err      error
+}
+
+func (e *notRecipient) Error() string { return e.err.Error() }
+func (e *notRecipient) Unwrap() error { return e.err }
 
 // verifyMAC confirms the file has not been altered since it was encrypted. A
 // decrypt that skips this reads a tampered file happily, and these values
