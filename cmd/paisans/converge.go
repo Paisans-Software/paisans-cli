@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
@@ -436,6 +437,25 @@ func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]r
 	return records, nil
 }
 
+// convergeSecrets is the secrets check apply without --site makes once for
+// the whole run, under a section of its own: each gateway's deployment record
+// read once, and each secret and recorded name paisans.yaml no longer uses
+// warned about once. The applies it runs as steps skip theirs (a
+// checkReporter). A secrets file not written yet has nothing to check.
+func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) {
+	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
+	if err != nil {
+		return
+	}
+	if len(cfg.GatewaySites()) == 0 && len(secretsgen.Orphans(cfg, secrets, nil)) == 0 {
+		return
+	}
+	r.Section("secrets")
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
+		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
+	}))
+}
+
 // convergeOptions is what apply without --site hands on to its steps: the
 // flags every command takes, and apply's own that are not about one site.
 type convergeOptions struct {
@@ -720,6 +740,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	if err := settle(cfg); err != nil {
 		return err
+	}
+	// An init that has just run warned about the secrets itself.
+	if !initRan {
+		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)
 	}
 	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
 		return err

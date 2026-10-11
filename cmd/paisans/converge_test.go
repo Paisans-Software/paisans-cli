@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -254,6 +255,10 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// A dry run's checks are each step's own dry run, which reaches a host;
 	// here every step is up to date. fakeChecks says otherwise.
 	convergeCheck = func(ui.Reporter, []string) (string, []checkReport, error) { return "", nil, nil }
+	// The run reads each gateway's deployment record once; here none has
+	// one yet. fakeGatewayReads says otherwise.
+	savedRegistry := registryHost
+	registryHost = func(string, config.Site, string, bool) registry.Runner { return noRecord{} }
 	// Asking Pocket ID for an admin reaches a host too; here it has none,
 	// and every declared admin has registered. fakeAdminCheck and
 	// fakeDeclaredAdmins say otherwise.
@@ -287,6 +292,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
 		convergePullPlan, convergePullImage = savedPullPlan, savedPull
+		registryHost = savedRegistry
 		if now, _ := os.ReadFile(fixtureSecretsPath()); string(now) != string(fixtureBefore) {
 			t.Errorf("%s was rewritten: add the generated secret it lacks to it, and restore it", fixtureSecretsPath())
 		}
@@ -926,11 +932,11 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section configuration", "warn", "step init", "pending init", "section etcd members"}},
-		{false, nil, []string{"section configuration", "warn", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section configuration", "warn", "section etcd members"}},
-		// init ran first and reported the findings itself, under the file's
-		// path; they are not reported a second time.
+		{true, nil, []string{"section configuration", "warn", "step init", "pending init", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section configuration", "warn", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section configuration", "warn", "section secrets", "step read the deployment record", "section etcd members"}},
+		// init ran first and reported the findings and the secrets itself,
+		// under the file's path; they are not reported a second time.
 		{true, []string{"--execute"}, []string{"section etcd members"}},
 	} {
 		rec.Events = nil
@@ -1069,7 +1075,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "pocket id" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "pocket id" || section == "secrets" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text

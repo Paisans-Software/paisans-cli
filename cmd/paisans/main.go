@@ -675,7 +675,11 @@ func runApply(args []string) error {
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
+	// As a step of apply without --site (a checkReporter) it leaves the
+	// record and the secrets to the run, which checks them once.
+	if _, step := r.(checkReporter); !step {
+		warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
+	}
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	done := r.Step("check mesh subnet")
 	err = checkMeshLive(cfg, *site, transport)
