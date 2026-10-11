@@ -1441,9 +1441,9 @@ func stackOrder(stacks map[string]bool) []string {
 
 // readManifest returns what the last apply recorded: its files, keyed by
 // path relative to the site root, and the manifest itself, for its record of
-// the site's Caddy build, of the images it rendered and of the files
-// written for the operator's web server. A host with no
-// manifest is a first apply, which is ordinary.
+// the site's Caddy build, of the images it rendered and of the files written
+// for the operator's web server. A host with no manifest is a first apply,
+// which is ordinary.
 func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, render.Manifest, error) {
 	var m render.Manifest
 	content, found, err := t.ReadFile(manifestPath(d))
