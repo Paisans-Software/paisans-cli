@@ -163,6 +163,7 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDSettingInvalid()
 	c.pocketIDConfigKeyHasASetting()
 	c.pocketIDEmailWithoutSMTP()
+	c.pocketIDAdminUsername()
 	c.pocketIDSMTPSender()
 	c.mbinSMTPSender()
 	c.mbinContactEmail()

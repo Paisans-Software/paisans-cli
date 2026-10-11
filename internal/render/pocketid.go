@@ -28,7 +28,8 @@ type pocketIDConfig struct {
 // database host.
 func (p *planner) pocketIDConfigFor(name string, app config.App) (pocketIDConfig, error) {
 	var out pocketIDConfig
-	for _, v := range kinds.PocketIDEnv(app.Settings) {
+	settings := kinds.PocketIDSettingsFor(app.Settings, p.cfg.CanMail(name))
+	for _, v := range kinds.PocketIDEnv(settings) {
 		quoted, err := configmerge.EnvValue(fmt.Sprintf("apps.%s.settings (%s)", name, v.Name), v.Value)
 		if err != nil {
 			return pocketIDConfig{}, err

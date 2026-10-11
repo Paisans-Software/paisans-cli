@@ -678,7 +678,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	steps := convergePlan(cfg, st)
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
-		convergeAdmins(r, cfg, o, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		// A dry run's admin problem is shown on its line; it stops nothing.
+		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
 		convergeIngressPending(r, cfg)
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
@@ -696,7 +697,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// check draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	convergeAdmins(r, cfg, o, func(string) bool { return true })
+	links, adminErr := convergeAdmins(r, cfg, o, true, func(string) bool { return true })
+	// The links are printed last, after the result, whatever it is: a run
+	// that fails after issuing them has still issued them.
+	defer printLoginLinks(links)
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
 	unwritten, headed := convergeIngressFiles(r, cfg, configPath, sudo)
@@ -708,7 +712,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if len(failed) > 0 {
-		return ingressFailed(failed)
+		return errors.Join(ingressFailed(failed), adminErr)
+	}
+	if adminErr != nil {
+		return adminErr
 	}
 	r.Result("Deployment complete.")
 	return nil
@@ -1579,12 +1586,12 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	}
 }
 
-// convergeAdmins names each Pocket ID app that has no admin, which only the
-// operator can create. An app is asked, in a step of its own, only once up
+// convergeAnyAdmin names each Pocket ID app that has no admin, for a
+// deployment that declares no admins, so only the operator can create one. An app is asked, in a step of its own, only once up
 // says it is running; one that is not is named by nothing, since the plan
 // already says what brings it up. A check that fails names the app with why,
 // and fails nothing else.
-func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
+func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
 	section := false
 	for _, app := range cfg.AppNames() {
 		if cfg.Apps[app].Kind != config.KindPocketID || !up(app) {

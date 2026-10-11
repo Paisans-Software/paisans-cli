@@ -163,6 +163,10 @@ before.
 
 ## The first Pocket ID admin
 
+For a deployment that declares `admins`, this section is replaced by
+`2026-10-11-apply-admin-login-links.md`: apply makes those admins itself. What
+follows still holds for a deployment that declares none.
+
 A credential the toolkit cannot generate is named whenever it is owed. The
 first Pocket ID admin is named only when it is actionable, for each
 `pocket-id` app:

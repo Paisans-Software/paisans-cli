@@ -537,6 +537,13 @@ func (s SMTP) PortOrDefault() int {
 	return 587
 }
 
+// CanMail reports whether an app's effective SMTP settings name both a host
+// and a sender, the two a mail needs before anything else.
+func (c *Config) CanMail(app string) bool {
+	s := c.SMTPFor(app)
+	return s.Host != "" && s.FromAddress != ""
+}
+
 // SMTPFor is an app's effective SMTP settings: the deployment's block with
 // every field the app declares replacing the deployment's.
 func (c *Config) SMTPFor(app string) SMTP {

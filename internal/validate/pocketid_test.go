@@ -183,3 +183,27 @@ func TestPocketIDFileBackendWarnsOnlyWhenSetToOtherThanDatabase(t *testing.T) {
 		t.Errorf("filesystem file_backend gave %v", got)
 	}
 }
+
+// An admin name Pocket ID would not take as a username is refused when the
+// deployment runs Pocket ID, and only then.
+func TestPocketIDAdminUsername(t *testing.T) {
+	cfg := withAuth(t, nil, nil, nil)
+	cfg.Admins["joe-"] = config.Admin{Email: "joe@example.org"}
+	r := validate.Check(cfg)
+	if got := findings(r, "pocket-id-admin-username"); len(got) != 1 || got[0] != "REFUSE admins.joe-" {
+		t.Errorf("findings %v", got)
+	}
+
+	for name, app := range cfg.Apps {
+		if app.Kind == config.KindPocketID {
+			delete(cfg.Apps, name)
+		}
+	}
+	if r := validate.Check(cfg); r.Has("pocket-id-admin-username") {
+		t.Errorf("refused without a Pocket ID app: %v", findings(r, "pocket-id-admin-username"))
+	}
+
+	if r := validate.Check(withAuth(t, nil, nil, nil)); r.Has("pocket-id-admin-username") {
+		t.Errorf("refused the fixture's admins: %v", findings(r, "pocket-id-admin-username"))
+	}
+}
