@@ -268,11 +268,11 @@ func TestOIDCClientCreateUsesTheDashboardLinkSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := "    hostname: talk.example.org\n"
-	if !strings.Contains(string(raw), host) {
-		t.Fatal("the fixture no longer declares talk's hostname as expected")
+	setting := "      contact_email: admins@example.org\n"
+	if !strings.Contains(string(raw), setting) {
+		t.Fatal("the fixture no longer declares talk's settings as expected")
 	}
-	edited := strings.Replace(string(raw), host, host+"    settings:\n      sso_dashboard_link: /magazines\n", 1)
+	edited := strings.Replace(string(raw), setting, setting+"      sso_dashboard_link: /magazines\n", 1)
 	cfg := filepath.Join(t.TempDir(), "paisans.yaml")
 	if err := os.WriteFile(cfg, []byte(edited), 0o600); err != nil {
 		t.Fatal(err)

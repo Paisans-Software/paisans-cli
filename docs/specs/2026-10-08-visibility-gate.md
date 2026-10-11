@@ -222,7 +222,12 @@ an unsigned read is refused (`visibility-gate-without-signed-fetch`).
 * **Mbin.** The toolkit renders `MBIN_AUTHORIZED_FETCH=true` and
   `MBIN_USE_FEDERATION_ALLOW_LIST=true` when the app is gated. Mbin reads them
   from the environment until an admin saves its settings, after which a
-  database row wins (SettingsManager.php:105-106,136-163).
+  database row wins (SettingsManager.php:105-106,136-163). Amended
+  2026-10-11: both are also named in `MBIN_LOCKED_SETTINGS`, which a paisans
+  fork image carrying locked settings reads from the environment on every
+  read and never saves, so an admin cannot turn them off. Until the pinned
+  image carries it, the database still wins after the first admin save. See
+  `docs/specs/2026-10-11-mbin-smtp.md`.
 * **WriteFreely** checks signatures only in private mode
   (handle.go:663-690, federation_allowlist.go:493-544), which the kind renders
   on by default. A gated WriteFreely with `private: false` has no signed fetch,
@@ -230,7 +235,8 @@ an unsigned read is refused (`visibility-gate-without-signed-fetch`).
 
 A rendered setting is not proof: an admin can turn either off inside the app
 with nothing in the configuration to say so. The monitor's signed fetch check
-is what catches that.
+is what catches that. It stays once Mbin's settings are locked: it is what
+proves the lock works.
 
 ## The monitor
 
@@ -287,8 +293,11 @@ it, and until then is a known limit below.
   `/api/*` reads. At v1.14.0+paisans it is read from the database only, with
   a hard-coded `false` default (SettingsManager.php:96), so nothing rendered
   can set it. The fork gives it the same environment fallback its siblings
-  have; a gated Mbin renders it on, and a direct check proves an anonymous
-  `/api/entries` is refused. Instance metadata and the admin and moderator
+  have (Paisans-Software/mbin#95, merged); a gated Mbin renders it on, and a
+  direct check proves an anonymous `/api/entries` is refused. Amended
+  2026-10-11: it is rendered on, and locked, ahead of a pinned image carrying
+  #95, since an image without it ignores the variable; the direct check waits
+  for that image. Instance metadata and the admin and moderator
   lists stay public (security.yaml:137-147).
 * **WriteFreely `authorized_fetch`**, independent of private mode: a valid
   signature on every ActivityPub read and every inbox delivery, from an

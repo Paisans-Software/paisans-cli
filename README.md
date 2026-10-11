@@ -601,7 +601,9 @@ from this configuration and the fork reconciles it at every start:
   never is. A gated app that federates also gets a **signed fetch** check: an
   unsigned ActivityPub request for a path the app refuses whatever content
   exists, expecting the refusal, because an admin can turn signed fetch off
-  inside the app with nothing in this configuration to say so.
+  inside the app with nothing in this configuration to say so. Where the app
+  locks the setting (Mbin's `MBIN_LOCKED_SETTINGS`), the check stays: it is
+  what proves the lock holds.
 * every site but the monitor's own gets a **ping** over the mesh, and a
   **heartbeat** the other way: the site's host pushes to the monitor's public
   hostname once a minute, over the internet and never the mesh, from a
@@ -1516,18 +1518,20 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 `external.smtp_password`, which `init` lists as owed once something resolves a
 mail host.
 
-Two kinds read it (`kinds.SendsMail`): the uptime monitor, which puts it in
-its seed file, and Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`,
+Three kinds read it (`kinds.SendsMail`): the uptime monitor, which puts it in
+its seed file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`,
 `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in its `.env` (see
-*Pocket ID's configuration is rendered from paisans.yaml*). The password goes
-into that `.env` beside the other credentials it already carries, written
-0600 like every rendered file that holds a secret, and quoted so that a `$` or
-a `#` a mail provider issued arrives as issued. An `smtp:` block on any other
+*Pocket ID's configuration is rendered from paisans.yaml*); and Mbin, which
+takes it as `MAILER_DSN` and its sender address (see *Mbin sends little mail,
+and says where from*). The password goes into that `.env` beside the other
+credentials it already carries, written 0600 like every rendered file that
+holds a secret, and quoted so that a `$` or a `#` a mail provider issued
+arrives as issued. An `smtp:` block on any other
 kind is refused, `smtp-on-a-kind-without-mail`, because an override nothing
 reads is ignored without a word.
 
 Two fields mean slightly less to Pocket ID than to the monitor, because of
-what Pocket ID can express:
+what Pocket ID can express (Mbin's own differences are in its section):
 
 * **`from_name` is not used.** Pocket ID has no sender name setting; its mail
   goes out under its application name (`email/module.go:212` at tag
@@ -3875,6 +3879,98 @@ delete), each waiting for the synchronous replica on the other site, and the
 table churns, which is vacuum's work. For a community of this size that is
 noise; an instance that outgrows it is the operator `queue: rabbitmq` exists
 for.
+
+### Mbin sends little mail, and says where from
+
+Every member signs in to Mbin through the identity provider, so Mbin sends
+little mail of its own: its `/contact` form, and the few account mails it
+still has (resending an activation link to an unverified account, a password
+reset, an email change). It sends no notification or digest mail. That is
+still mail a community wants delivered, a contact form message above all, so
+the kind reads the `smtp` block like the other two (see *Mail is declared once
+and overridden per app*) and renders three variables into its `.env`.
+
+**`MAILER_DSN`** is the transport, the only place Symfony Mailer reads it
+from (`config/packages/mailer.yaml`). It is built in Go from the app's
+effective `smtp` settings, so it can be tested:
+
+| `security` | `MAILER_DSN` | What Symfony does |
+|------------|--------------|-------------------|
+| `tls` | `smtps://user:pass@host:port` | implicit TLS from the first byte |
+| `starttls` | `smtp://user:pass@host:port?require_tls=true` | STARTTLS, and refuses to send if the server does not offer it |
+
+`require_tls` is there because plain `smtp://` upgrades only when the server
+offers STARTTLS and otherwise sends in plaintext (`EsmtpTransport.php` at
+symfony/mailer v7.4.14); with it, a stripped STARTTLS stops the mail instead
+of exposing the password. The port is `port`, or 465 and 587 as for the other
+kinds. The username and password are percent encoded in full, because Symfony
+splits the DSN with PHP's `parse_url` and an `@`, `:`, `/`, `#` or `?` a
+provider issued would otherwise move the split; with no `username` there is no
+userinfo at all. A password holding all of those, with quotes, `%`, `$` and a
+space, was rendered, read by Docker Compose v5.4.0 as an `env_file`, and
+parsed by symfony/mailer v7.4.14 on PHP 8.4 back to the same bytes.
+
+With **no SMTP host**, `MAILER_DSN` is `null://null`, Symfony's discard
+transport. The image's own baked `.env` names `smtp://mailserver`, a host
+that does not exist in this stack, so leaving the variable out would make
+every send fail rather than be dropped. `validate` warns,
+`mbin-without-smtp`: contact form messages and those account mails are
+discarded, and the app otherwise works, which is why it is a warning.
+
+**`KBIN_SENDER_EMAIL`** is the From address of every mail Mbin sends: the
+effective `from_address`, or `noreply@<hostname>` when none resolves, an
+address Mbin accepts and nothing sends from while the transport is the null
+one. Mbin builds every sender as `new Address(KBIN_SENDER_EMAIL, KBIN_DOMAIN)`
+(ResetPasswordController, ContactManager, SentUserConfirmationEmailHandler,
+SendApplicationAnswerMailHandler), so **`from_name` is not used**: the
+display name is always the instance's hostname. Symfony's `Address` throws on
+anything but an address alone, so a `from_address` like `Talk
+<talk@example.org>` is refused, `mbin-smtp-from-not-an-email`, since no mail
+could be sent with it. A mail server and no sender is a warning,
+`mbin-smtp-without-sender`: Mbin then sends as `noreply@<hostname>`, which
+`dns init` publishes as sending no mail unless it is a mail domain, so
+receivers are likely to reject it.
+
+**`KBIN_CONTACT_EMAIL`** is `settings.contact_email`, the admins' address:
+where the contact form sends each message, the address `/api/info` publishes,
+and the subject of Mbin's Web Push VAPID token. Without it, it is the sender
+address, so a message reaches whoever reads the sending mailbox rather than
+nobody. Anything but an address alone is refused,
+`mbin-contact-email-not-an-email`, because each of those three uses needs one.
+Nothing checks that the address receives mail: one at `community.domain`
+needs that domain in `community.mail_domains`, or `dns init`'s null MX refuses
+every message sent to it.
+
+```yaml
+apps:
+  talk:
+    kind: mbin
+    settings:
+      contact_email: admins@example.org
+```
+
+**These settings are the configuration's, and an admin cannot change them in
+Mbin.** Mbin keeps them, like most of its settings, as database rows once an
+admin saves its settings page, and from then on its `SettingsManager` reads
+the row and ignores the environment. The `.env` therefore also renders
+`MBIN_LOCKED_SETTINGS`, naming every Mbin database setting it sets:
+`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL` and `KBIN_CONTACT_EMAIL` always, and
+`MBIN_PRIVATE_INSTANCE`, `MBIN_AUTHORIZED_FETCH` and
+`MBIN_USE_FEDERATION_ALLOW_LIST` when the app is gated. The paisans fork reads
+each named setting from the environment on every read, never writes it on a
+save, and shows it disabled in the settings page, so `paisans.yaml` stays
+its only source. The list is derived from what the template renders, and a
+test checks it against both the rendered file and the fork's settings, so a
+setting the template gains is locked with it.
+
+The known limit: **until the pinned image carries locked settings, the
+database wins after the first admin save.** An image without the feature
+ignores `MBIN_LOCKED_SETTINGS`, and a changed `from_address` or
+`contact_email` then never reaches the app: the contact address can be
+changed on Mbin's settings page, and the sender is not on that page at all
+(`SettingsType.php`), so only the database holds it. `MAILER_DSN` is not a
+database setting and always follows the configuration. The monitor's signed fetch check (see *The monitor has a site of its own*)
+is what notices a gated app's signed fetch turned off that way.
 
 ### Pocket ID runs on every apps site, and one of them is active
 

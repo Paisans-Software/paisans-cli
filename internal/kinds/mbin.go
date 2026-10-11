@@ -157,6 +157,14 @@ func OIDCClient(kind config.Kind, hostname string) (OIDCClientSpec, bool) {
 	return OIDCClientSpec{}, false
 }
 
+// MbinContactEmailSetting is the app setting naming the admins' address, which
+// Mbin renders as KBIN_CONTACT_EMAIL: where its /contact form sends each
+// message, the address /api/info publishes, and the subject of its Web Push
+// VAPID token. When it is absent the sender address takes its place, so a
+// message reaches whoever reads the sending mailbox. README, "Mbin sends
+// little mail, and says where from", has the reasoning.
+const MbinContactEmailSetting = "contact_email"
+
 // MbinQueueSetting is the app setting that picks where an Mbin app's
 // Messenger queues live: MbinQueuePostgres, the default, or MbinQueueRabbitMQ.
 // README, "Mbin's queues are in Postgres by default", has the reasoning.

@@ -121,6 +121,19 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	}
 }
 
+// Mbin sends mail, so an Mbin app's own sender is a mail name the same way.
+func TestMbinSenderIsAMailDomain(t *testing.T) {
+	cfg := declared()
+	cfg.Apps["forum"] = config.App{Kind: config.KindMbin, Hostname: "forum.example.org", SMTP: &config.SMTP{FromAddress: "noreply@forum.example.org"}}
+	names := MailNames(cfg)
+	if s := names["forum.example.org"]; len(s) != 1 || s[0] != "apps.forum.smtp.from_address" {
+		t.Errorf("an mbin app's sender: %v", names)
+	}
+	if _, ok := wantsOf(t, cfg)["TXT forum.example.org"]; ok {
+		t.Errorf("forum.example.org sends mail and must get no SPF -all")
+	}
+}
+
 func TestMailClassification(t *testing.T) {
 	spf := Want{Type: "TXT", Name: "talk.example.org", Content: spfLockdown}
 	mx := Want{Type: "MX", Name: "example.org", Content: nullMX}
