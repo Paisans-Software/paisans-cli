@@ -1818,7 +1818,9 @@ for people reading the file; nothing compares it.
 
 `init` and `apply` warn by key and never by value, and never refuse: a gateway
 whose record cannot be read is a warning too, and one not applied since the
-record existed is silent. `paisans secrets prune` reads every gateway's record
+record existed is silent. `apply` without `--site` reads each gateway's record
+once, before its first step, and shows each of these warnings once, under
+`secrets`; the applies it runs as steps leave them to it. `paisans secrets prune` reads every gateway's record
 and refuses when one cannot be read or has none: apply the gateway first, or
 pass `--without-record` to trust `paisans.yaml` alone, which with `--execute`
 asks for the word `prune` at a terminal. It lists what it would remove and

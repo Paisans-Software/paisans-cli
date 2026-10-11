@@ -235,6 +235,11 @@ clients exist, ends by sweeping the old images its site's stacks used (see
 * **Hosts:** every site, and each app behind the operator's own web server
   from this machine, as a visitor would. Every host's sudo password is asked
   for before the first step.
+* **Secrets:** each gateway's deployment record is read once, after the sudo
+  passwords, and each secret or recorded name `paisans.yaml` no longer uses is
+  warned about once, by key, under `secrets`, dry run or not. The `apply`
+  steps it runs do not read the record or warn again. An `init` it runs warns
+  in its place.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
   when an app failed its web server check or its site file step warned, ends
