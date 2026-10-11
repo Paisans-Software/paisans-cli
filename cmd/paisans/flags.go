@@ -44,8 +44,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 // requests and retries. Without them a command prints one line per step.
 func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 	verbose := &verboseRun
-	fs.BoolVar(verbose, "verbose", false, "show the detail behind each step: reasons, values, requests and retries")
-	fs.BoolVar(verbose, "v", false, "short for --verbose")
+	verboseFlags(fs, verbose)
 	return func() ui.Reporter {
 		r := reporterOverride
 		if r == nil {
@@ -55,6 +54,12 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		routeHolds(r)
 		return r
 	}
+}
+
+// verboseFlags registers -v and --verbose on fs, into verbose.
+func verboseFlags(fs *flag.FlagSet, verbose *bool) {
+	fs.BoolVar(verbose, "verbose", false, "show the detail behind each step: reasons, values, requests and retries")
+	fs.BoolVar(verbose, "v", false, "short for --verbose")
 }
 
 // verboseRun is whether the command being run was given -v or --verbose, for

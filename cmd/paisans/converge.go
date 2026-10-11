@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -198,8 +199,102 @@ var convergeRun func(args []string) error
 func init() {
 	convergeRun = runStep
 	convergeCheck = func(r ui.Reporter, args []string) (string, []checkReport, error) {
+		if isPrepare(args) {
+			return checkPrepare(r, args)
+		}
 		return checkStep(r, args, runStep)
 	}
+}
+
+// isPrepare reports whether args are host prepare's.
+func isPrepare(args []string) bool {
+	return len(args) > 1 && args[0] == "host" && args[1] == "prepare"
+}
+
+// convergePrepare runs args, a host prepare step's command, through env:
+// apply without --site runs every host's at once, each on its own env.
+// Tests replace it.
+var convergePrepare = func(env prepareEnv, args []string) error {
+	return runHostPrepareIn(env, args[2:])
+}
+
+// defaultPrepareAtOnce is how many hosts are prepared at the same time.
+const defaultPrepareAtOnce = 8
+
+// prepareAtOnce is how many hosts are prepared at the same time. Tests set
+// it to one, to run them in order.
+var prepareAtOnce = defaultPrepareAtOnce
+
+// atOnce runs work for every index of keys, up to prepareAtOnce at a time,
+// and returns once each has. Indices sharing a key run one after another, in
+// order: two sites reached at one ssh destination are one machine, whose
+// package manager takes one run at a time. With prepareAtOnce one, every
+// index runs in order.
+func atOnce(keys []string, work func(i int)) {
+	var chains [][]int
+	chain := map[string]int{}
+	for i, k := range keys {
+		c, ok := chain[k]
+		if !ok {
+			c = len(chains)
+			chain[k] = c
+			chains = append(chains, nil)
+		}
+		chains[c] = append(chains[c], i)
+	}
+	slots := make(chan struct{}, max(prepareAtOnce, 1))
+	var wg sync.WaitGroup
+	for _, c := range chains {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			for _, i := range c {
+				work(i)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// prepareRun runs one host's host prepare, args, through convergePrepare,
+// quietly, as convergeQuiet runs a step: its warnings, refusals and ssh
+// retries come back as reports and its notes for after the line, and a hold
+// for a prompt reaches r, which draws the line. With verbose its own output
+// comes back too. found is whether it told a dry run's summary, and stop is
+// what it found that --execute would stop at.
+//
+// It touches none of the process's globals, so several run at once: the
+// holds already reach r, which the caller routed them to before starting
+// them, and nothing here routes them anywhere else.
+func prepareRun(r ui.Reporter, args []string, verbose bool) (output, summary string, found bool, stop error, reports []checkReport, err error) {
+	var b strings.Builder
+	inner := ui.Discard
+	if verbose {
+		inner = ui.NewPlain(&b, true)
+	}
+	env := prepareEnv{
+		r:       checkReporter{inner, r, &reports},
+		found:   func(s string, e error) { found, summary, stop = true, s, e },
+		retries: retryCollector{&reports},
+	}
+	err = convergePrepare(env, args)
+	return b.String(), summary, found, stop, reports, err
+}
+
+// checkPrepare is a host prepare step's check, as checkStep is any other's.
+func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
+	_, summary, found, stop, reports, err := prepareRun(r, args, false)
+	switch {
+	case err != nil:
+		return "", reports, err
+	case stop != nil:
+		return "", reports, stop
+	case !found:
+		return "", reports, fmt.Errorf("host prepare ended without saying what it would change")
+	}
+	return summary, reports, nil
 }
 
 func runStep(args []string) error {
@@ -556,7 +651,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		r.Result("Nothing changed. %s", next)
 		return nil
 	}
-	if err := convergeExecute(r, steps, o); err != nil {
+	if err := convergeExecute(r, cfg, steps, o); err != nil {
 		return err
 	}
 	// Each step pointed the retries and holds at its own reporter; the
@@ -623,7 +718,9 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 	// done is the status of each command, by title, as its latest step was
 	// marked.
 	done := map[string]stepStatus{}
-	check := func(i int) stepStatus {
+	// settled is step i's status when it needs no check of its own: it
+	// waits on a step not up to date, or its command was checked already.
+	settled := func(i int) (stepStatus, bool) {
 		s := steps[i]
 		after := ""
 		for _, w := range convergeWaits(cfg, steps, i) {
@@ -632,33 +729,44 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 				break
 			}
 		}
-		var st stepStatus
 		prior, checked := done[s.Title]
 		switch {
 		case after == s.Title:
 			// An apply in pass two waits on the same command earlier.
-			st = stepStatus{mark: ui.Waiting, result: "after the earlier " + after, after: after}
+			return stepStatus{mark: ui.Waiting, result: "after the earlier " + after, after: after}, true
 		case after != "":
-			st = stepStatus{mark: ui.Waiting, result: "after " + after, after: after}
+			return stepStatus{mark: ui.Waiting, result: "after " + after, after: after}, true
 		case checked:
-			st = stepStatus{mark: prior.mark, result: prior.result, after: prior.after}
-		default:
-			summary, reports, err := convergeCheck(r, convergeFlags(s.Args, o))
-			st.reports = reports
-			switch {
-			case err != nil:
-				// The hint is the line's result; what to do follows it at
-				// every verbosity, as a failure always says.
-				st.mark = ui.Failed
-				st.result, st.explain = ui.Describe(err)
-				st.problem = sentences(err)
-			case summary == "":
-				st.mark = ui.OK
-			default:
-				st.mark, st.result = ui.Pending, summary
-			}
+			return stepStatus{mark: prior.mark, result: prior.result, after: prior.after}, true
 		}
-		done[s.Title] = st
+		return stepStatus{}, false
+	}
+	// checked is s's status from its own dry run. It reads and writes
+	// nothing shared, so the prepare lines run it on every host at once.
+	checked := func(s convergeStep) stepStatus {
+		var st stepStatus
+		summary, reports, err := convergeCheck(r, convergeFlags(s.Args, o))
+		st.reports = reports
+		switch {
+		case err != nil:
+			// The hint is the line's result; what to do follows it at
+			// every verbosity, as a failure always says.
+			st.mark = ui.Failed
+			st.result, st.explain = ui.Describe(err)
+			st.problem = sentences(err)
+		case summary == "":
+			st.mark = ui.OK
+		default:
+			st.mark, st.result = ui.Pending, summary
+		}
+		return st
+	}
+	check := func(i int) stepStatus {
+		st, ok := settled(i)
+		if !ok {
+			st = checked(steps[i])
+		}
+		done[steps[i].Title] = st
 		return st
 	}
 	for i := 0; i < len(steps); {
@@ -673,13 +781,42 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 			j := installEnd(steps, i)
 			installStatus(r, steps[i:j], func(k int) stepStatus { return check(i + k) })
 			i = j
+		case s.Stage == stagePrepare:
+			// Every host's check runs at once, each on its own line.
+			j := prepareEnd(steps, i)
+			group := steps[i:j]
+			r.Section("prepare")
+			lines := ui.Group(r, prepareTitles(group)...)
+			statuses := make([]stepStatus, len(group))
+			var keys []string
+			var unsettled []int
+			for k := range group {
+				st, ok := settled(i + k)
+				if ok {
+					statuses[k] = st
+					endStatus(lines[k], st)
+					continue
+				}
+				unsettled = append(unsettled, k)
+				keys = append(keys, prepareHost(cfg, group[k], o))
+			}
+			atOnce(keys, func(n int) {
+				k := unsettled[n]
+				statuses[k] = checked(group[k])
+				endStatus(lines[k], statuses[k])
+			})
+			for k, s := range group {
+				done[s.Title] = statuses[k]
+			}
+			// Each check pointed nothing elsewhere, but a check of a step
+			// that is not host prepare may have: the reads after draw on r.
+			routeRetries(r)
+			routeHolds(r)
+			i = j
 		default:
 			title := s.Title
-			if s.Stage == stagePrepare {
-				title = stepSite(s)
-			}
 			if i == 0 || steps[i-1].Stage != s.Stage {
-				r.Section(map[stage]string{stagePrepare: "prepare", stageDNS: "dns"}[s.Stage])
+				r.Section(map[stage]string{stageDNS: "dns"}[s.Stage])
 			}
 			line := r.Step(title)
 			st := check(i)
@@ -758,6 +895,48 @@ func installStatus(r ui.Reporter, steps []convergeStep, check func(int) stepStat
 	showNotes(r, notes)
 }
 
+// endStatus ends a dry run's prepare line with its status: the check's
+// details under it, with -v, then what to do about a failure and its notes.
+func endStatus(line ui.Line, st stepStatus) {
+	for _, n := range lineDetails(line, "", "", st.reports) {
+		line.Note(n.Text, n.Detail)
+	}
+	line.Explain(st.explain)
+	line.End(st.mark, st.result)
+}
+
+// prepareEnd is the index after the prepare steps that start at from.
+func prepareEnd(steps []convergeStep, from int) int {
+	to := from
+	for to < len(steps) && steps[to].Stage == stagePrepare {
+		to++
+	}
+	return to
+}
+
+// prepareTitles are the prepare lines' titles: each step's site.
+func prepareTitles(steps []convergeStep) []string {
+	titles := make([]string, len(steps))
+	for i, s := range steps {
+		titles[i] = stepSite(s)
+	}
+	return titles
+}
+
+// prepareHost is the machine a prepare step reaches: its site's ssh
+// destination, which two sites may share.
+func prepareHost(cfg *config.Config, s convergeStep, o convergeOptions) string {
+	site := stepSite(s)
+	if cfg == nil {
+		return site
+	}
+	sc, ok := cfg.Sites[site]
+	if !ok {
+		return site
+	}
+	return siteTransport(site, sc, "", o.Sudo).Describe()
+}
+
 // installEnd is the index after the install steps that start at from.
 func installEnd(steps []convergeStep, from int) int {
 	to := from
@@ -831,27 +1010,18 @@ const resumeAdvice = "Run paisans apply --execute again to resume."
 // founding to pass two, whose spinner names the site it has reached; and dns
 // init, which reports as typed by hand, so a conflicting record it lists is
 // what the stop's advice points at. It stops at the first failure.
-func convergeExecute(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
+func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
 	for i := 0; i < len(steps); {
 		s := steps[i]
 		switch {
 		case s.Stage == stageInit:
 			i++
 		case s.Stage == stagePrepare:
-			if i == 0 || steps[i-1].Stage != stagePrepare {
-				r.Section("prepare")
+			j := prepareEnd(steps, i)
+			if err := convergePrepareAll(r, cfg, steps[i:j], o); err != nil {
+				return err
 			}
-			line := r.Step(stepSite(s))
-			output, reports, err := convergeQuiet(r, convergeFlags(s.Args, o), o.Verbose)
-			notes := lineDetails(line, "", output, reports)
-			if err != nil {
-				line.Fail(err)
-				showNotes(r, notes)
-				return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
-			}
-			line.Done("")
-			showNotes(r, notes)
-			i++
+			i = j
 		case s.Stage.installs():
 			j := installEnd(steps, i)
 			if err := convergeInstall(r, steps[i:j], o); err != nil {
@@ -870,6 +1040,61 @@ func convergeExecute(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		}
 	}
 	return nil
+}
+
+// convergePrepareAll runs steps, the prepare lines', every host at once,
+// each on its own line, which ends with its host. A host that fails stops
+// none of the others; once every one has ended, the run stops if any failed,
+// naming each.
+func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
+	r.Section("prepare")
+	lines := ui.Group(r, prepareTitles(steps)...)
+	errs := make([]error, len(steps))
+	keys := make([]string, len(steps))
+	for k, s := range steps {
+		keys[k] = prepareHost(cfg, s, o)
+	}
+	atOnce(keys, func(k int) {
+		output, _, _, _, reports, err := prepareRun(r, convergeFlags(steps[k].Args, o), o.Verbose)
+		for _, n := range lineDetails(lines[k], "", output, reports) {
+			lines[k].Note(n.Text, n.Detail)
+		}
+		errs[k] = err
+		if err != nil {
+			lines[k].Fail(err)
+			return
+		}
+		lines[k].Done("")
+	})
+	// A host prepare a test runs through the step runner may have pointed
+	// the retries and holds elsewhere; what follows draws on r.
+	routeRetries(r)
+	routeHolds(r)
+	var failed []int
+	for k, err := range errs {
+		if err != nil {
+			failed = append(failed, k)
+		}
+	}
+	switch len(failed) {
+	case 0:
+		return nil
+	case 1:
+		return convergeStop("apply stopped at "+steps[failed[0]].Title, errs[failed[0]], resumeAdvice)
+	}
+	var sites, explain []string
+	var causes []error
+	for _, k := range failed {
+		site := stepSite(steps[k])
+		sites = append(sites, site)
+		explain = append(explain, site+": "+strings.ReplaceAll(sentences(errs[k]), "\n", " "))
+		causes = append(causes, errs[k])
+	}
+	return &ui.Problem{
+		Hint:    "apply stopped at host prepare on " + strings.Join(sites, ", "),
+		Explain: strings.Join(append(explain, resumeAdvice), "\n"),
+		Cause:   errors.Join(causes...),
+	}
 }
 
 // convergeInstall runs steps, the install line's, in their order, quietly,

@@ -991,49 +991,106 @@ func runStorageInit(args []string) error {
 func runHostPrepare(args []string) error {
 	fs := flag.NewFlagSet("host prepare", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
-	site := fs.String("site", "", "the site to prepare, by the name it has in the configuration")
-	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
-	execute := fs.Bool("execute", false, "actually install and configure what is missing")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since packages, the firewall and kernel modules are root's")
+	o := hostPrepareFlags(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	r := reporter()
-	if *site == "" {
+	// dryRunFound is read when it is called: apply's check sets it around
+	// the run.
+	found := func(summary string, stop error) { dryRunFound(summary, stop) }
+	return hostPrepare(prepareEnv{r: reporter(), found: found}, *o)
+}
+
+// hostPrepareOptions are host prepare's flags.
+type hostPrepareOptions struct {
+	config, site, ssh string
+	execute, sudo     bool
+}
+
+// hostPrepareFlags registers host prepare's own flags on fs.
+func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
+	o := &hostPrepareOptions{}
+	fs.StringVar(&o.config, "config", "paisans.yaml", "path to the deployment declaration")
+	fs.StringVar(&o.site, "site", "", "the site to prepare, by the name it has in the configuration")
+	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
+	fs.BoolVar(&o.execute, "execute", false, "actually install and configure what is missing")
+	fs.BoolVar(&o.sudo, "sudo", true, "run remote commands through sudo, since packages, the firewall and kernel modules are root's")
+	return o
+}
+
+// prepareEnv is what one run of host prepare reports through. Typed by hand
+// it is the command's reporter and the process's dryRunFound; apply without
+// --site, which prepares several hosts at once, gives each its own, so that
+// no host's run touches what another's is using.
+type prepareEnv struct {
+	// r is what the command reports through.
+	r ui.Reporter
+	// found is told a dry run's summary, as dryRunFound is.
+	found func(summary string, stop error)
+	// retries, when set, receives the command's ssh retries in place of
+	// the process's retry log.
+	retries io.Writer
+}
+
+// runHostPrepareIn is host prepare run with args through env, on none of the
+// process's globals: its flags parse into its own variables, and nothing is
+// routed. -v is accepted and changes nothing here; env.r is already as
+// verbose as the run.
+func runHostPrepareIn(env prepareEnv, args []string) error {
+	fs := flag.NewFlagSet("host prepare", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var verbose bool
+	verboseFlags(fs, &verbose)
+	o := hostPrepareFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("host prepare: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("host prepare: %q is extra", fs.Arg(0))
+	}
+	return hostPrepare(env, *o)
+}
+
+// hostPrepare is host prepare with its flags parsed, reporting through env.
+func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
+	r := env.r
+	if o.site == "" {
 		return fmt.Errorf("host prepare: --site is required. A site at a time is deliberate, the same reason apply --site takes one")
 	}
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(o.config)
 	if err != nil {
 		return err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, *configPath, result)
+	reportFindings(r, o.config, result)
 	if result.Refused() {
-		return refused(*configPath, len(result.Refusals()), "")
+		return refused(o.config, len(result.Refusals()), "")
 	}
-	declared, ok := cfg.Sites[*site]
+	declared, ok := cfg.Sites[o.site]
 	if !ok {
-		return fmt.Errorf("host prepare: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+		return fmt.Errorf("host prepare: %s declares no site %q. Declared sites are %s", o.config, o.site, strings.Join(cfg.SiteNames(), ", "))
 	}
 
-	transport := siteTransport(*site, declared, *destination, *sudo)
-	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
+	transport := siteTransport(o.site, declared, o.ssh, o.sudo)
+	if env.retries != nil {
+		transport.RetryLog = env.retries
+	}
+	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
 	done := r.Step("check mesh subnet")
-	err = checkMeshLive(cfg, *site, transport)
+	err = checkMeshLive(cfg, o.site, transport)
 	if err != nil {
 		done.Fail(err)
 		return err
 	}
 	// Only once it is true: a check that could not run found nothing.
-	done.Detail("nothing on %s overlaps the mesh subnet", *site)
+	done.Detail("nothing on %s overlaps the mesh subnet", o.site)
 	done.Done("")
-	host, err := hostGate(r, cfg, *site, transport)
+	host, err := hostGate(r, cfg, o.site, transport)
 	if err != nil {
 		return err
 	}
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if err := claimHosts(r, cfg, o.execute, map[string]registry.Runner{o.site: transport}); err != nil {
 		return err
 	}
 	var options []hostprep.Option
@@ -1041,25 +1098,25 @@ func runHostPrepare(args []string) error {
 		options = append(options, hostprep.Shared())
 	}
 	plan, err := ui.Get(r, "read the host", func() (*hostprep.Plan, error) {
-		return hostprep.Build(*site, cfg, transport, options...)
+		return hostprep.Build(o.site, cfg, transport, options...)
 	})
 	if err != nil {
 		return err
 	}
 	// A dry run is the plan. --execute reports progress instead, and shows
 	// the plan first only with --verbose, since its steps say the same.
-	if !*execute || r.Verbose() {
+	if !o.execute || r.Verbose() {
 		plan.Show(r)
 	} else {
 		plan.Warn(r)
 	}
 
-	if !*execute {
+	if !o.execute {
 		// The kinds of change the plan makes, which apply's dry run shows
 		// on this step's line.
-		dryRunFound(strings.Join(plan.Kinds(), ", "), nil)
+		env.found(strings.Join(plan.Kinds(), ", "), nil)
 		if len(plan.Steps) == 0 {
-			r.Result("%s is prepared. Nothing to do.", *site)
+			r.Result("%s is prepared. Nothing to do.", o.site)
 			return nil
 		}
 		r.Result("Nothing changed. Re-run with --execute to apply.")
@@ -1068,7 +1125,7 @@ func runHostPrepare(args []string) error {
 	if err := hostprep.Execute(plan, transport, r); err != nil {
 		return err
 	}
-	r.Result("Prepared %s.", *site)
+	r.Result("Prepared %s.", o.site)
 	return nil
 }
 

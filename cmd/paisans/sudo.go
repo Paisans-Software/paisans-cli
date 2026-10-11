@@ -103,11 +103,20 @@ func terminalAvailable() bool {
 // erase the prompt and leave the operator watching a spinner that waits on
 // them without saying so. The prompt is erased once answered, so the
 // spinner redraws on the row it took.
+//
+// Prompts are asked one at a time: hosts prepared at the same time can each
+// reach a first sudo command at once, and two prompts sharing the terminal
+// would garble each other.
 func promptOnTerminal(host string) (string, error) {
+	promptMu.Lock()
+	defer promptMu.Unlock()
 	resume := holdOutput()
 	defer resume()
 	return readPassword(host)
 }
+
+// promptMu is held while a password is asked for on the terminal.
+var promptMu sync.Mutex
 
 // readPassword asks on the controlling terminal. Tests replace it, since a
 // test has no terminal to type into.

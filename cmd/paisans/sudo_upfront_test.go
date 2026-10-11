@@ -203,7 +203,8 @@ func TestAnUnreachableHostIsLeftToItsStep(t *testing.T) {
 		t.Errorf("sudo section:\n%s", strings.Join(lines, "\n"))
 	}
 	sameLines(t, lines[1:], []string{"done home-b", "done vm", "done watch"})
-	sameLines(t, *ran, []string{"host prepare --site home-a"})
+	// The other hosts are still prepared; nothing after prepare runs.
+	sameLines(t, *ran, []string{"host prepare --site home-a", "host prepare --site home-b", "host prepare --site vm", "host prepare --site watch"})
 }
 
 // With --sudo=false there is nothing to ask, and no sudo section.

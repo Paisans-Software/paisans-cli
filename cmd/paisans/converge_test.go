@@ -187,6 +187,17 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	var ran []string
 	var full [][]string
 	savedRun, savedRead, savedCheck := convergeRun, convergeReadInitial, convergeCheck
+	savedPrepare, savedAtOnce := convergePrepare, prepareAtOnce
+	// Each host's prepare goes through the step runner below, one host at
+	// a time and in order, reporting as a step under apply does; allAtOnce
+	// runs them together.
+	prepareAtOnce = 1
+	convergePrepare = func(env prepareEnv, args []string) error {
+		saved := reporterOverride
+		reporterOverride = env.r
+		defer func() { reporterOverride = saved }()
+		return convergeRun(args)
+	}
 	// A dry run's checks are each step's own dry run, which reaches a host;
 	// here every step is up to date. fakeChecks says otherwise.
 	convergeCheck = func(ui.Reporter, []string) (string, []checkReport, error) { return "", nil, nil }
@@ -215,6 +226,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	fixtureBefore, _ := os.ReadFile(fixtureSecretsPath())
 	t.Cleanup(func() {
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
+		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
 		if now, _ := os.ReadFile(fixtureSecretsPath()); string(now) != string(fixtureBefore) {
 			t.Errorf("%s was rewritten: add the generated secret it lacks to it, and restore it", fixtureSecretsPath())
 		}
