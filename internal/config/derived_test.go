@@ -18,6 +18,11 @@ community:
   domain: example.org
 mesh:
   subnet: 10.44.0.0/24
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   vm:
     roles: [witness]
@@ -25,40 +30,35 @@ sites:
     ssh:
       host: site.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   home-b:
     roles: [data]
     address: 10.44.0.2
     ssh:
       host: site.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   box:
     roles: [witness]
     address: 10.44.0.5
     ssh:
       host: site.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   home-a:
     roles: [data, apps]
     address: 10.44.0.1
     ssh:
       host: site.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   watch:
     roles: [apps]
     address: 10.44.0.4
     ssh:
       host: site.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 cluster:
   port: 5000
 etcd:

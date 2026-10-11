@@ -15,6 +15,11 @@ mesh:
 acme:
   provider: desec
 
+admins:
+  alice:
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -23,16 +28,14 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -40,8 +43,7 @@ sites:
     ssh:
       host: vm.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
   # The monitor's own machine, so that something watches the deployment.
   watch:
     roles: [monitor]
@@ -50,8 +52,7 @@ sites:
     ssh:
       host: watch.example.org
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
 
 cluster:
   sites: [home-a, home-b]

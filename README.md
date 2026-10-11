@@ -2543,8 +2543,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys:
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      keys: [alice]
     watchdog: auto   # auto | required | softdog | off; auto when absent
 ```
 
@@ -2633,9 +2632,23 @@ fail on every fork.
 
 ### Every site has an `ssh` section
 
-Every site, the gateway included, declares one:
+Every site, the gateway included, declares one. Its `keys` names admins from
+the top level `admins` section, and the site authorises every key those admins
+list:
 
 ```yaml
+admins:
+  alice:
+    name: Alice Example    # optional
+    email: alice@example.org
+    keys: |                # required: one whole .pub line per line
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC alice@laptop
+  bob:
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+
 sites:
   vm:
     roles: [gateway, witness]
@@ -2645,9 +2658,7 @@ sites:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
       user: ubuntu         # required, and must already exist on the host
       port: 22             # optional: empty or 0 means 22
-      keys:                # required: each key's name, then its .pub line
-        alice: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
-        bob: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+      keys: [alice, bob]   # required: the admins who may log in
 ```
 
 | Key | Required | Refused when |
@@ -2655,15 +2666,24 @@ sites:
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
 | `user` | yes | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
 | `port` | no | outside 1 to 65535 |
-| `keys` | yes | not a mapping; a name that is not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most; a name given twice; a value that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key under two names, by fingerprint |
+| `keys` | yes | not a list; empty; an admin the `admins` section does not declare; an admin listed twice |
+
+Each entry of `admins`:
+
+| Key | Required | Refused when |
+|-----|----------|--------------|
+| the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
+| `name` | no | |
+| `email` | yes | not an email address alone, Eg: `alice@example.org` |
+| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two admins, by fingerprint |
 
 `host` defaults to `public_address`, and without that to the host in
 `endpoint`, because on most sites they are the same address written twice.
 `endpoint` comes last because it may name a router that forwards only
 WireGuard's port; there the connection fails and nothing is changed. The user name is held to a conservative form because it
-goes into commands and a file name on the host, and so is a key's name, which
-`host prepare` records on the host so an operator can trace a key there back
-to this file. Options are refused rather than carried: a line `host prepare` writes
+goes into commands and a file name on the host, and so is an admin's name,
+which `host prepare` records on the host beside each of their keys so an
+operator can trace a key there back to this file. Options are refused rather than carried: a line `host prepare` writes
 and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
 
@@ -2671,9 +2691,19 @@ The section replaced a single string, `ssh: home-a.local`. That form is now
 refused, and the refusal prints the section to write with the old host filled
 in. A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
-`ssh.public_key`, a block of unnamed key lines, is refused the same way: the
-refusal prints the `keys` section to write, each key named by its comment up
-to the `@`.
+
+#### Keys belong to admins, and sites name admins
+
+An admin's keys are the same on every site they reach, so they are written
+once, under the admin, and each site names the people who may log in. A key
+written out per site is a key that gets rotated on some sites and missed on
+others; written once, rotating it is one edit and a `host prepare` of each site
+that names the admin.
+
+`email` is required so that every key in the file leads to somebody who can
+say whether it is still theirs. A key belongs to one admin: two admins sharing
+a key cannot be told apart on a host, and taking one of them off a site would
+leave the other's access resting on a key nobody listed for them.
 
 #### Public keys, not a path to a private key
 
@@ -2685,8 +2715,9 @@ private key or where one lives. The toolkit never reads a private key at all.
 
 The same list is the record of who may log in: `host prepare` makes those keys
 the login user's authorized keys (see *host prepare manages the login user's
-authorized keys*). Adding an admin is adding their `.pub` line and preparing
-again; removing one is deleting it and preparing again.
+authorized keys*). Giving an admin a site is adding their name to its
+`ssh.keys` and preparing again; taking it away is removing the name and
+preparing again.
 
 #### How the operator's ssh uses them
 
@@ -3221,7 +3252,7 @@ interface. That binding is separate work and is not part of `host prepare`.
 
 #### host prepare manages the login user's authorized keys
 
-`host prepare` makes every key in `ssh.keys` an authorized key of
+`host prepare` makes every key of every admin in `ssh.keys` an authorized key of
 `ssh.user`, in `~<user>/.ssh/authorized_keys`. When the directory or the file
 is missing it is created, 0700 and 0600, owned by the user. A user that does
 not exist is refused: creating users is out of scope.
@@ -3259,7 +3290,7 @@ For a listed key:
 | `authorized_keys` holds | This sidecar | Another sidecar | The plan says | What happens |
 |-------------------------|--------------|-----------------|---------------|--------------|
 | nothing for the key | | | `○ authorize ssh key` | appended verbatim, recorded `added` |
-| the key | lists it | | `✓` | nothing; `○ rename ssh key` if `ssh.keys` now calls it something else |
+| the key | lists it | | `✓` | nothing; `○ rename ssh key` if the key now belongs to a different admin |
 | the key | does not list it | lists it | `○ share ssh key` | recorded `shared` |
 | the key | does not list it | does not list it | `✓` | nothing; not recorded, so never removed |
 | the key, only with options | | | `✓ …: not paisans` | nothing; adding the plain key would undo the restriction |
