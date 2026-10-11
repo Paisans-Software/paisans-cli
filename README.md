@@ -3261,6 +3261,21 @@ wg-quick's own error line by default, the whole journal with `-v`. A peer
 `Endpoint` whose name does not resolve from the site is the common case, and
 is said as such: create its DNS record with `paisans dns init` and apply again.
 
+**Peer endpoint names are resolved before WireGuard runs.** `wg` resolves an
+`Endpoint` once and treats "not found" as final, and systemd-resolved keeps a
+"not found" for the zone's negative TTL, which can be many minutes. A site that
+looked a peer's name up before `dns init` created its record would fail
+wg-quick long after the record exists. So whenever `apply` is about to start,
+restart or sync the mesh and a peer's `Endpoint` is a name rather than an
+address, it first runs the step `resolve mesh endpoints`: it clears the site's
+DNS cache (`resolvectl flush-caches`, skipped on a host without systemd-resolved)
+and asks `getent ahosts` for every such name, in one command, again every 2
+seconds for up to 30 seconds, flushing before each try. A name that still does
+not resolve stops the apply before the interface is touched, with
+`mesh: wg-quick@psns-<token> was not started` and the same advice: create its DNS
+record with `paisans dns init` and apply again. A mesh with nothing to do, or
+whose peers are all addresses, resolves nothing.
+
 ### `paisans apply` with no `--site` converges the whole deployment
 
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running

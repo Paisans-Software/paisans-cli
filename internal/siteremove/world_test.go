@@ -586,6 +586,9 @@ func (h *host) Run(command string) (string, error) {
 		return "down\n", nil
 	case strings.Contains(command, "wg syncconf"):
 		return "", nil
+	case strings.Contains(command, "getent ahosts"):
+		// Every peer's endpoint name resolves.
+		return "", nil
 	case command == "wg show psns-f2a9 peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.files[wgConf], -1) {

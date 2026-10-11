@@ -82,6 +82,9 @@ type fakeHost struct {
 	// network inspect --format '{{json .IPAM.Config}}'` prints its address
 	// pools. A network not in it does not exist.
 	networks map[string]string
+	// unresolved is how many more polls each mesh endpoint name fails to
+	// resolve on, -1 for never. A name not in it resolves.
+	unresolved map[string]int
 }
 
 func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
@@ -170,6 +173,9 @@ func (h *fakeHost) Run(command string) (string, error) {
 		delete(h.files, strings.Trim(strings.TrimPrefix(command, "rm -f "), "'"))
 		return "", nil
 	}
+	if strings.Contains(command, "getent ahosts") {
+		return h.resolveProbe(command), nil
+	}
 	if strings.Contains(command, "ip link show psns-f2a9") {
 		if h.wgUp {
 			return "up\n", nil
@@ -206,6 +212,27 @@ func (h *fakeHost) Run(command string) (string, error) {
 		return "\n", nil
 	}
 	return "", nil
+}
+
+// resolveProbe answers the loop apply sends to ask which mesh endpoint names
+// resolve: it prints each quoted name between `for n in` and `; do` that does
+// not.
+func (h *fakeHost) resolveProbe(command string) string {
+	_, list, _ := strings.Cut(command, "for n in ")
+	list, _, _ = strings.Cut(list, "; do")
+	var b strings.Builder
+	for _, quoted := range strings.Fields(list) {
+		name := strings.Trim(quoted, "'")
+		left := h.unresolved[name]
+		if left == 0 {
+			continue
+		}
+		if left > 0 {
+			h.unresolved[name] = left - 1
+		}
+		fmt.Fprintf(&b, "%s\n", name)
+	}
+	return b.String()
 }
 
 // imageProbe answers the loop apply sends to ask which images are present:

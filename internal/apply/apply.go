@@ -173,6 +173,9 @@ type Plan struct {
 	// meshAddress is the Address line of the site's rendered WireGuard file
 	// (Eg: 10.44.0.1/24), which the interface must hold once WireGuard ran.
 	meshAddress string
+	// meshEndpoints are the host names among the peer endpoints of that
+	// file, which must resolve before WireGuard runs.
+	meshEndpoints []string
 	// Bootstrap is the per app database work, nil when this site does none.
 	// It runs after the infrastructure stack and before any app stack, and a
 	// failure stops the apply there. See WithDatabases.
@@ -676,6 +679,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			wireguard = &copied
 			wireguardBefore = current
 			out.meshAddress = wireguardAddress(file.Content)
+			out.meshEndpoints = endpointNames(file.Content)
 		}
 
 		if change.Stack != "" {
@@ -1078,6 +1082,9 @@ func execute(plan *Plan, t Transport) error {
 	// rule is simple: no container is started or checked on a site whose
 	// interface is down.
 	if command := plan.WireGuard.Command(plan.Deployment); command != "" {
+		if err := resolveMeshEndpoints(plan, t); err != nil {
+			return err
+		}
 		done := plan.step(plan.WireGuard.Title(plan.Deployment))
 		done.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
 		err := bringUpMesh(plan, t, command)
