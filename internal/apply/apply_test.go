@@ -65,6 +65,8 @@ type fakeHost struct {
 	images string
 	// containers is what the containers' images probe prints: names and IDs.
 	containers string
+	// others are other deployments' roots under /srv/paisans, by name.
+	others []string
 	// volumes is what each image declares, as `docker image inspect --format
 	// '{{json .Config.Volumes}}'` prints it. An image not in it declares
 	// nothing, which prints null.
@@ -110,6 +112,21 @@ func (h *fakeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
 	if h.fail != "" && strings.Contains(command, h.fail) {
 		return "refused by the fake host", fmt.Errorf("exit status 1")
+	}
+	if strings.Contains(command, "echo paisans-sweep-end") {
+		return h.sweepRead(command), nil
+	}
+	if id, ok := strings.CutPrefix(command, "docker image rm "); ok {
+		// The image is gone from then on, as it would be from a real host.
+		id = strings.Trim(id, "'")
+		var kept []string
+		for _, line := range strings.SplitAfter(h.images, "\n") {
+			if line != "" && !strings.Contains(line, id) {
+				kept = append(kept, line)
+			}
+		}
+		h.images = strings.Join(kept, "")
+		return "", nil
 	}
 	if strings.Contains(command, "ps -aq | xargs -r docker inspect") {
 		stack := strings.TrimSuffix(strings.TrimPrefix(command, "docker compose -f /srv/paisans/f2a9/"), command[strings.Index(command, "/compose.yaml"):])
@@ -256,6 +273,26 @@ func (h *fakeHost) imageProbe(command string) string {
 		digest := sha256.Sum256([]byte(ref))
 		fmt.Fprintf(&b, "present sha256:%s %s\n", hex.EncodeToString(digest[:]), ref)
 	}
+	return b.String()
+}
+
+// sweepRead answers the sweep's one read: the other deployments' roots, the
+// images, the probe of the images kept, and the containers' images.
+func (h *fakeHost) sweepRead(command string) string {
+	var b strings.Builder
+	for _, name := range h.others {
+		fmt.Fprintf(&b, "deployment %s\n", name)
+	}
+	b.WriteString(h.images)
+	if _, loop, ok := strings.Cut(command, "for r in "); ok {
+		b.WriteString(h.imageProbe("for r in " + loop))
+	}
+	for _, line := range strings.Split(strings.TrimSpace(h.containers), "\n") {
+		if line != "" {
+			fmt.Fprintf(&b, "container %s\n", line)
+		}
+	}
+	b.WriteString("paisans-sweep-end\n")
 	return b.String()
 }
 
@@ -830,7 +867,9 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 		t.Errorf("an unchanged psns-f2a9.conf on a host whose psns-f2a9 is down plans %v, want a start", p.WireGuard)
 	}
 	for _, command := range host.commands {
-		if !strings.Contains(command, "ip link show psns-f2a9") {
+		// The sweep's read of the host's images is the other probe a plan
+		// makes.
+		if !strings.Contains(command, "ip link show psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}

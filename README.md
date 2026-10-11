@@ -2979,8 +2979,9 @@ On a **shared** host:
   both decide the other services' traffic as well, and enabling a deny
   default under a web server the toolkit knows nothing about takes it off
   the network. It still adds and removes its own `paisans-<token>:` rules.
-* **No image is removed**, as with `apply --keep-images`, because an image the
-  toolkit renders (`caddy`, `postgres`) may be what a foreign project runs.
+* **No image is removed**, as with `apply --keep-images`, and nothing is
+  swept, because an image the toolkit renders (`caddy`, `postgres`) may be
+  what a foreign project runs.
 * **Docker is left alone**, as it already is whenever `docker compose` works,
   and Ubuntu's `docker.io` and a Docker snap are still refused rather than
   removed.
@@ -4394,12 +4395,54 @@ image. Waiting for the gate is the point: until the new image is healthy, the
 old one is what a rollback would run. `apply --keep-images` skips pruning for
 one run, for an operator who wants to keep that image a while longer.
 
-**The toolkit removes only what its own stacks superseded.** An image no
+**A whole apply ends by sweeping.** Pruning after a stack's gate reaches only
+what that stack's action superseded, so three kinds of old image would stay
+for good: one an earlier `--keep-images` run kept or whose removal failed, in a
+stack this apply does not move; any image at all when an apply moves nothing;
+and every image of an app taken out of the configuration, whose repository no
+stack renders any more. So the site's manifest records every image repository
+its stacks have rendered, with each reference rendered from it, and each apply
+adds what it renders to that record and drops nothing: it is what the stack
+uses and has used. As its last step, once every stack is healthy and the
+manifest is written, every whole `apply` removes each image that is all three
+of:
+
+* from a repository in that record, or one the site renders now,
+* not an image any site of the deployment renders, by ID or by tag, so a
+  digest-pinned image (Eg: the gateway's Caddy, which `docker image ls` shows
+  untagged) is kept by its ID, and an image the pull stage fetched for a stack
+  not started yet is kept because it is rendered, and
+* not used by any container, running or stopped, the same test as above.
+
+The dry run lists them as one `sweep old images` step, and its summary line
+counts them (Eg: `2 old images to sweep`). Each failed read or removal is a
+warning, never a failed apply. A manifest written before the record existed
+starts it at the next apply.
+
+Only a **whole** apply sweeps. One narrowed by `--only`, the pass that holds
+apps back until their sign-in clients exist, and the scoped applies inside
+`site add`, `storage add` and the others are each a step of a larger change,
+and the whole apply that finishes it sweeps. A step that swept could remove
+the image a later step of the same change is about to start from.
+
+**The toolkit removes only images of repositories it rendered.** An image no
 container uses may still be one the toolkit never pulled and knows nothing
-about: an operator's own tools, an image staged by hand for a later apply.
-**No previous versions are kept by default** because of the disk this is for:
-on a 10 GB host one extra Mbin image is 1.4 GB, and `--keep-images` covers the
-rollback case when an operator actually wants it.
+about: an operator's own tools, an image staged by hand for a later apply. A
+repository that never appeared in a compose file this deployment rendered is
+never in the record, so the sweep never reaches it. **No previous versions are
+kept by default** because of the disk this is for: on a 10 GB host one extra
+Mbin image is 1.4 GB, and `--keep-images`, which skips the sweep as well,
+covers the rollback case when an operator actually wants it.
+
+**Another deployment on the host stops the sweep.** Two deployments may share
+one Docker engine, and what the other renders is in its own files, which this
+apply does not read. A host whose containers include another deployment's is
+shared and removes nothing (*The host check: what is already on a host decides
+how much is touched*); a host holding another deployment's root under
+`/srv/paisans/` with no container running sweeps nothing either, and the plan
+says which root it found. Two sites of one deployment reached at the same ssh
+destination need no such rule: each keeps every image any site of the
+deployment renders.
 
 ### Every volume an image declares is mounted, and `apply` checks it
 

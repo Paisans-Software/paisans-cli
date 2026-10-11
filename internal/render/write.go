@@ -29,6 +29,22 @@ type Manifest struct {
 	// by apply on a site running Caddy and absent elsewhere. A manifest
 	// written before apply recorded it has none.
 	Caddy *ManifestCaddy `json:"caddy,omitempty"`
+	// Images is every image repository the site's stacks have rendered, with
+	// each reference rendered from it, accumulated over every apply: what
+	// the stack uses now and what it used before. A whole apply removes the
+	// images of these repositories that nothing renders or runs any more. A
+	// manifest written before apply recorded it has none, and its history
+	// starts with the next apply.
+	Images []ManifestImage `json:"images,omitempty"`
+}
+
+// ManifestImage is one repository a site's stacks rendered, and every
+// reference they rendered from it, sorted.
+type ManifestImage struct {
+	// Repository is as `docker image ls` shows it (Eg: postgres,
+	// ghcr.io/paisans-software/caddy).
+	Repository string   `json:"repository"`
+	References []string `json:"references"`
 }
 
 // ManifestCaddy is which build of its image a site's Caddy was deployed

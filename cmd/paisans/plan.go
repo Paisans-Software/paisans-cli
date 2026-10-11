@@ -137,6 +137,14 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 		r.Detail("the assembled gateway configuration, before the gateway is replaced")
 	}
 
+	// The sweep is the apply's last step.
+	if len(plan.Sweep) > 0 {
+		r.Step("sweep old images").End(ui.Pending, "")
+		for _, sweep := range plan.Sweep {
+			r.Detail("%s, which nothing the deployment renders names, if no container uses it then", sweep.Ref)
+		}
+	}
+
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		verb := "were"
 		if len(conflicts) == 1 {
