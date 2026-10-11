@@ -93,10 +93,31 @@ So listing a name in `community.mail_domains` and running `dns prune
 --execute` removes the toolkit's no-mail records there, which must happen
 before the mail service's own SPF and MX are added.
 
-## Tests
+## Amendment, 2026-10-11: a leftover stops dns init
+
+Founder decision, the same day. `dns init`, and so `apply`, refuses while a
+no-mail record this deployment made sits at a name that now has mail, so that
+the order in *Prune* cannot be skipped silently.
+
+* For each mail name equal to or under `community.domain`, `Desired` adds
+  **leftover** wants: the SPF content at the name, and at the domain also the
+  null MX and the empty DKIM key. A mail name outside the domain is never
+  read, since `dns init` never wrote there and its zone may not be visible.
+* `Build` looks at the records at a leftover want's name, and at the advisory
+  DMARC want's, for one of the same kind that carries this deployment's
+  comment and is exactly the no-mail content (`isLockdown`, the test prune
+  uses). One found is a conflict whose detail says to run `paisans dns prune
+  --execute`; none is `clear`, which is not shown. A leftover is never
+  created and never counted as wanted by prune.
+* The plan shows such a conflict with `remove with dns prune:` in place of
+  `wanted:`, and `apply`'s stop hint says to resolve each conflict as it says.
+
 
 `internal/dns/mail_test.go`: the records derived with no mail, with a mail
 domain, and with smtp senders; every row of the comparison table; creation and
 read-back including the MX priority; the advisory warning writing nothing;
 prune removing exactly the no-mail records a mail domain stops wanting; site
-removal leaving them. `internal/validate`: one fixture per new rule.
+removal leaving them; each leftover a conflict naming prune, none from a
+record without this deployment's comment, none after prune has run, and no
+lookup of a mail name outside the domain. `internal/validate`: one fixture
+per new rule.

@@ -1167,6 +1167,11 @@ warned about, never written. `dns prune` may delete a TXT or MX record that
 holds exactly one of those no-mail contents, which widens a delete path that
 was address records only.
 
+Amended the same day, founder decision: `dns init`, and so `apply`, refuses
+while a no-mail record this deployment made is still at a name that now has
+mail, naming `dns prune --execute` as the fix, so the prune cannot be skipped
+silently before a mail service's records are added.
+
 ### Why
 
 A name with an address record can be forged as a sender whether or not anyone

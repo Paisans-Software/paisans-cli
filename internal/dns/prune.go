@@ -267,7 +267,7 @@ func siteAddresses(cfg *config.Config, name string) map[string]string {
 func wantedSet(wants []Want) map[string][]string {
 	out := map[string][]string{} // type + " " + name -> sources
 	for _, w := range wants {
-		if w.Advisory {
+		if w.Advisory || w.Leftover {
 			continue
 		}
 		out[w.Type+" "+w.Name] = w.Sources

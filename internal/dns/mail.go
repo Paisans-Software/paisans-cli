@@ -129,6 +129,27 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 	if domain == "" {
 		return out
 	}
+	// A mail name may hold a no-mail record from before it had mail, and
+	// that record would turn its mail away. Each is looked for, at a name in
+	// this deployment's zones, so that dns init stops until prune has
+	// removed it.
+	var mailNames []string
+	for name := range mail {
+		if name == domain || strings.HasSuffix(name, "."+domain) {
+			mailNames = append(mailNames, name)
+		}
+	}
+	sort.Strings(mailNames)
+	for _, name := range mailNames {
+		sources := mail[name]
+		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: sources, Leftover: true})
+		if name == domain {
+			out = append(out,
+				Want{Type: "MX", Name: name, Content: nullMX, Sources: sources, Leftover: true},
+				Want{Type: "TXT", Name: "*._domainkey." + name, Content: dkimLockdown, Sources: sources, Leftover: true},
+			)
+		}
+	}
 	dmarc := "_dmarc." + domain
 	if sources, ok := mail[domain]; ok {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
@@ -318,6 +339,28 @@ func mailConflict(p purpose, w Want, r Record) string {
 		domain := strings.TrimPrefix(name, "_dmarc.")
 		return fmt.Sprintf("a DMARC policy already exists at this name: %q. It is weaker than rejecting what fails on the domain and on every name under it (p=reject, sp=reject, no pct below 100). If %s has mail, add it to community.mail_domains; otherwise tighten that record by hand.", text, domain)
 	}
+}
+
+// ownNoMail finds, among records at a want's name, a no-mail record of the
+// want's kind that this deployment's dns init made: one carrying comment and
+// holding exactly what dns init writes there. At a name with mail of its own
+// such a record is a leftover, and prune's to remove.
+func ownNoMail(w Want, records []Record, comment string) (Record, bool) {
+	p := wantPurpose(w)
+	for _, r := range records {
+		if r.Comment == comment && competes(p, r) && isLockdown(r) {
+			return r, true
+		}
+	}
+	return Record{}, false
+}
+
+// leftover is the conflict for a no-mail record dns init made at a name that
+// now has mail of its own.
+func leftover(w Want, r Record) string {
+	name := strings.TrimPrefix(strings.TrimPrefix(w.Name, "_dmarc."), "*._domainkey.")
+	return fmt.Sprintf("%s has mail of its own (%s), but the no-mail %s %s that this deployment's dns init made is still here. That name's mail records are whoever runs its mail's to set, and this one says it has none. Run paisans dns prune --execute to delete it, then run again.",
+		name, strings.Join(w.Sources, ", "), r.Type, display(strings.ToUpper(r.Type), r.Content, r.Priority))
 }
 
 // isLockdown reports whether r is exactly one of the records mailWants
