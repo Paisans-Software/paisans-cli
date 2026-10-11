@@ -240,7 +240,10 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   web server is the operator's; with another failure as well, or a web server
   step that could not reach or write what it needs on the host, it exits 1.
   Each problem with the operator's web server is one `!` line with one set of
-  instructions. A web server in a Docker container is validated and reloaded
+  instructions; an app whose site file step warned or failed has no check line
+  of its own but with `-v`. A web server container without the include
+  directory is diagnosed from its compose file, read only, with the command
+  that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
   after its site file changes, restarted when the reload fails; one on the
   host itself is validated, and the warning gives the command to reload it. An `include_dir` it
   derives is written into `paisans.yaml`. Without it, every step is checked

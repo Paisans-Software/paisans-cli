@@ -162,14 +162,22 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	} else {
 		inc, why = webserver.DeriveInclude(ws)
 	}
+	name := webserver.FileName(cfg.Deployment().Prefix(), app, ws.Server)
 	if why != "" {
-		return warned(fmt.Sprintf("no directory %s reads to write in", ws.Server), why+"\n"+optOut)
+		// Only a server in a container lacks a directory: its compose
+		// file says which mistake it is.
+		step.Progress("read " + ws.Container + "'s compose file")
+		d := webserver.DiagnoseMount(h, ws, dir.Path, name)
+		detail := d.Text
+		if d.Case == webserver.MountNotDeclared {
+			detail += "\n" + optOut
+		}
+		return warned(fmt.Sprintf("no directory %s reads to write in", ws.Server), detail)
 	}
 	conf := ws.Config
 	if conf == "" {
 		conf = ws.Main
 	}
-	name := webserver.FileName(cfg.Deployment().Prefix(), app, ws.Server)
 	state, found, err := webserver.CheckInclude(h, ws, inc.Seen, name)
 	line, where := webserver.IncludeLine(ws.Server, inc.Seen)
 	switch {
