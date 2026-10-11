@@ -201,7 +201,7 @@ func TestInitAgePrivateKeyFile(t *testing.T) {
 	if len(ks.Items) != 0 {
 		t.Errorf("the keystore was written: %v", ks.Items)
 	}
-	if !strings.Contains(rec.Lines()+out, "SOPS_AGE_KEY_FILE=") || strings.Contains(rec.Lines()+out, "AGE-SECRET-KEY") {
+	if !strings.Contains(rec.Lines()+out, "SOPS_AGE_KEY_FILE='"+keyFile+"'") || strings.Contains(rec.Lines()+out, "AGE-SECRET-KEY") {
 		t.Errorf("unexpected output:\n%s%s", rec.Lines(), out)
 	}
 }
@@ -230,6 +230,9 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "beside paisans.yaml") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
+		if !strings.Contains(err.Error(), "once ~/.config/paisans exists") {
+			t.Errorf("init = %v, want it to say the suggested directory must exist", err)
+		}
 		if exists(t, "deployment.key") || exists(t, config.SOPSConfigName) {
 			t.Error("something was written")
 		}
@@ -249,4 +252,104 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 			t.Error("a key file was written")
 		}
 	})
+}
+
+// lookupStore is a keystore with a lookup command, as the Keychain and the
+// Secret Service have.
+type lookupStore struct{ *keystore.Memory }
+
+func (lookupStore) LookupCommand(id string) string { return "lookup-age-key " + id }
+
+// A SOPS_AGE_* variable set while init runs means later commands use it
+// rather than the item, so init says that instead of promising the keystore.
+func TestInitNamesASetAgeVariable(t *testing.T) {
+	withoutAgeKey(t)
+	withKeystore(t, lookupStore{keystore.NewMemory()})
+	path, rec := initWorld(t, nil, fakeSites(), nil)
+	t.Setenv("SOPS_AGE_KEY_CMD", "true")
+	err, out := runInitShowing(t, "--config", path, "--sudo=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := rec.Lines() + out
+	if strings.Contains(shown, "finds the key on its own") {
+		t.Errorf("init promised the keystore is read:\n%s", shown)
+	}
+	if !strings.Contains(shown, "SOPS_AGE_KEY_CMD is set") {
+		t.Errorf("init did not name the variable:\n%s", shown)
+	}
+}
+
+func TestInitWithoutAgeVariableFindsTheKey(t *testing.T) {
+	withoutAgeKey(t)
+	withKeystore(t, lookupStore{keystore.NewMemory()})
+	path, rec := initWorld(t, nil, fakeSites(), nil)
+	err, out := runInitShowing(t, "--config", path, "--sudo=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown := rec.Lines() + out; !strings.Contains(shown, "finds the key on its own") || !strings.Contains(shown, "SOPS_AGE_KEY_CMD='lookup-age-key ") {
+		t.Errorf("unexpected output:\n%s", shown)
+	}
+}
+
+// sopsRacingStore stores the key, then a .sops.yaml appears before init
+// writes its own, so the write fails with the key already kept.
+type sopsRacingStore struct {
+	*keystore.Memory
+	dir string
+}
+
+func (s sopsRacingStore) Put(id, key, recipient string) error {
+	if err := s.Memory.Put(id, key, recipient); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.dir, config.SOPSConfigName), []byte("creation_rules: []\n"), 0o644)
+}
+
+// When .sops.yaml cannot be written after the key was kept, the error says
+// where the key was left, so a re-run's refusal is no surprise.
+func TestInitSaysWhatWasLeftWhenSOPSConfigFails(t *testing.T) {
+	withoutAgeKey(t)
+	path, _ := initWorld(t, nil, fakeSites(), nil)
+	ks := keystore.NewMemory()
+	withKeystore(t, sopsRacingStore{Memory: ks, dir: filepath.Dir(path)})
+	err, _ := runInitShowing(t, "--config", path, "--sudo=false")
+	if err == nil {
+		t.Fatal("init succeeded although .sops.yaml could not be written")
+	}
+	cfg, lerr := config.Load(path)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if want := ks.Describe(cfg.ID); !strings.Contains(err.Error(), want+", holding the new age key, was left in place") {
+		t.Errorf("init = %v, want it to say %s was left in place", err, want)
+	}
+}
+
+// Review Focus 1: with no keystore init refuses, and the re-run the refusal
+// names, with --age-private-key-file, then succeeds.
+func TestInitNoKeystoreThenKeyFile(t *testing.T) {
+	withoutAgeKey(t)
+	withKeystore(t, keystore.Unavailable{})
+	path, _ := initWorld(t, nil, fakeSites(), nil)
+	err, _ := runInitShowing(t, "--config", path, "--sudo=false")
+	if err == nil || !strings.Contains(err.Error(), "--age-private-key-file") {
+		t.Fatalf("init = %v, want a refusal naming --age-private-key-file", err)
+	}
+	keyFile := filepath.Join(t.TempDir(), "deployment.key")
+	if err, _ := runInitShowing(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := age.ParseX25519Identity(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := config.Recipients(filepath.Dir(path)); len(got) != 1 || got[0] != identity.Recipient().String() {
+		t.Errorf(".sops.yaml names %v, want %s", got, identity.Recipient())
+	}
 }

@@ -58,15 +58,24 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	var where, export string
 	if keyFile != "" {
 		where, err = writeKeyFile(id, configPath, keyFile, key)
-		export = "SOPS_AGE_KEY_FILE=" + where
+		export = "SOPS_AGE_KEY_FILE=" + shellQuote(where)
 	} else {
 		where, err = storeKey(id, key, recipient)
 		if command := config.AgeKeystore.LookupCommand(id); command != "" {
-			export = "SOPS_AGE_KEY_CMD='" + command + "'"
+			export = "SOPS_AGE_KEY_CMD=" + shellQuote(command)
 		}
 	}
 	if err == nil {
-		err = config.WriteSOPSConfig(dir, recipient)
+		if werr := config.WriteSOPSConfig(dir, recipient); werr != nil {
+			// The key is not removed, since deleting a key is not init's
+			// decision. Saying where it is makes the next run's refusal of
+			// an existing item or file expected rather than a surprise.
+			err = &ui.Problem{
+				Hint:    config.SOPSConfigName + " could not be written after the age key was kept",
+				Explain: fmt.Sprintf("%s, holding the new age key, was left in place. Nothing was encrypted to it yet. Remove it before re-running init, or init refuses to make another.", where),
+				Cause:   werr,
+			}
+		}
 	}
 	if err != nil {
 		step.Fail(err)
@@ -75,9 +84,12 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	step.Detail("public key %s, written to %s", recipient, ui.ShortPath(sopsPath))
 	step.Detail("private key kept in %s", where)
 	step.Done("")
+	variable, variableSet := config.AgeVariableSet()
 	switch {
 	case keyFile != "":
 		r.Detail("Set this before running paisans or sops: export %s", export)
+	case variableSet:
+		r.Detail("%s is set, so paisans uses it instead of %s until it is unset", variable, where)
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}
@@ -127,7 +139,7 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 	if inside(filepath.Dir(configPath), abs) {
 		return "", &ui.Problem{
 			Hint:    "the age key file would sit beside paisans.yaml",
-			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path outside it, Eg: ~/.config/paisans/%s.key", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
+			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
 		}
 	}
 	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -156,6 +168,12 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 		}
 	}
 	return abs, nil
+}
+
+// shellQuote quotes s for a POSIX shell, so a printed export line can be
+// pasted as it is, whatever the path holds.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // inside reports whether path is dir or below it, after symlinks, so a
