@@ -818,11 +818,12 @@ func (c *checker) mbinRabbitMQAcrossSites() {
 // that diverge from the moment anybody writes to them, and a failover would
 // move readers between them.
 //
-// Two kinds are in this position: Element, which is a static client, and
-// oauth2-proxy, which keeps a session in a cookie. It is refused rather than
-// warned about because there is no reading of it that works, and pinning is
-// not a downgrade: it is the plain case, and the app's availability becomes
-// its site's, which is what it was always going to be.
+// Three kinds are in this position: Element, which is a static client,
+// oauth2-proxy, which keeps a session in a cookie, and uptime, which keeps
+// its database in SQLite under its own data directory. It is refused rather
+// than warned about because there is no reading of it that works, and pinning
+// is not a downgrade: it is the plain case, and the app's availability
+// becomes its site's, which is what it was always going to be.
 func (c *checker) clusterPlacementWithoutACluster() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
