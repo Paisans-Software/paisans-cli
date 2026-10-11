@@ -3307,16 +3307,16 @@ elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 
 The output does not follow the phases. After `configuration` and `sudo` it has
 three sections: `prepare`, one line per site for its `host prepare`; `dns`;
-and `install`, one line for every step from founding to pass two, naming each
-site in the order the run first applies it. With `--execute` the prepare lines
-are a block of spinners, one per host, each with its own elapsed time; a host
-that finishes leaves the block with its mark, above the hosts still running,
-so the lines end in the order their hosts finish. The install line's spinner
-names the site the run has reached. While a line runs, the step its command is
-on follows the elapsed time in parentheses, the innermost one when steps nest,
-replaced as each starts; a host's prepare names the packages it is installing.
-It is gone from the line once the line ends, and output without a terminal
-never shows it:
+and `install`, one line per site for every step from founding to pass two that
+is about it, in the order the run first applies each site, then a `storage`
+line for `storage init` or `storage add` when there is Garage. With
+`--execute` the prepare lines are a block of spinners, one per host, each with
+its own elapsed time; a host that finishes leaves the block with its mark,
+above the hosts still running, so the lines end in the order their hosts
+finish. While a line runs, the step its command is on follows the elapsed time
+in parentheses, the innermost one when steps nest, replaced as each starts; a
+host's prepare names the packages it is installing. It is gone from the line
+once the line ends, and output without a terminal never shows it:
 
 ```
 prepare
@@ -3324,9 +3324,22 @@ prepare
   ✓ watch: 2.0s
   ⠹ home-b: 38s (install packages: wireguard-tools, ufw)
   ⠹ home-a: 38s (start docker)
+```
 
+The install steps still run one at a time, in the order of the table, so the
+install lines are a block that keeps its order: a site's line is a dim `·`
+until the run reaches it, spins while one of its steps runs, and between its
+steps, such as a founding stop and pass two, is a dim `·` again with the time
+its steps have taken so far and what it waits for. Its time is its steps'
+together, and it ends `✓` once its last step has:
+
+```
 install
-  ⠹ vm, home-a, home-b, watch: home-b: 41s (wait for Patroni primary)
+  · vm: 22.0s (again in pass two)
+  · home-a: 31.0s (stopped for the other etcd members)
+  ⠹ home-b: 41s (wait for Patroni primary)
+  · watch
+  · storage
 ```
 
 A host whose prepare fails does not stop the others: each is prepared, each
@@ -3337,21 +3350,36 @@ line, never another host's. Two sites reached at the same ssh destination are
 prepared one after the other. A sudo password or an ssh host key question a
 host asks during prepare holds the block, one question at a time.
 
-It ends `✓ vm, home-a, home-b, watch: 3m12.0s`, or at a failure
-`✗ vm, home-a, home-b, watch: home-b`, and the stop that follows names the step
-and how to resume. While they run the steps print nothing of their own but
-their notes, what only the operator can do, which follow the line; their
-warnings are kept for `-v`. `-v` lists each step under the line, with its
-result and its own output:
+A step that fails marks its site's line `✗` with the time its steps took, the
+other lines are left as they stand, and the stop that follows names the step
+and how to resume:
 
 ```
 install
-  ✓ vm, home-a, home-b, watch: 3m12.0s
+  · vm: 22.0s (again in pass two)
+  · home-a: 31.0s (stopped for the other etcd members)
+  ✗ home-b: 41.0s
+  · watch
+  · storage
+```
+
+While they run the steps print nothing of their own but their notes, what only
+the operator can do, which follow their site's line; their warnings are kept
+for `-v`. `-v` lists each step under its site's line, with its result and its
+own output. Without a terminal each install line is printed once, when it and
+every line above it have ended, so they keep their order; at a stop, the lines
+that did not end are printed as waiting:
+
+```
+install
+  ✓ vm: 64.3s
       ✓ apply --site vm: 22.0s
+      ✓ apply --site vm: 42.3s
+  ✓ home-a: 89.5s
       ✓ apply --site home-a: stopped for the other etcd members
         home-a is waiting on home-b to start etcd.
-      ✓ apply --site home-b: 58.3s
-      ...
+      ✓ apply --site home-a: 58.5s
+  ...
 ```
 
 `dns init` reports as it does when typed, so a conflicting record it lists is
@@ -3366,12 +3394,14 @@ added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
 first. Every host's prepare is checked at the same time, drawn as with
 `--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog. The install line is each
-of its steps' own dry run together: `✓` when every one is up to date, a dim `·`
-with `after prepare` (or `after init`) while a step waits on one that has not
-run, `○` when there is work, and `✗` naming the site when a step would refuse,
-with the refusal below it. A refusal outranks a wait, and a wait outranks work.
-`-v` lists each step under the line with its own status:
+in the order docker, wireguard, firewall, ssh keys, watchdog. Each install line
+is its site's steps' own dry runs together, and the storage line its step's:
+`✓` when every one is up to date, a dim `·` with `after prepare` (or
+`after init`) while a step waits on one that has not run, `○` when there is
+work, with what each step found, and `✗` when a step would refuse, with the
+refusal's hint after the site and what to do below it. A refusal outranks a
+wait, and a wait outranks work; a step that waits on another install step is
+work. `-v` lists each step under its line with its own status:
 
 ```
 configuration
@@ -3387,7 +3417,11 @@ dns
   ○ dns init: 2 records to create
 
 install
-  · vm, home-a, home-b, watch: after prepare
+  ○ vm
+  · home-a: after prepare
+  ○ home-b
+  ○ watch
+  · storage: after prepare
 ...
 Nothing changed on the servers. Added 4 generated secrets to secrets.enc.yaml. Re-run with --execute to apply. ...
 ```

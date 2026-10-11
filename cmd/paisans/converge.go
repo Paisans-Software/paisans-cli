@@ -50,7 +50,7 @@ func clusterNames(in render.EtcdInitial) []string {
 
 // stage is where in the order a step falls. The operator sees three of
 // them: prepare, dns, and install, which is every stage from founding to
-// pass two as one line.
+// pass two as a line per site and one for storage.
 type stage int
 
 const (
@@ -67,7 +67,7 @@ const (
 	stagePassTwo
 )
 
-// installs reports whether a step of st is one of the install line's.
+// installs reports whether a step of st is one of the install lines'.
 func (st stage) installs() bool { return st >= stageFounding && st <= stagePassTwo }
 
 // convergeStep is one existing command the plan runs.
@@ -714,8 +714,8 @@ type stepStatus struct {
 }
 
 // convergeStatus is the dry run's plan: a prepare line per site, dns, and
-// one install line for every step from founding to pass two, each marked
-// with its status; init's line is runConverge's, drawn with the findings. A step
+// an install line per site and one for storage, each marked with its
+// status; init's line is runConverge's, drawn with the findings. A step
 // is checked by its own dry run once every step it waits on is up to date,
 // and is otherwise marked as waiting on the first that is not; until that
 // one runs, its dry run would describe a host about to change. A check that
@@ -843,63 +843,79 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 	return marks
 }
 
-// installStatus is the dry run's install line: steps checked by check, by
-// index, as one line whose spinner names the site it has reached. Its mark
-// is theirs together: a failure, which --execute would stop at, names its
-// site and says why below the line; then a wait on prepare or init, which
-// leaves the rest unchecked; then any work; and up to date only when every
-// step is. Each step is listed under the line with its own status, which -v
-// shows, and its notes follow the line at every verbosity.
+// installStatus is the dry run's install lines: a line per site and one
+// for storage, in the order the steps first reach them, each step checked
+// by check, by index, in the plan's order. A line's mark is its steps'
+// together: a refusal, which --execute would stop at, with its hint as the
+// result and its explanation below the line; then a wait on prepare or
+// init, which leaves the rest unchecked; then any work, named by what each
+// step found; and up to date only when every step is. Each step is listed
+// under its line with its own status, which -v shows, and its notes follow
+// the line at every verbosity.
 func installStatus(r ui.Reporter, steps []convergeStep, check func(int) stepStatus) {
 	r.Section("install")
-	line := r.Step(installTitle(steps))
-	var notes []checkReport
-	var failed, problems []string
-	waits, pending, place := "", false, ""
+	places := installPlaces(steps)
+	lines, done := ui.Ordered(r, places...)
+	defer done()
+	type combined struct {
+		failed           bool
+		result, waits    string
+		pending          bool
+		found, explained []string
+	}
+	all := make([]combined, len(places))
+	last := lastVisits(steps)
 	for i, s := range steps {
-		if p := stepPlace(s); p != place {
-			place = p
-			line.Progress(p)
-		}
+		k := slices.Index(places, installPlace(s))
+		line, c := lines[k], &all[k]
+		line.Start()
 		st := check(i)
 		line.Detail("%s", innerLine(st.mark, s.Title, st.result))
-		notes = append(notes, lineDetails(line, "  ", "", st.reports)...)
+		for _, n := range lineDetails(line, "  ", "", st.reports) {
+			line.Note(n.Text, n.Detail)
+		}
 		switch st.mark {
 		case ui.Failed:
-			if !slices.Contains(failed, place) {
-				failed = append(failed, place)
-			}
-			if st.problem != "" {
-				problems = append(problems, st.problem)
+			if !c.failed {
+				c.failed, c.result = true, st.result
+				c.explained = append(c.explained, st.explain)
+			} else if st.problem != "" {
+				c.explained = append(c.explained, st.problem)
 			}
 		case ui.Waiting:
 			switch {
 			case st.after == "init":
-				waits = "init"
-			case strings.HasPrefix(st.after, "host prepare ") && waits == "":
-				waits = "prepare"
+				c.waits = "init"
+			case strings.HasPrefix(st.after, "host prepare ") && c.waits == "":
+				c.waits = "prepare"
 			default:
-				// It waits on a step of its own line, which is work.
-				pending = true
+				// It waits on another install step, which is work.
+				c.pending = true
 			}
 		case ui.Pending:
-			pending = true
+			c.pending = true
+			if st.result != "" && !slices.Contains(c.found, st.result) {
+				c.found = append(c.found, st.result)
+			}
+		}
+		if last[k] != i {
+			line.Pause("")
+			continue
+		}
+		for _, e := range c.explained {
+			line.Explain(e)
+		}
+		switch {
+		case c.failed:
+			line.End(ui.Failed, c.result)
+		case c.waits != "":
+			line.End(ui.Waiting, "after "+c.waits)
+		case c.pending:
+			line.End(ui.Pending, strings.Join(c.found, "; "))
+		default:
+			line.End(ui.OK, "")
 		}
 	}
-	switch {
-	case len(failed) > 0:
-		line.End(ui.Failed, strings.Join(failed, ", "))
-		for _, p := range problems {
-			r.Explain(p)
-		}
-	case waits != "":
-		line.End(ui.Waiting, "after "+waits)
-	case pending:
-		line.End(ui.Pending, "")
-	default:
-		line.End(ui.OK, "")
-	}
-	showNotes(r, notes)
 }
 
 // endStatus ends a dry run's prepare line with its status: the check's
@@ -953,28 +969,39 @@ func installEnd(steps []convergeStep, from int) int {
 	return to
 }
 
-// installTitle is the install line's title: every site its steps reach, in
-// the order they first reach it.
-func installTitle(steps []convergeStep) string {
-	var sites []string
+// installPlace is the install line a step is on: its site's, or storage's
+// for storage init and storage add.
+func installPlace(s convergeStep) string {
+	if s.Stage == stageStorage {
+		return "storage"
+	}
+	return stepSite(s)
+}
+
+// installPlaces is the install lines' titles: each place the steps reach,
+// in the order they first reach it.
+func installPlaces(steps []convergeStep) []string {
+	var places []string
 	for _, s := range steps {
-		if site := stepSite(s); site != "" && !slices.Contains(sites, site) {
-			sites = append(sites, site)
+		if p := installPlace(s); !slices.Contains(places, p) {
+			places = append(places, p)
 		}
 	}
-	return strings.Join(sites, ", ")
+	return places
 }
 
-// stepPlace is what the install line names a step by while it works: its
-// site, or storage for storage add, which is about none.
-func stepPlace(s convergeStep) string {
-	if site := stepSite(s); site != "" {
-		return site
+// lastVisits is, for each install line, the index of the last of steps on
+// it: the step after which the line ends.
+func lastVisits(steps []convergeStep) []int {
+	places := installPlaces(steps)
+	last := make([]int, len(places))
+	for i, s := range steps {
+		last[slices.Index(places, installPlace(s))] = i
 	}
-	return s.Args[0]
+	return last
 }
 
-// innerLine is a step of the install line as its detail lists it.
+// innerLine is a step of an install line as its detail lists it.
 func innerLine(m ui.Mark, title, result string) string {
 	line := map[ui.Mark]string{ui.OK: "✓", ui.Failed: "✗", ui.Pending: "○", ui.Waiting: "·"}[m] + " " + title
 	if result != "" {
@@ -1015,9 +1042,9 @@ const resumeAdvice = "Run paisans apply --execute again to resume."
 // convergeExecute runs every step but init, which runConverge has run: a
 // prepare line per site, as it runs; dns init, which reports as typed by
 // hand, so a conflicting record it lists is what the stop's advice points
-// at; and one install line for every step from founding to pass two, whose
-// spinner names the site it has reached. It stops at the first failure, so
-// a DNS conflict stops the run before any site is applied.
+// at; and an install line per site and one for storage, each spinning while
+// one of its steps runs. It stops at the first failure, so a DNS conflict
+// stops the run before any site is applied.
 func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
 	for i := 0; i < len(steps); {
 		s := steps[i]
@@ -1105,22 +1132,25 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 	}
 }
 
-// convergeInstall runs steps, the install line's, in their order, quietly,
-// as one line whose spinner names the site it has reached. A data member's
-// founding stop is expected, and the run carries on: pass two applies it
-// again. Each step is listed under the line with its own result, which -v
-// shows with the step's own output; its notes follow the line at every
-// verbosity.
+// convergeInstall runs steps, the install lines', one at a time in their
+// order, quietly. Each site has a line, and storage one, in the order the
+// steps first reach them: it spins while one of its steps runs, waits
+// between them with the time they took, and ends once its last step has.
+// A data member's founding stop is expected, and the run carries on: pass
+// two applies it again. Each step is listed under its line with its own
+// result, which -v shows with the step's own output; its notes follow the
+// line at every verbosity. A failure ends its line and the run, leaving the
+// other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
-	line := r.Step(installTitle(steps))
-	var notes []checkReport
-	place := ""
-	for _, s := range steps {
-		if p := stepPlace(s); p != place {
-			place = p
-			line.Progress(p)
-		}
+	places := installPlaces(steps)
+	lines, done := ui.Ordered(r, places...)
+	defer done()
+	last := lastVisits(steps)
+	for i, s := range steps {
+		k := slices.Index(places, installPlace(s))
+		line := lines[k]
+		line.Start()
 		start := convergeNow()
 		output, reports, err := convergeQuiet(r, line, convergeFlags(s.Args, o), o.Verbose)
 		founding := err != nil && s.Stage == stageFounding && errors.Is(err, apply.ErrFoundingWait)
@@ -1133,26 +1163,29 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
 		}
-		notes = append(notes, lineDetails(line, "  ", output, reports)...)
-		if err == nil || founding {
-			continue
+		for _, n := range lineDetails(line, "  ", output, reports) {
+			line.Note(n.Text, n.Detail)
 		}
-		if errors.Is(err, storageadd.ErrWaiting) {
+		switch {
+		case (err == nil || founding) && last[k] == i:
+			line.Done("")
+		case founding:
+			line.Pause("stopped for the other etcd members")
+		case err == nil:
+			line.Pause("again in pass two")
+		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
-			line.End(ui.Pending, place+": waiting on Garage")
-			showNotes(r, notes)
+			line.End(ui.Pending, "waiting on Garage")
 			return convergeStop("apply is waiting at "+s.Title, err, "Nothing failed: Garage is still moving data. Run paisans apply --execute again later.")
+		default:
+			line.Fail(err)
+			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
 		}
-		line.End(ui.Failed, place)
-		showNotes(r, notes)
-		return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
 	}
-	line.Done("")
-	showNotes(r, notes)
 	return nil
 }
 
-// convergeNow is the clock an inner step of the install line is timed by.
+// convergeNow is the clock an inner step of an install line is timed by.
 // Tests replace it.
 var convergeNow = time.Now
 
@@ -1301,7 +1334,7 @@ type checkReport struct {
 }
 
 // checkReporter is what a step's own command reports through while it is
-// checked, or run under the install line (convergeQuiet). Its plan is not
+// checked, or run under an install line (convergeQuiet). Its plan is not
 // shown, since the step's line says what it found;
 // its warnings, notes, refusals and ssh retries are kept for that line, and a
 // hold for a prompt reaches r, which draws the line's spinner.
