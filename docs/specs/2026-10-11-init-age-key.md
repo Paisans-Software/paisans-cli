@@ -125,25 +125,27 @@ The keystore is not touched when the flag is given.
 ## Finding the key at decryption
 
 `LoadDeploymentSecrets` passes the deployment id down to decryption. When no
-`SOPS_AGE_*` variable is set, paisans sets `SOPS_AGE_KEY_CMD` in its own
-process, for the duration of the decryption, to the keystore lookup for that
-id. The embedded sops then runs as before and still reads
-`sops/age/keys.txt`. A variable the operator set always wins, because an
-explicit choice outranks a convention.
+`SOPS_AGE_*` variable is set, paisans reads the keystore item for that id and
+hands the key to the file's age recipients directly, through sops'
+`age.ParsedIdentities`. A variable the operator set always wins, because an
+explicit choice outranks a convention, and decryption then runs exactly as it
+does today.
 
-The variable holds a command, never the key, because paisans starts `ssh` and
-other children, which inherit its environment. A command line that names a
-keystore item is safe to inherit.
+The key goes from the keystore to the decryption in memory. No environment
+variable is set, so `ssh` and the other children paisans starts never inherit
+the key or a way to fetch it.
 
-When decryption still finds no usable key, paisans fetches the keystore item
-itself to say why:
+When the keystore has no item for the id, decryption runs as today, which
+still reads `sops/age/keys.txt`. When the item's key opens none of the file's
+recipients, the same is tried before giving up. What the operator is told when
+both fail:
 
 * no item for this id: the existing "no usable age key" problem, with a line
   naming the item it looked for;
-* an item whose recipient is not among the file's recipients: "the keystore key
-  for deployment `<id>` is not a recipient of `secrets.enc.yaml`", which a
-  stale item or a hand edited `.sops.yaml` produces, and which sops alone
-  reports only as no usable key.
+* an item whose key is not among the file's recipients: "the keystore key for
+  deployment `<id>` is not a recipient of `secrets.enc.yaml`", which a stale
+  item or a hand edited `.sops.yaml` produces, and which sops alone reports
+  only as no usable key.
 
 ## What `init` prints
 
@@ -170,6 +172,8 @@ Each is a `ui.Problem` with a hint and an explanation, in the existing style.
 | no keystore, or the store fails | refuse; name `--age-private-key-file` and bringing a key |
 | read back does not match | refuse; `.sops.yaml` is not written; the item is named and left in place, since deleting a key is not `init`'s decision |
 | an item for this id already exists | refuse; name the item. It is left from an earlier run that stopped, and replacing it could orphan a file encrypted to it |
+| `--age-private-key-file` given, but the deployment already has a key | refuse; the flag only names where a new key goes |
+| a `.sops.yaml` exists but names no recipient | refuse; it is the operator's file, so `init` does not rewrite it |
 | `--age-private-key-file` path exists | refuse |
 | `--age-private-key-file` path inside the configuration's directory | refuse |
 | decryption: no item and no variable | existing problem plus the item it looked for |
