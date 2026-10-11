@@ -662,7 +662,7 @@ func TestAnImageOnlyChangeIsStillChecked(t *testing.T) {
 	}
 
 	// An image carrying the same provider, declared rather than published:
-	// the one line the sibling repository's digest bump would move.
+	// the one line a new build of the image moves.
 	moved := planWith(t, func(cfg *config.Config) {
 		cfg.ACME.Image = "ghcr.io/example-org/caddy-desec:2.11.4"
 	})

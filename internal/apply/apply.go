@@ -149,13 +149,14 @@ type Plan struct {
 	//   - infra/compose.yaml changed, so the container is replaced, which
 	//     is how the image itself moves
 	//
-	// The second is the flagship workflow: a pull request bumps the Caddy
-	// digest and merging it changes exactly that one file on the host. It is
-	// an environment path rather than a routing one, so it yields an ordinary
-	// `up -d` in the Actions loop, and `up -d` exits 0 as soon as the
-	// container starts. A Caddy that cannot load its configuration dies a
-	// moment later and the apply has already reported success. Checking only
-	// before a reload would leave exactly that path unchecked.
+	// The second is the flagship workflow: a new build behind Caddy's tag,
+	// resolved while apply plans (see ResolveImages), changes exactly that
+	// one file on the host. It is an environment path rather than a routing
+	// one, so it yields an ordinary `up -d` in the Actions loop, and `up -d`
+	// exits 0 as soon as the container starts. A Caddy that cannot load its
+	// configuration dies a moment later and the apply has already reported
+	// success. Checking only before a reload would leave exactly that path
+	// unchecked.
 	GatewayChanging bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
@@ -199,6 +200,13 @@ type Plan struct {
 	HostSites bool
 	// KeepImages skips pruning for this run, as --keep-images does.
 	KeepImages bool
+	// Caddy is the build of its image this site's Caddy is planned to run,
+	// nil when the site runs no Caddy or this plan does not touch its
+	// compose file. Execute records it in the manifest. See ResolveImages.
+	Caddy *CaddyPin
+	// recordedCaddy is what the manifest Build read recorded for Caddy, kept
+	// when this plan does not settle the compose file.
+	recordedCaddy *render.ManifestCaddy
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
 	// scoped marks a plan built with Scope: it writes its files and syncs
@@ -395,6 +403,8 @@ type options struct {
 	// --change-replication` sets it; see GarageReplication.
 	replicationChange bool
 	report            ui.Reporter
+	// resolver resolves the Caddy image's tag; see ResolveImages.
+	resolver Resolver
 }
 
 // Report sets the plan's Report before Build reads the host, so planning
@@ -544,10 +554,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	used := map[string]bool{}
 
-	entries, err := readManifestFiles(t, d)
+	entries, recordedCaddy, err := readManifest(t, d)
 	if err != nil {
 		return nil, err
 	}
+	out.recordedCaddy = recordedCaddy
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
 		recorded[path] = entry.SHA256
@@ -634,19 +645,33 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			isGateway = true
 		}
 
-		change := Change{
-			Path:    remote,
-			Mode:    file.Mode,
-			Stack:   stackOf(rel),
-			content: file.Content,
-		}
-
 		current, found, err := t.ReadFile(remote)
 		if err != nil {
 			finish(done, err)
 			return nil, err
 		}
-		change.before = current
+		// The Caddy image is pinned to a build here, against the host's copy,
+		// before anything is compared. See ResolveImages.
+		content := file.Content
+		if want := plan.CaddyImages[site]; want != "" && rel == d.RelPath(gatewayCompose) {
+			pinned, pin, note, err := pinCaddy(site, want, file.Content, current, found, o.resolver)
+			if err != nil {
+				finish(done, err)
+				return nil, err
+			}
+			content, out.Caddy = pinned, pin
+			if note != nil {
+				out.Notes = append(out.Notes, *note)
+			}
+		}
+
+		change := Change{
+			Path:    remote,
+			Mode:    file.Mode,
+			Stack:   stackOf(rel),
+			content: content,
+			before:  current,
+		}
 		if rel == GarageConfig(d) && found && !o.replicationChange {
 			if err := garageReplicationGuard(site, current, file.Content); err != nil {
 				finish(done, err)
@@ -656,7 +681,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		switch {
 		case !found:
 			change.Kind = Create
-		case current == file.Content:
+		case current == content:
 			change.Kind = Unchanged
 		case recorded[rel] == "":
 			// Present on the host, different from what we render, and no
@@ -1379,26 +1404,27 @@ func stackOrder(stacks map[string]bool) []string {
 	return out
 }
 
-// readManifestFiles returns what the last apply recorded, keyed by path
-// relative to the site root. A host with no manifest is a first apply, which
-// is ordinary.
-func readManifestFiles(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, error) {
+// readManifest returns what the last apply recorded: its files, keyed by
+// path relative to the site root, and its record of the site's Caddy build,
+// nil when it has none. A host with no manifest is a first apply, which is
+// ordinary.
+func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, *render.ManifestCaddy, error) {
 	content, found, err := t.ReadFile(manifestPath(d))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !found {
-		return map[string]render.ManifestFile{}, nil
+		return map[string]render.ManifestFile{}, nil, nil
 	}
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(content), &m); err != nil {
-		return nil, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
+		return nil, nil, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 	}
 	out := make(map[string]render.ManifestFile, len(m.Files))
 	for _, file := range m.Files {
 		out[file.Path] = file
 	}
-	return out, nil
+	return out, m.Caddy, nil
 }
 
 // now is the clock a left over mark is stamped with; tests replace it.
@@ -1458,7 +1484,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan)}, "", "  ")
 	if err != nil {
 		return err
 	}

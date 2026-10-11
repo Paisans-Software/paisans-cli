@@ -113,12 +113,17 @@ var spiloTag = map[string]string{
 	"18": "4.1-p2",
 }
 
-// caddyImage is the image the gateway runs.
+// caddyImage is the image the gateway runs, as the configuration names it.
 //
 // A DNS provider in Caddy is a module compiled into the binary, not a setting,
 // so the provider decides the image. A declared image wins, because it is the
 // only way a provider the toolkit publishes nothing for can reach a gateway now
 // that nothing is built on a host.
+//
+// What this returns may be a tag that moves, and is rendered as it is: render
+// reaches no network, so it cannot know which build a tag names today. apply
+// does, and pins the digest into the rendered file before comparing it with
+// the host's (see PinCaddyImage).
 func (p *planner) caddyImage() (string, error) {
 	if declared := p.cfg.ACME.Image; declared != "" {
 		return declared, nil
@@ -242,6 +247,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
+		p.caddyImages[site.Name] = caddy
 	}
 	initial := p.etcdInitialFor(site.Name)
 	infra, err := p.renderTemplate("infra-compose.yaml.tmpl", map[string]any{

@@ -17,7 +17,7 @@ func TestEveryDefaultImageHasItsVolumesRecorded(t *testing.T) {
 			if service.Image == "" {
 				continue
 			}
-			if _, ok := kinds.ImageVolumes[service.Image]; !ok {
+			if _, ok := kinds.DeclaredVolumes(service.Image); !ok {
 				t.Errorf("%s %s runs %s, whose declared volumes are not in kinds.ImageVolumes. Pull it, run `docker image inspect --platform linux/amd64 --format '{{json .Config.Volumes}}'` on it, and record the answer", kind, service.Name, service.Image)
 			}
 		}
@@ -100,10 +100,51 @@ func TestPostgresDataMountFollowsTheImage(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s at cluster %s: got %s, want %s", tc.image, tc.cluster, got, tc.want)
 		}
-		if declared, ok := kinds.ImageVolumes[tc.image]; ok {
+		if declared, ok := kinds.DeclaredVolumes(tc.image); ok {
 			if u := kinds.Uncovered(declared, []string{got}); len(u) > 0 {
 				t.Errorf("%s declares %v, and %s leaves %v uncovered", tc.image, declared, got, u)
 			}
+		}
+	}
+}
+
+// The gateway's Caddy is recorded by repository, since apply renders
+// whichever build its tag names: the tag as configured, a digest pinned
+// beside it, and a bare digest all find the same entry. Another repository
+// does not, nor does a reference that merely starts with the same name.
+func TestDeclaredVolumesMatchesCaddyByRepository(t *testing.T) {
+	for _, ref := range []string{
+		"ghcr.io/paisans-software/caddy:2",
+		"ghcr.io/paisans-software/caddy:2.11",
+		"ghcr.io/paisans-software/caddy:2@sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186",
+		"ghcr.io/paisans-software/caddy@sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186",
+	} {
+		if _, ok := kinds.DeclaredVolumes(ref); !ok {
+			t.Errorf("%s is the toolkit's Caddy and was not found", ref)
+		}
+	}
+	for _, ref := range []string{
+		"ghcr.io/example-org/caddy-route53:2.11.4",
+		"ghcr.io/paisans-software/caddy-extra:2",
+		"caddy:2-alpine",
+	} {
+		if _, ok := kinds.DeclaredVolumes(ref); ok {
+			t.Errorf("%s is not the toolkit's Caddy and was found", ref)
+		}
+	}
+}
+
+func TestRepositoryDropsTagAndDigest(t *testing.T) {
+	for ref, want := range map[string]string{
+		"ghcr.io/paisans-software/caddy:2":            "ghcr.io/paisans-software/caddy",
+		"ghcr.io/paisans-software/caddy:2@sha256:abc": "ghcr.io/paisans-software/caddy",
+		"ghcr.io/paisans-software/caddy@sha256:abc":   "ghcr.io/paisans-software/caddy",
+		"registry.example.org:5000/team/caddy:2":      "registry.example.org:5000/team/caddy",
+		"registry.example.org:5000/team/caddy":        "registry.example.org:5000/team/caddy",
+		"caddy":                                       "caddy",
+	} {
+		if got := kinds.ParseReference(ref).Repository(); got != want {
+			t.Errorf("%s: got %s, want %s", ref, got, want)
 		}
 	}
 }

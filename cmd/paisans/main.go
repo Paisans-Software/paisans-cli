@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
+	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -864,6 +865,11 @@ func checkStandby(r ui.Reporter, cfg *config.Config, plan *apply.Plan, site stri
 	return nil
 }
 
+// caddyDigests is what resolves the gateway's Caddy tag to the build it names
+// while apply plans; see apply.ResolveImages. Tests replace it, so that none
+// reaches a registry.
+var caddyDigests apply.Resolver = imagedigest.Registry{}
+
 // planSiteApply is everything apply decides for one site, without doing any
 // of it: the etcd flags the site's member was born with, the render, the plan
 // and the databases it bootstraps. `storage rotate-key` switches an app with
@@ -887,7 +893,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append(options, apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...))
+	options = append(options, apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(caddyDigests))
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err

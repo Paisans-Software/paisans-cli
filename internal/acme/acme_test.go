@@ -26,26 +26,20 @@ func TestSupportedProvidersAreComplete(t *testing.T) {
 			t.Errorf("%s is supported but has no published image", provider)
 			continue
 		}
-		if !kinds.ParseReference(image).Pinned() {
-			t.Errorf("%s image %q does not name one build", provider, image)
-		}
-		if !strings.Contains(image, "@sha256:") {
-			t.Errorf("%s image %q is not pinned by digest, and every tag we publish moves", provider, image)
+		if image != acme.Published {
+			t.Errorf("%s runs %q, but one published image carries every module", provider, image)
 		}
 	}
+}
 
-	// One image carries every module, which is what makes switching provider a
-	// configuration edit with no repull, and what lets the sibling repository
-	// move the digest with a single sed across these lines. An edit that
-	// updated one line and not the other would ship the providers on different
-	// digests, and nothing else here would notice.
-	first, _ := acme.Image(providers[0])
-	for _, provider := range providers[1:] {
-		image, _ := acme.Image(provider)
-		if image != first {
-			t.Errorf("%s runs %q and %s runs %q, but one image carries every module and a digest bump moves them together",
-				providers[0], first, provider, image)
-		}
+// The default follows Caddy's major version and names no build. A digest in
+// the code would make every security rebuild of the image a toolkit release,
+// and `latest` would cross a major version unasked; apply resolves the tag to
+// a digest while it plans instead.
+func TestPublishedImageTracksTheMajorVersion(t *testing.T) {
+	ref := kinds.ParseReference(acme.Published)
+	if ref.Name != "ghcr.io/paisans-software/caddy" || ref.Tag != "2" || ref.Digest != "" {
+		t.Errorf("published image is %q, want ghcr.io/paisans-software/caddy:2 with no digest", acme.Published)
 	}
 }
 

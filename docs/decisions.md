@@ -163,6 +163,10 @@ they do not use, a few megabytes.
 
 ### Why the default is a digest
 
+Superseded on 2026-10-11: the default now follows the major version tag and
+`apply` resolves it to a digest while it plans. See *The gateway's Caddy follows
+its major version, resolved to a digest when apply plans*, below.
+
 Every tag `caddy-dns` publishes moves, mirroring upstream, which rebuilds even a
 patch tag when its base image gets a security fix. A digest is the only
 reference that makes two runs of `apply` deploy the same bytes.
@@ -1265,3 +1269,74 @@ fail with the behaviour they cover removed. The rendered `.env` was passed as
 an `env_file` by Docker Compose v5.4.0 to PHP 8.4 with symfony/mailer
 v7.4.14, which parsed a password holding `@ : / ? # % ' " $` and a space back
 to the same bytes. Nothing was run against a mail server or a deployment.
+
+---
+
+## 2026-10-11: The gateway's Caddy follows its major version, resolved to a digest when apply plans
+
+Founder decision.
+
+### What was decided
+
+The toolkit's default Caddy image is `ghcr.io/paisans-software/caddy:2`: the
+repository and Caddy's major version, with no digest in the code. `paisans
+apply` asks the registry, while it plans, which build that tag names, and
+renders `ghcr.io/paisans-software/caddy:2@sha256:...` into the gateway's
+compose file. Each apply records the build in the site's manifest, under
+`caddy`, with the tag it came from and when it was resolved. `acme.image`
+still wins, and may now name a moving tag too, since it is resolved the same
+way; `latest` and an untagged reference stay refused, renamed
+`acme-image-is-latest`. Application images keep the floating tag refusal they
+had.
+
+### Why
+
+Caddy's image is rebuilt continuously for CVE fixes in Caddy and its base
+image. With the digest pinned in code, every rebuild was a toolkit pull
+request and a toolkit release before any deployment could take it. Following
+the major version takes a rebuild with no release, and keeps a major version,
+which can change the Caddyfile syntax, a deliberate step.
+
+A bare tag in the compose file would not do it alone: `apply` recreates a
+stack only when its compose file changes, so a tag that never changes in the
+file would never bring a new build to a host. Resolving at plan time makes a
+new build a changed compose file, which the dry run shows and the apply
+carries through the module check, the configuration validation and the health
+gate, the same as any image change. It also keeps what a host runs exact and
+recorded, which is what the digest pin was for.
+
+### How
+
+* The resolution is a lookup on the registry's HTTP API from the
+  workstation, anonymous, reading the `Docker-Content-Digest` of the tag's
+  manifest (`internal/imagedigest`). For a multi platform image that is the
+  index digest, which is what `docker pull` records as the image's RepoDigest
+  on the host; the two were compared for the published image on 2026-10-11 and
+  matched. It needs nothing installed on a host, and a dry run that resolves
+  changes nothing anywhere.
+* `render` stays offline and renders the tag as configured, listing it per
+  site in `Plan.CaddyImages`. `apply.Build` pins it with `ResolveImages`
+  before comparing the file with the host's copy.
+* When the registry cannot be reached, the plan keeps the build the site
+  already runs, with a warning. A site running none is refused, since a tag
+  written as it is would never move again.
+* A command that rewrites a gateway's compose file for another reason
+  (`site remove`, `site add`, `storage add`) passes no resolver, and keeps the
+  build the site runs, so it never moves Caddy to a build nobody planned.
+* The volume table records the image by repository, `kinds.RepositoryVolumes`,
+  since no one reference to it stays fixed; apply's own inspection of the
+  exact build on the host is unchanged.
+
+### What follows elsewhere
+
+`Paisans-Software/caddy-dns`'s `propose` job edits the digest in
+`internal/acme/acme.go`. The reference there is now composed from a
+repository constant, so the job's pattern finds nothing to replace and it
+opens no pull request. The job is that repository's to retire.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. The
+resolver was run against ghcr.io and Docker Hub, and its digest for
+`ghcr.io/paisans-software/caddy:2` matched the RepoDigest `docker pull`
+recorded for the same tag. Nothing was run against a deployment.

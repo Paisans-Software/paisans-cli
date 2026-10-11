@@ -558,6 +558,20 @@ no module answers to both produce a gateway that cannot load its own
 configuration, and neither is visible in an image reference. This check runs
 before the configuration check because its error says what to fix.
 
+**The gateway's Caddy image is resolved to a build while apply plans.** The
+configuration names it by a tag that moves (`acme.Published`,
+`ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and `render` renders
+that tag, listing it per site in `Plan.CaddyImages`, since render reaches no
+network. `planSiteApply` passes `apply.ResolveImages` with
+`imagedigest.Registry`, which asks the registry's HTTP API, anonymously and
+from the workstation, for the digest the tag names; `apply.Build` pins it
+into the infrastructure compose file with `render.PinCaddyImage` before the
+file is compared, so a new build is a changed file and goes through every
+gate above. A registry that cannot be reached keeps the build the site runs,
+read from its compose file, with a warning; a site running none is refused.
+Execute records the build in the manifest's `caddy` entry. Tests in
+`cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
+
 A DNS provider's Caddyfile syntax is provider specific rather than uniform: the
 cloudflare module takes the API token as a bare argument, while the deSEC module
 requires a block with a `token` subdirective and rejects a bare argument. That
