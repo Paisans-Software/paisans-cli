@@ -34,9 +34,10 @@ is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
 removed site.
-`ingress show` reads `paisans.yaml` alone; `ingress check` reaches no host
-over ssh and changes nothing, looking at a monitor's public hostname as a
-visitor would.
+`ingress show` and `ingress check` change nothing: `check` looks at a
+monitor's public hostname as a visitor would, and in ingress mode `external`
+both read the monitor's web server over ssh, `show` always and `check` when a
+check fails.
 
 Each command that changes a host first claims it in the host registry,
 `/var/lib/paisans/registry.json`, and its dry run only reads that registry;
@@ -237,8 +238,10 @@ config directory.
 `ingress show --app <name>` and `ingress check --app <name>` are for an app
 pinned to a monitor site (`render.ServedBy`); every other app is the
 gateway's and is refused. `internal/ingress` holds both: `For` builds the
-target from the configuration, `Show` prints what the web server in front of
-it must do and a snippet for Caddy, nginx and Apache, and `Check` runs four
+target from the configuration, `Detect` finds the web server in front of it
+over ssh, reading only (`internal/ingress/detect.go`), `Show` prints what that
+web server must do and the snippet for it, or for Caddy, nginx and Apache when
+`Detect` found none, and `Check` runs four
 read only checks through `Probes`, a resolver, an HTTPS client that never
 follows a redirect, a dialer and a clock. Behind the toolkit's own Caddy
 (ingress mode `paisans`) there is nothing to hand off, so `Show` says so and
@@ -247,6 +250,15 @@ against `httptest` TLS servers with certificates generated in the test, so no
 test touches real DNS or the network. README.md *The monitor has a site of
 its own* has the reasoning; `docs/guides/behind-your-own-web-server.md` is
 the walk-through.
+
+`apply` without `--site` uses the same package once every step has run:
+`writeIngressFiles` (`cmd/paisans/converge_ingress_files.go`) writes each
+app's snippet into the web server's `include_dir` through `ingress.Sync`
+(`internal/ingress/include.go`), recording each file in the manifest
+(`internal/apply/ingressrecord.go`) so `app remove` and `site remove` delete
+it through `ingress.Remove`, and `convergeIngress`
+(`cmd/paisans/converge_ingress.go`) runs `Check` for each app, again for
+about half a minute while only the certificate or sign in fails.
 
 `render` validates, then writes per site artifacts under `--out`. It writes
 files and stops: pushing them to a host is `apply`'s work.

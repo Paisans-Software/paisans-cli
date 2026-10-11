@@ -14,9 +14,12 @@ reasoning.
 `paisans apply` without `--site` takes `paisans.yaml` to a complete, running
 stack. It runs `init`, `host prepare`, `dns init`, `apply --site`, `site add`,
 `storage init` and `storage add` itself, in the order the deployment needs
-them, each exactly as it runs when typed (see *`paisans apply` with no
-`--site` converges the whole deployment* in `README.md`). So the usual way to
-make any change is to edit `paisans.yaml` and run:
+them, each exactly as it runs when typed, pulls every site's images on every
+host at once before the first of them installs anything, and ends by running
+`ingress check`'s checks for each app behind the operator's own web server
+(see *`paisans apply` with no `--site` converges the whole deployment* in
+`README.md`). So the usual way to make any change is to edit `paisans.yaml`
+and run:
 
 ```sh
 paisans apply             # every step it would run, and what each would change
@@ -28,7 +31,7 @@ step, working on one host, or reaching for a flag the whole apply does not
 pass on. Every other command is never run by the whole apply. Each is a
 decision an operator makes (removing a site or an app, replacing a key,
 deleting DNS records, making an administrator) or a read (`doctor`,
-`preflight`, `ingress check`).
+`preflight`, `ingress show`).
 
 ## Flags every command shares
 
@@ -141,8 +144,8 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 
 Takes a blank host to the state `apply` assumes: Docker with the compose
 plugin, the WireGuard tools, a firewall following the site's roles, the login
-user's authorized keys, and a watchdog on a data site. Installs only what is
-missing.
+user's authorized keys (every key of each admin the site's `ssh.keys` names),
+and a watchdog on a data site. Installs only what is missing.
 
 ```
 paisans host prepare --site home-a            # shows what it would do
@@ -200,21 +203,35 @@ See *Every volume an image declares is mounted, and `apply` checks it* in
 
 Every site, from `paisans.yaml` to a running stack: the commands in this file
 that it runs, in the order and under the conditions *`paisans apply` with no
-`--site` converges the whole deployment* in `README.md` gives.
+`--site` converges the whole deployment* in `README.md` gives. In order:
+`init` when it has work; `host prepare` on every host at once; a pull of every
+site's images on every host at once, so no install waits on a download; `dns
+init`; the founding applies, `site add`, the other sites, storage and pass
+two; a `pocket id` check for an admin; and, for each app behind the
+operator's own web server, its site file written into the web server's
+`include_dir` and `ingress check`'s checks. Each `apply --site` it runs that
+covers the whole site, rather than holding apps back until their sign in
+clients exist, ends by sweeping the old images its site's stacks used (see
+*`apply` prunes the images it superseded* in `README.md`).
 
 * **Alone:** this is the command an operator types; everything else is the
   exception.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--sudo`, `--min-free`
-  and `--keep-images` (handed to each `apply` step, below). `--ssh`,
+  and `--keep-images` (handed to each `apply` step, below; the pull checks
+  free space against `--min-free` too). `--ssh`,
   `--overwrite`, `--only` and `--recreate` are about one site and are refused
   without `--site`.
-* **Hosts:** every site. Every host's sudo password is asked for before the
-  first step.
+* **Hosts:** every site, and each app behind the operator's own web server
+  from this machine, as a visitor would. Every host's sudo password is asked
+  for before the first step.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
-  it reads live state again and carries on. Without it, every step is checked
-  as its own dry run, and the generated secrets the file lacks may be added to
-  the local secrets file, as `init` would add them, which it says when it
-  does.
+  it reads live state again and carries on. It ends `Deployment complete.`, or,
+  when an app failed its ingress check or its site file could not be written,
+  names each such app and exits 1 although every step ran. An `include_dir` it
+  derives is written into `paisans.yaml`. Without it, every step is checked
+  as its own dry run, the ingress checks are listed as `checked with
+  --execute`, and the generated secrets the file lacks may be added to the
+  local secrets file, as `init` would add them, which it says when it does.
 
 ### `paisans apply --site`
 
@@ -231,16 +248,21 @@ starts, restarts or recreates what changed.
   |------|---------|---------|
   | `--site <name>` | required | the site to apply |
   | `--ssh <destination>` | the site's `ssh` section | as above |
-  | `--only <stack>` | every stack | apply only this stack's files and actions (repeatable) |
+  | `--only <stack>` | every stack | apply only this stack's files and actions (repeatable); an apply narrowed by it does not sweep |
   | `--overwrite <path>` | none | replace this conflicting file although it differs from the last apply's record (repeatable) |
   | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable) |
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
-  | `--keep-images` | off | leave the images this apply supersedes on the host |
+  | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
 
   And `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** the site's own; an etcd member's apply also reads the other
   members, to compare the live membership.
-* **`--execute`:** writes and acts. Without it, it reads and prints the plan.
+* **`--execute`:** writes and acts, and an apply of the whole site ends by
+  sweeping the old images of repositories its stacks render or have rendered,
+  which no site of the deployment renders and no container uses (`sweep old
+  images` in the plan). Without it, it reads and prints the plan. It neither
+  writes the site files of an app behind the operator's own web server nor
+  checks its ingress: the whole apply does both.
 
 See *Rendered configuration is a build artifact* and the `apply` sections under
 *Bootstrapping a site* in `README.md`.
@@ -263,13 +285,9 @@ paisans site add home-b             # every stage, its steps and its gate
 paisans site add home-b --execute   # runs them, stopping at the first failed gate
 ```
 
-* **Alone:** the whole apply runs it for an etcd member the running cluster has
-  not admitted. Typed alone, it shows a join's stages and gates, or resumes a
-  join. It is also how a witness is added with a second data site today: the
-  whole apply plans a `site add` for the witness as well, which refuses, since
-  `site add` joins only sites whose roles are exactly `[data]`. So the data
-  site's `site add` is run alone first, which joins both, and the whole apply
-  after it.
+* **Alone:** the whole apply runs it for each data site the running cluster
+  has not admitted, and a witness joining beside one is joined by that run.
+  Typed alone, it shows a join's stages and gates, or resumes a join.
 * **Flags:** the site, as an argument before or after the flags; `--config`,
   `--secrets`, `--execute`, `--sudo`. No `--ssh`, since it reaches several
   hosts.
@@ -295,8 +313,10 @@ See *Preflight* in `README.md`.
 ### `paisans site remove`
 
 Takes a site out of the running deployment in gated stages: its data out, out
-of the cluster, its host cleaned of what is provably this deployment's, its DNS
-records deleted, and its entry out of `paisans.yaml`.
+of the cluster, its host cleaned of what is provably this deployment's (on a
+monitor behind the operator's own web server, the site files apply wrote into
+its `include_dir` included), its DNS records deleted, and its entry out of
+`paisans.yaml`.
 
 ```sh
 paisans site remove home-b                             # refusals, then every stage and its gate
@@ -332,7 +352,9 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
 
   And the site as an argument, `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
-  `--force` reaches the one host only and leaves DNS alone.
+  `--force` reaches the one host only and leaves DNS alone. `--host-gone`
+  reaches the removed site's host not at all, so it says the site files apply
+  wrote there may still be in the web server's `include_dir`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails.
 
 See *`site remove` takes a site out* in `README.md`.
@@ -511,7 +533,9 @@ See *`oidc client create` makes an app's client at Pocket ID* in `README.md`.
 ### `paisans app remove`
 
 Takes an app that has left `paisans.yaml` off every host, once a whole apply
-on each site has marked its files left over.
+on each site has marked its files left over. For an app behind the operator's
+own web server it also deletes the site file apply wrote into the web
+server's `include_dir`, then validates and reloads that web server.
 
 ```sh
 paisans app remove docs                              # shows what it would do
@@ -533,21 +557,31 @@ See *`app remove` takes an app off its hosts* in `README.md`.
 ### `paisans ingress show` and `paisans ingress check`
 
 For an app pinned to a monitor site behind the operator's own web server.
-`show` prints what that web server must do, with a snippet for Caddy, nginx
-and Apache. `check` checks, from this machine as a visitor would, that the
+`show` prints what that web server must do, with the snippet for the web
+server it finds in front of the app, or for Caddy, nginx and Apache when it
+finds none. `check` checks, from this machine as a visitor would, that the
 hostname resolves to the monitor, that `/healthz` answers with a valid
 certificate, that sign in redirects with an https callback, and that the
-published port is closed from outside.
+published port is closed from outside; when a check fails, it names the web
+server it finds there.
 
 ```sh
-paisans ingress show  --app status   # the hand-off sheet, from paisans.yaml alone
+paisans ingress show  --app status   # the hand-off sheet, for the web server it finds
 paisans ingress check --app status   # from your machine, as a visitor would
 ```
 
-* **Alone:** always.
-* **Flags:** `--app <name>` (required), `--config`.
-* **Hosts:** none over ssh. `check` looks at the public hostname only.
-* **`--execute`:** not taken. `check` exits 1 on any `FAIL`.
+* **Alone:** `show` always, to hand the snippet to whoever runs the web
+  server. The whole apply writes that snippet into the web server's
+  `include_dir` and runs `check`'s checks after every step, so `check` is
+  typed alone to check again once the web server is fixed.
+* **Flags:** `--app <name>` (required), `--config`, `--sudo` (on: read the web
+  server through sudo where the ssh user cannot; `--sudo=false` reads as the
+  ssh user alone).
+* **Hosts:** in ingress mode `external`, the monitor over ssh, reading only:
+  `show` always, `check` only when a check fails. `check` otherwise looks at
+  the public hostname only.
+* **`--execute`:** not taken. Neither changes anything. `check` exits 1 on any
+  `FAIL`.
 
 See *The monitor has a site of its own* in `README.md`, and
 [`docs/guides/behind-your-own-web-server.md`](guides/behind-your-own-web-server.md).

@@ -625,7 +625,7 @@ one with no record alone (created by an older Compose or by hand), so `apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
 **Helping an operator behind their own web server.** Two commands, `ingress
-show` and `ingress check`, neither of which reaches a host or changes anything.
+show` and `ingress check`, neither of which changes anything.
 How to run them, and their flags, are under *`paisans ingress show` and
 `paisans ingress check`* in [docs/commands.md](docs/commands.md).
 
@@ -660,7 +660,10 @@ hostname, and its days to expiry; the sign in redirect naming a callback under
 answering, on the public addresses. Any other dial failure, such as no route
 from where the check runs, says nothing about the port: one conclusive answer
 still passes, naming the family that could not be reached (commonly IPv6 from
-a home connection), and with none the check fails as inconclusive. In `mode: paisans` there is nothing to hand off, and `check`
+a home connection), and with none the check fails as inconclusive. In `mode:
+external` a check that fails also reads the web server, as `show` does, and
+names it, so the fix lands on the right configuration; a passing check reaches
+no host. In `mode: paisans` there is nothing to hand off, and `check`
 runs only the first two.
 
 **Moving an existing monitor.** A deployment whose uptime hostname already has
@@ -3617,12 +3620,18 @@ and joining are decided from them, it has four sections: `prepare`, one line
 per site for its `host prepare`; `pull`, one line per site for its images;
 `dns`; and `install`, one line per site for every step from founding to pass
 two that is about it, in the order the run first applies each site, then a
-`storage` line for `storage init` or `storage add` when there is Garage. Last,
-a `pocket id` section asks each Pocket ID app whose sites' steps are all up to
-date, or have run, whether it has an admin (`check <app> for an admin`), since
-one not running yet cannot answer, and names
-`app admin create` for one that has none, and a note names `secrets set` for
-each credential still owed, since only the operator can supply either. With
+`storage` line for `storage init` or `storage add` when there is Garage. After
+them, a `pocket id` section asks each Pocket ID app whose sites' steps are all
+up to date, or have run, whether it has an admin (`check <app> for an admin`),
+since one not running yet cannot answer, and names `app admin create` for one
+that has none. Then, when an app is served behind the operator's own web
+server, an `ingress` section: with `--execute` a line for each site file
+written into `include_dir` and a line per app for its ingress check, and in a
+dry run a line per app, `checked with --execute` (see *The monitor has a site
+of its own*). Last, a note names `secrets set` for each credential still owed,
+since only the operator can supply it. A run with `--execute` ends
+`Deployment complete.`; one where an app failed its ingress check, or its site
+file was not written, names those apps instead and exits 1. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
 above the hosts still running, so the lines end in the order their hosts
@@ -3703,8 +3712,10 @@ install
   ...
 ```
 
-`dns init` reports as it does when typed, so a conflicting record it lists is
-on screen above the stop that asks for it to be changed.
+`dns init` reports its records as it does when typed, so a conflicting record
+it lists is on screen above the stop that asks for it to be changed. It leaves
+out the configuration's findings, which the run showed at its start, and its
+own closing line, since the run ends on its own.
 
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
 subnet and the secrets file reads but lacks a generated secret, it generates
@@ -5325,16 +5336,23 @@ describes.
 
 1. `init`, which generates the VM's WireGuard keypair on the workstation and
    records it in the secrets file (see *Where WireGuard keys are generated*).
-2. `host prepare` on every site: the VM gets Docker, WireGuard and a firewall
-   following its roles, and home-a, already prepared, plans nothing.
-3. `dns init`, for any record the VM's names need.
-4. `apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
+2. `host prepare` on every site: the VM gets Docker, WireGuard, a firewall
+   following its roles and the keys of the admins its `ssh.keys` names, and
+   home-a, already prepared, plans nothing.
+3. The pull: the VM pulls the images its apply will start, at the same time as
+   any other host with images to pull, and home-a, which has them, pulls
+   nothing.
+4. `dns init`, for any record the VM's names need.
+5. `apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
    interface lists home-a as a peer with no endpoint: home-a dials out.
-5. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
+6. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
    as a peer **with** an endpoint, and `PersistentKeepalive` so the NAT mapping
    stays open, applied with `wg syncconf` so nothing on home-a restarts (see
-   *`apply` brings the mesh interface up before anything binds to it*).
+   *`apply` brings the mesh interface up before anything binds to it*). Each
+   of these applies ends by sweeping the images its site's stacks no longer
+   use (see *`apply` prunes the images it superseded*).
 
+The run ends `Deployment complete.`
 Each apply reads its mesh interface back before any stack starts. None waits
 for a handshake, because a tunnel to a site outside etcd carries no quorum: if
 it does not come up, the VM's own traffic waits and nothing that already runs
@@ -5357,8 +5375,8 @@ Home-b is declared in `paisans.yaml` at its end state, `roles: [data]`, and the
 VM gains the `witness` role in the same edit, so the voters go from one to
 three at once (see *Adding a site, and the constraint that shapes it*). The
 whole apply then runs `init` for home-b's secrets, `host prepare` on
-home-b, `dns init`, a `site add` for each data site the running cluster has
-not admitted, the storage step, and pass two. `site add` is the staged join
+home-b, the pull of home-b's images, `dns init`, a `site add` for each data
+site the running cluster has not admitted, the storage step, and pass two. `site add` is the staged join
 below: it admits the VM to etcd first and home-b after it, one learner at a
 time, then starts home-b's replica. The VM has no `site add` of its own: a
 witness joins inside the data site's join, because a witness joining alone
