@@ -268,8 +268,9 @@ func sshProblems(name string, site Site, known map[string]Admin) []string {
 
 // Admin is one person who may log in to the sites that name them.
 type Admin struct {
-	// Name is the admin's full name. Optional; it is for the people reading
-	// the file.
+	// Name is the admin's full name: at least a first and a last name, split
+	// at the first space. Required, because apply makes each admin a Pocket
+	// ID user and gives that user this name.
 	Name string `yaml:"name"`
 	// Email is how the admin is reached. Required, so that a key in the file
 	// always leads to somebody who can say whether it is still theirs.
@@ -325,6 +326,11 @@ func (c *Config) adminProblems() []string {
 		a := c.Admins[id]
 		if !keyName.MatchString(id) {
 			add("admins.%s: not a name this toolkit accepts, since it is recorded on each host beside the admin's keys. Use a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters.", id)
+		}
+		if strings.TrimSpace(a.Name) == "" {
+			add("admins.%s.name: required. Give the admin's first and last name, Eg: name: Alice Example.", id)
+		} else if first, last, _ := strings.Cut(strings.TrimSpace(a.Name), " "); first == "" || strings.TrimSpace(last) == "" {
+			add("admins.%s.name: %q is not a first and a last name. Give both, separated by a space, Eg: name: Alice Example; apply gives the admin's Pocket ID account the first word as its first name and the rest as its last.", id, a.Name)
 		}
 		if a.Email == "" {
 			add("admins.%s.email: required. Give the address the admin is reached at, Eg: %s@example.org.", id, id)

@@ -40,6 +40,20 @@ func (c *checker) pocketIDSettingInvalid() {
 	}
 }
 
+// pocketIDAccountEditOn refuses allow_own_account_edit set true. The kind
+// renders it false regardless (see kinds.PocketIDAccountEditSetting), so a
+// true here would say something the deployment does not do.
+func (c *checker) pocketIDAccountEditOn() {
+	for _, name := range c.pocketIDApps() {
+		if on, _ := c.cfg.Apps[name].Settings[kinds.PocketIDAccountEditSetting].(bool); !on {
+			continue
+		}
+		c.refuse("pocket-id-account-edit-on", fmt.Sprintf("apps.%s.settings.%s", name, kinds.PocketIDAccountEditSetting),
+			"pocket id account editing cannot be turned on",
+			"is true, and the pocket-id kind always renders ALLOW_OWN_ACCOUNT_EDIT=false. A Pocket ID username is the identity other apps know a person by, such as their fediverse handle in Mbin, and those apps do not follow a rename; with editing off nobody can change their own username or email, which is also how apply finds each declared admin's account. Set it false or remove it. An administrator can still edit any account from Pocket ID's admin page, and a rename made there breaks the same identities.")
+	}
+}
+
 // pocketIDSettingUnknown warns about a pocket-id setting the toolkit does not
 // read. A setting no template asks for renders nothing, which for this kind
 // most likely means a misspelt Pocket ID option that its admin page can no

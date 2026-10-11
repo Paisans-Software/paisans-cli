@@ -20,6 +20,7 @@ mesh:
   subnet: 10.44.0.0/24
 admins:
   alice:
+    name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org

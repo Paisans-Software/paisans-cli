@@ -64,6 +64,7 @@ admins:
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
   bob:
+    name: Bob Example
     email: bob@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
@@ -278,6 +279,10 @@ apps:
       # and records its ID under pocket_id_groups in the secrets.
       signup_default_groups: [provisional]
       email_one_time_access_as_unauthenticated: true
+      # Always false, and validate refuses true. A username is the identity
+      # other apps know a person by, such as their fediverse handle in Mbin,
+      # and those apps do not follow a rename.
+      allow_own_account_edit: false
 
   gate:
     kind: oauth2-proxy

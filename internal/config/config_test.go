@@ -27,6 +27,7 @@ mesh:
   subnet: 10.44.0.0/24
 admins:
   alice:
+    name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
@@ -61,6 +62,7 @@ acme:
   provider: desec
 admins:
   alice:
+    name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
@@ -301,7 +303,7 @@ func withAdmin(body, section string) string {
 // A site's ssh.keys names admins, and the keys it authorises are theirs,
 // merged in the order the site lists them.
 func TestSSHSectionLoads(t *testing.T) {
-	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n\n      " + fakeKeyC + "\n  bob:\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n\n      " + fakeKeyC + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
 	body := withAdmin(withSSH("    ssh:\n      host: 203.0.113.10\n      user: ubuntu\n      port: 2222\n      keys: [bob, alice]\n"), admins)
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
@@ -331,7 +333,7 @@ func TestSSHSectionLoads(t *testing.T) {
 
 // Each site gets only the keys of the admins it names.
 func TestSSHKeysAreOnlyTheListedAdmins(t *testing.T) {
-	admins := "admins:\n  alice:\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
 	cfg, err := config.Load(write(t, withAdmin(minimal, admins)))
 	if err != nil {
 		t.Fatal(err)
@@ -441,6 +443,9 @@ func TestAdminSectionRefusals(t *testing.T) {
 	}{
 		{"missing", "", "sites.home-a.ssh.keys: alice is not in the admins section"},
 		{"no email", admin("alice", keyed(fakeKeyA)), "admins.alice.email: required"},
+		{"no name", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: required. Give the admin's first and last name, Eg: name: Alice Example."},
+		{"one word name", admin("alice", "    name: Alice\n    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: \"Alice\" is not a first and a last name"},
+		{"blank last name", admin("alice", "    name: \"Alice  \"\n    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: \"Alice  \" is not a first and a last name"},
 		{"not an email", admin("alice", "    email: Alice <alice@example.org>\n"+keyed(fakeKeyA)), "admins.alice.email: \"Alice <alice@example.org>\" is not an email address alone"},
 		{"no keys", admin("alice", "    email: alice@example.org\n"), "admins.alice.keys: required"},
 		{"not a key", admin("alice", "    email: alice@example.org\n"+keyed("ssh-ed25519 not-base64")), "admins.alice.keys: line 1 is not an OpenSSH public key"},

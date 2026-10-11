@@ -59,11 +59,11 @@ func (pocketID) client(t Transport, req Request) *pocketid.Client {
 
 // find is the user a request is about: the one with its username, or for a
 // Declared request whose username no account has, the one with its email.
-// Pocket ID lets users edit their own username and email by default
-// (ALLOW_OWN_ACCOUNT_EDIT, appconfig/model.go:24, :129), so a declared admin
-// who renamed themselves after signing in is still the account with their
-// address. The address is compared whole, ignoring case, since Pocket ID's
-// search is a substring match.
+// The pocket-id kind renders ALLOW_OWN_ACCOUNT_EDIT=false, so a user can
+// change neither; only an administrator can, from Pocket ID's admin page, and
+// an account renamed there is still found by its address. The address is
+// compared whole, ignoring case, since Pocket ID's search is a substring
+// match.
 func (p pocketID) find(c *pocketid.Client, req Request) (*pocketid.User, error) {
 	u, err := c.FindUser(req.Username)
 	if err != nil || u != nil || !req.Declared || req.Email == "" {
@@ -161,7 +161,10 @@ func withLink(out []Action, req Request) []Action {
 	return out
 }
 
-// newUser is exactly what a create sends, and what the plan prints.
+// newUser is exactly what a create sends, and what the plan prints. A
+// declared admin always has a first and a last name, since validate refuses
+// one without; `app admin create` may leave the first name out, and the
+// username stands in for it.
 func (pocketID) newUser(req Request) pocketid.NewUser {
 	first := req.FirstName
 	if first == "" {

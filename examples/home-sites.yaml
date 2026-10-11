@@ -27,6 +27,7 @@ acme:
 
 admins:
   alice:
+    name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
@@ -133,6 +134,7 @@ apps:
     settings:
       file_backend: database
       app_name: Example ID
+      allow_own_account_edit: false   # always false; see README.md
 
   status:
     kind: uptime

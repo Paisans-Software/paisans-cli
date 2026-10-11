@@ -2765,12 +2765,13 @@ list:
 ```yaml
 admins:
   alice:
-    name: Alice Example    # optional
+    name: Alice Example    # required: a first and a last name
     email: alice@example.org
     keys: |                # required: one whole .pub line per line
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC alice@laptop
   bob:
+    name: Bob Example
     email: bob@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
@@ -2799,7 +2800,7 @@ Each entry of `admins`:
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
-| `name` | no | |
+| `name` | yes | not at least a first and a last name: split at its first space, either part is empty, Eg: `Alice` is refused and `Alice Example` is not |
 | `email` | yes | not an email address alone, Eg: `alice@example.org` |
 | `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two admins, by fingerprint |
 
@@ -2827,7 +2828,11 @@ others; written once, rotating it is one edit and a `host prepare` of each site
 that names the admin.
 
 `email` is required so that every key in the file leads to somebody who can
-say whether it is still theirs. A key belongs to one admin: two admins sharing
+say whether it is still theirs. `name` is required because the admin's
+Pocket ID account is given it: apply splits it at its first space into the
+account's first and last name (see *`apply` makes the declared admins and
+hands each a login link*). The entry's own name is the admin's Pocket ID
+username, which is fixed once the account exists. A key belongs to one admin: two admins sharing
 a key cannot be told apart on a host, and taking one of them off a site would
 leave the other's access resting on a key nobody listed for them.
 
@@ -4847,15 +4852,20 @@ A deployment that has just come up runs every app and lets nobody in: Pocket
 ID has no administrator, and its users sign in with passkeys, so there is no
 password to hand anyone. The `admins` section already says who the admins
 are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
-Pocket ID administrator: the admin's key is the username, `email` is the
+Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
 address, marked verified for the reason `app admin create` gives below, and
 `name` is split at its first space into a first and a last name. Each is put
 in every app's admin group, as `app admin create` does. Declaring the admin is
 the approval for all of it.
 
-An account is found by its username, then by its email, because Pocket ID
-lets a user change both once signed in (`ALLOW_OWN_ACCOUNT_EDIT`). Only an
-admin found by neither is created. Since the username is the admin's key,
+The username is set when the account is created and never changed after:
+the pocket-id kind turns account editing off (`allow_own_account_edit`, under
+*Pocket ID's configuration is rendered from paisans.yaml*), so nobody can
+rename themselves or change their email, and apply never renames an account.
+Renaming an admin's key in the `admins` section therefore makes a second
+account rather than renaming the first. An account is found by its username,
+then by its email, so one an administrator renamed from Pocket ID's admin page
+is still found by its address. Only an admin found by neither is created. Since the username is the admin's key,
 `validate` refuses a key Pocket ID would not take, one that does not end in a
 letter or digit (`pocket-id-admin-username`), when the deployment runs Pocket
 ID.
@@ -5057,7 +5067,7 @@ which is a restart of a few seconds during which nobody can sign in.
 | `emails_verified` | `EMAILS_VERIFIED` | `true` or `false` |
 | `accent_color` | `ACCENT_COLOR` | a CSS colour, or `default` |
 | `disable_animations` | `DISABLE_ANIMATIONS` | `true` or `false` |
-| `allow_own_account_edit` | `ALLOW_OWN_ACCOUNT_EDIT` | `true` or `false` |
+| `allow_own_account_edit` | `ALLOW_OWN_ACCOUNT_EDIT` | `false` only, and rendered `false` when unset; see below |
 | `allow_user_signups` | `ALLOW_USER_SIGNUPS` | `disabled`, `withToken` or `open` |
 | `signup_default_groups` | `SIGNUP_DEFAULT_USER_GROUP_IDS` | a list of group names; see below |
 | `require_user_email` | `REQUIRE_USER_EMAIL` | `true` or `false` |
@@ -5089,7 +5099,21 @@ apps:
       signup_default_groups: [provisional]
       email_one_time_access_as_unauthenticated: true
       email_verification: true
+      allow_own_account_edit: false  # the only value it takes
 ```
+
+**Nobody can edit their own account.** The kind renders
+`ALLOW_OWN_ACCOUNT_EDIT=false` whether or not the setting is declared, and
+`validate` refuses `true` (`pocket-id-account-edit-on`), as it refuses the
+variable under `config`. A Pocket ID username is the identity other apps know
+a person by, such as their fediverse handle in Mbin, and those apps do not
+follow a rename: a renamed user signs in to them as somebody new. With editing
+off a user cannot change their email either, which keeps apply finding each
+declared admin's account (see *`apply` makes the declared admins and hands
+each a login link*). The setting stays in the table so that a configuration
+can say so where it is read. Pocket ID's own admin page can still edit any
+account, and that is the way to correct one; a username changed there breaks
+the same identities in the other apps.
 
 **Pocket ID checks every value when it starts, and will not start on one it
 refuses** (`validateEnvConfig`, `service.go:252-279`, which applies the admin

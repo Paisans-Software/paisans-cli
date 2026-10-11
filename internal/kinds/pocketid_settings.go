@@ -83,6 +83,7 @@ var PocketIDSettings = []PocketIDSetting{
 	// checks it in the browser.
 	{Key: "accent_color", Env: "ACCENT_COLOR", Type: SettingText, Min: 1},
 	{Key: "disable_animations", Env: "DISABLE_ANIMATIONS", Type: SettingBool},
+	// Always rendered false; see PocketIDAccountEditSetting.
 	{Key: "allow_own_account_edit", Env: "ALLOW_OWN_ACCOUNT_EDIT", Type: SettingBool},
 	{Key: "allow_user_signups", Env: "ALLOW_USER_SIGNUPS", Type: SettingChoice, Choices: []string{"disabled", "withToken", "open"}},
 	{Key: "require_user_email", Env: "REQUIRE_USER_EMAIL", Type: SettingBool},
@@ -111,6 +112,17 @@ const (
 	PocketIDSignupGroupsSetting = "signup_default_groups"
 	PocketIDSignupGroupsEnv     = "SIGNUP_DEFAULT_USER_GROUP_IDS"
 )
+
+// PocketIDAccountEditSetting is the one setting whose value is fixed: the kind
+// always renders ALLOW_OWN_ACCOUNT_EDIT=false, declared or not, and validate
+// refuses true (pocket-id-account-edit-on). A Pocket ID username is the
+// identity other apps sign people in as, such as an Mbin account's fediverse
+// handle, and those apps do not follow a rename. With editing off a user can
+// change neither their username nor their email, which also keeps apply
+// finding each declared admin's account by the two. Pocket ID's own admin
+// page can still edit any account, and a rename made there breaks the same
+// identities.
+const PocketIDAccountEditSetting = "allow_own_account_edit"
 
 // PocketIDUIConfigDisabledEnv is the variable that locks the admin page and
 // makes the environment the configuration. The kind always renders it true.
@@ -292,12 +304,16 @@ type PocketIDEnvVar struct {
 }
 
 // PocketIDEnv is the variables the table renders for declared settings, in
-// the table's order. A value of a type the setting does not take is rendered
-// as Go prints it; validate refuses it before anything renders.
+// the table's order, and PocketIDAccountEditSetting's false whether declared
+// or not. A value of a type the setting does not take is rendered as Go
+// prints it; validate refuses it before anything renders.
 func PocketIDEnv(settings map[string]any) []PocketIDEnvVar {
 	var out []PocketIDEnvVar
 	for _, s := range PocketIDSettings {
 		v, ok := settings[s.Key]
+		if s.Key == PocketIDAccountEditSetting {
+			v, ok = false, true
+		}
 		if !ok || v == nil {
 			continue
 		}
