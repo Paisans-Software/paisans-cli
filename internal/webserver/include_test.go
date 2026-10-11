@@ -92,6 +92,16 @@ func TestCheckInclude(t *testing.T) {
 		{"caddy literal", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import /etc/caddy/paisans.d/" + fileName + "\n", webserver.IncludeRefused, "import /etc/caddy/paisans.d/" + fileName},
 		{"caddy commented", dockerCaddy, "/etc/caddy/paisans.d", fileName, "# import /etc/caddy/paisans.d/*\n", webserver.IncludeMissing, ""},
 		{"caddy missing", dockerCaddy, "/etc/caddy/paisans.d", fileName, "blog.example.org {\n}\n", webserver.IncludeMissing, ""},
+		{"caddy glob after options, comments between", dockerCaddy, "/etc/caddy/paisans.d", fileName, "# options\n{\n\temail ops@example.org # who\n}\n\n# paisans\nimport /etc/caddy/paisans.d/*\n", webserver.IncludeWildcard, ""},
+		{"caddy glob without options", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import /etc/caddy/paisans.d/*\nblog.example.org {\n\trespond \"{\" 200\n}\n", webserver.IncludeWildcard, ""},
+		{"caddy glob after a site", dockerCaddy, "/etc/caddy/paisans.d", fileName, "blog.example.org,\nwww.example.org {\n\theader X-Host {host}\n}\nimport /etc/caddy/paisans.d/*\n", webserver.IncludeWildcard, ""},
+		{"caddy glob after a snippet import", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import common.caddy\n{$SITE} {\n}\nimport /etc/caddy/paisans.d/*\n", webserver.IncludeWildcard, ""},
+		{"caddy glob above options", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import /etc/caddy/paisans.d/*\n{\n\temail ops@example.org\n}\nblog.example.org {\n}\n", webserver.IncludeAboveOptions, "import /etc/caddy/paisans.d/*"},
+		{"caddy glob above options, comments between", dockerCaddy, "/etc/caddy/paisans.d", fileName, "# paisans\n\nimport /etc/caddy/paisans.d/* # the toolkit's\n\n# options\n{\n\temail ops@example.org\n}\n", webserver.IncludeAboveOptions, "import /etc/caddy/paisans.d/*"},
+		{"caddy glob in a site", dockerCaddy, "/etc/caddy/paisans.d", fileName, "blog.example.org {\n\timport /etc/caddy/paisans.d/*\n}\n", webserver.IncludeInBlock, "import /etc/caddy/paisans.d/*"},
+		{"caddy glob in a snippet", dockerCaddy, "/etc/caddy/paisans.d", fileName, "(common) {\n\timport /etc/caddy/paisans.d/*\n}\n", webserver.IncludeInBlock, "import /etc/caddy/paisans.d/*"},
+		{"caddy glob in the options", dockerCaddy, "/etc/caddy/paisans.d", fileName, "{\n\timport /etc/caddy/paisans.d/*\n}\n", webserver.IncludeInBlock, "import /etc/caddy/paisans.d/*"},
+		{"caddy glob above options and after", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import /etc/caddy/paisans.d/*\n{\n}\nimport /etc/caddy/paisans.d/*\n", webserver.IncludeAboveOptions, "import /etc/caddy/paisans.d/*"},
 		{"nginx glob", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "# configuration file /etc/nginx/nginx.conf:\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include paisans.d/*.conf;\n}\n", webserver.IncludeWildcard, ""},
 		{"nginx glob that misses", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "include /etc/nginx/paisans.d/*.vhost;\n", webserver.IncludeMissing, ""},
 		{"nginx literal", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "include /etc/nginx/paisans.d/paisans-f2a9-status.conf;\n", webserver.IncludeRefused, "include /etc/nginx/paisans.d/paisans-f2a9-status.conf;"},
@@ -118,6 +128,21 @@ func TestIncludeLine(t *testing.T) {
 		if got, where := webserver.IncludeLine(s, "/etc/caddy/paisans.d"); got != want || where == "" {
 			t.Errorf("%s: %q %q", s, got, where)
 		}
+	}
+}
+
+// Caddy's import goes after the global options block, and the example
+// shows where.
+func TestIncludeLineForCaddyComesAfterTheGlobalOptions(t *testing.T) {
+	if _, where := webserver.IncludeLine(webserver.ServerCaddy, "/etc/caddy/paisans.d"); !strings.Contains(where, "after the global options block if it has one") {
+		t.Errorf("where %q", where)
+	}
+	want := "    {\n        email admin@example.org\n    }\n\n    import /etc/caddy/paisans.d/*\n\n    example.org {\n        ...\n    }\n"
+	if got := webserver.IncludeExample(webserver.ServerCaddy, "/etc/caddy/paisans.d"); got != want {
+		t.Errorf("example:\n%s", got)
+	}
+	if got := webserver.IncludeExample(webserver.ServerNginx, "/etc/nginx/paisans.d"); got != "" {
+		t.Errorf("nginx example %q", got)
 	}
 }
 

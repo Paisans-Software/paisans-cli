@@ -605,9 +605,31 @@ once:
 
 | Server | The one line |
 |---|---|
-| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile |
+| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile, after the global options block if it has one |
 | nginx | `include /etc/nginx/paisans.d/*.conf;`, inside the `http` block |
 | Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` |
+
+Caddy requires its global options block, the one that opens with `{` alone,
+to come first in the Caddyfile, so the import goes after it and outside every
+site block and snippet:
+
+```
+{
+    email admin@example.org
+}
+
+import /etc/caddy/paisans.d/*
+
+example.org {
+    ...
+}
+```
+
+An import above the global options block validates while the directory is
+empty, and Caddy refuses the whole configuration once a site file is in it.
+Apply reads the Caddyfile before it writes anything, and for an import above
+the global options block or inside a block it writes nothing and warns with
+where to move the line.
 
 The file is named for the deployment, `paisans-<token>-<app>.caddy` or
 `.conf`, so two deployments writing in one directory never collide. Apply
@@ -648,8 +670,9 @@ files may still be there.
 Everything about the operator's web server is a warning, `!`, on its step's
 line, and leaves the run's exit status 0: a web server not determined, one
 apply has no file for, no directory it reads to write in (a container
-whose mounts do not include one), no line including the directory or a
-literal one, a configuration it refuses, a file edited on the host, a reload
+whose mounts do not include one), no line including the directory, a
+literal one, or a Caddy import above its global options block or inside a
+block, a configuration it refuses, a file edited on the host, a reload
 left to the operator, and a failed web server check. What apply itself could
 not do is a failure, `✗`, and the run ends failed with exit status 1: the
 monitor's host not reached over ssh, the record of its site files not read

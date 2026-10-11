@@ -248,7 +248,10 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   step that could not reach or write what it needs on the host, it exits 1.
   Each problem with the operator's web server is one `!` line with one set of
   instructions; an app whose site file step warned or failed has no check line
-  of its own but with `-v`. A web server container without the include
+  of its own but with `-v`. Caddy's `import` of the include directory goes at
+  the top level of the Caddyfile, after the global options block if it has
+  one; apply refuses one above that block or inside a block, writing nothing,
+  and says where to move it. A web server container without the include
   directory is diagnosed from its compose file, read only, with the command
   that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
   after its site file changes, restarted when the reload fails; one on the
