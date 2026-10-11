@@ -879,8 +879,8 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 
 // statuses is each plan step's status as "mark title: result", in order,
 // from the events of the dry run's steps but the etcd reads: a prepare line
-// as the host prepare it checked, and the install line as the inner steps
-// it lists.
+// as the host prepare it checked, and each install line as the inner steps
+// it lists, so the install steps are grouped by line (see byLine).
 func statuses(rec *ui.Recorder) []string {
 	var out []string
 	section := ""
@@ -912,6 +912,46 @@ func statuses(rec *ui.Recorder) []string {
 	return out
 }
 
+// byLine is want, statuses in the plan's order, as the dry run lists them:
+// the install steps grouped by the line each is on, the lines in the order
+// the plan first reaches them, each line's steps in the plan's order.
+func byLine(want []string) []string {
+	place := func(l string) string {
+		_, title, _ := strings.Cut(l, " ")
+		title, _, _ = strings.Cut(title, ":")
+		f := strings.Fields(title)
+		switch {
+		case f[0] == "storage":
+			return "storage"
+		case f[0] == "apply" || (f[0] == "site" && f[1] == "add"):
+			return f[len(f)-1]
+		}
+		return ""
+	}
+	var out, places []string
+	group := map[string][]string{}
+	flush := func() {
+		for _, p := range places {
+			out = append(out, group[p]...)
+		}
+		places, group = nil, map[string][]string{}
+	}
+	for _, l := range want {
+		p := place(l)
+		if p == "" {
+			flush()
+			out = append(out, l)
+			continue
+		}
+		if _, ok := group[p]; !ok {
+			places = append(places, p)
+		}
+		group[p] = append(group[p], l)
+	}
+	flush()
+	return out
+}
+
 // A deployment that is up to date checks every command once, each line ✓,
 // and an apply in pass two takes its earlier apply's status.
 func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
@@ -926,7 +966,7 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 		_, title, _ := strings.Cut(l, ": ")
 		want = append(want, "✓ "+title)
 	}
-	sameLines(t, statuses(rec), want)
+	sameLines(t, statuses(rec), byLine(want))
 	seen := map[string]bool{}
 	for _, c := range *checked {
 		if seen[c] {
@@ -951,7 +991,7 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, statuses(rec), []string{
+	sameLines(t, statuses(rec), byLine([]string{
 		"✓ host prepare --site home-a",
 		"○ host prepare --site home-b: docker, firewall",
 		"✓ host prepare --site vm",
@@ -966,7 +1006,7 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		"· apply --site home-b: after host prepare --site home-b",
 		"· apply --site vm: after the earlier apply --site vm",
 		"· apply --site watch: after host prepare --site watch",
-	})
+	}))
 	for _, never := range []string{"apply --site home-a", "apply --site home-b", "apply --site watch", "storage add"} {
 		if slices.Contains(*checked, never) {
 			t.Errorf("%s was checked while it waits", never)
@@ -1015,7 +1055,7 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, statuses(rec), []string{
+	sameLines(t, statuses(rec), byLine([]string{
 		"✓ host prepare --site home-a",
 		"✓ host prepare --site home-b",
 		"✓ host prepare --site vm",
@@ -1027,7 +1067,7 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		"· apply --site home-b: after storage add",
 		"· apply --site vm: after storage add",
 		"· apply --site watch: after storage add",
-	})
+	}))
 	if !slices.Contains(*checked, "storage add") {
 		t.Errorf("storage add not checked: %v", *checked)
 	}
@@ -1270,7 +1310,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			if err := convergeShaped(t, c.edit, c.recorded); err != nil {
 				t.Fatal(err)
 			}
-			sameLines(t, statuses(rec), c.want)
+			sameLines(t, statuses(rec), byLine(c.want))
 		})
 	}
 }
@@ -1398,12 +1438,12 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	pending := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "pending" && e.Text == fixtureSites })
+	pending := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "pending" && e.Text == "vm" })
 	inner := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "○ apply --site vm: 5 changes"
+		return e.Kind == "detail" && e.Extra == "vm" && e.Text == "○ apply --site vm: 5 changes"
 	})
 	detail := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "  ! held back from this apply"
+		return e.Kind == "detail" && e.Extra == "vm" && e.Text == "  ! held back from this apply"
 	})
 	note := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "note" && e.Text == "owed" })
 	if pending < 0 || inner < 0 || detail != inner+1 || note < 0 || detail > pending || note < pending {
@@ -1500,12 +1540,12 @@ func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == fixtureSites && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
+		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: stopped for the other etcd members"
 	})
 	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
 		t.Errorf("inner result:\n%s", rec.Lines())
 	}
-	if rec.Has("note", "founding") || rec.Has("fail", "") || !rec.Has("done", fixtureSites) {
+	if rec.Has("note", "founding") || rec.Has("fail", "") || !rec.Has("done", "home-a") {
 		t.Errorf("the founding stop read as a failure or a note:\n%s", rec.Lines())
 	}
 }
