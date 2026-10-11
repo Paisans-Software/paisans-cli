@@ -33,9 +33,11 @@ func externalApps(cfg *config.Config) []string {
 // convergeWebServer checks each app served through a web server the operator
 // runs, as `paisans web-server check --app <app>` does, a line per app in a
 // section of its own. A failed check is a warning on the app's line, with the
-// failing checks, each error said once, and one set of instructions: none
-// of its own where the app's site file step already gave them, since the
-// check fails because of what that step reported. Where the site file is in
+// failing checks, each error said once, and one set of instructions. Where
+// the app's site file step warned or failed, the check only restates it, so
+// it is not run and the app has no line of its own but with --verbose,
+// where it gives no instructions of its own; the app counts as failing its
+// check either way. Where the site file is in
 // place and unchanged, the server's configuration is validated first, and
 // a server in a container reloaded and the app checked once more, which
 // takes in an edit of the operator's. It returns the apps that failed their
@@ -49,6 +51,11 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 		r.Section("web server")
 	}
 	for _, app := range apps {
+		sf := files.apps[app]
+		if sf != nil && sf.until != "" && !r.Verbose() {
+			warned = append(warned, app)
+			continue
+		}
 		s := r.Step(app)
 		target, err := webserver.For(cfg, app)
 		if err != nil {
@@ -57,7 +64,6 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 			failed = append(failed, app)
 			continue
 		}
-		sf := files.apps[app]
 		results := webServerResults(s, target)
 		var advice string
 		if !passed(results) && sf != nil && sf.until == "" && sf.path != "" && !sf.reloaded {

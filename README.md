@@ -585,9 +585,11 @@ sites:
   server `web-server show` finds in front of it, read through the sudo the run
   settled at its start, and the `web-server show` and `web-server check`
   commands to fix it with. Where the app's site file step above already
-  warned with its own instructions, the check's line gives none of its own:
-  it names what failed and says that is expected until that step's problem is
-  fixed. Each problem has one line and one set of instructions. The run ends on
+  warned or failed with its own instructions, the check would only restate
+  them, so the app has no check line; with `--verbose` it has one, which names
+  what failed and says that is expected until that step's problem is fixed,
+  and the app counts as failing its check either way. Each problem has one
+  line and one set of instructions. The run ends on
   a warning, `! Deployment complete, but 1 app failed its web server check`,
   with exit status 0: every step ran, and the web server is the operator's.
   The check runs once, and once more only after apply reloaded a web server
@@ -646,13 +648,36 @@ files may still be there.
 Everything about the operator's web server is a warning, `!`, on its step's
 line, and leaves the run's exit status 0: a web server not determined, one
 apply has no file for, no directory it reads to write in (a container
-mounting its configuration file alone), no line including the directory or a
+whose mounts do not include one), no line including the directory or a
 literal one, a configuration it refuses, a file edited on the host, a reload
 left to the operator, and a failed web server check. What apply itself could
 not do is a failure, `✗`, and the run ends failed with exit status 1: the
 monitor's host not reached over ssh, the record of its site files not read
 or written, a site file not read, written or removed there, or `paisans.yaml`
 not written.
+
+**A container without the directory is diagnosed from its compose file.**
+Docker adds a mount only when it creates a container, so a line added to the
+compose file takes effect once the container is recreated (`docker compose up
+-d <service>`), and `docker restart` is not enough. When the server's
+container lacks the directory, apply reads the labels compose put on it
+(`com.docker.compose.project`, `.service`, `.project.working_dir`,
+`.project.config_files`) and the compose files they name, through sudo only
+where the ssh user may not, and says which it is, in a few lines with the
+command that recreates the container: the line declared on the server's
+service for a container created before it; declared on another service, named
+with the one it belongs to; declared at a container path the configuration
+does not import, both paths named; or not declared, with the line to add to
+that service in that file, the only case that also offers `include_dir:
+false`. Short and long volume syntax are read, relative sources against the
+project's directory, and a volume written with a variable is compared as
+written and said to be. When the configuration already has the wildcard line,
+the warning adds that it matches nothing until the mount exists, which is
+harmless. Apply never edits a compose file, recreates a container or restarts
+one for a mount; a container it cannot read the compose file of gets the line
+to add. The command it gives is `cd <project directory> && docker compose up
+-d <service>`, or `docker compose -p <project> -f <file> ... up -d <service>`
+where the files are not the ones compose finds there by itself.
 
 The line must be a wildcard, because the directory may go: a deployment
 removed, or the directory deleted by hand. Caddy's `import` of a glob that

@@ -106,9 +106,10 @@ one to use instead.
 
 You need not add it first: an apply that finds no line writes nothing, warns
 with the exact line for your server, and ends without `Deployment complete.`.
-The site file's line carries the instructions, and the app's check below it
-says only that it fails until the file is in place. Add the line, then apply
-again:
+The site file's line carries the instructions. The app's own check would
+only fail for the same reason, so its line is left out; with `-v` it is
+there, saying only that it fails until the file is in place. Add the line,
+then apply again:
 
 ```
 web server
@@ -121,9 +122,6 @@ web server
        gone.
        Or set sites.watch.web_server.include_dir: false, and add what paisans
        web-server show --app status prints to your web server yourself.
-  ! status: status.example.org
-       healthz and login/oidc: tls: internal error (caddy has no certificate for
-       this name), expected until its site file is in place, see above.
 ```
 
 With the line there, apply creates the directory if it is missing, writes the
@@ -156,16 +154,56 @@ container sees it. Apply takes the host path from the mount of the
 configuration's directory, so with `/opt/caddy` mounted at `/etc/caddy` the
 file goes in `/opt/caddy/paisans.d` and the line is `import
 /etc/caddy/paisans.d/*`. A container that mounts its Caddyfile alone has no
-such directory: apply records nothing and warns with the mount to add to its
-compose service,
+such directory: apply records nothing and warns with the mount to add to the
+web server's own service in its compose file,
 
 ```yaml
+services:
+  web:
     volumes:
       - /opt/caddy/Caddyfile:/etc/caddy/Caddyfile
       - /opt/caddy/paisans.d:/etc/caddy/paisans.d
 ```
 
-after which, with the container recreated, the next apply finds it.
+then recreate the container, which is what makes Docker add a mount:
+
+```
+cd /opt/caddy && docker compose up -d web
+```
+
+`docker restart`, or a restart of the host, is not enough: a container keeps
+the mounts it was created with. The next apply then finds the directory.
+
+Apply reads the compose file that started the container, from the labels
+Docker puts on it, so the warning names the file and the service, and the
+command that recreates it. It only reads: it never edits the compose file and
+never recreates the container. When the file already has a line for the
+directory, the warning says which of the usual mistakes it is instead, each in
+a few lines:
+
+* the line is on the server's service, and the container was created before
+  it: recreate it;
+* the line is on another service, and the warning names both: move it;
+* the line mounts the directory at a path the configuration does not import,
+  such as `/etc/caddy/paisans` for `import /etc/caddy/paisans.d/*`: change the
+  container path.
+
+```
+web server
+  ! site file for status: no directory caddy reads to write in
+       The compose file /opt/caddy/compose.yaml declares
+       /opt/caddy/paisans.d:/etc/caddy/paisans.d for web, but the running
+       container caddy-1 was created before it. Recreate it; a restart does not
+       add a mount:
+           cd /opt/caddy && docker compose up -d web
+       then run paisans apply --execute again.
+       Until the mount exists, caddy's import /etc/caddy/paisans.d/* matches
+       nothing, which is harmless.
+```
+
+Relative paths in the compose file are read against the project's directory.
+A volume written with a variable, `${DATA}/paisans.d`, is compared as written,
+and the warning says so.
 
 **A web server on the host itself** is yours to restart, so apply validates
 its configuration with the file and does not reload it. The site file's line

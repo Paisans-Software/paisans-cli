@@ -340,8 +340,8 @@ var bareCaddy = webserver.WebServer{
 
 // A web server on the host itself is validated with the file and not
 // reloaded: the step warns with the command that reloads it, the check
-// failing until then says no more than that it follows, and the run ends
-// on a warning.
+// failing until then is left to --verbose and says no more than that it
+// follows, and the run ends on a warning.
 func TestApplyLeavesTheReloadOfABareMetalServer(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeWebServerCheck(t, certificateFails)
@@ -349,6 +349,7 @@ func TestApplyLeavesTheReloadOfABareMetalServer(t *testing.T) {
 	f := fakeWebServerFiles(t, bareCaddy, "import /etc/caddy/paisans.d/*\n")
 	f.server.Units = []string{"caddy"}
 	rec := recordConverge(t)
+	rec.Verbose_ = true
 	err := convergeAt(t, path, "--execute")
 	var w *ui.Warning
 	if !errors.As(err, &w) {
@@ -384,44 +385,107 @@ var tlsInternal = map[string][]webserver.Result{"status": {
 }}
 
 // Where the site file step warned with its own instructions, the check
-// that fails because of it gives none of its own: one line naming what
-// failed, the same error said once, and that it follows from the step
-// above. Each line is a warning, and the run ends on one.
+// that fails because of it only restates them: its line is left out, and
+// the run still ends on a warning naming the app. With --verbose it is
+// there, one line naming what failed, the same error said once, and that it
+// follows from the step above.
 func TestApplyGivesOneSetOfInstructionsPerProblem(t *testing.T) {
-	fakeConverge(t, nil)
-	fakeWebServerCheck(t, tlsInternal)
-	path := externalFixture(t)
-	ws := mountedCaddy
-	ws.Mounts = []webserver.Mount{{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
-	fakeWebServerFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
-	rec := recordConverge(t)
-	err := convergeAt(t, path, "--execute")
-	var w *ui.Warning
-	if !errors.As(err, &w) {
-		t.Fatalf("err %v", err)
-	}
-	var b strings.Builder
-	if code := reportError(&b, err, false); code != 0 {
-		t.Errorf("exit %d:\n%s", code, b.String())
-	}
-	var shown []string
-	for _, l := range lines(inSection(rec, "web server")) {
-		if !strings.HasPrefix(l, "progress ") {
-			shown = append(shown, l)
+	for _, verbose := range []bool{false, true} {
+		fakeConverge(t, nil)
+		fakeWebServerCheck(t, tlsInternal)
+		path := externalFixture(t)
+		ws := mountedCaddy
+		ws.Mounts = []webserver.Mount{{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
+		fakeWebServerFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
+		rec := recordConverge(t)
+		rec.Verbose_ = verbose
+		err := convergeAt(t, path, "--execute")
+		var w *ui.Warning
+		if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: status" {
+			t.Fatalf("verbose=%v: err %v", verbose, err)
+		}
+		var b strings.Builder
+		if code := reportError(&b, err, false); code != 0 {
+			t.Errorf("exit %d:\n%s", code, b.String())
+		}
+		var shown []string
+		for _, l := range lines(inSection(rec, "web server")) {
+			if !strings.HasPrefix(l, "progress ") {
+				shown = append(shown, l)
+			}
+		}
+		want := []string{
+			"step site file for status",
+			"warned site file for status: no directory caddy reads to write in",
+		}
+		if verbose {
+			want = append(want,
+				"step status",
+				"warned status: status.example.org",
+				"explain healthz and login/oidc: tls: internal error (caddy has no certificate for this name), expected until its site file is in place, see above.",
+			)
+		}
+		if len(shown) != len(want)+1 {
+			t.Fatalf("verbose=%v: section:\n%s", verbose, strings.Join(shown, "\n"))
+		}
+		sameLines(t, append(shown[:2:2], shown[3:]...), want)
+		if !strings.HasPrefix(shown[2], "explain The container caddy-1 mounts /opt/caddy/Caddyfile alone") || strings.Count(shown[2], "paisans web-server show --app status") != 1 {
+			t.Errorf("the site file's instructions:\n%s", shown[2])
 		}
 	}
-	if len(shown) != 6 {
-		t.Fatalf("section:\n%s", strings.Join(shown, "\n"))
-	}
-	sameLines(t, []string{shown[0], shown[1], shown[3], shown[4], shown[5]}, []string{
-		"step site file for status",
-		"warned site file for status: no directory caddy reads to write in",
-		"step status",
-		"warned status: status.example.org",
-		"explain healthz and login/oidc: tls: internal error (caddy has no certificate for this name), expected until its site file is in place, see above.",
-	})
-	if !strings.HasPrefix(shown[2], "explain The container caddy-1 mounts /opt/caddy/Caddyfile alone") || strings.Count(shown[2], "paisans web-server show --app status") != 1 {
-		t.Errorf("the site file's instructions:\n%s", shown[2])
+}
+
+// composeCaddy is a Caddy in a container compose started from /opt/x,
+// mounting its Caddyfile alone.
+func composeCaddy(t *testing.T, compose string) *filesFake {
+	t.Helper()
+	ws := mountedCaddy
+	ws.Config = "/opt/x/Caddyfile"
+	ws.Mounts = []webserver.Mount{{Source: "/opt/x/Caddyfile", Destination: "/etc/caddy/Caddyfile"}}
+	f := fakeWebServerFiles(t, ws, "import /etc/caddy/paisans.d/*\n")
+	f.server.Labels = `{"com.docker.compose.project":"x","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/opt/x","com.docker.compose.project.config_files":"/opt/x/compose.yaml"}`
+	f.server.Files["/opt/x/compose.yaml"] = compose
+	return f
+}
+
+// The site file step reads the compose file that started the server's
+// container and says what is wrong with it: here a mount declared on the
+// server's service, for a container created before it. Only where nothing
+// is declared does it offer include_dir: false as well. Nothing on the
+// host is changed.
+func TestApplyDiagnosesTheMountFromTheComposeFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, compose, want string
+		optOut              bool
+	}{
+		{"declared", "services:\n  web:\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n      - ./paisans.d:/etc/caddy/paisans.d\n", "declares /opt/x/paisans.d:/etc/caddy/paisans.d for web, but the running container caddy-1 was created before it", false},
+		{"another service", "services:\n  web:\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n  monitor:\n    volumes:\n      - /opt/x/paisans.d:/etc/caddy/paisans\n", "for monitor, but caddy runs in web's container caddy-1", false},
+		{"another path", "services:\n  web:\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n      - ./paisans.d:/etc/caddy/paisans\n", "change /etc/caddy/paisans to /etc/caddy/paisans.d", false},
+		{"not declared", "services:\n  web:\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile\n", "Add this line to the volumes of web in /opt/x/compose.yaml", true},
+	} {
+		fakeConverge(t, nil)
+		path := externalFixture(t)
+		f := composeCaddy(t, tc.compose)
+		rec := recordConverge(t)
+		if err := convergeAt(t, path, "--execute"); err == nil {
+			t.Fatalf("%s: complete", tc.name)
+		}
+		i := rec.Index("warned", "site file for status")
+		if i < 0 || rec.Events[i].Extra != "no directory caddy reads to write in" {
+			t.Fatalf("%s: output:\n%s", tc.name, rec.Lines())
+		}
+		text := rec.Events[i+1].Text
+		if !strings.Contains(text, tc.want) || !strings.Contains(text, "cd /opt/x && docker compose up -d web") {
+			t.Errorf("%s: instructions:\n%s", tc.name, text)
+		}
+		if strings.Contains(text, "include_dir: false") != tc.optOut {
+			t.Errorf("%s: include_dir: false offered %v:\n%s", tc.name, !tc.optOut, text)
+		}
+		for _, c := range f.server.Asked {
+			if strings.Contains(c, "compose up") || strings.Contains(c, "restart") || strings.Contains(c, "printf") || strings.Contains(c, "rm -f") {
+				t.Errorf("%s: changed the host: %s", tc.name, c)
+			}
+		}
 	}
 }
 
