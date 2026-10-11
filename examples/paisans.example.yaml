@@ -233,6 +233,9 @@ apps:
     # what makes running a fork, or holding a version back, a config edit.
     # `latest` is refused: it makes two runs of `apply` differ from identical
     # inputs. A digest (@sha256:...) is accepted and is the stronger form.
+    # A tag is resolved to the build it names each time `apply` plans, and
+    # that digest is what the host runs, so a rebuilt tag moves the app on the
+    # next apply; a digest here holds it on one build.
     images:
       app: ghcr.io/example-org/mbin:v1.2.3
 

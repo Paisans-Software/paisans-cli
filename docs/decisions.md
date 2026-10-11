@@ -1570,3 +1570,98 @@ wrapped entrypoints were run through Docker Compose against the pinned
 images with a root owned bind at the upload directory: each wrote a file
 there as uid 1000 and uid 1001 respectively. Nothing was run against a
 deployment, and no app was started in local mode end to end.
+
+## 2026-10-11: Every image the configuration names by a tag is resolved to a digest when apply plans
+
+Founder decision, as the stack channel spec
+(`docs/specs/2026-10-11-stack-channels.md`), sections *Resolution at plan
+time*, *An app on several sites*, *What the operator sees*, *Overriding* and
+*Validate*.
+
+### What was decided
+
+What the gateway's Caddy already did (see *The gateway's Caddy follows its
+major version, resolved to a digest when apply plans*) now holds for every
+image an app's stack runs. `render` lists, per site and compose file, every
+image the configuration decides, the app stacks' and the gateway's Caddy, in
+`Plan.Images`, which replaces `Plan.CaddyImages`. `apply.Build`, given a
+resolver, resolves each tag without a digest once per run, pins every line
+naming it, and stops when the lines rewritten differ from the count render
+reported. A digest is taken as written. An unreachable registry keeps the
+deployed build, with a warning, and refuses a stack that runs none.
+
+An app on several sites stays on one build. `apply` without `--site` resolves
+once for every site and moves them together. `apply --site` reads the app's
+compose file on its other sites and keeps the app on the build they run,
+warning when the tag names a newer one. Sites that already disagree are
+refused, naming each site's build.
+
+The manifest records each service's build under `pins` (stack, service,
+configured image, reference, `resolved_at`, source), replacing `caddy`. The
+dry run lists each moved image by app and service, with the builds it goes
+between and their `org.opencontainers.image.version` labels when they have
+them. validate warns, `image-channel-differs`, when an app's image names a
+`stack-<N>` other than its kind's default.
+
+### Why
+
+A tag in a compose file never changes, and apply recreates a stack only when
+its file changes, so a promotion to a fork's channel, or a version tag rebuilt
+for a CVE, never reached a host. Resolving at plan time makes a new build a
+changed compose file, which the dry run shows and the apply carries through
+the same gates as any image change, and keeps what a host runs exact and
+recorded.
+
+Holding a clustered app together is for its database. Two builds against one
+database is how a migration runs twice or not at all, so an apply that cannot
+see every site of the app does not choose a build for it.
+
+### How
+
+* **The manifest record is `pins`, not `images`.** The spec names the record
+  `images`, and the manifest's `images` key already holds the sweep's history
+  of every repository a site has rendered. Reusing the key would have changed
+  what an existing manifest's entries mean; the new record takes its own.
+* **No conversion of a manifest's `caddy` record.** The toolkit never adopts
+  an older layout. The build a host runs is read from its compose file, which
+  is what "keep the deployed build" needs, so a `caddy` entry is ignored and
+  disappears on the next manifest write.
+* **The other sites are read from their compose files, not their manifests.**
+  The compose file is what the host runs, and it is the same source the
+  single site path already reads for its own build. A site whose file cannot
+  be read is left out with a warning when this site runs a build to stay on,
+  and refuses an apply that would start the app with no build to compare.
+* **Every image of a clustered app's stack is held, not only the app's own.**
+  The rule is about the app, and holding Valkey or RabbitMQ beside Mbin costs
+  nothing but a later move.
+* **`storage rotate-key` passes no resolver**, joining `site add`, `site
+  remove` and `storage add`: a key rotation rewrites an environment, and an
+  image moving in the middle of one is a change nobody planned.
+* **The rewrite is per reference, counted against render's report.** Each
+  `image:` line is matched whole, so a reference that shares a prefix with
+  another is not counted as it.
+* **Versions are read from the image configuration**, anonymously as the
+  digest is, for linux/amd64 of a multi platform index. A build without the
+  label shows its digest alone.
+
+### What was weighed
+
+* **Naming the record `images` and moving the sweep history to a new key.**
+  That reinterprets every existing manifest's `images` entries as pins, which
+  is conversion by another name.
+* **Reading a peer site's build from its manifest.** A manifest written
+  before this change has no `pins`, and the compose file is the fact the
+  manifest records.
+* **Refusing an apply --site whenever another site of the app cannot be
+  read.** That refuses the apply an operator runs to repair a surviving site
+  while another is down, and the surviving site's own build is one the
+  cluster already runs.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./... -count=1`, `-race` on the
+changed packages, `gofmt -l .` empty. `imagedigest.Registry` was run against
+ghcr.io and Docker Hub for the digest and the version label of
+`ghcr.io/paisans-software/caddy:2` (v2.11.7), `outlinewiki/outline:1.10.0`
+(1.10.0) and `docker.io/library/rabbitmq:3.13.7-management-alpine` (no
+label). Nothing was run against a deployment.
