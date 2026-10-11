@@ -62,8 +62,10 @@ func TestADedicatedHealthRouteIsOpen(t *testing.T) {
 	if !slices.Contains(kinds.OpenPathsFor(config.KindOutline), "/_health") {
 		t.Error("outline's /_health is not open past the gate")
 	}
-	if slices.Contains(kinds.OpenPathsFor(config.KindMbin), "/") {
-		t.Error("mbin's health route is its front page, and opening it ungates the app")
+	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+		if !slices.Contains(kinds.OpenPathsFor(kind), "/healthz") {
+			t.Errorf("%s's /healthz is not open past the gate", kind)
+		}
 	}
 }
 
@@ -80,15 +82,25 @@ func TestAGateableFederatingKindRecordsSignedFetch(t *testing.T) {
 	}
 }
 
-// WriteFreely checks signatures only in private mode, so one with private
-// turned off has no signed fetch, and one with federation off does not
-// federate at all.
-func TestWriteFreelySignedFetchNeedsPrivateMode(t *testing.T) {
-	app := config.App{Kind: config.KindWriteFreely}
-	if kinds.SignedFetchFor(app) == nil || !kinds.Federates(app) {
-		t.Fatal("a default writefreely has no signed fetch, or does not federate")
+// Signed fetch is the app's authorized fetch setting, on unless
+// settings.authorized_fetch turns it off. WriteFreely reads only from its
+// allowlist in private mode alone, so one with private turned off has no
+// signed fetch either, and one with federation off does not federate at all.
+func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
+	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+		app := config.App{Kind: kind}
+		if !kinds.AuthorizedFetch(app) || kinds.SignedFetchFor(app) == nil || !kinds.Federates(app) {
+			t.Fatalf("a default %s has no authorized fetch, no signed fetch, or does not federate", kind)
+		}
+		app.Settings = map[string]any{kinds.AuthorizedFetchSetting: false}
+		if kinds.AuthorizedFetch(app) {
+			t.Errorf("%s: authorized_fetch false still reads as on", kind)
+		}
+		if kinds.SignedFetchFor(app) != nil {
+			t.Errorf("%s: authorized_fetch false still claims signed fetch", kind)
+		}
 	}
-	app.Settings = map[string]any{"private": false}
+	app := config.App{Kind: config.KindWriteFreely, Settings: map[string]any{"private": false}}
 	if kinds.SignedFetchFor(app) != nil {
 		t.Error("a writefreely with private off still claims signed fetch")
 	}
@@ -96,8 +108,14 @@ func TestWriteFreelySignedFetchNeedsPrivateMode(t *testing.T) {
 	if kinds.Federates(app) {
 		t.Error("a writefreely with federation off still federates")
 	}
-	probe := kinds.GateFor(config.KindWriteFreely).SignedFetch.SignedFetchProbe("blog.example.org")
-	if probe != "/api/collections/blog.example.org" {
+	sf := kinds.GateFor(config.KindWriteFreely).SignedFetch
+	if probe := sf.SignedFetchProbe("blog.example.org"); probe != "/api/collections/blog.example.org/outbox" {
 		t.Errorf("writefreely probe is %q", probe)
+	}
+	if !slices.Contains(sf.Settings, "app.authorized_fetch") {
+		t.Errorf("writefreely signed fetch settings %v do not name app.authorized_fetch", sf.Settings)
+	}
+	if probe := kinds.GateFor(config.KindMbin).SignedFetch.SignedFetchProbe("talk.example.org"); probe != "/" {
+		t.Errorf("mbin probe is %q", probe)
 	}
 }

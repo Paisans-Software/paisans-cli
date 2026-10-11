@@ -873,12 +873,18 @@ from this configuration and the fork reconciles it at every start:
   proving the edge and the gate: a private app redirects `/` to its own sign-in
   page, so the status alone would pass with the gate gone. Its public check stays only when its health route is a dedicated one,
   which is open past the gate; a health route of `/` is the front page and
-  never is. A gated app that federates also gets a **signed fetch** check: an
-  unsigned ActivityPub request for a path the app refuses whatever content
-  exists, expecting the refusal, because an admin can turn signed fetch off
-  inside the app with nothing in this configuration to say so. Where the app
-  locks the setting (Mbin's `MBIN_LOCKED_SETTINGS`), the check stays: it is
-  what proves the lock holds.
+  never is; Mbin's and WriteFreely's `/healthz` are dedicated. A gated app
+  that federates also gets a **signed fetch** check: an unsigned ActivityPub
+  request for a path the app refuses whatever content exists, expecting the
+  refusal: `/` for Mbin and a blog's outbox for WriteFreely, both 401. Both
+  apps lock the setting (Mbin's `MBIN_LOCKED_SETTINGS`, WriteFreely's
+  `locked_settings`), and the check stays: it is what proves the lock holds.
+* a gated Mbin also gets a **private API** check on each site, straight to the
+  container like the direct check: an anonymous `GET /api/entries`, expecting
+  401. A gated Mbin runs as a private instance, which refuses its API to a
+  request with no token; through the edge the gate would answer first, so the
+  app is asked directly. It is what notices an image that ignores
+  `MBIN_PRIVATE_INSTANCE`.
 * every site but the monitor's own gets a **ping** over the mesh, and a
   **heartbeat** the other way: the site's host pushes to the monitor's public
   hostname once a minute, over the internet and never the mesh, from a
@@ -1772,32 +1778,27 @@ operator's Mac; the version on any host was not checked.
   backtick, which it strips; one ending in a backslash, which joins the next
   line onto it; and one with a newline.
 
-**WriteFreely reads its settings from `config.ini` once.** The fork moves most
-of `[app]` and `[uploads]` into its database on the first start against an empty
-database, and from then on the database is in force. That much was run: a key
-added to `config` after the first start is rendered, and when the integration
-test restarted the blog once against the existing database, the fork logged
-`config.ini disagrees with the database on app.max_blogs; the database value
-is in force` and `writefreely settings get` still reported `0`, the value the database already
-held.
-
-The rest is read from the fork's source at the revision the pinned image
-carries (`ff9dcebe`) and was not run. `importSettings` in
-`settings_runtime.go` says it "runs at every start", so the same line is
-expected on every boot, not only the one restart observed. `writefreely
-settings set <name> <value>` exists in `cmd/writefreely/settings.go` ("running
-servers apply it on their next request") and looks like the way to change a
-running blog's setting, but nobody has used it here. And the drift check
-compares every database-bound key present in the file, which reads as though a
-template's own key in those sections, such as `app.site_name` from the
-`site_name` setting, would be ignored the same way after the first start;
-that too is untested. This is the fork's design, not the toolkit's.
+**WriteFreely reads a passthrough setting from `config.ini` once.** The fork
+keeps most of `[app]` and `[uploads]` in its database, moving each from
+`config.ini` on the first start against an empty database, and from then on
+the database is in force for it. The template's own database settings are not
+moved: the file locks them (see *Mbin and WriteFreely lock what the toolkit
+renders*), so the fork reads them from the file on every start. A passthrough
+key is not locked, because it is the operator's, and so it is moved once like
+any other. That was run: a key added to `config` after the first start is
+rendered, and when the integration test restarted the blog once against the
+existing database, the fork logged `config.ini disagrees with the database on
+app.max_blogs; the database value is in force` and `writefreely settings get`
+still reported `0`, the value the database already held. From then on the
+setting is the blog admins', on its settings page or with `writefreely
+settings set <name> <value>`. This is the fork's design, not the toolkit's.
 
 **What has been run, and what has not.** The ini insertion is proven against the
 software: `go test -tags writefreely_integration ./internal/render/` boots the
 pinned fork against the `config.ini` this toolkit renders, with a Postgres
 beside it, and reads the value back with `writefreely settings get`, along with
-the same file less that one line as a control. The yaml and json merges are
+the same file less that one line as a control. `PAISANS_WF_IMAGE` runs it
+against another build, such as a release not yet promoted to `stack-1`. The yaml and json merges are
 proven against Go's parsers only. Nothing here runs Synapse or Element, so the
 tests show that the rendered file parses and carries the value at the path
 asked for, not that those applications accept it.
@@ -2339,11 +2340,15 @@ without a member's sign-in; until then a native app's API calls meet the gate.
 **Anyone can send an ActivityPub header, so a gated app that federates must
 refuse an unsigned read.** Caddy cannot verify an HTTP signature without a
 plugin, and the gateway runs no plugin whose failure to build would stop the
-identity provider loading, so the app is where the check lives. A gated
-federating app whose kind records no way to refuse an unsigned read is
-refused (`visibility-gate-without-signed-fetch`), and the monitor proves the
-setting is still on (see *Monitoring*). Reading only from instances on
-an allow list is a federation policy choice, and it is the founder's.
+identity provider loading, so the app is where the check lives. That is
+authorized fetch, on by default for Mbin and WriteFreely (see *Mbin and
+WriteFreely lock what the toolkit renders*). A gated federating app that would
+not refuse an unsigned read is refused (`visibility-gate-without-signed-fetch`):
+one whose kind records no way to, one with `settings.authorized_fetch: false`,
+and a WriteFreely with `private: false`, since only private mode makes a blog
+read from its allowlist alone. The monitor proves the setting is still on (see
+*Monitoring*). Reading only from instances on an allow list is a federation
+policy choice, and it is the founder's.
 
 **Auto-login is derived from the kind.** Someone the gate let through already
 holds a session at the identity provider, so the app's own "Log in with"
@@ -4687,25 +4692,88 @@ Mbin.** Mbin keeps them, like most of its settings, as database rows once an
 admin saves its settings page, and from then on its `SettingsManager` reads
 the row and ignores the environment. The `.env` therefore also renders
 `MBIN_LOCKED_SETTINGS`, naming every Mbin database setting it sets:
-`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL` and `KBIN_CONTACT_EMAIL` always,
-`MBIN_SSO_ONLY_MODE` (rendered as `SSO_ONLY_MODE`) when the app has a client
-at the identity provider, and `MBIN_PRIVATE_INSTANCE`,
-`MBIN_AUTHORIZED_FETCH` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
-gated. The paisans fork reads
-each named setting from the environment on every read, never writes it on a
-save, and shows it disabled in the settings page, so `paisans.yaml` stays
-its only source. The list is kept beside the template, and a test checks it
-against both the rendered file and the fork's settings, so a setting the
-template gains and the list misses fails the test.
+`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL`, `KBIN_CONTACT_EMAIL` and
+`MBIN_AUTHORIZED_FETCH` always, `MBIN_SSO_ONLY_MODE` (rendered as
+`SSO_ONLY_MODE`) when the app has a client at the identity provider, and
+`MBIN_PRIVATE_INSTANCE` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
+gated. See *Mbin and WriteFreely lock what the toolkit renders*.
+`MAILER_DSN` is not a database setting and always follows the configuration.
 
-The known limit: **until the pinned image carries locked settings, the
-database wins after the first admin save.** An image without the feature
-ignores `MBIN_LOCKED_SETTINGS`, and a changed `from_address` or
-`contact_email` then never reaches the app: the contact address can be
-changed on Mbin's settings page, and the sender is not on that page at all
-(`SettingsType.php`), so only the database holds it. `MAILER_DSN` is not a
-database setting and always follows the configuration. The monitor's signed fetch check (see *The monitor has a site of its own*)
-is what notices a gated app's signed fetch turned off that way.
+### Mbin and WriteFreely lock what the toolkit renders
+
+Both apps keep most of their settings in their database and offer them on an
+admin page, so a setting rendered from `paisans.yaml` would hold only until an
+admin saved that page, after which the database would win and `paisans.yaml`
+would describe a deployment that no longer exists. Founder instruction: the
+toolkit locks every database setting it renders, so `paisans.yaml` stays the
+only source and an admin cannot drift from it through the app.
+
+* **Mbin** reads each setting named in `MBIN_LOCKED_SETTINGS` from the
+  environment on every read, never writes it on a save, shows it disabled on
+  the settings page, and refuses it through the settings API with a 400. A
+  name it cannot lock makes it answer every request with an error rather than
+  leave a setting silently unlocked. The list is in *Mbin sends little mail,
+  and says where from*.
+* **WriteFreely** reads each setting named in `config.ini`'s
+  `locked_settings`, a line before the first section, from the file on every
+  start, never moves it into its database, shows it greyed out on the admin
+  page, and refuses it from `writefreely settings set`. A name it does not know
+  or a value it would refuse stops it at startup. The toolkit locks
+  `app.site_name`, `app.theme`, `app.open_registration`,
+  `app.min_username_len`, `app.federation`, `app.public_stats`, `app.private`,
+  `app.authorized_fetch`, `app.local_timeline`, `uploads.enabled` and
+  `uploads.max_size_mb`. A `min_username_len` or `uploads_max_size_mb` the fork
+  would refuse is therefore refused by `validate` first
+  (`writefreely-setting-invalid`). `app.federation_allowlist` is not rendered,
+  so the allowlist stays the blog admins' to edit.
+
+Each list is derived beside its template, and a test renders the file and
+checks both directions against the fork's own list of database settings, so
+a setting the template gains without being locked fails the test. A
+passthrough key under `config` is the operator's, is not locked, and behaves
+as the app's own settings do (see *A config key is placed, not interpreted*).
+
+**Authorized fetch is on by default.** `settings.authorized_fetch` on an
+`mbin` or `writefreely` app makes the app refuse an ActivityPub request that
+carries no valid HTTP signature, and it is `true` when absent:
+
+```yaml
+apps:
+  talk:
+    kind: mbin
+    settings:
+      authorized_fetch: true   # the default
+```
+
+| Kind | Rendered as | What it leaves open |
+|---|---|---|
+| `mbin` | `MBIN_AUTHORIZED_FETCH`, locked | every `GET` that is not an ActivityPub route, and of those the instance actor, webfinger, host-meta, both nodeinfo routes and the JSON-LD contexts (`AuthorizedFetchSubscriber.php:52-59,83-90` at v1.15.0+paisans). Inbox deliveries are verified separately, always |
+| `writefreely` | `[app] authorized_fetch`, locked | discovery (everything under `/.well-known/`, and nodeinfo) and the instance actor (`authorized_fetch.go:35-50` at v0.21.1+wisp). It also requires a signature on every inbox delivery |
+
+What stays open is what a peer needs before it can sign anything: our
+instance actor carries the key it verifies our requests with, so gating it
+would leave two such servers each waiting on the other. A peer that does not
+sign its fetches cannot read either app. `false` turns it off for an ungated app, and a gated app refuses it
+(`visibility-gate-without-signed-fetch`), as does anything but a YAML boolean
+(`authorized-fetch-not-a-boolean`).
+
+**Both answer a status-only `/healthz`.** 200 with an empty body when the
+database answers (and, for Mbin, its cache), an empty 503 when not, with no
+session and no redirect, on a private instance too. It is a dedicated route,
+so on a gated hostname it is open past the gate and the monitor's public check
+reaches the app (see *Monitoring*).
+
+These three are the `stack-1` template contract: what the kinds render and
+what a release promoted to `stack-1` must read (see
+`docs/specs/2026-10-11-stack-channels.md`). The first promotions are Mbin
+1.15.0+paisans and WriteFreely 0.21.1+wisp.
+
+The known limit: **WriteFreely logs a warning on every start that it could not
+add `settings_location = database` to `config.ini`.** The file is mounted
+read only, and the fork adds that marker after its first import. Rendering it
+is not a fix: the fork refuses to start when the marker is present and its
+database holds no settings, which is every new blog's first start. The warning
+changes nothing.
 
 ### Pocket ID runs on every apps site, and one of them is active
 
@@ -5014,13 +5082,13 @@ the admin reconciler and the heartbeat's curl image):
 
 | Image | Declares | Mounted as |
 |-------|----------|------------|
-| mbin 1.14.0-paisans (app, messenger) | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
+| mbin 1.15.0-paisans, the first `stack-1` promotion (app, messenger) | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
 | rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` (already) |
 | outline 1.10.0 | `/var/lib/outline/data` | bind, `/srv/paisans/<token>/<app>/data`, which was mounted at `/data`, a path nothing reads |
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when

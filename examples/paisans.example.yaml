@@ -215,7 +215,8 @@ apps:
     # remember exists. member sends anyone signed in who is not yet a member
     # of the community to the gate's pending page, which is what makes this
     # app member only. Federation still works: ActivityPub goes to Mbin, which
-    # this turns signed fetch on for. The gate app itself is declared below.
+    # checks every signature, and this turns its allow list and private
+    # instance mode on. The gate app itself is declared below.
     visibility_gate: member
     # Its client at Pocket ID is restricted to settings.member_group and
     # settings.admin_group, defaulting to members and admins, and Mbin reads
@@ -228,6 +229,13 @@ apps:
       # the smtp block's from_address. Mbin reads the smtp block below for its
       # mail, which is little, since every member signs in through Pocket ID.
       contact_email: admins@example.org
+      # Optional, and true when absent: Mbin refuses an ActivityPub read with
+      # no valid HTTP signature, leaving open only its instance actor and
+      # discovery, which a peer needs before it can sign. Locked in Mbin, like
+      # every setting this file renders, so its admin page cannot turn it off.
+      # A gated app refuses false. See README, "Mbin and WriteFreely lock what
+      # the toolkit renders".
+      authorized_fetch: true
     # Optional. Keys are service names in the kind's compose template; any key
     # left out takes the default that kind ships. Declaring the reference is
     # what makes running a fork, or holding a version back, a config edit.
@@ -357,6 +365,11 @@ apps:
       # cannot reach it.
       site_name: Example Community
       oidc_display_name: Example
+      # Optional, and true when absent: a valid HTTP signature on every
+      # ActivityPub read and inbox delivery. config.ini locks it, with every
+      # other database setting it renders, so the blog's admin page cannot
+      # change it.
+      authorized_fetch: true
       # As for docs: the client admits only member_group (default members)
       # and admins, and WriteFreely reads no groups claim.
     # Not settings. A settings key works only if a template asks for it by

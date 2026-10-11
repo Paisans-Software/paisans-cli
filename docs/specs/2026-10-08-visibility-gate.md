@@ -56,7 +56,7 @@ only when it is one of these, matched in this order:
 | Class | Matched by | Who authenticates it |
 |---|---|---|
 | ActivityPub read | `GET` whose `Accept` names `application/activity+json` or `application/ld+json` | the app, by signed fetch; Caddy filters the answer |
-| ActivityPub delivery | `POST` whose `Content-Type` names either, on the kind's `InboxPaths` | the app, which verifies the delivery's signature (WriteFreely only with an allowlist, until `authorized_fetch`; see *Known limits*) |
+| ActivityPub delivery | `POST` whose `Content-Type` names either, on the kind's `InboxPaths` | the app, which verifies the delivery's signature (WriteFreely by `authorized_fetch`, on by default from the `stack-1` images) |
 | Auto-login | see *Auto-login* | the gate, whose session it requires |
 | Open paths | the kind's `OpenPaths` | nothing; these hold no private content |
 | Token paths | the kind's `TokenPaths` **and** `Authorization: Bearer` | the app, which refuses a token it did not issue |
@@ -233,6 +233,20 @@ an unsigned read is refused (`visibility-gate-without-signed-fetch`).
   on by default. A gated WriteFreely with `private: false` has no signed fetch,
   and is refused.
 
+Amended 2026-10-11, founder instruction: authorized fetch is on by default for
+both kinds, gated or not, through `settings.authorized_fetch` (absent means
+true), and every setting the templates render is locked. Mbin renders
+`MBIN_AUTHORIZED_FETCH` always; WriteFreely renders `[app] authorized_fetch`
+and names it in `config.ini`'s `locked_settings`. A gated app with
+`authorized_fetch: false` is refused by the same rule,
+`visibility-gate-without-signed-fetch`. WriteFreely's signed fetch record is
+now `app.authorized_fetch` and `app.private` together: authorized fetch
+requires a signature on every read and delivery, and private mode is what
+admits a signer only through the allowlist (with no allowlist,
+`authorized_fetch` alone admits any signer), so a gated WriteFreely with
+`private: false` stays refused. See `README.md`, *Mbin and WriteFreely lock
+what the toolkit renders*.
+
 A rendered setting is not proof: an admin can turn either off inside the app
 with nothing in the configuration to say so. The monitor's signed fetch check
 is what catches that. It stays once Mbin's settings are locked: it is what
@@ -253,15 +267,30 @@ status alone would pass with the gate gone. The uptime fork's string check
 passes on any status below 400 whose body holds the expected text.
 
 The public check is seeded for a gated app only when its health route is in its
-open paths, which is true of a dedicated route and never of `/`. Until the
-forks' health routes are in the pinned images, a gated Mbin or WriteFreely has
-the gate check and no public check.
+open paths, which is true of a dedicated route and never of `/`. Amended
+2026-10-11: both forks' `stack-1` images carry `/healthz`, so a gated Mbin or
+WriteFreely has a public check as well.
 
 The probes need no content to exist: Mbin's is `/`, which asking for
 ActivityPub is `ap_instance_front` and not one of the routes signed fetch
 leaves open (AuthorizedFetchSubscriber.php:52-59,148-153); WriteFreely's is
 `/api/collections/<hostname>`, the instance actor, which resolves from
 configuration (activitypub.go:108-131) and answers 401 unsigned.
+
+Amended 2026-10-11: under `authorized_fetch` the instance actor is one of the
+routes left open (authorized_fetch.go:35-50 at v0.21.1+wisp), so
+WriteFreely's probe is `/api/collections/<hostname>/outbox`. The outbox is an
+ActivityPub only route, refused unsigned before any lookup
+(authorized_fetch.go:28-33,72-98), so it answers 401 whether or not a blog
+has that alias. Checked against a local build of that release: unsigned,
+with an ActivityPub `Accept`, 401. Mbin's probe is unchanged:
+`ap_instance_front` is still gated at v1.15.0+paisans.
+
+A gated Mbin also gets a **private API** check per site, straight to the app:
+an anonymous `GET /api/entries` expecting 401, which the private instance's
+catch-all rule refuses (security.yaml:152) through the API firewall's OAuth2
+entry point (league/oauth2-server-bundle v1.1.1,
+OAuth2Authenticator.php:60-63).
 
 ## Fork health routes
 
@@ -279,7 +308,9 @@ through the edge without opening its front page:
 
 Each is its own branch and pull request in its fork. When a pinned image
 carries the route, `internal/kinds/health.go` records it, and it is open past
-the gate from then on with no other change.
+the gate from then on with no other change. Amended 2026-10-11: recorded for
+both, from Mbin 1.15.0+paisans and WriteFreely 0.21.1+wisp, the first
+`stack-1` releases.
 
 ## Fork settings the toolkit will render
 
@@ -306,14 +337,14 @@ it, and until then is a known limit below.
 
 ## Known limits
 
-* **A gated WriteFreely with an empty allowlist accepts unsigned deliveries.**
-  Its inbox verifies a signature only when the allowlist is non-empty
-  (activitypub.go:402-409), so until `authorized_fetch` is pinned anyone can
-  deliver a Follow or Like to a blog's inbox. Nothing becomes readable by it.
-* **Mbin's API answers anonymous reads** that reach it, until
-  `MBIN_PRIVATE_INSTANCE` is pinned. The gate keeps them from reaching it,
-  except through the ActivityPub filter, which returns nothing that is not
-  ActivityPub.
+* **A gated WriteFreely with an empty allowlist accepted unsigned
+  deliveries** on an image without `authorized_fetch`: its inbox verified a
+  signature only when the allowlist was non-empty (activitypub.go:402-409).
+  Closed from the `stack-1` images, where `authorized_fetch` requires one on
+  every delivery.
+* **Mbin's API answered anonymous reads** that reached it, on an image
+  without `MBIN_PRIVATE_INSTANCE` from the environment. Closed from the
+  `stack-1` images, and checked by the private API check.
 
 * **Webfinger is open to anyone**, because a peer needs it before it can sign,
   and it answers JRD rather than ActivityPub. It confirms whether a handle

@@ -105,9 +105,10 @@ func TestMbinWithoutSMTPRendersTheNullTransport(t *testing.T) {
 }
 
 // mbinDatabaseSettings are the fields of the paisans fork's SettingsDto
-// (src/DTO/SettingsDto.php, read at Paisans-Software/mbin develop 38bb5ea2):
-// every setting Mbin keeps in its database once an admin saves, after which
-// the environment value of an unlocked one is ignored.
+// (src/DTO/SettingsDto.php, read at Paisans-Software/mbin v1.15.0+paisans,
+// the first stack-1 release, and unchanged on develop 64794776): every
+// setting Mbin keeps in its database once an admin saves, after which the
+// environment value of an unlocked one is ignored.
 var mbinDatabaseSettings = []string{
 	"KBIN_DOMAIN", "KBIN_TITLE", "KBIN_META_TITLE", "KBIN_META_KEYWORDS", "KBIN_META_DESCRIPTION",
 	"KBIN_DEFAULT_LANG", "KBIN_CONTACT_EMAIL", "KBIN_SENDER_EMAIL", "MBIN_DEFAULT_THEME", "KBIN_JS_ENABLED",
@@ -120,10 +121,24 @@ var mbinDatabaseSettings = []string{
 	"MBIN_AUTHORIZED_FETCH",
 }
 
+// mbinLockableSettings are the settings the fork can lock, the ones that fall
+// back to an environment variable (docs/02-admin/03-optional-features/
+// 11-locked_settings.md at v1.15.0+paisans). Naming any other setting in
+// MBIN_LOCKED_SETTINGS makes Mbin answer every request with an error.
+var mbinLockableSettings = []string{
+	"KBIN_DOMAIN", "KBIN_TITLE", "KBIN_META_TITLE", "KBIN_META_KEYWORDS", "KBIN_META_DESCRIPTION",
+	"KBIN_DEFAULT_LANG", "KBIN_CONTACT_EMAIL", "KBIN_SENDER_EMAIL", "MBIN_DEFAULT_THEME", "KBIN_JS_ENABLED",
+	"KBIN_FEDERATION_ENABLED", "KBIN_REGISTRATIONS_ENABLED", "KBIN_HEADER_LOGO", "KBIN_CAPTCHA_ENABLED",
+	"KBIN_FEDERATION_PAGE_ENABLED", "KBIN_ADMIN_ONLY_OAUTH_CLIENTS", "MBIN_SSO_ONLY_MODE",
+	"MBIN_PRIVATE_INSTANCE", "MBIN_DOWNVOTES_MODE", "MBIN_NEW_USERS_NEED_APPROVAL",
+	"MBIN_USE_FEDERATION_ALLOW_LIST", "MBIN_AUTHORIZED_FETCH",
+}
+
 // MBIN_LOCKED_SETTINGS is exactly the database settings the template renders,
-// gated and not: every name in it is a key the .env sets, and every key the
-// .env sets that Mbin keeps in its database is in it. Passthrough keys are
-// left out, since only the template is the toolkit's.
+// gated and not, with authorized fetch on and off: every name in it is a key
+// the .env sets and one the fork can lock, and every key the .env sets that
+// Mbin keeps in its database is in it. Passthrough keys are left out, since
+// only the template is the toolkit's.
 func TestMbinLockedSettingsAreRendered(t *testing.T) {
 	// Keyed by the environment variable that feeds each setting, which is the
 	// setting's own name unless mbinSettingEnv says otherwise.
@@ -135,11 +150,34 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		}
 		database[key] = name
 	}
-	for _, gate := range []string{config.GateMember, ""} {
+	lockable := map[string]bool{}
+	for _, name := range mbinLockableSettings {
+		lockable[name] = true
+	}
+	for _, c := range []struct {
+		gate  string
+		fetch any
+	}{{config.GateMember, nil}, {"", nil}, {"", false}, {"", true}} {
+		gate := c.gate
 		env := renderTalk(t, fixtureSMTP, nil, func(a *config.App) {
 			a.VisibilityGate = gate
 			a.Config = nil
+			if c.fetch != nil {
+				settings := map[string]any{}
+				for k, v := range a.Settings {
+					settings[k] = v
+				}
+				settings["authorized_fetch"] = c.fetch
+				a.Settings = settings
+			}
 		})
+		wantFetch := "true"
+		if c.fetch == false {
+			wantFetch = "false"
+		}
+		if got := envValue(env, "MBIN_AUTHORIZED_FETCH"); got != wantFetch {
+			t.Errorf("gate %q, authorized_fetch %v: MBIN_AUTHORIZED_FETCH = %q, want %s", gate, c.fetch, got, wantFetch)
+		}
 		rendered := map[string]bool{}
 		var want []string
 		for _, line := range strings.Split(env, "\n") {
@@ -157,6 +195,9 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		for _, name := range locked {
 			if !rendered[name] {
 				t.Errorf("gate %q: %s is locked but the .env does not set it", gate, name)
+			}
+			if !lockable[name] {
+				t.Errorf("gate %q: %s is locked but the fork cannot lock it, so Mbin would refuse every request", gate, name)
 			}
 		}
 		sort.Strings(locked)

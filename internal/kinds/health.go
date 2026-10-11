@@ -24,9 +24,13 @@ var health = map[config.Kind]Health{
 	// The static client has no health route; /version is a cheap file the
 	// image serves. Ran v1.12.27: /version 200, /health 404.
 	config.KindElement: {"/version", "200"},
-	// No health route at v1.13.3+paisans. / renders the front page through
-	// Symfony and Postgres, and 302s to sign in when the instance is private.
-	config.KindMbin: {"/", "200,302"},
+	// The paisans fork's status-only route, from v1.15.0+paisans, the first
+	// stack-1 release: GET or HEAD, 200 with an empty body when Postgres and
+	// the cache answer, an empty 503 when either does not
+	// (config/mbin_routes/health.yaml, HealthController.php:27-38). Its own
+	// firewall has no security (security.yaml:34-37), so it answers without a
+	// session on a private instance too.
+	config.KindMbin: {"/healthz", "200"},
 	// Runs SELECT 1 and pings Redis, 500 when either fails
 	// (server/main.ts:78-105 at v1.10.0).
 	config.KindOutline: {"/_health", "200"},
@@ -40,9 +44,13 @@ var health = map[config.Kind]Health{
 	// versions endpoint answers without a token
 	// (synapse/rest/client/versions.py:40,50-60) on both routes.
 	config.KindSynapse: {"/_matrix/client/versions", "200"},
-	// No health route at sha-ff9dceb (routes.go). / renders sign in on a
-	// private instance.
-	config.KindWriteFreely: {"/", "200,302"},
+	// The writefreely-wisp fork's status-only route, from v0.21.1+wisp, the
+	// first stack-1 release: GET or HEAD, 200 with an empty body when the
+	// database answers SELECT 1, an empty 503 when it does not, with no
+	// session or private mode check (healthz.go:19-50 at develop f95d840).
+	// healthz is a reserved username, so no blog can claim the path
+	// (author/author.go:59).
+	config.KindWriteFreely: {"/healthz", "200"},
 	// src/server.js:63 at 1.1.0-oidc.1. Recorded for completeness: a monitor
 	// does not watch itself.
 	config.KindUptime: {"/healthz", "200"},

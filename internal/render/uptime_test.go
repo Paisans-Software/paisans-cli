@@ -97,15 +97,26 @@ func TestTheSeedChecksEveryAppTwiceAndPingsEveryOtherSite(t *testing.T) {
 		if d == nil {
 			t.Fatalf("clustered talk has no direct check on %s", site)
 		}
-		if want := "http://" + cfg.Sites[site].Address + ":8080/"; d["url"] != want {
+		if want := "http://" + cfg.Sites[site].Address + ":8080/healthz"; d["url"] != want {
 			t.Errorf("direct %s: url %v, want %s", site, d["url"], want)
 		}
 		headers, _ := d["request_headers"].(map[string]any)
 		if headers["Host"] != "talk.example.org" || headers["X-Forwarded-Proto"] != "https" {
 			t.Errorf("direct %s: headers %v", site, headers)
 		}
-		if d["expected_status"] != "200,302" {
+		if d["expected_status"] != "200" {
 			t.Errorf("direct %s: a direct check bypasses the gate and expects the kind's own codes, got %v", site, d["expected_status"])
+		}
+		// talk is gated, so Mbin runs as a private instance, and its API
+		// refuses a request with no token. The gate keeps anonymous /api/*
+		// from reaching the app through the edge, so this is checked on the
+		// app directly.
+		api := monitors["talk — private API ("+site+")"]
+		if want := "http://" + cfg.Sites[site].Address + ":8080/api/entries"; api == nil || api["url"] != want || api["expected_status"] != "401" || api["method"] != "GET" {
+			t.Errorf("private API %s: %v, want GET %s expecting 401", site, api, want)
+		}
+		if headers, _ := api["request_headers"].(map[string]any); headers["Host"] != "talk.example.org" {
+			t.Errorf("private API %s: headers %v", site, api["request_headers"])
 		}
 	}
 	for _, name := range []string{"home-a — ping", "home-b — ping", "vm — ping"} {
@@ -127,15 +138,17 @@ func TestTheSeedChecksEveryAppTwiceAndPingsEveryOtherSite(t *testing.T) {
 // 2026-10-08-visibility-gate.md). The gate check expects the gate's redirect
 // to sign in, by its body, because a private app redirects `/` to its own
 // sign-in page too. The public check reaches the app only when its health route is
-// open, which a dedicated route is and `/` never is, so a gated mbin, whose
-// health route is its front page, has none. The signed fetch check expects
-// the app to refuse an unsigned ActivityPub read. An ungated app keeps its
-// public check and gets neither of the others.
+// open, which a dedicated route is and `/` never is; Mbin's and WriteFreely's
+// /healthz are dedicated. The signed fetch check expects the app to refuse an
+// unsigned ActivityPub read. An ungated app keeps its public check and gets
+// neither of the others.
 func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
-	if _, ok := monitors["talk — public"]; ok {
-		t.Error("gated mbin has a public check, which the gate would answer rather than the app")
+	// Mbin's /healthz is a dedicated route, so it is open past the gate and
+	// the public check reaches the app.
+	if public := monitors["talk — public"]; public["url"] != "https://talk.example.org/healthz" || public["expected_status"] != "200" {
+		t.Errorf("gated mbin public check is %v", public)
 	}
 	if gate := monitors["talk — gate"]; gate["check_type"] != "string" || gate["expected_string"] != render.GateMarker {
 		t.Errorf("gated mbin gate check does not assert the gate's own redirect: %v", gate)
@@ -174,6 +187,43 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 	}
 	if got := monitors["docs — direct (home-a)"]["url"]; got != "http://"+cfg.Sites["home-a"].Address+":3000/_health" {
 		t.Errorf("outline direct url %v", got)
+	}
+}
+
+// A gated WriteFreely is proved by its outbox: an ActivityPub only route that
+// authorized_fetch refuses unsigned before any lookup, so the probe needs no
+// blog to exist. Its /healthz is open past the gate, so it has a public check.
+func TestAGatedWriteFreelyIsProvedByItsOutbox(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	blog := cfg.Apps["blog"]
+	blog.VisibilityGate = config.GateMember
+	cfg.Apps["blog"] = blog
+	monitors := byName(renderSeed(t, cfg, secrets))
+	signed := monitors["blog — signed fetch"]
+	if signed["url"] != "https://blog.example.org/api/collections/blog.example.org/outbox" || signed["expected_status"] != "401" {
+		t.Errorf("gated writefreely signed fetch check is %v", signed)
+	}
+	if public := monitors["blog — public"]; public["url"] != "https://blog.example.org/healthz" || public["expected_status"] != "200" {
+		t.Errorf("gated writefreely public check is %v", public)
+	}
+	for name := range monitors {
+		if strings.HasPrefix(name, "blog — private API") {
+			t.Errorf("writefreely has %s, which is Mbin's", name)
+		}
+	}
+}
+
+// An ungated Mbin is not a private instance, so its API answers anonymous
+// reads by design and there is nothing to prove.
+func TestAnUngatedMbinHasNoPrivateAPICheck(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	talk := cfg.Apps["talk"]
+	talk.VisibilityGate = config.GatePublic
+	cfg.Apps["talk"] = talk
+	for name := range byName(renderSeed(t, cfg, secrets)) {
+		if strings.Contains(name, "private API") {
+			t.Errorf("ungated mbin has %s", name)
+		}
 	}
 }
 

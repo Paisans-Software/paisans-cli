@@ -1,6 +1,7 @@
 package kinds_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -145,6 +146,28 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 		}
 		if got := kinds.ConfigFile(kind); got != want.file {
 			t.Errorf("%s: file is %q, want %q", kind, got, want.file)
+		}
+	}
+}
+
+// The two forks the toolkit runs default to their stack-1 channel, the
+// template contract these kinds render, and no other kind names a channel.
+func TestTheForksDefaultToStackOne(t *testing.T) {
+	want := map[config.Kind]string{
+		config.KindMbin:        "ghcr.io/paisans-software/mbin:stack-1",
+		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:stack-1",
+	}
+	for _, kind := range config.Kinds() {
+		for _, service := range kinds.Services(kind) {
+			if service.Name == "app" && want[kind] != "" {
+				if service.Image != want[kind] {
+					t.Errorf("%s app image is %s, want %s", kind, service.Image, want[kind])
+				}
+				continue
+			}
+			if strings.Contains(service.Image, ":stack-") {
+				t.Errorf("%s %s names a channel, %s", kind, service.Name, service.Image)
+			}
 		}
 	}
 }

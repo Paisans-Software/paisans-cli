@@ -20,7 +20,10 @@
 // test may pull images and boots the application three times, so give it a
 // generous limit rather than the 10 minute default, for example:
 //
-//	go test -tags writefreely_integration -timeout 30m -run TestRenderedPassthroughKeyIsReadByWriteFreely ./internal/render/
+//	go test -tags writefreely_integration -timeout 30m ./internal/render/
+//
+// PAISANS_WF_IMAGE, when set, replaces the rendered app image: a local build
+// of a release that is not yet promoted to the kind's channel, for example.
 package render_test
 
 import (
@@ -65,7 +68,8 @@ func requireDockerForWriteFreely(t *testing.T) {
 // this test runs what an operator receives and cannot drift when a pin moves.
 func renderedImage(t *testing.T, compose, service string) string {
 	t.Helper()
-	re := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(service) + `:\n    image: (\S+)`)
+	// The service's first image line, which follows its labels.
+	re := regexp.MustCompile(`(?ms)^  ` + regexp.QuoteMeta(service) + `:\n.*?^    image: (\S+)`)
 	m := re.FindStringSubmatch(compose)
 	if m == nil {
 		t.Fatalf("the rendered blog compose file names no image for %s:\n%s", service, compose)
@@ -120,6 +124,9 @@ func startWFCluster(t *testing.T, files map[string]string, stamp string) *wfClus
 		postgres: "paisans-wf-pg-" + stamp,
 		data:     "paisans-wf-data-" + stamp,
 		image:    renderedImage(t, compose, "app"),
+	}
+	if img := os.Getenv("PAISANS_WF_IMAGE"); img != "" {
+		c.image = img
 	}
 	pgImage := renderedImage(t, compose, "postgres")
 	dbHost := renderedValue(t, "config.ini", ini, `^host = (\S+)$`)
@@ -299,4 +306,87 @@ func TestRenderedPassthroughKeyIsReadByWriteFreely(t *testing.T) {
 			t.Errorf("the fork did not log that config.ini disagrees with the database on %s:\n%s", passthroughKey, logsOf(second))
 		}
 	})
+}
+
+// TestRenderedLockedSettingsAreLockedInWriteFreely boots the fork against the
+// rendered config.ini and asks it which settings config.ini locks: every name
+// in locked_settings, at the value the file gives it, with a change from the
+// command line refused. Starting at all is the first half of the check, since
+// the fork refuses to start on a name it does not know or a value it would
+// refuse. Authorized fetch is then asked of the running server: an unsigned
+// read of a blog's outbox answers 401, and /healthz answers 200.
+func TestRenderedLockedSettingsAreLockedInWriteFreely(t *testing.T) {
+	requireDockerForWriteFreely(t)
+
+	files := planFiles(build(t))
+	ini := files[blogDir+"config.ini"]
+	locked, ok := iniValue(ini, "", "locked_settings")
+	if !ok {
+		t.Fatalf("the rendered config.ini has no locked_settings:\n%s", ini)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.ini")
+	if err := os.WriteFile(path, []byte(ini), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	c := startWFCluster(t, files, stamp+"-locked")
+	app := "paisans-wf-app-" + stamp + "-locked"
+	c.startBlog(t, app, path)
+
+	cmd := exec.Command("docker", "exec", app, "writefreely", "settings", "list")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("writefreely settings list: %v\n%s", err, stderr.String())
+	}
+	list := string(out)
+	t.Logf("writefreely settings list:\n%s", list)
+	for _, name := range strings.Split(locked, ",") {
+		name = strings.TrimSpace(name)
+		section, key := name[:strings.LastIndex(name, ".")], name[strings.LastIndex(name, ".")+1:]
+		want, _ := iniValue(ini, section, key)
+		var line string
+		for _, l := range strings.Split(list, "\n") {
+			if f := strings.Fields(l); len(f) > 0 && f[0] == name {
+				line = l
+			}
+		}
+		if !strings.Contains(line, "(locked in config.ini)") {
+			t.Errorf("%s is not reported locked: %q", name, line)
+		}
+		if got := settingGet(t, app, name); got != want {
+			t.Errorf("%s = %q, want config.ini's %q", name, got, want)
+		}
+	}
+
+	set := exec.Command("docker", "exec", app, "writefreely", "settings", "set", "app.authorized_fetch", "false")
+	if out, err := set.CombinedOutput(); err == nil || !strings.Contains(string(out), "is locked") {
+		t.Errorf("settings set app.authorized_fetch false was not refused as locked (err %v):\n%s", err, out)
+	}
+
+	port := renderedValue(t, "config.ini", ini, `^port = (\d+)$`)
+	host := strings.TrimPrefix(renderedValue(t, "config.ini", ini, `^host = (https?://\S+)$`), "https://")
+	status := func(path string, headers ...string) string {
+		args := []string{"exec", app, "wget", "-S", "-q", "-O", "/dev/null"}
+		for _, h := range headers {
+			args = append(args, "--header", h)
+		}
+		args = append(args, "http://127.0.0.1:"+port+path)
+		out, _ := exec.Command("docker", args...).CombinedOutput()
+		m := regexp.MustCompile(`HTTP/1\.1 (\d{3})`).FindStringSubmatch(string(out))
+		if m == nil {
+			t.Fatalf("wget %s printed no status:\n%s", path, out)
+		}
+		return m[1]
+	}
+	if got := status("/healthz", "Host: "+host); got != "200" {
+		t.Errorf("/healthz answered %s, want 200", got)
+	}
+	probe := "/api/collections/" + host + "/outbox"
+	if got := status(probe, "Host: "+host, "Accept: application/activity+json"); got != "401" {
+		t.Errorf("an unsigned GET of %s answered %s, want 401", probe, got)
+	}
 }
