@@ -56,7 +56,9 @@ refuses a machine where another network or a route already uses that range,
 and `validate` refuses a mesh over it.
 
 The site needs no other role, and should have none of `gateway` or `witness`,
-which are refused: the monitor exists to report their failures.
+which are refused: the monitor exists to report their failures. Pin no other
+app there either: `validate` refuses one, because in this mode your web server
+is handed the monitor alone and nothing would route the other.
 
 ## 2. Check the configuration and apply it
 
@@ -72,7 +74,8 @@ paisans apply --site watch --execute
 web server is *shared*, which is fine here: nothing the monitor claims is
 taken. On a shared host the toolkit leaves ufw's default policy alone, so ufw
 must already be active and deny incoming by default, and it only adds its own
-rules, each commented `paisans:`. It does not open 80 or 443 in this mode;
+rules, each commented `paisans-<token>:` with the deployment's token. It does
+not open 80 or 443 in this mode;
 your web server's rules are yours.
 
 ## 3. Get the hand-off sheet
@@ -131,16 +134,18 @@ paisans ingress check --app status
 ```
 
 It changes nothing and reaches no host over ssh: it looks at the monitor as a
-visitor would, and reports each item as `PASS` or `FAIL` with what fixes it.
+visitor would, and marks each check passed (`ok`, or ✓ at a terminal) or
+failed (`FAIL`, or ✗), with what fixes a failure.
 
 | Check | Passes when | When it fails |
 |---|---|---|
 | `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 4; delete any other record for the name by hand |
 | `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 3, or the proxy if the answer is not 200 |
-| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
+| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`, then `paisans apply --site watch`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or drop the port in Docker's `DOCKER-USER` chain. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
-Run it again after every change until every line says `PASS`.
+Run it again after every change until no check fails and it ends with
+`4 checks passed.`
 
 ## Afterwards
 
