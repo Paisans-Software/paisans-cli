@@ -246,11 +246,20 @@ toolkit's Caddy (a gateway, or a monitor in `managed_by` `paisans`) when
 starts and then fails every DNS-01 challenge, which a visitor finds rather than
 the operator.
 
-A decryption failure names every place the embedded sops (v3.13.3,
-`age/keysource.go`) reads an age key from: `SOPS_AGE_KEY_CMD` first, since it
-lets the key live in a keychain rather than in a file or the environment, then
-`SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY` and `sops/age/keys.txt` under the user's
-config directory.
+`init` makes the age key of a deployment built from scratch and keeps it in
+`internal/keystore`: the macOS Keychain through `security`, the Secret
+Service through `secret-tool`, an item per deployment id under service
+`paisans-age`, the key on stdin and never in argv. Tests never reach a real
+keystore: `cmd/paisans` and `internal/config` replace `config.AgeKeystore` in
+`TestMain`.
+
+`config.LoadDeploymentSecrets` reads that item when no `SOPS_AGE_*` variable
+is set and hands its key to the file's age recipients in memory, through
+`age.ParsedIdentities` in the embedded sops (v3.13.3). Otherwise, and when
+there is no item or its key is not a recipient, sops' own search runs:
+`SOPS_AGE_KEY_CMD` first, then `SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY` and
+`sops/age/keys.txt` under the user's config directory. A failure names every
+one of those places, and the keystore item when one was looked for.
 
 `web-server show --app <name>` and `web-server check --app <name>` are for an app
 pinned to a monitor site (`render.ServedBy`); every other app is the
