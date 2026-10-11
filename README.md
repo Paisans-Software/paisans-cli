@@ -1538,6 +1538,71 @@ the premise that the config plus the secrets reconstruct the stack. That is
 incoherent rather than risky, so it takes a refusal by the rule above. A digest
 (`@sha256:...`) is accepted and is the stronger form.
 
+**An image named by a tag runs the build the tag named when apply planned.**
+`apply` asks the registry, while it plans, which build each tag an app's stack
+names points at now, and renders that digest beside the tag on every line
+naming it (Eg: `ghcr.io/example-org/mbin:v1.2.3@sha256:...`). A tag written
+into a compose file never changes, and `apply` recreates a stack only when its
+file changes, so without this a new build behind a tag, a release promoted to
+a fork's channel or a version tag rebuilt for a security fix, would never
+reach a host. With it, a new build is a changed compose file: the dry run
+lists it, by app and service, with the builds it goes between and their
+versions where the image carries the `org.opencontainers.image.version` label,
+
+```
+talk  app  ghcr.io/paisans-software/mbin:stack-1  1.15.0-paisans (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)
+```
+
+and the apply pulls, checks, validates and health gates the stack as for any
+image change. Every service of a stack naming one image runs one build of it:
+Mbin's application and its messenger consumers are pinned together, and a
+plan whose rewrite would leave one of them on the bare tag stops. Each tag is
+resolved once per run, so every site and service an apply plans gets the same
+build. The registry is asked from the workstation, anonymously; when it cannot
+be reached, the plan keeps what the stack already runs of the same tag and
+says so, and a stack that runs none is refused until it can be. A registry
+that could not be reached is not asked again for the rest of the run, so an
+outage costs one timeout rather than one per image. `--only` and a stack an
+apply holds back resolve nothing: they keep what the host runs, and nothing
+about them is listed or refused.
+
+A stack an older toolkit applied runs its tags bare. Its first apply pins
+each to the build the tag names then, and the dry run says `pins` rather
+than calling it a new build, since which build the host runs under the bare
+tag is not known; the compose file changes, so the stack is recreated once,
+on the build pinned. The manifest,
+`/srv/paisans/<token>/.paisans-manifest.json`, records each service's build
+under `pins`: the stack, the service, the reference as configured, the one
+pinned, when it was resolved, and whether it came from the registry, was kept,
+was held for the app's other sites, or was configured as a digest.
+
+A digest in `images` is taken as written, so it, or a version tag the
+publisher does not rebuild, holds an app on one build until the operator
+changes it. Commands that rewrite a compose file for a narrower reason
+(`site add`, `site remove`, `storage add`, `storage rotate-key`) resolve
+nothing and keep whatever each stack runs, whatever the configuration now
+names (another tag, a moved channel, another repository), so none of them
+moves an image nobody planned; the next `apply` shows and makes that move.
+
+**An app on several sites moves to a new build on all of them at once.** A
+clustered app runs one database from every site it is on, and two builds
+against one database is how a migration runs twice or not at all. `apply`
+without `--site` plans every site and moves them together. `apply --site`
+reads the app's compose file on its other sites, keeps the app on the build
+they run, and says so, naming a newer build when the tag points at one; moving
+the app takes an apply that covers all its sites. Sites that already run
+different builds are refused, naming each site's, and the operator chooses with
+an apply that covers all of them. A site still on a bare tag beside one pinned
+to a build of that tag is not a disagreement: both are held on the pinned
+build.
+
+**An app may follow another channel than its kind's, with a warning.** A fork
+the toolkit runs can publish a channel tag, `stack-<N>`, naming its latest
+release vetted for the toolkit's template contract `N`. Naming another channel
+in `images` (Eg: `stack-2` ahead of a toolkit release that renders it) is
+accepted, and validate warns (`image-channel-differs`) that this toolkit
+renders its own channel's contract, naming both.
+
 **A version change is not verified to be safe.** Many of these applications run
 schema migrations at boot, against live member data, and a downgrade after one
 is usually not a downgrade at all. The toolkit cannot know which release does
@@ -6665,8 +6730,10 @@ The registry is asked from the workstation, anonymously; when it cannot be
 reached, the plan keeps the build the site already runs and says so, and a
 site running none is refused until it can be. Each apply records the build in
 the site's manifest, `/srv/paisans/<token>/.paisans-manifest.json`, under
-`caddy`: the tag as configured, the reference the compose file names, when it
-was resolved and whether the digest came from the registry or was kept.
+`pins`, as it does every app's (see *The image an app runs is declared, not
+implied*): the tag as configured, the reference the
+compose file names, when it was resolved and whether the digest came from the
+registry or was kept.
 
 The cost is stated rather than hidden: a deployment's gateway depends on that
 registry and on those images being rebuilt. The escape hatch is what keeps it

@@ -304,14 +304,14 @@ func TestAPullTheRegistryRefusesSaysTheImageIsPrivate(t *testing.T) {
 func TestThePullAndTheInstallShareOneDigest(t *testing.T) {
 	fakeConverge(t, nil)
 	recordConverge(t)
-	savedDigests := caddyDigests
-	t.Cleanup(func() { caddyDigests = savedDigests })
+	savedDigests := imageDigests
+	t.Cleanup(func() { imageDigests = savedDigests })
 	var asked atomic.Int32
-	caddyDigests = movingTag{&asked}
+	imageDigests = movingTag{&asked}
 	var mu sync.Mutex
 	seen := map[string]bool{}
 	resolve := func() {
-		d, err := caddyDigests.Digest("ghcr.io/paisans-software/caddy:2")
+		d, err := imageDigests.Digest("ghcr.io/paisans-software/caddy:2")
 		if err != nil {
 			t.Error(err)
 		}
@@ -336,7 +336,7 @@ func TestThePullAndTheInstallShareOneDigest(t *testing.T) {
 	if len(seen) != 1 || asked.Load() != 1 {
 		t.Errorf("the run planned Caddy at %v, asking the registry %d times", seen, asked.Load())
 	}
-	if caddyDigests != (movingTag{&asked}) {
+	if imageDigests != (movingTag{&asked}) {
 		t.Error("the run left its cache in place")
 	}
 }

@@ -17,7 +17,7 @@ import (
 // init keeps age keys in: every test sees the tag name one fixed build,
 // testCaddyDigest, and keeps its age keys in memory.
 func TestMain(m *testing.M) {
-	caddyDigests = fixedDigest(testCaddyDigest)
+	imageDigests = fixedDigest(testCaddyDigest)
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
 		return nil, fmt.Errorf("test: no DNS provider may be built in tests, asked for %s", name)
 	}

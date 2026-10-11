@@ -22,11 +22,11 @@ func TestApplyKeepsTheWebServerRecord(t *testing.T) {
 	}
 	var before render.Manifest
 	json.Unmarshal([]byte(host.files[manifestFile]), &before)
-	if len(before.Files) == 0 || before.Caddy == nil {
+	if len(before.Files) == 0 || len(before.Pins) == 0 {
 		t.Fatalf("the rest of the manifest was lost: %+v", before)
 	}
 
-	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildB}))
+	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(caddyAt(buildB)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestApplyKeepsTheWebServerRecord(t *testing.T) {
 	if !reflect.DeepEqual(got, []render.ManifestWebServer{entry}) {
 		t.Errorf("after apply the record is %+v", got)
 	}
-	if manifestCaddy(t, host).Reference == before.Caddy.Reference {
+	if manifestCaddy(t, host).Reference == caddyTag+"@"+buildA {
 		t.Errorf("the manifest was not rewritten, so this proves nothing")
 	}
 

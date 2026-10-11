@@ -1,6 +1,12 @@
 package imagedigest
 
-import "sync"
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"sync"
+)
 
 // Resolver says which build a reference names now, as Registry does.
 type Resolver interface {
@@ -19,15 +25,34 @@ type Resolver interface {
 // have been for nothing. One answer per run keeps every plan on the build the
 // first one showed.
 //
-// Only an answer is kept. A resolution that failed is asked again the next
-// time, since a registry that did not answer once may answer now. Calls for a
-// reference that is being resolved wait for that resolution rather than start
-// their own, so sites planned at the same time ask the registry once.
+// A failure is kept as well, for the same reason: every plan of the run sees
+// the same answer, and a registry that took DefaultTimeout to fail once is not
+// waited on again for every image and every plan. A failure that never
+// reached the registry (a timeout, a refused connection, a name that does not
+// resolve) is kept for its whole host, so every other image on it fails at
+// once; a registry that answered, Eg: that a tag does not exist, fails that
+// reference alone. The next run asks again. Calls for a reference that is
+// being resolved wait for that resolution rather than start their own, so
+// sites planned at the same time ask the registry once.
 type Cache struct {
 	r       Resolver
 	mu      sync.Mutex
 	digests map[string]string
 	asking  map[string]*resolution
+	// failed are the references whose resolution failed, and down the
+	// registry hosts that could not be reached, with why.
+	failed map[string]error
+	down   map[string]error
+	// versions are the version labels Version read, by reference. A build
+	// named by its digest never changes, so an answer is kept for the run
+	// like a digest is.
+	versions map[string]string
+}
+
+// Versioner reads the version label of a build named by its digest, as
+// Registry.Version does.
+type Versioner interface {
+	Version(ref string) (string, error)
 }
 
 // resolution is one call to the wrapped resolver, which later calls for the
@@ -40,7 +65,7 @@ type resolution struct {
 
 // Cached is a Cache in front of r.
 func Cached(r Resolver) *Cache {
-	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}}
+	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
 }
 
 // Digest is the digest ref was first resolved to, resolving it now if it has
@@ -50,6 +75,15 @@ func (c *Cache) Digest(ref string) (string, error) {
 	if digest, ok := c.digests[ref]; ok {
 		c.mu.Unlock()
 		return digest, nil
+	}
+	if err, ok := c.failed[ref]; ok {
+		c.mu.Unlock()
+		return "", err
+	}
+	host := Host(ref)
+	if err, ok := c.down[host]; ok {
+		c.mu.Unlock()
+		return "", fmt.Errorf("%s was not asked about %s, since it could not be reached earlier in this run: %w", host, ref, err)
 	}
 	if res, ok := c.asking[ref]; ok {
 		c.mu.Unlock()
@@ -66,8 +100,59 @@ func (c *Cache) Digest(ref string) (string, error) {
 	delete(c.asking, ref)
 	if res.err == nil {
 		c.digests[ref] = res.digest
+	} else {
+		c.failed[ref] = res.err
+		var transport *url.Error
+		if errors.As(res.err, &transport) {
+			c.down[host] = res.err
+		}
 	}
 	c.mu.Unlock()
 	close(res.done)
 	return res.digest, res.err
+}
+
+// Version is the wrapped resolver's Version for ref, asked once per run, and
+// empty with no error when the wrapped resolver reads no labels. A failed
+// read is asked again the next time, as a failed resolution is.
+func (c *Cache) Version(ref string) (string, error) {
+	v, ok := c.r.(Versioner)
+	if !ok {
+		return "", nil
+	}
+	c.mu.Lock()
+	if version, ok := c.versions[ref]; ok {
+		c.mu.Unlock()
+		return version, nil
+	}
+	if _, down := c.down[Host(ref)]; down {
+		c.mu.Unlock()
+		return "", nil
+	}
+	c.mu.Unlock()
+	version, err := v.Version(ref)
+	if err != nil {
+		// A label is for the operator's eye: a build whose label could not
+		// be read shows its digest alone for the rest of the run, rather
+		// than costing a timeout on every plan.
+		version = ""
+	}
+	c.mu.Lock()
+	c.versions[ref] = version
+	c.mu.Unlock()
+	return version, nil
+}
+
+// Host is the registry host a reference is pulled from, by Docker's
+// defaults (see split), empty for a reference this package cannot read.
+func Host(ref string) string {
+	name := ref
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	if slash, colon := strings.LastIndex(name, "/"), strings.LastIndex(name, ":"); colon > slash {
+		name = name[:colon]
+	}
+	host, _ := locate(name)
+	return host
 }

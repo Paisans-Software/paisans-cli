@@ -3,7 +3,9 @@ package imagedigest_test
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,18 +52,54 @@ func TestACachedTagNamesItsFirstBuild(t *testing.T) {
 	}
 }
 
-// A failed resolution is not kept: the next plan asks again.
-func TestAFailedResolutionIsAskedAgain(t *testing.T) {
+// A failed resolution is kept for the run like an answer: every plan of it
+// sees the same thing, and a registry that timed out once is not waited on
+// again.
+func TestAFailedResolutionIsRemembered(t *testing.T) {
 	m := &moving{fail: 1}
 	c := imagedigest.Cached(m)
-	if _, err := c.Digest("caddy:2"); err == nil {
-		t.Fatal("the first resolution did not fail")
+	for range 3 {
+		if _, err := c.Digest("caddy:2"); err == nil {
+			t.Fatal("a failed resolution answered later in the run")
+		}
 	}
-	if got, err := c.Digest("caddy:2"); err != nil || got != "sha256:2" {
-		t.Errorf("got %q, %v, want the second resolution", got, err)
+	if n := m.calls.Load(); n != 1 {
+		t.Errorf("asked the registry %d times, want once", n)
 	}
-	if got, _ := c.Digest("caddy:2"); got != "sha256:2" {
-		t.Errorf("got %q after an answer, want it kept", got)
+}
+
+// unreachable fails every reference on one registry host as an unreachable
+// registry does, with a transport error, and answers every other.
+type unreachable struct {
+	host  string
+	asked []string
+}
+
+func (u *unreachable) Digest(ref string) (string, error) {
+	u.asked = append(u.asked, ref)
+	if strings.HasPrefix(ref, u.host+"/") {
+		return "", fmt.Errorf("asking %s for %s: %w", u.host, ref, &url.Error{Op: "Head", URL: "https://" + u.host + "/v2/", Err: errors.New("i/o timeout")})
+	}
+	return "sha256:1", nil
+}
+
+// A registry that could not be reached fails the run's later references on
+// it at once, instead of a timeout each; other registries are still asked.
+func TestAnUnreachableRegistryFailsFast(t *testing.T) {
+	u := &unreachable{host: "ghcr.io"}
+	c := imagedigest.Cached(u)
+	if _, err := c.Digest("ghcr.io/paisans-software/mbin:stack-1"); err == nil {
+		t.Fatal("an unreachable registry answered")
+	}
+	_, err := c.Digest("ghcr.io/paisans-software/caddy:2")
+	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+		t.Errorf("a second image on the same registry got %v, want the first failure", err)
+	}
+	if got, err := c.Digest("outlinewiki/outline:1.10.0"); err != nil || got != "sha256:1" {
+		t.Errorf("another registry got %q, %v", got, err)
+	}
+	if len(u.asked) != 2 {
+		t.Errorf("asked %v, want the unreachable registry once", u.asked)
 	}
 }
 

@@ -135,7 +135,10 @@ type applySwitch struct {
 }
 
 func (a applySwitch) plan(site string, secrets *config.Secrets) (*apply.Plan, error) {
-	options := []apply.Option{apply.Only(a.app)}
+	// A key rotation rewrites the app's environment, not its image: no
+	// resolver, so the switch keeps the build each site runs rather than
+	// moving the app to a new one in the middle of a rotation.
+	options := []apply.Option{apply.Only(a.app), apply.ResolveImages(nil)}
 	if a.shared[site] {
 		options = append(options, apply.KeepImages())
 	}

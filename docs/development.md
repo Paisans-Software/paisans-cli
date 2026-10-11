@@ -374,9 +374,9 @@ site's images on every host at once (`cmd/paisans/converge_pull.go`), from the
 plan `planSiteApply` makes for the site, with `Plan.Disk.Pulls` as the list
 and `apply.DiskRefusal` as the stop for a short disk; it reports straight to
 each site's line and never through `reporterOverride`, which is one command's
-at a time. Every plan of one `apply` resolves Caddy's tag through one
+at a time. Every plan of one `apply` resolves each image's tag through one
 `imagedigest.Cache` (`cacheDigests`), so the pull and the steps after it name
-the same build. That dry run changes nothing on the
+the same build, and every site of a clustered app moves to one build. That dry run changes nothing on the
 servers; the one file it may write is the local secrets file, with the
 generated secrets it lacks, through `fillSecrets`, the path `init` writes
 them with.
@@ -664,18 +664,30 @@ no module answers to both produce a gateway that cannot load its own
 configuration, and neither is visible in an image reference. This check runs
 before the configuration check because its error says what to fix.
 
-**The gateway's Caddy image is resolved to a build while apply plans.** The
-configuration names it by a tag that moves (`acme.Published`,
-`ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and `render` renders
-that tag, listing it per site in `Plan.CaddyImages`, since render reaches no
-network. `planSiteApply` passes `apply.ResolveImages` with
+**Every image the configuration names is resolved to a build while apply
+plans.** The gateway's Caddy is named by a tag that moves (`acme.Published`,
+`ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and so may an app's
+image (a fork's `stack-<N>`, or any version tag). `render` renders each tag as
+configured, listing each app stack's images and the gateway's Caddy per site
+and compose file in `Plan.Images`, with the configuration's names for each and
+the number of lines naming it, since render reaches no network.
+`planSiteApply` passes `apply.ResolveImages` with `imageDigests`, an
 `imagedigest.Registry`, which asks the registry's HTTP API, anonymously and
-from the workstation, for the digest the tag names; `apply.Build` pins it
-into the infrastructure compose file with `render.PinCaddyImage` before the
-file is compared, so a new build is a changed file and goes through every
-gate above. A registry that cannot be reached keeps the build the site runs,
-read from its compose file, with a warning; a site running none is refused.
-Execute records the build in the manifest's `caddy` entry. Tests in
+from the workstation, for the digest each tag names; `apply.Build` pins it
+into every line naming the tag with `render.PinImages` before the file is
+compared, and stops when the lines it rewrote differ from the count render
+reported. A new build is therefore a changed file, and goes through every gate
+above. A digest the configuration names is left alone. A registry that cannot
+be reached keeps the build the stack runs, read from its compose file, with a
+warning; a stack running none is refused. Execute records each service's build
+in the manifest's `pins`. `Plan.Moved` is what the dry run lists, with the
+version labels `imagedigest.Registry.Version` reads. `apply --site` passes
+`apply.OtherSites`, the compose files of each clustered app on its other sites
+(`readPeers`), so the app stays on the build they run, and sites on different
+builds are refused; a step of apply without `--site` (`planningEverySite`)
+passes none. Without a resolver, or for a stack outside `--only` or held back,
+Build keeps whatever the host runs. `ImagePin.FirstPin` is a bare tag pinned
+for the first time, which the dry run lists apart from `Plan.Moved`. Tests in
 `cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
 
 A DNS provider's Caddyfile syntax is provider specific rather than uniform: the

@@ -33,8 +33,8 @@ func TestApplyPlansCaddyAtTheResolvedBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "ghcr.io/paisans-software/caddy:2@" + testCaddyDigest
-	if plan.Caddy == nil || plan.Caddy.Reference != want {
-		t.Fatalf("planned %+v, want %s", plan.Caddy, want)
+	if c := plan.Caddy(); c == nil || c.Reference != want {
+		t.Fatalf("planned %+v, want %s", c, want)
 	}
 	rec := &ui.Recorder{Verbose_: true}
 	reportNotes(rec, plan, map[string]bool{})

@@ -204,13 +204,15 @@ type Plan struct {
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
 	KeepImages bool
-	// Caddy is the build of its image this site's Caddy is planned to run,
-	// nil when the site runs no Caddy or this plan does not touch its
-	// compose file. Execute records it in the manifest. See ResolveImages.
-	Caddy *CaddyPin
-	// recordedCaddy is what the manifest Build read recorded for Caddy, kept
-	// when this plan does not settle the compose file.
-	recordedCaddy *render.ManifestCaddy
+	// Pins are the builds the images this site's compose files name are
+	// planned to run, one per image a compose file this plan read names
+	// (see render.Plan.Images). Execute records them in the manifest. See
+	// ResolveImages, and Caddy and Moved.
+	Pins []ImagePin
+	// recordedPins is what the manifest Build read recorded of the builds
+	// the site runs, kept for a stack whose compose file this plan does not
+	// settle.
+	recordedPins []render.ManifestPin
 	// recordedWebServer is what the manifest Build read recorded of the files
 	// in the operator's web server's include directory. Apply writes them
 	// after every site is up, so every manifest write keeps them.
@@ -416,8 +418,11 @@ type options struct {
 	// --change-replication` sets it; see GarageReplication.
 	replicationChange bool
 	report            ui.Reporter
-	// resolver resolves the Caddy image's tag; see ResolveImages.
+	// resolver resolves the tags images are named by; see ResolveImages.
 	resolver Resolver
+	// peers are the compose files of this site's apps on the sites the
+	// apply does not cover; see OtherSites.
+	peers []PeerCompose
 }
 
 // Report sets the plan's Report before Build reads the host, so planning
@@ -578,7 +583,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if err != nil {
 		return nil, err
 	}
-	out.recordedCaddy = manifest.Caddy
+	out.recordedPins = manifest.Pins
 	out.recordedWebServer = manifest.WebServer
 	out.imageHistory = manifest.Images
 	recorded := make(map[string]string, len(entries))
@@ -672,18 +677,31 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			finish(done, err)
 			return nil, err
 		}
-		// The Caddy image is pinned to a build here, against the host's copy,
+		// Each image is pinned to a build here, against the host's copy,
 		// before anything is compared. See ResolveImages.
+		//
+		// A stack this plan leaves alone (outside --only, or held back with
+		// Except) is pinned as a command with no resolver pins it: to what
+		// the host runs, asking no registry. Its file is still compared, so
+		// an edit on the host is still a conflict, but nothing it would
+		// resolve to is planned, listed, or refused over.
 		content := file.Content
-		if want := plan.CaddyImages[site]; want != "" && rel == d.RelPath(gatewayCompose) {
-			pinned, pin, note, err := pinCaddy(site, want, file.Content, current, found, o.resolver)
+		if images := fileImages(plan.Images[site], file.Path); len(images) > 0 {
+			stack := stackOf(rel)
+			leftAlone := (onlySet != nil && !onlySet[stack]) || exceptSet[stack]
+			r, peers := o.resolver, o.peers
+			if leftAlone {
+				r, peers = nil, nil
+			}
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, peers)
 			if err != nil {
 				finish(done, err)
 				return nil, err
 			}
-			content, out.Caddy = pinned, pin
-			if note != nil {
-				out.Notes = append(out.Notes, *note)
+			content = pinned
+			if !leftAlone {
+				out.Pins = append(out.Pins, pins...)
+				out.Notes = append(out.Notes, notes...)
 			}
 		}
 
@@ -1515,7 +1533,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Caddy: caddyRecord(plan), Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
 	if err != nil {
 		return err
 	}

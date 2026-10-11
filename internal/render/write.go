@@ -25,10 +25,14 @@ type Manifest struct {
 	// Version is this manifest's format, not the configuration's.
 	Version int            `json:"version"`
 	Files   []ManifestFile `json:"files"`
-	// Caddy is the build of the gateway's image the site's Caddy runs, set
-	// by apply on a site running Caddy and absent elsewhere. A manifest
-	// written before apply recorded it has none.
-	Caddy *ManifestCaddy `json:"caddy,omitempty"`
+	// Pins are the builds the site's stacks run, one per service the
+	// configuration names an image for: each app's, and the gateway's
+	// Caddy, set by apply. The configuration may name an image by a tag
+	// that moves (Eg: a fork's stack-1, Caddy's 2), so the compose file's
+	// digest is the only fact about what ran, and this keeps it beside the
+	// tag it was resolved from, in a form an operator can read on the host
+	// without parsing YAML.
+	Pins []ManifestPin `json:"pins,omitempty"`
 	// Images is every image repository the site's stacks have rendered, with
 	// each reference rendered from it, accumulated over every apply: what
 	// the stack uses now and what it used before. A whole apply removes the
@@ -71,25 +75,28 @@ type ManifestWebServer struct {
 	Config string `json:"config"`
 }
 
-// ManifestCaddy is which build of its image a site's Caddy was deployed
-// with, and how apply came by it. The configuration names a tag that moves
-// (see acme.Published), so the compose file's digest is the only fact about
-// what ran, and this keeps it beside the tag it was resolved from in a form
-// an operator can read on the host without parsing YAML.
-type ManifestCaddy struct {
+// ManifestPin is the build one service of a stack was deployed with, and
+// how apply came by it.
+type ManifestPin struct {
+	// Stack is the stack: infra, or an app's name.
+	Stack string `json:"stack"`
+	// Service is the configuration's name for the image: a key of
+	// apps.<name>.images (Eg: app), or caddy.
+	Service string `json:"service"`
 	// Image is the reference as the configuration names it
-	// (Eg: ghcr.io/paisans-software/caddy:2).
+	// (Eg: ghcr.io/paisans-software/mbin:stack-1).
 	Image string `json:"image"`
 	// Reference is what the compose file names and the host pulled: Image
-	// with the digest it resolved to (Eg: ghcr.io/paisans-software/caddy:2@sha256:...).
+	// with the digest it resolved to (Eg: ghcr.io/paisans-software/mbin:stack-1@sha256:...).
 	Reference string `json:"reference"`
 	// ResolvedAt is when the apply that first deployed this Reference
 	// resolved it, RFC 3339. A later apply resolving the same build keeps it.
 	ResolvedAt string `json:"resolved_at"`
-	// Source is where the digest came from: "registry" when apply asked the
+	// Source is where the build came from: "registry" when apply asked the
 	// registry, "deployed" when the registry could not be reached and apply
-	// kept the build the host already ran, "configured" when acme.image named
-	// a digest itself.
+	// kept the build the host already ran, "held" when apply kept an app on
+	// the build its other sites run, "configured" when the configuration
+	// named a digest itself.
 	Source string `json:"source"`
 }
 
