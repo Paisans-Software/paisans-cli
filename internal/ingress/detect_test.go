@@ -81,6 +81,9 @@ func TestDetectsADockerCaddyThatObtainsItsOwnCertificates(t *testing.T) {
 	if ws.Server != ingress.ServerCaddy || ws.Container != "caddy-1" || ws.Config != "/opt/caddy/Caddyfile" || ws.Certs != ingress.CertsAutomatic {
 		t.Fatalf("got %+v", ws)
 	}
+	if ws.Main != "/etc/caddy/Caddyfile" || len(ws.Mounts) != 2 || ws.Mounts[0] != (ingress.Mount{Source: "/opt/caddy/Caddyfile", Destination: "/etc/caddy/Caddyfile"}) {
+		t.Errorf("main %q, mounts %+v", ws.Main, ws.Mounts)
+	}
 	if len(sudo.asked) != 0 {
 		t.Errorf("sudo was used: %v", sudo.asked)
 	}
@@ -171,7 +174,7 @@ func TestDetectsABareMetalNginxWithCertbot(t *testing.T) {
 		{key: "renewal", out: "authenticator = nginx\n"},
 	}}
 	ws := ingress.Detect(ingress.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
-	if ws.Server != ingress.ServerNginx || ws.Container != "" || ws.Process != "nginx" || ws.Config != "/etc/nginx/nginx.conf" {
+	if ws.Server != ingress.ServerNginx || ws.Container != "" || ws.Process != "nginx" || ws.Config != "/etc/nginx/nginx.conf" || ws.Main != ws.Config {
 		t.Fatalf("got %+v", ws)
 	}
 	if ws.CertFile != "/etc/letsencrypt/live/status.example.org/fullchain.pem" || ws.KeyFile != "/etc/letsencrypt/live/status.example.org/privkey.pem" {

@@ -480,6 +480,7 @@ sites:
     ingress:
       mode: external              # paisans (default) or external
       listen: 127.0.0.1:8480      # external only, and required there
+      # include_dir: /etc/nginx/paisans.d   # external only; apply derives it, false opts out
 ```
 
 * **`mode: paisans`**, the default, runs the toolkit's Caddy on the monitor,
@@ -515,6 +516,64 @@ sites:
   cause, is tried again for about half a minute first; a dry run lists the
   check without running it. `docs/guides/behind-your-own-web-server.md`
   walks through it.
+
+**The toolkit writes its own file, never the operator's configuration.** In
+`mode: external` `paisans apply` without `--site` puts each app's site, the snippet `ingress show`
+prints for the web server it finds, in a file of its own in `include_dir`, a
+directory on the host the web server includes with one line the operator adds
+once:
+
+| Server | The one line |
+|---|---|
+| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile |
+| nginx | `include /etc/nginx/paisans.d/*.conf;`, inside the `http` block |
+| Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` |
+
+The file is named for the deployment, `paisans-<token>-<app>.caddy` or
+`.conf`, so two deployments writing in one directory never collide. Apply
+writes it before the ingress check, validates the server's whole
+configuration (`caddy validate`, `nginx -t`, `apachectl configtest`, inside
+the container for one in a container) and reloads it (`caddy reload`, `nginx
+-s reload`, `apachectl graceful`). When either fails it puts back what was
+there, so the server keeps the configuration it ran, and warns with the
+server's own error. A file already as it should be is not written and nothing
+is reloaded. Each file goes into the deployment's manifest with what removing
+it needs, so its removal is driven by that record: `app remove`, `site
+remove` (with `--force` too) and an apply where the app's hostname moved off
+the site or `include_dir` changed delete the file, and only that file, never
+the directory or anything else in it, then validate and reload the same way.
+A file changed on the host since apply wrote it is left and reported; one
+already gone is fine. `site remove --host-gone` reaches nothing, and says the
+files may still be there.
+
+The line must be a wildcard, because the directory may go: a deployment
+removed, or the directory deleted by hand. Caddy's `import` of a glob that
+matches nothing, nginx's `include` of one and Apache's `IncludeOptional` all
+start with an empty or missing directory, without the paisans sites. A line
+naming a file or the directory itself, or Apache's plain `Include`, fails the
+next start or reload once it is gone, and takes down every site the server
+carries, the operator's own included. So apply reads the server's
+configuration first (the Caddyfile, `nginx -T`, Apache's include lines) and
+writes nothing unless it includes the directory by a wildcard that takes in
+the toolkit's files: with no such line it warns with the exact line to add,
+and with a literal one it warns with the line it found and the one to use
+instead; either way the run does not end as complete.
+
+`include_dir` unset, apply derives it beside the server's main configuration,
+`<its directory>/paisans.d`, and writes it into `paisans.yaml` under the
+site's `ingress`, in place, keeping every comment, with a warning saying so
+(`watch: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
+recorded only once the server is found to include it. For a server in a
+container the directory must be visible inside it: the host path comes from
+the mount of the configuration's directory, and the line names the path as
+the container sees it. A container that mounts its configuration file alone
+has no such directory, so nothing is recorded, and the warning names the
+mount to add to its compose file. `include_dir: false` writes nothing, for a
+server apply has no snippet for or an operator who keeps the configuration by
+hand: `ingress show` prints the snippet to copy, as it always does. `validate`
+refuses `include_dir` outside `mode: external` (`ingress-include-dir-mode`)
+and anything but a plain absolute path, since it goes into the server's
+configuration and into commands on the host (`ingress-include-dir-path`).
 
 `listen` belongs to `mode: external` alone, which cannot work without it
 (`ingress-listen-mode`). Docker publishes a port with its own iptables rules,

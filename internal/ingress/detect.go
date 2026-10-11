@@ -58,8 +58,13 @@ type WebServer struct {
 	// listening on 443 or 80 on the host itself; one of them is set.
 	Container string
 	Process   string
-	// Config is its configuration's path on the host, where known.
+	// Config is its configuration's path on the host, where known, and
+	// Main the same as the server itself reads it: inside the container,
+	// for one in a container.
 	Config string
+	Main   string
+	// Mounts are the container's mounts, host path and container path.
+	Mounts []Mount
 	Certs  Certs
 	// CertFile and KeyFile are the certificate files for the target's
 	// hostname, with CertsFiles; Example is one of the server's own, when
@@ -170,7 +175,11 @@ func Detect(h Host, t Target) WebServer {
 		}
 	}
 	if ws.Container != "" {
-		ws.Config = containerConfig(docker, ws.Container, ws.Server)
+		ws.Mounts = containerMounts(docker, ws.Container)
+		ws.Config = containerConfig(ws.Mounts, ws.Server)
+		if paths := configPaths[ws.Server]; len(paths) > 0 {
+			ws.Main = paths[0]
+		}
 	}
 	exec := func(command string) (string, error) {
 		if ws.Container != "" {
@@ -187,8 +196,11 @@ func Detect(h Host, t Target) WebServer {
 			ws.Why = "nginx -T failed: " + firstLine(out, err)
 			break
 		}
-		if m := regexp.MustCompile(`(?m)^# configuration file (\S+):$`).FindStringSubmatch(out); m != nil && ws.Config == "" {
-			ws.Config = m[1]
+		if m := regexp.MustCompile(`(?m)^# configuration file (\S+):$`).FindStringSubmatch(out); m != nil {
+			if ws.Config == "" {
+				ws.Config = m[1]
+			}
+			ws.Main = m[1]
 		}
 		files(h, &ws, t, out, `ssl_certificate`, `ssl_certificate_key`, `server_name`, "--nginx")
 	case ServerApache:
@@ -203,8 +215,14 @@ func Detect(h Host, t Target) WebServer {
 	default:
 		ws.Why = "there is no snippet for " + string(ws.Server)
 	}
+	if ws.Main == "" && ws.Container == "" {
+		ws.Main = ws.Config
+	}
 	return ws
 }
+
+// Mount is one of a container's mounts.
+type Mount struct{ Source, Destination string }
 
 type container struct {
 	name, image string
@@ -318,17 +336,22 @@ var configPaths = map[Server][]string{
 	ServerHAProxy: {"/usr/local/etc/haproxy/haproxy.cfg"},
 }
 
-// containerConfig is the host path of a container's configuration: the
-// mount its image reads it from.
-func containerConfig(docker Runner, name string, s Server) string {
+// containerMounts reads a container's mounts.
+func containerMounts(docker Runner, name string) []Mount {
 	out, err := docker.Run("docker inspect --format '{{json .Mounts}}' " + name)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var mounts []struct{ Source, Destination string }
+	var mounts []Mount
 	if json.Unmarshal([]byte(strings.TrimSpace(out)), &mounts) != nil {
-		return ""
+		return nil
 	}
+	return mounts
+}
+
+// containerConfig is the host path of a container's configuration: the
+// mount its image reads it from.
+func containerConfig(mounts []Mount, s Server) string {
 	for _, path := range configPaths[s] {
 		for _, m := range mounts {
 			switch {

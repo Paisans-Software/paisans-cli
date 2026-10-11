@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -228,6 +229,59 @@ type Ingress struct {
 	// an IPv4 address and a port. Required with mode external, refused with
 	// mode paisans.
 	Listen string `yaml:"listen"`
+	// IncludeDir is the directory on the host the toolkit writes its own
+	// files in for the operator's web server, which includes them with one
+	// wildcard line. Unset, apply derives it beside the web server's
+	// configuration and writes it here; false writes nothing there.
+	IncludeDir IncludeDir `yaml:"include_dir"`
+}
+
+// IncludeDir is sites.<site>.ingress.include_dir: a path, false, or unset.
+type IncludeDir struct {
+	Path string
+	// Off is include_dir: false.
+	Off bool
+}
+
+// Unset reports whether include_dir is not written at all.
+func (d IncludeDir) Unset() bool { return d.Path == "" && !d.Off }
+
+// UnmarshalYAML reads a path or false. true means nothing, so it is refused
+// rather than read as either.
+func (d *IncludeDir) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!bool" {
+		var on bool
+		if err := node.Decode(&on); err != nil {
+			return err
+		}
+		if on {
+			return fmt.Errorf("line %d: include_dir is true, which names no directory. Write the directory, or false to have the toolkit write nothing for your web server", node.Line)
+		}
+		*d = IncludeDir{Off: true}
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: include_dir is %s, not a directory or false", node.Line, describeNode(node))
+	}
+	*d = IncludeDir{Path: node.Value}
+	return nil
+}
+
+// IncludeDirProblem says what is wrong with an include_dir path, empty when
+// nothing is. It is written into the web server's configuration and into
+// shell commands, so it is held to plain absolute paths.
+func IncludeDirProblem(dir string) string {
+	switch {
+	case !strings.HasPrefix(dir, "/"):
+		return "is not an absolute path"
+	case dir == "/":
+		return "is the root directory"
+	case path.Clean(dir) != dir:
+		return "is not written in its clean form, " + path.Clean(dir)
+	case strings.ContainsAny(dir, " \t\n'\"\\$`;#*?[]{}"):
+		return "holds a space, a quote or a character a shell or a web server's glob reads specially"
+	}
+	return ""
 }
 
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it

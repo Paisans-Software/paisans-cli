@@ -36,6 +36,12 @@ type Manifest struct {
 	// manifest written before apply recorded it has none, and its history
 	// starts with the next apply.
 	Images []ManifestImage `json:"images,omitempty"`
+	// Ingress are the files apply wrote into the include directory of the
+	// operator's web server, on a monitor site in ingress mode external.
+	// They are outside the deployment root, so they are listed apart from
+	// Files, with what removing one needs: the server to validate and
+	// reload once it is gone.
+	Ingress []ManifestIngress `json:"ingress,omitempty"`
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every
@@ -45,6 +51,24 @@ type ManifestImage struct {
 	// ghcr.io/paisans-software/caddy).
 	Repository string   `json:"repository"`
 	References []string `json:"references"`
+}
+
+// ManifestIngress is one file apply wrote for the operator's web server,
+// which proves it this deployment's to the command that removes it.
+type ManifestIngress struct {
+	// App is the app the file serves.
+	App string `json:"app"`
+	// Path is the file on the host, absolute.
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	// Server is the web server that includes it: caddy, nginx or apache.
+	Server string `json:"server"`
+	// Container is the docker container the server runs in, empty when it
+	// runs on the host itself.
+	Container string `json:"container,omitempty"`
+	// Config is the server's main configuration, as the server reads it:
+	// inside the container, for one in a container.
+	Config string `json:"config"`
 }
 
 // ManifestCaddy is which build of its image a site's Caddy was deployed

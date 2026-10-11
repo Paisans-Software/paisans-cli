@@ -28,6 +28,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
+	"github.com/paisans-software/paisans-stack/internal/ingress/ingresstest"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
@@ -142,6 +143,21 @@ type host struct {
 	// filesAnswer, when set, rewrites the answer to the probe that reads the
 	// manifest's files.
 	filesAnswer func(string) (string, error)
+	// web is the operator's web server, when the host runs one: the
+	// commands writing or removing a file under webDir and those run in
+	// its container go to it.
+	web *ingresstest.Server
+}
+
+// webDir is where the operator's web server's include directory is.
+const webDir = "/opt/caddy/"
+
+func (h *host) webCommand(command string) bool {
+	if h.web == nil {
+		return false
+	}
+	return strings.HasPrefix(command, "if [ -e '"+webDir) || strings.HasPrefix(command, "rm -f -- '"+webDir) ||
+		strings.Contains(command, "mkdir -p '"+webDir) || strings.HasPrefix(command, "docker exec 'caddy-1' sh -c")
 }
 
 func (h *host) Describe() string { return h.name }
@@ -319,6 +335,9 @@ func (h *host) Run(command string) (string, error) {
 	if w.failOnce != "" && strings.Contains(command, w.failOnce) {
 		w.failOnce = ""
 		return "failed by the test", errors.New("exit status 1")
+	}
+	if h.webCommand(command) {
+		return h.web.Plain().Run(command)
 	}
 	// host prepare's key lock: the command inside it is what runs.
 	if inner, ok := strings.CutPrefix(command, "mkdir -p /etc/paisans && flock '/etc/paisans/authorized_keys.lock' sh -c '"); ok {
@@ -1068,6 +1087,7 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 		var m render.Manifest
 		if err := json.Unmarshal([]byte(content), &m); err == nil {
 			inv.ManifestFiles = m.Files
+			inv.ManifestIngress = m.Ingress
 			if inv.ManifestFiles == nil {
 				inv.ManifestFiles = []render.ManifestFile{}
 			}
