@@ -11,8 +11,9 @@ runtime. [docs/decisions.md](docs/decisions.md) records why.
 
 ## What it does
 
-It installs a complete community stack on one machine, then adds sites later as
-a manually invoked, additive step, without touching application configuration.
+It installs a complete community stack on every site `paisans.yaml` declares,
+one machine or several, then adds sites later as a manually invoked, additive
+step, without touching application configuration.
 Every command that changes a host prints its plan and changes nothing on a
 server unless given `--execute`. One dry run writes a local file: `paisans
 apply` without `--site` may add missing generated secrets to the secrets file,
@@ -30,7 +31,9 @@ paisans site remove home-b --execute       # take a site out of the deployment
 paisans doctor                             # what is unhealthy, and how to recover
 ```
 
-`paisans help` lists every command.
+`paisans help` lists every command, and [docs/commands.md](docs/commands.md)
+describes each one: what it does, when to run it on its own rather than
+through `paisans apply`, its flags, and what it changes.
 
 ## Design rules that everything else follows from
 
@@ -69,7 +72,8 @@ rule 5.
 ### Rule 3: object storage from the first install
 
 The same logic as rule 1, applied to files. **Garage ships out of the box**,
-single-node at `init`, replicated across sites when one is added.
+single-node on the first install (`storage init`, which a whole `apply` runs),
+replicated across sites when one is added (`storage add`).
 
 Starting with media on local disk and moving it later is a migration, not an
 addition — and for a federated instance it is a migration with consequences
@@ -227,12 +231,14 @@ Synapse special case.
 The media store cannot leave the node, and the kind renders its own Postgres
 plus the initialisation hook that creates the authentication service's database
 beside it, neither of which exists on a clustered site. A clustered homeserver
-would render and then meet the missing database at the first sign in. The same
-reasoning refuses `element`, which is a static client with no server side
-state, and `oauth2-proxy`, whose session is a cookie. So the refusal is the
-existing shape rather than a special case for Matrix: a kind with no Postgres
-service has nothing to join, and cluster placement would render it onto every
-apps site with storage of its own.
+would render and then meet the missing database at the first sign in. That
+refusal is a check of its own, `homeserver-must-be-pinned`, because the kind
+does run a Postgres service and the general check would let it through. The
+general check, `cluster-placement-without-a-cluster`, refuses `element`, which
+is a static client with no server side state, `oauth2-proxy`, whose session is
+a cookie, and `uptime`, whose database is a SQLite file: a kind with no
+Postgres service has nothing to join, and cluster placement would render it
+onto every apps site with storage of its own.
 
 `writefreely` used to be in that list. It no longer is: the kind now means the
 [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp) fork,
@@ -276,8 +282,8 @@ install is every app pinned to the only site, which is why this costs a new
 adopter nothing.
 
 `cluster` is the opt-in variant: drop the stack's own `postgres` service, point
-it at its own site's HAProxy (rule 2), put its media in Garage. Two compose profiles per app,
-and the toolkit picks one.
+it at its own site's HAProxy (rule 2), put its media in Garage. One compose
+template per app renders either shape, and the placement picks which.
 
 Pinned is not restricted to a cloud VM — pinning to a home is equally valid. The
 cloud VM is one location among several.
@@ -288,10 +294,11 @@ with the apps role and sharing one database through the local proxy. An
 application storing its data anywhere else gets neither half: it would be
 rendered onto each of those sites with its own separate storage, so one
 hostname would serve two deployments that diverge the moment anybody writes,
-and a failover would move readers between them. Element and oauth2-proxy are
-the cases that exist: a static client with no server side state, and a
-session kept in a cookie rather than a database. Pinning either is not a
-downgrade, because that was always its availability. WriteFreely used to be
+and a failover would move readers between them. Element, oauth2-proxy and
+uptime are the cases that exist: a static client with no server side state, a
+session kept in a cookie rather than a database, and a monitor keeping a
+SQLite file. Pinning any of them is not a downgrade, because that was always
+its availability. WriteFreely used to be
 in this group too, before the fork it now runs gained Postgres support; see
 Rule 5 above.
 
@@ -325,7 +332,7 @@ Four things make that sequence true rather than nearly true:
 * **Stop the stack before archiving.** Tarring a live Postgres volume produces a
   torn copy that may restore and then fail later. Stop it, or `pg_dump` instead.
 * **Use bind mounts under `/srv/paisans/<token>/<stack>/`, not named volumes.** This is why the
-  tar is one line instead of a `--volumes-from` dance, so the toolkit should lay
+  tar is one line instead of a `--volumes-from` dance, so the toolkit lays
   pinned stacks out that way from the start.
 * **Lower the DNS TTL before the move**, not during it.
 * **The hostname must not change** — same name, new address. For an ActivityPub
@@ -349,9 +356,9 @@ because something else was compacting.
 In order of preference: a separate VM for pinned apps; the same VM with etcd's
 data directory on its own device; or a box big enough, with monitoring.
 
-The toolkit should **warn** here rather than refuse. Unlike a co-located witness,
-which is incoherent, this is merely risky — and the risk is acceptable if it is
-chosen rather than stumbled into.
+The toolkit **warns** here (`pinned-app-on-witness`) rather than refusing.
+Unlike a co-located witness, which is incoherent, this is merely risky, and the
+risk is acceptable if it is chosen rather than stumbled into.
 
 #### There is one HA cluster, and that is deliberate
 
@@ -617,13 +624,10 @@ later recreates a network whose recorded configuration changed, but leaves
 one with no record alone (created by an older Compose or by hand), so `apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
-**Helping an operator behind their own web server.** Two commands, neither of
-which changes anything:
-
-```sh
-paisans ingress show  --app status   # the hand-off sheet, for the web server it finds
-paisans ingress check --app status   # from your machine, as a visitor would
-```
+**Helping an operator behind their own web server.** Two commands, `ingress
+show` and `ingress check`, neither of which changes anything.
+How to run them, and their flags, are under *`paisans ingress show` and
+`paisans ingress check`* in [docs/commands.md](docs/commands.md).
 
 `show` prints the hostname, the upstream (`listen`) and the health path; what
 the web server must do (terminate TLS for the hostname, pass `Host`, set
@@ -656,7 +660,10 @@ hostname, and its days to expiry; the sign in redirect naming a callback under
 answering, on the public addresses. Any other dial failure, such as no route
 from where the check runs, says nothing about the port: one conclusive answer
 still passes, naming the family that could not be reached (commonly IPv6 from
-a home connection), and with none the check fails as inconclusive. In `mode: paisans` there is nothing to hand off, and `check`
+a home connection), and with none the check fails as inconclusive. In `mode:
+external` a check that fails also reads the web server, as `show` does, and
+names it, so the fix lands on the right configuration; a passing check reaches
+no host. In `mode: paisans` there is nothing to hand off, and `check`
 runs only the first two.
 
 **Moving an existing monitor.** A deployment whose uptime hostname already has
@@ -748,8 +755,9 @@ missed and the next one late, since a push that fails outright takes about
 33 s (10 s timeout, two retries). The threshold is the same two as every
 other check; the fork evaluates heartbeats every 15 s, so it costs one such
 tick. The monitor's own site pushes to no one with one monitor, and so gets
-no heartbeat, and a role-less monitor site therefore still runs no
-infrastructure stack. With two monitors on two sites every site pushes to
+no heartbeat, and a monitor site with no other role in `mode: external`
+therefore still runs no infrastructure stack (in `mode: paisans` its Caddy
+already gives it one). With two monitors on two sites every site pushes to
 both, each monitor site pushes to the other, and each seed expects the
 other's site, which is what notices a monitor's host dying. Declaring a
 monitor changes `heartbeat.env` on every site, so a new one reaches a host at
@@ -786,9 +794,9 @@ admin makes by hand, and the channels an admin attaches to any monitor, are
 never touched. An admin who ticks **Attach to new managed monitors** on their
 channel is subscribed to apps added later; nobody's recipients are in YAML.
 
-**Beside etcd** the monitor renders `RETENTION_VACUUM=false`. The fork's full
-VACUUM rewrites the whole file every six hours, which is the one burst of I/O
-worth refusing next to a member whose heartbeats are measured in hundreds of
+**Beside etcd** is why the monitor renders `RETENTION_VACUUM=false`, on
+every site it runs on. The fork's full VACUUM rewrites the whole file every six
+hours, which is the one burst of I/O worth refusing next to a member whose heartbeats are measured in hundreds of
 milliseconds, and at steady state it reclaims nothing that SQLite would not
 reuse anyway. It matters wherever the monitor shares a machine with an etcd
 member, which `monitor-shares-a-site` warns about on a data site.
@@ -823,15 +831,17 @@ and drops to it. An image older than that entrypoint ignores the seed.
 etcd quorum is a majority: 1 member survives nothing but works; 3 members
 survive one loss; **2 members survive nothing and are strictly worse than 1.**
 
-So a join must take the cluster from one voter to three in a single operation —
-the second site and a witness together. It can never rest at two.
+So a join that grows the voters takes the cluster from one to three in a single
+operation: the second site and a witness together. It can never rest at two.
 
 With `etcd.members` left out (see *`etcd.members` and `cluster.sites` follow
 from the roles*), that is one edit to the roles: the new site gets `data`
 and the site in the third location gets `witness`, in the same change.
 Giving a second site `data` alone derives two voters, which `validate`
-refuses, naming both ways out: a witness in a third location, or
-`etcd.members` written with one site, which gives up automatic failover.
+refuses, suggesting a witness in a third location first, and naming the
+other way out: `etcd.members` written with one site, which gives up automatic
+failover. The toolkit never demands the witness; it refuses only the two
+voters (see *Nothing here is permanent*).
 
 ## The witness is a third location, not a cloud account
 
@@ -941,32 +951,44 @@ anyone, so there is nothing to lose that way.
 
 ### Nothing here is permanent
 
-A witness holds no data, so relocating one is cheap and scriptable — remove the
+A witness holds no data, so relocating one is cheap in principle: remove the
 member, add the new one. Start with whatever third location is available and
-move it when a better one appears.
+move it when a better one appears. No command does the move yet; the table
+says what does exist.
 
 If a gateway VM is in use, the third location already exists before anyone asks
-for a witness: the join enables the witness role on a machine already running,
+for a witness: the join gives the witness role to a machine already running,
 rather than provisioning a new one.
 
 | Stage | etcd members | Witness |
 |-------|--------------|---------|
-| `init`, no gateway | 1 | none — correct, not missing |
-| `init` with gateway | 1 | gateway serves ingress; witness role dormant |
-| `site add` | 3 | enable on the gateway, or name a third location |
-| later | 3 | `witness move` relocates it |
+| first apply, no gateway | 1 | none: correct, not missing |
+| first apply with a gateway | 1 | the gateway serves ingress and holds no witness role yet |
+| second data site, by `site add` | 3 | given to the gateway, or to a site in a third location, in the same change |
+| later | 3 | not built: no command moves a witness to another site; `site remove` takes one out |
 
-Declining a witness entirely is supported and means **giving up automatic
-failover**: two sites with two voters cannot safely promote anyone, so `site add`
-configures plain streaming replication with a documented manual promote instead.
-That is a legitimate choice. It is a different mode, not a slightly degraded
-version of the same one, and the toolkit should say so plainly. `validate`
-does (`one-voter-no-failover`): a cluster of two or more sites with one etcd
-member gets a warning saying that one member elects nobody, that while the
-voter's site is down every other site's Patroni loses etcd and stops taking
-writes, and that promoting the replica is a manual step. A warning and not a
-refusal, because the mode works as described; what it must not do is pass as
-the automatic one.
+A witness is required only as a concept; the toolkit never demands one.
+Declining it means **giving up automatic failover**, and no command configures
+a separate mode for that: a deployment founded with several data sites and one
+etcd member, `etcd.members` written with that one site, runs plain streaming
+replication, and promoting a replica is a manual step. That is a legitimate
+choice. It is a different mode, not a slightly degraded version of the same
+one, and the toolkit says so plainly. `validate` does
+(`one-voter-no-failover`): a cluster of two or more sites with one etcd member
+gets a warning saying that one member elects nobody, that while the voter's
+site is down every other site's Patroni loses etcd and stops taking writes, and
+that promoting the replica is a manual step. A warning and not a refusal,
+because the mode works as described; what it must not do is pass as the
+automatic one. Two voters are refused rather than warned of (`two-etcd-voters`),
+since they are strictly worse than one, and the refusal's first suggestion is a
+witness.
+
+One voter does not grow by itself. `site add` joins a data site only when
+`etcd.members` lists it, because its stages are an etcd join, and listing it
+beside one voter makes two. So growing a running one-voter cluster through
+`site add` means going from one voter to three in the same change, which is
+what adding a witness with the new data site does (see *Adding a site, and the
+constraint that shapes it*).
 
 ## Configuration
 
@@ -991,9 +1013,9 @@ data sites are home connections nothing can dial.
 ### The config declares intent; etcd holds truth
 
 Nothing about current state belongs in these files — not which node is primary,
-not replication lag. `paisans failover status` reads etcd. A config file that
-starts recording status drifts, and someone trusts a stale value during an
-incident.
+not replication lag. `paisans doctor` asks Patroni for both, which keeps them
+in etcd. A config file that starts recording status drifts, and someone
+trusts a stale value during an incident.
 
 ### `etcd.members` and `cluster.sites` follow from the roles
 
@@ -1010,7 +1032,8 @@ Witnesses come first because a new deployment is founded witness first (see
 *A new deployment is applied witness first*); nothing else reads either list
 for its order. Write a key only to choose something the roles do not say:
 `etcd.members: [home-a]` beside two data sites runs one voter by choice,
-which gives up automatic failover, and listing only some data sites runs
+which gives up automatic failover (`validate` warns, `one-voter-no-failover`;
+see *Nothing here is permanent*), and listing only some data sites runs
 fewer voters than there are data sites. A written key that is empty, or has
 no value, is refused: an empty `etcd.members` leaves Patroni nowhere to keep
 its leader, and an empty `cluster.sites` says nothing that leaving it out
@@ -1057,7 +1080,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 
 Code that decides whether a Docker object is this deployment's matches the
 label, and the full id in it, never a name: `doctor` lists containers with
-`docker ps --filter label=community.paisans.deployment=<id>`, and `prune`
+`docker ps -a --filter label=community.paisans.deployment=<id>`, and `prune`
 removes a volume only when it carries that label with this id. A name is
 chosen by whoever creates the object, and two deployments on one host share
 every naming convention, so a name can only ever say what something is
@@ -1098,7 +1121,10 @@ before `host prepare` has installed anything, so the file keeps one
 deployment per line, and a registry in any other layout is refused rather
 than guessed at. An entry leaves the registry one way: `site remove` deletes
 this deployment's line from a host it has cleaned, under the same lock and
-with the same kind of awk program, and every other line stays as it was.
+with the same kind of awk program, and every other line stays as it was. A
+gateway whose Caddy is kept for the host owner's sites keeps its line, marked
+`"kept":"caddy"`, because that Caddy still holds the gateway role and the root
+(see *`site remove` takes a site out*).
 
 **A host runs one deployment's gateway and one deployment's data site.** The
 gateway binds ports 80 and 443, and its Caddy imports `/srv/caddy.d`; a data
@@ -1324,7 +1350,9 @@ by name, and some are validated or acted on: `s3_bucket` is a setting because
 to the identity provider (see *`oidc client create` makes an app's client at Pocket
 ID*). An Mbin app's `queue` is one because it decides which services the stack
 runs (see *Mbin's queues are in Postgres by default*). A key no template asks
-for is silently ignored. That is the direction in which choosing
+for is ignored without a word, except on a Pocket ID app, where `validate`
+warns, `pocket-id-setting-unknown` (see *Pocket ID's configuration is
+rendered from paisans.yaml*). That is the direction in which choosing
 wrong is silent, and the reason this section exists: an application option put
 under `settings` renders nothing and says nothing.
 
@@ -1338,7 +1366,7 @@ The kinds do not share a format, so a key means something different per kind:
 
 | Format | Kinds | File | A key means |
 |---|---|---|---|
-| env | mbin, outline, pocket-id, oauth2-proxy | `.env` | the variable name |
+| env | mbin, outline, pocket-id, oauth2-proxy, uptime | `.env` | the variable name |
 | ini | writefreely | `config.ini` | `section.key`, exactly one dot |
 | yaml | synapse | `homeserver.yaml` | a nested path, any depth |
 | json | element | `config.json` | a nested path, any depth |
@@ -1570,7 +1598,7 @@ file without an `id` or a `version` is read, and has both from its next write.
 
 **Pasted and captured secrets go in through a pipe.** `paisans secrets set
 <dotted.key>` reads the value from stdin, writes it into `secrets.enc.yaml`
-re-encrypted to the recipients in `.sops.yaml`, and prints only `set <key>`:
+re-encrypted to the recipients in `.sops.yaml`, and prints only `Set <key>.`:
 
 ```
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
@@ -1640,15 +1668,11 @@ encrypted to the same recipients, and refuses an encrypted file with no
 delete the client at Pocket ID, which it says: delete it there by hand if that
 Pocket ID still runs. A removed site's WireGuard key is safe to prune once no
 site's mesh lists it, which is true after a full `site remove`, or after every
-remaining site's next `apply`.
+remaining site's next `apply`. How to run it, and its flags, are under
+*`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
 
-```sh
-paisans secrets prune             # lists them
-paisans secrets prune --execute   # removes them
-paisans secrets prune --without-record --execute   # no gateway to read; asks for the word prune
-```
-
-**A gateway without its DNS token is refused at `render` and `apply`.** `init`
+**A site running the toolkit's Caddy without its DNS token is refused at
+`render` and `apply`**: a gateway, or a monitor in ingress mode `paisans`. `init`
 lists `external.acme_dns_token` as owed rather than refusing, because an
 install is assembled in steps. Rendering without it is different: the gateway's
 Caddy starts, loads its configuration, and fails every DNS-01 challenge, so no
@@ -1670,7 +1694,11 @@ it for `init`, and `render` and `apply` both call it themselves right after
 `config.LoadSecrets`, because both load secrets directly and never call
 `Fill`: a key hand edited into the file after the last `init` has to be
 caught on every path that can reach a host, not only on the one that
-happens to regenerate secrets.
+happens to regenerate secrets. `site add`, `site remove`, `storage init`,
+`storage add` and `storage rotate-key` call it the same way, right after they
+load the secrets, and `secrets set` calls it with the new value in place,
+before it writes the file, so a malformed key is refused there rather than at
+the next render.
 
 ### Mail is declared once and overridden per app
 
@@ -1790,9 +1818,10 @@ So the unit the toolkit ships per `kind` is a **template directory**, and
 ```
 templates/mbin/                             templates/writefreely/
   compose.yaml.tmpl                           compose.yaml.tmpl
-  .env.tmpl                                   config.ini.tmpl
-  caddy.snippet.tmpl                          .env.tmpl
-  valkey.conf.tmpl                            caddy.snippet.tmpl
+  .env.secret.tmpl                            config.ini.secret.tmpl
+  caddy.snippet.tmpl                          .env.secret.tmpl
+  caddy.snippet.media.tmpl                    caddy.snippet.tmpl
+  valkey.conf.tmpl                            caddy.snippet.media.tmpl
   oauth/private.pem.tmpl
   oauth/public.pem.tmpl
 ```
@@ -1801,7 +1830,11 @@ templates/mbin/                             templates/writefreely/
 mirrors the layout under `/srv/paisans/<token>/<stack>/` on the host, so where a rendered file
 lands is read off the tree rather than held in a mapping somewhere else. A file
 the application expects at a path inside its own image is bind-mounted there by
-that kind's `compose.yaml`.
+that kind's `compose.yaml`. The name carries the rest: `.secret` before `.tmpl`
+is dropped from the rendered name and makes the file 0600, every other file is
+0644 so the container's own user can read it, and a `caddy.snippet.*` template
+is rendered onto the gateway under `infra/caddy/snippets/`, because that is
+where Caddy reads it.
 
 Nothing in the secrets path is env-specific: every rule above holds file by
 file, whatever the format. A rendered `config.ini` is a
@@ -1818,8 +1851,8 @@ one**, and where an application accepts either, the file is preferred.
 Reload differs as well. A changed `.env` needs `compose up -d` to recreate the
 container, because Compose passes environment only at start. A changed
 bind-mounted file needs a restart at most, and the container keeps its identity.
-`apply` should take the narrower action rather than recreating a stack it did
-not have to, since a recreate is an outage however brief.
+`apply` takes the narrower action rather than recreating a stack it does not
+have to, since a recreate is an outage however brief.
 
 #### The template set owns everything app-specific, routing and shims included
 
@@ -1978,7 +2011,7 @@ admitting anyone who made an account.
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
 would leave every page readable to a client that did not ask for HTML. So the
-gate covers everything, and three classes go to the app without it:
+gate covers everything, and four classes go to the app without it:
 
 | Class | Matched by | Who authenticates it |
 |---|---|---|
@@ -2005,7 +2038,7 @@ plugin, and the gateway runs no plugin whose failure to build would stop the
 identity provider loading, so the app is where the check lives. A gated
 federating app whose kind records no way to refuse an unsigned read is
 refused (`visibility-gate-without-signed-fetch`), and the monitor proves the
-setting is still on (see *Uptime monitoring*). Reading only from instances on
+setting is still on (see *Monitoring*). Reading only from instances on
 an allow list is a federation policy choice, and it is the founder's.
 
 **Auto-login is derived from the kind.** Someone the gate let through already
@@ -2032,7 +2065,11 @@ members of the mesh are the hosts this deployment already trusts. The bind
 address is the control, because Docker writes its own iptables rules for a
 published port, ahead of the host's, so a port published on all interfaces of
 a host with a public address is reachable from the internet whatever ufw says.
-A cloud VM holding the apps role is exactly that host.
+A cloud VM holding the apps role is exactly that host. The one port published
+elsewhere is the uptime app's on a monitor in ingress mode `external`, the one
+app that mode allows, which binds the site's `listen` for the operator's own
+web server, under the rules in *The monitor has a site of its own*; nothing
+that kind serves can be gated.
 
 What remains the operator's is the mesh itself. A port on the mesh address is
 reachable from every mesh peer, so a compromised peer reaches the app ungated.
@@ -2049,8 +2086,10 @@ a real data and apps site: Spilo's bg_mon took 8080 before Mbin could publish
 there. `validate` lists what each site binds (WireGuard's 51820/udp, etcd's
 2379 and 2380, Postgres, the Patroni API and bg_mon on a data site, HAProxy's
 cluster and stats ports where it runs, Garage's 3900 to 3903, Caddy's 80 and
-443 on every address of the gateway, and every app's published ports, counting
-a clustered app on every apps site and a pinned one on its own) and refuses
+443 on every address of the gateway and of a monitor in ingress mode `paisans`,
+and every app's published ports, counting a clustered app on every apps site,
+a pinned one on its own, and one on a monitor in ingress mode `external` at
+its `listen`) and refuses
 any two that overlap, naming both and the port. The list is read from the same
 constants the rendered files use, so the check cannot drift from what lands on
 a host. It is a refusal rather than a warning because the configuration cannot
@@ -2080,7 +2119,7 @@ member's. Pocket ID and the gate itself are the sign-in flow, so gating either
 gates the login. The monitor is what an admin opens when the sites it watches
 are down, and the gate signs in at the identity provider on those sites, so a
 gated monitor is unreadable at exactly the moment it exists for, and its break
-glass password sign-in (see *Uptime monitoring*) would sit behind the sign-in
+glass password sign-in (see *Monitoring*) would sit behind the sign-in
 it is the fallback for; its own OIDC client already admits only
 `settings.admin_group`, so the gate would add no access control, only a
 dependency. Leaving gating to a hand edited include means that failure
@@ -2108,7 +2147,7 @@ the site is the one Garage site; joining several is `storage add`, below. Like `
 writes nothing without `--execute`.
 
 The plan marks its lines the way `apply`'s dry run does: `○` and the step's
-title (`assign layout role`, `import key for <app>`, `create bucket for
+title (`assign layout role`, `apply layout`, `import key for <app>`, `create bucket for
 <app>`, `grant key for <app>`, `allow website for <app>`) for what is still
 missing, its full sentence under it with `-v`; `✓` for what Garage already
 has, shown with `-v`. Piped output says `todo` and `ok` instead.
@@ -2119,7 +2158,8 @@ leaves object storage unusable**: the containers come up, but no bucket exists a
 application key can reach one, so the failure an adopter meets is an
 application error with no obvious cause, not a message naming a missing step.
 `storage init` is that missing step, and `paisans apply` without `--site` runs
-it once every site is up.
+it once every site is up, or `storage add` in its place when
+`storage.garage.sites` lists more than one site.
 
 #### More than one Garage site: `storage add`
 
@@ -2279,12 +2319,8 @@ Every public name a deployment answers on needs a DNS record, and the toolkit
 creates them, not the operator and not an agent working by hand. A record typed
 into a provider's console is a record nothing checks against the configuration,
 and the first anyone hears of a typo is a visitor who cannot reach the site.
-Founder requirement.
-
-```sh
-paisans dns init                # shows what it would create
-paisans dns init --execute      # creates it
-```
+Founder requirement. How to run it, and its flags, are under *`paisans dns
+init`* in [docs/commands.md](docs/commands.md).
 
 **The records are derived, never declared.** Each app's `hostname`, each of its
 role `hostnames`, and the media hostname of each app that stores objects,
@@ -2435,12 +2471,8 @@ configuration implies it now. Founder decision: the toolkit removes such a
 record, not an operator in the provider's console, which amends the earlier
 rule that the toolkit never deletes a record. A deletion by hand is exactly the
 unchecked edit to the zone that `dns init` exists to replace, and the next one
-deletes the wrong name.
-
-```sh
-paisans dns prune               # lists remove and keep, with reasons
-paisans dns prune --execute     # deletes the removes, then confirms each is gone
-```
+deletes the wrong name. How to run it, and its flags, are under *`paisans dns
+prune`* in [docs/commands.md](docs/commands.md).
 
 **`--name <fqdn>` vouches for one name outside the domain.** A hostname
 configured explicitly beside `community.domain` (Eg: an old shared media name
@@ -2469,8 +2501,8 @@ A record is deleted only when every one of these holds:
 own records: its SPF beside the toolkit's `v=spf1 -all` would be two SPF
 records, which a receiver ignores, and the null MX would turn its mail away.
 
-Until the prune has run, `dns init` refuses, and so does `apply`, which runs
-it before any site is applied. At every name with mail under `community.domain` it looks for a
+Until the prune has run, `dns init` refuses, and so does `apply` without
+`--site`, which runs it before any site is applied. At every name with mail under `community.domain` it looks for a
 no-mail record this deployment's `dns init` made (its comment, and exactly a
 no-mail content), and each one it finds is a conflict naming `dns prune
 --execute` as the fix, shown as `remove with dns prune` in place of what is
@@ -2525,9 +2557,10 @@ address is no longer declared, and prune keeps every record pointing at it.
 
 Patroni fences itself with `/dev/watchdog`: if it stops renewing the timer
 while it is leader, the machine reboots before another node's promotion can
-leave two primaries taking writes. The rendered Patroni runs with
-`PATRONI_WATCHDOG_MODE=required` and maps `/dev/watchdog` into its container,
-so on a data site without a device compose will not even create the container.
+leave two primaries taking writes. The rendered Patroni runs with watchdog mode
+`required`, set in `SPILO_CONFIGURATION` because Spilo passes no `PATRONI_*`
+variable through to Patroni, and maps `/dev/watchdog` into its container, so
+on a data site without a device compose will not even create the container.
 
 Which device a host has is a property of the machine, not of the deployment: a
 board with an Intel TCO timer (`iTCO_wdt`), an AMD one (`sp5100_tco`), a server
@@ -2551,8 +2584,8 @@ sites:
 |------|---------------------------|------------------|
 | `auto` | uses the device the host has, whatever its driver; with none, loads and persists `softdog` and prints a warning | `required`, device mapped |
 | `required` | refuses unless a driver other than `softdog` is present | `required`, device mapped |
-| `softdog` | loads and persists `softdog`, without a warning | `required`, device mapped |
-| `off` | nothing | `PATRONI_WATCHDOG_MODE=off`, no device mapping |
+| `softdog` | loads and persists `softdog`; warns only when a hardware or hypervisor watchdog is present, because Patroni opens that device rather than softdog | `required`, device mapped |
+| `off` | nothing | `off`, no device mapping |
 
 **`softdog` is a fallback, never the assumption.** It is a kernel timer, so it
 reboots a machine whose Patroni hung but not one whose kernel did, and a hung
@@ -2688,8 +2721,8 @@ and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
 
 The section replaced a single string, `ssh: home-a.local`. That form is now
-refused, and the refusal prints the section to write with the old host filled
-in. A site's access has one way to write it (founder decision), so there is
+refused, and the refusal says the section to write and its keys (`host`,
+`user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
 
 #### Keys belong to admins, and sites name admins
@@ -2855,8 +2888,11 @@ database app on the site.
 
 #### `--ssh` replaces the whole section
 
-Every command that reaches a host takes `--ssh <destination>`, the escape hatch
-for a route the section cannot describe. When it is given, it is passed to ssh
+Every command that reaches only one site's host takes `--ssh <destination>`,
+the escape hatch for a route the section cannot describe. A command that
+reaches several sites (`site add`, `preflight`, `storage add`, `apply` without
+`--site`) takes none, because one destination cannot describe several. When it
+is given, it is passed to ssh
 verbatim, exactly as before the section existed, and the section's user, host,
 port and keys are **not** used for the connection. It replaces all of them
 rather than one, so what is used is always either everything the file says or
@@ -3003,15 +3039,19 @@ home-a (ubuntu@home-a.local)
 
 `storage rotate-key` and `storage add` run the check too, since they apply
 files on the sites they change: rotate-key checks every site the app runs on, storage add every
-Garage site and the gateway, all before the first change.
+Garage site, the gateway and every monitor site, all before the first change.
+`site add`, `site remove` and `app remove` check every monitor site as well,
+because each ends by applying the monitor's stack with a new seed.
 
 The check has three parts, in `internal/hostcheck`:
 
 * **Claims**, from `paisans.yaml` alone: every port the site will bind, with
   its protocol, its address and the key that makes the site bind it
   (`render.SiteListeners`, the list the renderer itself uses, so the check
-  cannot drift from what is deployed), the `psns-<token>` interface, and the mesh
-  subnet as a route.
+  cannot drift from what is deployed), the `psns-<token>` interface, the mesh
+  subnet as a route, and every subnet the site's stacks pin
+  (`render.SiteNetworks`, today a monitor's network behind the operator's own
+  web server).
 * **Inventory**, read only, one command per fact, in the C locale because
   the parsers read ufw's, dpkg's and ss's English words, and as root, which
   `ss -p` needs to name another user's process: it asks `id -u` first and
@@ -3019,7 +3059,8 @@ The check has three parts, in `internal/hostcheck`:
   rather than reading every root listener as unowned. Then Docker's version and package,
   every container with its compose project, PID and published ports,
   volumes, networks and their subnets, `ss -Hltnup`, `ip -o link`,
-  `ip -j route`, `ufw status verbose`, whether firewalld is active, and
+  `ip -j route`, `ufw status verbose`, whether firewalld is active, the site
+  files in `/srv/caddy.d`, and
   whether this deployment's manifest, `/srv/paisans/<token>/.paisans-manifest.json`,
   exists and records `psns-<token>.conf`.
 * **Classification.** A container or network is the toolkit's when it
@@ -3047,9 +3088,15 @@ would fail on it. A foreign container's published ports count whether or not
 anything listens, because Docker without its userland proxy publishes with no
 listener, and a stopped container binds again when it starts. A foreign
 Docker network whose subnet overlaps the mesh conflicts, because containers
-would be handed the mesh's addresses. A route conflicts when it equals the
-mesh subnet or lies inside it, because the kernel picks the longest matching
-prefix and it would take the mesh's traffic. A route broader than the mesh (a
+would be handed the mesh's addresses. A Docker network over a subnet the site
+pins conflicts unless it belongs to the stack that pins it, even when it is
+another of this deployment's stacks (one an app left behind when it was
+renamed), because compose would refuse to create the pinned network halfway
+through an apply; when the holder is this deployment's, the conflict names
+the `docker compose -p <project> down` that clears it. A route conflicts when
+it equals the mesh subnet or a pinned one, or lies inside it, because the
+kernel picks the longest matching prefix and it would take that traffic. A
+route broader than the mesh (a
 provider's 10.0.0.0/8 private network) is shorter than the one `psns-<token>`
 adds, so the mesh still wins; it is printed as a note. A `psns-<token>` the
 toolkit did not write conflicts.
@@ -3073,8 +3120,8 @@ On a **shared** host:
   swept, because an image the toolkit renders (`caddy`, `postgres`) may be
   what a foreign project runs.
 * **Docker is left alone**, as it already is whenever `docker compose` works,
-  and Ubuntu's `docker.io` and a Docker snap are still refused rather than
-  removed.
+  and Ubuntu's `docker.io` without a working `docker compose`, and a Docker
+  snap, are still refused rather than removed.
 
 The class is computed on every run and never stored: a host becomes shared
 the day someone installs something beside the deployment. `apply`'s manifest
@@ -3088,20 +3135,19 @@ interfaces, firewall policy and other people's containers.
 WireGuard tools, a firewall, and on a data site a `/dev/watchdog` for Patroni.
 **None of that is done by hand.** A step an operator performs from a wiki page
 is a step done differently on every host, and the first time it matters is a
-rebuild at the worst possible moment. So it is a command:
-
-```
-paisans host prepare --site home-a            # shows what it would do
-paisans host prepare --site home-a --execute  # does it
-```
+rebuild at the worst possible moment. So it is a command, `host prepare`.
+How to run it, and its flags, are under *`paisans host prepare`* in
+[docs/commands.md](docs/commands.md).
 
 It reaches the host through the site's `ssh` section with the operator's own
 ssh, exactly as `apply` does. It probes read only, plans only what is missing,
 and changes nothing without `--execute`; a prepared host plans nothing, so
 re-running it after a failure resumes rather than restarts. It is not part of
-`apply` for the same reason `storage init` is not: installed packages, firewall
+`apply --site` for the same reason `storage init` is not: installed packages, firewall
 rules and loaded kernel modules are host state that no rendered manifest
-describes, so they are probed rather than compared.
+describes, so they are probed rather than compared. `apply` without `--site`
+runs each of them as a command of its own (see *`paisans apply` with no
+`--site` converges the whole deployment*).
 
 #### Operating systems are profiles
 
@@ -3128,12 +3174,15 @@ ubuntu 24.04
 On Ubuntu, Docker Engine and the compose plugin are installed from Docker's own
 apt repository, as
 [Docker's install page](https://docs.docker.com/engine/install/ubuntu/)
-describes, not from Ubuntu's `docker.io`. Every host then runs the same engine
-from the same source whenever it was prepared. The packages that page lists as
+describes, not from Ubuntu's `docker.io`. Every host the toolkit installs
+Docker on then runs the same engine from the same source whenever it was
+prepared. The packages that page lists as
 conflicting (`docker.io`, `docker-compose-v2`, `containerd`, `runc` and the
-rest) are **refused, not removed**: on a host already running containers from
+rest) are **refused, not removed**, when `docker compose` does not work with
+them: on a host already running containers from
 them, removing them stops those containers, and that is a decision for
-whoever started them. Docker installed as a snap is refused the same way,
+whoever started them. Where `docker compose` already works, Docker is left as
+it is. Docker installed as a snap is refused the same way,
 whether or not `docker compose` works with it, since it is an engine from a
 third source. Every `apt-get` runs non-interactively.
 
@@ -3160,7 +3209,9 @@ which a package upgrade replaces, untouched.
 | the port the site is dialled on, UDP, WireGuard | sites with a `public_address` or an `endpoint` (see *Where the mesh dials a site*) |
 | everything arriving on `psns-<token>` | every site |
 | 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in ingress mode paisans |
-| `br-+` to the site's mesh address, cluster port and Garage's S3 port | sites with the apps role |
+| `br-+` to the site's mesh address, cluster port | sites with the apps role |
+| `br-+` to the site's mesh address, Garage's S3 port | sites with the apps role that are also Garage sites |
+| `br-+` to the site's mesh address, the port of each other app that runs there | sites an uptime monitor runs on, so its direct checks of those apps arrive |
 
 Nothing is listed per site. A site that gains the gateway role gains 80 and 443
 at its next prepare, and one that loses it loses them at its next prepare. A
@@ -3184,6 +3235,7 @@ says `todo`, `ok` and `WARN` instead.
 |-----------|---------------|--------------|
 | nothing matching | `○ allow <rule>` | added, with the comment |
 | the rule, with the comment | `✓` | nothing |
+| the rule, with the comment, another action | `○ allow <rule>` | re-added as an allow, replacing the hand edit |
 | the rule, with no comment | `✓`, then `○ adopt rule <rule>` | re-added with the comment |
 | the rule, with someone else's comment | `✓ …: not paisans` | nothing; it satisfies the rule |
 | the same traffic, another action (`limit`, `deny`) | `!` | nothing; a `deny` or `reject` on SSH is refused |
@@ -3247,8 +3299,10 @@ in as many words: "When you expose container ports using Docker, these ports
 bypass your firewall rules." What ufw protects here is everything on the host network,
 which is etcd, Patroni, Garage, HAProxy and Caddy, all `network_mode: host`. A
 container that publishes a port is not covered by this table, which is why
-published ports are to be bound to the mesh address rather than to every
-interface. That binding is separate work and is not part of `host prepare`.
+every rendered app publishes its port on the site's mesh address rather than on
+every interface; a monitor behind the operator's own web server publishes on
+its site's `listen` instead, which `validate` refuses on a public address.
+That binding is the renderer's, not `host prepare`'s.
 
 #### host prepare manages the login user's authorized keys
 
@@ -3393,10 +3447,15 @@ to carry every other rendered secret.
 There is nothing to tunnel to yet.
 
 ```
-paisans init --domain example.org --site home-a --ssh home-a.local
+paisans init               # steps 1 and 2
+paisans apply --execute    # steps 3 to 6
 ```
 
-1. Preflight over SSH. Refuse loudly rather than proceed on a warning.
+`init` reaches a host only to read it. `apply` without `--site` runs `init`
+itself when it has work, so the second command alone does all six.
+
+1. Check the configuration, and the mesh subnet against every host. Refuse
+   loudly rather than proceed on a warning.
 2. Generate every secret — WireGuard keypair, database passwords, object storage
    keys — into `secrets.enc.yaml`.
 3. Render and push.
@@ -3494,7 +3553,7 @@ it:
 | pull | each site's images (below) | every site; a host that has every image its apply needs pulls nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
-| joining | `site add <s>` | the cluster runs and a member has not joined it |
+| joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
 | other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
@@ -3554,11 +3613,25 @@ the toolkit cannot generate (`secrets set`), and a DNS record pointing
 elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
-The output does not follow the phases. After `configuration` and `sudo` it has
-four sections: `prepare`, one line per site for its `host prepare`; `pull`,
-one line per site for its images; `dns`; and `install`, one line per site for
-every step from founding to pass two that is about it, in the order the run first applies each site, then a `storage`
-line for `storage init` or `storage add` when there is Garage. With
+The output does not follow the phases. After `configuration`, `sudo` and
+`etcd members`, which reads each member's founding record on a line of its own
+(`read <s>'s etcd record`, `founded` or `not founded yet`), because founding
+and joining are decided from them, it has four sections: `prepare`, one line
+per site for its `host prepare`; `pull`, one line per site for its images;
+`dns`; and `install`, one line per site for every step from founding to pass
+two that is about it, in the order the run first applies each site, then a
+`storage` line for `storage init` or `storage add` when there is Garage. After
+them, a `pocket id` section asks each Pocket ID app whose sites' steps are all
+up to date, or have run, whether it has an admin (`check <app> for an admin`),
+since one not running yet cannot answer, and names `app admin create` for one
+that has none. Then, when an app is served behind the operator's own web
+server, an `ingress` section: with `--execute` a line for each site file
+written into `include_dir` and a line per app for its ingress check, and in a
+dry run a line per app, `checked with --execute` (see *The monitor has a site
+of its own*). Last, a note names `secrets set` for each credential still owed,
+since only the operator can supply it. A run with `--execute` ends
+`Deployment complete.`; one where an app failed its ingress check, or its site
+file was not written, names those apps instead and exits 1. With
 `--execute` the prepare lines are a block of spinners, one per host, each with
 its own elapsed time; a host that finishes leaves the block with its mark,
 above the hosts still running, so the lines end in the order their hosts
@@ -3639,8 +3712,10 @@ install
   ...
 ```
 
-`dns init` reports as it does when typed, so a conflicting record it lists is
-on screen above the stop that asks for it to be changed.
+`dns init` reports its records as it does when typed, so a conflicting record
+it lists is on screen above the stop that asks for it to be changed. It leaves
+out the configuration's findings, which the run showed at its start, and its
+own closing line, since the run ends on its own.
 
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
 subnet and the secrets file reads but lacks a generated secret, it generates
@@ -3828,7 +3903,8 @@ while `/cluster` names the leader (Patroni v4.1.0, `docs/rest_api.rst`).
 ### `apply` restarts only the infrastructure service whose file changed
 
 The infrastructure stack is one compose project holding etcd, Patroni, HAProxy,
-Garage and the gateway's Caddy. A change to a bind mounted file there used to
+Garage, the toolkit's Caddy and the heartbeat pusher, each where the site's
+roles call for it. A change to a bind mounted file there used to
 restart the whole project, so a new `garage.toml` restarted Patroni, which on
 the primary is a failover, and HAProxy, which drops every app's database
 connection. Each service's bind mounted files live in a directory named for
@@ -3938,9 +4014,9 @@ nothing after it:
 ```
 
 The cause is the newest line that reads as a failure: for a JSON log (etcd,
-most Go services) the `error` field, else `err` or `msg`, of a line whose
-level is error, fatal or panic, never its stack trace; for any other log a
-line that says error, fatal or panic. A log with no such line adds none. The
+most Go services) the `error` field, else `err`, `msg` or `message`, of a line
+whose level is error, fatal, panic, dpanic, crit or critical, never its stack
+trace; for any other log a line that says error, fatal or panic. A log with no such line adds none. The
 30 lines themselves follow with `-v`. `site add`, `site remove`, `storage
 add` and `app remove` stop the same way when a stack they start or the
 monitor they reseed is not healthy, with their own advice after the cause.
@@ -3977,11 +4053,12 @@ HAProxy or Patroni: `haproxy.cfg` or `patroni.env` changed, the `haproxy` or
 `patroni` service changed in `compose.yaml`, or the action restarts or force
 recreates either. Then every app on the site with `cluster` placement and a
 kind that uses Postgres gets a restart after the infrastructure stack's action
-and health gate and after the database bootstrap, and is held to the same gate:
+and health gate and after the database bootstrap, and is held to the same gate.
+The dry run lists the restart, and `-v` gives its reason under it:
 
 ```
-restart   talk
-    its database path changed (HAProxy/Patroni moved), and an app's open database connections do not survive that
+  ○ restart talk
+      its database path changed (HAProxy/Patroni moved), and an app's open database connections do not survive that
 ```
 
 An app that already has its own restart or recreate keeps that one action,
@@ -4242,14 +4319,16 @@ Mbin.** Mbin keeps them, like most of its settings, as database rows once an
 admin saves its settings page, and from then on its `SettingsManager` reads
 the row and ignores the environment. The `.env` therefore also renders
 `MBIN_LOCKED_SETTINGS`, naming every Mbin database setting it sets:
-`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL` and `KBIN_CONTACT_EMAIL` always, and
-`MBIN_PRIVATE_INSTANCE`, `MBIN_AUTHORIZED_FETCH` and
-`MBIN_USE_FEDERATION_ALLOW_LIST` when the app is gated. The paisans fork reads
+`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL` and `KBIN_CONTACT_EMAIL` always,
+`MBIN_SSO_ONLY_MODE` (rendered as `SSO_ONLY_MODE`) when the app has a client
+at the identity provider, and `MBIN_PRIVATE_INSTANCE`,
+`MBIN_AUTHORIZED_FETCH` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
+gated. The paisans fork reads
 each named setting from the environment on every read, never writes it on a
 save, and shows it disabled in the settings page, so `paisans.yaml` stays
-its only source. The list is derived from what the template renders, and a
-test checks it against both the rendered file and the fork's settings, so a
-setting the template gains is locked with it.
+its only source. The list is kept beside the template, and a test checks it
+against both the rendered file and the fork's settings, so a setting the
+template gains and the list misses fails the test.
 
 The known limit: **until the pinned image carries locked settings, the
 database wins after the first admin save.** An image without the feature
@@ -4444,7 +4523,9 @@ will be recreated names one it does not have, the action will pull it, and
 '{{.DockerRootDir}}'`, then `df -B1 --output=avail`). Below the threshold,
 `apply` refuses before writing anything, says how much is free and how much it
 needs, quotes what `docker system df` says is reclaimable, and names
-`--min-free`. The dry run shows the same numbers as a `check disk:` line. A
+`--min-free`. The dry run shows the same numbers on its `disk space` step: the
+free space on the step's line, and under `--verbose` a `disk:` line with the
+threshold and the images to pull. A
 `restart` pulls nothing and is not checked, and nor is a plan that moves no
 stack.
 
@@ -4479,7 +4560,9 @@ are all three of:
 Each goes with `docker image rm <id>`. A removal that fails is a warning and
 not a stop: the stack is already healthy, and an image left behind costs disk,
 not service. The dry run lists what is on the host and would be superseded as
-`prune <repository:tag>` lines under each stack; `Execute` reads the host again
+a `prune old images` step under each stack, which under `-v` names each image
+as `repository:tag` (or `repository@id` when it has no tag left); `Execute`
+reads the host again
 after the gate, because the action has just moved containers off the old
 image. Waiting for the gate is the point: until the new image is healthy, the
 old one is what a rollback would run. `apply --keep-images` skips pruning for
@@ -4556,7 +4639,9 @@ trailing slash is not a difference.
 
 **Every kind's template mounts every path its images declare.** State gets a
 bind under `/srv/paisans/<token>/<stack>/`; throwaway gets a tmpfs. Each pinned image was
-pulled for linux/amd64 and inspected on 2026-10-07:
+pulled for linux/amd64 and inspected on 2026-10-07, except where
+`kinds.ImageVolumes` records otherwise beside the entry (the uptime monitor,
+the admin reconciler and the heartbeat's curl image):
 
 | Image | Declares | Mounted as |
 |-------|----------|------------|
@@ -4565,7 +4650,8 @@ pulled for linux/amd64 and inspected on 2026-10-07:
 | outline 1.10.0 | `/var/lib/outline/data` | bind, `/srv/paisans/<token>/<app>/data`, which was mounted at `/data`, a path nothing reads |
 | postgres 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy | nothing | |
+| uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
@@ -4668,17 +4754,12 @@ itself run against the Pocket ID app.
 Pocket ID users sign in with passkeys, so there is no password to pipe in, and
 a new administrator cannot sign in at all until they have registered one. For
 a `pocket-id` app the command therefore creates the user as an administrator
-and issues a **one-time login link**:
+and issues a **one-time login link**. How to run it, and its flags, are under
+*`paisans app admin create`* in [docs/commands.md](docs/commands.md).
 
-```sh
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern     # shows what it would do
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern --execute
-```
-
-The dry run marks each step `○`, here for a deployment whose Mbin app reads
-the admin group `admins`:
+The dry run marks each step `○`, here for an administrator `founder` of the
+Pocket ID app `auth`, in a deployment whose Mbin app reads the admin group
+`admins`:
 
 ```
 auth on home-a (pocket-id)
@@ -4713,13 +4794,14 @@ without it the page waits for 12 characters and the link is unusable. Over
 fifteen minutes gets the 12 character code. If it
 expires, `--login-link --execute` issues a fresh one for an account that
 exists; without `--login-link`, an existing administrator plans nothing. An
-existing account that is not an administrator plans `grant admin` only, and a
-disabled one is refused rather than re-enabled.
+existing account that is not an administrator plans `make <u> an
+administrator`, and a link only with `--login-link`; a disabled one is
+refused rather than re-enabled.
 
 **The administrator's email is created verified** (`"emailVerified": true`,
 `dto/user_dto.go:29`, stored as sent at `service/user_service.go:299`), and an
-existing account whose email is not verified plans `mark email verified for
-<u>`: a `PUT /api/users/<id>` that sends every field back as read with only
+existing account whose email is not verified plans `verify <u>`: a `PUT
+/api/users/<id>` that sends every field back as read with only
 `emailVerified` changed, since that update overwrites the whole user
 (`service/user_service.go:495-519`). Without it Pocket ID sends
 `email_verified: false`, and the paisans Mbin fork refuses an OIDC sign in whose
@@ -4799,8 +4881,7 @@ which is a restart of a few seconds during which nobody can sign in.
 
 Mail settings come from the `smtp:` block, not from here (see *Mail is
 declared once and overridden per app*). `file_backend` is the one setting
-older than the rest (see *Pocket ID runs on every apps site, and one of them
-is active*).
+older than the rest (see *Rule 3: object storage from the first install*).
 
 ```yaml
 apps:
@@ -4983,13 +5064,8 @@ after the app under another ID than the recorded one. That client may be what a
 running app signs people in with, so replacing it is a decision, not a repair.
 
 `apply` never rotates a secret. The command stays for that and for running the
-step alone:
-
-```sh
-paisans oidc client create --app talk             # shows what it would do
-paisans oidc client create --app talk --execute   # does it
-paisans oidc client create --app talk --rotate-secret --execute
-```
+step alone. How to run it, and its flags, are under *`paisans oidc client
+create`* in [docs/commands.md](docs/commands.md).
 
 For an Mbin app that declares no groups, so that its member group is
 `members` and its admin group `admins`, and a Pocket ID that already has both
@@ -5031,8 +5107,11 @@ group and its admin group**, so a person outside both is refused there before
 the app sees them. The two groups are `apps.<app>.settings.member_group` and
 `settings.admin_group`, defaulting to `members` and `admins`
 (`kinds.MembersGroup`, `kinds.AdminsGroup`), and the command creates
-whichever is missing. The defaults exist because an empty pair would leave an
-open client: anyone who could make a Pocket ID account could sign in to the
+whichever is missing. Outline and WriteFreely read no admin group, so theirs
+is always `admins` and only `member_group` is a setting; the uptime monitor
+has one group, `settings.admin_group`, with no default, because `validate`
+requires it (`uptime-needs-an-admin-group`). The defaults exist because an
+empty pair would leave an open client: anyone who could make a Pocket ID account could sign in to the
 app. Which app reads the groups claim itself differs by kind, and the table
 says so, because for a kind that does not, the restriction is the whole
 control and the operator should know that nothing else stands behind it:
@@ -5105,7 +5184,7 @@ URL would be a second place to spell it, one that can disagree with
 there.** That means empty, which is a client made before this command set one,
 or one of the toolkit's own defaults (`kinds.ToolkitLaunchURLs`): the bare
 `https://<hostname>`, the only default before kinds named a path, and the
-kind's current default. Either plans `set launch URL for client <app>`: a `PUT
+kind's current default. Either plans `set launch URL for <app>`: a `PUT
 /api/oidc/clients/<id>` that sends every field back as read with only
 `launchURL` changed, because the update overwrites the whole client. That keeps
 the callback URLs, PKCE, the public flag, the group restriction (sending it
@@ -5161,13 +5240,9 @@ fails unless a fresh plan is empty.
 
 Taking an app out of `paisans.yaml` and applying stops routing to it and
 leaves the rest on its hosts, as the section on left over files says.
-`app remove` is the decision to take the rest away, made for one app by name:
-
-```sh
-paisans app remove docs                              # shows what it would do
-paisans app remove docs --execute                    # does it, and keeps its data
-paisans app remove docs --delete-data --execute      # and deletes its data, after asking
-```
+`app remove` is the decision to take the rest away, made for one app by name.
+How to run it, and its flags, are under *`paisans app remove`* in
+[docs/commands.md](docs/commands.md).
 
 **It refuses an app still in `paisans.yaml`**, and the infrastructure stack,
 which is never an app. It reads every site before it changes any, and refuses
@@ -5232,37 +5307,80 @@ over marks. A failure there comes after everything of the app's is gone and
 names the `apply` that finishes it.
 
 **It leaves three things and says so.** The app's secrets stay in the secrets
-file, which it never edits, so they are listed for removal with `sops`. Its
+file, which it never edits, so they are listed for removal with `sops`; it does
+take the app, and each Pocket ID group only it named, out of every gateway's
+deployment record, so `paisans secrets prune` can remove them instead (see
+*Three kinds of secret*). Its
 DNS records stay until `paisans dns prune --execute` deletes the ones
 `dns init` made. And everything kept above is listed again at the end, with
 why.
 
-### `site add` — the gateway and witness
+### Adding the gateway and the witness
 
 The straightforward case, because the VM has a stable address and is the one
-thing everything else can dial.
+thing everything else can dial. There is no command for joining it on its own:
+the VM is declared in `paisans.yaml` like any other site, with its roles, its
+mesh address, its `public_address` and its `ssh` section, and the whole
+deployment is applied (see *`paisans apply` with no `--site` converges the
+whole deployment*):
 
 ```
-paisans site add vm --roles gateway,witness --ssh vm.example.org
+paisans apply             # every step it would run, and what each would change
+paisans apply --execute   # runs them, stopping at the first failure
 ```
 
-1. Preflight the VM.
-2. Generate its keypair; record it.
-3. Render the VM's mesh interface: peer home-a, no endpoint; home-a dials out.
-4. Render home-a's mesh interface: peer vm **with** an endpoint, and `PersistentKeepalive`
-   so the NAT mapping stays open.
-5. Push both; bring both up.
-6. **Verify handshakes in both directions.** Stop here on failure.
-7. etcd stays a single member. The VM does not become a voter yet, because two
-   voters are worse than one. With `etcd.members` left out, the `witness` role
-   is what would make it one, so the VM joins as `gateway` alone and gains
-   `witness` in the join that adds the second data site.
+For a VM joining a running site, home-a, as `roles: [gateway]`, the whole
+apply reads what runs and plans the steps below. If home-a served as the
+gateway until then, handing the role over is the change *Moving the gateway*
+describes.
 
-### `site add` — a second data site, and the one hard problem
+1. `init`, which generates the VM's WireGuard keypair on the workstation and
+   records it in the secrets file (see *Where WireGuard keys are generated*).
+2. `host prepare` on every site: the VM gets Docker, WireGuard, a firewall
+   following its roles and the keys of the admins its `ssh.keys` names, and
+   home-a, already prepared, plans nothing.
+3. The pull: the VM pulls the images its apply will start, at the same time as
+   any other host with images to pull, and home-a, which has them, pulls
+   nothing.
+4. `dns init`, for any record the VM's names need.
+5. `apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
+   interface lists home-a as a peer with no endpoint: home-a dials out.
+6. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
+   as a peer **with** an endpoint, and `PersistentKeepalive` so the NAT mapping
+   stays open, applied with `wg syncconf` so nothing on home-a restarts (see
+   *`apply` brings the mesh interface up before anything binds to it*). Each
+   of these applies ends by sweeping the images its site's stacks no longer
+   use (see *`apply` prunes the images it superseded*).
 
-```
-paisans site add home-b --roles data,apps --ssh home-b.local
-```
+The run ends `Deployment complete.`
+Each apply reads its mesh interface back before any stack starts. None waits
+for a handshake, because a tunnel to a site outside etcd carries no quorum: if
+it does not come up, the VM's own traffic waits and nothing that already runs
+is touched. The handshake gate belongs to the change that puts quorum across
+the tunnel, `site add`'s stage 2, which verifies a handshake in both
+directions before any etcd membership changes (see *The staged gate, and the
+half-joined site*).
+
+etcd stays a single member. The VM does not become a voter yet, because two
+voters are worse than one. With `etcd.members` left out, the `witness` role is
+what would make it one, so the VM joins as `gateway` alone and gains `witness`
+in the change that adds the second data site, below. Declared with both roles
+beside one data site, it would make two voters, which `validate` refuses
+(`two-etcd-voters`), saying to take the witness role off while there is one
+data site to vote.
+
+### `site add`: a second data site, and the one hard problem
+
+Home-b is declared in `paisans.yaml` at its end state, `roles: [data]`, and the
+VM gains the `witness` role in the same edit, so the voters go from one to
+three at once (see *Adding a site, and the constraint that shapes it*). The
+whole apply then runs `init` for home-b's secrets, `host prepare` on
+home-b, the pull of home-b's images, `dns init`, a `site add` for each data
+site the running cluster has not admitted, the storage step, and pass two. `site add` is the staged join
+below: it admits the VM to etcd first and home-b after it, one learner at a
+time, then starts home-b's replica. The VM has no `site add` of its own: a
+witness joins inside the data site's join, because a witness joining alone
+would make the voters even, and `site add vm` refuses saying so.
 
 Home-b reaches the VM the same way home-a does. Fine.
 
@@ -5314,22 +5432,26 @@ resumes rather than restarting.
 ### `site add` is built for sites that dial each other
 
 `paisans site add <site>` implements the table above for one case: a new site
-with `roles: [data]` joining a running cluster of one, an existing site gaining
-the witness role in the same join, and **every site dialled**, by its
+with `roles: [data]` joining a running cluster of one, together with the
+witness that makes the voters three (an existing site gaining the witness role,
+or a new site holding it, which preflight checks as a blank host like the new
+site), and **every site dialled**, by its
 `public_address` or its `endpoint` (see *Where the mesh dials a site*).
 A site with neither is refused, naming the relay design above, which is still a
-design: the first deployment that needs it builds it. A second Garage node
-is out of scope too, and removing a site is `site remove`'s (below). Apps on
+design: the first deployment that needs it builds it. A witness has no `site
+add` of its own: it joins in the data site's join, witnesses first in stage 3,
+and `site add <witness>` refuses saying so. A second Garage node
+is `storage add`'s (see *More than one Garage site: `storage add`*), and
+removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
 app stack: give the site the `apps` role, `host prepare` and `apply` it, then
 `apply` the gateway, whose routes gain the site.
 Pocket ID stands by there while another site's instance is active (see
 *Pocket ID runs on every apps site, and one of them is active*). `docs/specs/2026-10-07-site-add.md` is the approved specification.
 
-```
-paisans site add home-b             # every stage, its steps and its gate
-paisans site add home-b --execute   # runs them, stopping at the first failed gate
-```
+The whole apply runs `site add` for each data site the running cluster has not
+admitted. Running it on its own, and its flags, are under *`paisans site add`*
+in [docs/commands.md](docs/commands.md).
 
 The configuration is the end state, and `site add` plans only what differs
 from the live deployment: the `psns-<token>.conf` on each site, `etcdctl member list`,
@@ -5345,7 +5467,7 @@ skipped and why.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 2. Mesh | each site's `psns-<token>.conf`, as a scoped `apply`, then `wg syncconf` (the new site's interface is started) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
-| 3. etcd | for each joiner, witness first: `member add --learner`, its compose file and record written, `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
+| 3. etcd | for each joiner, every witness first: `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
 | 4. Replica | the new site's remaining files by a whole `apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
 | 6. HAProxy | `haproxy.cfg` as a scoped `apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
@@ -5443,14 +5565,8 @@ The reverse of `site add`, for one site by name. The site stays declared in
 host is reached and its roles say what it holds; everything else is computed
 from the configuration with the site taken out, the end state, and the last
 stage writes that back to the file. `docs/specs/2026-10-08-site-remove.md` is
-the approved specification.
-
-```sh
-paisans site remove home-b                             # refusals, then every stage and its gate
-paisans site remove home-b --execute                   # runs them, stopping at the first failed gate
-paisans site remove home-b --delete-data --execute     # and deletes its data, after asking
-paisans site remove home-b --host-gone --execute       # the host is never coming back
-```
+the approved specification. How to run it, and its flags, are under
+*`paisans site remove`* in [docs/commands.md](docs/commands.md).
 
 **It refuses before anything changes**, with the evidence and what to do:
 
@@ -5472,6 +5588,7 @@ paisans site remove home-b --host-gone --execute       # the host is never comin
 | any other Patroni member not running or streaming | the cluster changes under the stages below |
 | the site holds the leader and no member is a streaming `Sync Standby` | only a synchronous standby takes over without losing writes the leader acknowledged |
 | a host that does not answer over ssh | what is on it cannot be read; fix ssh, or say `--host-gone` |
+| `external.acme_dns_token` empty while a site runs the toolkit's Caddy | the same refusal as `render` and `apply`: stage 2 reloads the gateway's routes, and a Caddy without its token obtains no certificate |
 | `--delete-data` without a terminal, or with `--host-gone` | the same rule as `app remove`; and nothing is deleted on a host that is not reached |
 
 **Six stages, each ending at a gate.** Each is planned from live state, so a
@@ -5528,7 +5645,7 @@ deployment's is left alone and not listed:
 | the mesh interface | `wg-quick@psns-<token>`, named for the token, and its file hashing to its manifest entry | the unit disabled and stopped; the file deleted with the rendered files |
 | units and drop-ins | named `paisans-<token>-*` under `/etc/systemd/system` and its drop-in directories | disabled, stopped, deleted; systemd reloaded |
 | ufw rules | a comment starting with exactly `paisans-<token>:` | deleted, except the SSH allow, which is always kept so the host stays reachable, and is not listed: with incoming denied, deleting it would cut the next connection. A rule without that comment is not this deployment's, so it stays and is not listed |
-| authorized keys | nothing can prove one: a key `host prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed |
+| authorized keys | nothing can prove one: a key `host prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, is its own file, so that is deleted |
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
@@ -5631,19 +5748,16 @@ pipe*); and everything kept above, with why.
 A full removal checks the cluster first, and when the other hosts are gone
 every one of its refusals holds, so nothing cleans the host that is left.
 `--force` runs stage 3 alone against one host: stages 1, 2, 5 and 6 do not
-run, none of their refusals are checked, no other site is reached, and neither
+run, none of their refusals are checked, no other site is reached but the
+gateways, which take a site `paisans.yaml` no longer declares out of their
+deployment record, and neither
 `paisans.yaml` nor the secrets file is edited. A site `paisans.yaml` still
 declares has no DNS stage, since its records are still wanted; for one it does
 not declare, the DNS stage follows and is skipped, saying its records are
 deleted by hand, since nothing names its public address.
 `docs/specs/2026-10-09-site-remove-force.md` is the approved specification.
-
-```sh
-paisans site remove monitor-a --force --ssh admin@203.0.113.9                          # dry run
-paisans site remove monitor-a --force --ssh admin@203.0.113.9 --execute --delete-data  # asks for the name
-paisans site remove home-b --force --execute                                           # its declared host, asks for the name
-paisans site remove home-b --force --ssh admin@198.51.100.4 --execute                  # a host it ran on before
-```
+Examples of each form are under *`paisans site remove`* in
+[docs/commands.md](docs/commands.md).
 
 **Which host.** `--ssh user@host[:port]` when given, and it may be any host.
 Otherwise the declared site's own `ssh` section. A site no longer declared
@@ -5669,6 +5783,7 @@ No flag answers either question. Any other host is not asked about.
 | an undeclared site without `--ssh` | there is no way to reach its host |
 | `--ssh` not of the form `user@host[:port]` | the user is who the command logs in as; Eg: `admin@203.0.113.9` |
 | `--ssh` without `--force` | a full removal reaches the site through its `ssh` section |
+| `--ssh` naming a host whose registry entry is another site `paisans.yaml` still declares | the entry is the proof of whose host it is; name that site instead |
 | `--force` with `--host-gone` | `--force` cleans one host, and `--host-gone` reaches none |
 | a host that does not answer over ssh | what is on it cannot be read |
 | the site's own host, or `--delete-data`, with `--execute` and no terminal | it takes a running site from under its cluster, or deletes member data |
@@ -5699,14 +5814,8 @@ is lost, the id is still on every host the deployment reached, in the
 registry. `paisans host deployments` lists it, and `--id` cleans the host of
 it, reading neither `paisans.yaml` nor the secrets file.
 `docs/specs/2026-10-10-remove-without-config.md` is the approved
-specification.
-
-```sh
-paisans host deployments --ssh admin@203.0.113.9                                   # read only
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9                      # dry run
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute            # asks for the name
-paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete-data
-```
+specification. How to run both, and their flags, are under *`paisans host
+deployments`* and *`paisans site remove`* in [docs/commands.md](docs/commands.md).
 
 `host deployments` marks each registry entry `✓`: id, token, domain, site,
 roles and root. Under *not in the registry* it warns, `!`, of any
@@ -5770,7 +5879,8 @@ difference between a tuning rule people follow and one they read once.
 
 `paisans preflight --site <new>` runs the checks on their own and changes
 nothing; `site add` runs the same checks as its first stage. Each finding is
-`ok`, `WARNING` or `REFUSED`, and any refusal stops the join. A check that
+`✓`, `!` or `✗` (`ok`, `WARN` or `FAIL` when piped), and any refusal stops the
+join. A check that
 could not be made (a host that did not answer, output that did not parse) is
 a refusal, not a skip: preflight exists so that every assumption was looked
 at, and "could not look" is not "looked and it was fine".
@@ -5785,12 +5895,12 @@ at, and "could not look" is not "looked and it was fine".
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, and the release at the end of `ldd --version`'s first line | any of the three differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
-| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port where the site runs HAProxy; 80 and 443 for a gateway or a monitor in ingress mode paisans; `listen` for a monitor in ingress mode external; each app's published port |
+| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in ingress mode paisans; `listen` for a monitor in ingress mode external; each app's published port |
 | Mesh | new site | `ip -j route`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
 | Routes | new site | `ip -j route` | a route overlaps `mesh.subnet`, other than one through `psns-<token>` |
 | Disk | new data site | the leader's `sum(pg_database_size(...))`, through its Patroni container's `psql`; `df` on the deepest existing directory towards `/srv/paisans/<token>/infra/postgres` | free space is under that plus 2 GiB |
 | Storage | new site | `docker info --format '{{.DockerRootDir}}'`, then `findmnt -no FSTYPE,SOURCE --target` on Docker's root and on the deployment's root, `/srv/paisans/<token>` (or the deepest directory towards it that exists) | either is a network filesystem (`nfs`, `nfs4`, `cifs`, `smb3`, `glusterfs`, `ceph`, `fuse.sshfs` and the others preflight lists); a type that is neither that nor a local block filesystem (`ext4`, `xfs`, `btrfs`, `zfs`, `f2fs`) warns |
-| Round trip | new site to every other site | three TCP connects to the site's `public_address` on its ssh port, timed with bash's `/dev/tcp` and `$EPOCHREALTIME`; the median is used | `etcd.election_timeout_ms` is under five round trips |
+| Round trip | new site to every other site | three TCP connects to the site's `public_address` on its ssh port, timed with bash's `/dev/tcp` and `$EPOCHREALTIME`; the median is used | another site has no `public_address` to measure to, or `etcd.election_timeout_ms` is under five round trips |
 
 Three of these need a word.
 
@@ -5845,7 +5955,9 @@ does not pass stops it where it is rather than switching back blind.
    gate; and every app answers through the gateway, an HTTPS request from the
    workstation to its hostname answering under 500 (a redirect to a login page
    counts). Pocket ID is asked for `/.well-known/openid-configuration`, the
-   document every client of it fetches first. Lag is looked at up to three
+   document every client of it fetches first. A Pocket ID on more than one
+   apps site must have exactly one active instance (see *Pocket ID runs on
+   every apps site, and one of them is active*). Lag is looked at up to three
    times, because Patroni compares a replica with the leader's last reported
    position and a busy moment shows bytes that are gone on the next look.
 2. **Switch.** In the leader's Patroni container, `patronictl -c
@@ -6169,7 +6281,8 @@ goes through the gateway's Caddy too, and its site block lives in the host's
 `/srv/caddy.d`. The gateway's Caddy mounts that directory read only at
 `/etc/caddy.d`, and the Caddyfile ends with `import /etc/caddy.d/*.caddy`, at
 the top level and after the toolkit's own snippets, so each file there is a
-whole site block and may import `upstream_unavailable` or `upstream_single`.
+whole site block and may import `upstream_unavailable`, `upstream_failover` or
+`upstream_single`.
 
 **paisans never touches what is in it.** `apply` creates the directory, root's
 and 0755, when it is missing, and leaves an existing one as it is. It never
@@ -6239,13 +6352,13 @@ them where they read everything else. Two rules keep that honest:
   up in a public repository.
 
 **Recovery needs four things, and only the first is here:** this documentation,
-plus the deployment's config, its secrets, and its data. See the backup contract
-above. Documentation tells you what to rebuild; it contains nothing to rebuild
+plus the deployment's config, its secrets, and its data. See *Backup and
+restore*. Documentation tells you what to rebuild; it contains nothing to rebuild
 it *from*.
 
 ## Where this repository lives
 
-`Paisans-Software/paisans-stack`, private, since 2026-09-15. It was
+`Paisans-Software/paisans-stack`, public, since 2026-09-15. It was
 `josephquigley/paisans-stack` until then. GitHub redirects the old path, and a
 redirect is a courtesy rather than a contract, so a clone that predates the move
 should have its remote updated rather than relying on one.
