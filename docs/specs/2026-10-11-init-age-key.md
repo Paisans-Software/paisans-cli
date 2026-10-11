@@ -135,9 +135,9 @@ The key goes from the keystore to the decryption in memory. No environment
 variable is set, so `ssh` and the other children paisans starts never inherit
 the key or a way to fetch it.
 
-When the keystore has no item for the id, decryption runs as today, which
-still reads `sops/age/keys.txt`. When the item's key opens none of the file's
-recipients, the same is tried before giving up. What the operator is told when
+When the keystore has no item for the id, or cannot be read at all, decryption
+runs as today, which still reads `sops/age/keys.txt`. When the item's key opens
+none of the file's recipients, the same is tried before giving up. What the operator is told when
 both fail:
 
 * no item for this id: the existing "no usable age key" problem, with a line
@@ -178,6 +178,9 @@ Each is a `ui.Problem` with a hint and an explanation, in the existing style.
 | `--age-private-key-file` path inside the configuration's directory | refuse |
 | decryption: no item and no variable | existing problem plus the item it looked for |
 | decryption: item's recipient not in the file | the recipient mismatch problem above |
+| decryption: the keystore cannot be read, Eg: no D-Bus session or a locked keychain | sops' own search runs; if it finds nothing, a problem naming the item and the keystore's error |
+| decryption fails while a `SOPS_AGE_*` variable is set | the no key problem names the variable and the item it kept paisans from reading |
+| `init` with a `SOPS_AGE_*` variable set | the key is still made and kept; the output names the variable and says paisans uses it instead of the item until it is unset |
 
 ## Testing
 
