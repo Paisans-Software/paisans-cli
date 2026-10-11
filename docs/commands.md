@@ -252,8 +252,11 @@ See *Rendered configuration is a build artifact* and the `apply` sections under
 Joins a data site to the running cluster in eight gated stages: preflight,
 mesh, etcd (learners, then promoted), the Patroni replica, synchronous mode,
 HAProxy, each existing replica's `patroni.env`, and each monitor site's uptime
-stack. An existing site that gains the witness role in the same change joins
-etcd first, as a learner, in the same stage.
+stack. A witness joining in the same change, whether an existing site gaining the
+role or a new host holding it, joins etcd first, as a learner, in the same
+stage, and preflight checks a new witness host as it checks the new site.
+Refuses a witness given on its own: it joins through the `site add` of the
+data site joining with it.
 
 ```
 paisans site add home-b             # every stage, its steps and its gate

@@ -3431,7 +3431,7 @@ step runs after the one before it:
 | hosts | `host prepare --site <s>` | every site; a prepared host plans nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
-| joining | `site add <s>` | the cluster runs and a member has not joined it |
+| joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
 | other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
@@ -5154,22 +5154,12 @@ Home-b is declared in `paisans.yaml` at its end state, `roles: [data]`, and the
 VM gains the `witness` role in the same edit, so the voters go from one to
 three at once (see *Adding a site, and the constraint that shapes it*). The
 whole apply then runs `init` for home-b's secrets, `host prepare` on
-home-b, `dns init`, a `site add` for each etcd member the running cluster has
+home-b, `dns init`, a `site add` for each data site the running cluster has
 not admitted, the storage step, and pass two. `site add` is the staged join
 below: it admits the VM to etcd first and home-b after it, one learner at a
-time, then starts home-b's replica.
-
-One step of that is not built yet. The whole apply plans a `site add` for the
-VM as well as for home-b, and `site add` refuses a site whose roles are not
-exactly `[data]`, so the run stops at the VM's. Until the whole apply plans the
-witness's join inside the data site's, as `site add` already performs it, the
-data site's join is run on its own between two whole applies:
-
-```
-paisans apply --execute             # init, host prepare and dns init; stops at site add vm
-paisans site add home-b --execute   # the VM's etcd member, then home-b's, staged
-paisans apply --execute             # finds both admitted, and runs the rest
-```
+time, then starts home-b's replica. The VM has no `site add` of its own: a
+witness joins inside the data site's join, because a witness joining alone
+would make the voters even, and `site add vm` refuses saying so.
 
 Home-b reaches the VM the same way home-a does. Fine.
 
@@ -5221,11 +5211,15 @@ resumes rather than restarting.
 ### `site add` is built for sites that dial each other
 
 `paisans site add <site>` implements the table above for one case: a new site
-with `roles: [data]` joining a running cluster of one, an existing site gaining
-the witness role in the same join, and **every site dialled**, by its
+with `roles: [data]` joining a running cluster of one, together with the
+witness that makes the voters three (an existing site gaining the witness role,
+or a new site holding it, which preflight checks as a blank host like the new
+site), and **every site dialled**, by its
 `public_address` or its `endpoint` (see *Where the mesh dials a site*).
 A site with neither is refused, naming the relay design above, which is still a
-design: the first deployment that needs it builds it. A second Garage node
+design: the first deployment that needs it builds it. A witness has no `site
+add` of its own: it joins in the data site's join, witnesses first in stage 3,
+and `site add <witness>` refuses saying so. A second Garage node
 is `storage add`'s (see *More than one Garage site: `storage add`*), and
 removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
@@ -5252,7 +5246,7 @@ skipped and why.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 2. Mesh | each site's `psns-<token>.conf`, as a scoped `apply`, then `wg syncconf` (the new site's interface is started) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
-| 3. etcd | for each joiner, witness first: `member add --learner`, its compose file and record written, `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
+| 3. etcd | for each joiner, every witness first: `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
 | 4. Replica | the new site's remaining files by a whole `apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
 | 6. HAProxy | `haproxy.cfg` as a scoped `apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
