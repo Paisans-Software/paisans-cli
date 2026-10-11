@@ -438,7 +438,7 @@ func readConvergeState(configPath, secretsPath string) (*config.Config, converge
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); errors.Is(err, fs.ErrNotExist) {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); errors.Is(err, fs.ErrNotExist) {
 		why = append(why, "no secrets file yet")
 	} else if err != nil {
 		// A file that is there and does not read (no age key, most often)
@@ -475,7 +475,7 @@ func convergeSecretsPath(configPath, secretsPath string) string {
 // would drop, and one encrypted with no .sops.yaml recipient beside it,
 // which writing would leave in plaintext. Why it failed is a ui.Problem.
 func convergeGenerate(cfg *config.Config, path string) (names, recipients []string, left string, err error) {
-	secrets, err := config.LoadSecrets(path)
+	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
 		return nil, nil, "", generateProblem(path, err)
 	}
@@ -1473,7 +1473,7 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	if secrets, err := config.LoadSecrets(secretsPath); err == nil {
+	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); err == nil {
 		for _, key := range secretsgen.OwedNames(cfg, secrets) {
 			r.Note("secrets: "+key+" is owed and only you can provide it", "paisans secrets set "+key+" < value")
 		}

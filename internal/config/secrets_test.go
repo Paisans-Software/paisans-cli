@@ -174,7 +174,8 @@ func TestMissingSecretsFileIsAProblem(t *testing.T) {
 	}
 }
 
-// A secrets file at a version this toolkit does not read says so.
+// A secrets file at a format version newer than this toolkit reads says a
+// newer toolkit wrote it.
 func TestSecretsVersionIsAProblem(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
 	if err := os.WriteFile(path, []byte("version: 2\n"), 0o600); err != nil {
@@ -182,8 +183,119 @@ func TestSecretsVersionIsAProblem(t *testing.T) {
 	}
 	_, err := config.LoadSecrets(path)
 	var p *ui.Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Hint, "version 2") {
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, "version 2") || !strings.Contains(p.Explain, "newer toolkit") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// A file with no version is read as this format, and written with it.
+func TestSecretsWithoutAVersionAreRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, []byte("cluster:\n  admin_password: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(path, exampleDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Version != config.SecretsVersion {
+		t.Errorf("version %d, want %d", s.Version, config.SecretsVersion)
+	}
+}
+
+const (
+	exampleDeploymentID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	otherDeploymentID   = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
+)
+
+// The file says first which format it is and which deployment it belongs
+// to.
+func TestWrittenSecretsStartWithVersionAndID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	s := &config.Secrets{Version: config.SecretsVersion, ID: exampleDeploymentID, Cluster: config.ClusterSecrets{AdminPassword: "x"}}
+	if err := config.WriteSecrets(path, s, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			body = append(body, line)
+		}
+	}
+	if len(body) < 2 || body[0] != "version: 1" || body[1] != "id: "+exampleDeploymentID {
+		t.Errorf("the file does not start with version and id:\n%s", data)
+	}
+}
+
+// A secrets file belonging to another deployment is refused: it holds that
+// deployment's credentials and the state captured from its services.
+func TestSecretsOfAnotherDeploymentAreRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nid: "+otherDeploymentID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.LoadDeploymentSecrets(path, exampleDeploymentID)
+	var p *ui.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.HasSuffix(p.Hint, "secrets.enc.yaml belongs to deployment 0c1d…, not f2a9…") {
+		t.Errorf("hint %q", p.Hint)
+	}
+	for _, want := range []string{"another deployment's credentials", "move", "paisans init"} {
+		if !strings.Contains(p.Explain, want) {
+			t.Errorf("explanation lacks %q: %s", want, p.Explain)
+		}
+	}
+}
+
+// Two ids that share a token are told apart in full.
+func TestSecretsOfAnotherDeploymentWithTheSameToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	same := "f2a9" + otherDeploymentID[4:]
+	if err := os.WriteFile(path, []byte("version: 1\nid: "+same+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.LoadDeploymentSecrets(path, exampleDeploymentID)
+	var p *ui.Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, same) || !strings.Contains(p.Hint, exampleDeploymentID) {
+		t.Errorf("got %v", err)
+	}
+}
+
+// A file with no id is accepted, and carries the id from its next write.
+func TestSecretsWithoutAnIDTakeTheDeployments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(path, exampleDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ID != exampleDeploymentID {
+		t.Errorf("id %q, want %q", s.ID, exampleDeploymentID)
+	}
+	if err := config.WriteSecrets(path, s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := config.LoadSecrets(path); err != nil || again.ID != exampleDeploymentID {
+		t.Errorf("written id %v, %v", again, err)
+	}
+}
+
+// The deployment's own file is read.
+func TestSecretsOfThisDeploymentAreRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nid: "+exampleDeploymentID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.LoadDeploymentSecrets(path, exampleDeploymentID); err != nil {
+		t.Fatal(err)
 	}
 }
 
