@@ -1455,6 +1455,34 @@ The toolkit generates it, records it here, and then hands it to Pocket ID,
 which accepts a caller supplied secret; see *`oidc client create` makes an
 app's client at Pocket ID*.
 
+**The file names its format and its deployment.** Its first two keys are
+`version`, the secrets file's own format (currently 1, and independent of
+`paisans.yaml`'s `version`), and `id`, the id of the deployment it belongs to,
+the same value as `paisans.yaml`'s `id`:
+
+```yaml
+version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+cluster:
+  ...
+```
+
+Every write of the file sets both, whether by `init`, `apply`, `secrets set` or
+`oidc client create`. A file with a newer `version` is refused, since a newer
+toolkit wrote it. A file whose `id` is not `paisans.yaml`'s is refused by every
+command that reads it:
+
+```
+secrets.enc.yaml belongs to deployment 0c1d…, not f2a9…
+```
+
+It holds another deployment's credentials and the state captured from its
+running services: OIDC client credentials and Pocket ID group IDs name objects
+at that deployment's Pocket ID, and used here they would quietly point at
+things this deployment does not have. To start this deployment fresh, move the
+file aside and run `paisans init`; `paisans apply` creates a new one as well. A
+file without an `id` or a `version` is read, and has both from its next write.
+
 **Pasted and captured secrets go in through a pipe.** `paisans secrets set
 <dotted.key>` reads the value from stdin, writes it into `secrets.enc.yaml`
 re-encrypted to the recipients in `.sops.yaml`, and prints only `set <key>`:

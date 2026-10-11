@@ -247,7 +247,7 @@ func pocketIDKey(cfg *config.Config, configPath, secretsPath, app string) (strin
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID)
 	if err != nil {
 		return "", err
 	}

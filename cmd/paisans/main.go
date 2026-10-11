@@ -429,10 +429,10 @@ func runInit(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	switch {
 	case errors.Is(err, iofs.ErrNotExist):
-		secrets = &config.Secrets{Version: 1}
+		secrets = &config.Secrets{Version: config.SecretsVersion, ID: cfg.ID}
 	case err != nil:
 		return err
 	}
@@ -539,7 +539,7 @@ func runRender(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -631,7 +631,7 @@ func runApply(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -951,7 +951,7 @@ func runStorageInit(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1268,7 +1268,7 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadSecrets(*secretsPath)
+	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return nil, nil, nil, nil, false, err
 	}
