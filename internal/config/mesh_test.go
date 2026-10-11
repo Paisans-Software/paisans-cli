@@ -26,6 +26,88 @@ func TestListenPortIsTheEndpointsPort(t *testing.T) {
 	}
 }
 
+// The address other sites dial: public_address on the endpoint's port, or
+// on 51820 when no endpoint is written. An endpoint is used as written only
+// where there is no public_address to dial instead, or where it is an address
+// itself. A hostname beside a public_address is not dialled, so the mesh
+// never waits on DNS.
+func TestDialEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		endpoint, public, public6 string
+		want                      string
+	}{
+		{"public address alone", "", "203.0.113.10", "", "203.0.113.10:51820"},
+		{"port only", ":51821", "203.0.113.10", "", "203.0.113.10:51821"},
+		{"hostname beside a public address", "vm.example.org:51822", "203.0.113.10", "", "203.0.113.10:51822"},
+		{"hostname alone", "home.example.org:51820", "", "", "home.example.org:51820"},
+		{"address alone", "198.51.100.2:51820", "", "", "198.51.100.2:51820"},
+		{"address beside a public address", "198.51.100.2:51820", "203.0.113.10", "", "198.51.100.2:51820"},
+		{"IPv6 address", "[2001:db8::1]:4500", "", "", "[2001:db8::1]:4500"},
+		{"neither", "", "", "", ""},
+		{"public_address6 alone", "", "", "2001:db8::10", ""},
+		{"port only without a public address", ":51820", "", "", ""},
+		{"malformed", "vm.example.org", "203.0.113.10", "", ""},
+	} {
+		site := config.Site{Endpoint: tc.endpoint, PublicAddress: tc.public, PublicAddress6: tc.public6}
+		if got := site.DialEndpoint(); got != tc.want {
+			t.Errorf("%s: DialEndpoint() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The port a site listens on is the port it is dialled on, derived or not.
+func TestListenPortFollowsTheDialEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		site config.Site
+		want int
+	}{
+		{config.Site{PublicAddress: "203.0.113.10"}, 51820},
+		{config.Site{PublicAddress: "203.0.113.10", Endpoint: ":51821"}, 51821},
+		{config.Site{PublicAddress: "203.0.113.10", Endpoint: "vm.example.org:51822"}, 51822},
+		{config.Site{PublicAddress6: "2001:db8::10"}, 0},
+	} {
+		if got := tc.site.ListenPort(); got != tc.want {
+			t.Errorf("%+v: ListenPort() = %d, want %d", tc.site, got, tc.want)
+		}
+	}
+}
+
+// A site with only a public address is dialled, so it peers directly with a
+// site that has neither.
+func TestAPublicAddressPeersDirectly(t *testing.T) {
+	public := config.Site{PublicAddress: "203.0.113.10"}
+	home := config.Site{}
+	if !home.PeersDirectly(public) || !public.PeersDirectly(home) {
+		t.Error("a site with a public address does not peer directly with one that dials out")
+	}
+	if home.PeersDirectly(config.Site{PublicAddress6: "2001:db8::10"}) {
+		t.Error("public_address6 alone made a site dialled")
+	}
+}
+
+func TestLoadRefusesAPortOnlyEndpointWithoutAPublicAddress(t *testing.T) {
+	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \":51820\"\n", 1)
+	_, err := config.Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "sites.home-a.endpoint") || !strings.Contains(err.Error(), "public_address") {
+		t.Fatalf("Load = %v, want a refusal of the endpoint naming public_address", err)
+	}
+	ok := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \":51821\"\n    public_address: 203.0.113.10\n", 1)
+	if _, err := config.Load(write(t, ok)); err != nil {
+		t.Fatalf("Load refused a port-only endpoint beside a public address: %v", err)
+	}
+}
+
+func TestLoadRefusesAPortOnlyEndpointWithABadPort(t *testing.T) {
+	for _, port := range []string{":0", ":70000", ":wg"} {
+		body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \""+port+"\"\n    public_address: 203.0.113.10\n", 1)
+		_, err := config.Load(write(t, body))
+		if err == nil || !strings.Contains(err.Error(), "sites.home-a.endpoint") {
+			t.Errorf("endpoint %q: Load = %v, want a refusal of the endpoint", port, err)
+		}
+	}
+}
+
 func TestLoadRefusesAnEndpointWithoutAPort(t *testing.T) {
 	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: home-a.example.org\n", 1)
 	_, err := config.Load(write(t, body))

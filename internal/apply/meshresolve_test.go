@@ -54,13 +54,18 @@ func TestHostnameEndpointsAreFlushedAndResolvedBeforeTheMesh(t *testing.T) {
 		t.Fatalf("asked %d times whether the endpoint names resolve, want once: %v", len(polls), host.commands)
 	}
 	poll := polls[0]
-	for _, want := range []string{"command -v resolvectl", "resolvectl flush-caches", "'vm.example.org'", "'watch.example.org'"} {
+	for _, want := range []string{"command -v resolvectl", "resolvectl flush-caches", "'vm.example.org'"} {
 		if !strings.Contains(poll, want) {
 			t.Errorf("the probe does not carry %q:\n%s", want, poll)
 		}
 	}
 	if strings.Contains(poll, "198.51.100.2") {
 		t.Errorf("the probe resolves an address:\n%s", poll)
+	}
+	// watch's endpoint names a host, but watch declares public_address, so
+	// the rendered file dials the address and the name is nobody's to wait on.
+	if strings.Contains(poll, "watch.example.org") {
+		t.Errorf("the probe waits on a name the rendered file does not dial:\n%s", poll)
 	}
 	if strings.Index(poll, "flush-caches") > strings.Index(poll, "getent") {
 		t.Errorf("the names are asked for before the cache is flushed:\n%s", poll)

@@ -26,18 +26,63 @@ func ParseEndpointPort(endpoint string) (int, error) {
 	return n, nil
 }
 
-// ListenPort is the UDP port this site's WireGuard interface listens on: its
-// endpoint's port, since that is the port every other site dials. A site with
-// no endpoint is never dialled, so it has no fixed port: its interface is
-// rendered without ListenPort and WireGuard picks one ("Optional; if not
-// specified, chosen randomly", wireguard-tools v1.0.20210914, src/man/wg.8).
-// That is also what lets two deployments share a host behind NAT without
-// choosing ports. Zero means none. It assumes the endpoint was checked.
-func (s Site) ListenPort() int {
+// DefaultWireGuardPort is the port a site is dialled on when it declares a
+// public_address and no endpoint port: WireGuard's own conventional port.
+const DefaultWireGuardPort = 51820
+
+// DialEndpoint is the host:port every other site's WireGuard dials to reach
+// this one, or "" when nothing dials it. It is the one place the endpoint is
+// read, so the render, the firewall, the port checks and validate cannot
+// disagree about who is dialled where.
+//
+//   - public_address declared: that address, on the endpoint's port, or on
+//     DefaultWireGuardPort when no endpoint is written. An endpoint naming a
+//     host is not dialled: its name still gets a DNS record (`paisans dns
+//     init`), but the mesh never waits on DNS for a site whose address is
+//     declared. An endpoint written as an address is dialled as written.
+//   - no public_address: the endpoint as written, a dynamic DNS name or a
+//     router's address; nothing when there is none, and the site only dials
+//     out. public_address6 alone derives nothing: a peer with no IPv6 route
+//     could never reach it.
+//
+// It assumes the endpoint was checked; a malformed one dials nothing.
+func (s Site) DialEndpoint() string {
 	if s.Endpoint == "" {
-		return 0
+		if s.PublicAddress == "" {
+			return ""
+		}
+		return net.JoinHostPort(s.PublicAddress, strconv.Itoa(DefaultWireGuardPort))
 	}
 	port, err := ParseEndpointPort(s.Endpoint)
+	if err != nil {
+		return ""
+	}
+	host, _, _ := net.SplitHostPort(s.Endpoint)
+	switch {
+	case net.ParseIP(host) != nil:
+		return s.Endpoint
+	case s.PublicAddress != "":
+		return net.JoinHostPort(s.PublicAddress, strconv.Itoa(port))
+	case host == "":
+		return ""
+	default:
+		return s.Endpoint
+	}
+}
+
+// ListenPort is the UDP port this site's WireGuard interface listens on: the
+// port of its DialEndpoint, since that is the port every other site dials. A
+// site that is never dialled has no fixed port: its interface is rendered
+// without ListenPort and WireGuard picks one ("Optional; if not specified,
+// chosen randomly", wireguard-tools v1.0.20210914, src/man/wg.8). That is
+// also what lets two deployments share a host behind NAT without choosing
+// ports. Zero means none.
+func (s Site) ListenPort() int {
+	endpoint := s.DialEndpoint()
+	if endpoint == "" {
+		return 0
+	}
+	port, err := ParseEndpointPort(endpoint)
 	if err != nil {
 		return 0
 	}
@@ -45,14 +90,14 @@ func (s Site) ListenPort() int {
 }
 
 // PeersDirectly reports whether this site and another exchange WireGuard
-// traffic without a relay: one of them has an endpoint, so the other dials
-// it. Two sites with no endpoint never peer at all; their traffic goes
-// through the first site that has one, in sorted order, which is the one
-// path between them and is gone when that site is. The render lays out
+// traffic without a relay: one of them is dialled (DialEndpoint), so the
+// other dials it. Two sites that are never dialled never peer at all; their
+// traffic goes through the first dialled site, in sorted order, which is the
+// one path between them and is gone when that site is. The render lays out
 // exactly this, and validate's quorum rule reads the same predicate, so the
 // two cannot disagree about which sites reach each other.
 func (s Site) PeersDirectly(other Site) bool {
-	return s.Endpoint != "" || other.Endpoint != ""
+	return s.DialEndpoint() != "" || other.DialEndpoint() != ""
 }
 
 // SetMesh writes mesh.subnet and the named sites' addresses into the

@@ -688,8 +688,9 @@ func (p *planner) renderTemplate(name string, data any) (string, error) {
 
 // renderWireGuard builds one site's interface and peer list.
 //
-// A site with a stable endpoint is dialled by everyone else. Two sites that
-// both lack one cannot dial each other, so their traffic relays through a site
+// A site with a dial endpoint (config.Site.DialEndpoint: its public_address,
+// or the endpoint it writes) is dialled by everyone else. Two sites that both
+// lack one cannot dial each other, so their traffic relays through a site
 // that has one. Relaying keeps this to static configuration with no daemon and
 // no coordination service, which is why plain WireGuard was chosen.
 func (p *planner) renderWireGuard(site *siteView) (string, error) {
@@ -713,7 +714,7 @@ func (p *planner) renderWireGuard(site *siteView) (string, error) {
 			return "", fmt.Errorf("secrets sites.%s.wireguard_private_key: %w", name, err)
 		}
 		if !p.cfg.Sites[site.Name].PeersDirectly(p.cfg.Sites[name]) {
-			// Neither side has an endpoint. Nothing to configure: the traffic
+			// Neither side is dialled. Nothing to configure: the traffic
 			// goes through a relay.
 			continue
 		}

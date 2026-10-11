@@ -88,7 +88,7 @@ type Entry struct {
 	// Interface is the deployment's WireGuard interface, psns-<token>.
 	Interface string `json:"interface,omitempty"`
 	// ListenPort is the UDP port that interface listens on here, zero when
-	// the site has no endpoint and WireGuard picks one.
+	// nothing dials the site and WireGuard picks one.
 	ListenPort int `json:"listen_port,omitempty"`
 	// Subnet is the deployment's mesh subnet, and Address this site's
 	// address in it.
@@ -219,7 +219,7 @@ func (c Conflict) Error() string {
 // clashes is everything theirs holds that ours needs: the same token, root,
 // interface or listen port, a mesh subnet overlapping ours either way, or the
 // gateway or data role when ours claims it too. A listen port of zero is a
-// site with no endpoint, which WireGuard gives a port of its own, and holds
+// site nothing dials, which WireGuard gives a port of its own, and holds
 // none.
 func clashes(theirs, ours Entry) []string {
 	var out []string

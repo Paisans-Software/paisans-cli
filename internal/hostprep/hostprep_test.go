@@ -523,6 +523,28 @@ func TestFirewallRulesFollowRoles(t *testing.T) {
 	}
 }
 
+// A site with a public address and no endpoint is dialled on 51820, so it
+// opens that port; the port of a port-only endpoint is the one opened.
+func TestADerivedEndpointOpensItsPort(t *testing.T) {
+	cfg := fixture(t)
+	for _, tc := range []struct {
+		endpoint, want string
+	}{
+		{"", "22/tcp,51820/udp,all inbound on psns-f2a9"},
+		{":51821", "22/tcp,51821/udp,all inbound on psns-f2a9"},
+	} {
+		site := cfg.Sites["home-a"]
+		site.Endpoint, site.PublicAddress = tc.endpoint, "203.0.113.10"
+		var got []string
+		for _, r := range hostprep.Rules(cfg.Deployment(), site) {
+			got = append(got, r.String())
+		}
+		if strings.Join(got, ",") != tc.want {
+			t.Errorf("endpoint %q: got %s, want %s", tc.endpoint, strings.Join(got, ","), tc.want)
+		}
+	}
+}
+
 // A monitor serving its own apps opens 80 and 443 like a gateway; behind the
 // operator's own web server it opens nothing for the web, because that server
 // already holds both.

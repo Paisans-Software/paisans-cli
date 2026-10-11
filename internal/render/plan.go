@@ -129,8 +129,10 @@ type plannedApp struct {
 }
 
 type siteView struct {
-	Name      string
-	Address   string
+	Name    string
+	Address string
+	// Endpoint is what the other sites dial, config.Site.DialEndpoint: not
+	// the endpoint as written, which may be a name beside a public_address.
 	Endpoint  string
 	Roles     []config.Role
 	IsData    bool
@@ -205,7 +207,7 @@ func newPlanner(cfg *config.Config, secrets *config.Secrets) *planner {
 		p.sites[name] = &siteView{
 			Name:       name,
 			Address:    site.Address,
-			Endpoint:   site.Endpoint,
+			Endpoint:   site.DialEndpoint(),
 			Roles:      site.Roles,
 			IsData:     site.Has(config.RoleData),
 			IsApps:     site.Has(config.RoleApps),

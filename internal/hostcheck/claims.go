@@ -19,7 +19,7 @@ type Claims struct {
 	Listeners []render.Listener
 	// Interface is this deployment's mesh interface, psns-<token>, and Mesh
 	// the subnet routed through it. ListenPort is the WireGuard port the
-	// site's endpoint declares, 0 when it has none.
+	// site is dialled on, 0 when nothing dials it.
 	Interface  string
 	ListenPort int
 	Mesh       *net.IPNet

@@ -476,8 +476,7 @@ sites:
   watch:
     roles: [monitor]
     address: 10.44.0.4
-    endpoint: watch.example.org:51820
-    public_address: 203.0.113.20
+    public_address: 203.0.113.20  # the mesh dials it here, on 51820
     ingress:
       mode: external              # paisans (default) or external
       listen: 127.0.0.1:8480      # external only, and required there
@@ -789,12 +788,13 @@ pretend otherwise by installing a placeholder.
 
 A witness buys the ability to lose one site. That only holds if the voters
 left standing can reach each other, and on this mesh reachability is decided
-by endpoints: two sites peer directly when one of them has an `endpoint` the
-other dials, and two sites with none never peer at all. Their traffic goes
-through the first site that has an endpoint, and that path has no fallback,
+by who is dialled: two sites peer directly when the other dials one of them,
+at its `public_address` or its `endpoint` (see *Where the mesh dials a site*),
+and two sites that are never dialled never peer at all. Their traffic goes
+through the first dialled site, and that path has no fallback,
 because the configuration is static and WireGuard does not reroute.
 
-So take the obvious shape, two homes without endpoints and a VM as gateway and
+So take the obvious shape, two homes that are not dialled and a VM as gateway and
 witness. The VM is the only thing either home dials, and every packet between
 the homes goes through it. The VM dying is the exact failure the witness
 exists to survive, and it does the opposite: home-a and home-b lose each
@@ -803,20 +803,21 @@ Patroni on both loses its DCS, and the database is read-only everywhere.
 The site that held no data took the cluster down.
 
 **The toolkit refuses this** (`voters-share-a-relay`): with three or more
-etcd members, at least two of them must have an endpoint. That is the whole
-rule, and it is exactly the property that matters. A voter with an endpoint
+etcd members, at least two of them must be dialled. That is the whole
+rule, and it is exactly the property that matters. A dialled voter
 reaches every other voter, so the voters surviving the loss of any one site
 still reach each other precisely when at least one survivor is dialled, and
 with one dialled voter in the cluster there is a site, that voter, whose loss
 leaves none. Two dialled voters cover every single loss. Two voters are
 refused on their own, and one voter has nobody to be partitioned from.
 
-The fix is to give one home a stable endpoint. A dynamic DNS name kept
-current by the router and one forwarded UDP port is enough: that home is then
+The fix is to make one home dialled: a `public_address` where it has a static
+one, or else an `endpoint`. A dynamic DNS name kept current by the router and
+one forwarded UDP port is enough: that home is then
 dialled by the other, the two peer directly, and the VM is a tiebreaker again
 rather than a hub. The example declares `home-a` that way. The relay through
 the VM (see *`site add`: a second data site, and the one hard problem*)
-remains how a site with no endpoint reaches another with none, which is fine
+remains how a site that is not dialled reaches another that is not, which is fine
 for traffic that can wait out an outage and never fine for quorum.
 
 ### `cluster.sites` and the `data` role name the same sites
@@ -899,6 +900,8 @@ be reviewed by someone who cannot read the secrets.
 
 See [`examples/paisans.example.yaml`](examples/paisans.example.yaml) and
 [`examples/secrets.example.yaml`](examples/secrets.example.yaml).
+[`examples/home-sites.yaml`](examples/home-sites.yaml) is a smaller layout whose
+data sites are home connections nothing can dial.
 
 ### The config declares intent; etcd holds truth
 
@@ -1027,6 +1030,56 @@ reads it on the site being added. `app admin create` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
 `--execute` they claim through sudo, since the registry is root's.
 
+### Where the mesh dials a site
+
+Two sites peer directly when one of them is dialled by the other. Which
+address a site is dialled on follows from two of its keys, `public_address`
+and `endpoint`:
+
+```yaml
+sites:
+  vm:                                  # dialled on 203.0.113.10:51820
+    address: 10.44.0.3
+    public_address: 203.0.113.10
+  home-a:                              # dialled by its dynamic DNS name
+    address: 10.44.0.1
+    endpoint: home-a.example.org:51820
+  home-b:                              # dialled by nobody: it dials out
+    address: 10.44.0.2
+```
+
+| `public_address` | `endpoint` | The other sites dial |
+|------------------|------------|----------------------|
+| set | absent | `public_address` on 51820 |
+| set | `":<port>"` | `public_address` on that port |
+| set | a name and a port | `public_address` on that port; the name still gets its A record from `dns init` |
+| set or absent | an address and a port | the endpoint as written |
+| absent | a name and a port | the endpoint as written, resolved by each peer's WireGuard |
+| absent | absent | nothing: the site only dials out |
+
+A site with a `public_address` is dialled at that address rather than through a
+name that resolves to it, so the mesh never waits on DNS for it: WireGuard
+resolves a name once, as the interface starts, and a name whose record does not
+exist yet fails the whole interface. A name is dialled only where there is no
+address to dial instead, which is the dynamic DNS case: a home whose router
+forwards the port. `public_address6` alone is not dialled, because a peer with
+no IPv6 route could never reach it; a site reached only over IPv6 writes its
+endpoint as an address, `"[2001:db8::10]:51820"`.
+
+So a site with a `public_address` is always dialled, and must accept UDP on its
+port: `host prepare` opens it on the host, and a cloud provider's own firewall,
+where there is one, has to let it through as well. `validate` refuses an
+endpoint that is neither `host:port` nor `:port`, a port outside 1 to 65535, and
+a port alone on a site with no `public_address`.
+
+A deployment can keep its data on home connections that nothing can dial at
+all, with no static address, no dynamic DNS name and no forwarded port. The
+homes dial out, and the sites that are dialled are small VPSs: the gateway, and
+a second witness so that two of the three etcd voters are dialled (see *The
+voters that survive one loss must still dial each other*).
+[`examples/home-sites.yaml`](examples/home-sites.yaml) is that layout, with
+what it survives.
+
 ### Two deployments on one host never share a mesh
 
 Every site of a deployment sits on its mesh: a WireGuard interface with an
@@ -1045,17 +1098,16 @@ everything that touches the interface uses it: `/etc/wireguard/psns-f2a9.conf`,
 inside Linux's limit of fifteen: `IFNAMSIZ` is 16 bytes including the
 terminating NUL (Linux v6.8, `include/uapi/linux/if.h`).
 
-**A site listens on its endpoint's port.** `sites.<name>.endpoint` is
-`host:port`, and the port is what every other site dials, so it is the
-`ListenPort` rendered for that site and the UDP port `host prepare` opens
-there. Behind NAT, forward that same port. A site with no endpoint is never
-dialled, so it is rendered without `ListenPort` and opens no port: WireGuard
+**A site listens on the port it is dialled on.** That port (see *Where the
+mesh dials a site*) is the `ListenPort` rendered for the site and the UDP port
+`host prepare` opens there. Behind NAT, forward that same port. A site that is
+never dialled is rendered without `ListenPort` and opens no port: WireGuard
 then picks one ("Optional; if not specified, chosen randomly",
 wireguard-tools v1.0.20210914, `src/man/wg.8`), and the firewall lets in the
 replies to what it sends as part of that exchange. Two deployments sharing a host behind NAT
-therefore never choose ports at all; two sharing a host with an endpoint give
-it two different ports. `validate` refuses an endpoint that is not
-`host:port`.
+therefore never choose ports at all; two sharing a host that is dialled give
+it two different ports, with `endpoint: ":<port>"` where the host has a
+`public_address`.
 
 **The registry refuses a clash.** Each entry records the deployment's
 `interface`, `listen_port`, `subnet` and this site's `address`, and the claim
@@ -2127,8 +2179,10 @@ derived or declared, get an A record pointing at the gateway site's
 `public_address`, except an app pinned to a monitor site, whose names point at
 that monitor's own `public_address` (see *The monitor has a site of its
 own*). A site whose `endpoint` is a name rather than
-an address gets an A record pointing at that site's own `public_address`,
-because that is the name the other sites' WireGuard dials. Where a site also
+an address gets an A record pointing at that site's own `public_address`, so
+the name the operator wrote resolves there; the mesh itself dials the address
+(see *Where the mesh dials a site*). An endpoint given as an address, or as a
+port alone, names nothing and gets no record. Where a site also
 declares `public_address6`, each of its names gets an AAAA record as well.
 Deriving them keeps every hostname written in one place, since a second copy is
 the one that drifts and sends visitors somewhere else.
@@ -2138,7 +2192,7 @@ sites:
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
-    endpoint: vm.example.org:51820
+    endpoint: vm.example.org:51820     # optional: gets an A record; the mesh dials public_address
     public_address: 203.0.113.10       # what the internet reaches, not the interface
     # public_address6: 2001:db8::10    # optional, adds AAAA records
 ```
@@ -2830,7 +2884,7 @@ The check has three parts, in `internal/hostcheck`:
   host are foreign like anyone else's, whatever their names. A listener is the toolkit's when its process is in one of
   those containers' cgroups (a host network container), or it is the
   `docker-proxy` publishing one of their ports, or it is the kernel's
-  WireGuard socket, on the site's endpoint port, for a `psns-<token>` the
+  WireGuard socket, on the port the site is dialled on, for a `psns-<token>` the
   manifest records. A loopback listener, and
   `sshd`, `systemd-resolved`, `systemd-networkd`, `chronyd` and `tailscaled`,
   are the base system and count as neither. Everything else is foreign.
@@ -2958,7 +3012,7 @@ which a package upgrade replaces, untouched.
 |------|-------|
 | deny incoming, allow outgoing by default | every clean site; a shared site must have it already (see *The host check*) |
 | the site's `ssh.port`, 22 unless declared | every site |
-| the endpoint's port, UDP, WireGuard | sites with an `endpoint` |
+| the port the site is dialled on, UDP, WireGuard | sites with a `public_address` or an `endpoint` (see *Where the mesh dials a site*) |
 | everything arriving on `psns-<token>` | every site |
 | 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in ingress mode paisans |
 | `br-+` to the site's mesh address, cluster port and Garage's S3 port | sites with the apps role |
@@ -3266,8 +3320,9 @@ is said as such: create its DNS record with `paisans dns init` and apply again.
 "not found" for the zone's negative TTL, which can be many minutes. A site that
 looked a peer's name up before `dns init` created its record would fail
 wg-quick long after the record exists. So whenever `apply` is about to start,
-restart or sync the mesh and a peer's `Endpoint` is a name rather than an
-address, it first runs the step `resolve mesh endpoints`: it clears the site's
+restart or sync the mesh and a peer's rendered `Endpoint` is a name rather
+than an address (a site with an `endpoint` name and no `public_address`), it
+first runs the step `resolve mesh endpoints`: it clears the site's
 DNS cache (`resolvectl flush-caches`, skipped on a host without systemd-resolved)
 and asks `getent ahosts` for every such name, in one command, again every 2
 seconds for up to 30 seconds, flushing before each try. A name that still does
@@ -3297,8 +3352,9 @@ step runs after the one before it:
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop and moves what earlier steps changed |
 
-**DNS comes before any site is applied.** Each site's `wg-quick` resolves its
-peers' `endpoint` names as the mesh interface starts, and one name that does
+**DNS comes before any site is applied.** Each site's `wg-quick` resolves the
+`endpoint` names it dials, those of sites with no `public_address`, as the
+mesh interface starts, and one name that does
 not resolve fails the whole interface, so etcd then cannot bind its mesh
 address. `dns init` needs only the provider's API and the configuration, never
 a host, and nothing in it waits for the stack: Caddy's certificates use DNS
@@ -5005,8 +5061,9 @@ resumes rather than restarting.
 
 `paisans site add <site>` implements the table above for one case: a new site
 with `roles: [data]` joining a running cluster of one, an existing site gaining
-the witness role in the same join, and **every site declaring an `endpoint`**.
-A site without one is refused, naming the relay design above, which is still a
+the witness role in the same join, and **every site dialled**, by its
+`public_address` or its `endpoint` (see *Where the mesh dials a site*).
+A site with neither is refused, naming the relay design above, which is still a
 design: the first deployment that needs it builds it. A second Garage node
 is out of scope too, and removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
@@ -5026,7 +5083,7 @@ from the live deployment: the `psns-<token>.conf` on each site, `etcdctl member 
 state already satisfies plans no steps, and its gate is still checked, so a
 re-run proves each stage again and resumes at the first gate that fails.
 Preflight is the exception: it checks a host the join has not touched, and once
-stage 2 has run the new site's own mesh interface holds its endpoint's port,
+stage 2 has run the new site's own mesh interface holds the port it is dialled on,
 which the ports check refuses. A join is recognised as started from what only
 stage 2 or later leaves (the new site's `psns-<token>.conf`, or its etcd member), and the plan says preflight is
 skipped and why.
@@ -5474,7 +5531,7 @@ at, and "could not look" is not "looked and it was fine".
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, and the release at the end of `ldd --version`'s first line | any of the three differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
-| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the endpoint's port, UDP, on a site with an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port where the site runs HAProxy; 80 and 443 for a gateway or a monitor in ingress mode paisans; `listen` for a monitor in ingress mode external; each app's published port |
+| Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port where the site runs HAProxy; 80 and 443 for a gateway or a monitor in ingress mode paisans; `listen` for a monitor in ingress mode external; each app's published port |
 | Mesh | new site | `ip -j route`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
 | Routes | new site | `ip -j route` | a route overlaps `mesh.subnet`, other than one through `psns-<token>` |
 | Disk | new data site | the leader's `sum(pg_database_size(...))`, through its Patroni container's `psql`; `df` on the deepest existing directory towards `/srv/paisans/<token>/infra/postgres` | free space is under that plus 2 GiB |
@@ -5515,7 +5572,7 @@ or a Ceph RBD image carries an ordinary `ext4` or `xfs` and passes, so a
 network disk presented as a local one is still the operator's to know about.
 
 The ports check reads listeners, not owners. After the mesh stage the new
-site's own mesh interface holds its endpoint's port, so preflight is the gate for a join that
+site's own mesh interface holds the port it is dialled on, so preflight is the gate for a join that
 has not begun, and a join resumed past stage 1 must not be sent back through
 it.
 

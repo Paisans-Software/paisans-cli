@@ -170,16 +170,22 @@ type ACME struct {
 }
 
 type Site struct {
-	Roles    []Role `yaml:"roles"`
-	Address  string `yaml:"address"`
+	Roles   []Role `yaml:"roles"`
+	Address string `yaml:"address"`
+	// Endpoint is where the other sites' WireGuard reaches this one, and its
+	// port is the one this site listens on: host:port, or ":port" beside a
+	// public_address. Optional. Read it through DialEndpoint, which says what
+	// is actually dialled: public_address, where one is declared, unless the
+	// endpoint is itself an address.
 	Endpoint string `yaml:"endpoint"`
 	// SSH is how the toolkit reaches the site and who may log in to it. See
 	// the SSH type.
 	SSH SSH `yaml:"ssh"`
 
 	// PublicAddress is the IPv4 address the internet reaches this site on. It
-	// is optional, and only `paisans dns` reads it: it is the content of the A
-	// records that command creates. It is declared rather than discovered
+	// is optional. It is the content of the A records `paisans dns` creates,
+	// the address the other sites' WireGuard dials (DialEndpoint), and the
+	// default ssh.host. It is declared rather than discovered
 	// because the address a host sees on its own interface is often not the
 	// one the internet sees, behind NAT or a cloud provider's 1:1 mapping, and
 	// a guessed address published in DNS sends every visitor somewhere wrong.
@@ -854,7 +860,9 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if site.Endpoint != "" {
 			if _, err := ParseEndpointPort(site.Endpoint); err != nil {
-				add("sites.%s.endpoint: %q %v. Write it as a host and a port, for example vm.example.org:51820: the port is also the one this site's WireGuard listens on.", name, site.Endpoint, err)
+				add("sites.%s.endpoint: %q %v. Write it as a host and a port, for example vm.example.org:51820, or as a port alone, for example \":51820\", beside a public_address: the port is also the one this site's WireGuard listens on.", name, site.Endpoint, err)
+			} else if host, _, _ := net.SplitHostPort(site.Endpoint); host == "" && site.PublicAddress == "" {
+				add("sites.%s.endpoint: %q is a port alone, which means public_address on that port, and the site declares no public_address. Declare it, for example public_address: 203.0.113.10, or write the endpoint as a host and a port.", name, site.Endpoint)
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
