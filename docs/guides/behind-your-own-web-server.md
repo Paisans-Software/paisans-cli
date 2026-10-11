@@ -25,8 +25,7 @@ sites:
   watch:
     roles: [monitor]
     address: 10.44.0.4                # its mesh address
-    endpoint: watch.example.org:51820
-    public_address: 203.0.113.20      # what the internet reaches it on
+    public_address: 203.0.113.20      # what the internet and the mesh reach it on
     ingress:
       mode: external
       listen: 127.0.0.1:8480          # where your web server proxies to

@@ -270,6 +270,15 @@ func TestAJoinOutsideTheScopeIsRefused(t *testing.T) {
 	if _, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports()); err == nil || !strings.Contains(err.Error(), "relay") {
 		t.Errorf("a site without an endpoint was accepted: %v", err)
 	}
+	// A public address is dialled without an endpoint written, so it is
+	// not the relay case.
+	w = newWorld(t)
+	s = w.cfg.Sites["home-a"]
+	s.Endpoint, s.PublicAddress = "", "203.0.113.31"
+	w.cfg.Sites["home-a"] = s
+	if _, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports()); err != nil && strings.Contains(err.Error(), "has no endpoint") {
+		t.Errorf("a site dialled at its public address was refused for having no endpoint: %v", err)
+	}
 	w = newWorld(t)
 	if _, err := siteadd.Build(w.cfg, w.secrets, "home-a", w.transports()); err == nil {
 		t.Error("an existing data and apps site was accepted as a new data site")

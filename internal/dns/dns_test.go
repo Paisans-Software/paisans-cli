@@ -609,3 +609,41 @@ func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
 		t.Fatalf("a monitor with no address: %v", err)
 	}
 }
+
+// The endpoint's name still gets its record when the site declares a public
+// address, though the mesh dials the address: the name is the operator's.
+// An endpoint written as a port alone, or left out, names nothing, so it adds
+// no record and no refusal.
+func TestEndpointRecordsFollowTheWrittenName(t *testing.T) {
+	cfg := declared()
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWant(wants, "A", "vm.example.org", "203.0.113.10") {
+		t.Errorf("no A vm.example.org -> 203.0.113.10: %+v", wants)
+	}
+	for _, endpoint := range []string{":51821", ""} {
+		vm := cfg.Sites["vm"]
+		vm.Endpoint = endpoint
+		cfg.Sites["vm"] = vm
+		wants, err := Desired(cfg)
+		if err != nil {
+			t.Fatalf("endpoint %q: %v", endpoint, err)
+		}
+		for _, w := range wants {
+			if w.Name == "vm.example.org" {
+				t.Errorf("endpoint %q: a record for a name nothing declares: %+v", endpoint, w)
+			}
+		}
+	}
+}
+
+func hasWant(wants []Want, typ, name, content string) bool {
+	for _, w := range wants {
+		if w.Type == typ && w.Name == name && w.Content == content {
+			return true
+		}
+	}
+	return false
+}

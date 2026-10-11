@@ -110,8 +110,9 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		steps = append(steps, step(stagePrepare, "host", "prepare", "--site", s))
 	}
 	// dns creates the records that are missing; one pointing elsewhere
-	// stops it. It comes before install: each site's wg-quick resolves its
-	// peers' endpoint names as it starts, and one that does not resolve
+	// stops it. It comes before install: each site's wg-quick resolves the
+	// endpoint names it dials as it starts (a site's endpoint written as a
+	// name with no public_address beside it), and one that does not resolve
 	// fails the mesh interface, so the names must exist before any site is
 	// applied. It needs only the provider's API and the configuration, and
 	// nothing waits for the stack: Caddy's certificates use DNS challenges.

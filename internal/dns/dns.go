@@ -205,9 +205,12 @@ func Desired(cfg *config.Config) ([]Want, error) {
 		}
 	}
 
-	// A site endpoint given as a name is what the other sites' WireGuard
-	// dials, so it needs a record too. An endpoint given as an address
-	// needs nothing.
+	// A site endpoint given as a name gets a record too. Beside a
+	// public_address it points there, and the mesh dials the address itself
+	// (config.Site.DialEndpoint), so the name is the operator's to use; with
+	// no public_address the other sites' WireGuard dials the name, and there
+	// is no address here to give it. An endpoint given as an address, or as
+	// a port alone, names nothing.
 	for _, siteName := range cfg.SiteNames() {
 		site := cfg.Sites[siteName]
 		host := endpointHost(site.Endpoint)

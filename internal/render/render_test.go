@@ -2966,3 +2966,73 @@ func TestGateAdmitsTheDefaultMemberGroup(t *testing.T) {
 	}
 	t.Fatal("no gate/compose.yaml was rendered")
 }
+
+// peerBlock is the [Peer] section for name in a WireGuard file.
+func peerBlock(conf, name string) string {
+	for _, block := range strings.Split(conf, "[Peer]") {
+		if strings.HasPrefix(strings.TrimSpace(block), "# "+name+"\n") {
+			return block
+		}
+	}
+	return ""
+}
+
+// Every other site dials what config.Site.DialEndpoint says: public_address
+// on the endpoint's port where the site declares one, so a hostname endpoint
+// is never what WireGuard resolves; the endpoint as written where it does
+// not; and nothing at all for a site with neither, which only dials out.
+func TestPeersDialTheEffectiveEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		endpoint, public string
+		want             string // the Endpoint line home-a renders for vm; "" for none
+	}{
+		{"derived from public_address", "", "203.0.113.10", "Endpoint = 203.0.113.10:51820"},
+		{"port only", ":51821", "203.0.113.10", "Endpoint = 203.0.113.10:51821"},
+		{"hostname beside public_address", "vm.example.org:51822", "203.0.113.10", "Endpoint = 203.0.113.10:51822"},
+		{"hostname alone", "vm.example.org:51820", "", "Endpoint = vm.example.org:51820"},
+		{"neither", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fixture(t)
+			vm := cfg.Sites["vm"]
+			vm.Endpoint, vm.PublicAddress = tc.endpoint, tc.public
+			cfg.Sites["vm"] = vm
+			plan, err := render.Build(cfg, fixtureSecrets(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var home, vmConf string
+			for _, f := range plan.Files {
+				switch f.Path {
+				case "home-a/etc/wireguard/psns-f2a9.conf":
+					home = f.Content
+				case "vm/etc/wireguard/psns-f2a9.conf":
+					vmConf = f.Content
+				}
+			}
+			block := peerBlock(home, "vm")
+			if tc.want == "" {
+				// home-a is not dialled either, so the two do not peer: their
+				// traffic goes through a relay.
+				if block != "" {
+					t.Errorf("neither side is dialled, but home-a peers with vm:\n%s", block)
+				}
+				if strings.Contains(vmConf, "ListenPort") {
+					t.Errorf("vm is never dialled, but listens on a fixed port:\n%s", vmConf)
+				}
+				return
+			}
+			if block == "" {
+				t.Fatalf("home-a has no peer vm:\n%s", home)
+			}
+			if !strings.Contains(block, "\n"+tc.want+"\n") {
+				t.Errorf("home-a's peer vm does not carry %q:\n%s", tc.want, block)
+			}
+			port := tc.want[strings.LastIndex(tc.want, ":")+1:]
+			if !strings.Contains(vmConf, "\nListenPort = "+port+"\n") {
+				t.Errorf("vm does not listen on %s:\n%s", port, vmConf)
+			}
+		})
+	}
+}

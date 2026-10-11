@@ -278,12 +278,13 @@ func (c *checker) votersVerb() string {
 // votersShareARelay refuses a mesh in which losing one site cuts the voters
 // that would otherwise hold quorum off from each other.
 //
-// Two sites with no endpoint never peer directly (config.Site.PeersDirectly):
-// their traffic relays through the first site that has one, and that path
-// has no fallback. A voter with an endpoint reaches every other voter, so
-// the voters that survive losing any one site still reach each other exactly
-// when at least one of them has an endpoint, which with three or more voters
-// means at least two of them do. With fewer, there is a site whose loss
+// Two sites that are never dialled (config.Site.DialEndpoint: no
+// public_address and no endpoint) never peer directly
+// (config.Site.PeersDirectly): their traffic relays through the first dialled
+// site, and that path has no fallback. A dialled voter reaches every other
+// voter, so the voters that survive losing any one site still reach each
+// other exactly when at least one of them is dialled, which with three or
+// more voters means at least two of them are. With fewer, there is a site whose loss
 // leaves every surviving voter alone, 1 of n and no majority: the database
 // goes read-only on every site, even when the lost site held no data and
 // was "only" the relay. Two voters are refused on their own, and one has
@@ -296,7 +297,7 @@ func (c *checker) votersShareARelay() {
 			continue // undeclaredSites reports this
 		}
 		voters = append(voters, name)
-		if site.Endpoint != "" {
+		if site.DialEndpoint() != "" {
 			dialled = append(dialled, name)
 		}
 	}
@@ -307,27 +308,27 @@ func (c *checker) votersShareARelay() {
 	}
 	var relays []string
 	for _, name := range c.cfg.SiteNames() {
-		if c.cfg.Sites[name].Endpoint != "" {
+		if c.cfg.Sites[name].DialEndpoint() != "" {
 			relays = append(relays, name)
 		}
 	}
 	stranded := without(voters, dialled)
-	fix := fmt.Sprintf("Give a second voter a stable endpoint (sites.<name>.endpoint; for a home connection a dynamic DNS name and a forwarded UDP port is enough), so that the voters surviving any one loss dial each other directly. Here that is any of %s.", strings.Join(stranded, ", "))
+	fix := fmt.Sprintf("Give a second voter a public_address, or a stable endpoint (sites.<name>.endpoint; for a home connection a dynamic DNS name and a forwarded UDP port is enough), so that the voters surviving any one loss dial each other directly. Here that is any of %s.", strings.Join(stranded, ", "))
 	switch {
 	case len(dialled) == 1:
 		c.refuse("voters-share-a-relay", c.cfg.EtcdMembersKey(),
-			"only one etcd voter has an endpoint",
-			"%s %d voters, and only %s has an endpoint. %s have none, so they reach each other only through %s, and losing %s leaves each of them alone, 1 of %d and no majority: the database goes read-only on every site. %s",
+			"only one etcd voter is dialled",
+			"%s %d voters, and only %s is dialled, by a public_address or an endpoint. %s are not, so they reach each other only through %s, and losing %s leaves each of them alone, 1 of %d and no majority: the database goes read-only on every site. %s",
 			c.votersVerb(), len(voters), dialled[0], strings.Join(stranded, " and "), dialled[0], dialled[0], len(voters), fix)
 	case len(relays) > 0:
 		c.refuse("voters-share-a-relay", c.cfg.EtcdMembersKey(),
-			"no etcd voter has an endpoint, so they peer through a relay",
-			"%s %d voters and none of them has an endpoint, so they reach each other only through %s, and losing %s leaves every voter alone, 1 of %d and no majority: the database goes read-only on every site. %s",
+			"no etcd voter is dialled, so they peer through a relay",
+			"%s %d voters and none of them is dialled, having neither a public_address nor an endpoint, so they reach each other only through %s, and losing %s leaves every voter alone, 1 of %d and no majority: the database goes read-only on every site. %s",
 			c.votersVerb(), len(voters), relays[0], relays[0], len(voters), fix)
 	default:
 		c.refuse("voters-share-a-relay", c.cfg.EtcdMembersKey(),
-			"no etcd voter has an endpoint and no relay exists",
-			"%s %d voters and no site has an endpoint, so no two of them can ever peer: WireGuard needs one side to know where to send the first packet. %s",
+			"no etcd voter is dialled and no relay exists",
+			"%s %d voters and no site is dialled, having neither a public_address nor an endpoint, so no two of them can ever peer: WireGuard needs one side to know where to send the first packet. %s",
 			c.votersVerb(), len(voters), fix)
 	}
 }

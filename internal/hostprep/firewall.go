@@ -50,7 +50,7 @@ func (r Rule) String() string {
 	return fmt.Sprintf("%d/%s", r.Port, r.Proto)
 }
 
-// Rules derives a site's inbound rules from its roles and its endpoint.
+// Rules derives a site's inbound rules from its roles and its dial endpoint.
 // Nothing is listed per site: a site that gains the gateway role, or the
 // monitor role in ingress mode paisans, gains 80 and 443 on its next prepare,
 // and one that loses it has them removed by the same prepare, since the
@@ -65,9 +65,11 @@ func (r Rule) String() string {
 // (etcd, Patroni, Garage, HAProxy) listens on the site's mesh address, so the
 // mesh is let in whole rather than port by port: a new mesh service would
 // otherwise be one more rule to remember on every site. WireGuard's own port
-// is the site's endpoint port, the ListenPort its file is rendered with; a
-// site with no endpoint is never dialled and opens none, since the replies
-// to the packets it sends out are let in as part of that exchange.
+// is the port of the site's dial endpoint (config.Site.DialEndpoint), the
+// ListenPort its file is rendered with: 51820 for a site that declares a
+// public_address and no endpoint port. A site that is never dialled opens
+// none, since the replies to the packets it sends out are let in as part of
+// that exchange.
 func Rules(d deployment.Deployment, site config.Site) []Rule {
 	rules := []Rule{
 		// First, and on every site: the firewall is enabled after it, and an

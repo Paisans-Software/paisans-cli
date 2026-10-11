@@ -355,6 +355,23 @@ func TestVotersShareARelay(t *testing.T) {
 			},
 		},
 		{
+			// A public address is dialled without an endpoint written.
+			name: "three data voters, two with only a public address, is accepted",
+			change: func(cfg *config.Config) {
+				addSite(cfg, "home-c", "10.44.0.5")
+				cfg.Cluster.Sites = []string{"home-a", "home-b", "home-c"}
+				cfg.Etcd.Members = []string{"home-a", "home-b", "home-c"}
+				vm := cfg.Sites["vm"]
+				vm.Roles = []config.Role{config.RoleGateway}
+				cfg.Sites["vm"] = vm
+				for name, address := range map[string]string{"home-a": "203.0.113.31", "home-b": "203.0.113.32"} {
+					site := cfg.Sites[name]
+					site.Endpoint, site.PublicAddress = "", address
+					cfg.Sites[name] = site
+				}
+			},
+		},
+		{
 			// A declined witness leaves one voter, and one voter has
 			// nobody to be partitioned from.
 			name: "one voter is not this rule's concern",

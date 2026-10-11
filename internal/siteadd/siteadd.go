@@ -306,8 +306,8 @@ func checkScope(cfg *config.Config, newSite string, transports map[string]apply.
 		return fmt.Errorf("site add %s: etcd.members is written and does not list it. A data site is an etcd voter, so list it there, and a witness with it if the cluster has one member today; or leave the key out so it is derived from the roles, every witness and every data site", newSite)
 	}
 	for _, name := range cfg.SiteNames() {
-		if cfg.Sites[name].Endpoint == "" {
-			return fmt.Errorf("site add %s: sites.%s has no endpoint. site add joins sites that all dial each other directly; a site behind NAT needs the relay README.md describes under \"`site add`: a second data site, and the one hard problem\", which is not built yet", newSite, name)
+		if cfg.Sites[name].DialEndpoint() == "" {
+			return fmt.Errorf("site add %s: sites.%s has no endpoint and no public_address, so nothing dials it. site add joins sites that all dial each other directly; a site behind NAT needs the relay README.md describes under \"`site add`: a second data site, and the one hard problem\", which is not built yet", newSite, name)
 		}
 		if _, ok := transports[name]; !ok {
 			return fmt.Errorf("site add %s: no way to reach site %s. Every site is read, and most are changed", newSite, name)
