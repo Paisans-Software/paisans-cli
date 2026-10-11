@@ -72,6 +72,11 @@ type Want struct {
 	// checked and warned about, never created, and prune never counts it as
 	// wanted.
 	Advisory bool
+	// Leftover is a record that must not be there if this deployment's dns
+	// init made it: a no-mail record at a name that has since been given mail.
+	// One found is a conflict that dns prune resolves; none is Clear. It is
+	// never created, and prune never counts it as wanted.
+	Leftover bool
 }
 
 // Provider is a DNS provider's API, reduced to the things this package does
@@ -277,6 +282,8 @@ const (
 	// Warn is an advisory record that is missing or too weak. Nothing is
 	// written for it and it stops nothing.
 	Warn Action = "warn"
+	// Clear is a leftover record that is not there. It is not shown.
+	Clear Action = "clear"
 )
 
 // Entry is one wanted record and what will be done about it.
@@ -352,7 +359,18 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 			}
 			existing[w.Name] = records
 		}
-		action, detail := classify(w, records, wantedTypes[w.Name])
+		var action Action
+		var detail string
+		if w.Leftover {
+			action = Clear
+		} else {
+			action, detail = classify(w, records, wantedTypes[w.Name])
+		}
+		if w.Leftover || w.Advisory {
+			if r, ok := ownNoMail(w, records, plan.comment); ok {
+				action, detail = Conflict, leftover(w, r)
+			}
+		}
 		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail})
 	}
 	return plan, nil
@@ -424,7 +442,7 @@ func (e conflictError) Unwrap() error {
 	}
 	return &ui.Problem{
 		Hint:    hint,
-		Explain: "Each is listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, then run again.",
+		Explain: "Each is listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, or run paisans dns prune --execute for one that says so, then run again.",
 		Cause:   ErrConflict,
 	}
 }
@@ -479,8 +497,13 @@ func (p *Plan) Show(r ui.Reporter) {
 		case Create:
 			r.Step("create "+record).End(ui.Pending, "")
 		case Conflict:
+			wanted := "wanted"
+			if e.Leftover || e.Advisory {
+				wanted = "remove with dns prune"
+			}
 			r.Refuse(fmt.Sprintf("%s %s conflicts with a record at the provider", e.Type, e.Name),
-				fmt.Sprintf("%s\nwanted: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))
+				fmt.Sprintf("%s\n%s: %s -> %s (zone %s)", e.Detail, wanted, e.Name, content, e.Zone))
+		case Clear:
 		case Warn:
 			r.Note(fmt.Sprintf("%s %s is not this toolkit's to write, and is missing or weak", e.Type, e.Name),
 				fmt.Sprintf("%s\nexpected at least: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))

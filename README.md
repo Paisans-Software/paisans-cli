@@ -2298,6 +2298,16 @@ A record is deleted only when every one of these holds:
 own records: its SPF beside the toolkit's `v=spf1 -all` would be two SPF
 records, which a receiver ignores, and the null MX would turn its mail away.
 
+Until the prune has run, `dns init` refuses, and so does `apply`, whose last
+stage it is. At every name with mail under `community.domain` it looks for a
+no-mail record this deployment's `dns init` made (its comment, and exactly a
+no-mail content), and each one it finds is a conflict naming `dns prune
+--execute` as the fix, shown as `remove with dns prune` in place of what is
+wanted. That holds after the fact too: a mail service's records added before
+the prune leave the toolkit's beside them, and the next run says so. A no-mail
+record without this deployment's comment is somebody's choice and is left
+alone, as prune leaves it.
+
 **The comment is necessary and never sufficient.** A comment is free text that
 anyone with the zone can write, on a record the toolkit never made, and a rule
 that trusted it alone would let one edit in a console steer a deletion. The name and address rules tie a record

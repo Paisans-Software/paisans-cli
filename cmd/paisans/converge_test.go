@@ -468,7 +468,7 @@ func TestConvergeStopsWithTheHintThatFits(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"dns init", conflict, "Change each conflicting record above at your DNS provider, then run paisans apply --execute again."},
+		{"dns init", conflict, "Resolve each DNS conflict above as it says, then run paisans apply --execute again."},
 		{"storage add", waiting, "Nothing failed: Garage is still moving data. Run paisans apply --execute again later."},
 		{"apply --site vm", errors.New("vm: boom"), "Run paisans apply --execute again to resume."},
 	} {

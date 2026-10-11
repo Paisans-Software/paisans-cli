@@ -1032,7 +1032,7 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			r.Section("dns")
 			if err := convergeRun(convergeFlags(s.Args, o)); err != nil {
 				if errors.Is(err, dns.ErrConflict) {
-					return convergeStop("apply stopped at "+s.Title, err, "Change each conflicting record above at your DNS provider, then run paisans apply --execute again.")
+					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans apply --execute again.")
 				}
 				return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
 			}

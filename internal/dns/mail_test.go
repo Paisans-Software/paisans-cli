@@ -11,10 +11,12 @@ import (
 
 const comment = "paisans-f2a9: created by paisans dns init"
 
+// mailOnly are the mail records a deployment publishes or checks, without
+// the leftovers it only looks for.
 func mailOnly(wants []Want) map[string]Want {
 	out := map[string]Want{}
 	for _, w := range wants {
-		if w.Type == "TXT" || w.Type == "MX" {
+		if (w.Type == "TXT" || w.Type == "MX") && !w.Leftover {
 			out[w.Type+" "+w.Name] = w
 		}
 	}
@@ -299,5 +301,115 @@ func TestSiteRemovalLeavesNoMailRecords(t *testing.T) {
 	}
 	if len(p.Removes()) != 1 || p.Removes()[0].ID != "a" {
 		t.Fatalf("want only the address removed: %+v", p.Entries)
+	}
+}
+
+// zoneWithNoMailRecords is a zone holding every no-mail record dns init
+// writes at the domain, plus one at talk, each with the comment given.
+func zoneWithNoMailRecords(comment string) *fakeCloudflare {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "spf", Type: "TXT", Name: "example.org", Content: `"v=spf1 -all"`, Comment: comment},
+		{ID: "mx", Type: "MX", Name: "example.org", Content: ".", Priority: new(int), Comment: comment},
+		{ID: "dkim", Type: "TXT", Name: "*._domainkey.example.org", Content: dkimLockdown, Comment: comment},
+		{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "talk-spf", Type: "TXT", Name: "talk.example.org", Content: spfLockdown, Comment: comment},
+	}
+	return fake
+}
+
+// A no-mail record dns init made at a name that now has mail is a conflict,
+// so dns init, and apply after it, stops until dns prune has removed it.
+func TestNoMailRecordLeftAtAMailNameIsAConflict(t *testing.T) {
+	fake := zoneWithNoMailRecords(comment)
+	c := fake.serve(t)
+	cfg := declared()
+	cfg.Community.MailDomains = []string{"example.org"}
+	cfg.SMTP = config.SMTP{FromAddress: "hello@talk.example.org"}
+	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+	p := plan(t, c, cfg)
+
+	got := map[string]Entry{}
+	for _, e := range p.Conflicts() {
+		got[e.Type+" "+e.Name] = e
+	}
+	for _, key := range []string{"TXT example.org", "MX example.org", "TXT *._domainkey.example.org", "TXT _dmarc.example.org", "TXT talk.example.org"} {
+		e, ok := got[key]
+		if !ok {
+			t.Errorf("%s: no conflict for the no-mail record left there; conflicts: %+v", key, p.Conflicts())
+			continue
+		}
+		if !strings.Contains(e.Detail, "paisans dns prune --execute") || !strings.Contains(e.Detail, "has mail of its own") {
+			t.Errorf("%s: the conflict must say to prune: %q", key, e.Detail)
+		}
+	}
+	if len(got) != 5 {
+		t.Errorf("want 5 conflicts, got %+v", p.Conflicts())
+	}
+	shown := &ui.Recorder{}
+	p.Show(shown)
+	if i := shown.Index("refuse", "TXT example.org conflicts"); i < 0 || !strings.Contains(shown.Events[i].Extra, `remove with dns prune: example.org -> "v=spf1 -all" (zone example.org)`) {
+		t.Errorf("the refusal should say what prune removes:\n%s", shown.Lines())
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err == nil || len(fake.posts) != 0 {
+		t.Fatalf("execute must refuse and write nothing: err %v, %d post(s)", err, len(fake.posts))
+	}
+
+	// dns prune removes exactly those, and dns init then has nothing in its
+	// way: a warning for the DMARC policy that is now the mail's to set.
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := BuildPrune(context.Background(), c, cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ExecutePrune(context.Background(), c, pruned, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	again := plan(t, c, cfg)
+	if n := len(again.Conflicts()); n != 0 {
+		t.Fatalf("after prune: %d conflict(s): %+v", n, again.Conflicts())
+	}
+	warned := false
+	for _, e := range again.Entries {
+		warned = warned || (e.Action == Warn && e.Name == "_dmarc.example.org")
+	}
+	if !warned {
+		t.Errorf("after prune, the missing DMARC policy should be a warning")
+	}
+}
+
+// Only this deployment's own no-mail records are its to flag. One with no
+// comment, or another deployment's, is somebody's choice.
+func TestNoMailRecordNotOursAtAMailNameIsLeftAlone(t *testing.T) {
+	for _, other := range []string{"", "paisans-0b7d: created by paisans dns init"} {
+		fake := zoneWithNoMailRecords(other)
+		cfg := declared()
+		cfg.Community.MailDomains = []string{"example.org"}
+		cfg.SMTP = config.SMTP{FromAddress: "hello@talk.example.org"}
+		cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+		p := plan(t, fake.serve(t), cfg)
+		if n := len(p.Conflicts()); n != 0 {
+			t.Errorf("comment %q: %d conflict(s): %+v", other, n, p.Conflicts())
+		}
+	}
+}
+
+// A sender outside the deployment's zones is a mail name too, but dns init
+// never wrote there, so it is not looked up at all.
+func TestMailNameOutsideTheDomainIsNotRead(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	cfg := declared()
+	cfg.SMTP = config.SMTP{FromAddress: "community@mail.example.net"}
+	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+	plan(t, fake.serve(t), cfg)
+	for _, name := range fake.lookups {
+		if strings.HasSuffix(name, "example.net") {
+			t.Errorf("looked up %s", name)
+		}
 	}
 }
