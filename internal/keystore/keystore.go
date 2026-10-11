@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+
+	"github.com/paisans-software/paisans-stack/internal/deployment"
 )
 
 // Service is the service name every item is stored under.
@@ -60,14 +62,14 @@ func Platform() Store {
 }
 
 var (
-	idPattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	keyPattern       = regexp.MustCompile(`^AGE-SECRET-KEY-1[0-9A-Z]+$`)
 	recipientPattern = regexp.MustCompile(`^age1[0-9a-z]+$`)
 )
 
 // checkID refuses anything but a deployment id, since it reaches a command.
+// The deployment package spells what an id is, so the two never disagree.
 func checkID(id string) error {
-	if !idPattern.MatchString(id) {
+	if !deployment.ValidID(id) {
 		return fmt.Errorf("keystore: %q is not a deployment id", id)
 	}
 	return nil

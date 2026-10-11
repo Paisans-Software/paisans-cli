@@ -115,13 +115,16 @@ func TestSecretServiceStoreFailure(t *testing.T) {
 	}
 }
 
-// Anything but a UUID, an age key and an age recipient is refused before a
-// command runs, since the keychain's command line is built from them.
+// Anything but a deployment id, an age key and an age recipient is refused
+// before a command runs, since the keychain's command line is built from
+// them. A UUID that is not a deployment id is refused too: the item names a
+// deployment, and init never writes any other id.
 func TestPutRefusesMalformedValues(t *testing.T) {
 	bin, dir := fake(t, fakeSecurity)
 	s := keychain{bin: bin}
 	for _, c := range [][3]string{
 		{"not-a-uuid", testKey, testRecipient},
+		{"f2a9c4e1-0b7d-1c3a-9e2f-5a6b7c8d9e01", testKey, testRecipient},
 		{testID, "AGE-SECRET-KEY-1 -w x", testRecipient},
 		{testID, testKey, `age1q" -l x`},
 	} {
