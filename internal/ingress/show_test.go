@@ -62,7 +62,7 @@ func TestForRefusesAnAppTheGatewayServes(t *testing.T) {
 
 func TestShowHandsOffAnExternalApp(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"))
+	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
 	out := buf.String()
 	for _, want := range []string{
 		"status.example.org", "http://127.0.0.1:8480", "/healthz",
@@ -90,7 +90,7 @@ func TestShowHandsOffAnExternalApp(t *testing.T) {
 func TestShowWarnsWhenListenIsNotLoopback(t *testing.T) {
 	var buf bytes.Buffer
 	target := external(t, "192.168.1.20:8480")
-	ingress.Show(&buf, target)
+	ingress.Show(&buf, target, ingress.WebServer{})
 	hint, detail, ok := ingress.ListenWarning(target)
 	if !ok || !strings.Contains(hint, "ufw") || !strings.Contains(detail, "DOCKER-USER") {
 		t.Fatalf("no warning: %q %q", hint, detail)
@@ -107,7 +107,7 @@ func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	ingress.Show(&buf, target)
+	ingress.Show(&buf, target, ingress.WebServer{})
 	out := buf.String()
 	if !strings.Contains(out, "nothing to hand off") || strings.Contains(out, "proxy_pass") || strings.Contains(out, "YOUR CERTIFICATE") {
 		t.Fatal(out)
@@ -119,7 +119,7 @@ func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
 // server that edge is theirs, so each snippet carries the same refusals.
 func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"))
+	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
 	out := buf.String()
 	for _, want := range []string{
 		"@refused path /status* /badge/* /metrics /metrics/ /api/v1/*",
@@ -159,7 +159,7 @@ func caddyPathMatches(patterns []string, path string) bool {
 
 func TestEachSnippetRefusesEveryFormOfTheRefusedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	ingress.Show(&buf, external(t, "127.0.0.1:8480"))
+	ingress.Show(&buf, external(t, "127.0.0.1:8480"), ingress.WebServer{})
 	out := buf.String()
 
 	caddy := regexp.MustCompile(`@refused path (.+)`).FindStringSubmatch(out)

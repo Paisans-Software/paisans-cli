@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -32,7 +33,30 @@ func fakeIngressCheck(t *testing.T, failing map[string][]ingress.Result) *[]stri
 	}
 	convergeSleep = func(time.Duration) {}
 	t.Cleanup(func() { convergeIngressCheck, convergeSleep = saved, savedSleep })
+	fakeWebServer(t, caddyAutomatic)
 	return &checked
+}
+
+// caddyAutomatic is a Caddy in a container that obtains its own
+// certificates, as Detect finds it.
+var caddyAutomatic = ingress.WebServer{Server: ingress.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: ingress.CertsAutomatic}
+
+// webServerAsks is each time fakeWebServer was asked: the app, and whether
+// through sudo.
+type webServerAsks []string
+
+// fakeWebServer replaces reading the web server in front of an app's host:
+// it finds ws.
+func fakeWebServer(t *testing.T, ws ingress.WebServer) *webServerAsks {
+	t.Helper()
+	var asked webServerAsks
+	saved := ingressWebServer
+	ingressWebServer = func(_ *config.Config, target ingress.Target, sudo bool) ingress.WebServer {
+		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, sudo))
+		return ws
+	}
+	t.Cleanup(func() { ingressWebServer = saved })
+	return &asked
 }
 
 // externalWatch makes the fixture's monitor, watch, a site in ingress mode
@@ -222,5 +246,38 @@ func TestConvergeDryRunListsTheIngressCheck(t *testing.T) {
 	got := lines(inSection(rec, "ingress"))
 	if len(got) < 2 || got[0] != "step status" || !strings.HasPrefix(got[1], "waiting status: ") {
 		t.Errorf("ingress section %q:\n%s", got, rec.Lines())
+	}
+}
+
+// A failed check reads the web server in front of the app, with the run's
+// sudo, and names it in the warning, so the
+// advice says what to add the configuration to. A passing one reads nothing.
+func TestConvergeFailedIngressNamesTheWebServer(t *testing.T) {
+	fakeConverge(t, nil)
+	externalWatch(t)
+	fakeIngressCheck(t, nil)
+	asked := fakeWebServer(t, caddyAutomatic)
+	recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("a passing check read the web server: %v", *asked)
+	}
+
+	fakeIngressCheck(t, certificateFails)
+	asked = fakeWebServer(t, caddyAutomatic)
+	rec := recordConverge(t)
+	// The run's --sudo reaches the read: here --sudo=false, as every
+	// converge test runs, since a settled sudo would reach a real host.
+	// TestIngressHostSharesTheRunsSudo shows a read with sudo shares the
+	// run's answer.
+	converge(t, "--execute")
+	if !slices.Equal(*asked, webServerAsks{"status sudo=false"}) {
+		t.Errorf("asked %v", *asked)
+	}
+	i := rec.Index("note", "status")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, caddyAutomatic.Summary()) {
+		t.Errorf("the warning does not name the web server:\n%s", rec.Lines())
 	}
 }

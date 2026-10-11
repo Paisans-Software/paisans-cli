@@ -45,9 +45,9 @@ func externalApps(cfg *config.Config) []string {
 // convergeIngress checks each app served through a web server the operator
 // runs, as `paisans ingress check --app <app>` does, a line per app in a
 // section of its own. A failed check is a warning naming what failed, with
-// the failing checks' own lines and how to fix it. It returns the apps that
-// failed.
-func convergeIngress(r ui.Reporter, cfg *config.Config) []string {
+// the failing checks' own lines, the web server found in front of the app
+// and how to fix it. It returns the apps that failed.
+func convergeIngress(r ui.Reporter, cfg *config.Config, sudo bool) []string {
 	apps := externalApps(cfg)
 	if len(apps) == 0 {
 		return nil
@@ -79,13 +79,18 @@ func convergeIngress(r ui.Reporter, cfg *config.Config) []string {
 			s.Done(target.Hostname)
 			continue
 		}
+		// What serves it is read only now, through the sudo the run
+		// settled, so a passing app costs no ssh. The line spins while
+		// it is read.
+		s.Progress("read the web server on " + target.Site)
+		ws := ingressWebServer(cfg, target, sudo)
 		s.End(ui.Failed, target.Hostname)
 		failed = append(failed, app)
 		checks := "check"
 		if len(names) > 1 {
 			checks += "s"
 		}
-		r.Note(fmt.Sprintf("%s: the %s %s failed", app, andList(names), checks), strings.Join(append(lines, advice), "\n"))
+		r.Note(fmt.Sprintf("%s: the %s %s failed", app, andList(names), checks), strings.Join(append(lines, ws.Summary(), advice), "\n"))
 	}
 	return failed
 }
