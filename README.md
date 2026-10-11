@@ -4873,10 +4873,12 @@ paisans site remove home-b --host-gone --execute       # the host is never comin
 | the only data site | the database would have nowhere to live |
 | the first site in `storage.garage.sites` while apps are declared | every app writes its objects through that node; put another Garage site first and apply every site running an app |
 | a Garage site whose removal leaves fewer nodes than `storage.garage.replication`, or another Garage node unhealthy | the objects on it would have nowhere to go |
+| a site in the end state's `storage.garage.sites` with no node in Garage's live layout, or fewer layout nodes left without the site than `storage.garage.replication` | `garage layout apply` would refuse halfway through stage 1; run `storage add` first |
 | an end state `validate` refuses | Eg: two data sites left as two etcd voters, when three data sites go to two; add a witness first |
 | one data site out of two and a witness, when the witness role is that site's only one and no app is pinned to it | it would be left with no role; give it another first, or `site remove` it afterwards |
 | one data site out of two and a witness, with either remaining voter unhealthy | going from two voters to one is a change both must commit |
 | any other etcd member unhealthy, or too few healthy members left for a quorum | a membership change on a limping cluster is how it stops |
+| a site in the end state's `etcd.members` that etcd does not list, or lists as a learner | its join never finished, so fewer voters would remain than the file says; finish its `apply` first. It counts as unhealthy in the quorum |
 | any other Patroni member not running or streaming | the cluster changes under the stages below |
 | the site holds the leader and no member is a streaming `Sync Standby` | only a synchronous standby takes over without losing writes the leader acknowledged |
 | a host that does not answer over ssh | what is on it cannot be read; fix ssh, or say `--host-gone` |

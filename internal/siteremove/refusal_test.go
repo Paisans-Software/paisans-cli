@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -63,6 +64,13 @@ func TestRefusals(t *testing.T) {
 			w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
 		}, want: "no member is a streaming Sync Standby"},
 		{name: "an unhealthy Garage node", site: "home-b", world: func(w *world) { w.garageDown["home-c"] = true }, want: "home-c (cccccccccccccccc) are not healthy"},
+		{name: "an etcd.members site etcd does not list", site: "home-b", world: func(w *world) { w.dropEtcd("home-c") }, want: "home-c is in etcd.members but is not an etcd member yet"},
+		{name: "no quorum counting a member etcd does not list", site: "home-b", world: func(w *world) { w.dropEtcd("home-c"); w.etcdDown["vm"] = true }, want: "1 of 3 remaining members are healthy"},
+		{name: "an etcd.members site that is a learner", site: "home-b", world: func(w *world) { w.learner("home-c") }, want: "home-c is still a learner"},
+		{name: "a Garage site not in the layout", site: "home-b",
+			edits: []func(string) string{replace("replication: 2", "replication: 1")},
+			world: func(w *world) { delete(w.layout, "cccccccccccccccc") }, want: "home-c is in storage.garage.sites but not in Garage's layout yet"},
+		{name: "a live layout too small without the site", site: "home-b", world: func(w *world) { delete(w.layout, "cccccccccccccccc") }, want: "1 node(s) in Garage's layout would stay without home-b, fewer than storage.garage.replication 2"},
 		{name: "a host that does not answer", site: "home-b", world: func(w *world) { w.unreachable["home-b"] = true }, want: "--host-gone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +100,28 @@ func TestRefusals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// dropEtcd is a site in etcd.members whose join never finished: etcd does
+// not list it, and nothing of etcd runs on its host.
+func (w *world) dropEtcd(site string) {
+	var kept []apply.EtcdMember
+	for _, m := range w.etcd {
+		if m.Name != site {
+			kept = append(kept, m)
+		}
+	}
+	w.etcd = kept
+	w.hosts[site].etcdUp, w.hosts[site].etcdContainer = false, false
+}
+
+// learner makes a site's etcd member a learner, joined but not promoted.
+func (w *world) learner(site string) {
+	for i := range w.etcd {
+		if w.etcd[i].Name == site {
+			w.etcd[i].IsLearner = true
+		}
 	}
 }
 
