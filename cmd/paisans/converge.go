@@ -272,34 +272,21 @@ const defaultPrepareAtOnce = 8
 // it to one, to run them in order.
 var prepareAtOnce = defaultPrepareAtOnce
 
-// atOnce runs work for every index of keys, up to prepareAtOnce at a time,
-// and returns once each has. Indices sharing a key run one after another, in
-// order: two sites reached at one ssh destination are one machine, whose
-// package manager takes one run at a time. With prepareAtOnce one, every
+// atOnce runs work for every index below n, up to prepareAtOnce at a time,
+// and returns once each has. Each index is a site, and a site is a machine of
+// its own (validate refuses two sites at one ssh destination), so no two of
+// them wait on one host's package manager. With prepareAtOnce one, every
 // index runs in order.
-func atOnce(keys []string, work func(i int)) {
-	var chains [][]int
-	chain := map[string]int{}
-	for i, k := range keys {
-		c, ok := chain[k]
-		if !ok {
-			c = len(chains)
-			chain[k] = c
-			chains = append(chains, nil)
-		}
-		chains[c] = append(chains[c], i)
-	}
+func atOnce(n int, work func(i int)) {
 	slots := make(chan struct{}, max(prepareAtOnce, 1))
 	var wg sync.WaitGroup
-	for _, c := range chains {
+	for i := range n {
 		slots <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-slots }()
-			for _, i := range c {
-				work(i)
-			}
+			work(i)
 		}()
 	}
 	wg.Wait()
@@ -865,7 +852,6 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 			r.Section(map[stage]string{stagePrepare: "prepare", stagePull: "pull"}[s.Stage])
 			lines := ui.Group(r, siteTitles(group)...)
 			statuses := make([]stepStatus, len(group))
-			var keys []string
 			var unsettled []int
 			for k := range group {
 				st, ok := settled(i + k)
@@ -875,9 +861,8 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 					continue
 				}
 				unsettled = append(unsettled, k)
-				keys = append(keys, prepareHost(cfg, group[k], o))
 			}
-			atOnce(keys, func(n int) {
+			atOnce(len(unsettled), func(n int) {
 				k := unsettled[n]
 				statuses[k] = checked(group[k])
 				endStatus(lines[k], statuses[k])
@@ -1017,20 +1002,6 @@ func siteTitles(steps []convergeStep) []string {
 	return titles
 }
 
-// prepareHost is the machine a prepare or pull step reaches: its site's ssh
-// destination, which two sites may share.
-func prepareHost(cfg *config.Config, s convergeStep, o convergeOptions) string {
-	site := stepSite(s)
-	if cfg == nil {
-		return site
-	}
-	sc, ok := cfg.Sites[site]
-	if !ok {
-		return site
-	}
-	return siteTransport(site, sc, "", o.Sudo).Describe()
-}
-
 // installEnd is the index after the install steps that start at from.
 func installEnd(steps []convergeStep, from int) int {
 	to := from
@@ -1165,11 +1136,7 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 	r.Section("prepare")
 	lines := ui.Group(r, siteTitles(steps)...)
 	errs := make([]error, len(steps))
-	keys := make([]string, len(steps))
-	for k, s := range steps {
-		keys[k] = prepareHost(cfg, s, o)
-	}
-	atOnce(keys, func(k int) {
+	atOnce(len(steps), func(k int) {
 		output, _, _, _, reports, err := prepareRun(r, lines[k], convergeFlags(steps[k].Args, o), o.Verbose)
 		for _, n := range lineDetails(lines[k], "", output, reports) {
 			lines[k].Note(n.Text, n.Detail)

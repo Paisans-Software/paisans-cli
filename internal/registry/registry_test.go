@@ -59,12 +59,24 @@ func TestMerge(t *testing.T) {
 		}
 	})
 	t.Run("same id is refreshed", func(t *testing.T) {
-		got, err := Merge(base, ours, entry("f2a9", "example.org", "home-b"))
+		e := entry("f2a9", "example.org", "home-a")
+		e.ClaimedAt = "2026-10-02T00:00:00Z"
+		got, err := Merge(base, ours, e)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Deployments) != 1 || got.Deployments[ours].Site != "home-b" {
+		if len(got.Deployments) != 1 || got.Deployments[ours] != e {
 			t.Errorf("refresh = %+v", got)
+		}
+	})
+	t.Run("same id as another site is refused", func(t *testing.T) {
+		got, err := Merge(base, ours, entry("f2a9", "example.org", "home-b"))
+		var c Conflict
+		if !errors.As(err, &c) || c.ID != ours || c.Entry.Site != "home-a" {
+			t.Fatalf("Merge = %v, want a conflict naming home-a", err)
+		}
+		if got.Deployments[ours].Site != "home-a" {
+			t.Errorf("a refused merge changed the registry: %+v", got)
 		}
 	})
 	t.Run("another token coexists", func(t *testing.T) {
@@ -184,7 +196,11 @@ func TestClaimMergeAgreesWithMerge(t *testing.T) {
 		e    Entry
 	}{
 		{"a first claim on an empty host", "", ours, entry("f2a9", "example.org", "home-a")},
-		{"a refresh", string(input), ours, entry("f2a9", "example.org", "home-b")},
+		{"a refresh", string(input), ours, func() Entry {
+			e := entry("f2a9", "example.org", "home-a")
+			e.ClaimedAt = "2026-10-02T00:00:00Z"
+			return e
+		}()},
 		{"a new token", string(input), "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6", entry("1d2e", "example.com", "home-a")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,6 +235,19 @@ func TestClaimMergeAgreesWithMerge(t *testing.T) {
 	var c Conflict
 	if err := ParseClaim(stderr); !errors.As(err, &c) || c.ID != ours || c.Entry.Domain != "example.org" {
 		t.Errorf("the refusal %q parsed to %v, want a conflict naming %s", stderr, err, ours)
+	}
+
+	// The same deployment claiming the host as another site is refused,
+	// naming the site the host runs, as Merge refuses it.
+	stdout, stderr, code = runMerge(t, string(input), ours, entry("f2a9", "example.org", "home-b"))
+	if code != 3 || stdout != "" {
+		t.Fatalf("a second site of one deployment was not refused: exit %d, stdout %q", code, stdout)
+	}
+	if err := ParseClaim(stderr); !errors.As(err, &c) || c.ID != ours || c.Entry.Site != "home-a" {
+		t.Errorf("the refusal %q parsed to %v, want a conflict naming home-a", stderr, err)
+	}
+	if _, err := Merge(base, ours, entry("f2a9", "example.org", "home-b")); err == nil {
+		t.Error("Merge took what the awk merge refused")
 	}
 
 	if _, _, code := runMerge(t, "{\"something\":\"else\"}\n", ours, entry("f2a9", "example.org", "home-a")); code != 4 {

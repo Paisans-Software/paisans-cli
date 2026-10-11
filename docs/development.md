@@ -53,6 +53,15 @@ subnet, and a claim refuses another deployment's same interface, same port or
 overlapping subnet. It carries the site's roles too (`roles`, sorted and
 comma joined so the awk matches one with `index()`), and a claim refuses
 `gateway` or `data` when another deployment on the host holds the same role.
+A site is one machine: `registry.Check` and `registry.Claim` refuse a host
+that runs another site of this deployment (`internal/registry/machine.go`),
+read from this deployment's entry, which names the site, or with no entry from
+the `Address` line of `/etc/wireguard/psns-<token>.conf`. The awk merge
+refuses the same thing under the lock, for two claims racing, and `Merge`
+mirrors it. `validate` refuses two sites with one mesh address
+(`duplicate-site-address`) and two at one ssh host and port or one dial
+endpoint (`sites-share-a-machine`), so `apply` without `--site` runs every
+site's prepare and pull at once with no host shared between them.
 `apply` and `host prepare` also read the host's routes,
 addresses, Docker networks and Docker's address pools before they claim it,
 and refuse an overlap with the mesh subnet; `internal/mesh` holds the parsing

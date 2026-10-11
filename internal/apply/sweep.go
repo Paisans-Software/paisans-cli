@@ -235,27 +235,3 @@ func imageRecord(plan *Plan) []render.ManifestImage {
 	sort.Slice(out, func(i, j int) bool { return out[i].Repository < out[j].Repository })
 	return out
 }
-
-// otherSitesImages is every image the other sites of the deployment render,
-// read from their compose files in the render. The Caddy reference there is
-// the configuration's tag: only a site's own apply pins it to a build.
-func otherSitesImages(site string, plan *render.Plan) []string {
-	seen := map[string]bool{}
-	for _, file := range plan.Files {
-		name, rel, ok := strings.Cut(file.Path, "/")
-		if !ok || name == site {
-			continue
-		}
-		if _, _, rest, ok := deployment.SplitRel(rel); !ok || rest != "compose.yaml" {
-			continue
-		}
-		images, err := composeImages(file.Content)
-		if err != nil {
-			continue
-		}
-		for _, ref := range images {
-			seen[ref] = true
-		}
-	}
-	return sortedKeys(seen)
-}

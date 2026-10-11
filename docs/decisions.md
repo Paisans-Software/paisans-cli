@@ -1340,3 +1340,49 @@ opens no pull request. The job is that repository's to retire.
 resolver was run against ghcr.io and Docker Hub, and its digest for
 `ghcr.io/paisans-software/caddy:2` matched the RepoDigest `docker pull`
 recorded for the same tag. Nothing was run against a deployment.
+
+## 2026-10-11: A site is one machine
+
+**Decided.** Founder decision.
+
+### What was decided
+
+A site of a deployment is one machine, and a machine runs at most one site of
+any one deployment. Two deployments may still share a machine, as before. The
+toolkit refuses a second site of a deployment on a machine before anything is
+written to it, and `validate` refuses the configurations that are certainly
+one machine.
+
+### Why
+
+Everything a deployment owns on a host is named for the deployment and
+nothing narrower: `/srv/paisans/<token>/`, its manifest, its compose projects
+`paisans-<token>-<stack>`, its WireGuard interface `psns-<token>` and
+`/etc/wireguard/psns-<token>.conf`, and its one entry in the host's registry.
+Two sites of one deployment on one machine collide on every one of them. No
+case needs them there: roles combine on one site, and a second environment is
+a second deployment, which the registry keeps apart from the first on any
+machine they share.
+
+### How
+
+* The host registry's claim, which every command that writes to a host makes
+  first, with its dry run reading the same, refuses a host already running
+  another site of this deployment and names that site and its mesh address.
+  The site is read from this deployment's registry entry, which names it, so
+  a site whose address changed in `paisans.yaml` is still recognised as
+  itself; on a host with no entry, from the `Address` in the deployment's
+  WireGuard config. The awk merge refuses it again under the lock.
+* `validate` refuses two sites with one mesh address
+  (`duplicate-site-address`), and two reached at one ssh host and port or
+  dialled at one endpoint (`sites-share-a-machine`). A public address shared
+  by sites behind one router is accepted, since each is reached on ports of
+  its own.
+* `apply` without `--site` prepares and pulls every site at once with no
+  ordering between sites, and an apply's image sweep keeps only what its own
+  site renders.
+
+### What was run
+
+`go build ./...`, `go vet ./...`, `go test ./... -count=1`, `-race` on the
+changed packages, and `gofmt -l .` empty. Nothing was run against a host.

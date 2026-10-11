@@ -1135,6 +1135,32 @@ deployment claiming `gateway` on a host where another already holds
 `gateway`, and the same for `data`. The refusal says to use another host for
 one of them. Every other role shares a host freely.
 
+**A site is one machine, and a machine runs at most one site of a
+deployment.** Everything above is named for the deployment and nothing
+narrower: one root, one manifest, one set of compose projects, one WireGuard
+interface with one `Address`, one registry entry. Two sites of one deployment
+on one machine would write the same files, replace each other's containers and
+give one interface two addresses. Nothing needs them there: roles combine on
+one site (`roles: [data, apps, gateway]`), and a second environment, Eg: a
+staging copy, is a second deployment with its own `id`, which the registry
+keeps apart from the first on any host they share. So the claim refuses a host
+that already runs another site of this deployment, naming that site and its
+mesh address, before anything is written, and a dry run refuses the same way.
+Which site a host runs is read from this deployment's registry entry, which
+names it; on a host with no entry, from the `Address` in
+`/etc/wireguard/psns-<token>.conf`, matched to the site `paisans.yaml` gives
+that address. Reading the name first is what lets a site's address change: the
+entry still names the site, and `apply` restarts the interface with the new
+`Address` (see *`apply` brings the mesh interface up before anything binds to
+it*). A host left by a site that `paisans.yaml` no longer declares is cleaned
+with `site remove --force` before another site takes it.
+
+`validate` refuses what a file alone can show to be one machine: two sites
+with one mesh address (`duplicate-site-address`), and two sites reached at one
+ssh host and port, or dialled at one endpoint (`sites-share-a-machine`). Two
+sites behind one router may share its public address, each with ports of its
+own forwarded to it; that is two machines and is accepted.
+
 Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
 reads it on the site being added. `app admin create` and `oidc client create`
@@ -3574,10 +3600,9 @@ host's downloads, gigabytes each, would run in turn while every other host sat
 idle. The pull stage plans each site exactly as its `apply --site` would, and
 pulls on the host the images that plan would pull: the rendered images the host
 does not have, of the stacks the apply will recreate. Each host pulls a few
-images at a time, every host at once, and two sites at one ssh destination pull
-one after the other. Each apply after it finds its images present. It needs
-only Docker, which prepare installs, so it follows prepare directly; ahead of
-`dns`, a host short of space stops the run before a record is published for a
+images at a time, every host at once. Each apply after it finds its images
+present. It needs only Docker, which prepare installs, so it follows prepare
+directly; ahead of `dns`, a host short of space stops the run before a record is published for a
 deployment that cannot start. The same plan carries the free space check (see
 *`apply` checks free space before it pulls*), so a host short of space is
 refused here, before any host has pulled a layer, with the words its apply
@@ -3676,8 +3701,7 @@ every failed host named. A host whose pull fails is the same: every other host
 finishes its pulls, and the run stops before `dns` with each failed host named
 and why. Without a terminal each prepare line is printed once, whole, when its
 host finishes, and with `-v` a host's own output follows its
-line, never another host's. Two sites reached at the same ssh destination are
-prepared one after the other. A sudo password or an ssh host key question a
+line, never another host's. A sudo password or an ssh host key question a
 host asks during prepare holds the block, one question at a time.
 
 A step that fails marks its site's line `✗` with the time its steps took, the
@@ -4613,9 +4637,10 @@ apply does not read. A host whose containers include another deployment's is
 shared and removes nothing (*The host check: what is already on a host decides
 how much is touched*); a host holding another deployment's root under
 `/srv/paisans/` with no container running sweeps nothing either, and the plan
-says which root it found. Two sites of one deployment reached at the same ssh
-destination need no such rule: each keeps every image any site of the
-deployment renders.
+says which root it found. Another site of the same deployment is never on
+the host, since a site is one machine (*A deployment has an id, and a host
+knows every deployment on it*), so the sweep keeps what this site renders and
+nothing on behalf of other sites.
 
 ### Every volume an image declares is mounted, and `apply` checks it
 

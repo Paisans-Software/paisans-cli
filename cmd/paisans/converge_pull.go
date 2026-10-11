@@ -253,9 +253,9 @@ func lastLine(s string) string {
 }
 
 // convergePullAll is the pull stage of a run with --execute: a line per
-// site, every host at once, as prepare runs, and same-host sites one after
-// another. A host that fails stops none of the others; once every one has
-// ended, the run stops if any failed, naming each.
+// site, every host at once, as prepare runs. A host that fails stops none of
+// the others; once every one has ended, the run stops if any failed, naming
+// each.
 //
 // It runs nothing through convergeQuiet or checkStep, which swap the
 // process's reporterOverride and so allow one command at a time: each site's
@@ -266,12 +266,8 @@ func convergePullAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 	r.Section("pull")
 	lines := ui.Group(r, siteTitles(steps)...)
 	errs := make([]error, len(steps))
-	keys := make([]string, len(steps))
-	for k, s := range steps {
-		keys[k] = prepareHost(cfg, s, o)
-	}
 	p := newPuller(cfg, o)
-	atOnce(keys, func(k int) {
+	atOnce(len(steps), func(k int) {
 		reports, err := p.pullSite(lines[k], steps[k])
 		for _, n := range lineDetails(lines[k], "", "", reports) {
 			lines[k].Note(n.Text, n.Detail)

@@ -148,45 +148,6 @@ func TestAHostPullsAFewImagesAtOnce(t *testing.T) {
 	}
 }
 
-// Two sites reached at one ssh destination are one machine, which pulls one
-// site's images and then the other's.
-func TestSitesOnOneHostPullInOrder(t *testing.T) {
-	fakeConverge(t, nil)
-	pullAtOnce(t)
-	recordConverge(t)
-	var mu sync.Mutex
-	var order []string
-	var together atomic.Bool
-	inside := map[string]bool{}
-	convergePullPlan = func(_ *config.Config, _ *config.Secrets, site string, _ apply.Transport, _ ...apply.Option) (*apply.Plan, error) {
-		mu.Lock()
-		inside[site] = true
-		if inside["home-a"] && inside["home-b"] {
-			together.Store(true)
-		}
-		order = append(order, site)
-		mu.Unlock()
-		time.Sleep(20 * time.Millisecond)
-		mu.Lock()
-		inside[site] = false
-		mu.Unlock()
-		return &apply.Plan{Site: site}, nil
-	}
-	if err := convergeShaped(t, func(cfg *config.Config) {
-		b := cfg.Sites["home-b"]
-		b.SSH.Host = cfg.Sites["home-a"].SSH.Host
-		cfg.Sites["home-b"] = b
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if together.Load() {
-		t.Error("home-a and home-b, one machine, pulled at the same time")
-	}
-	if a, b := slices.Index(order, "home-a"), slices.Index(order, "home-b"); a < 0 || b < a {
-		t.Errorf("pulled in the order %v, want home-a before home-b", order)
-	}
-}
-
 // A host that fails does not stop the others: every host pulls, each
 // failure is marked on its line and named in the error, and the run stops
 // before dns and install.

@@ -300,8 +300,12 @@ func Meshes(r Registry, id, on string) []mesh.Taken {
 }
 
 // Merge adds or refreshes id's entry, or refuses with the first conflict and
-// returns r unchanged.
+// returns r unchanged. id's own entry naming another site is refused as the
+// awk merge refuses it, with a Conflict naming id itself.
 func Merge(r Registry, id string, e Entry) (Registry, error) {
+	if mine, ok := r.Deployments[id]; ok && mine.Site != "" && mine.Site != e.Site {
+		return r, Conflict{ID: id, Entry: mine}
+	}
 	if c := Conflicts(r, id, e); len(c) > 0 {
 		return r, c[0]
 	}
@@ -369,7 +373,9 @@ const (
 
 // mergeProgram is the claim's merge, in awk. It reads the registry in
 // Encode's layout, keeps every other deployment's line, drops id's own line
-// (the refresh), and prints the result with entry last. A line under another
+// (the refresh), and prints the result with entry last. id's own line naming
+// another site is a conflict too: the host is that site's machine (see
+// sameMachine). A line under another
 // id holding the claimed token, root, interface or listen port, a mesh
 // subnet overlapping the claimed one, or the gateway or data role the claim
 // also holds, is a conflict: it is printed to stderr
@@ -420,7 +426,13 @@ $0 == footer { done = 1; next }
 	sub(/,$/, "", line)
 	if (line !~ /^"[^"]+":\{.*\}$/) { bad = 1; next }
 	key = substr(line, 2, index(line, "\":") - 2)
-	if (key == id) next
+	if (key == id) {
+		if (str(line, "site") != "" && str(line, "site") != site) {
+			print marker line > "/dev/stderr"
+			conflict = 1
+		}
+		next
+	}
 	if (index(line, "\"token\":\"" token "\"") || index(line, "\"root\":\"" root "\"") ||
 		str(line, "interface") == iface ||
 		(port != "" && port != "0" && num(line, "listen_port") == port) ||
@@ -457,11 +469,11 @@ func awkArgs(id string, e Entry) ([]string, error) {
 	}
 	vars := map[string]string{
 		"id": id, "token": e.Token, "root": e.Root, "entry": entry,
-		"iface": e.Interface, "port": port, "subnet": e.Subnet, "roles": e.Roles,
+		"iface": e.Interface, "port": port, "subnet": e.Subnet, "roles": e.Roles, "site": e.Site,
 		"header": header, "footer": footer, "marker": conflictMarker, "unreadable": unreadableMarker,
 	}
 	var args []string
-	for _, name := range []string{"id", "token", "root", "iface", "port", "subnet", "roles", "entry", "header", "footer", "marker", "unreadable"} {
+	for _, name := range []string{"id", "token", "root", "iface", "port", "subnet", "roles", "site", "entry", "header", "footer", "marker", "unreadable"} {
 		args = append(args, "-v", name+"="+awkString(vars[name]))
 	}
 	return append(args, mergeProgram), nil
@@ -529,8 +541,24 @@ type Runner interface {
 // Claim claims the host t reaches for cfg's deployment, as site. It is the
 // first thing every command that writes to a host does: a refusal stops the
 // command with nothing on the host changed.
+//
+// A host that already runs another site of this deployment is refused before
+// the claim runs, and the merge refuses it again under the lock, for two
+// claims racing.
 func Claim(t Runner, cfg *config.Config, site string, now time.Time) error {
 	id, e := For(cfg, site, now)
+	content, _, err := t.ReadFile(Path)
+	if err != nil {
+		return fmt.Errorf("%s: reading %s: %w", t.Describe(), Path, err)
+	}
+	// A registry in another layout is the merge's to refuse, in its own words.
+	var current *Registry
+	if r, err := Parse([]byte(content)); err == nil {
+		current = &r
+	}
+	if err := sameMachine(t, current, cfg, site); err != nil {
+		return err
+	}
 	command, err := ClaimCommand(id, e)
 	if err != nil {
 		return err
@@ -541,6 +569,9 @@ func Claim(t Runner, cfg *config.Config, site string, now time.Time) error {
 	}
 	if refusal := ParseClaim(out); refusal != nil {
 		var c Conflict
+		if errors.As(refusal, &c) && c.ID == id {
+			return otherSite(t, cfg, site, c.Entry.Site, c.Entry.Address, c.Entry.Kept)
+		}
 		if errors.As(refusal, &c) {
 			c.Clashes = clashes(c.Entry, e)
 			refusal = c
@@ -556,6 +587,9 @@ func Check(t Runner, cfg *config.Config, site string) error {
 	id, e := For(cfg, site, time.Time{})
 	r, err := Read(t)
 	if err != nil {
+		return err
+	}
+	if err := sameMachine(t, &r, cfg, site); err != nil {
 		return err
 	}
 	if c := Conflicts(r, id, e); len(c) > 0 {

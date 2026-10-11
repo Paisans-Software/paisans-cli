@@ -48,6 +48,9 @@ func TestRulesFire(t *testing.T) {
 		{"garage-two-sites-stop-uploads", "garage-two-sites-stop-uploads", validate.Warn},
 		{"garage-partial-uploads", "garage-partial-uploads", validate.Warn},
 		{"site-address-outside-mesh", "site-address-outside-mesh", validate.Refuse},
+		{"duplicate-site-address", "duplicate-site-address", validate.Refuse},
+		{"sites-share-a-machine", "sites-share-a-machine", validate.Refuse},
+		{"sites-share-a-machine-endpoint", "sites-share-a-machine", validate.Refuse},
 		{"unknown-image-service", "unknown-image-service", validate.Refuse},
 		{"floating-image-tag", "floating-image-tag", validate.Refuse},
 		{"cluster-placement-without-a-cluster", "cluster-placement-without-a-cluster", validate.Refuse},
@@ -813,5 +816,42 @@ func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the watchdog warning did not fire: %v", result.Findings)
+	}
+}
+
+// Two sites behind one router share its public address, each with a port of
+// its own forwarded to it for ssh and for WireGuard. That is two machines,
+// and is not refused; the same address and port for either is one machine.
+func TestSitesBehindOneRouterAreTwoMachines(t *testing.T) {
+	cfg := load(t, "valid")
+	share := func(cfg *config.Config, sshPort int, endpoint string) {
+		for name, port := range map[string]int{"home-a": 2201, "home-b": sshPort} {
+			site := cfg.Sites[name]
+			site.SSH.Host = ""
+			site.PublicAddress = "203.0.113.30"
+			site.SSH.Port = port
+			cfg.Sites[name] = site
+		}
+		a := cfg.Sites["home-a"]
+		a.Endpoint = ":51820"
+		cfg.Sites["home-a"] = a
+		b := cfg.Sites["home-b"]
+		b.Endpoint = endpoint
+		cfg.Sites["home-b"] = b
+	}
+	share(cfg, 2202, ":51821")
+	if result := validate.Check(cfg); result.Has("sites-share-a-machine") {
+		t.Fatalf("two sites behind one router were refused: %v", result.Refusals())
+	}
+
+	cfg = load(t, "valid")
+	share(cfg, 2201, ":51821")
+	if !validate.Check(cfg).Has("sites-share-a-machine") {
+		t.Error("two sites at one ssh address and port were not refused")
+	}
+	cfg = load(t, "valid")
+	share(cfg, 2202, ":51820")
+	if !validate.Check(cfg).Has("sites-share-a-machine") {
+		t.Error("two sites dialled at one address and port were not refused")
 	}
 }
