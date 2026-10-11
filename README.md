@@ -1219,7 +1219,8 @@ compose projects and its own markers, so none of them reads another's files
 as its own or replaces another's containers. What the token cannot do alone
 is guarantee that: four hex digits of a random id collide rarely, not never.
 So **every host keeps a registry** at `/var/lib/paisans/registry.json`,
-root's and 0600, listing every deployment that has claimed it:
+root's and 0600, in a directory others may enter but not list (0711, for the
+deployment record beside it), listing every deployment that has claimed it:
 
 ```json
 {"version":1,"deployments":{
@@ -1781,7 +1782,14 @@ something the configuration does not declare:
 missing from `paisans.yaml` by mistake (commented out, renamed, a bad merge)
 does not lose its secrets. `/var/lib/paisans/deployed.<token>.json` on every
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
-nothing else. A gateway's `apply` adds every name the yaml declares and never
+nothing else. Because it holds nothing else, it is **readable without sudo**:
+every write leaves it 0644, and `/var/lib/paisans` 0711, which others may
+enter but not list, so the registry beside it and the names of its files stay
+root's. Reading it is done as the ssh user, so `apply --site` of a site that
+is not a gateway, which reads every gateway's record for its warnings, asks
+for no gateway's sudo password. A record the ssh user may not read, one
+written with other modes, is read through sudo instead, and the gateway's
+next `apply` writes it readable. A gateway's `apply` adds every name the yaml declares and never
 takes one out, so an `apply` of a yaml mid-edit cannot shrink it. Only the
 removal commands take names out, on every gateway: `site remove` in its stage
 2, `site remove --force` for a site no longer declared, and `app remove` for

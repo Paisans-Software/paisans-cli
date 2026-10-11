@@ -135,7 +135,9 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **Flags:** `--config`, `--secrets`, `--execute`, `--without-record` (off:
   trust `paisans.yaml` alone when no gateway's deployment record can be read;
   with `--execute` it asks for the word `prune` at a terminal), `--sudo`.
-* **Hosts:** reads each gateway's deployment record. Changes none.
+* **Hosts:** reads each gateway's deployment record, as the ssh user since it
+  holds only names and is world readable, and through sudo only for one
+  written with other modes. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
@@ -274,7 +276,10 @@ starts, restarts or recreates what changed.
 
   And `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** the site's own; an etcd member's apply also reads the other
-  members, to compare the live membership.
+  members, to compare the live membership. It reads every gateway's
+  deployment record as the ssh user, without sudo, since the record holds
+  only names and is world readable, so applying a site that is not a gateway
+  asks for no gateway's sudo password.
 * **`--execute`:** writes and acts, and an apply of the whole site ends by
   sweeping the old images of repositories its stacks render or have rendered,
   which no site of the deployment renders and no container uses (`sweep old

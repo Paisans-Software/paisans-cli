@@ -37,8 +37,10 @@ Out:
 ## The record
 
 `/var/lib/paisans/deployed.<token>.json` on every gateway the yaml declares,
-beside `registry.json`, root's and 0600, written under the registry's lock and
-replaced atomically, as the registry is:
+beside `registry.json`, root's and 0644 in the 0711 directory, so that the
+ssh user reads it without sudo while the directory's listing stays root's. It
+holds only names. It is written under the registry's lock and replaced
+atomically, as the registry is:
 
 ```json
 {"version": 1, "updated_at": "2026-10-09T18:40:00Z",
