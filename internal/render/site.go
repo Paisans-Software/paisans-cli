@@ -123,7 +123,7 @@ var spiloTag = map[string]string{
 // What this returns may be a tag that moves, and is rendered as it is: render
 // reaches no network, so it cannot know which build a tag names today. apply
 // does, and pins the digest into the rendered file before comparing it with
-// the host's (see PinCaddyImage).
+// the host's (see PinImages and Plan.Images).
 func (p *planner) caddyImage() (string, error) {
 	if declared := p.cfg.ACME.Image; declared != "" {
 		return declared, nil
@@ -254,7 +254,6 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.caddyImages[site.Name] = caddy
 	}
 	initial := p.etcdInitialFor(site.Name)
 	infra, err := p.renderTemplate("infra-compose.yaml.tmpl", map[string]any{

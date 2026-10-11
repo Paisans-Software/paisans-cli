@@ -138,7 +138,7 @@ func TestTheSweepKeepsADigestPinnedCaddy(t *testing.T) {
 	host.images = imageLine(caddyRepo, "<none>", fakeID(pinned)) +
 		imageLine(caddyRepo, "<none>", fakeID("an older build"))
 
-	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{digest: buildA}))
+	p, err := apply.Build("vm", plan(t), acmeModule(t), host, apply.ResolveImages(caddyAt(buildA)))
 	if err != nil {
 		t.Fatal(err)
 	}
