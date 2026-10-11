@@ -73,7 +73,7 @@ func IncludeAt(ws WebServer, dir string) (inc Include, why string) {
 		}
 	}
 	seen := path.Join(path.Dir(ws.Main), IncludeName)
-	return Include{}, fmt.Sprintf("%s is not mounted into the container %s, so %s cannot read what is written there. Add it to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container, then run paisans apply --execute again.", dir, ws.Container, ws.Server, dir, seen)
+	return Include{}, fmt.Sprintf("%s Add it to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container (a restart does not add a mount), then run paisans apply --execute again.", unmounted(ws, dir), dir, seen)
 }
 
 func mountAdvice(ws WebServer, seen string) string {
@@ -81,11 +81,21 @@ func mountAdvice(ws WebServer, seen string) string {
 	if ws.Config != "" {
 		host = path.Join(path.Dir(ws.Config), IncludeName)
 	}
+	return fmt.Sprintf("%s Add one to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container (a restart does not add a mount), then run paisans apply --execute again: it finds the directory and records it in paisans.yaml.", unmounted(ws, ""), host, seen)
+}
+
+// unmounted says that the server in a container cannot see dir, the
+// include_dir paisans.yaml names, or with dir empty the directory beside
+// its configuration.
+func unmounted(ws WebServer, dir string) string {
+	if dir != "" {
+		return fmt.Sprintf("%s is not mounted into the container %s, so %s cannot read what is written there.", dir, ws.Container, ws.Server)
+	}
 	what := "its configuration"
 	if ws.Config != "" {
 		what = ws.Config
 	}
-	return fmt.Sprintf("The container %s mounts %s alone, so no directory beside it is visible inside the container. Add one to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container, then run paisans apply --execute again: it finds the directory and records it in paisans.yaml.", ws.Container, what, host, seen)
+	return fmt.Sprintf("The container %s mounts %s alone, so no directory beside it is visible inside the container.", ws.Container, what)
 }
 
 // hostPath is the host path of p inside a container, through the mount of
@@ -119,13 +129,26 @@ func under(p, dir string) (string, bool) {
 func IncludeLine(s Server, seen string) (line, where string) {
 	switch s {
 	case ServerCaddy:
-		return "import " + seen + "/*", "at the top level of the Caddyfile, outside every site block"
+		return "import " + seen + "/*", "at the top level of the Caddyfile, after the global options block if it has one, outside every site block and snippet"
 	case ServerNginx:
 		return "include " + seen + "/*.conf;", "inside the http block"
 	case ServerApache:
 		return "IncludeOptional " + seen + "/*.conf", "at the top level of the server's configuration"
 	}
 	return "", ""
+}
+
+// IncludeExample is a Caddyfile with the line where it goes, indented to
+// stand under a sentence; it is empty for the other servers, whose line
+// IncludeLine's where places well enough. Caddy requires its global options
+// block, the one that opens with { alone, to come first: an import above
+// it brings the toolkit's site blocks in ahead of it.
+func IncludeExample(s Server, seen string) string {
+	if s != ServerCaddy {
+		return ""
+	}
+	line, _ := IncludeLine(s, seen)
+	return indent("{\n    email admin@example.org\n}\n\n" + line + "\n\nexample.org {\n    ...\n}\n")
 }
 
 // FileName is the toolkit's file for app, named for the deployment, so two
@@ -165,6 +188,13 @@ const (
 	// next start once the directory or a file is gone: a literal path, or
 	// Apache's plain Include.
 	IncludeRefused
+	// IncludeAboveOptions is Caddy's wildcard import above the Caddyfile's
+	// global options block: valid while the directory is empty, and refused
+	// once a site file in it brings a site block in ahead of the options.
+	IncludeAboveOptions
+	// IncludeInBlock is Caddy's wildcard import inside a site block, a
+	// snippet or the global options block, where a site block cannot go.
+	IncludeInBlock
 )
 
 var (
@@ -176,8 +206,53 @@ var (
 
 // CheckInclude reads the server's configuration and reports whether it
 // includes seen by a wildcard that takes in a file named name, and the line
-// it found when that line is refused. It reads only.
+// it found when that line is refused or misplaced. It reads only.
 func CheckInclude(h Host, ws WebServer, seen, name string) (IncludeState, string, error) {
+	lines, err := includeLines(h, ws)
+	if err != nil {
+		return IncludeMissing, "", err
+	}
+	state, refused, found := IncludeMissing, "", false
+	for _, l := range lines {
+		dir, file := path.Dir(l.path), path.Base(l.path)
+		switch {
+		case l.path == seen || (dir == seen && !strings.ContainsAny(file, "*?[")):
+			state, refused = IncludeRefused, l.text
+		case dir != seen:
+		case !l.optional:
+			state, refused = IncludeRefused, l.text
+		default:
+			if ok, _ := path.Match(file, name); !ok {
+				continue
+			}
+			switch {
+			case l.inBlock:
+				return IncludeInBlock, l.text, nil
+			case l.aboveOptions:
+				return IncludeAboveOptions, l.text, nil
+			}
+			found = true
+		}
+	}
+	if found {
+		return IncludeWildcard, "", nil
+	}
+	return state, refused, nil
+}
+
+// includeLine is one line of a server's configuration that includes
+// others: as written, the absolute path it names, and whether it starts
+// with nothing matching it. For Caddy, also whether it is inside a block,
+// or above the global options block.
+type includeLine struct {
+	text, path            string
+	optional              bool
+	inBlock, aboveOptions bool
+}
+
+// includeLines reads the server's configuration for the lines that
+// include others. It reads only.
+func includeLines(h Host, ws WebServer) ([]includeLine, error) {
 	var conf string
 	var err error
 	switch ws.Server {
@@ -192,10 +267,10 @@ func CheckInclude(h Host, ws WebServer, seen, name string) (IncludeState, string
 		}
 		conf, err = serverRun(h, ws.Container, "grep -rhiE '^[[:space:]]*(Include|IncludeOptional|ServerRoot)[[:space:]]' "+dirs+" 2>/dev/null; true")
 	default:
-		return IncludeMissing, "", fmt.Errorf("there is no include line for %s", ws.Server)
+		return nil, fmt.Errorf("there is no include line for %s", ws.Server)
 	}
 	if err != nil {
-		return IncludeMissing, "", fmt.Errorf("reading %s's configuration: %s", ws.Server, firstLine(conf, err))
+		return nil, fmt.Errorf("reading %s's configuration: %s", ws.Server, firstLine(conf, err))
 	}
 	base := path.Dir(ws.Main)
 	if ws.Server == ServerApache {
@@ -205,8 +280,13 @@ func CheckInclude(h Host, ws WebServer, seen, name string) (IncludeState, string
 			}
 		}
 	}
-	state, refused := IncludeMissing, ""
-	for _, line := range strings.Split(conf, "\n") {
+	var depth []int
+	options := -1
+	if ws.Server == ServerCaddy {
+		depth, options = caddyBlocks(conf)
+	}
+	var out []includeLine
+	for i, line := range strings.Split(conf, "\n") {
 		line = strings.TrimSpace(line)
 		if i := strings.Index(line, "#"); i >= 0 {
 			line = strings.TrimSpace(line[:i])
@@ -234,21 +314,98 @@ func CheckInclude(h Host, ws WebServer, seen, name string) (IncludeState, string
 		if !path.IsAbs(p) {
 			p = path.Join(base, p)
 		}
-		p = path.Clean(p)
-		dir, file := path.Dir(p), path.Base(p)
-		switch {
-		case p == seen || (dir == seen && !strings.ContainsAny(file, "*?[")):
-			state, refused = IncludeRefused, line
-		case dir != seen:
-		case !optional:
-			state, refused = IncludeRefused, line
-		default:
-			if ok, _ := path.Match(file, name); ok {
-				return IncludeWildcard, "", nil
+		l := includeLine{text: line, path: path.Clean(p), optional: optional}
+		if depth != nil {
+			l.inBlock, l.aboveOptions = depth[i] > 0, i < options
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// caddyBlocks reads a Caddyfile's blocks: the depth of braces each line
+// starts at, and the line its global options block opens on, the first
+// block at the top level with no key before it, or -1 when there is none.
+// A brace is a token of its own; one inside a quoted token, or inside a
+// placeholder such as {host}, is not.
+func caddyBlocks(conf string) ([]int, int) {
+	lines := strings.Split(conf, "\n")
+	depth := make([]int, len(lines))
+	d, options, keyed := 0, -1, false
+	for i, line := range lines {
+		depth[i] = d
+		toks := caddyTokens(line)
+		// An import at the top level is a directive of its own, not the
+		// key of a block.
+		directive := d == 0 && len(toks) > 0 && toks[0] == "import"
+		for _, tok := range toks {
+			switch {
+			case tok == "{":
+				if d == 0 && !keyed && options < 0 {
+					options = i
+				}
+				d, keyed = d+1, false
+			case tok == "}":
+				if d > 0 {
+					d--
+				}
+			case d == 0 && !directive:
+				keyed = true
 			}
 		}
 	}
-	return state, refused, nil
+	return depth, options
+}
+
+// caddyTokens splits one line of a Caddyfile into its tokens, up to a
+// comment: a token starting with #.
+func caddyTokens(line string) []string {
+	var toks []string
+	for i := 0; i < len(line); {
+		switch c := line[i]; {
+		case c == ' ' || c == '\t' || c == '\r':
+			i++
+		case c == '#':
+			return toks
+		case c == '"' || c == '`':
+			j := i + 1
+			for j < len(line) && line[j] != c {
+				if c == '"' && line[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			toks = append(toks, line[i:min(j+1, len(line))])
+			i = j + 1
+		default:
+			j := i
+			for j < len(line) && line[j] != ' ' && line[j] != '\t' && line[j] != '\r' {
+				j++
+			}
+			toks = append(toks, line[i:j])
+			i = j
+		}
+	}
+	return toks
+}
+
+// wildcardLine is the line of the server's configuration that includes
+// seen by a wildcard taking in a file named name, or empty when there is
+// none or the configuration cannot be read.
+func wildcardLine(h Host, ws WebServer, seen, name string) string {
+	lines, err := includeLines(h, ws)
+	if err != nil {
+		return ""
+	}
+	for _, l := range lines {
+		if !l.optional || path.Dir(l.path) != seen {
+			continue
+		}
+		if ok, _ := path.Match(path.Base(l.path), name); ok && strings.ContainsAny(path.Base(l.path), "*?[") {
+			return l.text
+		}
+	}
+	return ""
 }
 
 // RefusedWhy is why a line naming the toolkit's directory is refused.

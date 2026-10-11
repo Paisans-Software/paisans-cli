@@ -22,17 +22,23 @@ var webServerProbes = webserver.DefaultProbes
 // settled at its start; run by hand, it is asked once, and only when a
 // command needs sudo.
 func webServerHost(cfg *config.Config, site string, sudo bool) webserver.Host {
-	h := webserver.Host{Plain: siteTransport(site, cfg.Sites[site], "", false)}
+	return webServerHostVia(cfg, site, "", sudo)
+}
+
+// webServerHostVia is webServerHost through ssh, verbatim, in place of the
+// site's ssh section when it is set, as apply --site --ssh reaches it.
+func webServerHostVia(cfg *config.Config, site, ssh string, sudo bool) webserver.Host {
+	h := webserver.Host{Plain: siteTransport(site, cfg.Sites[site], ssh, false)}
 	if sudo {
-		h.Sudo = siteTransport(site, cfg.Sites[site], "", true)
+		h.Sudo = siteTransport(site, cfg.Sites[site], ssh, true)
 	}
 	return h
 }
 
 // findWebServer finds the web server in front of an app on its monitor
-// site, reading only. Tests replace it.
-var findWebServer = func(cfg *config.Config, t webserver.Target, sudo bool) webserver.WebServer {
-	return webserver.Detect(webServerHost(cfg, t.Site, sudo), t)
+// site, through h, reading only. Tests replace it.
+var findWebServer = func(h webserver.Host, t webserver.Target) webserver.WebServer {
+	return webserver.Detect(h, t)
 }
 
 // runWebServer dispatches `paisans web-server show` and `paisans web-server check`.
@@ -83,10 +89,12 @@ func runWebServer(args []string) error {
 		var ws webserver.WebServer
 		if target.External() {
 			ws, _ = ui.Get(r, "read the web server on "+target.Site, func() (webserver.WebServer, error) {
-				return findWebServer(cfg, target, *sudo), nil
+				return findWebServer(webServerHost(cfg, target.Site, *sudo), target), nil
 			})
 		}
-		webserver.Show(os.Stdout, target, ws)
+		// Redacted as the reporter's lines are, since what it found on
+		// the host is printed with the sheet.
+		webserver.Show(ui.RedactWriter(os.Stdout), target, ws)
 		return nil
 	}
 	r.Section(fmt.Sprintf("web-server %s at %s", target.App, target.Hostname))
@@ -96,7 +104,7 @@ func runWebServer(args []string) error {
 	if webserver.Report(r, results) {
 		if target.External() {
 			ws, _ := ui.Get(r, "read the web server on "+target.Site, func() (webserver.WebServer, error) {
-				return findWebServer(cfg, target, *sudo), nil
+				return findWebServer(webServerHost(cfg, target.Site, *sudo), target), nil
 			})
 			r.Note(ws.Summary(), "paisans web-server show --app "+target.App+" prints what to add to it")
 		}

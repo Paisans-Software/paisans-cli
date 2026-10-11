@@ -325,7 +325,10 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // ships, so an adopter who never opens the stanza runs a tested set. The
 // database is the one service with no fixed default: every database in the
 // deployment is the same major version, declared once in cluster, so it is
-// derived rather than repeated per app.
+// derived rather than repeated per app. It is Debian's image, with the Debian
+// release in the tag: the C library decides how Postgres sorts text, so an
+// index is only valid under the C library that built it, and naming the
+// release keeps a pull from changing it under an existing data directory.
 func (p *planner) appImages(app config.App) map[string]string {
 	out := map[string]string{}
 	for _, service := range kinds.Services(app.Kind) {
@@ -335,7 +338,7 @@ func (p *planner) appImages(app config.App) map[string]string {
 		case service.Image != "":
 			out[service.Name] = service.Image
 		case service.Name == kinds.PostgresService:
-			out[service.Name] = fmt.Sprintf("postgres:%s-alpine", p.postgresVersion())
+			out[service.Name] = fmt.Sprintf("postgres:%s-trixie", p.postgresVersion())
 		}
 	}
 	return out

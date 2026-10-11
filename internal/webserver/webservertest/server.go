@@ -19,6 +19,9 @@ type Server struct {
 	// Config is what reading the server's configuration answers: the
 	// Caddyfile, nginx -T's output, or Apache's include lines.
 	Config string
+	// Labels is the container's labels as docker inspect prints them, a
+	// JSON object; empty is a container with none.
+	Labels string
 	// Validate fails the configuration check with its text when set,
 	// Reload the reload, and Restart a container's restart.
 	Validate, Reload, Restart string
@@ -80,6 +83,13 @@ func (s *Server) run(command string, sudo bool) (string, error) {
 			return "", nil
 		}
 		return "", errors.New("exit status 3")
+	case strings.HasPrefix(command, "docker inspect "):
+		if s.Labels == "" {
+			return "null\n", nil
+		}
+		return s.Labels + "\n", nil
+	case strings.HasPrefix(command, "cat ") && len(args) > 0 && s.Files[args[0]] != "":
+		return s.Files[args[0]], nil
 	case strings.HasPrefix(command, "docker restart "):
 		if s.Restart != "" {
 			return s.Restart + "\n", errors.New("exit status 1")

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -430,12 +431,17 @@ func write(t registry.Runner, d deployment.Deployment, raw string, found bool, c
 	return nil
 }
 
+// writeCommand leaves the record 0644 in a directory others may enter, so
+// that a command which only reads it, Eg: an apply of a site that is not a
+// gateway, needs no sudo on the gateway. It holds the names of sites, apps and
+// Pocket ID groups and nothing else. The directory is not listable, for the
+// registry beside it (see registry.Dir).
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
 		"umask 077",
 		"mkdir -p " + registry.Dir,
-		"chmod 700 " + registry.Dir,
+		"chmod 711 " + registry.Dir,
 		"exec 9>>" + registry.LockPath,
 		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
 		"f=" + quote(Path(d)),
@@ -445,7 +451,7 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 		"tmp=$(mktemp " + registry.Dir + "/.deployed.XXXXXX)",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
-		`chmod 600 "$tmp"`,
+		`chmod 644 "$tmp"`,
 		`mv "$tmp" "$f"`,
 	}, "; ")
 }
@@ -454,3 +460,50 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// The markers ReadAsUser's command prints in place of the record.
+const (
+	absentMarker = "__PAISANS_ABSENT__"
+	deniedMarker = "__PAISANS_DENIED__"
+)
+
+// ReadAsUser is gateway user for reading the record as the ssh user, without
+// sudo, which the modes a write leaves allow. A record the ssh user may not
+// read, one written with other modes, is read through elevated instead,
+// which is made only then, so that a read which needs no sudo asks for no
+// sudo password. The next write leaves the record readable. Run is for
+// writes, and goes through elevated.
+func ReadAsUser(user registry.Runner, elevated func() registry.Runner) registry.Runner {
+	return userReader{user: user, elevated: elevated}
+}
+
+type userReader struct {
+	user     registry.Runner
+	elevated func() registry.Runner
+}
+
+func (u userReader) Describe() string { return u.user.Describe() }
+
+func (u userReader) Run(command string) (string, error) { return u.elevated().Run(command) }
+
+func (u userReader) ReadFile(p string) (string, bool, error) {
+	out, err := u.user.Run(userReadCommand(p))
+	if err != nil {
+		return "", false, err
+	}
+	switch strings.TrimSpace(out) {
+	case absentMarker:
+		return "", false, nil
+	case deniedMarker:
+		return u.elevated().ReadFile(p)
+	}
+	return out, true, nil
+}
+
+// userReadCommand prints the file at p, or a marker: denied for a file the
+// user may not read, or one in a directory the user may not enter, which
+// hides whether the file is there at all; absent otherwise.
+func userReadCommand(p string) string {
+	f, dir := quote(p), quote(path.Dir(p))
+	return fmt.Sprintf(`if [ -f %[1]s ] && [ -r %[1]s ]; then cat %[1]s; elif [ -e %[1]s ] || { [ -d %[2]s ] && ! [ -x %[2]s ]; }; then echo %[3]s; else echo %[4]s; fi`, f, dir, deniedMarker, absentMarker)
+}

@@ -578,34 +578,65 @@ sites:
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
   a configuration it does not own. `paisans apply` without `--site` runs
-  `paisans web-server check` for each such app once every step has run, a line
+  `paisans web-server check` for each such app once every step has run, and
+  `paisans apply --site` on such a monitor runs it for the apps the monitor
+  serves once its stacks are up, a line
   per app in a `web server` section, and does not call the deployment complete
   while one fails: the app's line is a warning, `!`, with the checks that
   failed under it, an error several of them share said once, then the web
   server `web-server show` finds in front of it, read through the sudo the run
   settled at its start, and the `web-server show` and `web-server check`
   commands to fix it with. Where the app's site file step above already
-  warned with its own instructions, the check's line gives none of its own:
-  it names what failed and says that is expected until that step's problem is
-  fixed. Each problem has one line and one set of instructions. The run ends on
+  warned or failed with its own instructions, the check would only restate
+  them, so the app has no check line; with `--verbose` it has one, which names
+  what failed and says that is expected until that step's problem is fixed,
+  and the app counts as failing its check either way. Each problem has one
+  line and one set of instructions. The run ends on
   a warning, `! Deployment complete, but 1 app failed its web server check`,
   with exit status 0: every step ran, and the web server is the operator's.
   The check runs once, and once more only after apply reloaded a web server
   in a container (below), since waiting on that web server is not the
   toolkit's to do; a dry run lists the check without running it.
+  `apply --site` on such a monitor runs the whole step, the site files below
+  and then the check, reaching the monitor through the ssh and sudo the rest
+  of its apply uses, and ends the same way, on the warning or the failure in
+  place of `Applied <n> files to <site>.`. The applies a full apply runs as
+  its steps leave the step to the full apply, which runs it once.
   `docs/guides/behind-your-own-web-server.md` walks through it.
 
 **The toolkit writes its own file, never the operator's configuration.** In
-`managed_by: external` `paisans apply` without `--site` puts each app's site, the snippet `web-server show`
+`managed_by: external` `paisans apply` puts each app's site, the snippet `web-server show`
 prints for the web server it finds, in a file of its own in `include_dir`, a
 directory on the host the web server includes with one line the operator adds
 once:
 
 | Server | The one line |
 |---|---|
-| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile |
+| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile, after the global options block if it has one |
 | nginx | `include /etc/nginx/paisans.d/*.conf;`, inside the `http` block |
 | Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` |
+
+Caddy requires its global options block, the one that opens with `{` alone,
+to come first in the Caddyfile, so the import goes after it and outside every
+site block and snippet:
+
+```
+{
+    email admin@example.org
+}
+
+import /etc/caddy/paisans.d/*
+
+example.org {
+    ...
+}
+```
+
+An import above the global options block validates while the directory is
+empty, and Caddy refuses the whole configuration once a site file is in it.
+Apply reads the Caddyfile before it writes anything, and for an import above
+the global options block or inside a block it writes nothing and warns with
+where to move the line.
 
 The file is named for the deployment, `paisans-<token>-<app>.caddy` or
 `.conf`, so two deployments writing in one directory never collide. Apply
@@ -646,13 +677,37 @@ files may still be there.
 Everything about the operator's web server is a warning, `!`, on its step's
 line, and leaves the run's exit status 0: a web server not determined, one
 apply has no file for, no directory it reads to write in (a container
-mounting its configuration file alone), no line including the directory or a
-literal one, a configuration it refuses, a file edited on the host, a reload
+whose mounts do not include one), no line including the directory, a
+literal one, or a Caddy import above its global options block or inside a
+block, a configuration it refuses, a file edited on the host, a reload
 left to the operator, and a failed web server check. What apply itself could
 not do is a failure, `✗`, and the run ends failed with exit status 1: the
 monitor's host not reached over ssh, the record of its site files not read
 or written, a site file not read, written or removed there, or `paisans.yaml`
 not written.
+
+**A container without the directory is diagnosed from its compose file.**
+Docker adds a mount only when it creates a container, so a line added to the
+compose file takes effect once the container is recreated (`docker compose up
+-d <service>`), and `docker restart` is not enough. When the server's
+container lacks the directory, apply reads the labels compose put on it
+(`com.docker.compose.project`, `.service`, `.project.working_dir`,
+`.project.config_files`) and the compose files they name, through sudo only
+where the ssh user may not, and says which it is, in a few lines with the
+command that recreates the container: the line declared on the server's
+service for a container created before it; declared on another service, named
+with the one it belongs to; declared at a container path the configuration
+does not import, both paths named; or not declared, with the line to add to
+that service in that file, the only case that also offers `include_dir:
+false`. Short and long volume syntax are read, relative sources against the
+project's directory, and a volume written with a variable is compared as
+written and said to be. When the configuration already has the wildcard line,
+the warning adds that it matches nothing until the mount exists, which is
+harmless. Apply never edits a compose file, recreates a container or restarts
+one for a mount; a container it cannot read the compose file of gets the line
+to add. The command it gives is `cd <project directory> && docker compose up
+-d <service>`, or `docker compose -p <project> -f <file> ... up -d <service>`
+where the files are not the ones compose finds there by itself.
 
 The line must be a wildcard, because the directory may go: a deployment
 removed, or the directory deleted by hand. Caddy's `import` of a glob that
@@ -1194,7 +1249,8 @@ compose projects and its own markers, so none of them reads another's files
 as its own or replaces another's containers. What the token cannot do alone
 is guarantee that: four hex digits of a random id collide rarely, not never.
 So **every host keeps a registry** at `/var/lib/paisans/registry.json`,
-root's and 0600, listing every deployment that has claimed it:
+root's and 0600, in a directory others may enter but not list (0711, for the
+deployment record beside it), listing every deployment that has claimed it:
 
 ```json
 {"version":1,"deployments":{
@@ -1756,7 +1812,14 @@ something the configuration does not declare:
 missing from `paisans.yaml` by mistake (commented out, renamed, a bad merge)
 does not lose its secrets. `/var/lib/paisans/deployed.<token>.json` on every
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
-nothing else. A gateway's `apply` adds every name the yaml declares and never
+nothing else. Because it holds nothing else, it is **readable without sudo**:
+every write leaves it 0644, and `/var/lib/paisans` 0711, which others may
+enter but not list, so the registry beside it and the names of its files stay
+root's. Reading it is done as the ssh user, so `apply --site` of a site that
+is not a gateway, which reads every gateway's record for its warnings, asks
+for no gateway's sudo password. A record the ssh user may not read, one
+written with other modes, is read through sudo instead, and the gateway's
+next `apply` writes it readable. A gateway's `apply` adds every name the yaml declares and never
 takes one out, so an `apply` of a yaml mid-edit cannot shrink it. Only the
 removal commands take names out, on every gateway: `site remove` in its stage
 2, `site remove --force` for a site no longer declared, and `app remove` for
@@ -1785,7 +1848,9 @@ for people reading the file; nothing compares it.
 
 `init` and `apply` warn by key and never by value, and never refuse: a gateway
 whose record cannot be read is a warning too, and one not applied since the
-record existed is silent. `paisans secrets prune` reads every gateway's record
+record existed is silent. `apply` without `--site` reads each gateway's record
+once, before its first step, and shows each of these warnings once, under
+`secrets`; the applies it runs as steps leave them to it. `paisans secrets prune` reads every gateway's record
 and refuses when one cannot be read or has none: apply the gateway first, or
 pass `--without-record` to trust `paisans.yaml` alone, which with `--execute`
 asks for the word `prune` at a terminal. It lists what it would remove and
@@ -3116,23 +3181,42 @@ a host is made with the display held until that host has answered once. A key
 whose passphrase ssh asks for on every connection is the one prompt this does
 not cover: after the first connection the spinner runs while ssh asks, and can
 draw over the question. A key held by an agent (above) is never asked for.
-The password is checked once with `sudo -k -S -p '' true`, and every later
-command runs as `sudo -k -S -p '' sh -c '<command>'` with the password as the
-first line of that ssh session's stdin:
+The password is checked once, and every command after it runs as
+`sudo -k -S -p '' sh -c '<fence>; <command>'`, with the password as the first
+line of that ssh session's stdin, a fence line after it, and then whatever
+stdin the command itself takes:
 
 * `-S` reads the password from stdin, and `-p ''` prints no prompt into
   output the toolkit parses.
-* `-k` ignores a cached credential, so sudo reads the password line on every
-  command. A command run while the credential was cached would otherwise get
-  that line as the top of its own input, and a file write would put the
-  password into the file.
-* sudo reads the password up to the newline, so whatever follows it on stdin
-  reaches the command unchanged.
+* `-k` ignores a cached credential, so sudo asks on every command where it
+  asks at all.
+* sudo reads the password up to the newline, one byte at a time, so it takes
+  nothing that follows.
+* Whether sudo reads that line at all is the host's to decide: a NOPASSWD
+  rule matching the command, or a PAM module that authenticates without a
+  password, lets the command through without reading it. The line would then
+  be the top of the command's own input, and a command reading stdin would
+  print it, write it into a file or run it. So the command never reads that
+  stdin directly: the shell sudo starts first reads up to the fence, at most
+  two lines, which is the fence alone when sudo took the password and the
+  password and then the fence when it did not. Only what follows the fence
+  reaches the command, whichever way the host went. The fence is random for
+  each command, so nothing a command is sent can be mistaken for it.
+* ssh runs with `-T`, whatever the operator's ssh config says, so the
+  command has no terminal on the host: a terminal echoes what arrives on
+  stdin back into the output, the password included.
 
 The password is held in memory for the run and shared by every connection to
 the same destination. It never appears on a command line, where `ps` on either
-machine would show it, never in an error message, and never on disk. The next
-run asks again.
+machine would show it, and never on disk. The next run asks again.
+
+It is also registered as a secret the moment it is typed, and everything the
+toolkit shows passes through one redaction that replaces each registered
+secret with `[redacted]`: every line the progress display writes, the error a
+command ends on, the transport's own errors, and the sheet `web-server show`
+prints. A host's output is quoted to the operator in many places (a warning's
+detail, a failure's cause under `--verbose`), and a host can print back what
+it was sent, so leaving the password out is not left to each of them.
 
 **What stops a run, and what it says:**
 
@@ -4840,8 +4924,8 @@ the admin reconciler and the heartbeat's curl image):
 | mbin 1.14.0-paisans (app, messenger) | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
 | rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` (already) |
 | outline 1.10.0 | `/var/lib/outline/data` | bind, `/srv/paisans/<token>/<app>/data`, which was mounted at `/data`, a path nothing reads |
-| postgres 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
-| postgres 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
+| postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
+| postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
 | amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
 

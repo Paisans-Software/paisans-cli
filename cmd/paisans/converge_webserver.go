@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -30,18 +32,75 @@ func externalApps(cfg *config.Config) []string {
 	return out
 }
 
+// scopedApps is externalApps on the sites scope covers.
+func scopedApps(cfg *config.Config, scope webServerScope) []string {
+	var out []string
+	for _, app := range externalApps(cfg) {
+		if site, _ := render.ServedBy(cfg, app); scope.covers(site) {
+			out = append(out, app)
+		}
+	}
+	return out
+}
+
+// webServerStep is the web server step for the sites scope covers: each
+// external app's site file written (convergeWebServerFiles), then the app
+// checked (convergeWebServer). apply without --site runs it once, after
+// every other step; apply --site runs it for its own site. It returns what
+// the run ends on when something is left: broken when what apply needed on
+// a host could not be done, otherwise the operator's web server.
+func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, sudo bool, scope webServerScope) (end *ui.Problem, broken bool) {
+	files := convergeWebServerFiles(r, cfg, configPath, sudo, scope)
+	checked, failed := convergeWebServer(r, cfg, sudo, files, scope)
+	// An app whose site file step warned is named once, by the app.
+	warned := slices.Clone(checked)
+	for _, title := range files.warned {
+		if name := strings.TrimPrefix(title, "site file for "); !slices.Contains(warned, name) {
+			warned = append(warned, name)
+		}
+	}
+	if failed = append(files.failed, failed...); len(failed) > 0 {
+		return webServerBroken(failed), true
+	}
+	if len(warned) > 0 {
+		return webServerFailed(checked, warned), false
+	}
+	return nil, false
+}
+
+// webServerEnd is how a run ends on what the web server step left, end,
+// beside other, the run's own problem if it has one.
+func webServerEnd(end *ui.Problem, broken bool, other error) error {
+	switch {
+	case end == nil:
+		return other
+	case other != nil:
+		return errors.Join(end, other)
+	case broken:
+		// What apply needed on the host could not be done: that is not
+		// the operator's web server, and the run fails.
+		return end
+	}
+	// Every step ran, and what is left is the operator's own web server:
+	// the run ends on a warning, not a failure.
+	return &ui.Warning{Problem: *end}
+}
+
 // convergeWebServer checks each app served through a web server the operator
 // runs, as `paisans web-server check --app <app>` does, a line per app in a
 // section of its own. A failed check is a warning on the app's line, with the
-// failing checks, each error said once, and one set of instructions: none
-// of its own where the app's site file step already gave them, since the
-// check fails because of what that step reported. Where the site file is in
+// failing checks, each error said once, and one set of instructions. Where
+// the app's site file step warned or failed, the check only restates it, so
+// it is not run and the app has no line of its own but with --verbose,
+// where it gives no instructions of its own; the app counts as failing its
+// check either way. Where the site file is in
 // place and unchanged, the server's configuration is validated first, and
 // a server in a container reloaded and the app checked once more, which
-// takes in an edit of the operator's. It returns the apps that failed their
-// check, and the steps that failed outright.
-func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webServerFiles) (warned, failed []string) {
-	apps := externalApps(cfg)
+// takes in an edit of the operator's. Only the apps on the sites scope
+// covers are checked. It returns the apps that failed their check, and the
+// steps that failed outright.
+func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webServerFiles, scope webServerScope) (warned, failed []string) {
+	apps := scopedApps(cfg, scope)
 	if len(apps) == 0 {
 		return nil, nil
 	}
@@ -49,6 +108,11 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 		r.Section("web server")
 	}
 	for _, app := range apps {
+		sf := files.apps[app]
+		if sf != nil && sf.until != "" && !r.Verbose() {
+			warned = append(warned, app)
+			continue
+		}
 		s := r.Step(app)
 		target, err := webserver.For(cfg, app)
 		if err != nil {
@@ -57,7 +121,6 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 			failed = append(failed, app)
 			continue
 		}
-		sf := files.apps[app]
 		results := webServerResults(s, target)
 		var advice string
 		if !passed(results) && sf != nil && sf.until == "" && sf.path != "" && !sf.reloaded {
@@ -82,7 +145,7 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 			// run settled, so a passing app costs no ssh. The line
 			// spins while it is read.
 			s.Progress("read the web server on " + target.Site)
-			ws = findWebServer(cfg, target, sudo)
+			ws = findWebServer(scope.serverHost(cfg, target.Site, sudo), target)
 		}
 		s.End(ui.Warned, target.Hostname)
 		warned = append(warned, app)
@@ -215,10 +278,10 @@ func webServerBroken(steps []string) *ui.Problem {
 }
 
 // convergeWebServerPending is a dry run's web server section: a line per app
-// served through a web server the operator runs, which --execute checks
-// once every step has run.
-func convergeWebServerPending(r ui.Reporter, cfg *config.Config) {
-	apps := externalApps(cfg)
+// served through a web server the operator runs, on the sites scope covers,
+// which --execute checks once every step has run.
+func convergeWebServerPending(r ui.Reporter, cfg *config.Config, scope webServerScope) {
+	apps := scopedApps(cfg, scope)
 	if len(apps) == 0 {
 		return
 	}

@@ -48,7 +48,7 @@ func Show(w io.Writer, t Target, ws WebServer) {
 		fmt.Fprintf(w, "Obtain its certificate as the others were obtained:\n\n    %s\n\n", ws.Certbot)
 	}
 	caddy := func() {
-		fmt.Fprintf(w, "Caddy (it sets X-Forwarded-For and X-Forwarded-Proto and passes Host itself):\n\n")
+		fmt.Fprintf(w, "Caddy (it sets X-Forwarded-For and X-Forwarded-Proto and passes Host itself),\nat the top level of the Caddyfile, after the global options block if it has one:\n\n")
 		fmt.Fprint(w, indent(caddySnippet(t, ws)))
 	}
 	nginx := func() {

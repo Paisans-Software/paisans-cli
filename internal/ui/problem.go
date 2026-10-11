@@ -85,6 +85,7 @@ func PrintError(w io.Writer, err error, verbose bool) {
 }
 
 func printError(w io.Writer, err error, verbose, terminal bool, width int) {
+	w = RedactWriter(w)
 	if width <= 0 || width > maxWidth {
 		width = maxWidth
 	}
@@ -186,9 +187,12 @@ func ownText(e, next error) ([]string, bool) {
 // gets a line of its own. Each line of text wraps on its own and keeps its
 // indentation, and a list item's continuation lines align under its text
 // after "- ". Blank lines are dropped.
+//
+// text is redacted before it is broken (see Secret), so a secret holding a
+// space is found whole.
 func Wrap(text string, width int) []string {
 	var out []string
-	for _, line := range strings.Split(strings.Trim(text, "\n"), "\n") {
+	for _, line := range strings.Split(strings.Trim(Redact(text), "\n"), "\n") {
 		line = strings.TrimRight(line, " \t")
 		if strings.TrimSpace(line) == "" {
 			continue

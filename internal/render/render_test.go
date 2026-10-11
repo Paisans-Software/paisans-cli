@@ -246,7 +246,7 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 	// A pinned app may choose its own database image; a clustered one has no
 	// database service to choose for.
 	chat := files["vm/srv/paisans/f2a9/chat/compose.yaml"]
-	if !strings.Contains(chat, "image: postgres:17-alpine") {
+	if !strings.Contains(chat, "image: postgres:17-trixie") {
 		t.Errorf("a pinned app's declared database image was not used:\n%s", chat)
 	}
 }

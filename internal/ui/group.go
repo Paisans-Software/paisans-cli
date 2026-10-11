@@ -371,7 +371,7 @@ func (r *writer) rowLocked(l *line, now time.Time) string {
 	case l.visiting:
 		return r.spinnerLine(l.title, l.progress, l.nested, l.elapsedLocked(now))
 	}
-	text := l.waitingText()
+	text := Redact(l.waitingText())
 	if r.termCols > 5 {
 		if runes := []rune(text); len(runes) > r.termCols-5 {
 			text = string(runes[:r.termCols-5])

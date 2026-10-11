@@ -1150,7 +1150,7 @@ Four run the rendered wrapper in the pinned Pocket ID image, through the
 image's entrypoint and `su-exec`, with a fake `/app/pocket-id` bind mounted
 over the binary: standing by and then serving, a prompt stop that reaches the
 child, any other exit passed on, and the 50 line window. The fifth runs two
-real instances against a `postgres:17-alpine` and stops the active one. Rerun
+real instances against a `postgres:17-trixie` and stops the active one. Rerun
 it whenever the Pocket ID image is bumped: it is what proves the marker
 against the binary. The image is `linux/amd64`, emulated on an arm64
 workstation.

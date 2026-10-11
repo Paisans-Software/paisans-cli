@@ -460,7 +460,12 @@ func runInit(args []string) error {
 	case err != nil:
 		return err
 	}
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner { return hosts[gw] }))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
+		if elevated {
+			return hosts[gw]
+		}
+		return initHost(gw, cfg.Sites[gw], false)
+	}))
 
 	filled, recipients, err := fillSecrets(cfg, *secretsPath, secrets)
 	var failed *secretsWriteError
@@ -674,12 +679,11 @@ func runApply(args []string) error {
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner {
-		if gw == *site {
-			return transport
-		}
-		return registryHost(gw, cfg.Sites[gw], "", *sudo)
-	}))
+	// As a step of apply without --site (a checkReporter) it leaves the
+	// record and the secrets to the run, which checks them once.
+	if _, step := r.(checkReporter); !step {
+		warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
+	}
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	done := r.Step("check mesh subnet")
 	err = checkMeshLive(cfg, *site, transport)
@@ -801,6 +805,11 @@ func runApply(args []string) error {
 		if len(plan.Sweep) > 0 {
 			summary = strings.TrimPrefix(summary+", "+plural(len(plan.Sweep), "old image")+" to sweep", ", ")
 		}
+		// As a step of apply without --site, the web server is the run's,
+		// which lists it once.
+		if _, step := r.(checkReporter); !step {
+			convergeWebServerPending(r, cfg, webServerScope{site: *site})
+		}
 		// A plan --execute would refuse, Eg: a file edited on the host, is
 		// where the run would stop, not work it would do.
 		dryRunFound(summary, apply.Refusal(plan))
@@ -856,8 +865,22 @@ func runApply(args []string) error {
 	}); err != nil {
 		return err
 	}
-	err = clients.result()
-	r.Result("Applied %s to %s.", plural(written, "file"), *site)
+	return siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
+}
+
+// siteApplied is how apply --site --execute ends once site's stacks are up:
+// the web server step for the apps served by site's web server, when it has
+// managed_by: external, reaching site as the apply did, then the result, or
+// what the step left. err is the apply's own problem, if it has one. As a
+// step of apply without --site (a checkReporter) it leaves the web server
+// to the run, which does it once every step has run.
+func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, sudo bool, written int, err error) error {
+	if _, step := r.(checkReporter); !step {
+		if end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{site: site, ssh: ssh}); end != nil {
+			return webServerEnd(end, broken, err)
+		}
+	}
+	r.Result("Applied %s to %s.", plural(written, "file"), site)
 	return err
 }
 

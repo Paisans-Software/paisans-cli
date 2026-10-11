@@ -135,7 +135,9 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **Flags:** `--config`, `--secrets`, `--execute`, `--without-record` (off:
   trust `paisans.yaml` alone when no gateway's deployment record can be read;
   with `--execute` it asks for the word `prune` at a terminal), `--sudo`.
-* **Hosts:** reads each gateway's deployment record. Changes none.
+* **Hosts:** reads each gateway's deployment record, as the ssh user since it
+  holds only names and is world readable, and through sudo only for one
+  written with other modes. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
@@ -233,6 +235,11 @@ clients exist, ends by sweeping the old images its site's stacks used (see
 * **Hosts:** every site, and each app behind the operator's own web server
   from this machine, as a visitor would. Every host's sudo password is asked
   for before the first step.
+* **Secrets:** each gateway's deployment record is read once, after the sudo
+  passwords, and each secret or recorded name `paisans.yaml` no longer uses is
+  warned about once, by key, under `secrets`, dry run or not. The `apply`
+  steps it runs do not read the record or warn again. An `init` it runs warns
+  in its place.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
   when an app failed its web server check or its site file step warned, ends
@@ -240,7 +247,13 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   web server is the operator's; with another failure as well, or a web server
   step that could not reach or write what it needs on the host, it exits 1.
   Each problem with the operator's web server is one `!` line with one set of
-  instructions. A web server in a Docker container is validated and reloaded
+  instructions; an app whose site file step warned or failed has no check line
+  of its own but with `-v`. Caddy's `import` of the include directory goes at
+  the top level of the Caddyfile, after the global options block if it has
+  one; apply refuses one above that block or inside a block, writing nothing,
+  and says where to move it. A web server container without the include
+  directory is diagnosed from its compose file, read only, with the command
+  that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
   after its site file changes, restarted when the reload fails; one on the
   host itself is validated, and the warning gives the command to reload it. An `include_dir` it
   derives is written into `paisans.yaml`. Without it, every step is checked
@@ -271,13 +284,27 @@ starts, restarts or recreates what changed.
 
   And `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** the site's own; an etcd member's apply also reads the other
-  members, to compare the live membership.
+  members, to compare the live membership. It reads every gateway's
+  deployment record as the ssh user, without sudo, since the record holds
+  only names and is world readable, so applying a site that is not a gateway
+  asks for no gateway's sudo password.
 * **`--execute`:** writes and acts, and an apply of the whole site ends by
   sweeping the old images of repositories its stacks render or have rendered,
   which no site of the deployment renders and no container uses (`sweep old
-  images` in the plan). Without it, it reads and prints the plan. It neither
-  writes the site files of an app behind the operator's own web server nor
-  checks its web server: the whole apply does both.
+  images` in the plan). Without it, it reads and prints the plan. On a monitor
+  with `managed_by: external`, `--execute` then runs the web server step for
+  the apps that monitor serves, as the whole apply does at its end: each
+  app's site file written into `include_dir` (an `include_dir` it derives
+  written into `paisans.yaml`), the configuration validated, a server in a
+  container reloaded and the reload command given for one on the host, then
+  `web-server check`'s checks, a line per app in a `web server` section. It
+  reaches the monitor through the same ssh and sudo as the rest of the apply,
+  `--ssh` included. A problem with the operator's web server ends it on the
+  whole apply's warning with exit status 0, in place of `Applied <n> files to
+  <site>.`; one apply could not do on the host, such as reading or writing the
+  record of its site files, ends it failed with exit status 1. Its dry run
+  lists the check as `checked with --execute`. The applies the whole apply
+  runs as its steps leave the step to it, so it runs once.
 
 See *Rendered configuration is a build artifact* and the `apply` sections under
 *Bootstrapping a site* in `README.md`.

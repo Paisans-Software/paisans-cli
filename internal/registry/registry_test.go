@@ -147,6 +147,20 @@ func TestClaimCommandShape(t *testing.T) {
 	}
 }
 
+// A claim leaves the directory enterable and unlistable by others, so a
+// gateway's deployment record, at a path its reader already knows, can be
+// read without sudo while the registry and the names of every file stay
+// root's.
+func TestClaimLeavesTheDirectoryEnterableNotListable(t *testing.T) {
+	command, err := ClaimCommand(ours, entry("f2a9", "example.org", "home-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "; chmod 711 "+Dir+"; ") || strings.Contains(command, "chmod 700") {
+		t.Errorf("the claim does not leave %s 0711:\n%s", Dir, command)
+	}
+}
+
 // runMerge runs the claim's awk program as ClaimCommand would, on input, and
 // returns its stdout, stderr and exit code.
 func runMerge(t *testing.T, input string, id string, e Entry) (string, string, int) {

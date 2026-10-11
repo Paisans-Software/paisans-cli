@@ -47,6 +47,9 @@ func (h *recordFake) Run(command string) (string, error) {
 	if h.down {
 		return "", errors.New("ssh: connect to host vm.example.org port 22: Operation timed out")
 	}
+	if out, ok := userRead(h.files, command); ok {
+		return out, nil
+	}
 	h.ran = append(h.ran, command)
 	path := recordPathRe.FindStringSubmatch(command)[1]
 	cur := "none"
@@ -60,6 +63,23 @@ func (h *recordFake) Run(command string) (string, error) {
 	data, _ := base64.StdEncoding.DecodeString(recordDataRe.FindStringSubmatch(command)[1])
 	h.files[path] = string(data)
 	return "", nil
+}
+
+// userReadRe is the path in deployrecord.ReadAsUser's command.
+var userReadRe = regexp.MustCompile(`^if \[ -f '([^']+)' \] && \[ -r `)
+
+// userRead answers deployrecord.ReadAsUser's command from files, as the ssh
+// user would see a record the write left readable, an empty one as absent.
+// ok is false for any other command.
+func userRead(files map[string]string, command string) (string, bool) {
+	m := userReadRe.FindStringSubmatch(command)
+	if m == nil {
+		return "", false
+	}
+	if c := files[m[1]]; c != "" {
+		return c, true
+	}
+	return "__PAISANS_ABSENT__\n", true
 }
 
 func TestApplyRecordsTheDeploymentOnAGateway(t *testing.T) {
@@ -261,5 +281,75 @@ func TestConfirmWordAsksOnALineOfItsOwn(t *testing.T) {
 		if len(l) > 80 {
 			t.Errorf("line longer than 80: %q", l)
 		}
+	}
+}
+
+// deniedFake is a gateway whose record the ssh user may not read, one
+// written with other modes: the user's read is denied and only ReadFile, the
+// sudo read, gives it.
+type deniedFake struct{ *recordFake }
+
+func (d deniedFake) Run(command string) (string, error) {
+	if userReadRe.MatchString(command) {
+		return "__PAISANS_DENIED__\n", nil
+	}
+	return d.recordFake.Run(command)
+}
+
+// sudoLog makes registryHost answer with gw for every site, logging whether
+// each was reached through sudo.
+func sudoLog(t *testing.T, gw registry.Runner) *[]string {
+	t.Helper()
+	log := &[]string{}
+	saved := registryHost
+	registryHost = func(name string, _ config.Site, _ string, sudo bool) registry.Runner {
+		*log = append(*log, fmt.Sprintf("%s sudo=%v", name, sudo))
+		return gw
+	}
+	t.Cleanup(func() { registryHost = saved })
+	return log
+}
+
+// An apply of a site that is not a gateway reads the gateway's record as the
+// ssh user, so it asks for no gateway's sudo password.
+func TestApplyOfANonGatewayReadsTheRecordWithoutSudo(t *testing.T) {
+	cfg, _ := config.Load(fixtureConfig())
+	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
+	log := sudoLog(t, vm)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "", &recordFake{}, true))
+	if rec == nil || !rec.Lists("sites", "monitor-a") {
+		t.Fatalf("record %+v", rec)
+	}
+	if strings.Join(*log, ",") != "vm sudo=false" {
+		t.Errorf("reached %v", *log)
+	}
+}
+
+// A record the ssh user may not read is read through sudo, as the command
+// reaches the gateway.
+func TestADeniedRecordIsReadThroughSudo(t *testing.T) {
+	cfg, _ := config.Load(fixtureConfig())
+	vm := deniedFake{&recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}}
+	log := sudoLog(t, vm)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "", &recordFake{}, true))
+	if rec == nil || !rec.Lists("sites", "monitor-a") {
+		t.Fatalf("record %+v", rec)
+	}
+	if strings.Join(*log, ",") != "vm sudo=false,vm sudo=true" {
+		t.Errorf("reached %v", *log)
+	}
+}
+
+// The applied gateway's own sudo read goes through the apply's transport.
+func TestApplyOfAGatewayFallsBackToItsOwnTransport(t *testing.T) {
+	cfg, _ := config.Load(fixtureConfig())
+	own := deniedFake{&recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}}
+	log := sudoLog(t, own)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "vm", "", own, true))
+	if rec == nil || !rec.Lists("sites", "monitor-a") {
+		t.Fatalf("record %+v", rec)
+	}
+	if strings.Join(*log, ",") != "vm sudo=false" {
+		t.Errorf("reached %v", *log)
 	}
 }

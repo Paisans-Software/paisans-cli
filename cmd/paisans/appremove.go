@@ -167,7 +167,9 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// The app, and each group only it named, leave every gateway's
 	// deployment record, so secrets prune may remove their secrets.
-	deployed, _ := readDeploymentRecord(r, cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "", *sudo) })
+	deployed, _ := readDeploymentRecord(r, cfg, func(gw string, elevated bool) registry.Runner {
+		return registryHost(gw, cfg.Sites[gw], "", elevated && *sudo)
+	})
 	forget := func(execute bool) bool {
 		return forgetInRecords(r, cfg, appRecordNames(cfg, app, deployed), app, execute, *sudo)
 	}

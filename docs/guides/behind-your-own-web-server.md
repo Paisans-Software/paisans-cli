@@ -80,9 +80,14 @@ rules, each commented `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 with `managed_by: external`;
 your web server's rules are yours.
 
+Once the monitor's stacks are up, `apply --site watch --execute` goes on to
+your web server: it writes the site file of step 3 and runs the check of step
+6. Until your configuration includes the toolkit's directory it ends on a
+warning, `!`, that says what to add, with exit status 0.
+
 ## 3. Include the toolkit's directory
 
-`paisans apply --execute`, run without `--site`, writes the monitor's site,
+`paisans apply --execute`, with or without `--site watch`, writes the monitor's site,
 filled in for the web server it finds, into a file of its own, `paisans-<token>-status.caddy` or
 `.conf`, in a directory beside your server's main configuration:
 `/etc/caddy/paisans.d`, `/etc/nginx/paisans.d` or `/etc/apache2/paisans.d` on
@@ -91,9 +96,55 @@ which you add once:
 
 | Server | Add | Where |
 |---|---|---|
-| Caddy | `import /etc/caddy/paisans.d/*` | at the top level of the Caddyfile, outside every site block |
+| Caddy | `import /etc/caddy/paisans.d/*` | at the top level of the Caddyfile, after the global options block if it has one, outside every site block and snippet |
 | nginx | `include /etc/nginx/paisans.d/*.conf;` | inside the `http` block |
 | Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` | at the top level, beside the server's other includes |
+
+Caddy requires its global options block, the one that opens with `{` alone,
+to come first in the Caddyfile. Put the import after it:
+
+```
+{
+    email admin@example.org
+}
+
+import /etc/caddy/paisans.d/*
+
+example.org {
+    ...
+}
+```
+
+An import above the global options block works while the directory is empty,
+and once apply writes a site file, the site it imports comes ahead of the
+options and Caddy refuses the whole configuration with `server block without
+any key is global configuration, and if used, it must be first`. Apply reads
+the Caddyfile first, and for an import above the global options block, or
+one inside a site block or snippet, it writes nothing and warns with where to
+move the line:
+
+```
+web server
+  ! site file for status: caddy imports /etc/caddy/paisans.d above its global options block
+       Nothing was written. /opt/caddy/Caddyfile has:
+           import /etc/caddy/paisans.d/*
+       above its global options block, the block that opens with { alone.
+       Caddy requires that block to come first, so once a site file is in
+       the directory the site it holds comes ahead of the options, and Caddy
+       refuses the whole configuration: server block without any key is
+       global configuration, and if used, it must be first. Move the import
+       line to after the global options block:
+           {
+               email admin@example.org
+           }
+
+           import /etc/caddy/paisans.d/*
+
+           example.org {
+               ...
+           }
+       then run paisans apply --execute again.
+```
 
 The line must be a wildcard. If the directory is ever gone, a removed
 deployment or a cleanup by hand, Caddy's `import` of a glob, nginx's `include`
@@ -106,24 +157,33 @@ one to use instead.
 
 You need not add it first: an apply that finds no line writes nothing, warns
 with the exact line for your server, and ends without `Deployment complete.`.
-The site file's line carries the instructions, and the app's check below it
-says only that it fails until the file is in place. Add the line, then apply
-again:
+The site file's line carries the instructions. The app's own check would
+only fail for the same reason, so its line is left out; with `-v` it is
+there, saying only that it fails until the file is in place. Add the line,
+then apply again:
 
 ```
 web server
   ! site file for status: caddy does not include /etc/caddy/paisans.d
        Nothing was written. Add this line to /opt/caddy/Caddyfile, at the top
-       level of the Caddyfile, outside every site block, once:
+       level of the Caddyfile, after the global options block if it has one,
+       outside every site block and snippet, once:
            import /etc/caddy/paisans.d/*
+       as here:
+           {
+               email admin@example.org
+           }
+
+           import /etc/caddy/paisans.d/*
+
+           example.org {
+               ...
+           }
        then run paisans apply --execute again. It is a wildcard so that the
        server still starts, without the paisans sites, if the directory is ever
        gone.
        Or set sites.watch.web_server.include_dir: false, and add what paisans
        web-server show --app status prints to your web server yourself.
-  ! status: status.example.org
-       healthz and login/oidc: tls: internal error (caddy has no certificate for
-       this name), expected until its site file is in place, see above.
 ```
 
 With the line there, apply creates the directory if it is missing, writes the
@@ -156,16 +216,56 @@ container sees it. Apply takes the host path from the mount of the
 configuration's directory, so with `/opt/caddy` mounted at `/etc/caddy` the
 file goes in `/opt/caddy/paisans.d` and the line is `import
 /etc/caddy/paisans.d/*`. A container that mounts its Caddyfile alone has no
-such directory: apply records nothing and warns with the mount to add to its
-compose service,
+such directory: apply records nothing and warns with the mount to add to the
+web server's own service in its compose file,
 
 ```yaml
+services:
+  web:
     volumes:
       - /opt/caddy/Caddyfile:/etc/caddy/Caddyfile
       - /opt/caddy/paisans.d:/etc/caddy/paisans.d
 ```
 
-after which, with the container recreated, the next apply finds it.
+then recreate the container, which is what makes Docker add a mount:
+
+```
+cd /opt/caddy && docker compose up -d web
+```
+
+`docker restart`, or a restart of the host, is not enough: a container keeps
+the mounts it was created with. The next apply then finds the directory.
+
+Apply reads the compose file that started the container, from the labels
+Docker puts on it, so the warning names the file and the service, and the
+command that recreates it. It only reads: it never edits the compose file and
+never recreates the container. When the file already has a line for the
+directory, the warning says which of the usual mistakes it is instead, each in
+a few lines:
+
+* the line is on the server's service, and the container was created before
+  it: recreate it;
+* the line is on another service, and the warning names both: move it;
+* the line mounts the directory at a path the configuration does not import,
+  such as `/etc/caddy/paisans` for `import /etc/caddy/paisans.d/*`: change the
+  container path.
+
+```
+web server
+  ! site file for status: no directory caddy reads to write in
+       The compose file /opt/caddy/compose.yaml declares
+       /opt/caddy/paisans.d:/etc/caddy/paisans.d for web, but the running
+       container caddy-1 was created before it. Recreate it; a restart does not
+       add a mount:
+           cd /opt/caddy && docker compose up -d web
+       then run paisans apply --execute again.
+       Until the mount exists, caddy's import /etc/caddy/paisans.d/* matches
+       nothing, which is harmless.
+```
+
+Relative paths in the compose file are read against the project's directory.
+A volume written with a variable, `${DATA}/paisans.d`, is compared as written,
+and the warning says so.
 
 **A web server on the host itself** is yours to restart, so apply validates
 its configuration with the file and does not reload it. The site file's line
@@ -294,8 +394,9 @@ Run it again after every change until no check fails and it ends with
 `4 checks passed.`
 
 `paisans apply --execute` without `--site` runs the same checks for every app
-behind your own web server once every other step has run, in a `web server`
-section:
+behind your own web server once every other step has run, and `paisans apply
+--site watch --execute` runs them for the monitor's apps once its stacks are
+up, in a `web server` section:
 
 ```
 web server
@@ -308,8 +409,9 @@ front of the app, read with the sudo password the run asked for at its start.
 When the app's site file step above already warned, the check's line says
 only that it fails until that is fixed, so each problem comes with one set of
 instructions. The run ends on a warning, `! Deployment complete, but 1 app
-failed its web server check: status`, rather than `Deployment complete.`,
-since a visitor cannot use the app yet. Every step ran, so the exit status is
+failed its web server check: status`, rather than `Deployment complete.`, or
+`Applied <n> files to watch.` for `apply --site watch`, since a visitor cannot
+use the app yet. Every step ran, so the exit status is
 still 0. What apply could not do on the host, such as reaching it over ssh to
 read the record of its site files, is a failure instead, `✗`, and the run
 exits 1. The check runs once, and once more after apply reloaded a server in a

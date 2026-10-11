@@ -1,6 +1,8 @@
 package apply
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,13 +19,56 @@ const sudoProbe = "sudo -n true"
 // sudoWithPassword is sudo reading its password from the first line of
 // stdin. -S reads it from stdin rather than a terminal; -p ” prints no
 // prompt, since the output is read by the toolkit; and -k ignores any cached
-// credential, so sudo reads that line on every command. Without -k, a command
-// run while the credential was cached would get the password line as the top
-// of its own input, and WriteFile would write it into a file.
+// credential, so sudo reads that line on every command where it asks at
+// all. sudo reads the password one byte at a time up to the newline, so
+// whatever follows it on stdin reaches the command unchanged.
 //
-// sudo reads the password one byte at a time up to the newline, so whatever
-// follows it on stdin reaches the command unchanged.
+// It is never run bare: withPassword puts it in front of every command, with
+// the stdin that command needs.
 const sudoWithPassword = "sudo -k -S -p ''"
+
+// withPassword is command run through sudo with password, and the stdin to
+// send it: the password, then a fence line, then the command's own stdin.
+//
+// Whether sudo reads the password line is up to the host, not to us. -k
+// makes sudo ask on every command, but a host can still let a command
+// through without asking: a NOPASSWD rule that matches it, or a PAM module
+// that authenticates without a password. sudo then reads nothing, and the
+// password line is left at the top of the command's stdin, where a command
+// that reads stdin takes it as its own input: `cat` prints it into the
+// output, WriteFile writes it into a file, and a shell runs it as a command
+// and prints it back in its error.
+//
+// So the command never reads that stdin directly. The shell sudo starts
+// first reads lines up to the fence, at most two: the fence alone when sudo
+// read the password, the password and then the fence when it did not. Only
+// then does the command run, on what follows the fence, so it sees exactly
+// its own stdin either way and the password never reaches it. The line read
+// is held in a variable that is emptied and printed nowhere, and a stdin
+// whose first two lines hold no fence stops the command before it runs.
+// The shell's read builtin, like sudo, reads a pipe one byte at a time, so
+// it takes nothing past the fence.
+//
+// The fence is random for each command, so no password and no line of a
+// command's input can be mistaken for it.
+func withPassword(password, command string, stdin *string) (string, *string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", nil, err
+	}
+	fence := "paisans-fence-" + hex.EncodeToString(b[:])
+	in := password + "\n" + fence + "\n"
+	if stdin != nil {
+		in += *stdin
+	}
+	return sudoWithPassword + " sh -c " + shellQuote(fenceGuard(fence)+command), &in, nil
+}
+
+// fenceGuard is the shell that reads stdin up to fence before the command
+// after it runs: see withPassword.
+func fenceGuard(fence string) string {
+	return "IFS= read -r paisans_line && { [ \"$paisans_line\" = " + fence + " ] || { IFS= read -r paisans_line && [ \"$paisans_line\" = " + fence + " ]; }; } || { paisans_line=; echo 'paisans: the stdin sudo passed on was not as sent, so the command was not run' >&2; exit 125; }; paisans_line=; "
+}
 
 // SudoAuth is how sudo is satisfied on one host. It asks the host once
 // whether sudo needs a password and, if it does, asks the operator once, and
@@ -109,11 +154,7 @@ func (t SSHTransport) sudo(command string, stdin *string) (string, *string, erro
 	if password == "" {
 		return "sudo sh -c " + shellQuote(command), stdin, nil
 	}
-	in := password + "\n"
-	if stdin != nil {
-		in += *stdin
-	}
-	return sudoWithPassword + " sh -c " + shellQuote(command), &in, nil
+	return withPassword(password, command, stdin)
 }
 
 // resolve returns the password sudo wants on this host, or "" when it wants
@@ -158,6 +199,9 @@ func (a *SudoAuth) resolve(t SSHTransport) (string, error) {
 		})
 	}
 	password, err := a.Prompt(t.promptLabel())
+	// Registered before anything is sent, so that nothing this run shows
+	// can carry it, whether sudo takes it or not (see ui.Secret).
+	ui.Secret(password)
 	if err != nil {
 		return "", a.refuse(&ui.Problem{
 			Hint:    "the sudo password for " + t.Describe() + " could not be read",
@@ -172,8 +216,11 @@ func (a *SudoAuth) resolve(t SSHTransport) (string, error) {
 		})
 	}
 
-	in := password + "\n"
-	out, err = t.run(sudoWithPassword+" true", &in)
+	check, in, err := withPassword(password, "true", nil)
+	if err != nil {
+		return "", err
+	}
+	out, err = t.run(check, in)
 	if errors.Is(err, ErrUnreachable) {
 		return "", fmt.Errorf("%s: checking the sudo password: %w\n%s", t.Describe(), err, out)
 	}

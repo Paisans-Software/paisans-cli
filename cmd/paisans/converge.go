@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
@@ -436,6 +437,25 @@ func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]r
 	return records, nil
 }
 
+// convergeSecrets is the secrets check apply without --site makes once for
+// the whole run, under a section of its own: each gateway's deployment record
+// read once, and each secret and recorded name paisans.yaml no longer uses
+// warned about once. The applies it runs as steps skip theirs (a
+// checkReporter). A secrets file not written yet has nothing to check.
+func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) {
+	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
+	if err != nil {
+		return
+	}
+	if len(cfg.GatewaySites()) == 0 && len(secretsgen.Orphans(cfg, secrets, nil)) == 0 {
+		return
+	}
+	r.Section("secrets")
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
+		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
+	}))
+}
+
 // convergeOptions is what apply without --site hands on to its steps: the
 // flags every command takes, and apply's own that are not about one site.
 type convergeOptions struct {
@@ -721,6 +741,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if err := settle(cfg); err != nil {
 		return err
 	}
+	// An init that has just run warned about the secrets itself.
+	if !initRan {
+		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)
+	}
 	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
 		return err
 	}
@@ -732,7 +756,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's admin problem is shown on its line; it stops nothing.
 		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
-		convergeWebServerPending(r, cfg)
+		convergeWebServerPending(r, cfg, webServerScope{})
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
 		if len(generated) > 0 {
@@ -755,35 +779,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	defer printLoginLinks(links)
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	files := convergeWebServerFiles(r, cfg, configPath, sudo)
-	checked, broken := convergeWebServer(r, cfg, sudo, files)
-	// An app whose site file step warned is named once, by the app.
-	warned := slices.Clone(checked)
-	for _, title := range files.warned {
-		if name := strings.TrimPrefix(title, "site file for "); !slices.Contains(warned, name) {
-			warned = append(warned, name)
-		}
-	}
-	broken = append(files.failed, broken...)
+	end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{})
 	convergeLeft(r, cfg, secretsPath, configPath)
-	if len(broken) > 0 {
-		// What apply needed on the host could not be done: that is not
-		// the operator's web server, and the run fails.
-		if adminErr != nil {
-			return errors.Join(webServerBroken(broken), adminErr)
-		}
-		return webServerBroken(broken)
-	}
-	if len(warned) > 0 {
-		if adminErr != nil {
-			return errors.Join(webServerFailed(checked, warned), adminErr)
-		}
-		// Every step ran, and what is left is the operator's own web
-		// server: the run ends on a warning, not a failure.
-		return &ui.Warning{Problem: *webServerFailed(checked, warned)}
-	}
-	if adminErr != nil {
-		return adminErr
+	if end != nil || adminErr != nil {
+		return webServerEnd(end, broken, adminErr)
 	}
 	r.Result("Deployment complete.")
 	return nil

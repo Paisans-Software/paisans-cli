@@ -19,16 +19,33 @@ import (
 
 // deploymentRecord is the names the gateways' deployment records, merged,
 // hold as deployed, and, for each gateway that could not give one, why:
-// deployrecord.ErrNoRecord for one that answered without one.
-func deploymentRecord(cfg *config.Config, hosts func(string) registry.Runner) (deployrecord.Record, map[string]error) {
-	deployed, _, missing := deployrecord.Gather(gatewayHosts(cfg, hosts), cfg.Deployment())
+// deployrecord.ErrNoRecord for one that answered without one. Each record is
+// read as the ssh user, hosts(gw, false), and through hosts(gw, true) only
+// when that user may not read it (see deployrecord.ReadAsUser).
+func deploymentRecord(cfg *config.Config, hosts recordHosts) (deployrecord.Record, map[string]error) {
+	deployed, _, missing := deployrecord.Gather(recordReaders(cfg, hosts), cfg.Deployment())
 	return deployed, missing
+}
+
+// recordHosts reaches a gateway to read its deployment record: as the ssh
+// user when elevated is false, and as the command reaches it otherwise,
+// through sudo unless the operator turned it off.
+type recordHosts func(gw string, elevated bool) registry.Runner
+
+// recordReaders is every gateway paisans.yaml declares, each read as the
+// ssh user and through hosts(gw, true) only when that is denied.
+func recordReaders(cfg *config.Config, hosts recordHosts) map[string]registry.Runner {
+	out := map[string]registry.Runner{}
+	for _, gw := range cfg.GatewaySites() {
+		out[gw] = deployrecord.ReadAsUser(hosts(gw, false), func() registry.Runner { return hosts(gw, true) })
+	}
+	return out
 }
 
 // readDeploymentRecord is deploymentRecord as a step of r's, so a spinner
 // shows while each gateway is read over ssh. With no gateway there is
 // nothing to read, and no step.
-func readDeploymentRecord(r ui.Reporter, cfg *config.Config, hosts func(string) registry.Runner) (deployrecord.Record, map[string]error) {
+func readDeploymentRecord(r ui.Reporter, cfg *config.Config, hosts recordHosts) (deployrecord.Record, map[string]error) {
 	if len(cfg.GatewaySites()) == 0 {
 		return deploymentRecord(cfg, hosts)
 	}
@@ -50,10 +67,26 @@ func gatewayHosts(cfg *config.Config, hosts func(string) registry.Runner) map[st
 	return out
 }
 
+// applyRecordHosts is how an apply of site reaches each gateway to read its
+// deployment record: as the ssh user, so that applying a site that is not a
+// gateway asks for no gateway's sudo password, and the applied site's own
+// sudo read through transport, the one the apply runs through.
+func applyRecordHosts(cfg *config.Config, site, destination string, transport registry.Runner, sudo bool) recordHosts {
+	return func(gw string, elevated bool) registry.Runner {
+		switch {
+		case gw == site && elevated:
+			return transport
+		case gw == site:
+			return registryHost(gw, cfg.Sites[gw], destination, false)
+		}
+		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
+	}
+}
+
 // recordForWarnings is the record init and apply warn against. A gateway
 // with no record yet is silent; one that cannot be read is a warning. With
 // no record at all the yaml alone is used.
-func recordForWarnings(r ui.Reporter, cfg *config.Config, hosts func(string) registry.Runner) *deployrecord.Record {
+func recordForWarnings(r ui.Reporter, cfg *config.Config, hosts recordHosts) *deployrecord.Record {
 	rec, missing := readDeploymentRecord(r, cfg, hosts)
 	read := len(cfg.GatewaySites()) - len(missing)
 	for _, gw := range sortedKeys(missing) {
@@ -175,7 +208,9 @@ func forgetInRecords(r ui.Reporter, cfg *config.Config, names deployrecord.Recor
 		// A gateway that cannot be read is warned about below, not a
 		// failure, so the read always ends done.
 		_ = ui.Run(r, "read the deployment record", func() error {
-			deployed, found, missing = deployrecord.Gather(hosts, d)
+			deployed, found, missing = deployrecord.Gather(recordReaders(cfg, func(gw string, elevated bool) registry.Runner {
+				return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
+			}), d)
 			return nil
 		})
 		listed := found > 0 && listsAny(deployed, names)
