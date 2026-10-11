@@ -157,11 +157,18 @@ paisans host prepare --site home-a --execute  # does it
   change, or reaching a host through `--ssh`.
 * **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`,
   `--sudo`. It reads no secrets.
-* **Hosts:** the one site's. It runs the host check first.
+* **Hosts:** the one site's. It runs the host check first, which refuses a
+  Docker snap and a Docker older than engine 25.0.0 or compose 2.24.0,
+  whatever its source.
+* **Docker:** left as it is wherever `docker compose` works, from any source.
+  Installed from Docker's own apt repository where it is absent. Where it is
+  there and `docker compose` does not work, the packages in the way are named
+  and refused, never removed.
 * **`--execute`:** installs and configures what the plan lists. Without it, it
   probes and prints the plan; a prepared host plans nothing.
 
-See *`host prepare` takes a blank host to an apply-able state* in `README.md`.
+See *`host prepare` takes a blank host to an apply-able state* and *Docker is
+judged by its version, not its source* in `README.md`.
 
 ### `paisans host deployments`
 

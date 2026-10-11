@@ -697,14 +697,35 @@ func TestASoftdogHostReRunsClean(t *testing.T) {
 	}
 }
 
-// Ubuntu's own docker.io is refused rather than removed: removing it would take
-// down whatever containers it is running.
+// Ubuntu's own docker.io without a working `docker compose` is refused rather
+// than removed: removing it would take down whatever containers it is
+// running. Without Ubuntu's compose plugin, installing that is offered too.
 func TestDistroDockerIsRefusedNotRemoved(t *testing.T) {
 	host := freshHost()
 	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "docker.io, runc") {
+	if err == nil || !strings.Contains(err.Error(), "docker.io, runc") || !strings.Contains(err.Error(), "apt-get install docker-compose-v2), or remove them yourself (apt-get remove docker.io runc)") {
 		t.Fatalf("got %v", err)
+	}
+	host = freshHost()
+	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\nkeyring absent\narch amd64\n"
+	_, err = hostprep.Build("home-a", fixture(t), host)
+	if err == nil || strings.Contains(err.Error(), "apt-get install") || !strings.Contains(err.Error(), "Remove them yourself (apt-get remove docker.io docker-compose-v2)") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// Ubuntu's docker.io is left as it is when `docker compose` works with it:
+// nothing of Docker's is planned, and nothing refused.
+func TestDistroDockerWithComposeIsLeftAlone(t *testing.T) {
+	host := freshHost()
+	host.responses[probePackages] = "compose present\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := describes(plan); strings.Contains(got, "docker-ce") || strings.Contains(got, "docker apt") || strings.Contains(got, "Docker's apt") {
+		t.Errorf("Docker was planned over a working docker.io:\n%s", got)
 	}
 }
 
@@ -1576,10 +1597,9 @@ func TestASharedHostNeverSetsTheFirewallsDefaults(t *testing.T) {
 	}
 }
 
-// Docker installed as a snap is refused, not removed, as Ubuntu's docker.io
-// is, and whether or not `docker compose` works with it: the toolkit runs
-// Docker from Docker's own repository on every host. Removing it would stop
-// whatever runs from it.
+// Docker installed as a snap is refused, not removed, whether or not
+// `docker compose` works with it: its confinement keeps it from bind mounting
+// under /srv. Removing it would stop whatever runs from it.
 func TestSnapDockerIsRefusedNotRemoved(t *testing.T) {
 	for _, compose := range []string{"compose present", "compose absent"} {
 		host := freshHost()

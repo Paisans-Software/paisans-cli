@@ -317,14 +317,24 @@ a host decides how much is touched* has the reasoning; what the code does:
   `docker inspect`, `docker volume inspect`, `docker network inspect`,
   `ss -Hltnup`, `/proc/`, `ip -o link`, `ip -j route`, `ufw status verbose`,
   `is-active firewalld`, `/srv/caddy.d/`); a fake transport elsewhere that reaches one of
-  these commands has to answer it.
+  these commands has to answer it. The `docker version` probe prints the
+  daemon's and the CLI's versions on its first line and `compose <version>`
+  or `compose absent` on the next; a fake that answers the first line alone
+  reads as a Docker whose compose was not reported, which is not refused.
+* **Docker** (`hostcheck.MinEngine`, `hostcheck.MinCompose`, in
+  `internal/hostcheck/docker.go`) is refused by `Report.Refusal` before the
+  class is: a snap, or an engine, CLI or compose plugin below the minimum.
+  The source package is shown and otherwise ignored. A new dependency on a
+  Docker or Compose feature goes in the table in
+  `docs/specs/2026-10-11-docker-version-gate.md` with the release that
+  introduced it, and raises the constant when it is newer.
 * **Classification** (`hostcheck.Classify`) is a pure function of the
   claims and the inventory, tested with recorded output: a clean host with
   an empty Docker, the toolkit's own running stack, a foreign host network
   Caddy against a site that claims 80 and 443 and one that does not, a
   foreign Postgres, a published port with no listener, a foreign `psns-<token>`, a
-  network over the mesh, and the three ways a shared host's firewall is
-  refused.
+  network over the mesh, the three ways a shared host's firewall is
+  refused, and Docker from each source at old and current versions.
 
 What "shared" changes, and where:
 

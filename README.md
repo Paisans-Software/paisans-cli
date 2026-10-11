@@ -3049,14 +3049,14 @@ home-a (ubuntu@home-a.local)
 `shared` stands where `clean` does for a host that runs other services, and a
 conflict ends the step as `FAIL` with each conflict in the error. `--verbose`
 adds under the step what the check found, each marked `✓` (`ok` when piped):
-the Docker version, the firewall state, each note, and each foreign resource
+the Docker and compose versions, the firewall state, each note, and each foreign resource
 that makes the host shared, which reads `not paisans`:
 
 ```
 home-a (ubuntu@home-a.local)
   ✓ host check: shared
       home-a (ubuntu@home-a.local) is shared
-  ✓ docker: 27.3.1 (docker-ce)
+  ✓ docker: 27.3.1, compose 2.29.7 (docker-ce)
   ✓ firewall: ufw active, incoming deny
   ✓ container web-caddy-1 (compose project web): not paisans
   ✓ *:80/tcp held by container web-caddy-1 (compose project web): not paisans
@@ -3082,7 +3082,8 @@ The check has three parts, in `internal/hostcheck`:
   the parsers read ufw's, dpkg's and ss's English words, and as root, which
   `ss -p` needs to name another user's process: it asks `id -u` first and
   refuses unless it is 0, so `--sudo=false` as a normal user is refused
-  rather than reading every root listener as unowned. Then Docker's version and package,
+  rather than reading every root listener as unowned. Then Docker's
+  version, the docker CLI's, the compose plugin's and Docker's package,
   every container with its compose project, PID and published ports,
   volumes, networks and their subnets, `ss -Hltnup`, `ip -o link`,
   `ip -j route`, `ufw status verbose`, whether firewalld is active, the site
@@ -3145,15 +3146,43 @@ On a **shared** host:
 * **No image is removed**, as with `apply --keep-images`, and nothing is
   swept, because an image the toolkit renders (`caddy`, `postgres`) may be
   what a foreign project runs.
-* **Docker is left alone**, as it already is whenever `docker compose` works,
-  and Ubuntu's `docker.io` without a working `docker compose`, and a Docker
-  snap, are still refused rather than removed.
+* **Docker is left alone**, as it is on every host where `docker compose`
+  works (see *Docker is judged by its version, not its source*).
 
 The class is computed on every run and never stored: a host becomes shared
 the day someone installs something beside the deployment. `apply`'s manifest
 gate is unchanged and still refuses to overwrite a file it has no record of;
 the host check runs before it and covers what a manifest cannot see: ports,
 interfaces, firewall policy and other people's containers.
+
+#### Docker is judged by its version, not its source
+
+Besides classifying the host, the check reads Docker itself. Where it
+came from does not matter: Docker's own repository, Ubuntu's `docker.io` with
+`docker-compose-v2`, or anything else whose `docker compose` works is
+accepted, because what the toolkit depends on is what the engine and compose
+can do, and that is a version, not a package name. So the check refuses, on
+any host and whatever its class:
+
+* **A Docker older than the toolkit needs.** The engine (daemon and CLI) must
+  be at least 25.0.0 and the compose plugin at least 2.24.0, the first
+  releases with `healthcheck.start_interval`, which the rendered stacks use.
+  The refusal names the versions found and the versions needed: upgrade
+  Docker from wherever it came from, or remove it and let `host prepare`
+  install it from Docker's repository.
+  [docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
+  lists every Docker feature the toolkit depends on, with the release that
+  introduced it.
+* **A Docker snap, however new.** Its confinement keeps Docker from bind
+  mounting under `/srv`, where every stack keeps its data, and snapd refreshes
+  it, restarting the daemon and every container, on snapd's schedule rather
+  than the operator's. A version number reveals neither.
+
+A Docker whose `docker compose` does not work is not refused here, because
+`host prepare` is what installs the plugin, or names the packages in its way
+(see *Docker comes from Docker's repository when it is absent*). Nothing is
+removed: removing Docker stops every container it runs, and that is a decision
+for whoever started them.
 
 ### `host prepare` takes a blank host to an apply-able state
 
@@ -3195,22 +3224,28 @@ debian 12 is not supported. Use one of the following:
 ubuntu 24.04
 ```
 
-#### Docker comes from Docker's repository
+#### Docker comes from Docker's repository when it is absent
 
-On Ubuntu, Docker Engine and the compose plugin are installed from Docker's own
-apt repository, as
+Where `docker compose` already works, Docker is left as it is, whatever its
+source: the host check has already refused a snap and anything older than the
+toolkit needs (see *Docker is judged by its version, not its source*).
+
+Where Docker is absent, Docker Engine and the compose plugin are installed from
+Docker's own apt repository, as
 [Docker's install page](https://docs.docker.com/engine/install/ubuntu/)
-describes, not from Ubuntu's `docker.io`. Every host the toolkit installs
-Docker on then runs the same engine from the same source whenever it was
-prepared. The packages that page lists as
-conflicting (`docker.io`, `docker-compose-v2`, `containerd`, `runc` and the
-rest) are **refused, not removed**, when `docker compose` does not work with
-them: on a host already running containers from
-them, removing them stops those containers, and that is a decision for
-whoever started them. Where `docker compose` already works, Docker is left as
-it is. Docker installed as a snap is refused the same way,
-whether or not `docker compose` works with it, since it is an engine from a
-third source. Every `apt-get` runs non-interactively.
+describes. An install needs one source, and that one gives every host the
+toolkit prepares the same engine from the same source, whenever it was
+prepared.
+
+Where Docker is there and `docker compose` does not work, the install would
+meet the packages that page lists as conflicting (`docker.io`,
+`docker-compose-v2`, `containerd`, `runc` and the rest), so they are **refused,
+not removed**: on a host already running containers from them, removing them
+stops those containers, and that is a decision for whoever started them. The
+refusal names them, and on a `docker.io` without `docker-compose-v2` it offers
+installing that package, Ubuntu's compose plugin, as the other way out. A
+Docker snap is refused here too, as the host check refuses it. Every `apt-get`
+runs non-interactively.
 
 #### Docker starts after the mesh interface
 
@@ -5977,7 +6012,7 @@ at, and "could not look" is not "looked and it was fine".
 |---|---|---|---|
 | SSH and sudo | every site | `sudo -n true`, through the site's sudo (see *A sudo that wants a password is asked for once, on a terminal*) | the host does not answer, or sudo cannot be used: it refuses the user, wants a password with no terminal to ask on, or rejects the one typed |
 | Clock | every site | `timedatectl show -p NTPSynchronized --value` | not `yes` |
-| Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default |
+| Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan, without the firewall's defaults on a shared host | it has any step left |
 | Registry | new site | `/var/lib/paisans/registry.json`, read and never claimed | another deployment there holds this one's token, root, interface or listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims |
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, and the release at the end of `ldd --version`'s first line | any of the three differs |
