@@ -15,6 +15,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
@@ -137,6 +138,8 @@ func Check(cfg *config.Config) Result {
 	c.garageCapacities()
 	c.garageAvailability()
 	c.siteOutsideMesh()
+	c.duplicateSiteAddress()
+	c.sitesShareAMachine()
 	c.imageServices()
 	c.floatingImages()
 	c.clusterPlacementWithoutACluster()
@@ -660,6 +663,94 @@ func (c *checker) siteOutsideMesh() {
 			"is %s, which is outside mesh.subnet %s. Every site binds its services to a mesh address, and applications trust that subnet for forwarded client addresses. Give the site an address inside it, or widen the mesh.",
 			address, c.cfg.Mesh.Subnet)
 	}
+}
+
+// duplicateSiteAddress refuses two sites with one mesh address.
+//
+// Every service on a site binds its mesh address, and every other site routes
+// that address to it through its WireGuard peer. Two sites holding one address
+// would each get the other's traffic and neither could tell, so there is no
+// way to apply it that works.
+func (c *checker) duplicateSiteAddress() {
+	first := map[string]string{}
+	for _, name := range c.cfg.SiteNames() {
+		address := c.cfg.Sites[name].Address
+		if address == "" {
+			continue
+		}
+		if earlier, taken := first[address]; taken {
+			c.refuse("duplicate-site-address", fmt.Sprintf("sites.%s.address", name),
+				"two sites have the same mesh address",
+				"is %s, which sites.%s.address already is. Every site binds its services to its own mesh address and every other site routes that address to it, so two sites on one address each receive the other's traffic. Give each site an address of its own inside mesh.subnet.",
+				address, earlier)
+			continue
+		}
+		first[address] = name
+	}
+}
+
+// sitesShareAMachine refuses two sites that are certainly one machine.
+//
+// A site is a machine. Everything a deployment owns on a host is named for the
+// deployment, not the site: its root /srv/paisans/<token>, its compose
+// projects, its WireGuard interface psns-<token>, its entry in the host's
+// registry. Two sites of one deployment on one machine would overwrite each
+// other's files and containers. Roles combine on one site, and a second
+// environment is a second deployment, so nothing needs two sites on one
+// machine.
+//
+// The file can only see a machine through how it is reached, so two things
+// are compared, each of which reaches exactly one machine:
+//
+//   - the ssh destination, host and port after their defaults (ssh.host or
+//     public_address or the endpoint's host; port 22). The login user is
+//     left out: two users on one host and port are still one machine.
+//   - the endpoint other sites dial (config.Site.DialEndpoint). One address
+//     and UDP port is delivered to one machine, behind NAT or not.
+//
+// A shared public_address alone is not compared. Two sites behind one router
+// share the router's public address, each reached on a port forwarded to it,
+// and that is a correct home lab, not one machine. The apply's claim on each
+// host is what catches the rest (internal/registry), since two different
+// names for one machine look different in a file.
+func (c *checker) sitesShareAMachine() {
+	advice := "A site is a machine: a deployment names its files, containers and WireGuard interface for itself and not for the site, so two of its sites on one machine overwrite each other. To combine roles, give one site several roles; a second environment is a second deployment."
+	ssh := map[string]string{}
+	dial := map[string]string{}
+	for _, name := range c.cfg.SiteNames() {
+		site := c.cfg.Sites[name]
+		if host := site.SSHHost(); host != "" {
+			where := sshKey(host, site.SSH.PortOrDefault())
+			if earlier, taken := ssh[where]; taken {
+				c.refuse("sites-share-a-machine", fmt.Sprintf("sites.%s.ssh", name),
+					"two sites are reached at one ssh destination",
+					"reaches %s, as sites.%s.ssh does, so the two are one machine. %s",
+					where, earlier, advice)
+			} else {
+				ssh[where] = name
+			}
+		}
+		if endpoint := site.DialEndpoint(); endpoint != "" {
+			where := strings.ToLower(endpoint)
+			if earlier, taken := dial[where]; taken {
+				c.refuse("sites-share-a-machine", fmt.Sprintf("sites.%s.endpoint", name),
+					"two sites are dialled at one endpoint",
+					"is dialled at %s, as sites.%s is, and one address and port reaches one machine. %s Behind one router, forward a port of its own to each site.",
+					endpoint, earlier, advice)
+			} else {
+				dial[where] = name
+			}
+		}
+	}
+}
+
+// sshKey is one ssh host and port, written the same way however the file
+// spelt them: a hostname in lowercase, an address in its canonical form.
+func sshKey(host string, port int) string {
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
 }
 
 // meshIsNotPrivate warns about a mesh on publicly routable space.

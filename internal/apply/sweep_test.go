@@ -100,14 +100,14 @@ func TestTheSweepRunsLast(t *testing.T) {
 
 // A repository the manifest records and the site no longer renders, an app
 // taken out of the configuration, is swept. A repository never recorded is
-// somebody else's and is never touched, and neither is an image another
-// site of the deployment renders.
+// somebody else's and is never touched. What another site of the deployment
+// renders is not kept on this one: a site is a machine, so another site's
+// images are on its own.
 func TestTheSweepReachesRecordedRepositoriesOnly(t *testing.T) {
 	host := applied(t, "home-a")
 	recordHistory(t, host, render.ManifestImage{Repository: "example/removed-app", References: []string{"example/removed-app:1"}})
 	// home-a renders postgres:18-alpine, and vm's chat renders
-	// postgres:17-alpine: two sites reached at one ssh destination share
-	// Docker, so home-a's sweep keeps vm's.
+	// postgres:17-alpine, which on home-a is an old version like any other.
 	host.images = imageLine("example/removed-app", "1", fakeID("removed")) +
 		imageLine("example/removed-app", "<none>", fakeID("removed, older")) +
 		imageLine("example/operators-own", "1", fakeID("operator")) +
@@ -116,15 +116,15 @@ func TestTheSweepReachesRecordedRepositoriesOnly(t *testing.T) {
 
 	p, _ := applyAgain(t, "home-a", host)
 	got := removedRefs(host)
-	want := []string{fakeID("removed"), fakeID("removed, older"), fakeID("postgres:16-alpine")}
+	want := []string{fakeID("removed"), fakeID("removed, older"), fakeID("postgres:17-alpine"), fakeID("postgres:16-alpine")}
 	if !slices.Equal(got, want) {
-		t.Errorf("removed %v, want the removed app's two images and postgres:16-alpine", got)
+		t.Errorf("removed %v, want the removed app's two images, postgres:17-alpine and postgres:16-alpine", got)
 	}
 	var planned []string
 	for _, s := range p.Sweep {
 		planned = append(planned, s.Ref)
 	}
-	if strings.Join(planned, " ") != "example/removed-app:1 example/removed-app@"+strings.TrimPrefix(fakeID("removed, older"), "sha256:")[:12]+" postgres:16-alpine" {
+	if strings.Join(planned, " ") != "example/removed-app:1 example/removed-app@"+strings.TrimPrefix(fakeID("removed, older"), "sha256:")[:12]+" postgres:17-alpine postgres:16-alpine" {
 		t.Errorf("the plan sweeps %v", planned)
 	}
 }

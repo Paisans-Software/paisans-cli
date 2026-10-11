@@ -178,10 +178,10 @@ func superseded(scopes []pruneScope, keep []string, ids map[string]string, liste
 }
 
 // keepRefs is every image no prune may remove: what each stack of this site
-// renders, held back or not, and what every other site of the deployment
-// renders. Sorted and without repeats.
+// renders, held back or not. Another site's images are on another machine,
+// since a site is one. Sorted and without repeats.
 func (p *Plan) keepRefs() []string {
-	return allRefs(map[string][]string{"site": allRefs(p.images), "deployment": p.deploymentImages})
+	return allRefs(p.images)
 }
 
 // inUseImages reads the containerImages answer, one image per line.

@@ -217,10 +217,6 @@ type Plan struct {
 	recordedIngress []render.ManifestIngress
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
-	// deploymentImages is what every other site of the deployment renders.
-	// No prune removes one: two sites reached at one ssh destination share
-	// Docker, and the pull stage pulls a site's images before its apply.
-	deploymentImages []string
 	// imageHistory is the manifest's record of every repository this site
 	// has rendered, as Build read it. See imageRecord.
 	imageHistory []render.ManifestImage
@@ -585,7 +581,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	out.recordedCaddy = manifest.Caddy
 	out.recordedIngress = manifest.Ingress
 	out.imageHistory = manifest.Images
-	out.deploymentImages = otherSitesImages(site, plan)
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
 		recorded[path] = entry.SHA256
