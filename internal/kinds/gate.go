@@ -258,8 +258,8 @@ func SignedFetchFor(app config.App) *SignedFetch {
 
 // AuthorizedFetchSetting is the app setting that turns authorized fetch, a
 // valid HTTP signature on every ActivityPub read, on or off for the mbin and
-// writefreely kinds. Absent means on. README, "Authorized fetch is on by
-// default", has the reasoning.
+// writefreely kinds. Absent means on. README, "Mbin and WriteFreely lock
+// what the toolkit renders", has the reasoning.
 const AuthorizedFetchSetting = "authorized_fetch"
 
 // AuthorizedFetch reports whether an app's settings leave authorized fetch
