@@ -504,7 +504,16 @@ sites:
   check refuses a host where a foreign network or route already holds it.
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
-  a configuration it does not own. `docs/guides/behind-your-own-web-server.md`
+  a configuration it does not own. `paisans apply` without `--site` runs
+  `paisans ingress check` for each such app once every step has run, a line
+  per app in an `ingress` section, and does not call the deployment complete
+  while one fails: it names the app, what failed, the web server `ingress show`
+  finds in front of it, read through the sudo the run settled at its start,
+  and the `ingress show` and `ingress check` commands to fix it with, and
+  exits 1. A certificate or sign
+  in failure, which an app or certificate that has only just started can
+  cause, is tried again for about half a minute first; a dry run lists the
+  check without running it. `docs/guides/behind-your-own-web-server.md`
   walks through it.
 
 `listen` belongs to `mode: external` alone, which cannot work without it
@@ -550,19 +559,36 @@ one with no record alone (created by an older Compose or by hand), so `apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
 **Helping an operator behind their own web server.** Two commands, neither of
-which reaches a host or changes anything:
+which changes anything:
 
 ```sh
-paisans ingress show  --app status   # the hand-off sheet, from paisans.yaml alone
+paisans ingress show  --app status   # the hand-off sheet, for the web server it finds
 paisans ingress check --app status   # from your machine, as a visitor would
 ```
 
 `show` prints the hostname, the upstream (`listen`) and the health path; what
 the web server must do (terminate TLS for the hostname, pass `Host`, set
 `X-Forwarded-For` and `X-Forwarded-Proto`, refuse what the toolkit's own edge
-refuses, below); a filled in snippet for Caddy, nginx and Apache, each marked
-where the operator's certificate lines go; and the ufw warning when `listen`
-is not loopback. `check` reports pass or fail, with the fix, for: the hostname
+refuses, below); the snippet for the web server in front of the monitor; and
+the ufw warning when `listen` is not loopback. It finds that web server over
+ssh, reading only, through the transport `apply` uses: the container
+publishing 443 or 80 (`docker ps`, through sudo when docker refuses the ssh
+user), and its configuration from the container's mounts; failing that, the
+process listening on 443 or 80 (`sudo ss -ltnp`). For Caddy it asks the admin
+API on `localhost:2019`, on the host or inside the container: a Caddy that
+obtains its own certificates gets no `tls` line, one that loads certificate
+files gets a `tls` line following their pattern for the new name, and where a
+server is bound to a private address only the snippet says which listener the
+site belongs on. For nginx (`nginx -T`) and Apache it reads the certificate
+files the configuration names; under `/etc/letsencrypt/live/` it names the
+files certbot will write for the new name and the `certbot certonly` command,
+with the authenticator the existing renewals use. A line above the snippet
+says what was found, such as `web server: caddy (docker container caddy-1,
+config /opt/caddy/Caddyfile), obtains its own certificates`, so it can be
+checked before anything is copied. When nothing could be read, or the server
+has no snippet, that line says why and the sheet carries the Caddy, nginx and
+Apache snippets, with Caddy's `tls` line commented out. sudo is asked for once,
+and only when a command needs it; `--sudo=false` reads as the ssh user alone. `check` reports pass or fail, with the fix, for: the hostname
 resolving to the monitor's `public_address` (and `public_address6`) and to
 nothing else, so a stale record still on the gateway fails;
 `https://<hostname>/healthz` answering with a certificate valid for the

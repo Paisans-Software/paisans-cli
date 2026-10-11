@@ -83,8 +83,8 @@ Usage:
   paisans oidc client create --app <name> [--rotate-secret]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--site <name>] [--ssh <destination>] [--execute]
-  paisans ingress show  --app <name> [--config paisans.yaml]
-  paisans ingress check --app <name> [--config paisans.yaml]
+  paisans ingress show  --app <name> [--config paisans.yaml] [--sudo=false]
+  paisans ingress check --app <name> [--config paisans.yaml] [--sudo=false]
 
 Commands:
   validate   Load the configuration and report every problem found.
@@ -210,7 +210,8 @@ Commands:
   ingress    show: for an app pinned to a monitor site, print what the web
              server in front of it must do (terminate TLS for its hostname,
              pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled
-             in for Caddy, nginx and Apache. From paisans.yaml alone.
+             in for the web server it finds on the monitor over ssh, read
+             only, or for Caddy, nginx and Apache when it finds none.
              check: from this machine, check that the hostname resolves to
              the monitor, that /healthz answers with a valid certificate,
              that sign in redirects with an https callback, and that the
@@ -231,8 +232,10 @@ another deployment there holds this one's token, WireGuard interface or listen
 port, or a mesh subnet overlapping this one's. apply and host prepare also
 refuse when anything else on the host overlaps the mesh subnet. dns init and dns
 prune reach no host, only the DNS provider's API, and change it only with
---execute; site remove also deletes the removed site's records there. ingress check reaches no host over ssh and changes nothing: it
-looks at a monitor's public hostname as any visitor could.
+--execute; site remove also deletes the removed site's records there. ingress
+show and ingress check change nothing: check looks at a monitor's public
+hostname as any visitor could, and in ingress mode external both read the
+monitor's web server over ssh, show always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,

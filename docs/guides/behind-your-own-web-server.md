@@ -81,7 +81,7 @@ your web server's rules are yours.
 paisans ingress show --app status
 ```
 
-It prints, from `paisans.yaml` alone:
+It reads the machine's web server over ssh, changing nothing, and prints:
 
 * the hostname, the upstream (`http://127.0.0.1:8480`) and the health path,
   `/healthz`;
@@ -97,12 +97,35 @@ It prints, from `paisans.yaml` alone:
     slash, because the app's routing ignores both: the status page lists
     every monitor, mesh addresses included, and `/metrics` is public whenever
     no API token exists;
-* a filled in snippet for Caddy, nginx and Apache. Each has a line marked
-  `YOUR CERTIFICATE` where your own certificate lines go;
+* one line saying which web server it found, where, and how it comes by its
+  certificates, for you to check, such as:
+
+  ```
+  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates
+  ```
+
+* the snippet for that web server, filled in;
 * a warning when `listen` is not loopback.
 
-Copy the snippet for your server into its configuration, put your certificate
-lines where it says, and reload the server.
+It looks for a container publishing 443 or 80 first, then for the process
+listening on 443 or 80 on the machine itself, using sudo only where docker or
+`ss` need it; it asks for the password once. What the snippet says about the
+certificate follows what it found:
+
+| Found | Certificate in the snippet |
+|---|---|
+| Caddy whose admin API shows it obtains its own certificates | no `tls` line: Caddy obtains this one too |
+| Caddy loading certificate files for its other sites | a `tls` line naming files for this hostname by the same pattern |
+| nginx or Apache with certificates under `/etc/letsencrypt/live/` | the files certbot will write for this hostname, after the `certbot certonly` command that obtains them the way your other certificates were |
+| nginx or Apache with other certificate files | files for this hostname by the same pattern, where the paths name a host |
+| nothing it could read | the Caddy, nginx and Apache snippets, Caddy's `tls` line commented out and each marked `YOUR CERTIFICATE`, with the line above saying what could not be determined |
+
+When Caddy also serves a listener bound to a private address only, such as a
+Tailscale one, the snippet says which listener the site belongs on.
+
+Copy the snippet into your web server's configuration, obtain the certificate
+if the sheet says to, and reload the server. `--sudo=false` reads as the ssh
+user alone.
 
 ## 4. Publish the name
 
@@ -130,8 +153,9 @@ again.
 paisans ingress check --app status
 ```
 
-It changes nothing and reaches no host over ssh: it looks at the monitor as a
-visitor would, and reports each item as `PASS` or `FAIL` with what fixes it.
+It changes nothing: it looks at the monitor as a visitor would, and reports
+each item as `PASS` or `FAIL` with what fixes it. When an item fails it also
+reads the web server over ssh, as `ingress show` does, and names it.
 
 | Check | Passes when | When it fails |
 |---|---|---|
@@ -141,6 +165,25 @@ visitor would, and reports each item as `PASS` or `FAIL` with what fixes it.
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or drop the port in Docker's `DOCKER-USER` chain. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
 Run it again after every change until every line says `PASS`.
+
+`paisans apply --execute` without `--site` runs the same checks for every app
+behind your own web server once every other step has run, in an `ingress`
+section:
+
+```
+ingress
+  ✓ status   status.example.org
+```
+
+When one fails it marks the app's line failed, notes which check failed with
+that check's own line and the web server it finds in front of the app, read
+with the sudo password the run asked for at its start, and ends with `Deployment complete, but 1 app failed
+its ingress check: status` and exit status 1 rather than `Deployment
+complete.`, since every step ran but a visitor cannot use the app yet. A
+failing `certificate` or `sign in` check, which an app or certificate that has
+only just started can cause, is tried again for about half a minute before it
+is reported. Fix what it names with steps 3 and 4, then run `paisans ingress
+check --app status` until it passes.
 
 ## Afterwards
 
