@@ -3155,23 +3155,42 @@ a host is made with the display held until that host has answered once. A key
 whose passphrase ssh asks for on every connection is the one prompt this does
 not cover: after the first connection the spinner runs while ssh asks, and can
 draw over the question. A key held by an agent (above) is never asked for.
-The password is checked once with `sudo -k -S -p '' true`, and every later
-command runs as `sudo -k -S -p '' sh -c '<command>'` with the password as the
-first line of that ssh session's stdin:
+The password is checked once, and every command after it runs as
+`sudo -k -S -p '' sh -c '<fence>; <command>'`, with the password as the first
+line of that ssh session's stdin, a fence line after it, and then whatever
+stdin the command itself takes:
 
 * `-S` reads the password from stdin, and `-p ''` prints no prompt into
   output the toolkit parses.
-* `-k` ignores a cached credential, so sudo reads the password line on every
-  command. A command run while the credential was cached would otherwise get
-  that line as the top of its own input, and a file write would put the
-  password into the file.
-* sudo reads the password up to the newline, so whatever follows it on stdin
-  reaches the command unchanged.
+* `-k` ignores a cached credential, so sudo asks on every command where it
+  asks at all.
+* sudo reads the password up to the newline, one byte at a time, so it takes
+  nothing that follows.
+* Whether sudo reads that line at all is the host's to decide: a NOPASSWD
+  rule matching the command, or a PAM module that authenticates without a
+  password, lets the command through without reading it. The line would then
+  be the top of the command's own input, and a command reading stdin would
+  print it, write it into a file or run it. So the command never reads that
+  stdin directly: the shell sudo starts first reads up to the fence, at most
+  two lines, which is the fence alone when sudo took the password and the
+  password and then the fence when it did not. Only what follows the fence
+  reaches the command, whichever way the host went. The fence is random for
+  each command, so nothing a command is sent can be mistaken for it.
+* ssh runs with `-T`, whatever the operator's ssh config says, so the
+  command has no terminal on the host: a terminal echoes what arrives on
+  stdin back into the output, the password included.
 
 The password is held in memory for the run and shared by every connection to
 the same destination. It never appears on a command line, where `ps` on either
-machine would show it, never in an error message, and never on disk. The next
-run asks again.
+machine would show it, and never on disk. The next run asks again.
+
+It is also registered as a secret the moment it is typed, and everything the
+toolkit shows passes through one redaction that replaces each registered
+secret with `[redacted]`: every line the progress display writes, the error a
+command ends on, the transport's own errors, and the sheet `web-server show`
+prints. A host's output is quoted to the operator in many places (a warning's
+detail, a failure's cause under `--verbose`), and a host can print back what
+it was sent, so leaving the password out is not left to each of them.
 
 **What stops a run, and what it says:**
 

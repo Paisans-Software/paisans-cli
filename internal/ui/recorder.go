@@ -24,7 +24,9 @@ type Recorder struct {
 func (r *Recorder) add(kind, text, extra string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.Events = append(r.Events, Event{kind, text, extra})
+	// Redacted as a drawing reporter redacts what it writes, so a test
+	// sees what an operator would.
+	r.Events = append(r.Events, Event{kind, Redact(text), Redact(extra)})
 }
 
 func (r *Recorder) Section(title string)       { r.add("section", title, "") }

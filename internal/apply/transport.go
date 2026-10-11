@@ -151,10 +151,16 @@ func (t SSHTransport) port() int {
 // the --ssh route as well, since they name a socket and not the destination
 // (see sshmux.go).
 //
+// -T asks for no terminal on the host, whatever the operator's ssh config
+// says (RequestTTY). A command on a terminal has its stdin echoed back into
+// its output by the terminal itself, and stdin carries sudo's password and
+// WriteFile's content, so with one every command run with a password would
+// print it.
+//
 // The command is sent as RemoteCommand wraps it, on both routes.
 func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 	command = RemoteCommand(command)
-	args := muxArgs()
+	args := append(muxArgs(), "-T")
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
 	}
@@ -238,16 +244,33 @@ func writeKeyFiles(dir string, keys []string) ([]string, error) {
 	return files, nil
 }
 
+// Run runs command on the host, through sudo when the transport says to.
+//
+// Its error, like every error the transport returns, is redacted of the
+// sudo password (see ui.RedactError): it carries the host's output, which
+// callers quote to the operator, and a host can print what it was sent.
+// The output itself is returned as the host printed it, since it is data a
+// caller parses; what is shown of it is redacted where it is shown.
 func (t SSHTransport) Run(command string) (string, error) {
-	command, stdin, err := t.sudo(command, nil)
+	wrapped, stdin, err := t.sudo(command, nil)
 	if err != nil {
-		return "", err
+		return "", ui.RedactError(err)
 	}
-	out, err := t.run(command, stdin)
+	out, err := t.run(wrapped, stdin)
 	if err != nil {
-		return out, fmt.Errorf("%s: %s: %w\n%s", t.Describe(), firstLine(command), err, strings.TrimRight(out, "\n"))
+		return out, ui.RedactError(fmt.Errorf("%s: %s: %w\n%s", t.Describe(), t.named(command), err, strings.TrimRight(out, "\n")))
 	}
 	return out, nil
+}
+
+// named is how an error names command: its first line, after sudo when it
+// ran through sudo. It is the command as the caller gave it rather than as
+// sudo wraps it, which says what failed without the wrapping.
+func (t SSHTransport) named(command string) string {
+	if t.Sudo {
+		return "sudo " + firstLine(command)
+	}
+	return firstLine(command)
 }
 
 // How often a connection that never opened is tried again, and how long to
@@ -554,8 +577,8 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 		if t.RetryLog != nil {
 			log = t.RetryLog
 		}
-		fmt.Fprintf(log, "%s: ssh could not connect (%s), retrying in %s (attempt %d of %d)\n",
-			t.Describe(), lastLine(out.String()), delay, attempt+1, len(sshRetryDelays)+1)
+		fmt.Fprint(log, ui.Redact(fmt.Sprintf("%s: ssh could not connect (%s), retrying in %s (attempt %d of %d)\n",
+			t.Describe(), lastLine(out.String()), delay, attempt+1, len(sshRetryDelays)+1)))
 		sleep(delay)
 	}
 }
@@ -585,10 +608,10 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 		shellQuote(dir), shellQuote(path), mode, shellQuote(path))
 	script, stdin, err := t.sudo(script, &content)
 	if err != nil {
-		return err
+		return ui.RedactError(err)
 	}
 	if out, err := t.run(script, stdin); err != nil {
-		return fmt.Errorf("%s: writing %s: %w\n%s", t.Describe(), path, err, strings.TrimRight(out, "\n"))
+		return ui.RedactError(fmt.Errorf("%s: writing %s: %w\n%s", t.Describe(), path, err, strings.TrimRight(out, "\n")))
 	}
 	return nil
 }
@@ -597,13 +620,13 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 // content that way: what goes in carries credentials, and only the command
 // line is visible in the process table.
 func (t SSHTransport) RunInput(command, stdin string) (string, error) {
-	command, in, err := t.sudo(command, &stdin)
+	wrapped, in, err := t.sudo(command, &stdin)
 	if err != nil {
-		return "", err
+		return "", ui.RedactError(err)
 	}
-	out, err := t.run(command, in)
+	out, err := t.run(wrapped, in)
 	if err != nil {
-		return out, fmt.Errorf("%s: %s: %w\n%s", t.Describe(), firstLine(command), err, strings.TrimRight(out, "\n"))
+		return out, ui.RedactError(fmt.Errorf("%s: %s: %w\n%s", t.Describe(), t.named(command), err, strings.TrimRight(out, "\n")))
 	}
 	return out, nil
 }

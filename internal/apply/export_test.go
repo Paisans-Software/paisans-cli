@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -109,6 +110,23 @@ func SetNow(at func() time.Time) func() {
 	old := now
 	now = at
 	return func() { now = old }
+}
+
+// Unfence undoes the fence withPassword adds, for a fake host standing in
+// for a sudo that reads its password line: the command as the caller gave
+// it, under sudo -k -S, and stdin as the password and then the command's
+// own. Anything else is returned as it is.
+func Unfence(command, stdin string) (string, string) {
+	fence := regexp.MustCompile(`paisans-fence-[0-9a-f]{32}`).FindString(command)
+	if fence == "" {
+		return command, stdin
+	}
+	prefix := sudoWithPassword + " sh -c '" + strings.ReplaceAll(fenceGuard(fence), "'", `'\''`)
+	rest, ok := strings.CutPrefix(command, prefix)
+	if !ok {
+		return command, stdin
+	}
+	return sudoWithPassword + " sh -c '" + rest, strings.Replace(stdin, "\n"+fence+"\n", "\n", 1)
 }
 
 // InnerCommand undoes RemoteCommand. ok is false when remote is not one.

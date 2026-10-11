@@ -86,7 +86,9 @@ func runWebServer(args []string) error {
 				return findWebServer(cfg, target, *sudo), nil
 			})
 		}
-		webserver.Show(os.Stdout, target, ws)
+		// Redacted as the reporter's lines are, since what it found on
+		// the host is printed with the sheet.
+		webserver.Show(ui.RedactWriter(os.Stdout), target, ws)
 		return nil
 	}
 	r.Section(fmt.Sprintf("web-server %s at %s", target.App, target.Hostname))
