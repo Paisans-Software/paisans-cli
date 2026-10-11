@@ -24,6 +24,11 @@ func FindZone(ctx context.Context, provider Provider, name string, cache map[str
 	labels := strings.Split(name, ".")
 	var tried []string
 	for i := 0; i < len(labels)-1; i++ {
+		// A wildcard or an underscore label (*._domainkey, _dmarc) names a
+		// record, never a zone apex, so it is not asked about.
+		if labels[i] == "*" || strings.HasPrefix(labels[i], "_") {
+			continue
+		}
 		candidate := strings.Join(labels[i:], ".")
 		if z, ok := cache[candidate]; ok {
 			if z.id != "" {

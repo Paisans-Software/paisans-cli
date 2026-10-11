@@ -2206,6 +2206,57 @@ ordinary records are different code, and `dns init` refuses an unimplemented
 provider by name rather than pretending. Until one is implemented, create the
 records it would have created by hand, unproxied.
 
+**Every name says whether it has mail.** A name that publishes an address can
+be forged as the sender of a message whether or not anybody sends mail from
+it, and a receiver refuses the forgery only when the name says it sends none.
+So `dns init` publishes, beside the address records, the records a DNS
+provider recommends for a domain that sends no mail:
+
+| Name | Record | What it tells a receiver |
+|------|--------|--------------------------|
+| `community.domain` and every name that gets an address record | TXT `v=spf1 -all` | no server may send as this name. SPF applies only to the exact name it is published at, and a wildcard reaches no name that holds another record, so each hostname carries its own |
+| `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
+| `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
+| `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`). A receiver finding no policy at a hostname's own `_dmarc` applies this one |
+
+**A name with mail of its own gets none of them.** Some communities run mail
+at their domain through a hosted service (Eg: Google Workspace, Fastmail or
+Proton Mail), and its SPF, MX, DKIM keys and DMARC policy are that service's
+to configure. List such names under `community.mail_domains`:
+
+```yaml
+community:
+  domain: example.org
+  mail_domains: [example.org]
+```
+
+A sender in an `smtp` block makes its own domain one of these without being
+listed: the domain of `smtp.from_address`, and of every `from_address` an app
+that sends mail declares for itself, so the toolkit never locks out mail it
+configured. Every other name is locked down as above, the hostnames under a
+mail domain included. When `community.domain` itself has mail, its DMARC
+policy is what those hostnames rely on, and `dns init` checks it without ever
+writing it: a policy that is missing, or weaker than `p=reject` and
+`sp=reject` with no `pct` below 100, is a `!` note, never a conflict and never
+a create. `validate` refuses an entry that is not a hostname
+(`mail-domain-is-not-a-hostname`) or is outside `community.domain`
+(`mail-domain-outside-the-domain`), since `dns init` publishes nothing there.
+
+Only a record saying the same kind of thing competes with one of these. Any
+other TXT record at the name, a provider's verification code for one, is left
+alone and stops nothing. A record of the same kind that says something else
+is a conflict, and so is a second SPF record, since a receiver treats two as an
+error and ignores both. A DMARC policy is compared by what it makes a receiver
+do, so one that adds a reporting address to `p=reject` is present, not a
+conflict. An SPF record that lets a server send, or an MX that receives, is the
+likeliest conflict, and it says which line to add: the name has mail, and
+belongs in `community.mail_domains`.
+
+When `community.domain` is itself a subdomain (Eg: `staging.example.org`), a
+receiver that looks up a hostname's policy at the organisational domain
+(`example.org`) rather than at `community.domain` finds whatever that domain
+publishes. The SPF record on each hostname holds either way.
+
 **`dns prune` removes what `dns init` made and nothing wants any more.** A
 deployment that moved from one shared media hostname to one per app is left
 holding the old name's A record: `dns init` created it, and no line of the
@@ -2236,10 +2287,16 @@ A record is deleted only when every one of these holds:
 | Rule | Why |
 |------|-----|
 | it carries exactly the comment this deployment's `dns init` writes, `paisans-<token>: created by paisans dns init` | a record without it was never this deployment's: one with another token is another deployment's, and one with no token was never the toolkit's |
-| it is an A or AAAA record, holding an address of that record's family | those are the only types `dns init` creates, and an IPv4-mapped address in an AAAA record would otherwise match an IPv4 address |
+| it is an A or AAAA record holding an address of that record's family, or a TXT or MX record holding exactly one of the no-mail contents above at the kind of name `dns init` writes it at | those are the only records `dns init` creates, an IPv4-mapped address in an AAAA record would otherwise match an IPv4 address, and a TXT or MX that says anything but "no mail here" is somebody's mail |
 | its name is `community.domain`, a name under it, or a name the configuration produces now | every media hostname, derived or declared, is under the domain, and so was the shared one per app hostnames replaced |
-| its address is a site's `public_address` or `public_address6` | it pointed at this deployment's own host |
-| no record of its type is wanted at its name | prune removes names, it does not repoint them |
+| for an address record, its address is a site's `public_address` or `public_address6` | it pointed at this deployment's own host. A no-mail record points at nothing; its exact content ties it to the toolkit instead |
+| no record of its type is wanted at its name | prune removes names, it does not repoint them. A DMARC policy `dns init` only checks is not wanted |
+
+**A name given mail is a prune, then the provider.** Listing a name in
+`community.mail_domains` stops `dns init` wanting its no-mail records, and
+`dns prune --execute` deletes them. Do that before adding the mail service's
+own records: its SPF beside the toolkit's `v=spf1 -all` would be two SPF
+records, which a receiver ignores, and the null MX would turn its mail away.
 
 **The comment is necessary and never sufficient.** A comment is free text that
 anyone with the zone can write, on a record the toolkit never made, and a rule
@@ -5020,7 +5077,7 @@ holds:
 | Rule | Why |
 |------|-----|
 | it carries exactly this deployment's comment, `paisans-<token>: created by paisans dns init` | anything else was never this deployment's |
-| it is an A or AAAA record, holding an address of that record's family | the only types `dns init` creates |
+| it is an A or AAAA record, holding an address of that record's family | the only records that point at the site. A no-mail TXT record `dns init` made at the site's endpoint name points at nothing, so it is left for `dns prune`, which deletes it once the configuration no longer names the endpoint |
 | its name is `community.domain`, a name under it, or one the configuration before removal produces | it sits where this deployment's names sit |
 | its address is the site's own `public_address` or `public_address6` | it points at the host being removed |
 | the configuration without the site wants no record of its type at its name | a name still wanted is kept |

@@ -112,6 +112,12 @@ type Community struct {
 	// Domain is a one way door. Federation identity is the hostname and remote
 	// instances have recorded it, so changing it after federating is a rebuild.
 	Domain string `yaml:"domain"`
+	// MailDomains are names under Domain whose mail somebody other than this
+	// toolkit runs (Eg: the domain itself on a hosted mail service). dns init
+	// publishes no mail records at them, while every other name it publishes
+	// says it sends and receives no mail. A sender in an smtp block makes its
+	// own domain one of these without being listed here.
+	MailDomains []string `yaml:"mail_domains"`
 }
 
 // Mesh is the private network every site sits on.

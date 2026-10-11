@@ -169,14 +169,17 @@ Commands:
              down, Pocket ID's active instance, and clocks. Prints how to
              recover. Reaches hosts, changes nothing; exits 1 on any FAIL.
   dns        init: create the public DNS records the configuration implies,
-             at the provider named by acme.provider. Creates only what is
+             at the provider named by acme.provider: addresses, and records
+             saying every name without mail (community.mail_domains, smtp
+             senders) sends and receives none. Creates only what is
              missing, never updates or deletes, and refuses if any record
              conflicts.
-             prune: delete the A and AAAA records dns init created that the
+             prune: delete the records dns init created that the
              configuration no longer implies: only one carrying init's
              comment, at a name under community.domain or one the
-             configuration names, pointing at a site's public address, and
-             no longer wanted. Lists every other record init marked, with why
+             configuration names, and no longer wanted; an A or AAAA
+             pointing at a site's public address, or a TXT or MX holding
+             exactly a no-mail content init writes. Lists every other record init marked, with why
              it is kept, and lists the zone again to confirm each delete.
              Both write nothing without --execute.
   secrets    set: read one value from stdin and write it into the encrypted

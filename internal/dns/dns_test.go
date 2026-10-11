@@ -205,6 +205,17 @@ func declared() *config.Config {
 	}
 }
 
+// addressEntries are the entries for A and AAAA records.
+func addressEntries(entries []Entry) []Entry {
+	var out []Entry
+	for _, e := range entries {
+		if e.Type == "A" || e.Type == "AAAA" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func plan(t *testing.T, c *cloudflare, cfg *config.Config) *Plan {
 	t.Helper()
 	wants, err := Desired(cfg)
@@ -228,8 +239,11 @@ func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
 	p.Show(out)
 	t.Logf("dry run:\n%s", out.Lines())
 
-	if len(p.Entries) != 5 || len(p.Creates()) != 5 {
-		t.Fatalf("want 5 creates, got %+v", p.Entries)
+	// Five address records, and the no-mail records: SPF on each of those
+	// five names and on the domain, the domain's null MX, empty DKIM key
+	// and DMARC policy.
+	if len(p.Entries) != 14 || len(p.Creates()) != 14 || len(addressEntries(p.Entries)) != 5 {
+		t.Fatalf("want 14 creates, 5 of them addresses, got %+v", p.Entries)
 	}
 	// Each record to create is pending, its whole line in the title.
 	if !out.Has("pending", "create A talk.example.org -> 203.0.113.10 (zone example.org)") {
@@ -247,18 +261,25 @@ func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
 	if !run.Has("done", "create A talk.example.org") {
 		t.Errorf("steps:\n%s", run.Lines())
 	}
-	if len(fake.posts) != 5 {
-		t.Fatalf("want 5 POSTs, got %d", len(fake.posts))
+	if len(fake.posts) != 14 {
+		t.Fatalf("want 14 POSTs, got %d", len(fake.posts))
 	}
+	var addresses []cfRecord
 	for _, rec := range fake.posts {
-		if rec.Type != "A" || rec.Content != "203.0.113.10" || rec.Proxied || rec.TTL != 1 || rec.Comment != "paisans-f2a9: created by paisans dns init" {
+		if rec.Proxied || rec.TTL != 1 || rec.Comment != "paisans-f2a9: created by paisans dns init" {
 			t.Errorf("unexpected record body %+v", rec)
+		}
+		if rec.Type == "A" {
+			addresses = append(addresses, rec)
+			if rec.Content != "203.0.113.10" {
+				t.Errorf("unexpected address %+v", rec)
+			}
 		}
 	}
 	// docs was declared with capitals and a trailing dot, which its derived
 	// media hostname inherits, and both sort first.
-	if fake.posts[0].Name != "docs-media.example.org" || fake.posts[1].Name != "docs.example.org" {
-		t.Errorf("names should be normalised and sorted, first was %q", fake.posts[0].Name)
+	if len(addresses) != 5 || addresses[0].Name != "docs-media.example.org" || addresses[1].Name != "docs.example.org" {
+		t.Errorf("names should be normalised and sorted, got %+v", addresses)
 	}
 
 	// A second run finds everything present and writes nothing.
@@ -275,7 +296,7 @@ func TestExistingMatchingRecordIsPresent(t *testing.T) {
 	p := plan(t, fake.serve(t), declared())
 	for _, e := range p.Entries {
 		want := Create
-		if e.Name == "talk.example.org" {
+		if e.Name == "talk.example.org" && e.Type == "A" {
 			want = Present
 		}
 		if e.Action != want {
@@ -324,11 +345,18 @@ func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
 			fake.records["zone-1"] = []cfRecord{existing}
 			c := fake.serve(t)
 			p := plan(t, c, declared())
-			if len(p.Conflicts()) != 1 || p.Conflicts()[0].Name != "talk.example.org" {
-				t.Fatalf("want one conflict on talk.example.org, got %+v", p.Entries)
+			// A CNAME stands in the way of the name's SPF record too.
+			want := 1
+			if name == "cname" {
+				want = 2
 			}
-			if p.Conflicts()[0].Detail == "" {
-				t.Fatal("a conflict must say what is in the way")
+			if len(p.Conflicts()) != want || len(addressEntries(p.Conflicts())) != 1 {
+				t.Fatalf("want %d conflict(s), one an address, got %+v", want, p.Entries)
+			}
+			for _, e := range p.Conflicts() {
+				if e.Name != "talk.example.org" || e.Detail == "" {
+					t.Fatalf("a conflict on talk.example.org must say what is in the way: %+v", e)
+				}
 			}
 			shown := &ui.Recorder{}
 			p.Show(shown)
@@ -339,11 +367,15 @@ func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
 			if err == nil {
 				t.Fatal("execute should refuse a plan with a conflict")
 			}
-			if !errors.Is(err, ErrConflict) || err.Error() != "dns: 1 conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not" {
+			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", want) {
 				t.Errorf("err = %v, want ErrConflict with its message unchanged", err)
 			}
+			hint := "1 DNS record conflicts with the configuration"
+			if want != 1 {
+				hint = fmt.Sprintf("%d DNS records conflict with the configuration", want)
+			}
 			var q *ui.Problem
-			if !errors.As(err, &q) || q.Hint != "1 DNS record conflicts with the configuration" || !strings.Contains(q.Explain, "Change each at your DNS provider") {
+			if !errors.As(err, &q) || q.Hint != hint || !strings.Contains(q.Explain, "Change each at your DNS provider") {
 				t.Errorf("not the Problem main prints: %#v", q)
 			}
 			if len(fake.posts) != 0 {
@@ -515,6 +547,9 @@ func TestDesiredDerivesAndDedupes(t *testing.T) {
 	}
 	var got []string
 	for _, w := range wants {
+		if w.Type != "A" && w.Type != "AAAA" {
+			continue
+		}
 		got = append(got, w.Type+" "+w.Name)
 		if w.Name == "talk.example.org" && len(w.Sources) != 2 {
 			t.Errorf("talk.example.org should be one record with two sources, got %v", w.Sources)

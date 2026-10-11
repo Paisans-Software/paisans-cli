@@ -53,6 +53,8 @@ type Record struct {
 	// Comment is the provider's free text note on the record. Prune reads it
 	// as necessary and never as sufficient: anyone with the zone can edit it.
 	Comment string
+	// Priority is an MX record's preference, and zero for every other type.
+	Priority int
 }
 
 // Want is a record the deployment needs.
@@ -63,6 +65,13 @@ type Want struct {
 	// Sources are the configuration keys that require this record, so that a
 	// conflict can name the line in paisans.yaml it is about.
 	Sources []string
+	// Priority is an MX record's preference.
+	Priority int
+	// Advisory is a record the deployment relies on but is somebody else's
+	// to write: the DMARC policy of a domain with mail of its own. It is
+	// checked and warned about, never created, and prune never counts it as
+	// wanted.
+	Advisory bool
 }
 
 // Provider is a DNS provider's API, reduced to the things this package does
@@ -216,6 +225,7 @@ func Desired(cfg *config.Config) ([]Want, error) {
 	for _, key := range order {
 		out = append(out, *byKey[key])
 	}
+	out = append(out, mailWants(cfg, out)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
@@ -264,6 +274,9 @@ const (
 	Create Action = "create"
 	// Conflict is a record whose name already holds something else.
 	Conflict Action = "conflict"
+	// Warn is an advisory record that is missing or too weak. Nothing is
+	// written for it and it stops nothing.
+	Warn Action = "warn"
 )
 
 // Entry is one wanted record and what will be done about it.
@@ -348,6 +361,9 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 // classify decides what one wanted record needs, given every record already
 // at its name.
 func classify(w Want, records []Record, wanted map[string]bool) (Action, string) {
+	if w.Type == "TXT" || w.Type == "MX" {
+		return classifyMail(w, records)
+	}
 	var same []Record
 	for _, r := range records {
 		switch {
@@ -425,8 +441,8 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 	}
 	for _, e := range plan.Creates() {
 		step := r.Step(fmt.Sprintf("create %s %s", e.Type, e.Name))
-		step.Detail("%s, zone %s", e.Content, e.Zone)
-		record := Record{Type: e.Type, Name: e.Name, Content: e.Content, Comment: plan.comment}
+		step.Detail("%s, zone %s", display(e.Type, e.Content, e.Priority), e.Zone)
+		record := Record{Type: e.Type, Name: e.Name, Content: e.Content, Priority: e.Priority, Comment: plan.comment}
 		if err := provider.Create(ctx, e.zoneID, record); err != nil {
 			err = fmt.Errorf("dns: creating %s %s: %w", e.Type, e.Name, err)
 			step.Fail(err)
@@ -439,11 +455,11 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 			return err
 		}
 		if action, _ := classify(e.Want, back, map[string]bool{e.Type: true, "A": true, "AAAA": true}); action != Present {
-			err := fmt.Errorf("dns: %s %s was created but does not read back as %s unproxied. Check it in the provider's console before re-running", e.Type, e.Name, e.Content)
+			err := fmt.Errorf("dns: %s %s was created but does not read back as %s unproxied. Check it in the provider's console before re-running", e.Type, e.Name, display(e.Type, e.Content, e.Priority))
 			step.Fail(err)
 			return err
 		}
-		step.Detail("read back as %s, unproxied", e.Content)
+		step.Detail("read back as %s, unproxied", display(e.Type, e.Content, e.Priority))
 		step.Done("")
 	}
 	return nil
@@ -457,13 +473,17 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 func (p *Plan) Show(r ui.Reporter) {
 	r.Section("dns " + p.Provider)
 	for _, e := range p.Entries {
-		record := fmt.Sprintf("%s %s -> %s (zone %s)", e.Type, e.Name, e.Content, e.Zone)
+		content := display(e.Type, e.Content, e.Priority)
+		record := fmt.Sprintf("%s %s -> %s (zone %s)", e.Type, e.Name, content, e.Zone)
 		switch e.Action {
 		case Create:
 			r.Step("create "+record).End(ui.Pending, "")
 		case Conflict:
 			r.Refuse(fmt.Sprintf("%s %s conflicts with a record at the provider", e.Type, e.Name),
-				fmt.Sprintf("%s\nwanted: %s -> %s (zone %s)", e.Detail, e.Name, e.Content, e.Zone))
+				fmt.Sprintf("%s\nwanted: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))
+		case Warn:
+			r.Note(fmt.Sprintf("%s %s is not this toolkit's to write, and is missing or weak", e.Type, e.Name),
+				fmt.Sprintf("%s\nexpected at least: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))
 		default:
 			if r.Verbose() {
 				r.Step(record).End(ui.OK, "")

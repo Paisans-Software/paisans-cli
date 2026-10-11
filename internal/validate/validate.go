@@ -163,6 +163,7 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDSMTPSender()
 	c.mediaHostnameShape()
 	c.mediaHostnameUnderAnAppHostname()
+	c.mailDomains()
 	c.outlineBucketInMediaURL()
 	c.configKeyIsNestedInAnEnvFile()
 	c.configKeyLooksLikeASecret()
@@ -1292,6 +1293,36 @@ func (c *checker) mediaHostnameShape() {
 				"media hostname is outside community.domain",
 				"is %q, which is not under community.domain (%s). Its certificate is issued over DNS-01 against the deployment's own zone, so the configured DNS provider cannot answer for a name outside it. Use a name under %s, for example %s.",
 				media, c.cfg.Community.Domain, c.cfg.Community.Domain, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+		}
+	}
+}
+
+// mailDomains refuses a community.mail_domains entry that is not a hostname
+// under community.domain.
+//
+// dns init leaves a mail domain's mail records alone and locks down every
+// other name it publishes. An entry it never publishes at, outside the domain,
+// would say nothing at all, and an operator who wrote one expecting it to
+// protect that name's mail would never be told. An entry that is not a
+// hostname is a typo, and a typo here locks the name it meant out of its own
+// mail.
+func (c *checker) mailDomains() {
+	domain := strings.TrimSuffix(strings.ToLower(c.cfg.Community.Domain), ".")
+	for i, entry := range c.cfg.Community.MailDomains {
+		key := fmt.Sprintf("community.mail_domains[%d]", i)
+		name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(entry)), ".")
+		if problem := hostnameProblem(name); problem != "" {
+			c.refuse("mail-domain-is-not-a-hostname", key,
+				"mail domain is not a hostname",
+				"is %q, which is not a hostname: %s. List the name mail is addressed to, the part after the @, for example %s.",
+				entry, problem, c.cfg.Community.Domain)
+			continue
+		}
+		if domain != "" && name != domain && !strings.HasSuffix(name, "."+domain) {
+			c.refuse("mail-domain-outside-the-domain", key,
+				"mail domain is outside community.domain",
+				"is %q, which is neither community.domain (%s) nor a name under it. dns init publishes records only for this deployment's names, so listing another name changes nothing. List %s, or a name under it.",
+				entry, c.cfg.Community.Domain, c.cfg.Community.Domain)
 		}
 	}
 }

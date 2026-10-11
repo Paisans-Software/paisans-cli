@@ -77,6 +77,8 @@ func TestRulesFire(t *testing.T) {
 		{"homeserver-must-be-pinned", "homeserver-must-be-pinned", validate.Refuse},
 		{"media-hostname-is-not-a-hostname", "media-hostname-is-not-a-hostname", validate.Refuse},
 		{"media-hostname-outside-the-domain", "media-hostname-outside-the-domain", validate.Refuse},
+		{"mail-domain-is-not-a-hostname", "mail-domain-is-not-a-hostname", validate.Refuse},
+		{"mail-domain-outside-the-domain", "mail-domain-outside-the-domain", validate.Refuse},
 		{"media-hostname-under-an-app-hostname", "media-hostname-under-an-app-hostname", validate.Refuse},
 		{"outline-bucket-in-media-url", "outline-bucket-in-media-url", validate.Refuse},
 		{"duplicate-derived-media-hostname", "duplicate-hostname", validate.Refuse},

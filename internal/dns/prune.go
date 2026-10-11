@@ -11,8 +11,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// Prune removes address records the toolkit created and the configuration no
-// longer implies, such as the A record for a hostname an app stopped using.
+// Prune removes records the toolkit created and the configuration no longer
+// implies, such as the A record for a hostname an app stopped using, or the
+// no-mail SPF record of a domain that has since been given mail of its own.
 //
 // A record is removed only when every one of these holds, and a record the
 // toolkit's comment marks but that fails any of them is listed as kept, with
@@ -20,12 +21,17 @@ import (
 //
 //  1. it carries exactly RecordComment of this deployment, so this
 //     deployment's dns init created it;
-//  2. it is an A or AAAA record;
+//  2. it is an A or AAAA record, or (for dns prune, not site remove) a TXT
+//     or MX record holding exactly one of the no-mail contents mail.go
+//     writes, at the kind of name it writes it at;
 //  3. its name is community.domain, a name under it, or a name Desired
 //     produces for this configuration;
-//  4. its address is one of this deployment's sites' public_address or
-//     public_address6, so it pointed at our own host;
-//  5. no record of its type is wanted at its name.
+//  4. for an address record, its address is one of this deployment's sites'
+//     public_address or public_address6, so it pointed at our own host. A
+//     no-mail record points at nothing; its exact content, in rule 2, is
+//     what ties it to the toolkit instead;
+//  5. no record of its type is wanted at its name. An advisory want, a
+//     DMARC policy the toolkit only checks, does not count.
 //
 // The comment alone is not enough because anyone with the zone can write it,
 // on a record the toolkit never made. Rules 3 and 4 tie the record to this
@@ -126,6 +132,10 @@ type pruneRules struct {
 	wanted map[string][]string
 	// wantedBy names the configuration rule 5 compares against.
 	wantedBy string
+	// mail admits rule 2's no-mail records. site remove leaves them alone:
+	// a site leaving changes which addresses exist, not which names have
+	// mail, and dns prune removes a no-mail record a removed name leaves.
+	mail bool
 }
 
 // BuildPrune lists every record in each zone the deployment's names live in
@@ -150,6 +160,7 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 		notOurs:    "is not any site's public_address or public_address6, so it does not point at this deployment",
 		wanted:     wantedSet(wants),
 		wantedBy:   "this configuration",
+		mail:       true,
 	}
 	if rules.domain == "" {
 		return nil, fmt.Errorf("dns: community.domain is not set, so there is no subtree to prune within")
@@ -256,6 +267,9 @@ func siteAddresses(cfg *config.Config, name string) map[string]string {
 func wantedSet(wants []Want) map[string][]string {
 	out := map[string][]string{} // type + " " + name -> sources
 	for _, w := range wants {
+		if w.Advisory {
+			continue
+		}
 		out[w.Type+" "+w.Name] = w.Sources
 	}
 	return out
@@ -301,8 +315,13 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 			typ := strings.ToUpper(r.Type)
 			var reasons []string
 			unscoped := false
-			if typ != "A" && typ != "AAAA" {
-				reasons = append(reasons, fmt.Sprintf("it is a %s record; prune removes only A and AAAA records", typ))
+			address := typ == "A" || typ == "AAAA"
+			switch {
+			case address:
+			case !rules.mail:
+				reasons = append(reasons, fmt.Sprintf("it is a %s record; site remove removes only A and AAAA records, and dns prune removes a no-mail record nothing wants any more", typ))
+			case !isLockdown(r):
+				reasons = append(reasons, fmt.Sprintf("it is a %s record holding something other than the no-mail content dns init writes at this kind of name; prune removes only A and AAAA records and those", typ))
 			}
 			if rules.vouched[name] {
 				seenVouched[name] = true
@@ -329,6 +348,8 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 				}
 			}
 			switch {
+			case !address:
+				// Rule 4 is the address's; a no-mail record has none.
 			case ip == nil || rules.addresses[ip.String()] == "":
 				reasons = append(reasons, fmt.Sprintf("%s %s", r.Content, rules.notOurs))
 			case rules.shared[ip.String()] != "":
@@ -369,7 +390,7 @@ func ExecutePrune(ctx context.Context, provider Provider, plan *PrunePlan, r ui.
 	removes := plan.Removes()
 	for i, e := range removes {
 		step := r.Step(fmt.Sprintf("delete %s %s", e.Type, e.Name))
-		step.Detail("%s, zone %s, record %s", e.Content, e.Zone, e.ID)
+		step.Detail("%s, zone %s, record %s", display(e.Type, e.Content, e.Priority), e.Zone, e.ID)
 		if e.ID == "" {
 			err := fmt.Errorf("dns: %s %s has no record id to delete by. %s", e.Type, e.Name, partway(removes, i))
 			step.Fail(err)
@@ -448,7 +469,7 @@ func (p *PrunePlan) Show(r ui.Reporter) {
 		return
 	}
 	for _, e := range p.Entries {
-		record := fmt.Sprintf("%s %s -> %s (zone %s, record %s)", e.Type, e.Name, e.Content, e.Zone, e.ID)
+		record := fmt.Sprintf("%s %s -> %s (zone %s, record %s)", e.Type, e.Name, display(e.Type, e.Content, e.Priority), e.Zone, e.ID)
 		switch {
 		case e.Action == Remove:
 			r.Step("delete "+record).End(ui.Pending, "")
