@@ -10,7 +10,7 @@ name whose mail somebody else runs.
 
 ## Scope
 
-In: `community.mail_domains` in `paisans.yaml`, the records `dns.Desired`
+In: `community.mail_domains` in `paisans-stack.yaml`, the records `dns.Desired`
 derives, how `dns init` compares TXT and MX records with what the provider
 holds, which records `dns prune` may delete, the Cloudflare provider's MX
 priority, two `validate` rules, the example and the README.
@@ -24,7 +24,7 @@ Out:
   no-mail record left at a removed site's endpoint name is `dns prune`'s.
 * **Updating a record.** As before, nothing in the toolkit updates one.
 
-## `paisans.yaml`
+## `paisans-stack.yaml`
 
 ```yaml
 community:

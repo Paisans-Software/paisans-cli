@@ -1289,8 +1289,8 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		withoutAgeKey(t)
 		path, _ := initWorld(t, nil, fakeSites(), nil)
 		t.Chdir(filepath.Dir(path))
-		err, _ := runInitShowing(t, "--config", "paisans.yaml", "--sudo=false", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
-		if err == nil || !strings.Contains(err.Error(), "beside paisans.yaml") {
+		err, _ := runInitShowing(t, "--config", "paisans-stack.yaml", "--sudo=false", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
+		if err == nil || !strings.Contains(err.Error(), "beside paisans-stack.yaml") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
 		if exists(t, "deployment.key") || exists(t, config.SOPSConfigName) {
@@ -1451,7 +1451,7 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 	}
 	if inside(filepath.Dir(configPath), abs) {
 		return "", &ui.Problem{
-			Hint:    "the age key file would sit beside paisans.yaml",
+			Hint:    "the age key file would sit beside paisans-stack.yaml",
 			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path outside it, Eg: ~/.config/paisans/%s.key", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
 		}
 	}
@@ -1620,7 +1620,7 @@ account, and writes the public key to `.sops.yaml`. The key is never printed,
 because a secret on a terminal is in a scrollback buffer and this one opens
 every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
-`paisans.yaml`, since that directory is usually a git repository.
+`paisans-stack.yaml`, since that directory is usually a git repository.
 
 **The keystore then holds the only copy.** Losing the workstation loses every
 secret in the file, so add a second recipient to `.sops.yaml`, another

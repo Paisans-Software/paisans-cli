@@ -40,7 +40,7 @@ func (c Class) String() string {
 type Conflict struct {
 	// Resource is what is claimed, Eg: "*:80/tcp (Caddy)" or "interface psns-f2a9".
 	Resource string
-	// Key is the paisans.yaml key that claims it.
+	// Key is the paisans-stack.yaml key that claims it.
 	Key string
 	// Holder is what holds it: a container and its compose project, or a
 	// process and its PID.

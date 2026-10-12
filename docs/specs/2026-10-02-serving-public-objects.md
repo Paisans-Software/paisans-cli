@@ -84,7 +84,7 @@ published form is not recoverable after federation is real.
 
 ## Configuration
 
-**Nothing.** No new key in `paisans.yaml`, no new secret. The media hostname and
+**Nothing.** No new key in `paisans-stack.yaml`, no new secret. The media hostname and
 the storage block already exist, and which buckets are public follows from the
 kinds already declared.
 

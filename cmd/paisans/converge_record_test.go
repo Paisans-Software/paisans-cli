@@ -13,11 +13,11 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-const orphanWarning = "secrets: sites.monitor-a names a site paisans.yaml does not declare"
+const orphanWarning = "secrets: sites.monitor-a names a site paisans-stack.yaml does not declare"
 
 // orphanedDeployment is a deployment directory with the fixture
 // configuration and the fixture secrets, plus a secret for monitor-a, a site
-// paisans.yaml does not declare.
+// paisans-stack.yaml does not declare.
 func orphanedDeployment(t *testing.T) (configPath, secretsPath string) {
 	t.Helper()
 	configPath, secretsPath = secretsDir(t, "")

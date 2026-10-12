@@ -17,7 +17,7 @@ import (
 // and the whole point is to check the example against the real list rather
 // than a copy of it typed into the test.
 func TestExampleSecretsMatchAppSecretKeys(t *testing.T) {
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestExampleSecretsMatchAppSecretKeys(t *testing.T) {
 // half of the promise: a value already set is kept, so the example's fixed
 // placeholders are what come back out rather than freshly generated keys.
 func TestExampleSecretsLoadAndPassEveryCheck(t *testing.T) {
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestExampleSecretsLoadAndPassEveryCheck(t *testing.T) {
 // for every app that needs one, including the homeserver's, whose client
 // belongs to Matrix Authentication Service rather than to Synapse.
 func TestExampleOIDCClientsCoverEveryApp(t *testing.T) {
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

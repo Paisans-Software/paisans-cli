@@ -13,7 +13,7 @@ import (
 
 func setIncludeDir(t *testing.T, content, dir string) (string, error) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatal(err)
 	}

@@ -16,8 +16,8 @@ func TestRunSiteAddArguments(t *testing.T) {
 		{nil, "name the site"},
 		{[]string{"--execute"}, "name the site"},
 		{[]string{"home-b", "home-c"}, "one site at a time"},
-		{[]string{"home-b", "--config", "/nonexistent/paisans.yaml"}, "nonexistent"},
-		{[]string{"--config", "/nonexistent/paisans.yaml", "home-b"}, "nonexistent"},
+		{[]string{"home-b", "--config", "/nonexistent/paisans-stack.yaml"}, "nonexistent"},
+		{[]string{"--config", "/nonexistent/paisans-stack.yaml", "home-b"}, "nonexistent"},
 	} {
 		err := runSiteAdd(tc.args, strings.NewReader(""), io.Discard)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

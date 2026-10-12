@@ -82,7 +82,7 @@ stricter one.
 * Deleting documentation
 
 The exception: **`paisans apply` creating the OIDC client an app declared in
-`paisans.yaml` needs**, as part of setting that app up, takes no approval of its
+`paisans-stack.yaml` needs**, as part of setting that app up, takes no approval of its
 own. Every app in the stack signs in through the identity provider, so an app
 cannot run without its client, and approval to run the apply is approval for the
 clients it creates, whether a person or an agent runs it. The gate, which no
@@ -94,7 +94,7 @@ a client's secret, deleting a client, and every change to groups or users stay
 in the tier above, and `apply` never replaces a client it has already recorded.
 
 The same holds for the deployment's own administrators. **`paisans apply`
-making each admin `paisans.yaml` declares an administrator of the identity
+making each admin `paisans-stack.yaml` declares an administrator of the identity
 provider**, and handing each one who has not yet signed in a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
 sign into is not set up, and declaring the admin is approval for the account.

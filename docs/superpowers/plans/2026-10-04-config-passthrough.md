@@ -49,7 +49,7 @@ Keep the refusal names identical in both places so an operator searching the REA
 - `internal/render/site.go` or wherever a rendered file is finalised: the merge call and the collision error.
 - `internal/render/render_test.go`: golden coverage per format.
 - `internal/render/testdata/deployment.yaml`: one passthrough key per format.
-- `README.md`, `docs/decisions.md`, `examples/paisans.example.yaml`.
+- `README.md`, `docs/decisions.md`, `examples/paisans-stack.example.yaml`.
 
 ---
 
@@ -151,7 +151,7 @@ file names are the rendered names rather than the template names.
 Add three cases to the validate table, each loading its own fixture and expecting exactly one finding at REFUSE:
 
 - `config-key-is-nested-in-an-env-file`: an mbin app with `config: {a.b: 1}`. The message says env has no nesting, names the key, and says a dot is a typo here rather than a path.
-- `config-key-looks-like-a-secret`: any app with `config: {app.api_token: xyz}`. The message names `secrets.enc.yaml` and says `paisans.yaml` is plaintext and meant to be committed.
+- `config-key-looks-like-a-secret`: any app with `config: {app.api_token: xyz}`. The message names `secrets.enc.yaml` and says `paisans-stack.yaml` is plaintext and meant to be committed.
 - `config-for-a-kind-with-no-config-file`: an oauth2-proxy app is wrong for this one, since it reads an env file. Use a kind whose `ConfigFormat` is `ConfigNone` if one exists; **if every kind has a config file, say so in your report and drop this fixture and its rule rather than inventing a kind to refuse.** Do not add a kind to make a rule fire.
 
 Build each fixture from a neighbouring one so it differs in one thing only.
@@ -176,7 +176,7 @@ reads.
 
 Three refusals are knowable without rendering: a dotted key on an env file,
 where a dot is a typo rather than a path; a credential shaped key name, since
-paisans.yaml is plaintext and secrets.enc.yaml exists for the other thing; and
+paisans-stack.yaml is plaintext and secrets.enc.yaml exists for the other thing; and
 a config block on a kind that reads no config file. The collision case needs
 rendered output and lands with the merge.
 
@@ -504,7 +504,7 @@ MSG
 
 **Files:**
 - Modify: `internal/garage/integration_test.go` or a new `internal/render/integration_test.go` behind the same build tag, whichever fits the existing container helpers better
-- Modify: `README.md`, `docs/decisions.md`, `examples/paisans.example.yaml`
+- Modify: `README.md`, `docs/decisions.md`, `examples/paisans-stack.example.yaml`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -535,7 +535,7 @@ reason this step exists.
 - that a key the toolkit already renders is refused, and that the way to change
   such a value is a `settings` key or a template change rather than an
   override, with the reason;
-- that `paisans.yaml` is plaintext, so a credential belongs in
+- that `paisans-stack.yaml` is plaintext, so a credential belongs in
   `secrets.enc.yaml`, and that the check for that is by name and narrow.
 
 The distinction between `settings` and `config` has to be legible to somebody
@@ -554,7 +554,7 @@ routed around; and that the secret check is by name and admits it.
 
 - [ ] **Step 4: Put one in the example**
 
-`examples/paisans.example.yaml` gains one `config` key with a comment
+`examples/paisans-stack.example.yaml` gains one `config` key with a comment
 distinguishing it from the `settings` block above it. One is enough: the README
 carries the rest, and an example that demonstrates every format teaches less
 than one that shows the difference between the two mechanisms.

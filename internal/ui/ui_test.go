@@ -497,7 +497,7 @@ func TestAResultFollowsItsTitle(t *testing.T) {
 // Prose under a refusal, a note and a verbose warning wraps to 80 columns,
 // aligned under the hint, and never splits a path.
 func TestRefuseNoteAndWarnWrapTheirProse(t *testing.T) {
-	long := "Move what holds each one, or change the paisans.yaml key it names, and run again; the file is /var/lib/paisans/registry.json on the host, read with sudo."
+	long := "Move what holds each one, or change the paisans-stack.yaml key it names, and run again; the file is /var/lib/paisans/registry.json on the host, read with sudo."
 	for _, terminal := range []bool{false, true} {
 		var b strings.Builder
 		r := ui.NewForTestVerboseWidth(&b, true, terminal, 80, clock())

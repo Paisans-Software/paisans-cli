@@ -3,7 +3,7 @@
 // something the site is about to claim.
 //
 // It has three parts, and each is testable alone. Claims is what
-// paisans.yaml says the site will take on its host, with no host contact.
+// paisans-stack.yaml says the site will take on its host, with no host contact.
 // Inventory is what the host already runs, read through the transport and
 // never changed. Classify decides who owns each thing found and compares the
 // two.

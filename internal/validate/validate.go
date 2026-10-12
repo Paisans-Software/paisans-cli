@@ -1780,7 +1780,7 @@ var secretWords = []string{"password", "secret", "token", "apikey", "privatekey"
 
 // configKeyLooksLikeASecret refuses a key named like a credential.
 //
-// paisans.yaml is plaintext and meant to be read, committed and diffed. A
+// paisans-stack.yaml is plaintext and meant to be read, committed and diffed. A
 // passthrough map is exactly where somebody pastes an API token at the end of
 // a long day. The check is by name and is deliberately narrow: it refuses the
 // one thing it can see, and says so, rather than claiming to be a policy.

@@ -144,7 +144,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // registerConfig is the configuration register reads the admins and the
-// sites from: the local paisans.yaml, or, on a workstation without the files
+// sites from: the local paisans-stack.yaml, or, on a workstation without the files
 // and with a root pinned, the version the pin leads to in the workstation's
 // own store, which a recovery's dry run fills.
 func registerConfig(l configstore.Local, path, pin string) (*config.Config, error) {

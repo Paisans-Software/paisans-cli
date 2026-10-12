@@ -16,9 +16,9 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 		{Level: validate.Refuse, Rule: "witness-shares-failure-domain", Key: "sites.home-c", Hint: "witness shares a failure domain with its only voter", Message: "Put the witness in another failure domain."},
 		{Level: validate.Warn, Rule: "garage-consistency-dangerous", Key: "storage.garage.consistency", Hint: "garage consistency is dangerous", Message: "Reads can miss a recent upload."},
 	}}
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", res)
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", res)
 	out := b.String()
-	for _, want := range []string{"paisans.yaml\n", "FAIL witness shares a failure domain", "sites.home-c: Put the witness in another failure domain.", "WARN garage consistency is dangerous", "paisans.yaml: 1 refusal, 1 warning"} {
+	for _, want := range []string{"paisans-stack.yaml\n", "FAIL witness shares a failure domain", "sites.home-c: Put the witness in another failure domain.", "WARN garage consistency is dangerous", "paisans-stack.yaml: 1 refusal, 1 warning"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
@@ -29,7 +29,7 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 		}
 	}
 	b.Reset()
-	reportFindings(ui.NewPlain(&b, true), "paisans.yaml", res)
+	reportFindings(ui.NewPlain(&b, true), "paisans-stack.yaml", res)
 	// A verbose warning's detail is prose, wrapped to the width: compare it
 	// as words.
 	flat := strings.Join(strings.Fields(b.String()), " ")
@@ -42,7 +42,7 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 
 func TestNoFindingsPrintsNothing(t *testing.T) {
 	var b strings.Builder
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", validate.Result{})
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", validate.Result{})
 	if b.Len() != 0 {
 		t.Errorf("printed %q for a clean file", b.String())
 	}
@@ -54,8 +54,8 @@ func TestCountsPluralAndWarningOnly(t *testing.T) {
 		{Level: validate.Refuse, Rule: "a", Key: "k1", Hint: "h1", Message: "m1"},
 		{Level: validate.Refuse, Rule: "b", Key: "k2", Hint: "h2", Message: "m2"},
 	}}
-	reportValidation(ui.NewPlain(&b, false), "paisans.yaml", two)
-	if !strings.Contains(b.String(), "paisans.yaml: 2 refusals") {
+	reportValidation(ui.NewPlain(&b, false), "paisans-stack.yaml", two)
+	if !strings.Contains(b.String(), "paisans-stack.yaml: 2 refusals") {
 		t.Errorf("no plural count in\n%s", b.String())
 	}
 	b.Reset()
@@ -63,8 +63,8 @@ func TestCountsPluralAndWarningOnly(t *testing.T) {
 		{Level: validate.Warn, Rule: "a", Key: "k1", Hint: "h1", Message: "m1"},
 		{Level: validate.Warn, Rule: "b", Key: "k2", Hint: "h2", Message: "m2"},
 	}}
-	reportValidation(ui.NewPlain(&b, false), "paisans.yaml", warns)
-	if !strings.Contains(b.String(), "paisans.yaml: 2 warnings\n") || strings.Contains(b.String(), "refusal") {
+	reportValidation(ui.NewPlain(&b, false), "paisans-stack.yaml", warns)
+	if !strings.Contains(b.String(), "paisans-stack.yaml: 2 warnings\n") || strings.Contains(b.String(), "refusal") {
 		t.Errorf("bad warning-only count in\n%s", b.String())
 	}
 }
@@ -75,14 +75,14 @@ func TestCountsPluralAndWarningOnly(t *testing.T) {
 func TestCommandsCountOnlyARefusal(t *testing.T) {
 	var b strings.Builder
 	warn := validate.Finding{Level: validate.Warn, Rule: "a", Key: "k1", Hint: "h1", Message: "m1"}
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", validate.Result{Findings: []validate.Finding{warn}})
-	if got := strings.Count(b.String(), "paisans.yaml"); got != 1 || strings.Contains(b.String(), "1 warning") {
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", validate.Result{Findings: []validate.Finding{warn}})
+	if got := strings.Count(b.String(), "paisans-stack.yaml"); got != 1 || strings.Contains(b.String(), "1 warning") {
 		t.Errorf("a warning alone is counted, or the path shown %d times:\n%s", got, b.String())
 	}
 	b.Reset()
 	refuse := validate.Finding{Level: validate.Refuse, Rule: "b", Key: "k2", Hint: "h2", Message: "m2"}
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", validate.Result{Findings: []validate.Finding{refuse, warn}})
-	if !strings.Contains(b.String(), "paisans.yaml: 1 refusal, 1 warning\n") {
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", validate.Result{Findings: []validate.Finding{refuse, warn}})
+	if !strings.Contains(b.String(), "paisans-stack.yaml: 1 refusal, 1 warning\n") {
 		t.Errorf("a refusal is not counted:\n%s", b.String())
 	}
 }
@@ -92,18 +92,18 @@ func TestCommandsCountOnlyARefusal(t *testing.T) {
 func TestFindingsUnderASection(t *testing.T) {
 	warn := validate.Finding{Level: validate.Warn, Rule: "a", Key: "k1", Hint: "h1", Message: "m1"}
 	rec := &ui.Recorder{}
-	reportFindingsUnder(rec, "configuration", "paisans.yaml", validate.Result{Findings: []validate.Finding{warn}})
+	reportFindingsUnder(rec, "configuration", "paisans-stack.yaml", validate.Result{Findings: []validate.Finding{warn}})
 	if len(rec.Events) != 2 || rec.Events[0] != (ui.Event{Kind: "section", Text: "configuration"}) || rec.Events[1].Kind != "warn" {
 		t.Errorf("got:\n%s", rec.Lines())
 	}
 	rec = &ui.Recorder{}
 	refuse := validate.Finding{Level: validate.Refuse, Rule: "b", Key: "k2", Hint: "h2", Message: "m2"}
-	reportFindingsUnder(rec, "configuration", "paisans.yaml", validate.Result{Findings: []validate.Finding{refuse}})
-	if last := rec.Events[len(rec.Events)-1]; last.Kind != "result" || last.Text != "paisans.yaml: 1 refusal" || rec.Has("section", "paisans.yaml") {
+	reportFindingsUnder(rec, "configuration", "paisans-stack.yaml", validate.Result{Findings: []validate.Finding{refuse}})
+	if last := rec.Events[len(rec.Events)-1]; last.Kind != "result" || last.Text != "paisans-stack.yaml: 1 refusal" || rec.Has("section", "paisans-stack.yaml") {
 		t.Errorf("got:\n%s", rec.Lines())
 	}
 	rec = &ui.Recorder{}
-	reportFindingsUnder(rec, "configuration", "paisans.yaml", validate.Result{})
+	reportFindingsUnder(rec, "configuration", "paisans-stack.yaml", validate.Result{})
 	if len(rec.Events) != 0 {
 		t.Errorf("printed for a clean file:\n%s", rec.Lines())
 	}
@@ -112,7 +112,7 @@ func TestFindingsUnderASection(t *testing.T) {
 // A refused configuration ends the command with a short hint naming the file
 // and the count, and says what to do.
 func TestRefusedConfigurationIsAProblem(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	err := refused(path, 2, "")
 	var p *ui.Problem
 	if !errors.As(err, &p) {
@@ -124,8 +124,8 @@ func TestRefusedConfigurationIsAProblem(t *testing.T) {
 	if !strings.Contains(p.Explain, "Fix each refusal above") {
 		t.Errorf("explanation: %q", p.Explain)
 	}
-	err = refused("paisans.yaml", 1, "Secrets are not generated for a configuration that cannot be deployed.")
-	if !errors.As(err, &p) || p.Hint != "paisans.yaml was refused: 1 refusal above" || !strings.Contains(p.Explain, "Secrets are not generated") {
+	err = refused("paisans-stack.yaml", 1, "Secrets are not generated for a configuration that cannot be deployed.")
+	if !errors.As(err, &p) || p.Hint != "paisans-stack.yaml was refused: 1 refusal above" || !strings.Contains(p.Explain, "Secrets are not generated") {
 		t.Errorf("got %#v", p)
 	}
 }
@@ -135,11 +135,11 @@ func TestRefusedConfigurationIsAProblem(t *testing.T) {
 func TestFindingsNameTheFileShortByDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	path := filepath.Join(dir, "staging", "paisans.yaml")
+	path := filepath.Join(dir, "staging", "paisans-stack.yaml")
 	res := validate.Result{Findings: []validate.Finding{{Level: validate.Refuse, Rule: "r", Key: "k", Hint: "h", Message: "m"}}}
 	var b strings.Builder
 	reportFindings(ui.NewPlain(&b, false), path, res)
-	if strings.Contains(b.String(), dir) || !strings.HasPrefix(b.String(), "staging/paisans.yaml\n") || !strings.Contains(b.String(), "\nstaging/paisans.yaml: 1 refusal") {
+	if strings.Contains(b.String(), dir) || !strings.HasPrefix(b.String(), "staging/paisans-stack.yaml\n") || !strings.Contains(b.String(), "\nstaging/paisans-stack.yaml: 1 refusal") {
 		t.Errorf("default:\n%s", b.String())
 	}
 	b.Reset()

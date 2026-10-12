@@ -13,7 +13,7 @@ import (
 )
 
 // dnsStage is the stage number of the DNS stage: after the host is cleaned,
-// and before paisans.yaml is edited, so that a failure in it is resumed by
+// and before paisans-stack.yaml is edited, so that a failure in it is resumed by
 // running the same command, which needs the site still declared.
 const dnsStage = 4
 

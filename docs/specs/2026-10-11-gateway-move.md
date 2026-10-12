@@ -9,7 +9,7 @@ README's *Moving the gateway* describes a five step overlap: the new gateway
 comes up and serves while the old one still does, it is verified answering for
 every hostname, DNS is repointed, the old records' TTL is waited out, and only
 then is the old gateway stopped. Before this, moving the gateway role in
-`paisans.yaml` and applying rendered Caddy on the new site and nothing more,
+`paisans-stack.yaml` and applying rendered Caddy on the new site and nothing more,
 and `dns init` stopped on every hostname, since each still pointed at the old
 gateway and init never changes a record. This builds the missing steps.
 
@@ -176,7 +176,7 @@ record or marker. When one does, `gateway move` is planned after pass two,
 waiting on the new gateway's prepare and apply, under a section of its own,
 `gateway`. A site that cannot be asked stops the run before anything is
 applied. The move runs last because it needs the new gateway applied and
-answering, and because `apply` is the command that takes `paisans.yaml` to a
+answering, and because `apply` is the command that takes `paisans-stack.yaml` to a
 running stack: README's *It is a config change* says the move is what applying
 a moved role does.
 

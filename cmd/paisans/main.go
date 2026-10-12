@@ -1384,7 +1384,7 @@ func (l *pathList) Set(value string) error {
 // than one part of it, so what is used is always either everything the file
 // says or exactly what the operator typed, never a blend of the two.
 //
-// name is the site's name in paisans.yaml. The transport carries it so that
+// name is the site's name in paisans-stack.yaml. The transport carries it so that
 // a sudo password prompt names the site it is for; it plays no part in
 // reaching the host.
 func siteTransport(name string, site config.Site, override string, sudo bool) apply.SSHTransport {

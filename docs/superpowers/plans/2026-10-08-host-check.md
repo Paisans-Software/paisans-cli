@@ -4,7 +4,7 @@
 
 **Goal:** Before `host prepare`, `apply`, `site add` and `prune` change a host, inventory what is already on it, compare that with what the site will claim, and refuse a conflict, or proceed touching only the toolkit's own things on a shared host.
 
-**Architecture:** A new package `internal/hostcheck` with three parts, each testable alone: `ClaimsFor` (from `paisans.yaml` only, built on `render.SiteListeners`), `Inspect` (read only probes through the existing transport) and `Classify` (ownership, then clean, shared or conflict). `cmd/paisans` runs one gate helper first in each of the four commands and passes "shared" on as options that already exist (`apply.KeepImages`) or are added here (`hostprep.Shared`, a `shared` argument to `apply.BuildVolumePrune`, `siteadd.Plan.KeepImages`). `preflight` drops its own port list for the claims and gains a `host` check.
+**Architecture:** A new package `internal/hostcheck` with three parts, each testable alone: `ClaimsFor` (from `paisans-stack.yaml` only, built on `render.SiteListeners`), `Inspect` (read only probes through the existing transport) and `Classify` (ownership, then clean, shared or conflict). `cmd/paisans` runs one gate helper first in each of the four commands and passes "shared" on as options that already exist (`apply.KeepImages`) or are added here (`hostprep.Shared`, a `shared` argument to `apply.BuildVolumePrune`, `siteadd.Plan.KeepImages`). `preflight` drops its own port list for the claims and gains a `host` check.
 
 **Tech Stack:** Go 1.26, standard library only, the repository's fake transport test style.
 
@@ -76,7 +76,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
-// Every listener names the paisans.yaml key that makes the site bind it, so
+// Every listener names the paisans-stack.yaml key that makes the site bind it, so
 // a refusal over a port the host already uses can tell the operator what to
 // change.
 func TestEveryListenerNamesTheKeyThatClaimsIt(t *testing.T) {
@@ -126,7 +126,7 @@ Expected: FAIL to compile, `l.Key undefined`.
 In `Listener` add, after `Owner`:
 
 ```go
-	// Key is the paisans.yaml key that makes the site bind it, for a
+	// Key is the paisans-stack.yaml key that makes the site bind it, for a
 	// message that has to tell the operator what to change.
 	Key string
 ```
@@ -150,7 +150,7 @@ In `SiteListeners`, `add` takes the key second and every call passes one:
 Run: `go test ./internal/render ./internal/validate`
 Expected: PASS.
 
-- [ ] **Step 5: Commit** `feat: name the paisans.yaml key behind every site listener`
+- [ ] **Step 5: Commit** `feat: name the paisans-stack.yaml key behind every site listener`
 
 ---
 
@@ -446,7 +446,7 @@ func TestAForeignCaddyConflictsWithAGateway(t *testing.T) {
 func (r *Report) Refusal() error {
 	switch r.Class {
 	case Conflicted:
-		return fmt.Errorf("host check: %s holds %d thing(s) %s claims, each listed above as CONFLICT, so nothing was changed. Move what holds each one, or change the paisans.yaml key it names, and run again", r.Host, len(r.Conflicts), r.Site)
+		return fmt.Errorf("host check: %s holds %d thing(s) %s claims, each listed above as CONFLICT, so nothing was changed. Move what holds each one, or change the paisans-stack.yaml key it names, and run again", r.Host, len(r.Conflicts), r.Site)
 	case Shared:
 		if why := firewallGap(r.Inventory.Firewall); why != "" {
 			return fmt.Errorf("host check: %s runs services the deployment does not own, and on a shared host the toolkit never sets ufw's default policy or enables it, so both must already be in place: %s. Allow what those services need, then enable ufw with incoming denied by default (ufw default deny incoming; ufw enable) and run again", r.Host, why)

@@ -22,12 +22,12 @@ func problemOf(t *testing.T, err error) *ui.Problem {
 
 // A configuration that is not there says so, and what to do.
 func TestMissingConfigIsAProblem(t *testing.T) {
-	_, err := config.Load(filepath.Join(t.TempDir(), "paisans.yaml"))
+	_, err := config.Load(filepath.Join(t.TempDir(), "paisans-stack.yaml"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("not fs.ErrNotExist: %v", err)
 	}
 	p := problemOf(t, err)
-	if !strings.HasSuffix(p.Hint, "paisans.yaml does not exist") || !strings.Contains(p.Explain, "--config") {
+	if !strings.HasSuffix(p.Hint, "paisans-stack.yaml does not exist") || !strings.Contains(p.Explain, "--config") {
 		t.Errorf("got %#v", p)
 	}
 }
@@ -37,7 +37,7 @@ func TestMissingConfigIsAProblem(t *testing.T) {
 func TestUnknownKeyIsAProblem(t *testing.T) {
 	_, err := config.Load(write(t, minimal+"trusted_proxies: [10.0.0.0/8]\n"))
 	p := problemOf(t, err)
-	if !strings.HasSuffix(p.Hint, "paisans.yaml cannot be read as a configuration") {
+	if !strings.HasSuffix(p.Hint, "paisans-stack.yaml cannot be read as a configuration") {
 		t.Errorf("hint: %q", p.Hint)
 	}
 	if !strings.Contains(p.Explain, "unknown key trusted_proxies") || strings.Contains(p.Explain, "config.Config") {
@@ -68,7 +68,7 @@ func TestStructuralProblemsAreAList(t *testing.T) {
 		t.Fatalf("not a LoadError: %v", err)
 	}
 	p := problemOf(t, err)
-	if !strings.HasSuffix(p.Hint, "paisans.yaml is not a usable configuration") {
+	if !strings.HasSuffix(p.Hint, "paisans-stack.yaml is not a usable configuration") {
 		t.Errorf("hint: %q", p.Hint)
 	}
 	items := 0

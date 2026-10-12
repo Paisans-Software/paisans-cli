@@ -56,7 +56,7 @@ func hasSecrets(s *config.Secrets, key string) bool {
 	return false
 }
 
-// runSecretsPrune removes the secrets that name something paisans.yaml no
+// runSecretsPrune removes the secrets that name something paisans-stack.yaml no
 // longer declares: a removed site's WireGuard key and heartbeat token, a
 // removed app's passwords and sign-in client, a Pocket ID group nothing
 // names. It lists them by key, never by value, and changes nothing without

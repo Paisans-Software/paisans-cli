@@ -256,7 +256,7 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	if claimed(logged(t, log)) {
 		t.Errorf("the host was claimed before the review was approved:\n%s", logged(t, log))
 	}
-	if !rec.Has("pending", "review what paisans.yaml grants") || !strings.Contains(rec.Lines(), "explain: + key SHA256:") {
+	if !rec.Has("pending", "review what paisans-stack.yaml grants") || !strings.Contains(rec.Lines(), "explain: + key SHA256:") {
 		t.Errorf("the review is not shown:\n%s", rec.Lines())
 	}
 	rec, err = prepare(t, noTerminalStdin(), io.Discard)
@@ -408,7 +408,7 @@ func joinConfig(t *testing.T) string {
 	if joined == s {
 		t.Fatal("the fixture no longer declares the sites this edit expects")
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(joined), 0o600); err != nil {
 		t.Fatal(err)
 	}

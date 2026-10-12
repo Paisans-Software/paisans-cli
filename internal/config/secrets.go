@@ -20,7 +20,7 @@ import (
 )
 
 // SecretsVersion is the format of the secrets file this toolkit reads and
-// writes. It is the file's own, and changes independently of paisans.yaml's
+// writes. It is the file's own, and changes independently of paisans-stack.yaml's
 // version.
 //
 // Version 2 adds the backup section. Its restic password and WAL-G key
@@ -40,7 +40,7 @@ type Secrets struct {
 	// Version is the file's format, SecretsVersion when written. A file
 	// without one is read as this format and written with it.
 	Version int `yaml:"version"`
-	// ID is the id of the deployment the file belongs to, paisans.yaml's id.
+	// ID is the id of the deployment the file belongs to, paisans-stack.yaml's id.
 	// The file holds that deployment's credentials and the state captured
 	// from its running services, so LoadDeploymentSecrets refuses it for any
 	// other. A file without one is accepted and carries the id from its next
@@ -109,7 +109,7 @@ type GarageSecrets struct {
 	RPCSecret  string `yaml:"rpc_secret"`
 }
 
-// BackupSecrets is what backups need beyond paisans.yaml's backup section:
+// BackupSecrets is what backups need beyond paisans-stack.yaml's backup section:
 // two keys generated at init and never seen, and each destination's
 // credentials, which its provider issues and an operator pastes.
 type BackupSecrets struct {
@@ -117,7 +117,7 @@ type BackupSecrets struct {
 	ResticPassword string `yaml:"restic_password,omitempty"`
 	// WALGLibsodiumKey encrypts every object WAL-G writes, 32 bytes as hex.
 	WALGLibsodiumKey string `yaml:"walg_libsodium_key,omitempty"`
-	// Destinations is keyed by the destination's name in paisans.yaml.
+	// Destinations is keyed by the destination's name in paisans-stack.yaml.
 	Destinations map[string]DestinationSecrets `yaml:"destinations,omitempty"`
 }
 

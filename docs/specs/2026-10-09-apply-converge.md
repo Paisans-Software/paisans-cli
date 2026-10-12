@@ -2,7 +2,7 @@
 
 Date: 2026-10-09. Status: approved by the founder in session.
 
-Bringing a deployment up from `paisans.yaml` takes a dozen commands in an order
+Bringing a deployment up from `paisans-stack.yaml` takes a dozen commands in an order
 the operator has to know: `init`, `host prepare` for every site, `apply` for
 the witness first and then the data sites, one of them twice, `storage init`
 or `storage add`, `dns init`. Nothing runs them in that order, and a first
@@ -18,7 +18,7 @@ every other command are unchanged, for building a deployment piece by piece.
 
 ## Scope
 
-In: one command that takes `paisans.yaml` to a complete, running stack, and
+In: one command that takes `paisans-stack.yaml` to a complete, running stack, and
 keeps it there, for every site and app it declares.
 
 Out:
@@ -143,7 +143,7 @@ check that fails.
 The rest of init's work stays with `init`, and the dry run writes nothing for
 it. A yaml with no mesh subnet does not load, as for every command, and the
 error names `paisans init`: choosing the subnet reads every host and rewrites
-`paisans.yaml`. Otherwise `init` is pending and every later step waits on it,
+`paisans-stack.yaml`. Otherwise `init` is pending and every later step waits on it,
 as above, when
 
 * the yaml has no id;

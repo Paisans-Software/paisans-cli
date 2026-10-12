@@ -1,4 +1,4 @@
-# paisans.yaml — the whole deployment, declared.
+# paisans-stack.yaml — the whole deployment, declared.
 #
 # This file is PLAIN and safe to commit. It holds no secrets: those live in
 # secrets.enc.yaml, encrypted with sops + age. Keeping them apart means routine
@@ -321,7 +321,7 @@ apps:
       # read only: they are rendered into its .env, and changing one is an
       # edit here and an apply, which restarts it. Anything left out takes
       # Pocket ID's default. The full list is in README.md, "Pocket ID's
-      # configuration is rendered from paisans.yaml".
+      # configuration is rendered from paisans-stack.yaml".
       app_name: Example ID       # also the sender name on its mail
       session_duration: 10080    # minutes
       # New accounts come only from invites (the invite app below), so

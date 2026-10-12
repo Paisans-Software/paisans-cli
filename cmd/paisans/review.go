@@ -16,10 +16,10 @@ import (
 )
 
 // What follows is the review apply and host prepare make of what
-// paisans.yaml grants on a host, before they change it
+// paisans-stack.yaml grants on a host, before they change it
 // (docs/specs/2026-10-11-config-review.md).
 //
-// Any admin of a deployment can edit paisans.yaml, and whoever runs apply
+// Any admin of a deployment can edit paisans-stack.yaml, and whoever runs apply
 // runs it with their own access, so an added key or a changed image reaches
 // a host through someone else's run. Each host records the grant last
 // applied (internal/grant); the review compares the configuration's grant

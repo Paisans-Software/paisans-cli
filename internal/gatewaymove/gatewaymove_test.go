@@ -89,7 +89,7 @@ func (h *host) WriteFile(path, content string, _ uint32) error {
 func (h *host) RunInput(command, _ string) (string, error) { return h.Run(command) }
 
 // world is a deployment whose gateway role has just moved from home-a to
-// vm in paisans.yaml, with vm applied: home-a still runs the old Caddy and
+// vm in paisans-stack.yaml, with vm applied: home-a still runs the old Caddy and
 // holds the deployment record, and the zone still points every hostname
 // the gateway serves at home-a.
 type world struct {
@@ -124,7 +124,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		text = e(text)
 	}
 	dir := t.TempDir()
-	path := filepath.Join(dir, "paisans.yaml")
+	path := filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}

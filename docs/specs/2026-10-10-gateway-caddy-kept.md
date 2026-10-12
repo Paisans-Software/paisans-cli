@@ -68,7 +68,7 @@ removes them.
 
 ## The reduced Caddyfile
 
-Built from the Caddyfile on the host, not from `paisans.yaml`, so a run with a
+Built from the Caddyfile on the host, not from `paisans-stack.yaml`, so a run with a
 configuration and a run with `--id` write the same file. It holds:
 
 * the global options block, which keeps the ACME email and the DNS provider

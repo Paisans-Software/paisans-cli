@@ -155,15 +155,15 @@ func TestSiteRemoveByIDRefusesBeforeReachingAHost(t *testing.T) {
 	for args, want := range map[string]string{
 		"--ssh admin@192.0.2.30 --id f2a9": "add --force",
 		"--force --id f2a9":                "--ssh",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --config paisans.yaml":   "--config",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --secrets s.enc.yaml":    "--secrets",
-		"watch --force --ssh admin@192.0.2.30 --id f2a9":                   "names the site",
-		"--force --ssh admin@192.0.2.30 --id f2a":                          "Eg: --id f2a9",
-		"--force --ssh admin@192.0.2.30 --id F2A9":                         "Eg: --id f2a9",
-		"--force --ssh myalias --id f2a9":                                  "not user@host",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --host-gone":             "Drop one of them",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --execute":               "terminal",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --execute --delete-data": "terminal",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --config paisans-stack.yaml": "--config",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --secrets s.enc.yaml":        "--secrets",
+		"watch --force --ssh admin@192.0.2.30 --id f2a9":                       "names the site",
+		"--force --ssh admin@192.0.2.30 --id f2a":                              "Eg: --id f2a9",
+		"--force --ssh admin@192.0.2.30 --id F2A9":                             "Eg: --id f2a9",
+		"--force --ssh myalias --id f2a9":                                      "not user@host",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --host-gone":                 "Drop one of them",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --execute":                   "terminal",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --execute --delete-data":     "terminal",
 	} {
 		err := runSiteRemove(strings.Fields(args), strings.NewReader("watch\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {

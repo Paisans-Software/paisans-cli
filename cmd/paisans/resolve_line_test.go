@@ -32,7 +32,7 @@ func (unpublished) Digest(ref string) (string, error) {
 // a registry on which its channel tag is not published.
 func unresolvedPlan(t *testing.T) error {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		t.Fatal(err)
 	}

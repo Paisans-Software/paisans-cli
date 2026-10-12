@@ -57,7 +57,7 @@ storage:
 `
 
 func TestRemoveSiteKeepsEveryOtherByte(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(removeFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestRemoveSiteKeepsEveryOtherByte(t *testing.T) {
 
 func TestRemoveSiteLastEntryAndFlowEntry(t *testing.T) {
 	for _, site := range []string{"vm", "home-c"} {
-		path := filepath.Join(t.TempDir(), "paisans.yaml")
+		path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 		if err := os.WriteFile(path, []byte(removeFile), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestRemoveSiteLastEntryAndFlowEntry(t *testing.T) {
 // The edit and the in memory end state agree.
 func TestRemoveSiteMatchesWithoutSite(t *testing.T) {
 	cfg := loadFixtureConfig(t)
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	data, err := os.ReadFile(cfg.Path)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestRemoveSiteRefusesWhatItCannotEditInPlace(t *testing.T) {
 		"undeclared":       strings.Replace(removeFile, "  home-b:\n", "  home-x:\n", 1),
 		"flow sites block": "version: 1\nsites: { home-a: {}, home-b: {} }\n",
 	} {
-		path := filepath.Join(t.TempDir(), "paisans.yaml")
+		path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -168,7 +168,7 @@ func TestRemoveSiteLeavesDerivedListsOut(t *testing.T) {
 	if derivedFile == removeFile || strings.Contains(derivedFile, "members:") {
 		t.Fatal("the fixture still writes the lists")
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(derivedFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestRemoveSiteMatchesWithoutSiteWhenDerived(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := regexp.MustCompile(`(?m)^  (sites|members): \[[^\]]*\]\n`).ReplaceAllString(string(data), "")
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

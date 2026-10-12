@@ -366,7 +366,7 @@ func firstOf(s string) string {
 }
 
 // removeRedundantGateConfig is doctor --execute's one change: it takes out of
-// paisans.yaml every config: key that only repeats a value gating makes the
+// paisans-stack.yaml every config: key that only repeats a value gating makes the
 // template write (kinds.RedundantGateConfig), which validate refuses as
 // config-key-already-rendered. A key with any other value contradicts the
 // gate, and changing it would change policy, so it is left for the operator.
@@ -402,7 +402,7 @@ func removeRedundantGateConfig(r ui.Reporter, path string) error {
 	return nil
 }
 
-// restore puts paisans.yaml back as it was before doctor --execute edited it.
+// restore puts paisans-stack.yaml back as it was before doctor --execute edited it.
 func restore(path string, original []byte, cause error) error {
 	if err := os.WriteFile(path, original, 0o644); err != nil {
 		return fmt.Errorf("%w; restoring %s also failed: %v", cause, path, err)

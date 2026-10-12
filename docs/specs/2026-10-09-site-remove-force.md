@@ -14,7 +14,7 @@ cleaned:
 2. **Cleaning leaves images behind.** Stage 3 removes this deployment's
    containers but not the images only they ran.
 3. **The secrets of what was removed stay, unnoticed.** A site or an app taken
-   out of `paisans.yaml` leaves its WireGuard key, passwords and sign-in
+   out of `paisans-stack.yaml` leaves its WireGuard key, passwords and sign-in
    client in `secrets.enc.yaml`, and the only advice is to edit the file with
    sops by hand.
 
@@ -26,7 +26,7 @@ second, and a warning plus `paisans secrets prune` closes the third.
 In:
 
 * `site remove <site> --force`: stage 3 alone, the cleaning of one host, with
-  none of the cluster's refusals and without editing `paisans.yaml`.
+  none of the cluster's refusals and without editing `paisans-stack.yaml`.
 * `--ssh user@host[:port]`, naming the host to clean: required for a site no
   longer declared, optional for one that is (Eg: the host it ran on before its
   address changed).
@@ -54,7 +54,7 @@ Out, each for a stated reason:
   `site remove` of the cleaned site.
 * **Pocket ID.** Reported, not changed. Pruning a sign-in client's secret
   does not delete the client at Pocket ID, and the prune says so.
-* **DNS of a site `paisans.yaml` still declares.** Its records are still
+* **DNS of a site `paisans-stack.yaml` still declares.** Its records are still
   wanted, so a forced removal of it has no DNS stage. The DNS stage below
   covers every other case with a configuration.
 
@@ -102,7 +102,7 @@ The site's ssh user, whose authorized keys are cleaned, is `--ssh`'s user or
 the declared one. The site's roles, which decide whether a gateway's Caddy is
 kept for the host owner's sites (docs/specs/2026-10-10-gateway-caddy-kept.md),
 come from this deployment's registry entry on
-the host, not from `paisans.yaml`, so they are right for an undeclared site
+the host, not from `paisans-stack.yaml`, so they are right for an undeclared site
 and for a host the site has left. With no registry entry, the declared roles
 are used, and an undeclared site has none.
 
@@ -111,9 +111,9 @@ are used, and an undeclared site has none.
 * Stages 1 and 2 do not run, and none of their refusals are checked: not the
   only gateway, not a pinned app, not the end state validating, not etcd's,
   Patroni's or Garage's health. No other site is reached.
-* Stage 3 runs, and for a site `paisans.yaml` does not declare, the DNS stage
+* Stage 3 runs, and for a site `paisans-stack.yaml` does not declare, the DNS stage
   after it, which skips (below).
-* `paisans.yaml` is not edited, and nothing in `secrets.enc.yaml` is.
+* `paisans-stack.yaml` is not edited, and nothing in `secrets.enc.yaml` is.
 
 `--host-gone` has nothing to do with `--force`, which exists to reach a host,
 and is refused with it.
@@ -149,21 +149,21 @@ Added 2026-10-10, approved by the founder in session.
 `site remove` deletes the address records this deployment's `dns init` made
 for the site it removes, in a stage of its own, the DNS stage. It applies
 whenever there is a configuration: a full removal, and `--force` with
-`paisans.yaml`.
+`paisans-stack.yaml`.
 
 ### Where it runs
 
 * **A full removal:** stage 4, after the host is cleaned and stage 3's gate
-  has passed, and before `paisans.yaml` is edited. A failure in any stage
+  has passed, and before `paisans-stack.yaml` is edited. A failure in any stage
   before it leaves DNS untouched. A failure in it is resumed by running the
   same command again, which needs the site still declared: the configuration
   edit, stage 5, is what makes a re-run impossible. The configuration edit is
   stage 5 and the monitor's reseed stage 6.
 * **`--host-gone`:** the stage runs. The records point at a host that is
   gone, which is exactly when they should go.
-* **`--force` on a site `paisans.yaml` still declares:** no DNS stage. The
+* **`--force` on a site `paisans-stack.yaml` still declares:** no DNS stage. The
   site's records are still wanted.
-* **`--force` on a site `paisans.yaml` does not declare:** the stage follows
+* **`--force` on a site `paisans-stack.yaml` does not declare:** the stage follows
   the host stage, and is skipped, saying the records are deleted by hand,
   since the configuration names no public address for the site.
 
@@ -235,7 +235,7 @@ The stage is skipped, saying why in one line, and the removal goes on:
 | Skipped | Line |
 |---|---|
 | `acme.provider` is not set | `skip dns: no DNS provider declared` |
-| `--force` on a site `paisans.yaml` does not declare | `skip dns: <site> is not declared; delete its records by hand` |
+| `--force` on a site `paisans-stack.yaml` does not declare | `skip dns: <site> is not declared; delete its records by hand` |
 | the site declares neither `public_address` nor `public_address6` | `skip dns: <site> has no public address` |
 | the provider's record management is not implemented | `skip dns: <provider> record management is not implemented` |
 | `external.acme_dns_token` is not in the secrets | `skip dns: the DNS provider's token is not in the secrets` |
@@ -264,7 +264,7 @@ Docker's reason.
 
 ## Orphaned secrets
 
-A secret is orphaned when it names something `paisans.yaml` does not declare:
+A secret is orphaned when it names something `paisans-stack.yaml` does not declare:
 
 | Secret | Orphaned when |
 |---|---|
@@ -274,7 +274,7 @@ A secret is orphaned when it names something `paisans.yaml` does not declare:
 | `pocket_id_groups.<name>` | no Pocket ID app's `signup_default_groups` names `<name>` |
 
 `init` and `apply` already read the secrets file. Both warn, never refuse,
-once per orphan: `secrets: sites.monitor-a names a site paisans.yaml does not
+once per orphan: `secrets: sites.monitor-a names a site paisans-stack.yaml does not
 declare; paisans secrets prune removes it`.
 
 `paisans secrets prune` lists every orphan, by key and never by value, and
@@ -294,7 +294,7 @@ A deployment whose data and gateway hosts were destroyed, and whose monitors
 survived on hosts that also run other people's services:
 
 1. The monitors are taken out: their sites and their uptime apps come out of
-   `paisans.yaml`, and `paisans site remove <monitor> --force --ssh
+   `paisans-stack.yaml`, and `paisans site remove <monitor> --force --ssh
    <its host> --execute --delete-data` runs once per monitor, from a terminal.
    Only what is this deployment's goes; the owner's containers, images, Caddy
    and ufw rules stay.
@@ -308,7 +308,7 @@ survived on hosts that also run other people's services:
    record, so each name still wanted that points at a lost address (the
    gateway's) is reported as a conflict; the operator changes it to the new
    address, and `paisans dns` then finds nothing to do. `paisans dns prune`
-   deletes only a record pointing at an address `paisans.yaml` declares, so
+   deletes only a record pointing at an address `paisans-stack.yaml` declares, so
    the records of the monitors' hostnames, whose addresses are no longer
    declared once the monitors are taken out, are deleted by hand too.
 
@@ -317,7 +317,7 @@ survived on hosts that also run other people's services:
 In `internal/siteremove`, against the existing fake world:
 
 * `--force` on a site with an app pinned to it and with an unhealthy etcd: no
-  refusal, no other host reached, `paisans.yaml` unchanged, and the host
+  refusal, no other host reached, `paisans-stack.yaml` unchanged, and the host
   stage identical to the unforced plan's for the same host.
 * An undeclared site cleaned through a destination it was not declared with;
   a host with no registry entry plans nothing.

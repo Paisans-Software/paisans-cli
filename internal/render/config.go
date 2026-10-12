@@ -237,7 +237,7 @@ type ConfigCollision struct {
 	Detail string
 }
 
-// ConfigKey is the key in paisans.yaml: apps.<app>.config.<key>.
+// ConfigKey is the key in paisans-stack.yaml: apps.<app>.config.<key>.
 func (c *ConfigCollision) ConfigKey() string { return "apps." + c.App + ".config." + c.Key }
 
 func (c *ConfigCollision) Error() string {

@@ -143,7 +143,7 @@ func fixtureRuns(t *testing.T) map[string]string {
 	t.Run("init", func(t *testing.T) {
 		path, _ := initWorld(t, nil, fakeSites(), make([]byte, 64))
 		t.Chdir(filepath.Dir(path))
-		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans.yaml", "--sudo=false"}) })
+		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml", "--sudo=false"}) })
 	})
 
 	work := t.TempDir()
@@ -161,9 +161,9 @@ func fixtureRuns(t *testing.T) map[string]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write("paisans.yaml", string(body))
+	write("paisans-stack.yaml", string(body))
 	write("secrets.yaml", string(secretsBody))
-	cfg, secrets := "paisans.yaml", "secrets.yaml"
+	cfg, secrets := "paisans-stack.yaml", "secrets.yaml"
 
 	// With a public address declared, dns init gets as far as the provider
 	// check, which is the last place it can refuse offline.

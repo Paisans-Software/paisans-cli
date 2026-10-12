@@ -1,9 +1,9 @@
-# `paisans create` writes a new deployment's `paisans.yaml` from questions
+# `paisans create` writes a new deployment's `paisans-stack.yaml` from questions
 
 Date: 2026-10-12. Status: approved by the founder in session.
 
-Every command in the toolkit starts from a `paisans.yaml`, and today the only
-way to get one is to copy `examples/paisans.example.yaml` and edit it. That
+Every command in the toolkit starts from a `paisans-stack.yaml`, and today the only
+way to get one is to copy `examples/paisans-stack.example.yaml` and edit it. That
 example declares four sites, eight apps and object storage, and a newcomer has
 to work out which of it they need and which role combinations validate refuses.
 `paisans create` asks the questions instead, writes a commented file that
@@ -23,7 +23,7 @@ Out:
 
 * **Editing an existing file.** `create` writes a file that does not exist and
   refuses one that does. Adding a site, an app or an admin later is an edit to
-  `paisans.yaml`, as it is today.
+  `paisans-stack.yaml`, as it is today.
 * **Secrets.** `create` asks for none and writes none. `init` generates every
   secret the declaration needs and names the ones owed from elsewhere, the DNS
   token and the SMTP password among them, which keeps one command responsible
@@ -39,14 +39,14 @@ Out:
 An organizer building a deployment from nothing. The questions use the words
 of what a community needs (forums, a wiki, a blog, chat, a status page) rather
 than the toolkit's kind names, and every answer has a default where one is
-sensible. Done is a `paisans.yaml` that `paisans validate` accepts with no
+sensible. Done is a `paisans-stack.yaml` that `paisans validate` accepts with no
 refusal, commented so that the person who answered the questions can read what
 each section means, followed by the two commands to run next.
 
 ## The command
 
 ```
-paisans create [--config paisans.yaml]
+paisans create [--config paisans-stack.yaml]
 ```
 
 * Refuses when the file already exists, before asking anything, and again just
@@ -143,7 +143,7 @@ reason, and so is an empty answer to a required question.
    schema on purpose. The password is a secret and is not asked: the wizard
    names `paisans secrets set external.smtp_password` at the end.
 10. **Review.** The rendered file, then validate's findings exactly as `paisans
-    validate` prints them, then "Write paisans.yaml? [Y/n]".
+    validate` prints them, then "Write paisans-stack.yaml? [Y/n]".
 
 ## What the wizard decides
 
@@ -182,7 +182,7 @@ asked a question whose right answer the toolkit already knows.
 
 The file is rendered from a text template, not marshalled, because the
 newcomer reads it: each section carries a comment saying what it means and
-what is permanent, worded as `examples/paisans.example.yaml` words it, so the
+what is permanent, worded as `examples/paisans-stack.example.yaml` words it, so the
 two never explain the same key two ways. Every value the operator typed passes
 through a YAML quoting function, so a name holding `:` or `#` is a string and
 not a syntax error.

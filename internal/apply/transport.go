@@ -65,7 +65,7 @@ type Transport interface {
 // the other four are not used at all, so an operator whose route the section
 // cannot describe still has one.
 type SSHTransport struct {
-	// Site is the site's name in paisans.yaml, when the transport reaches
+	// Site is the site's name in paisans-stack.yaml, when the transport reaches
 	// one. It is never part of the ssh command; it names the site where the
 	// operator is asked something, so a prompt says which site it is for
 	// rather than only an address the operator may not recognise.

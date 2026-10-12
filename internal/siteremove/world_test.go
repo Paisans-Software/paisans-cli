@@ -1335,7 +1335,7 @@ func worldConfig(t *testing.T, edits ...func(string) string) (*config.Config, *c
 	for _, edit := range edits {
 		text = edit(text)
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}

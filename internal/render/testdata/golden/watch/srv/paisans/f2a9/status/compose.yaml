@@ -2,7 +2,7 @@
 #
 # The uptime monitor, pinned to watch. Its monitors are not configured
 # here or in its UI: they are seeded from monitors.json, which `apply` renders
-# from paisans.yaml, at every start.
+# from paisans-stack.yaml, at every start.
 #
 # OWNERSHIP. It starts as root on purpose. data/ is a bind mount Docker
 # creates as root, and monitors.json is a root owned 0600 file because it

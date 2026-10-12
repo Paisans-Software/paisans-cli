@@ -1,4 +1,4 @@
-// Package config loads and structurally checks a paisans.yaml deployment
+// Package config loads and structurally checks a paisans-stack.yaml deployment
 // declaration. It performs no policy checks: those live in internal/validate,
 // so that every problem in a file can be reported at once rather than one per
 // run.
@@ -24,7 +24,7 @@ import (
 // command's --config, the name a configuration store version holds it by, and
 // the name every message gives it. It is defined once so that the name an
 // operator reads is always the name the toolkit looks for.
-const FileName = "paisans.yaml"
+const FileName = "paisans-stack.yaml"
 
 // Role is a capability a site provides. Sites declare roles; apps declare
 // placement. Keeping those separate is what stops every new app from becoming

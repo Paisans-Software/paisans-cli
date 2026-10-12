@@ -94,10 +94,10 @@ func TestTwoDataSitesAndAWitnessShrinkToOneVoter(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Join(cfg.Etcd.Members, ",") != "home-a" || cfg.Sites["vm"].Has(config.RoleWitness) || !cfg.Sites["vm"].Has(config.RoleGateway) {
-		t.Errorf("paisans.yaml after: etcd.members %v, vm's roles %v", cfg.Etcd.Members, cfg.Sites["vm"].Roles)
+		t.Errorf("paisans-stack.yaml after: etcd.members %v, vm's roles %v", cfg.Etcd.Members, cfg.Sites["vm"].Roles)
 	}
 	if result := validate.Check(cfg); result.Refused() {
-		t.Errorf("the edited paisans.yaml is refused: %v", result.Refusals())
+		t.Errorf("the edited paisans-stack.yaml is refused: %v", result.Refusals())
 	}
 	data, _ := os.ReadFile(w.configPath)
 	if !strings.Contains(string(data), "# The monitor's own machine") {
@@ -190,7 +190,7 @@ func TestAWitnessWithNoOtherRole(t *testing.T) {
 			t.Errorf("box's roles %v, etcd.members %v", after.Sites["box"].Roles, after.Etcd.Members)
 		}
 		if result := validate.Check(after); result.Refused() {
-			t.Errorf("the edited paisans.yaml is refused: %v", result.Refusals())
+			t.Errorf("the edited paisans-stack.yaml is refused: %v", result.Refusals())
 		}
 	})
 }
@@ -422,9 +422,9 @@ func TestTheShrinkWithDerivedLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Join(after.Etcd.Members, ",") != "home-a" || !after.Etcd.MembersDerived || !after.Cluster.SitesDerived {
-		t.Errorf("paisans.yaml after: etcd.members %v, derived %t and %t", after.Etcd.Members, after.Etcd.MembersDerived, after.Cluster.SitesDerived)
+		t.Errorf("paisans-stack.yaml after: etcd.members %v, derived %t and %t", after.Etcd.Members, after.Etcd.MembersDerived, after.Cluster.SitesDerived)
 	}
 	if result := validate.Check(after); result.Refused() {
-		t.Errorf("the edited paisans.yaml is refused: %v", result.Refusals())
+		t.Errorf("the edited paisans-stack.yaml is refused: %v", result.Refusals())
 	}
 }
