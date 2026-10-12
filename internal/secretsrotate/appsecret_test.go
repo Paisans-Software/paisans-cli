@@ -208,6 +208,16 @@ func TestAppSelfCosts(t *testing.T) {
 			t.Errorf("%s: SignsOut %v, want %v", key, got, signsOut)
 		}
 	}
+	for _, key := range []string{"mercure_jwt_secret", "valkey_password"} {
+		if d := AppSelfCost(key).Downtime; !strings.Contains(d, "Mbin stack") {
+			t.Errorf("%s: Downtime %q, want a restart of the Mbin stack", key, d)
+		}
+	}
+	for _, key := range []string{"app_secret", "cookie_secret", "session_secret", "mas_signing_key", "mas_matrix_secret", "static_api_key"} {
+		if d := AppSelfCost(key).Downtime; d != "" {
+			t.Errorf("%s: Downtime %q, want none", key, d)
+		}
+	}
 	if c := AppSelf("forum", "app_secret", Cost{Downtime: "x"}).Cost(); c.Downtime != "x" {
 		t.Errorf("AppSelf does not keep the cost it is given: %+v", c)
 	}

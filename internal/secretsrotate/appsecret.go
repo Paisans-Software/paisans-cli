@@ -38,6 +38,9 @@ var selfKinds = map[string]config.Kind{
 	"static_api_key":     config.KindPocketID,
 }
 
+// mbinRestart is the downtime of a rotation that restarts the Mbin stack.
+const mbinRestart = "the Mbin stack, for one restart on each site in turn"
+
 // AppSelfCost is what rotating key costs the members, for each key AppSelf
 // rotates; a key it does not rotate costs nothing here, and AppSelf refuses
 // it at Precheck.
@@ -53,8 +56,9 @@ var selfKinds = map[string]config.Kind{
 //   - oauth2-proxy cookie_secret signs members out. The kind renders no
 //     session store, so oauth2-proxy keeps the whole session in the cookie,
 //     encrypted with the cookie secret (oauth2-proxy documentation,
-//     Configuration, Session Storage, "Cookie Storage"); a cookie sealed with
-//     the old secret no longer opens.
+//     Configuration, Session Storage, "Cookie Storage", taken from that
+//     documentation and not fetched for this); a cookie sealed with the old
+//     secret no longer opens.
 //   - uptime session_secret signs members out. The fork passes it to
 //     express-session as `secret` (src/auth.js, sessionMiddleware, and
 //     src/config.js, sessionSecret, read in the local checkout at
@@ -68,14 +72,17 @@ var selfKinds = map[string]config.Kind{
 //     sessions survive either changing, and it has not been verified against
 //     a running MAS. Marking them only adds a confirmation.
 //   - Mbin mercure_jwt_secret and valkey_password sign nobody out: the hub
-//     and the cache restart with the stack and hold no session (sessions are
-//     in Postgres, above).
+//     and the cache hold no session (sessions are in Postgres, above). Their
+//     cost is a restart of the Mbin stack on each site, as the spec's cost
+//     table gives it.
 //   - Pocket ID static_api_key signs nobody out: its users are the toolkit
 //     and the admin reconciler, not members (secretsgen, appSecretKeys).
 func AppSelfCost(key string) Cost {
 	switch key {
 	case "app_secret", "cookie_secret", "session_secret", "mas_signing_key", "mas_matrix_secret":
 		return Cost{SignsOut: true}
+	case "mercure_jwt_secret", "valkey_password":
+		return Cost{Downtime: mbinRestart}
 	}
 	return Cost{}
 }
@@ -179,8 +186,9 @@ func parseOAuthUnit(next string) (oauthUnit, error) {
 	if err := dec.Decode(&u); err != nil {
 		return oauthUnit{}, fmt.Errorf("the next value is not Mbin's four OAuth2 values")
 	}
+	values := u.values()
 	for _, key := range oauthKeys {
-		v := u.values()[key]
+		v := values[key]
 		if v == "" {
 			return oauthUnit{}, fmt.Errorf("the next value has no %s", key)
 		}
