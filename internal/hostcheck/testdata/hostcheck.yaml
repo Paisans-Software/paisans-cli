@@ -72,23 +72,23 @@ etcd:
 
 apps:
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
       file_backend: database
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: blog.example.org
     placement: cluster
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: status.example.org
     placement: { pinned: watch }
     settings:
       admin_group: admins
   porch-status:
-    kind: uptime
+    blueprint: uptime
     hostname: porch-status.example.org
     placement: { pinned: porch }
     settings:

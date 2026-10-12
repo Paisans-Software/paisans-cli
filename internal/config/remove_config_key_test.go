@@ -7,7 +7,7 @@ import (
 
 const withConfigKeys = `apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     gated: true
     config:
       # Federation on.
@@ -18,7 +18,7 @@ const withConfigKeys = `apps:
     settings:
       admin_group: admins
   blog:
-    kind: writefreely
+    blueprint: writefreely
     # Only one.
     config:
       # Private.

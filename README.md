@@ -320,7 +320,7 @@ rest of a pinned stack. Founder decision.
 ```yaml
 apps:
   blog:
-    kind: writefreely
+    blueprint: writefreely
     placement: { pinned: home-a }
     storage: local
 ```
@@ -455,7 +455,7 @@ The gateway's Caddy configuration becomes inventory-driven: a pinned app's
 hostname points at its location, everything else follows the current primary.
 A template job, not an orchestrator job.
 
-It is assembled rather than written: each `kind` ships its own Caddy snippet in
+It is assembled rather than written: each blueprint ships its own Caddy snippet in
 its template set, and the gateway file holds only what is cross-cutting. See
 *The template set owns everything app-specific, routing and shims included*.
 
@@ -518,7 +518,7 @@ the new member a one-time sign-in link. The design is in
 ```yaml
 apps:
   invite:
-    kind: invite
+    blueprint: invite
     hostname: invite.example.org
     placement: cluster
     settings:
@@ -638,7 +638,7 @@ uptime app is pinned to a site that holds it. Founder decision.
 | `monitor` with no uptime app pinned to it | refused | `monitor-without-uptime` |
 | an uptime app pinned to a site without `monitor` | refused | `uptime-needs-a-monitor-site` |
 | `monitor` without `public_address` | refused | `monitor-without-public-address` |
-| no app of kind `uptime` at all | warned | `no-uptime-monitor` |
+| no app with blueprint `uptime` at all | warned | `no-uptime-monitor` |
 
 A machine of its own is the recommendation: a small VM or box declared
 `roles: [monitor]`, which needs no other role. A deployment with no machine to
@@ -1709,7 +1709,7 @@ move.
 
 ### The image an app runs is declared, not implied
 
-`kind` selects which template set renders. It does not decide which image runs.
+`blueprint` selects which template set renders. It does not decide which image runs.
 Keeping those separate is what lets an operator move to a fork, hold a version
 back, or take an upgrade on their own schedule, without the toolkit shipping a
 release for it:
@@ -1717,28 +1717,28 @@ release for it:
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
     images:
       app: ghcr.io/example-org/mbin:v1.2.3
 ```
 
-Every key is optional and an unset one takes the default its `kind` ships, so an
+Every key is optional and an unset one takes the default its blueprint ships, so an
 adopter who never opens this stanza runs a tested set.
 
 **A map, not a single `image`.** A stack is several containers, and naming only
 the application one would work until the first operator needed a different
-Valkey. The keys are service names in the `kind`'s compose template, which also
+Valkey. The keys are service names in the blueprint's compose template, which also
 means an unknown key is a typo the toolkit can refuse rather than ignore.
 
 **One full reference per key, not `image` plus `tag`.** Switching to a fork
 changes registry, repository and tag together. Split into two fields, a
 half-finished switch parses cleanly and pulls something nobody intended.
 
-**Changing `images` is not changing `kind`.** A fork that renames an environment
+**Changing `images` is not changing `blueprint`.** A fork that renames an environment
 variable, moves a config path or adds a required setting needs a different
-template set, and that is a new `kind`. The `images` map is for a different
+template set, and that is a new blueprint. The `images` map is for a different
 build of the same software, and pointing it at software that merely resembles
 the original produces a stack that renders and then fails at boot.
 
@@ -1863,19 +1863,19 @@ One of each:
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     config:
       KBIN_META_TITLE: A place to talk          # env: a variable in .env
   blog:
-    kind: writefreely
+    blueprint: writefreely
     config:
       app.max_blogs: 3                          # ini: max_blogs in [app]
   chat:
-    kind: synapse
+    blueprint: synapse
     config:
       require_auth_for_profile_requests: true   # yaml: a top level key
   web:
-    kind: element
+    blueprint: element
     config:
       default_theme: dark                       # json: a top level key
 ```
@@ -2581,7 +2581,7 @@ what is stuck and how to recover*). Both name `paisans app remove <app>` for
 each app the leftovers belong to, which is the command that takes them off
 (see *`app remove` takes an app off its hosts*).
 
-#### A `kind` ships a template set, not a single `.env`
+#### A blueprint ships a template set, not a single `.env`
 
 Not every application is configured through environment variables, and the
 stacks named in this document are already split on it. Mbin reads `.env`.
@@ -2594,10 +2594,12 @@ upstream's [config reference](https://writefreely.org/docs/latest/admin/config),
 which documents neither. Synapse reads
 [`homeserver.yaml`](https://element-hq.github.io/synapse/latest/usage/configuration/homeserver_sample_config.html).
 
-So the unit the toolkit ships per `kind` is a **blueprint**: a directory
+So the unit the toolkit ships per application is a **blueprint**: a directory
 holding a `blueprint.yaml`, which records what the toolkit knows about the
 application, and the templates `apply` renders, every one of them
-(`docs/specs/2026-10-12-blueprints-and-catalogs.md`):
+(`docs/specs/2026-10-12-blueprints-and-catalogs.md`). An app names its
+blueprint with `blueprint:`; elsewhere in this document and in the code
+(`internal/kinds`, `config.Kind`) the same thing is called the app's kind.
 
 ```
 internal/blueprints/core/mbin/              internal/blueprints/core/writefreely/
@@ -2731,7 +2733,7 @@ never spent on a container about to be replaced.
 ```yaml
 apps:
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: matrix.example.org
     hostnames:
       wellknown: example.org
@@ -2776,16 +2778,16 @@ own delegation documents there, and that name is equally permanent.
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     gated: true
     auto_login: true
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: blog.example.org
     auto_login: true
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: matrix.example.org
     gated: false
 ```
@@ -2948,7 +2950,7 @@ gate a fact about the app that a reviewer can see, rather than an inference
 from what nobody wrote.
 
 **Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
-toolkit runs it as an app named `gate`, of kind `oauth2-proxy`, at
+toolkit runs it as an app named `gate`, of blueprint `oauth2-proxy`, at
 `gate.<community.domain>`, pinned to the gateway site. It holds no data, being
 a session cookie and nothing durable, so it sits with the edge it serves: it is
 down only when the gateway is, and that takes every app with it anyway. It is
@@ -5784,7 +5786,7 @@ every message sent to it.
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     settings:
       contact_email: admins@example.org
 ```
@@ -5842,7 +5844,7 @@ carries no valid HTTP signature, and it is `true` when absent:
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     settings:
       authorized_fetch: true   # the default
 ```
@@ -6507,7 +6509,7 @@ older than the rest (see *Rule 3: object storage from the first install*).
 ```yaml
 apps:
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -6814,7 +6816,7 @@ An app may replace the kind's path:
 ```yaml
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     settings:
       sso_dashboard_link: /magazines   # tile opens https://talk.example.org/magazines

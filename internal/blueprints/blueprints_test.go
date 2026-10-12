@@ -60,3 +60,23 @@ func TestABlueprintHasOneOrigin(t *testing.T) {
 		seen[b.Name] = b.Origin
 	}
 }
+
+// The copy of the core catalog in the binary is exactly the commit its pin
+// names: a hand edit to the copy, or a sync that did not write the pin,
+// fails here rather than shipping as if it were the catalog's.
+func TestTheCoreCopyMatchesItsPin(t *testing.T) {
+	pin, err := CorePin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pin.Commit) != 40 || pin.URL == "" {
+		t.Fatalf("pin %+v names no commit", pin)
+	}
+	got, err := CoreDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != pin.SHA256 {
+		t.Errorf("the core copy's SHA-256 is %s and its pin says %s. Change a core blueprint in the catalog and run scripts/sync-core-catalog.sh, rather than editing the copy", got, pin.SHA256)
+	}
+}

@@ -51,7 +51,7 @@ func (s OIDCClientSpec) Groups(app config.App) (admin, member string) {
 // it is not a setting.
 func (s OIDCClientSpec) AdminGroupSource(app string) string {
 	if s.AdminGroupSetting == "" {
-		return "apps." + app + ".kind"
+		return "apps." + app + ".blueprint"
 	}
 	return "apps." + app + ".settings." + s.AdminGroupSetting
 }

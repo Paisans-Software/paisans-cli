@@ -66,7 +66,7 @@ etcd:
   heartbeat_ms: 200
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
 `

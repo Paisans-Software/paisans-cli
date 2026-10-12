@@ -441,7 +441,7 @@ const (
 )
 
 type App struct {
-	Kind      Kind      `yaml:"kind"`
+	Kind      Kind      `yaml:"blueprint"`
 	Hostname  string    `yaml:"hostname"`
 	Placement Placement `yaml:"placement"`
 	// Images overrides the container image a service runs, keyed by service
@@ -1047,9 +1047,9 @@ func (c *Config) structural(noSubnet bool) error {
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if app.Kind == "" {
-			add("apps.%s.kind: required. Say which application this is, for example mbin or outline.", name)
+			add("apps.%s.blueprint: required. Say which application this is, for example mbin or outline: the blueprint it runs.", name)
 		} else if !knownKinds[app.Kind] {
-			add("apps.%s.kind: unknown kind %q. This toolkit renders element, mbin, oauth2-proxy, outline, pocket-id, synapse, uptime and writefreely.", name, app.Kind)
+			add("apps.%s.blueprint: unknown blueprint %q. The ones built into this toolkit are element, mbin, oauth2-proxy, outline, pocket-id, synapse, uptime and writefreely.", name, app.Kind)
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
@@ -1073,7 +1073,7 @@ func (c *Config) structural(noSubnet bool) error {
 			problems = append(problems, smtpProblems("apps."+name+".smtp", *app.SMTP)...)
 		}
 		if app.Kind == KindOAuth2Proxy && !app.Derived {
-			add("apps.%s.kind: oauth2-proxy is the gate, which the toolkit runs itself whenever an app sets gated or auto_login. Remove this app, and set gated: true or auto_login: true on the apps it was for.", name)
+			add("apps.%s.blueprint: oauth2-proxy is the gate, which the toolkit runs itself whenever an app sets gated or auto_login. Remove this app, and set gated: true or auto_login: true on the apps it was for.", name)
 		}
 		switch app.Storage {
 		case "", StorageLocal, StorageS3:

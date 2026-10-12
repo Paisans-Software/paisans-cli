@@ -144,12 +144,12 @@ backup:
 
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
 
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -158,7 +158,7 @@ apps:
       allow_own_account_edit: false   # always false; see README.md
 
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
     settings:

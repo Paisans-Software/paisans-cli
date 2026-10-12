@@ -92,7 +92,7 @@ func TestAnAppUnhealthyAfterHAProxyNamesItsCause(t *testing.T) {
 func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	w := newWorld(t, func(text string) string {
 		text = regexp.MustCompile(`(?s)\n  # The monitor's own machine.*?\n\ncluster:`).ReplaceAllString(text, "\n\ncluster:")
-		return regexp.MustCompile(`(?s)\n  status:\n    kind: uptime.*?\n\n# The deployment's mail server`).ReplaceAllString(text, "\n\n# The deployment's mail server")
+		return regexp.MustCompile(`(?s)\n  status:\n    blueprint: uptime.*?\n\n# The deployment's mail server`).ReplaceAllString(text, "\n\n# The deployment's mail server")
 	})
 	t.Cleanup(siteremove.SetFast())
 	t.Cleanup(siteremove.SetInspect(w.inspect))

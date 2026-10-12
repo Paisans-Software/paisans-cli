@@ -1428,12 +1428,22 @@ installed, on a workstation or anywhere else.
 Templating is `text/template` from the standard library. No template engine is
 inherited, per the language decision in `docs/decisions.md`.
 
-### A kind ships a template directory
+### A kind ships a blueprint directory
 
-A blueprint's directory, `internal/blueprints/<core or reserved>/<kind>/`, is a set, and every template in it is rendered; its `blueprint.yaml` is read rather than rendered.
-Two conventions make a set need no code of its own.
+The first party blueprints in `internal/blueprints/core/` are a copy of the
+core catalog, [`Paisans-Software/blueprints`](https://github.com/Paisans-Software/blueprints),
+at the commit `internal/blueprints/core/pin.yaml` names. Change one there, in a
+pull request to that repository, then run
+`scripts/sync-core-catalog.sh <commit>` here, which replaces the copy and
+rewrites the pin; `TestTheCoreCopyMatchesItsPin` fails on a copy edited by
+hand. The reserved blueprints in `internal/blueprints/reserved/` are this
+repository's own and are edited in place.
 
-**A template's path is its destination.** the synapse blueprint's
+A blueprint's directory, `internal/blueprints/<core or reserved>/<kind>/`, is
+a set, and every template in it is rendered; its `blueprint.yaml` is read
+rather than rendered. Two conventions make a set need no code of its own.
+
+**A template's path is its destination.** The synapse blueprint's
 `initdb.d/01-mas-database.sql.tmpl` lands at
 `/srv/paisans/<token>/<stack>/initdb.d/01-mas-database.sql`, so where a file goes is
 read off the tree rather than held in a mapping somewhere else. Adding a file

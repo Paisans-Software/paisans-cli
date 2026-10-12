@@ -43,7 +43,7 @@ etcd:
   members: [home-a]
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
 `
@@ -78,7 +78,7 @@ etcd:
   members: [home-a]
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
 `
@@ -163,7 +163,7 @@ sites:
     address: not-an-address
 apps:
   talk:
-    kind: gopher
+    blueprint: gopher
     hostname: ""
 `
 	_, err := config.Load(write(t, body))
@@ -173,7 +173,7 @@ apps:
 	msg := err.Error()
 	for _, want := range []string{
 		"version:", "community.domain:", "mesh.subnet:", "sites.home-a.roles:", "sites.home-a.address:",
-		"sites.home-a.ssh:", "apps.talk.kind:", "apps.talk.hostname:",
+		"sites.home-a.ssh:", "apps.talk.blueprint:", "apps.talk.hostname:",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the error does not name %s:\n%s", want, msg)
@@ -500,7 +500,7 @@ const smtpBlock = `smtp:
 
 // statusApp is an uptime app pinned to site, appended to validConfig's apps.
 func statusApp(site, extra string) string {
-	return "  status:\n    kind: uptime\n    hostname: status.example.org\n    placement: { pinned: " + site + " }\n" + extra
+	return "  status:\n    blueprint: uptime\n    hostname: status.example.org\n    placement: { pinned: " + site + " }\n" + extra
 }
 
 // An app's smtp block replaces only the fields it names; everything else is
@@ -674,16 +674,16 @@ func TestTheGateIsDerivedWhenAnAppUsesIt(t *testing.T) {
 // an app holding the gate's name, or no gateway to run it on.
 func TestTheGateIsNeverDeclared(t *testing.T) {
 	declared := validConfig + `  gate:
-    kind: oauth2-proxy
+    blueprint: oauth2-proxy
     hostname: gate.example.org
     placement: { pinned: home-a }
 `
-	if _, err := config.Load(write(t, declared)); err == nil || !strings.Contains(err.Error(), "apps.gate.kind: oauth2-proxy is the gate") {
+	if _, err := config.Load(write(t, declared)); err == nil || !strings.Contains(err.Error(), "apps.gate.blueprint: oauth2-proxy is the gate") {
 		t.Errorf("a declared oauth2-proxy app loaded, or was refused without saying why: %v", err)
 	}
 	named := validConfig + `    gated: true
   gate:
-    kind: outline
+    blueprint: outline
     hostname: wiki.example.org
     placement: cluster
 `

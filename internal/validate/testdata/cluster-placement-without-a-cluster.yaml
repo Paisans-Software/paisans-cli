@@ -63,19 +63,19 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_bucket: docs-uploads
   web:
-    kind: element
+    blueprint: element
     hostname: web.example.org
     # A static client keeps nothing in a database, so there is no cluster
     # for it to join.
     placement: cluster
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:

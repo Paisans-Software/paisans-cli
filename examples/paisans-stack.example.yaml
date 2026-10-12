@@ -241,7 +241,7 @@ backup:
 # fails quietly, so it is not configurable here.
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
     # gated is access policy, and access policy belongs in configuration, not
@@ -275,9 +275,10 @@ apps:
       # A gated app refuses false. See README, "Mbin and WriteFreely lock what
       # the toolkit renders".
       authorized_fetch: true
-    # Optional. Keys are service names in the kind's compose template; any key
-    # left out takes the default that kind ships. Declaring the reference is
-    # what makes running a fork, or holding a version back, a config edit.
+    # Optional. Keys are service names in the blueprint's compose template; any
+    # key left out takes the default that blueprint ships. Declaring the
+    # reference is what makes running a fork, or holding a version back, a
+    # config edit.
     # `latest` is refused: it makes two runs of `apply` differ from identical
     # inputs. A digest (@sha256:...) is accepted and is the stronger form.
     # A tag is resolved to the build it names each time `apply` plans, and
@@ -287,7 +288,7 @@ apps:
       app: ghcr.io/example-org/mbin:v1.2.3
 
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
@@ -309,7 +310,7 @@ apps:
       media: attachments.example.org
 
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -338,7 +339,7 @@ apps:
       allow_own_account_edit: false
 
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: chat.example.org
     hostnames:
       # A second name because it serves something different: the apex carries
@@ -353,7 +354,7 @@ apps:
     placement: { pinned: vm }
 
   web:
-    kind: element
+    blueprint: element
     hostname: web.example.org
     # Pinned, for the same reason the gate is: a static web client keeps
     # nothing in Postgres, so there is no cluster for it to join and `cluster`
@@ -371,15 +372,15 @@ apps:
       brand: Example Chat
 
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: blog.example.org
-    # This kind means the writefreely-wisp fork, not upstream WriteFreely: the
+    # This blueprint means the writefreely-wisp fork, not upstream WriteFreely: the
     # fork adds Postgres and S3 support upstream does not have, so the blog
     # could join the cluster like any other app. It is pinned here as an
     # ordinary choice, not a forced one: pinning to a home is as valid as
     # pinning to the gateway, and its availability is that site's.
     placement: { pinned: home-a }
-    # Optional, and only for a kind that stores files. Left out, the blog's
+    # Optional, and only for a blueprint that stores files. Left out, the blog's
     # images go to Garage, because this deployment runs one; `local` keeps
     # them in the blog's own stack directory on home-a instead, which only a
     # pinned app may do, and gives it no bucket and no media hostname. See
@@ -414,7 +415,7 @@ apps:
       app.max_blogs: 3
 
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: health.example.org
     # The uptime monitor. Pinned only, and only to a site holding the monitor
     # role: it keeps SQLite on local disk, and it must not go dark with the
@@ -433,7 +434,7 @@ apps:
   # below and chooses their details before any account exists; with
   # require_approval an admin approves first. See "Invites" in the README.
   invite:
-    kind: invite
+    blueprint: invite
     hostname: invite.example.org
     placement: cluster
     settings:

@@ -64,19 +64,19 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_bucket: docs-uploads
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
       file_backend: database
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: chat.example.org
     hostnames:
       wellknown: example.org
@@ -84,6 +84,6 @@ apps:
     # 8008, which is a different refusal.
     placement: { pinned: vm }
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: example.org
     placement: { pinned: home-a }

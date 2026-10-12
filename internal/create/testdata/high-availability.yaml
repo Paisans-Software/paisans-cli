@@ -106,7 +106,7 @@ storage:
 # addresses, never one host, so the gateway role can move later.
 apps:
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     # Sign in for every other app. Its settings are rendered into its
@@ -118,7 +118,7 @@ apps:
       # Also the sender name on its mail.
       app_name: Example Community
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
     # Behind the gate, which admits members and admins. The toolkit runs the
@@ -127,14 +127,14 @@ apps:
     # every signature.
     gated: true
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     # Behind the gate, which admits members and admins. The toolkit runs the
     # gate itself, at gate.example.org on the gateway.
     gated: true
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: blog.example.org
     placement: cluster
     # Behind the gate, which admits members and admins. The toolkit runs the
@@ -143,11 +143,11 @@ apps:
     # every signature.
     gated: true
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: chat.example.org
     placement: { pinned: gateway }
   web:
-    kind: element
+    blueprint: element
     hostname: web.example.org
     placement: { pinned: home-a }
     # Behind the gate, which admits members and admins. The toolkit runs the
@@ -158,7 +158,7 @@ apps:
       homeserver: chat.example.org
       brand: Example Community
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
     # The uptime monitor, on a machine of its own so it does not go dark with
