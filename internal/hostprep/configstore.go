@@ -23,6 +23,13 @@ func ConfigPeers(d deployment.Deployment) string { return configDir + "/" + d.To
 // ConfigSyncLog is what the last sync reached, written by the sync script.
 func ConfigSyncLog(d deployment.Deployment) string { return configDir + "/" + d.Token() + ".sync.json" }
 
+// ConfigIncoming is where a pushed bundle lands for the length of one push,
+// beside the repository it is taken into. A push that is cut off can leave
+// it behind, so site remove deletes it with the rest of the store.
+func ConfigIncoming(d deployment.Deployment) string {
+	return configDir + "/" + d.Token() + ".incoming.bundle"
+}
+
 // ConfigScriptDir holds the sync script, named for the deployment so that
 // two deployments on one host keep their own.
 func ConfigScriptDir(d deployment.Deployment) string { return "/usr/local/lib/" + d.Prefix() }

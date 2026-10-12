@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
@@ -53,13 +52,6 @@ func checkID(d deployment.Deployment) error {
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// incomingPath is where a pushed bundle lands for the length of one push. It
-// sits beside the repository, in the directory hostprep already owns, so the
-// path is derived from ConfigRepo rather than spelled a second time.
-func incomingPath(d deployment.Deployment) string {
-	return path.Dir(hostprep.ConfigRepo(d)) + "/" + d.Token() + ".incoming.bundle"
-}
-
 // Push puts a bundle's versions into the site's repository. The bundle is
 // verified first and taken in by hostprep.ConfigReceiveShell's paisans_receive,
 // which creates each version the bundle names correctly where it is absent
@@ -69,7 +61,7 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 	if err := checkID(d); err != nil {
 		return err
 	}
-	tmp, repo := incomingPath(d), hostprep.ConfigRepo(d)
+	tmp, repo := hostprep.ConfigIncoming(d), hostprep.ConfigRepo(d)
 	// A site host prepare has not given a store has nowhere to take the
 	// bundle, and is told apart so the refusal can name what makes one.
 	out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then echo ok; else echo %s; fi", quote(repo), noStoreMark))

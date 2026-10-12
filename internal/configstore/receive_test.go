@@ -228,7 +228,7 @@ func TestPushAndPullShellKeepEveryVersionWhereItIs(t *testing.T) {
 		t.Fatalf("hostile push: %v", err)
 	}
 	wantVersions(t, site, x, y)
-	if _, err := os.Stat(s.local(incomingPath(dep))); !os.IsNotExist(err) {
+	if _, err := os.Stat(s.local(hostprep.ConfigIncoming(dep))); !os.IsNotExist(err) {
 		t.Fatalf("the pushed bundle was left behind: %v", err)
 	}
 	if err := Push(s, dep, honest); err != nil {
