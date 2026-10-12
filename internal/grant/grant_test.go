@@ -87,6 +87,42 @@ func TestEmptyBaselineReviewsEveryEntry(t *testing.T) {
 	if r.Changes[0].Line() != fmt.Sprintf("+ key %s (alice, alice@example.org) may log in as ubuntu", g.Keys[0].Fingerprint) {
 		t.Errorf("keys first: %q", r.Changes[0].Line())
 	}
+	if !r.First {
+		t.Error("a review against no record is not marked as the first")
+	}
+}
+
+// A review is the first when the record holds none of the parts it covers:
+// a host prepared since the record existed still has its images reviewed
+// for the first time by its first apply.
+func TestFirstIsNoRecordedPartTheReviewCovers(t *testing.T) {
+	cfg := fixture(t)
+	g, err := grant.For(cfg, rendered(t, cfg), "vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := grant.Update(grant.Record{}, g, grant.PrepareScope, time.Unix(0, 0), "")
+	if grant.Compare("vm", g, prepared, grant.PrepareScope).First {
+		t.Error("host prepare's review of recorded keys is marked first")
+	}
+	if !grant.Compare("vm", g, prepared, grant.ApplyScope()).First {
+		t.Error("the first review of the images is not marked first")
+	}
+}
+
+// Every change of a stack's images is together, whatever it is, so a long
+// first review reads stack by stack.
+func TestImageChangesAreGroupedByStack(t *testing.T) {
+	g := grant.Grant{Images: []grant.Image{{Stack: "b", Service: "x", Reference: "b:2"}, {Stack: "c", Service: "x", Reference: "c:1"}}}
+	rec := grant.Record{Images: &grant.ImagesPart{Entries: []grant.Image{{Stack: "a", Service: "x", Reference: "a:1"}, {Stack: "b", Service: "x", Reference: "b:1"}, {Stack: "b", Service: "y", Reference: "b:1"}}}}
+	var lines []string
+	for _, c := range grant.Compare("home-a", g, rec, grant.ApplyScope()).Changes {
+		lines = append(lines, c.Line())
+	}
+	want := []string{"- image a/x: a:1", "~ image b/x: b:1 → b:2", "- image b/y: b:1", "+ image c/x: c:1"}
+	if !slices.Equal(lines, want) {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
 }
 
 func TestReviewRows(t *testing.T) {
@@ -116,8 +152,8 @@ func TestReviewRows(t *testing.T) {
 	want := []string{
 		"+ key " + bob + " (bob, bob@laptop) may log in as ubuntu",
 		"- key " + carol + " (carol, carol@desk)",
-		"~ image talk/app: ghcr.io/example/mbin:1.14 → ghcr.io/example/mbin:1.15",
 		"- image old/app: ghcr.io/example/old:1",
+		"~ image talk/app: ghcr.io/example/mbin:1.14 → ghcr.io/example/mbin:1.15",
 	}
 	if !slices.Equal(lines, want) {
 		t.Errorf("review:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))

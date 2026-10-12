@@ -2,6 +2,7 @@ package grant
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -44,6 +45,10 @@ func (c Change) Line() string { return string(c.Op) + " " + ui.Visible(c.Text) }
 type Review struct {
 	Site    string
 	Changes []Change
+	// First is a review against a record holding none of the parts it
+	// covers: the host has no record of them yet, every entry is new, and
+	// approving it is the record being made.
+	First bool
 }
 
 // Pending is how many changes need approval.
@@ -79,7 +84,7 @@ func (r Review) Unapproved(approved Review) []Change {
 
 // Compare is site's review: the parts of g that s covers against rec.
 func Compare(site string, g Grant, rec Record, s Scope) Review {
-	r := Review{Site: site}
+	r := Review{Site: site, First: !rec.holds(s)}
 	if s.Keys {
 		r.Changes = append(r.Changes, compareKeys(g, rec.Keys)...)
 	}
@@ -143,7 +148,32 @@ func compareKeys(g Grant, was *KeysPart) []Change {
 	return out
 }
 
+// compareImages lists each stack's changes together, by stack and then
+// service, whatever each change is, so a long review reads stack by stack.
 func compareImages(now, was []Image) []Change {
+	type entry struct {
+		stack, service string
+		change         Change
+	}
+	var all []entry
+	for _, c := range imageChanges(now, was) {
+		stack, service, _ := strings.Cut(strings.TrimPrefix(c.Subject, "image "), "/")
+		all = append(all, entry{stack, service, c})
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].stack != all[j].stack {
+			return all[i].stack < all[j].stack
+		}
+		return all[i].service < all[j].service
+	})
+	out := make([]Change, 0, len(all))
+	for _, e := range all {
+		out = append(out, e.change)
+	}
+	return out
+}
+
+func imageChanges(now, was []Image) []Change {
 	var out []Change
 	find := func(list []Image, stack, service string) (Image, bool) {
 		for _, i := range list {

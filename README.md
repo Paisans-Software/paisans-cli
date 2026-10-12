@@ -3836,7 +3836,9 @@ which allows nothing, rather than no file, which would allow everything; going
 back to no list is deleting the file by hand. Both are the owner's: they claim
 nothing in the registry and touch nothing of a deployment's, and `--execute`
 asks for the site's name at a terminal, since writing the list is granting or
-withdrawing access and is never scripted. The list is written under the same
+withdrawing access and is never scripted. `host disallow` asks as `host allow`
+does, because taking lines off can empty the list, which blocks every key
+`host prepare` would add later. The list is written under the same
 lock as `authorized_keys`, by a temporary file and a rename, and only over the
 list that was read. The file is the owner's, so both keep every line they do
 not change as it was written, comments included, and refuse a list holding a
@@ -3936,7 +3938,12 @@ run review everything again. `site remove` deletes it with the registry entry.
 
 A removal is shown and not approved, because it only takes away. The review
 is one line per site, pending when anything needs approval, with every change
-under it, keys first, at every verbosity, with `--execute` as well as without.
+under it at every verbosity, with `--execute` as well as without: the login and
+the keys first, then the images stack by stack, then the web server, so a long
+list stays readable. A host with no record of the parts a review covers says
+`first review` on its line, and that every entry is new because there is no
+record yet: the first `--execute` on such a host asks once for the whole list,
+which is the record being made, and later runs show only what changes.
 `host prepare` reviews the login and the keys; `apply --site` the images and
 the web server's directory, narrowed to the named stacks by `--only`; `site
 add` the new site's images, since its stage 4 applies that site's whole

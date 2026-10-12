@@ -116,6 +116,14 @@ func TestConvergeDryRunShowsTheReview(t *testing.T) {
 	if !strings.Contains(rec.Lines(), "it asks you to type approve") {
 		t.Errorf("the result does not say what --execute asks:\n%s", rec.Lines())
 	}
+	// home-a has no record, so its review says this is the first, and why
+	// every entry is new; a site with a record says nothing of the kind.
+	if !strings.Contains(rec.Lines(), "pending: home-a first review, ") || !strings.Contains(rec.Lines(), "explain: home-a has no record of what this deployment granted there yet") {
+		t.Errorf("the first review is not said to be one:\n%s", rec.Lines())
+	}
+	if strings.Contains(rec.Lines(), "home-b has no record") {
+		t.Errorf("a site with a record is called a first review:\n%s", rec.Lines())
+	}
 }
 
 // A site whose record cannot be read is a failed line in a dry run, and

@@ -198,6 +198,11 @@ type Scope struct {
 	Stacks []string
 }
 
+// holds reports whether rec holds any part s covers.
+func (rec Record) holds(s Scope) bool {
+	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil) || (s.WebServer && rec.WebServer != nil)
+}
+
 // PrepareScope is host prepare's.
 var PrepareScope = Scope{Keys: true}
 
