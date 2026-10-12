@@ -64,7 +64,7 @@ var shapes = []shape{
 var roleWhat = map[config.Role]string{
 	config.RoleData:    "holds the databases and uploaded files",
 	config.RoleApps:    "runs the apps",
-	config.RoleGateway: "is where visitors arrive: every hostname points at it",
+	config.RoleGateway: "receives all web traffic and passes it to the apps",
 	config.RoleWitness: "breaks ties between the homes' databases",
 }
 
