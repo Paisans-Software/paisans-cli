@@ -22,9 +22,9 @@ code behind each one is laid out.
 
 validate and render touch nothing outside the working directory. init writes
 only local files, and reads every site over ssh to settle the mesh subnet.
-`host prepare`, `apply`, `prune`, `site add`, `site remove`, `storage init`,
-`storage add`, `storage rotate-key`, `app admin create`, `app remove` and `oidc client
-create` reach a machine, and each changes
+`host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
+`storage init`, `storage add`, `storage rotate-key`, `app admin create`, `app
+remove` and `oidc client create` reach a machine, and each changes
 it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
 host `--ssh` names, with no `paisans.yaml`, and changes nothing. `secrets
@@ -33,7 +33,9 @@ secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
-removed site.
+removed site. `site remove --evict` and `mesh rekey` also write the local
+secrets file: the replacement's generated secrets, and a site's next and
+promoted WireGuard key.
 `web-server show` and `web-server check` change nothing: `check` looks at a
 monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
@@ -84,6 +86,8 @@ paisans storage add                       # every Garage stage, from live state
 paisans storage rotate-key --app talk     # replaces one app's S3 key, staged
 paisans app remove docs                   # an app out of paisans.yaml, off every host
 paisans site remove home-b                # a site out of the deployment, staged
+paisans site remove home-b --evict        # a site nobody else can reach, cut out first
+paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
 paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
 paisans dns init                          # shows which records it would create
@@ -854,6 +858,54 @@ key rules, and the gateway hand over: done, not needed, undone on a failed
 gate, stopped by an invalid configuration, and refused into a `/srv/caddy`
 that is somebody else's.
 
+### `--evict`, and why its order differs
+
+`siteremove.Build` with `Options.Evict` builds the eviction from the same
+probes and the same pieces as a removal, in another order: `buildEvict` in
+`internal/siteremove/evict.go`. README.md's *Evicting a site: `--evict`* has
+the design, and `docs/specs/2026-10-11-site-evict.md` the approved
+specification. What the code relies on:
+
+* **Joining sites are read, then left alone.** `JoiningSites` reads each
+  remaining host's registry; one without this deployment's entry is a
+  replacement declared in the same edit, and is taken out of the transports,
+  so no stage can reach it. `live` filters it out of every list a probe or
+  gate walks (etcd members, cluster sites, Garage sites, gateways), and the
+  command neither host checks nor claims it.
+* **The cut is rendered without the joining sites** (`liveEnd`, which also
+  drops apps pinned to them), so it never waits on a host or a DNS record
+  that does not exist yet. Stage 6 uses the render with them, for HAProxy.
+* **`planSiteChanges` and `planForget` are shared** with stage 2 of a plain
+  removal, with a filter for which files a stage moves: the cut takes the
+  mesh file and Caddy's routing, the rest stage everything else.
+* **Patroni's health is not refused once the cut is done.** A failover is
+  under way, so a resumed run reads the members as they move; stage 3's gate
+  is what has to hold.
+* **Which replica leads is read at stage 6, not at Build**, when the evicted
+  site led: its successor is Patroni's choice in stage 3.
+
+The tests in `evict_test.go` run the same world, with a failover that
+promotes the `Sync Standby`, or the first streaming replica, once no
+remaining host's running interface lists the evicted key, and a running mesh
+file per host that only `wg syncconf` changes. They cover the order, the host
+never reached, a leader with and without a `Sync Standby`, objects lost at
+replication 1, a gateway replaced in the same edit, the token check, every
+refusal, a partial cut, and resuming from each stage.
+
+## `mesh rekey`, one site at a time
+
+`internal/meshrekey` rekeys each site in four stages, reading the secrets
+through a `Store` the command implements over `config.LoadDeploymentSecrets`
+and `config.WriteSecrets`. README.md's *Rekeying the mesh: `mesh rekey`* has
+the design. The swap renders the configuration with the site's next key in
+place of its current one and moves only the mesh file, by scoped `apply`, on
+every peer and then the site; render never reads
+`wireguard_next_private_key`, so a whole `apply` mid rekey puts the old key
+back, which the error that stops a run says. Where a rekey stands is read
+from the secrets file and `wg show <interface> public-key`, and nothing else.
+The tests run a mesh in maps in which a handshake is up when both ends run a
+peer entry for the key the other runs.
+
 ## `storage add`, and what lives where
 
 `internal/storageadd` is shaped like `internal/siteadd`: Build reads every
@@ -1492,13 +1544,24 @@ No `backup`. `site add` exists for sites that all declare an endpoint; the
 relay for sites behind NAT is still design. `storage add` joins Garage nodes,
 changes the replication factor, sizes each node and can stop one to prove
 failover, and has run against containers; replacing a Garage node is not
-built, and removing one goes with its site, in `site remove`. `site add`'s first stage is `preflight`, and
+built, and removing one goes with its site, in `site remove`, where an evicted
+site's node is skipped as dead. `site add`'s first stage is `preflight`, and
 `failover test` exists; both are described above. `apply`
 pushes files, brings up the mesh interface, creates clustered apps' roles and databases, and
 takes the narrowest action that makes the rest live. `site add` has never been
 run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
-the same way.
+the same way, nor `site remove --evict` and `mesh rekey`: Patroni's failover
+once its leader is cut off, `garage layout skip-dead-nodes` on a node that
+is down, and a WireGuard key swapped by `wg syncconf` are read from upstream
+source and documentation, and have run only against fakes.
+
+`secrets rotate`, which changes every shared secret where it is checked and
+where it is used together, is not built: its own specification and pull
+request. Until then, after an eviction, the DNS token is replaced with
+`secrets set`, OIDC client secrets with `oidc client create
+--rotate-secret`, and the apps' S3 keys with `storage rotate-key --app`, and
+the Postgres, Garage and heartbeat secrets stay as they are.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered
