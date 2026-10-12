@@ -130,9 +130,11 @@ const rollbackWord = "rollback"
 // asks each site to sync with its peers first and asks for rollback at a
 // terminal; without it no site is changed and a rollback is only reported.
 // remember raises the newest revision seen (configstore.GatherOptions).
-// log reports a rollback without saying --execute asks.
+// log reports a rollback without saying --execute asks. noAnchor, when set,
+// replaces what a missing anchor's refusal says to do.
 type gatherMode struct {
 	execute, remember, log bool
+	noAnchor               string
 }
 
 // gatherAt gathers from sites, reporting each, and explains a missing anchor.
@@ -169,9 +171,13 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 	if err != nil {
 		s.Fail(err)
 		if errors.Is(err, configstore.ErrNoAnchor) {
+			todo := m.noAnchor
+			if todo == "" {
+				todo = "Pin the first version you trust with --root <sha>, or run paisans admin register to sign the version you hold."
+			}
 			return g, &ui.Problem{
 				Hint:    "no version to start trusting from",
-				Explain: err.Error() + ". A history found only on the sites could have been written by anyone with root on them. Pin the first version you trust with --root <sha>, or run paisans admin register to sign the version you hold.",
+				Explain: err.Error() + ". A history found only on the sites could have been written by anyone with root on them. " + todo,
 				Cause:   err,
 			}
 		}
@@ -230,18 +236,8 @@ func confirmPartial(stdin io.Reader, stdout io.Writer, g configstore.Gathered, c
 // for a first version).
 func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	held := agentKeys()
-	recorded, err := l.SigningKey()
-	if err != nil {
-		return "", err
-	}
-	if recorded != "" {
-		k, _, _ := config.ParseKeyLine(recorded)
-		for _, line := range held {
-			if h, _, err := config.ParseKeyLine(line); err == nil && h.Fingerprint == k.Fingerprint {
-				return recorded, nil
-			}
-		}
-		return "", &ui.Problem{Hint: "your ssh-agent does not hold your signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key. Load it with ssh-add and run this again.", k.Fingerprint)}
+	if recorded, err := recordedKey(l, held, ""); err != nil || recorded != "" {
+		return recorded, err
 	}
 	base := local
 	head, err := l.Head()
@@ -262,16 +258,10 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		}
 	}
 	var found []string
-	for _, line := range held {
-		h, _, err := config.ParseKeyLine(line)
-		if err != nil {
-			continue
-		}
-		for _, admin := range base.Admins {
-			for _, al := range admin.KeyLines() {
-				if a, _, err := config.ParseKeyLine(al); err == nil && a.Fingerprint == h.Fingerprint && !slices.Contains(found, line) {
-					found = append(found, line)
-				}
+	for _, lines := range adminsHolding(base, held) {
+		for _, line := range lines {
+			if !slices.Contains(found, line) {
+				found = append(found, line)
 			}
 		}
 	}
@@ -282,6 +272,53 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an admin", Explain: "A version is signed with an admin's key, listed under admins in the version it builds on. Load yours with ssh-add, or have another admin publish the change that adds it."}
 	}
 	return "", &ui.Problem{Hint: "your ssh-agent holds more than one admin key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
+}
+
+// recordedKey is the signing key .paisans/signing-key records, and "" when
+// none is. A recorded key the agent does not hold (held is the agent's key
+// lines) is refused, and otherwise ends what the refusal says to do.
+func recordedKey(l configstore.Local, held []string, otherwise string) (string, error) {
+	recorded, err := l.SigningKey()
+	if err != nil || recorded == "" {
+		return recorded, err
+	}
+	k, _, _ := config.ParseKeyLine(recorded)
+	if agentHolds(held, k.Fingerprint) {
+		return recorded, nil
+	}
+	return "", &ui.Problem{Hint: "your ssh-agent does not hold your signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key. Load it with ssh-add and run this again%s.", k.Fingerprint, otherwise)}
+}
+
+// agentHolds reports whether one of held, the agent's key lines, has the
+// fingerprint fp.
+func agentHolds(held []string, fp string) bool {
+	for _, line := range held {
+		if h, _, err := config.ParseKeyLine(line); err == nil && h.Fingerprint == fp {
+			return true
+		}
+	}
+	return false
+}
+
+// adminsHolding is, for each admin cfg lists, the agent's key lines (held)
+// that are among that admin's keys. An admin none of whose keys is held is
+// left out.
+func adminsHolding(cfg *config.Config, held []string) map[string][]string {
+	out := map[string][]string{}
+	for id, admin := range cfg.Admins {
+		for _, al := range admin.KeyLines() {
+			a, _, err := config.ParseKeyLine(al)
+			if err != nil {
+				continue
+			}
+			for _, line := range held {
+				if h, _, err := config.ParseKeyLine(line); err == nil && h.Fingerprint == a.Fingerprint && !slices.Contains(out[id], line) {
+					out[id] = append(out[id], line)
+				}
+			}
+		}
+	}
+	return out
 }
 
 func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -488,18 +525,8 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 // key name only. With execute the head's files go to .paisans/incoming/ for
 // a merge by hand.
 func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, head, base string, local, theirs configstore.Files, execute bool, stdout io.Writer) error {
-	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/paisans.yaml", "head/paisans.yaml")
-	if err != nil {
+	if err := showDifference(stdout, local, theirs); err != nil {
 		return err
-	}
-	if diff != "" {
-		fmt.Fprint(stdout, diff)
-	}
-	for _, line := range secretsKeyChanges(local.Secrets, theirs.Secrets) {
-		fmt.Fprintln(stdout, line)
-	}
-	if !bytesEqual(local.SOPS, theirs.SOPS) {
-		fmt.Fprintln(stdout, ".sops.yaml differs")
 	}
 	where := "--execute writes the head's files to " + l.Incoming() + " to merge from"
 	if execute {
@@ -516,6 +543,25 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 		Hint:    "the local files have edits the sites' newest version lacks",
 		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with paisans config publish --merge.", from, describe(g, head), where),
 	}
+}
+
+// showDifference prints how the local files differ from the head's:
+// paisans.yaml as a diff, the secrets by key name only, never a value.
+func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
+	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/paisans.yaml", "head/paisans.yaml")
+	if err != nil {
+		return err
+	}
+	if diff != "" {
+		fmt.Fprint(stdout, diff)
+	}
+	for _, line := range secretsKeyChanges(local.Secrets, theirs.Secrets) {
+		fmt.Fprintln(stdout, line)
+	}
+	if !bytesEqual(local.SOPS, theirs.SOPS) {
+		fmt.Fprintln(stdout, ".sops.yaml differs")
+	}
+	return nil
 }
 
 func bytesEqual(a, b []byte) bool { return string(a) == string(b) }

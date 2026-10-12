@@ -83,6 +83,7 @@ Usage:
   paisans config log [--config paisans.yaml] [--root <sha>]
   paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]
                [--config paisans.yaml] [--execute]
+  paisans admin register [--config paisans.yaml] [--key <path.pub>] [--root <sha>] [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
@@ -231,6 +232,15 @@ Commands:
              older than one seen here before. With --execute each site
              first syncs with its peers; without it, and in log, no site
              is changed and only .paisans/ here is written.
+  admin      register: sign an attestation of the sites' newest version
+             with your own key, so trust starts from your signature: the
+             key in your ssh-agent listed under your entry in admins, or
+             the one --key names. Signs only a version equal to your local
+             files, or, with no files and a root pinned, the one the pin
+             leads to, and then writes its files. Records the key in
+             .paisans/signing-key, which config publish signs with from
+             then on. Changes only the sites' configuration stores, and
+             nothing without --execute.
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
@@ -269,11 +279,12 @@ Commands:
 host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, storage init, storage add, storage rotate-key, app admin
 create, app remove, oidc client create, secrets prune, preflight, failover test,
-doctor, init and config are the only commands that reach a host. Each reads it
-to plan, and changes it only with --execute; host allow and host disallow change
-only a host's key allowlist, which is the host owner's, and claim nothing;
-config claims nothing, and its --execute only starts each site's configuration
-sync and, for publish, adds a version to its store; host deployments, preflight,
+doctor, init, config and admin register are the only commands that
+reach a host. Each reads it to plan, and changes it only with --execute; host
+allow and host disallow change only a host's key allowlist, which is the host
+owner's, and claim nothing; config and admin register claim nothing, and their
+--execute only starts each site's configuration sync and, for publish and
+register, adds a version to its store; host deployments, preflight,
 doctor and init have no --execute and never change it; secrets prune only reads
 the gateways' deployment records, and its --execute writes the local secrets
 file alone. With --execute, a command first claims each host it writes to in
@@ -335,6 +346,8 @@ func main() {
 		err = runGateway(os.Args[2:])
 	case "config":
 		err = runConfig(os.Args[2:], os.Stdin, os.Stdout)
+	case "admin":
+		err = runAdmin(os.Args[2:], os.Stdin, os.Stdout)
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":

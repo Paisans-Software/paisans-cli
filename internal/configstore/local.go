@@ -760,11 +760,19 @@ func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publis
 		}
 	}
 
+	pushed, err := pushVersion(cache, g, sites, local.ID, sha, push)
+	return sha, pushed, err
+}
+
+// pushVersion pushes the cache, which holds sha, to every site g reached
+// directly, and returns the sites that took it. Any that did not, or were
+// not reached, make a *PushError.
+func pushVersion(cache Repo, g Gathered, sites map[string]apply.Transport, id, sha string, push PushFunc) ([]string, error) {
 	bundle, err := cache.Bundle()
 	if err != nil {
-		return sha, nil, err
+		return nil, err
 	}
-	d := deployment.Deployment{ID: local.ID}
+	d := deployment.Deployment{ID: id}
 	pe := &PushError{SHA: sha, Failed: map[string]error{}}
 	var pushed []string
 	for _, r := range g.Reached {
@@ -779,9 +787,9 @@ func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publis
 		pushed = append(pushed, r.Site)
 	}
 	if len(pe.Failed) > 0 {
-		return sha, pushed, pe
+		return pushed, pe
 	}
-	return sha, pushed, nil
+	return pushed, nil
 }
 
 // CheckSigner refuses keyLine unless an admin of every parent lists it, or,
@@ -860,4 +868,166 @@ func UnreachedError(g Gathered) error {
 		return errors.New("no site was given")
 	}
 	return errors.Join(errs...)
+}
+
+// DiffersError is local files that are not the sites' newest version. An
+// attestation says the operator holds that version's files, which they have
+// checked; files that differ are not that check.
+type DiffersError struct {
+	Head          string
+	Local, Theirs Files
+}
+
+func (e *DiffersError) Error() string {
+	return fmt.Sprintf("the local files differ from the sites' newest version %s, and only a version equal to the files you hold is attested", e.Head)
+}
+
+// AttestTarget is the version an attestation signs: the single head of g,
+// which must equal the local files byte for byte, since those are the copy
+// the operator already trusts. With no local files at all it is the head the
+// pinned root pin leads to, and write is true: the attestation writes the
+// head's files, as a recovery does. It refuses a fork, no head, files that
+// differ (a *DiffersError) and, with no local files, no pin.
+func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err error) {
+	heads := g.Verdict.Heads
+	switch {
+	case len(heads) == 0:
+		return "", false, errors.New("the sites hold no version to attest; paisans config publish makes the first")
+	case g.Verdict.Fork:
+		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans config publish --merge", strings.Join(heads, " and "))
+	}
+	head = heads[0]
+	if !l.HasFiles() {
+		if pin == "" || !slices.Contains(g.Roots(head), pin) {
+			return "", false, errors.New("there are no local files to compare the sites' newest version with, and no pinned root it descends from; pin the first version you trust with --root <sha>")
+		}
+		return head, true, nil
+	}
+	local, err := l.Files()
+	if err != nil {
+		return "", false, fmt.Errorf("read the local files: %w", err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return "", false, err
+	}
+	theirs, err := cache.Files(head)
+	if err != nil {
+		return "", false, err
+	}
+	if !local.Equal(theirs) {
+		return "", false, &DiffersError{Head: head, Local: local, Theirs: theirs}
+	}
+	return head, false, nil
+}
+
+// Attest gathers from the sites the local paisans.yaml declares, anchored on
+// the pinned root and on signingKey (a public key line the ssh-agent holds),
+// and signs an attestation of the head: a version whose tree is exactly the
+// head's and whose only parent is the head, one revision on. It pushes it to
+// every site that answered and records the key, the attestation as the head,
+// and the root when none is pinned, so the attestation is the operator's
+// anchor from then on. It changes nothing on a site but its store. A
+// workstation without the local files gathers itself and calls AttestFrom.
+func Attest(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (string, error) {
+	return attest(l, sites, signingKey, "key::"+signingKey, now, Pull, Push)
+}
+
+func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string, now time.Time, pull PullFunc, push PushFunc) (string, error) {
+	f, err := l.Files()
+	if err != nil {
+		return "", fmt.Errorf("read the local files: %w", err)
+	}
+	local, err := config.LoadBytes(f.Paisans)
+	if err != nil {
+		return "", err
+	}
+	key, opts, err := config.ParseKeyLine(keyLine)
+	if err != nil || len(opts) > 0 {
+		return "", fmt.Errorf("the signing key is not a bare public key line: %q", keyLine)
+	}
+	root, err := l.Root()
+	if err != nil {
+		return "", err
+	}
+	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signer: key.Fingerprint}, GatherOptions{Sync: true, Remember: true}, pull)
+	if err != nil {
+		return "", err
+	}
+	sha, _, err := attestFrom(l, g, sites, root, keyLine, signWith, now, push)
+	return sha, err
+}
+
+// AttestFrom is Attest on a gather the caller has already made, and judged,
+// from the anchor of the pinned root pin and the key. signWith is what git's
+// user.signingKey is given, "key::" and the key line for the agent. A head
+// the key signed already is pushed again rather than attested twice, so
+// running it again resumes a push some sites missed.
+func AttestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyLine, signWith string, now time.Time) (string, []string, error) {
+	return attestFrom(l, g, sites, pin, keyLine, signWith, now, Push)
+}
+
+func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyLine, signWith string, now time.Time, push PushFunc) (string, []string, error) {
+	key, opts, err := config.ParseKeyLine(keyLine)
+	if err != nil || len(opts) > 0 {
+		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", keyLine)
+	}
+	if len(g.Direct()) == 0 {
+		return "", nil, fmt.Errorf("no site answered, so nothing was attested: %w", UnreachedError(g))
+	}
+	head, write, err := AttestTarget(l, g, pin)
+	if err != nil {
+		return "", nil, err
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return "", nil, err
+	}
+	theirs, err := cache.Files(head)
+	if err != nil {
+		return "", nil, err
+	}
+	cfg, err := config.LoadBytes(theirs.Paisans)
+	if err != nil {
+		return "", nil, fmt.Errorf("version %s: %w", head, err)
+	}
+	if err := CheckSigner(l, []string{head}, cfg, keyLine); err != nil {
+		return "", nil, err
+	}
+	sha := head
+	if g.Versions[head].SignerFP != key.Fingerprint {
+		rev := g.Versions[head].Revision + 1
+		if sha, err = cache.Commit(theirs, []string{head}, rev, signWith, now); err != nil {
+			return "", nil, fmt.Errorf("sign the attestation: %w", err)
+		}
+		if err := l.raiseSeen(rev, sha); err != nil {
+			return "", nil, err
+		}
+	}
+	if write {
+		if err := l.WriteFiles(theirs); err != nil {
+			return "", nil, err
+		}
+	}
+	if err := l.SetSigningKey(key.Line); err != nil {
+		return "", nil, err
+	}
+	if err := l.SetHead(sha); err != nil {
+		return "", nil, err
+	}
+	if recorded, err := l.Root(); err != nil {
+		return "", nil, err
+	} else if recorded == "" {
+		root := pin
+		if roots := g.Roots(head); root == "" && len(roots) == 1 {
+			root = roots[0]
+		}
+		if root != "" {
+			if err := l.SetRoot(root); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	pushed, err := pushVersion(cache, g, sites, cfg.ID, sha, push)
+	return sha, pushed, err
 }

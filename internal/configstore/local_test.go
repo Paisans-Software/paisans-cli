@@ -638,3 +638,146 @@ func TestSeenIsRaisedOnlyWhenRememberingAndLoweredOnlyByAcceptance(t *testing.T)
 		t.Fatalf("accepted rollback left %d %s", rev, sha)
 	}
 }
+
+func (o operator) attest(t *testing.T, l Local, sites map[string]apply.Transport) (string, error) {
+	t.Helper()
+	return attest(l, sites, o.pub, o.key, testNow, fakePull, fakePush)
+}
+
+// twoVersions is alice's v1 and v2 on every site, admins alice and bob, and
+// bob's workstation holding v2's files with nothing recorded.
+func twoVersions(t *testing.T) (alice, bob operator, sites map[string]*storeSite, v1, v2 string, lb Local) {
+	t.Helper()
+	needTools(t, "git", "ssh-keygen")
+	alice, bob = newOperator(t), newOperator(t)
+	admins := map[string]string{"alice": alice.pub, "bob": bob.pub}
+	sites = storeSites(t, "home-a", "home-b")
+	all := reach(sites, "home-a", "home-b")
+	la := workstation(t, edit(testFiles(), "1", admins))
+	v1, _, err := alice.publish(t, la, all, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	la.WriteFiles(edit(testFiles(), "2", admins))
+	if v2, _, err = alice.publish(t, la, all, false); err != nil {
+		t.Fatal(err)
+	}
+	lb = workstation(t, edit(testFiles(), "2", admins))
+	return alice, bob, sites, v1, v2, lb
+}
+
+// An attestation is the head's tree on the head, one revision on, signed by
+// the operator; it is pushed to every site, recorded as the head and the
+// key's anchor, and a later judgement from the key alone starts from it.
+func TestAttestSignsTheHeadAndBecomesTheAnchor(t *testing.T) {
+	_, bob, sites, v1, v2, lb := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	if _, err := bob.attest(t, lb, all); !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("no pin and nothing signed by bob: %v", err)
+	}
+	if k, _ := lb.SigningKey(); k != "" {
+		t.Fatalf("a refused attestation recorded key %q", k)
+	}
+	if err := lb.SetRoot(v1); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := bob.attest(t, lb, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sites {
+		if !held(t, s, sha) {
+			t.Errorf("%s lacks the attestation", s.name)
+		}
+	}
+	cache, _ := lb.Cache()
+	f, err := cache.Files(sha)
+	hf, _ := cache.Files(v2)
+	if err != nil || !f.Equal(hf) {
+		t.Fatalf("the attestation's tree is not the head's: %v", err)
+	}
+	key, _ := lb.SigningKey()
+	head, _ := lb.Head()
+	root, _ := lb.Root()
+	rev, seen, _ := lb.Seen()
+	if key != bob.pub || head != sha || root != v1 || rev != 3 || seen != sha {
+		t.Fatalf("key %q head %q root %q seen %d %q", key, head, root, rev, seen)
+	}
+	// A workstation that forgot the pin trusts from bob's key alone.
+	os.Remove(filepath.Join(lb.Dir, ".paisans", "config-root"))
+	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := g.Versions[sha]
+	if g.Verdict.AnchorAt != sha || !slices.Equal(g.Verdict.Heads, []string{sha}) || !slices.Equal(v.Parents, []string{v2}) || v.Revision != 3 {
+		t.Fatalf("verdict %+v, version %+v", g.Verdict, v)
+	}
+	// Registering again signs nothing new: the head is already bob's.
+	again, err := bob.attest(t, lb, all)
+	if err != nil || again != sha {
+		t.Fatalf("again: %s %v", again, err)
+	}
+}
+
+// Local files that differ from the head are refused with both sides, and
+// nothing is recorded or pushed.
+func TestAttestRefusesFilesThatDifferFromTheHead(t *testing.T) {
+	alice, bob, sites, v1, v2, lb := twoVersions(t)
+	lb.SetRoot(v1)
+	mine := edit(testFiles(), "mine", map[string]string{"alice": alice.pub, "bob": bob.pub})
+	lb.WriteFiles(mine)
+	_, err := bob.attest(t, lb, reach(sites, "home-a", "home-b"))
+	var de *DiffersError
+	if !errors.As(err, &de) || de.Head != v2 || !de.Local.Equal(mine) || de.Theirs.Equal(mine) {
+		t.Fatalf("got %v", err)
+	}
+	if k, _ := lb.SigningKey(); k != "" {
+		t.Fatalf("key recorded %q", k)
+	}
+	if h, _ := lb.Head(); h != "" {
+		t.Fatalf("head recorded %q", h)
+	}
+	shas, _ := sites["home-a"].repo.versionRefs()
+	if len(shas) != 2 {
+		t.Fatalf("home-a holds %d versions", len(shas))
+	}
+}
+
+// With no local files and a pinned root, the head the pin leads to is
+// attested and its files are written; with no pin it is refused.
+func TestAttestWritesTheHeadsFilesOnlyFromAPin(t *testing.T) {
+	_, bob, sites, v1, v2, _ := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	l := Local{Dir: t.TempDir()}
+	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := attestFrom(l, g, all, "", bob.pub, bob.key, testNow, fakePush); err == nil || !strings.Contains(err.Error(), "--root") {
+		t.Fatalf("no files and no pin: %v", err)
+	}
+	if l.HasFiles() {
+		t.Fatal("a refused attestation wrote the files")
+	}
+	head, write, err := AttestTarget(l, g, v1)
+	if err != nil || head != v2 || !write {
+		t.Fatalf("target %s %v %v", head, write, err)
+	}
+	sha, _, err := attestFrom(l, g, all, v1, bob.pub, bob.key, testNow, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := l.Cache()
+	want, _ := cache.Files(v2)
+	got, err := l.Files()
+	if err != nil || !got.Equal(want) {
+		t.Fatalf("files %v", err)
+	}
+	if h, _ := l.Head(); h != sha {
+		t.Fatalf("head %s", h)
+	}
+	if r, _ := l.Root(); r != v1 {
+		t.Fatalf("root %s", r)
+	}
+}
