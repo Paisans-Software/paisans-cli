@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- Only an explicit `backup.enabled: false` turns backups off. A missing `backup` section is a refusal; a section without `enabled` is enabled.
+- A deployment may run without backups. A missing `backup` section and `enabled: false` both mean off, and both warn `backups-off` on every run; nothing else about backups is checked while they are off. A section without `enabled` is enabled.
+- Adding a `backup` section later is an ordinary `apply` (spec, "Turning backups on later"): this phase adds nothing that a deployment without backups has to carry.
 - `schedule` is one of `daily`, `weekly`, `monthly`, `yearly`; `at` is `HH:MM`, UTC.
 - `prune` defaults to `true` per destination.
 - The first destination is the primary. Order is meaningful; destinations are a list, not a map.
@@ -24,8 +25,8 @@
 ## Review Focus
 
 1. **A `keep` tier the schedule can never fill** at the boundaries: `schedule: monthly` with `keep.weekly`, `schedule: yearly` with anything but `yearly`, and `schedule: daily` with every tier (allowed). Pinned in Task 2.
-2. **`backup: {}` or `backup:` with no value.** Expected: enabled, then refused for having no destinations, not refused as missing. Pinned in Task 2.
-3. **A pinned app with `images.postgres` while backups are disabled.** Expected: no refusal; the disabled warning already says nothing is backed up. Pinned in Task 3.
+2. **`backup: {}` or `backup:` with no value.** Expected: enabled, then refused for having no destinations, not warned as off. Pinned in Task 2.
+3. **A pinned app with `images.postgres` while backups are off, by `enabled: false` or by no section.** Expected: no refusal; `backups-off` already says nothing is backed up. Pinned in Task 3.
 4. **A destination renamed** in `paisans.yaml`. Expected: its new name is owed credentials, and the old name's credentials are reported as orphans by `secrets prune`, never silently kept as live. Pinned in Task 4.
 5. **A destination name that cannot be a secrets key segment** (Eg: `B2 main`). Expected: refused with the allowed shape, since it would otherwise be a credential nobody can set. Pinned in Task 2.
 
@@ -43,9 +44,9 @@
 | `internal/validate/testdata/backup-*.yaml` (new) | one fixture per rule |
 | `internal/secretsgen/secretsgen.go`, `orphans.go` | generate, owe, orphan |
 | `cmd/paisans/secrets.go` | `backup` is a known section |
-| every declaration fixture and example | a `backup:` section |
+| `internal/validate/testdata/valid.yaml`, `internal/render/testdata/deployment.yaml`, both examples | a `backup:` section |
 | `README.md` | the section and its rules |
-| `docs/specs/2026-10-11-backups.md` | missing credentials are owed, not a validate refusal |
+| `docs/specs/2026-10-11-backups.md` | the rules this phase adds that the spec does not list |
 
 ---
 
@@ -54,7 +55,7 @@
 **Files:**
 - Create: `internal/config/backup.go`, `internal/config/backup_test.go`
 - Modify: `internal/config/config.go:84-112` (`Config`), `:433-450` (`App`)
-- Modify: every declaration fixture, both examples
+- Modify: `internal/validate/testdata/valid.yaml`, `internal/render/testdata/deployment.yaml`, both examples
 
 **Interfaces:**
 - Produces:
@@ -269,8 +270,8 @@ type Keep struct {
 	Yearly  int `yaml:"yearly"`
 }
 
-// On reports whether backups run. A nil section is off here; validate refuses
-// it before anything asks.
+// On reports whether backups run. A nil section is off, as is an explicit
+// `enabled: false`; validate warns about either on every run.
 func (b *Backup) On() bool { return b != nil && (b.Enabled == nil || *b.Enabled) }
 
 // Prunes reports whether retention deletes from this destination.
@@ -300,8 +301,8 @@ func (a App) BacksUp() bool { return a.Backup == nil || *a.Backup }
 In `Config`, after `SMTP`, before `Apps`:
 
 ```go
-	// Backup is nil when the declaration has no backup section, which
-	// validate refuses: backups are on by default.
+	// Backup is nil when the declaration has no backup section, which means
+	// no backups, and validate warns about it on every run.
 	Backup *Backup `yaml:"backup"`
 ```
 
@@ -318,9 +319,9 @@ In `App`, after `Images`:
 Run: `go test ./internal/config/ -v -run 'Backup|BacksUp'`
 Expected: PASS.
 
-- [ ] **Step 5: Give every declaration a backup section**
+- [ ] **Step 5: Give two fixtures and the examples a backup section**
 
-Validate will refuse a declaration without one from Task 2, so every fixture gains it now. The block, appended at the end of each declaration file:
+A declaration without one is valid and warns `backups-off`, so only the declarations later tasks read a section from gain it: `internal/validate/testdata/valid.yaml`, which Tasks 2 to 4 edit in code, and `internal/render/testdata/deployment.yaml`, which Task 5's secrets tests load. Every other fixture stays as it is, and is a standing test that a deployment without backups still validates and renders. The block, appended at the end of each of those two files:
 
 ```yaml
 
@@ -340,49 +341,14 @@ backup:
       keep: { weekly: 4, monthly: 12 }
 ```
 
-Script, written to the scratchpad and run from the worktree root:
-
-```sh
-cat > "$SCRATCH/add-backup.py" <<'EOF'
-import pathlib, re, subprocess, sys
-block = pathlib.Path(sys.argv[1]).read_text()
-files = subprocess.run(["git", "grep", "-l", "-E", "^sites:", "--", "*.yaml"], capture_output=True, text=True).stdout.split()
-for name in files:
-    p = pathlib.Path(name)
-    s = p.read_text()
-    if re.search(r"(?m)^backup:", s):
-        continue
-    p.write_text(s.rstrip("\n") + "\n" + block)
-    print(name)
-EOF
-cat > "$SCRATCH/backup-block.yaml" <<'EOF2'
-
-backup:
-  schedule: daily
-  at: "03:00"
-  destinations:
-    - name: offsite
-      endpoint: https://s3.example.net
-      region: us-east-1
-      bucket: fixture-backups
-      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
-    - name: home
-      endpoint: https://s3.home.example.org
-      region: garage
-      bucket: fixture-backups
-      keep: { weekly: 4, monthly: 12 }
-EOF2
-python3 -I "$SCRATCH/add-backup.py" "$SCRATCH/backup-block.yaml"
-```
-
-Skip, by deleting the appended block again, any fixture whose test reads the file's bytes back unchanged (Eg: `internal/config` tests that rewrite a file in place and compare). Leave `internal/validate/testdata/backup-*.yaml` to Task 2.
+Append it with an editor. With two destinations, pruning on and `valid.yaml`'s uptime app, the block trips none of Task 4's warnings, so `TestValidFixtureIsQuiet` stays quiet.
 
 In `examples/paisans.example.yaml` and `examples/home-sites.yaml`, write the block before `apps:` instead, with a comment per key, in the voice of the surrounding comments: what `schedule` and `keep` each mean, that the first destination is the primary, that credentials go in with `paisans secrets set backup.destinations.<name>.access_key_id` and `.secret_access_key`, that `prune: false` keeps everything forever.
 
 - [ ] **Step 6: Run the whole suite**
 
 Run: `go test ./... 2>&1 | tail -30`
-Expected: PASS. Golden renders do not change; nothing renders the section yet.
+Expected: PASS. Golden renders do not change; nothing renders the section yet. Fixtures without a section load with `Backup == nil`.
 
 - [ ] **Step 7: Commit**
 
@@ -394,18 +360,15 @@ Expected: PASS. Golden renders do not change; nothing renders the section yet.
 
 **Files:**
 - Create: `internal/validate/backup.go`, `internal/validate/backup_test.go`
-- Create: `internal/validate/testdata/backup-section-missing.yaml` (valid.yaml without its `backup:` block)
 - Modify: `internal/validate/validate.go:121-185` (`Check`)
 
 **Interfaces:**
 - Consumes: Task 1's types.
-- Produces: `func (c *checker) backup()`, and these rule identifiers, all `Refuse`: `backup-section-missing`, `backup-without-destinations`, `backup-schedule-unknown`, `backup-at-not-a-time`, `backup-destination-incomplete`, `backup-destination-name`, `backup-destination-duplicate`, `backup-endpoint-not-a-url`, `backup-keep-empty`, `backup-keep-negative`, `backup-keep-never-filled`, `backup-number-negative`.
+- Produces: `func (c *checker) backup()`, and these rule identifiers, all `Refuse`: `backup-without-destinations`, `backup-schedule-unknown`, `backup-at-not-a-time`, `backup-destination-incomplete`, `backup-destination-name`, `backup-destination-duplicate`, `backup-endpoint-not-a-url`, `backup-keep-empty`, `backup-keep-negative`, `backup-keep-never-filled`, `backup-number-negative`.
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `TestRulesFire`'s table: `{"backup-section-missing", "backup-section-missing", validate.Refuse},`.
-
-`internal/validate/backup_test.go` builds the rest from `valid` in code, so no other fixture is needed:
+`internal/validate/backup_test.go` builds every case from `valid` in code, so no new fixture is needed:
 
 ```go
 package validate_test
@@ -514,9 +477,16 @@ func TestADisabledSectionIsNotCheckedFurther(t *testing.T) {
 func TestAnEmptySectionIsEnabledAndRefusedForNoDestinations(t *testing.T) {
 	cfg := load(t, "valid")
 	cfg.Backup = &config.Backup{}
-	r := validate.Check(cfg)
-	if !refused(r, "backup-without-destinations") || refused(r, "backup-section-missing") {
+	if r := validate.Check(cfg); !refused(r, "backup-without-destinations") {
 		t.Fatalf("findings: %v", r.Findings)
+	}
+}
+
+func TestNoSectionIsNotRefused(t *testing.T) {
+	cfg := load(t, "valid")
+	cfg.Backup = nil
+	if r := validate.Check(cfg); r.Refused() {
+		t.Fatalf("a deployment without backups was refused: %v", r.Refusals())
 	}
 }
 ```
@@ -553,12 +523,6 @@ var clock = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 // docs/specs/2026-10-11-backups.md, "Validation").
 func (c *checker) backup() {
 	b := c.cfg.Backup
-	if b == nil {
-		c.refuse("backup-section-missing", "backup",
-			"no backup section",
-			"is missing. Backups are on by default, so a declaration either configures them, with a schedule and at least one destination, or turns them off with `backup: { enabled: false }`.")
-		return
-	}
 	if !b.On() {
 		return
 	}
@@ -685,15 +649,13 @@ func schedulePeriod(s config.Schedule) string {
 
 Call `c.backup()` in `Check`, after `c.storage()`.
 
-Create `internal/validate/testdata/backup-section-missing.yaml`: a copy of `valid.yaml` with its `backup:` block removed and the header comment saying what it breaks, as the other fixtures do.
-
 - [ ] **Step 4: Run**
 
 Run: `go test ./internal/validate/ -v 2>&1 | tail -40`
 Expected: PASS, including `TestValidFixtureIsQuiet`, `TestRefusalMessagesAreActionable` and `TestEveryCallPassesAHint`, which every new rule must satisfy. Read what those two require before adjusting a message.
 
 Run: `go test ./... 2>&1 | tail -30`
-Expected: PASS. A failure naming `backup-section-missing` is a declaration Task 1's script missed: add the block.
+Expected: PASS. Every fixture without a section still validates: it is off, and nothing else is checked.
 
 - [ ] **Step 5: Commit**
 
@@ -730,6 +692,7 @@ func TestPinnedPostgresWithoutWALG(t *testing.T) {
 		{"a lookalike repository", kinds.WALGImage + "-fork:17", false, false, true},
 		{"the app opted out", "postgres:17-trixie", true, false, false},
 		{"backups off", "postgres:17-trixie", false, true, false},
+		{"no backup section", "postgres:17-trixie", false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := withPinnedForum(t)
@@ -741,6 +704,9 @@ func TestPinnedPostgresWithoutWALG(t *testing.T) {
 			cfg.Apps["forum"] = app
 			if tc.backupOff {
 				cfg.Backup.Enabled = &no
+			}
+			if tc.name == "no backup section" {
+				cfg.Backup = nil
 			}
 			if got := refused(validate.Check(cfg), "pinned-postgres-without-walg"); got != tc.refuse {
 				t.Fatalf("refused = %v, want %v", got, tc.refuse)
@@ -862,7 +828,7 @@ Expected: PASS. A fixture or example with a pinned `images.postgres` override no
 - Modify: `internal/validate/backup.go`, `internal/validate/backup_test.go`
 
 **Interfaces:**
-- Produces: `Warn` rules `backup-disabled`, `backup-prune-off`, `backup-single-destination`, `backup-without-a-monitor`.
+- Produces: `Warn` rules `backups-off`, `backup-prune-off`, `backup-single-destination`, `backup-without-a-monitor`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -882,7 +848,8 @@ func TestBackupWarnings(t *testing.T) {
 		name, rule string
 		edit       func(cfg *config.Config)
 	}{
-		{"disabled", "backup-disabled", func(cfg *config.Config) { cfg.Backup.Enabled = &no }},
+		{"disabled", "backups-off", func(cfg *config.Config) { cfg.Backup.Enabled = &no }},
+		{"no section", "backups-off", func(cfg *config.Config) { cfg.Backup = nil }},
 		{"prune off", "backup-prune-off", func(cfg *config.Config) { cfg.Backup.Destinations[0].Prune = &no }},
 		{"one destination", "backup-single-destination", func(cfg *config.Config) { cfg.Backup.Destinations = cfg.Backup.Destinations[:1] }},
 		{"no uptime app", "backup-without-a-monitor", func(cfg *config.Config) {
@@ -909,7 +876,7 @@ func TestDisabledBackupsWarnOnlyThatTheyAreDisabled(t *testing.T) {
 	cfg.Backup.Enabled = &no
 	cfg.Backup.Destinations = cfg.Backup.Destinations[:1]
 	for _, f := range validate.Check(cfg).Findings {
-		if strings.HasPrefix(f.Rule, "backup-") && f.Rule != "backup-disabled" {
+		if strings.HasPrefix(f.Rule, "backup") && f.Rule != "backups-off" {
 			t.Errorf("a disabled section also warned %s", f.Rule)
 		}
 	}
@@ -928,8 +895,14 @@ Expected: FAIL: rules do not fire.
 In `backup()`, replace `if !b.On() { return }` with:
 
 ```go
+	if b == nil {
+		c.warn("backups-off", "backup",
+			"backups are off",
+			"is missing. Nothing in this deployment is backed up: not its databases, its files, its buckets or its configuration. Add a backup section, with a schedule and at least one destination, to turn them on; the next apply does the rest.")
+		return
+	}
 	if !b.On() {
-		c.warn("backup-disabled", "backup.enabled",
+		c.warn("backups-off", "backup.enabled",
 			"backups are off",
 			"is false. Nothing in this deployment is backed up: not its databases, its files, its buckets or its configuration.")
 		return
@@ -978,11 +951,13 @@ func (c *checker) backupMonitor() {
 - [ ] **Step 4: Run**
 
 Run: `go test ./internal/validate/ -v 2>&1 | tail -20` then `go test ./... 2>&1 | tail -20`
-Expected: PASS. Fixtures without an uptime app now warn `backup-without-a-monitor`; a test asserting such a fixture has no findings is fixed by adding `backup-without-a-monitor` to what it tolerates only if the test is about something else, and never by removing the rule.
+Expected: PASS. Fixtures without a backup section now warn `backups-off`, and fixtures with one but without an uptime app warn `backup-without-a-monitor`; for either, a test asserting a fixture has no findings is fixed by adding the warning to what it tolerates only if the test is about something else, and never by removing the rule.
 
 - [ ] **Step 5: Commit**
 
 `feat: validate warns when backups are off, unpruned, single or unmonitored`
+
+The body says that a deployment without a backup section is valid, and why: backups can be added later with an ordinary apply.
 
 ---
 
@@ -1202,11 +1177,11 @@ Expected: PASS. `init` tests that compare the exact list of generated or owed se
 
 - [ ] **Step 1: README**
 
-Find where README lists validate rules (`grep -n "garage-single-copy\|REFUSE\|refuses" README.md | head`), and add every rule from Tasks 2 to 4 there in the same form, with the reason each exists. Under "Backup and restore", say what exists after this phase: the section, its validation, the generated and owed secrets, and that nothing runs backups yet.
+Find where README lists validate rules (`grep -n "garage-single-copy\|REFUSE\|refuses" README.md | head`), and add every rule from Tasks 2 to 4 there in the same form, with the reason each exists. Under "Backup and restore", say what exists after this phase: the section, its validation, the generated and owed secrets, that a deployment may run without backups and is warned on every run, and that nothing runs backups yet.
 
 - [ ] **Step 2: Spec**
 
-In *Validation*, move "a destination whose credentials are missing from the secrets" out of the refused list: `validate` reads only `paisans.yaml`, so missing credentials are owed by `init` and listed as still to do, and the phase that renders them (the runner, phase 3) refuses to apply without them, as `requireACMEToken` does for the DNS token. Add the rules this phase added that the spec did not list: `backup-schedule-unknown`, `backup-destination-name`, `backup-endpoint-not-a-url`, `backup-keep-negative`, `backup-number-negative`.
+*Validation* already says missing credentials are owed and that no section warns. Name the warning `backups-off` there if it is not, and add the rules this phase added that the spec did not list: `backup-schedule-unknown`, `backup-destination-name`, `backup-endpoint-not-a-url`, `backup-keep-negative`, `backup-number-negative`.
 
 - [ ] **Step 3: Check the rules**
 
