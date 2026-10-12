@@ -6565,11 +6565,31 @@ the `mesh rekey` that finishes it: an `apply` then would hand the old key back
 to every peer and cut the site's tunnels, and a refusal costs nothing but the
 rekey's resume.
 
+**A relay's swap pauses Patroni.** A site with no dial endpoint routes
+everything it has no peer for through the first site that has one (*The
+mesh*), so two undialled sites reach each other only through that relay.
+Swapping the relay's key cuts them apart for the moment it takes, and with
+them etcd's quorum when they are most of its voters: the leader could not renew
+its key, would demote itself, and another member could be promoted, for a
+partition that heals in seconds. So around a relay's swap the cluster is put in
+maintenance mode with `patronictl pause --wait`, which returns once every
+member has seen it (Patroni v4.1.0, `patroni/ctl.py`); paused, Patroni keeps
+the roles it has and still reports them. The pause is read back from
+`patronictl show-config`, since patronictl reports a failed request without
+failing. etcd re-forms on its own once the tunnels are back, and the health
+gate waits for it, bounded; only then does `patronictl resume --wait` run.
+A run that stops in between leaves Patroni paused, on purpose, since resuming
+it before etcd has its voters back is the failover the pause exists to
+prevent, and the run that resumes the swap resumes Patroni after it. The plan
+says which sites relay through the site and that the cluster pauses for its
+swap. A deployment of one dialled VM and homes with no endpoint can therefore
+rekey every site, its relay included, which the eviction's runbook depends on.
+
 **Refused before anything changes:** an unhealthy etcd or Patroni, since every
-site's swap takes its tunnels down for a moment; a site that does not answer
-over ssh, since every site is a peer of some site rekeyed; and rekeying the
-only site with a dial endpoint while others have none, since every undialled
-site reaches the mesh only through it and would go down with it.
+site's swap takes its tunnels down for a moment; a Patroni paused by anything
+but this rekey's own relay swap, since that is someone else's maintenance; and
+a site that does not answer over ssh, since every site is a peer of some site
+rekeyed.
 
 ### Preflight
 

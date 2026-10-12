@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -74,6 +76,10 @@ type Site struct {
 	Name string
 	// From is the stage the rekey starts at.
 	From Stage
+	// Relays are the sites whose traffic to each other goes through this
+	// one. Its swap cuts them off from each other for a moment, so Patroni
+	// is paused around it.
+	Relays []string
 }
 
 // Plan is a whole run: the sites in order.
@@ -205,19 +211,27 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 	}
 	sites = ordered
 	p.cfg = cfg.WithoutJoining(p.Joining...)
-	if err := refuseLostRelay(p.cfg, sites); err != nil {
+	running, _, err := meshkey.AsRunning(secrets, p.dep(), p.transports)
+	if err != nil {
+		return nil, fmt.Errorf("mesh rekey: %w", err)
+	}
+	current, err := render.Build(p.cfg, running)
+	if err != nil {
 		return nil, err
 	}
 	// A run that starts with a new site's rekey needs a healthy cluster
 	// first. One that finishes a stopped swap checks health after it, since
 	// the partial swap may be what is unhealthy.
 	if len(pending) == 0 && len(sites) > 0 {
-		if err := p.health(); err != nil {
+		if err := p.ready(); err != nil {
 			return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`paisans doctor` says how) and run again. Nothing was changed", err)
 		}
 	}
 	for _, name := range sites {
 		s := Site{Name: name, From: NewKey}
+		if len(p.cfg.Cluster.Sites) > 0 {
+			s.Relays = relayed(current, p.cfg, name)
+		}
 		if next := secrets.Sites[name].WireGuardNextPrivateKey; next != "" {
 			s.From = Swap
 			runs, err := p.runningKey(name)
@@ -237,28 +251,45 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 	return p, nil
 }
 
-// refuseLostRelay refuses a run that rekeys the one site every undialled site
-// relays through. Such a site peers only with dialled sites, and when there
-// is one, its swap takes every undialled site off the mesh with it: more than
-// one site down at once, which can cost etcd its quorum.
-func refuseLostRelay(cfg *config.Config, sites []string) error {
-	var dialled, undialled []string
+// relayed is the sites whose traffic to some other site goes through site:
+// each one's mesh file routes the whole mesh subnet through site (render,
+// renderWireGuard: a site with no dial endpoint relays through the first
+// that has one) and lists no peer of its own for some other site. While
+// site's key is swapped those sites cannot reach each other, so more than one
+// site is cut off at once.
+func relayed(rendered *render.Plan, cfg *config.Config, site string) []string {
+	conf := cfg.Deployment().WireGuardConf()
+	var out []string
 	for _, name := range cfg.SiteNames() {
-		if cfg.Sites[name].DialEndpoint() != "" {
-			dialled = append(dialled, name)
-		} else {
-			undialled = append(undialled, name)
+		if name == site {
+			continue
+		}
+		peers := map[string]string{}
+		for _, block := range strings.Split(renderedFile(rendered, name, conf), "[Peer]")[1:] {
+			var peer, allowed string
+			for _, line := range strings.Split(block, "\n") {
+				line = strings.TrimSpace(line)
+				if v, ok := strings.CutPrefix(line, "# "); ok && peer == "" {
+					peer = v
+				}
+				if v, ok := strings.CutPrefix(line, "AllowedIPs = "); ok {
+					allowed = v
+				}
+			}
+			peers[peer] = allowed
+		}
+		route, ok := peers[site]
+		if !ok || strings.HasSuffix(route, "/32") {
+			continue
+		}
+		for _, other := range cfg.SiteNames() {
+			if _, direct := peers[other]; other != name && other != site && !direct {
+				out = append(out, name)
+				break
+			}
 		}
 	}
-	if len(dialled) != 1 || len(undialled) == 0 {
-		return nil
-	}
-	for _, name := range sites {
-		if name == dialled[0] {
-			return fmt.Errorf("mesh rekey: %s is the only site with a dial endpoint, so %s reach the mesh only through it, and its rekey would take them down with it. Give another site an endpoint (or a public_address) and apply it first. Nothing was changed", name, strings.Join(undialled, ", "))
-		}
-	}
-	return nil
+	return out
 }
 
 // runningKey is the public key site's interface runs.
@@ -284,16 +315,40 @@ func (p *Plan) Show(r ui.Reporter) {
 	}
 }
 
-type stageText struct{ title, work, gate string }
+type stageText struct {
+	from              Stage
+	title, work, gate string
+}
 
 func (p *Plan) stages(s Site) []stageText {
 	all := []stageText{
-		{"new key for " + s.Name, "the cluster checked healthy, then a new private key, generated here, written to the secrets file as sites." + s.Name + ".wireguard_next_private_key beside the current one", "the file decrypts and holds it"},
-		{"swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
-		{"check the cluster", "nothing changes", "etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming"},
-		{"promote " + s.Name + "'s key", "the next key becomes sites." + s.Name + ".wireguard_private_key in the secrets file, and the old one is deleted", "the file decrypts and holds only the new key"},
+		{NewKey, "new key for " + s.Name, "the cluster checked healthy, then a new private key, generated here, written to the secrets file as sites." + s.Name + ".wireguard_next_private_key beside the current one", "the file decrypts and holds it"},
 	}
-	return all[s.From-1:]
+	if len(s.Relays) > 0 {
+		all = append(all, stageText{Swap, "pause Patroni", fmt.Sprintf("`patronictl pause --wait`: %s reach each other only through %s, so its swap cuts them apart for a moment, which can cost etcd its quorum; paused, Patroni fails nothing over for a partition that heals in seconds", joinAnd(s.Relays), s.Name), "Patroni reports itself paused"})
+	}
+	all = append(all,
+		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
+		stageText{Health, "check the cluster", "nothing changes", fmt.Sprintf("etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming; within %s", healthWait)},
+	)
+	if len(s.Relays) > 0 {
+		all = append(all, stageText{Health, "resume Patroni", "`patronictl resume --wait`, once the cluster is healthy again", "Patroni no longer reports itself paused"})
+	}
+	all = append(all, stageText{Health, "promote " + s.Name + "'s key", "the next key becomes sites." + s.Name + ".wireguard_private_key in the secrets file, and the old one is deleted", "the file decrypts and holds only the new key"})
+	var out []stageText
+	for _, st := range all {
+		if st.from >= s.From {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
+func joinAnd(list []string) string {
+	if len(list) < 2 {
+		return strings.Join(list, "")
+	}
+	return strings.Join(list[:len(list)-1], ", ") + " and " + list[len(list)-1]
 }
 
 // Execute rekeys each site in turn, every stage ending at its gate. A stage
@@ -348,7 +403,7 @@ func (p *Plan) rekey(s Site) error {
 		// Only before a site's rekey starts: once it has, its own swap is
 		// finished first, whatever the cluster's health.
 		step := r.Step("check the cluster before " + s.Name + "'s rekey")
-		if err := p.health(); err != nil {
+		if err := p.ready(); err != nil {
 			step.Fail(err)
 			return fmt.Errorf("%v. A rekey takes the site's tunnels down for a moment, which a cluster already short of a member may not survive; nothing of %s's rekey has started. Fix it (`paisans doctor` says how)", err, s.Name)
 		}
@@ -377,15 +432,33 @@ func (p *Plan) rekey(s Site) error {
 	if err != nil {
 		return fmt.Errorf("secrets sites.%s.wireguard_next_private_key: %w", s.Name, err)
 	}
+	// A relay whose host already runs its next key has had its swap: a run
+	// that stopped after it pauses nothing, and resumes a pause it left.
+	if len(s.Relays) > 0 && s.From < Health {
+		if err := p.pause(s); err != nil {
+			return err
+		}
+	}
 	if err := p.swap(s.Name, secrets, newPublic); err != nil {
+		if len(s.Relays) > 0 {
+			err = fmt.Errorf("%w. Patroni stays paused, so a partition cannot fail it over, and the run that resumes this swap resumes Patroni after it", err)
+		}
 		return err
 	}
 	step := r.Step("check the cluster")
 	if err := poll(healthWait, healthPoll, p.health); err != nil {
 		step.Fail(err)
+		if len(s.Relays) > 0 {
+			return fmt.Errorf("gate: %w. Patroni stays paused, since resuming it before etcd has every voter back could fail it over; the next run resumes it once the cluster is healthy", err)
+		}
 		return fmt.Errorf("gate: %w", err)
 	}
 	step.Done("healthy")
+	if len(s.Relays) > 0 {
+		if err := p.resume(); err != nil {
+			return err
+		}
+	}
 
 	step = r.Step("promote " + s.Name + "'s key")
 	secrets, err = p.store.Load()
@@ -628,6 +701,107 @@ func (p *Plan) health() error {
 			return fmt.Errorf("Patroni: %s", strings.Join(problems, "; "))
 		}
 	}
+	return nil
+}
+
+// ready is health, and Patroni not paused. A rekey pauses Patroni only
+// around a relay's swap and resumes it after; one paused otherwise is someone
+// else's maintenance, and a new site's rekey does not start under it.
+func (p *Plan) ready() error {
+	if err := p.health(); err != nil {
+		return err
+	}
+	paused, err := p.paused()
+	if err != nil {
+		return err
+	}
+	if paused {
+		return fmt.Errorf("Patroni is paused (maintenance mode), and this run did not pause it. Resume it with `patronictl resume` once whatever paused it is done")
+	}
+	return nil
+}
+
+// patronictl runs patronictl inside the first data site's Patroni container.
+func (p *Plan) patronictl(args string) (string, error) {
+	at := p.cfg.Cluster.Sites[0]
+	out, err := p.transports[at].Run(p.dep().ComposeCmd("infra") + " exec -T patroni patronictl -c /home/postgres/postgres.yml " + args)
+	if err != nil {
+		return out, fmt.Errorf("%s: patronictl %s: %w: %s", at, args, err, strings.TrimSpace(out))
+	}
+	return out, nil
+}
+
+// paused is whether Patroni is in maintenance mode. `patronictl pause` sets
+// pause: true in the cluster's dynamic configuration, which `patronictl
+// show-config` prints, and `resume` clears it (Patroni v4.1.0, patroni/ctl.py,
+// toggle_pause).
+func (p *Plan) paused() (bool, error) {
+	if len(p.cfg.Cluster.Sites) == 0 {
+		return false, nil
+	}
+	out, err := p.patronictl("show-config")
+	if err != nil {
+		return false, err
+	}
+	var live map[string]any
+	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+		return false, fmt.Errorf("%s: patronictl show-config is not YAML: %w", p.cfg.Cluster.Sites[0], err)
+	}
+	return fmt.Sprint(live["pause"]) == "true", nil
+}
+
+// pause puts Patroni in maintenance mode before a relay's swap. The swap cuts
+// the sites that relay through it off from each other for a moment, which can
+// cost etcd its quorum; a leader that cannot renew its key would then demote
+// itself and another member could be promoted, for a partition that heals in
+// seconds. Paused, Patroni leaves the roles as they are. `--wait` returns
+// once every member has seen it (Patroni v4.1.0, patroni/ctl.py,
+// wait_until_pause_is_applied), and the pause is read back, since patronictl
+// reports a failed request without failing. A cluster already paused, by a
+// run of this relay's rekey that stopped, is left paused.
+func (p *Plan) pause(s Site) error {
+	step := p.reporter().Step("pause Patroni for " + s.Name + "'s swap")
+	paused, err := p.paused()
+	if err != nil {
+		step.Fail(err)
+		return err
+	}
+	if !paused {
+		if _, err := p.patronictl("pause --wait"); err != nil {
+			step.Fail(err)
+			return err
+		}
+		if paused, err = p.paused(); err != nil || !paused {
+			err = errors.Join(err, fmt.Errorf("Patroni does not report itself paused after `patronictl pause`"))
+			step.Fail(err)
+			return err
+		}
+	}
+	step.Done(strings.Join(s.Relays, ", ") + " relay through " + s.Name)
+	return nil
+}
+
+// resume takes Patroni out of maintenance mode once the swap is done, every
+// peer has a handshake under the new key and the cluster is healthy again.
+func (p *Plan) resume() error {
+	step := p.reporter().Step("resume Patroni")
+	paused, err := p.paused()
+	if err == nil && !paused {
+		step.Done("not paused")
+		return nil
+	}
+	if err == nil {
+		if _, err = p.patronictl("resume --wait"); err == nil {
+			if paused, err = p.paused(); err == nil && paused {
+				err = fmt.Errorf("Patroni still reports itself paused after `patronictl resume`")
+			}
+		}
+	}
+	if err != nil {
+		step.Fail(err)
+		return fmt.Errorf("%w. Patroni is paused and does not fail over until it is resumed: run mesh rekey again, or `patronictl resume`", err)
+	}
+	step.Done("resumed")
 	return nil
 }
 

@@ -46,6 +46,10 @@ type mesh struct {
 	sick bool
 	// patroni overrides a data site's role and state in `patronictl list`.
 	patroni map[string][2]string
+	// paused is Patroni's maintenance mode.
+	paused bool
+	// promotedAt is where in log each site's key was promoted.
+	promotedAt map[string]int
 	log  []string
 }
 
@@ -68,6 +72,13 @@ func (m *mesh) Load() (*config.Secrets, error) {
 
 func (m *mesh) Save(s *config.Secrets) error {
 	m.saves++
+	if m.secrets != nil {
+		for name, site := range s.Sites {
+			if old := m.secrets.Sites[name]; old.WireGuardNextPrivateKey != "" && site.WireGuardNextPrivateKey == "" {
+				m.promotedAt[name] = len(m.log)
+			}
+		}
+	}
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -190,6 +201,23 @@ func (h *host) Run(command string) (string, error) {
 		}
 		data, _ := json.Marshal(out)
 		return string(data), nil
+	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "show-config"):
+		if m.paused {
+			return "loop_wait: 10\npause: true\n", nil
+		}
+		return "loop_wait: 10\n", nil
+	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "pause --wait"):
+		if m.paused {
+			return "Error: Cluster is already paused", errors.New("exit status 1")
+		}
+		m.paused = true
+		return "Success: cluster management is paused\n", nil
+	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "resume --wait"):
+		if !m.paused {
+			return "Error: Cluster is not paused", errors.New("exit status 1")
+		}
+		m.paused = false
+		return "Success: cluster management is resumed\n", nil
 	case strings.Contains(command, "patronictl") && strings.Contains(command, "list -f json"):
 		var out []map[string]any
 		for i, name := range m.cfg.Cluster.Sites {
@@ -210,8 +238,18 @@ func (h *host) Run(command string) (string, error) {
 	return "", nil
 }
 
-// tunnel is whether a and b each list the key the other runs.
+// tunnel is whether a and b each list the key the other runs, or, for two
+// sites that do not peer directly, whether both have a tunnel to a site with
+// a dial endpoint, their relay.
 func (m *mesh) tunnel(a, b string) bool {
+	if !m.cfg.Sites[a].PeersDirectly(m.cfg.Sites[b]) {
+		for _, r := range m.cfg.SiteNames() {
+			if r != a && r != b && m.cfg.Sites[r].DialEndpoint() != "" && m.tunnel(a, r) && m.tunnel(b, r) {
+				return true
+			}
+		}
+		return false
+	}
 	ha, hb := m.hosts[a], m.hosts[b]
 	return contains(ha.peers(), hb.runsKey()) && contains(hb.peers(), ha.runsKey())
 }
@@ -223,17 +261,20 @@ func sum(s string) string {
 
 // newMesh is every fixture site applied from the configuration as it stands,
 // each interface running its file.
-func newMesh(t *testing.T) *mesh {
+func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 	t.Helper()
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, edit := range edits {
+		edit(cfg)
+	}
 	secrets, err := config.LoadSecrets(filepath.Join("..", "render", "testdata", "secrets.fixture.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &mesh{t: t, cfg: cfg, hosts: map[string]*host{}, secrets: secrets}
+	m := &mesh{t: t, cfg: cfg, hosts: map[string]*host{}, secrets: secrets, promotedAt: map[string]int{}}
 	rendered, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
@@ -456,20 +497,96 @@ func TestARekeyRefuses(t *testing.T) {
 	}
 }
 
-// The one dialled site is every undialled site's path; rekeying it takes
-// them down with it.
-func TestARekeyRefusesTheOnlyRelay(t *testing.T) {
+// undialled takes home-b's endpoint away, so home-a and home-b reach each
+// other only through vm, the first dialled site: vm relays.
+func undialled(cfg *config.Config) {
+	s := cfg.Sites["home-b"]
+	s.Endpoint, s.PublicAddress = "", ""
+	cfg.Sites["home-b"] = s
+}
+
+// A relay's rekey pauses Patroni before its swap and resumes it once every
+// handshake is back and the cluster is healthy, so the moment home-a and
+// home-b cannot reach each other cannot fail Patroni over. A site nothing
+// relays through pauses nothing.
+func TestARelaysRekeyPausesPatroni(t *testing.T) {
+	m := newMesh(t, undialled)
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	relays := map[string]string{}
+	for _, s := range p.Sites {
+		relays[s.Name] = strings.Join(s.Relays, ",")
+	}
+	if relays["vm"] != "home-a,home-b" || relays["home-a"] != "" || relays["watch"] != "" {
+		t.Fatalf("relays: %v", relays)
+	}
+	rec := &ui.Recorder{}
+	p.Show(rec)
+	if !strings.Contains(rec.Lines(), "pause Patroni") {
+		t.Errorf("the plan does not say Patroni pauses:\n%s", rec.Lines())
+	}
+	if err := run(t, p); err != nil {
+		t.Fatal(err)
+	}
+	pause, resume, vmSync, vmPromoted := -1, -1, -1, -1
+	for i, line := range m.log {
+		switch {
+		case strings.Contains(line, "patronictl") && strings.HasSuffix(line, "pause --wait"):
+			if pause >= 0 {
+				t.Error("Patroni was paused twice")
+			}
+			pause = i
+		case strings.Contains(line, "patronictl") && strings.HasSuffix(line, "resume --wait"):
+			resume = i
+		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "wg syncconf"):
+			vmSync = i
+		}
+	}
+	vmPromoted = m.promotedAt["vm"]
+	if pause < 0 || vmSync < pause || resume < vmSync || vmPromoted < resume {
+		t.Errorf("pause %d, vm's sync %d, resume %d, promotion %d", pause, vmSync, resume, vmPromoted)
+	}
+	if m.paused {
+		t.Error("Patroni was left paused")
+	}
+}
+
+// A relay's swap that stops leaves Patroni paused, and the run that resumes
+// it finishes the swap, then resumes Patroni.
+func TestAStoppedRelaySwapResumesPatroni(t *testing.T) {
+	m := newMesh(t, undialled)
+	p, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.failOnce, m.failHost = "wg syncconf", "vm"
+	if err := run(t, p); err == nil || !strings.Contains(err.Error(), "Patroni stays paused") {
+		t.Fatalf("err = %v", err)
+	}
+	if !m.paused {
+		t.Fatal("Patroni was resumed with the swap part way")
+	}
+	again, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t, again); err != nil {
+		t.Fatal(err)
+	}
+	if m.paused || len(m.secrets.RekeyPending()) != 0 {
+		t.Errorf("paused %v, pending %v", m.paused, m.secrets.RekeyPending())
+	}
+}
+
+// A Patroni paused by something else stops a new site's rekey before it
+// starts.
+func TestARekeyRefusesAPausedPatroni(t *testing.T) {
 	m := newMesh(t)
-	for _, name := range []string{"home-b", "watch"} {
-		s := m.cfg.Sites[name]
-		s.Endpoint, s.PublicAddress = "", ""
-		m.cfg.Sites[name] = s
-	}
-	if err := refuseLostRelay(m.cfg, []string{"vm"}); err == nil || !strings.Contains(err.Error(), "only site with a dial endpoint") {
+	m.paused = true
+	if _, err := m.build("home-a"); err == nil || !strings.Contains(err.Error(), "this run did not pause it") {
 		t.Errorf("err = %v", err)
-	}
-	if err := refuseLostRelay(m.cfg, []string{"home-a"}); err != nil {
-		t.Errorf("home-a relays nothing: %v", err)
 	}
 }
 

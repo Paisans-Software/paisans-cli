@@ -906,8 +906,13 @@ its own rekey keeps its new key), and moves only the mesh file, by scoped
 secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
 they would put the old key back. Where a rekey stands is read
 from the secrets file and `wg show <interface> public-key`, and nothing else.
-The tests run a mesh in maps in which a handshake is up when both ends run a
-peer entry for the key the other runs.
+A site other sites relay through is found in the rendered mesh files, as the
+peer each of them routes the whole subnet through while it lacks a peer of its
+own for some other site, and Patroni is paused around its swap. The tests run
+a mesh in maps in which a handshake is up when both ends run a peer entry for
+the key the other runs, two undialled sites reach each other through their
+relay, etcd is healthy while every voter's tunnels are up, and Patroni's pause
+is a flag that `show-config` reports.
 
 ## `storage add`, and what lives where
 
@@ -1556,8 +1561,11 @@ run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
 the same way, nor `site remove --evict` and `mesh rekey`: Patroni's failover
 once its leader is cut off, `garage layout skip-dead-nodes` on a node that
-is down, and a WireGuard key swapped by `wg syncconf` are read from upstream
-source and documentation, and have run only against fakes.
+is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
+--wait` and `resume --wait` around a relay's swap, with the pause read back as
+`pause: true` in `patronictl show-config`, are read from upstream source
+(Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only
+against fakes.
 
 `secrets rotate`, which changes every shared secret where it is checked and
 where it is used together, is not built: its own specification and pull

@@ -203,9 +203,24 @@ health refusal applies only before a site's rekey starts. An `--all` run
 records the sites it has left in the secrets file, so a stopped one resumes
 without rekeying a site it already promoted.
 
-Refused, before anything changes: an unhealthy etcd or Patroni, a site
-that does not answer over ssh, and a site whose only path to the mesh is a relay
-that is itself being rekeyed in the same run.
+A relay's swap pauses Patroni. Every site with no dial endpoint routes what it
+has no peer for through the first site that has one, so swapping that relay's
+key cuts the undialled sites apart for a moment, which can cost etcd its quorum
+and, through it, let Patroni fail over for a partition that heals in seconds.
+Around such a site's swap the cluster is put in maintenance mode with
+`patronictl pause --wait`, read back from `patronictl show-config`; the swap
+runs; etcd re-forms by itself once the tunnels return, and the health gate
+waits for it with a bounded timeout; then `patronictl resume --wait`. The plan
+names the sites that relay through the site and says the cluster pauses for
+its swap. A run that stops in between leaves Patroni paused, since resuming it
+before etcd has its voters back is the failover the pause prevents; the run
+that resumes the swap resumes Patroni after it. A deployment of one dialled VM
+and homes with no endpoint can so rekey every site, which the eviction's
+runbook needs.
+
+Refused, before anything changes: an unhealthy etcd or Patroni, a Patroni
+paused by anything but this rekey's own relay swap, and a site that does not
+answer over ssh.
 
 ## Runbooks
 

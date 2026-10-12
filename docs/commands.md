@@ -449,8 +449,9 @@ paisans mesh rekey --all --execute     # every site, one at a time
   secrets file is read and written on this machine only.
 * **`--execute`:** rekeys each site in four gated stages, and stops at the
   first gate that fails. Refuses before anything changes when etcd or Patroni
-  is unhealthy, a site does not answer over ssh, or the run includes the only
-  site with a dial endpoint while others have none.
+  is unhealthy, Patroni is paused by something else, or a site does not answer
+  over ssh. Around the swap of a site other sites relay through, Patroni is
+  paused and then resumed once the cluster is healthy again.
 
 See *Rekeying the mesh: `mesh rekey`* in `README.md`.
 
