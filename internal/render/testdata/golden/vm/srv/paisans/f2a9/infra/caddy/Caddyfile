@@ -269,8 +269,20 @@ talk.example.org {
 
 	# Open paths: the sign-in itself, federation discovery and what those
 	# pages load. They hold no private content.
-	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /healthz
+	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /api/client /api/info /api/instance /healthz
 	handle @open {
+		import /etc/caddy/snippets/talk.caddy
+	}
+
+	# Token paths, with a bearer token. The app refuses one it did not
+	# issue. Any other Authorization, and one anywhere else, goes to the gate
+	# like anything else: an app can serve a request it does not read the
+	# header of as an anonymous one.
+	@token {
+		path /api/*
+		header Authorization "Bearer *"
+	}
+	handle @token {
 		import /etc/caddy/snippets/talk.caddy
 	}
 

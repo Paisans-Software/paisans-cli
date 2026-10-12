@@ -1817,3 +1817,44 @@ groups before it.
 new tests (`TestAdminRequestJoinsTheMemberGroups`,
 `TestPocketIDPutsADeclaredAdminInTheMemberGroups`) fail with the change
 reverted and pass with it. Not run against a live Pocket ID.
+
+## 2026-10-12: A gated Mbin lets a native app through on its token
+
+Founder decision.
+
+### What was decided
+
+Mbin's gate record gains `/api/*` as a token path, so a request there with
+`Authorization: Bearer` reaches Mbin with no gate session, and opens
+`/api/client`, `/api/info` and `/api/instance` (exact paths) with no token.
+The visibility gate spec's *Which kinds have token paths* has the reasoning
+and the citations.
+
+### Why
+
+The gate record kept `/api/*` behind the gate because a public Mbin answers
+its API reads to anyone. A gated Mbin has since become a private instance
+(the 2026-10-11 record above), which refuses any request without a signed in
+user, so a token path no longer opens anything. Keeping the API behind the
+gate cost Mbin's mobile apps, which sign in through a WebView and then call
+`/api/*` with no gate cookie. The three open routes are what such an app calls
+before it holds a token.
+
+### What was weighed
+
+* **Gating `/api/client` and accepting broken mobile apps.** Registration
+  alone grants nothing: a public client still needs a member's sign-in at
+  `/authorize`, and a `client_credentials` client's bot user is created
+  unverified, which the API firewall refuses. Anonymous registration can
+  still add unverified bot users, rate limited to two per six hours, which
+  was judged acceptable.
+* **`KBIN_ADMIN_ONLY_OAUTH_CLIENTS`.** It closes anonymous registration, and
+  with it the mobile apps' own registration.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, with the golden tree
+regenerated and its diff read. `TestMbinOpensItsAPIToATokenOnly` fails with
+the gate record reverted and passes with it. Not run against a live Mbin or a
+mobile app: which routes a given app calls before sign-in is read from Mbin's
+access rules, not observed.

@@ -148,24 +148,47 @@ route, never when it is `/`.
 
 | Kind | Open paths | Inboxes | Token paths | Auto-login |
 |---|---|---|---|---|
-| `mbin` | OIDC (`/oauth/*`), the native app's chain (`/authorize /consent /token /login`), discovery (webfinger, host-meta, nodeinfo, `/i/actor`, contexts), the sign-in page's assets | `/i/inbox /f/inbox /u/*/inbox /m/*/inbox` | none | `/` and `/login` to `/oauth/oidc/connect`, unless `PHPSESSID` or `REMEMBERME` |
+| `mbin` | OIDC (`/oauth/*`), the native app's chain (`/authorize /consent /token /login`) and what it calls before it holds a token (`/api/client /api/info /api/instance`, exact paths), discovery (webfinger, host-meta, nodeinfo, `/i/actor`, contexts), the sign-in page's assets | `/i/inbox /f/inbox /u/*/inbox /m/*/inbox` | `/api/*` | `/` and `/login` to `/oauth/oidc/connect`, unless `PHPSESSID` or `REMEMBERME` |
 | `writefreely` | OIDC (`/oauth/*`), discovery (webfinger, host-meta, nodeinfo), the sign-in page's assets | `/api/collections/*/inbox` | none | `/login` always, `/` unless `wfu`, to `/oauth/generic` |
 | `outline` | OIDC (`/auth/oidc`, `/auth/oidc.callback`, `/auth/redirect`, never `/auth/*`, which would open email sign-in), OAuth discovery, registration and token endpoints, `/_health` | none | `/api/*`, `/mcp` | none: its sign-in screen redirects itself when OIDC is the only provider |
 | `element` | the health route | none | none | none |
 
 Each entry is cited in `internal/kinds/gate.go` against the pinned tag.
 
-### Why Mbin's and WriteFreely's token paths are empty
+### Which kinds have token paths
 
 A token path is safe only if a token that reads content cannot be had without
-a member's sign-in, and the app refuses everything else. Mbin's `/api/*` read
-endpoints answer with no token at all, and anonymous `POST /api/client` mints
-a client (CreateClientApi.php:95,122-139). WriteFreely mints tokens only from a
-password sign-in, which `disable_password_auth` closes, but tokens already
-issued keep working and carry no scopes (handle.go:281-292). **Mbin's mobile
-apps do not work on a gated instance**, because after their WebView sign-in
-they call `/api/*` with no gate session. Outline's API keys are created only
-from a signed-in session (apiKeys.ts:23-27), so its API is a token path.
+a member's sign-in, and the app refuses everything else.
+
+**Mbin's `/api/*` is a token path because a gated Mbin is a private
+instance.** `MBIN_PRIVATE_INSTANCE` is rendered and locked for every gated
+Mbin, and Mbin's catch-all access rule then refuses any request without a
+signed in user (security.yaml:152 at v1.15.0+paisans). `/api` sits on a
+stateless OAuth2 firewall that refuses a token it did not issue
+(security.yaml:22-27). A public Mbin answers its `/api/*` reads with no token
+at all, so without that mode the token path would rest on the firewall
+alone; a test holds that every gated Mbin renders it. With it, Mbin's mobile apps work on a gated instance:
+after their WebView sign-in they call `/api/*` with the token it earned and
+no gate session.
+
+Three API routes are open with no token, because a native app calls them
+before it holds one: `/api/client` registers the app's client, and
+`/api/info` and `/api/instance` say what the instance is. Mbin answers them to
+anyone even as a private instance (security.yaml:143-146). They are exact
+paths, so the rest of `/api/instance/*` needs a token. Registering a client
+grants nothing by itself: a public client still needs `/authorize`, which
+needs a member's sign-in, and a confidential `client_credentials` client
+comes with a bot user created unverified (CreateClientApi.php:122-138,
+User.php:188), which the API firewall's user checker refuses
+(UserChecker.php:55). Anonymous registration is rate limited to two clients
+per six hours (rate_limiter.yaml:9-12). An admin who verifies such a bot user
+gives it the API.
+
+WriteFreely mints tokens only from a password sign-in, which
+`disable_password_auth` closes, but tokens already issued keep working and
+carry no scopes (handle.go:281-292), so its token paths are empty. Outline's
+API keys are created only from a signed-in session (apiKeys.ts:23-27), so its
+API is a token path.
 
 ## Auto-login
 
