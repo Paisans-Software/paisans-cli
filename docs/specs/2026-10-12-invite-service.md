@@ -56,7 +56,7 @@ The application never names Pocket ID. It speaks to an interface:
 | `FindUser(username)` | the provider's user, if one exists, so a retry never creates a second |
 | `CreateUser(username, email, displayName)` | creates the account and returns its ID |
 | `AdminGroupEmails(group)` | the email addresses of the members of the service's admin group |
-| `SendLoginLink(userID)` | has the provider email the user a one-time sign in link that lasts 7 days |
+| `SendLoginLink(userID)` | has the provider email the user a one-time sign in link that lasts `login_link_days` |
 
 The service keeps its own record of invites, applications and who invited whom.
 Some of that duplicates what the provider holds, and that is accepted: it is
@@ -76,7 +76,8 @@ what lets a deployment change provider by writing a second adapter.
   `applyDefaultGroups` at `:382`), so group membership is the deployment's
   `signup_default_groups`, never the service's.
 * `SendLoginLink`: `POST /api/users/:id/one-time-access-email` with the body
-  `{"ttl":"168h"}` and nothing else (`backend/internal/onetimeaccess/module.go:69`).
+  `{"ttl":"<login_link_days × 24>h"}` and nothing else, `168h` by default
+  (`backend/internal/onetimeaccess/module.go:69`; Pocket ID accepts up to 744h).
   Without a `ttl` Pocket ID makes the link last 15 minutes, which an approved
   invitee would usually miss. This link is not tied to a device: it works on
   whichever phone or computer opens it. Pocket ID sends the mail
@@ -157,7 +158,7 @@ version and the time of agreement, and marks the invite `applied`.
 What the invitee is shown next, exactly:
 
 * Approval off: **Check your email.** "We've sent you a sign-in link. It
-  expires in 7 days." Below it, smaller: "Link expired? Go to
+  expires in N days.", N being `login_link_days` ("1 day" when it is 1). Below it, smaller: "Link expired? Go to
   `<identity host>`, choose sign in with an email code, and enter the code from
   the new email on that same screen."
 * Approval on: **Thanks for applying.** "An admin will review your
@@ -253,6 +254,7 @@ apps:
       invite_lifetime_days: 14
       application_wait_days: 14
       decline_retention_days: 183
+      login_link_days: 7
       code_of_conduct: code-of-conduct.md
 ```
 
@@ -264,6 +266,7 @@ apps:
 | `invite_lifetime_days` | 1 to 365 | `14` |
 | `application_wait_days` | 1 to 365 | `14` |
 | `decline_retention_days` | 1 to 3650 | `183` |
+| `login_link_days` | 1 to 31 | `7` |
 | `code_of_conduct` | a path relative to `paisans.yaml` | required |
 
 **`validate` refuses:**

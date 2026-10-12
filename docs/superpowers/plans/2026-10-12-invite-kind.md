@@ -19,7 +19,7 @@
 - Kind name `invite`; constant `config.KindInvite`.
 - Placement: `cluster` only. Rule `invite-must-be-clustered`.
 - Container port `8080`; health `GET /healthz` answers `200`.
-- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `code_of_conduct` (required, a path relative to `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
+- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, a path relative to `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
 - Generated secrets: `apps.<invite>.email_hash_key`, `apps.<invite>.session_key`, both the default `password()` shape (32 random bytes, unpadded base64url). Plus `database_password`, which `UsesPostgres` already brings.
 - The environment variable names are exactly the service plan's contract table; rename nothing.
 - `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; that app's `email_one_time_access_as_unauthenticated` not set to `true` (rule `invite-recovery-disabled`; founder decision 2026-10-12: a member whose 7-day link expired recovers through Pocket ID's email-code sign-in); no SMTP host and sender for the invite app; a `code_of_conduct` file that does not exist; a placement other than `cluster`; a setting out of range.
@@ -252,12 +252,13 @@ var InviteSettingRanges = map[string][2]int{
 	"invite_lifetime_days":   {1, 365},
 	"application_wait_days":  {1, 365},
 	"decline_retention_days": {1, 3650},
+	"login_link_days":        {1, 31},
 }
 
 // InviteSettingDefaults are what the service is told when a setting is unset.
 var InviteSettingDefaults = map[string]string{
 	"invite_quota": "3", "require_approval": "true", "invite_lifetime_days": "14",
-	"application_wait_days": "14", "decline_retention_days": "183",
+	"application_wait_days": "14", "decline_retention_days": "183", "login_link_days": "7",
 }
 
 // InviteCoCPath is where the code of conduct is read from: an absolute
@@ -515,6 +516,7 @@ func TestInviteCoCRendered(t *testing.T) {
 		"INVITE_QUOTA=5",
 		"INVITE_REQUIRE_APPROVAL=true",
 		"INVITE_DECLINE_RETENTION_DAYS=183",
+		"INVITE_LOGIN_LINK_DAYS=7",
 		"INVITE_TRUST_FORWARDED=true",
 		"INVITE_COC_PATH=/etc/paisans-invite/code-of-conduct.md",
 	} {
@@ -725,6 +727,7 @@ INVITE_REQUIRE_APPROVAL={{ index .Invite.Settings "require_approval" }}
 INVITE_LIFETIME_DAYS={{ index .Invite.Settings "invite_lifetime_days" }}
 INVITE_APPLICATION_WAIT_DAYS={{ index .Invite.Settings "application_wait_days" }}
 INVITE_DECLINE_RETENTION_DAYS={{ index .Invite.Settings "decline_retention_days" }}
+INVITE_LOGIN_LINK_DAYS={{ index .Invite.Settings "login_link_days" }}
 INVITE_COC_PATH=/etc/paisans-invite/code-of-conduct.md
 INVITE_TRUST_FORWARDED=true
 ```
