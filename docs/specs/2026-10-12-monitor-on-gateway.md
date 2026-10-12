@@ -34,7 +34,7 @@ reads one line rather than three. The message, for `sites.<name>.roles`:
 > failing: when it goes down, the monitor goes with it and no alert is sent.
 > A small machine of its own with roles: [monitor] reports it.
 
-The roles are listed in the order `allRoles` offers them. Holding the witness
+The roles are listed gateway, witness, data, apps: what is lost, most first. Holding the witness
 adds one sentence: "Nothing reports etcd losing its tiebreaker either." A
 site holding `monitor` alone, or `monitor` with `storage`, is not warned:
 storage is not something the monitor's absence would hide.
@@ -87,10 +87,6 @@ Everything else already holds:
 monitor shares the gateway it carries every public hostname, and the
 monitor with it; the description says so.
 
-Moving the gateway off a site that also holds the monitor leaves a
-monitor-only site that runs its own Caddy. `gatewaymove` already treats any
-site with `RunsCaddy` as keeping its Caddy (`internal/gatewaymove`); the
-plan adds a test that pins this rather than assuming it.
 
 ## The wizard
 
@@ -110,13 +106,69 @@ the only site in a named shape with a public address, which the monitor
 needs. A custom shape offers the same choice when exactly one of its sites
 holds `gateway`, and only the first option otherwise.
 
-Option 1 asks the questions it asks today, and declining the machine still
-drops the status page. Option 2 adds `monitor` to that site's roles and pins
-the status page to it; `Answers.Monitor` stays nil. Answering again keeps the
-choice as the default.
+Option 1 asks the machine's name, address and SSH questions it asks today.
+"Add a machine for it?" goes: declining the status page is answering no to
+"A status page?", one question earlier. Option 2 sets
+`Answers.MonitorOnGateway`, and `AllSites` adds `monitor` to the roles of the
+site holding `gateway`, so answering the machines again, or renaming that
+site, keeps the choice; `Answers.Monitor` stays nil. Answering again keeps
+the choice as the default.
+
+`create`'s render keeps the chat server off monitor sites. With the monitor
+on the high availability shape's VPS, that would push chat onto a data site,
+where it collides with Patroni's ports. The rule becomes "off a monitor site
+that is not the gateway": a monitor beside the gateway shares the gateway's
+Caddy, so chat there is routed as before.
 
 Chat stays unavailable on one machine. That is a port collision between
 Synapse and the database, and Element and the gateway, unrelated to this.
+
+## Moving the gateway off a shared site
+
+`paisans gateway move` finds the old gateway from what its host still holds,
+and skips any site whose roles run Caddy, which a monitor's do. It still
+finds a shared site through DNS, since the gateway's hostnames point there,
+and its last stage would then stop that site's Caddy, taking the monitor down
+with it. Worse, `apply` runs on every site before the move, and on a shared
+site it rewrites the Caddyfile to the monitor's routes alone while DNS still
+sends every hostname there: the outage "an overlap, not a cutover" exists to
+prevent.
+
+This ships in two pull requests. Founder decision, 2026-10-12.
+
+### First: refuse it
+
+With the rest of this spec. Both `paisans gateway move` and
+`paisans apply --site` (which `apply` runs for every site) refuse when the
+site concerned does not hold `gateway`, runs Caddy for the monitor, and its
+host holds this deployment's record or the move's marker. Only a gateway
+ever holds the record (`cmd/paisans/record.go` writes it to gateway sites
+alone), so a monitor-only site is never mistaken for an old one. The
+message: "<site> keeps the monitor and is still this deployment's gateway.
+Moving the gateway off a site that keeps the monitor is not supported yet.
+Give <site> the gateway role back and apply it, or pin the status page to
+another monitor site first, then move the gateway."
+
+### Second: hand it off
+
+Its own spec and plan, after the first merges. The design approved in
+session:
+
+* **Finding it.** A site that runs Caddy for a monitor is read too, with its
+  Caddy not counted as evidence: the record and the marker are.
+* **Keeping the overlap.** While such a site still holds the record or the
+  marker and paisans.yaml no longer gives it `gateway`, `apply` renders it as
+  a departing gateway: its Caddyfile keeps every gateway route beside the
+  monitor's. `apply` reads this from the host, as it already reads whether a
+  move is pending, and passes it to render.
+* **Stage 6 on a shared site** removes the record and the marker and leaves
+  Caddy running. A last stage, *hand off*, applies that site again, so its
+  Caddy reloads with the monitor's routes alone. Its gate: the site's
+  Caddyfile names no gateway hostname.
+* The refusal over the host owner's sites in `/srv/caddy.d` stands: a
+  monitor's Caddy does not serve them.
+* The note that the old site keeps 80 and 443 open is dropped for a shared
+  site, whose monitor still needs them.
 
 ## Documentation
 
@@ -142,9 +194,12 @@ Synapse and the database, and Element and the gateway, unrelated to this.
   `monitors.json` with app checks and no ping or heartbeat. A two-site
   deployment with the monitor on the gateway pings and receives a heartbeat
   from the other site.
-* gatewaymove: moving the gateway off a monitor site keeps that site's
-  Caddy.
+* gatewaymove: a move from a site that runs the monitor is refused, and
+  its Caddy is not stopped; a move from a plain old gateway is unchanged.
+* apply: `apply --site` on a monitor site holding the record or the marker
+  is refused; on a monitor site holding neither it proceeds.
 * doctor: the lost-gateway description for a shared monitor.
 * create: both choices, on each named shape, validate with only the shared
-  site warning; answering again keeps the choice; the golden files gain a
+  site warning added (and, on high availability, chat still beside the
+  gateway); answering again keeps the choice; the golden files gain a
   one-machine-with-monitor case.
