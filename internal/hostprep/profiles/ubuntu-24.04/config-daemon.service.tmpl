@@ -6,6 +6,8 @@ Requires={{.WireGuardUnit}}
 [Service]
 User=nobody
 Group=nogroup
+# The repository is root's and the daemon is nobody: name it safe, and only it.
+Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/var/lib/paisans/config/{{.Token}}.git
 ExecStart=/usr/bin/git daemon --reuseaddr --listen={{.Address}} --port=9418 --base-path=/var/lib/paisans/config --export-all /var/lib/paisans/config/{{.Token}}.git
 Restart=on-failure
 

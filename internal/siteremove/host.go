@@ -92,6 +92,7 @@ func (p *Plan) storeRoots() []storeRoot {
 		{hostprep.ConfigRepo(d), hostprep.ConfigRepo(d) + "/HEAD", true},
 		{hostprep.ConfigPeers(d), hostprep.ConfigPeers(d), false},
 		{hostprep.ConfigSyncLog(d), hostprep.ConfigSyncLog(d), false},
+		{hostprep.ConfigSyncLog(d) + ".tmp", hostprep.ConfigSyncLog(d) + ".tmp", false},
 		{hostprep.ConfigScriptDir(d), hostprep.ConfigScriptDir(d) + "/config-sync.sh", true},
 	}
 }

@@ -180,7 +180,9 @@ func TestTheDaemonServesOnlyThisDeploymentsRepositoryOnTheMeshAddress(t *testing
 	}
 	for _, w := range []string{
 		"--listen=10.44.0.1 ", "--port=9418", "--base-path=/var/lib/paisans/config",
-		"/var/lib/paisans/config/f2a9.git\n", "User=nobody", "After=wg-quick@psns-f2a9\n", "Requires=wg-quick@psns-f2a9\n",
+		"/var/lib/paisans/config/f2a9.git\n", "User=nobody",
+		"Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/var/lib/paisans/config/f2a9.git\n",
+		"After=wg-quick@psns-f2a9\n", "Requires=wg-quick@psns-f2a9\n",
 	} {
 		if !strings.Contains(unit, w) {
 			t.Errorf("the daemon unit lacks %q:\n%s", w, unit)

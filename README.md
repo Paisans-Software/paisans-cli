@@ -4291,8 +4291,8 @@ added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
 first. Every host's prepare is checked at the same time, drawn as with
 `--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog, configuration store. Each install line
-is its site's steps' own dry runs together, and the storage line its step's:
+in the order docker, wireguard, firewall, ssh keys, watchdog, configuration
+store. Each install line is its site's steps' own dry runs together, and the storage line its step's:
 `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is
 work, with what each step found, and `✗` when a step would refuse, with the
