@@ -34,8 +34,8 @@ is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
 removed site. `site remove --evict` and `mesh rekey` also write the local
-secrets file: the replacement's generated secrets, and a site's next and
-promoted WireGuard key.
+secrets file: the replacement's generated secrets, a site's next and
+promoted WireGuard key, and the sites a `mesh rekey --all` run has left.
 `web-server show` and `web-server check` change nothing: `check` looks at a
 monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a

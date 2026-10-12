@@ -86,9 +86,17 @@ type Plan struct {
 	// so a rekey neither writes to them nor renders them.
 	Joining []string
 
+	// Finishing are the sites a run that stopped left with a next key, which
+	// this run completes first whether or not they were named.
+	Finishing []string
+	// Resumed is an --all run picking up the sites an earlier --all run had
+	// left, which the secrets file records.
+	Resumed bool
+
 	cfg        *config.Config
 	store      Store
 	transports map[string]apply.Transport
+	all        bool
 }
 
 func (p *Plan) dep() deployment.Deployment { return p.cfg.Deployment() }
@@ -149,23 +157,64 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 			return nil, fmt.Errorf("mesh rekey: %s holds no claim of this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
 		}
 	}
+	secrets, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	p.all = all
 	if all {
-		for _, name := range cfg.SiteNames() {
-			if !contains(p.Joining, name) {
-				sites = append(sites, name)
+		// An --all run that stopped resumes with the sites it had left, so a
+		// site it already promoted is not rekeyed a second time.
+		if remaining := secrets.MeshRekeyRemaining; len(remaining) > 0 {
+			p.Resumed = true
+			for _, name := range remaining {
+				if _, ok := cfg.Sites[name]; ok && !contains(p.Joining, name) {
+					sites = append(sites, name)
+				}
+			}
+		} else {
+			for _, name := range cfg.SiteNames() {
+				if !contains(p.Joining, name) {
+					sites = append(sites, name)
+				}
 			}
 		}
 	}
+	// A site with a next key is part way through a rekey, and goes first,
+	// named or not: until its swap is complete its peers may disagree about
+	// its key, which is often why the cluster is unhealthy, and no other
+	// site's rekey starts on a cluster in that state.
+	var pending []string
+	for _, name := range secrets.RekeyPending() {
+		if contains(p.Joining, name) {
+			continue
+		}
+		pending = append(pending, name)
+		p.Finishing = append(p.Finishing, name)
+	}
+	var ordered []string
+	for _, name := range cfg.SiteNames() {
+		if contains(pending, name) {
+			ordered = append(ordered, name)
+		}
+	}
+	for _, name := range sites {
+		if !contains(ordered, name) {
+			ordered = append(ordered, name)
+		}
+	}
+	sites = ordered
 	p.cfg = cfg.WithoutJoining(p.Joining...)
 	if err := refuseLostRelay(p.cfg, sites); err != nil {
 		return nil, err
 	}
-	if err := p.health(); err != nil {
-		return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`paisans doctor` says how) and run again. Nothing was changed", err)
-	}
-	secrets, err := store.Load()
-	if err != nil {
-		return nil, err
+	// A run that starts with a new site's rekey needs a healthy cluster
+	// first. One that finishes a stopped swap checks health after it, since
+	// the partial swap may be what is unhealthy.
+	if len(pending) == 0 && len(sites) > 0 {
+		if err := p.health(); err != nil {
+			return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`paisans doctor` says how) and run again. Nothing was changed", err)
+		}
 	}
 	for _, name := range sites {
 		s := Site{Name: name, From: NewKey}
@@ -219,6 +268,12 @@ func (p *Plan) runningKey(site string) (string, error) {
 
 // Show lists the plan: a section per site, each remaining stage pending.
 func (p *Plan) Show(r ui.Reporter) {
+	if p.Resumed {
+		r.Note("mesh rekey: an earlier --all run stopped", "This run rekeys only the sites it had left, which the secrets file records.")
+	}
+	if len(p.Finishing) > 0 {
+		r.Note("mesh rekey: "+strings.Join(p.Finishing, ", ")+" stopped part way", "A run that stopped left a next key, and this run finishes that rekey first.")
+	}
 	for _, s := range p.Sites {
 		r.Section("rekey " + s.Name)
 		for _, st := range p.stages(s) {
@@ -233,7 +288,7 @@ type stageText struct{ title, work, gate string }
 
 func (p *Plan) stages(s Site) []stageText {
 	all := []stageText{
-		{"new key for " + s.Name, "a new private key, generated here, written to the secrets file as sites." + s.Name + ".wireguard_next_private_key beside the current one", "the file decrypts and holds it"},
+		{"new key for " + s.Name, "the cluster checked healthy, then a new private key, generated here, written to the secrets file as sites." + s.Name + ".wireguard_next_private_key beside the current one", "the file decrypts and holds it"},
 		{"swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
 		{"check the cluster", "nothing changes", "etcd healthy with every voter, every Patroni member running or streaming"},
 		{"promote " + s.Name + "'s key", "the next key becomes sites." + s.Name + ".wireguard_private_key in the secrets file, and the old one is deleted", "the file decrypts and holds only the new key"},
@@ -242,12 +297,41 @@ func (p *Plan) stages(s Site) []stageText {
 }
 
 // Execute rekeys each site in turn, every stage ending at its gate. A stage
-// that fails stops the run: the next run resumes there.
+// that fails stops the run: the next run resumes there. An --all run records
+// the sites it has left in the secrets file first, and each promotion takes
+// its site off the record, so a stopped --all run resumes without rekeying
+// what it already finished.
 func Execute(p *Plan) error {
+	if p.all && !p.Resumed && len(p.Sites) > 0 {
+		var names []string
+		for _, s := range p.Sites {
+			names = append(names, s.Name)
+		}
+		if err := p.record(names); err != nil {
+			return fmt.Errorf("mesh rekey: recording the sites --all rekeys: %w. Nothing was changed", err)
+		}
+	}
 	for _, s := range p.Sites {
 		if err := p.rekey(s); err != nil {
 			return fmt.Errorf("mesh rekey %s stopped: %w. Nothing after it ran. Fix the cause and run mesh rekey again: it resumes where this stopped. Until it finishes apply refuses: it renders the key the secrets file holds as current, which is the old one until the last stage", s.Name, err)
 		}
+	}
+	return nil
+}
+
+// record writes the sites an --all run has left to the secrets file, and
+// reads it back.
+func (p *Plan) record(names []string) error {
+	secrets, err := p.store.Load()
+	if err != nil {
+		return err
+	}
+	secrets.MeshRekeyRemaining = names
+	if err := p.store.Save(secrets); err != nil {
+		return err
+	}
+	if secrets, err = p.store.Load(); err != nil || strings.Join(secrets.MeshRekeyRemaining, " ") != strings.Join(names, " ") {
+		return errors.Join(err, fmt.Errorf("the secrets file does not hold the sites it was written with"))
 	}
 	return nil
 }
@@ -261,7 +345,15 @@ func (p *Plan) rekey(s Site) error {
 	}
 	site := secrets.Sites[s.Name]
 	if site.WireGuardNextPrivateKey == "" {
-		step := r.Step("new key for " + s.Name)
+		// Only before a site's rekey starts: once it has, its own swap is
+		// finished first, whatever the cluster's health.
+		step := r.Step("check the cluster before " + s.Name + "'s rekey")
+		if err := p.health(); err != nil {
+			step.Fail(err)
+			return fmt.Errorf("%v. A rekey takes the site's tunnels down for a moment, which a cluster already short of a member may not survive; nothing of %s's rekey has started. Fix it (`paisans doctor` says how)", err, s.Name)
+		}
+		step.Done("healthy")
+		step = r.Step("new key for " + s.Name)
 		key, err := secretsgen.WireGuardPrivateKey()
 		if err != nil {
 			step.Fail(err)
@@ -304,6 +396,7 @@ func (p *Plan) rekey(s Site) error {
 	site = secrets.Sites[s.Name]
 	site.WireGuardPrivateKey, site.WireGuardNextPrivateKey = next, ""
 	secrets.Sites[s.Name] = site
+	secrets.MeshRekeyRemaining = without(secrets.MeshRekeyRemaining, s.Name)
 	if err := p.store.Save(secrets); err != nil {
 		step.Fail(err)
 		return err
@@ -527,6 +620,16 @@ func poll(wait, every time.Duration, check func() error) error {
 		}
 	}
 	return err
+}
+
+func without(list []string, s string) []string {
+	var out []string
+	for _, item := range list {
+		if item != s {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func contains(list []string, s string) bool {

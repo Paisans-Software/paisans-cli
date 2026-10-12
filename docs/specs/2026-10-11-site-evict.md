@@ -197,7 +197,13 @@ etcd its quorum.
 
 A run stopped part way resumes: a site with a next key in the file is mid
 rekey, and which key its host runs, read with `wg show`, says whether stage 2
-is done. Refused, before anything changes: an unhealthy etcd or Patroni, a site
+is done. Such a site goes first in the next run, and its swap is finished
+before health is read, since the partial swap may be what is unhealthy; the
+health refusal applies only before a site's rekey starts. An `--all` run
+records the sites it has left in the secrets file, so a stopped one resumes
+without rekeying a site it already promoted.
+
+Refused, before anything changes: an unhealthy etcd or Patroni, a site
 that does not answer over ssh, and a site whose only path to the mesh is a relay
 that is itself being rekeyed in the same run.
 

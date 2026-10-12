@@ -37,8 +37,11 @@ type mesh struct {
 	hosts   map[string]*host
 	secrets *config.Secrets
 	saves   int
-	// failOnce fails the first command containing it.
+	// failOnce fails the first command containing it, after failSkip of
+	// them have run, and only on failHost when that is set.
 	failOnce string
+	failSkip int
+	failHost string
 	// sick makes etcd answer one endpoint unhealthy.
 	sick bool
 	log  []string
@@ -129,9 +132,13 @@ func (h *host) Run(command string) (string, error) {
 	if h.down {
 		return "ssh: connect to host port 22: Operation timed out", fmt.Errorf("%s: %w", h.name, apply.ErrUnreachable)
 	}
-	if m.failOnce != "" && strings.Contains(command, m.failOnce) {
-		m.failOnce = ""
-		return "failed by the test", errors.New("exit status 1")
+	if m.failOnce != "" && strings.Contains(command, m.failOnce) && (m.failHost == "" || m.failHost == h.name) {
+		if m.failSkip > 0 {
+			m.failSkip--
+		} else {
+			m.failOnce = ""
+			return "failed by the test", errors.New("exit status 1")
+		}
 	}
 	switch {
 	case command == "true":
@@ -171,7 +178,13 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
 		for i, name := range m.cfg.Etcd.Members {
-			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": !(m.sick && i == 1)})
+			// A member is healthy while its tunnel to every other member is
+			// up, which a swap part way breaks.
+			up := true
+			for _, other := range m.cfg.Etcd.Members {
+				up = up && (other == name || m.tunnel(name, other))
+			}
+			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": up && !(m.sick && i == 1)})
 		}
 		data, _ := json.Marshal(out)
 		return string(data), nil
@@ -190,6 +203,12 @@ func (h *host) Run(command string) (string, error) {
 	// apply's own plumbing around a scoped write: what it runs is not this
 	// test's subject, and it succeeds.
 	return "", nil
+}
+
+// tunnel is whether a and b each list the key the other runs.
+func (m *mesh) tunnel(a, b string) bool {
+	ha, hb := m.hosts[a], m.hosts[b]
+	return contains(ha.peers(), hb.runsKey()) && contains(hb.peers(), ha.runsKey())
 }
 
 func sum(s string) string {
@@ -362,8 +381,10 @@ func TestARekeyResumes(t *testing.T) {
 			old := m.secrets.Sites["vm"].WireGuardPrivateKey
 			m.failOnce = tc.fail
 			if tc.fail == "endpoint health" {
-				// One read, so the failed one is the gate's answer.
+				// One read, so the failed one is the gate's answer, and
+				// not the check before the rekey starts.
 				healthWait = healthPoll
+				m.failSkip = 1
 			}
 			if err := run(t, p); err == nil || !strings.Contains(err.Error(), "resumes where this stopped") {
 				t.Fatalf("err = %v", err)
@@ -482,5 +503,80 @@ func TestASwapKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
 		if !contains(m.hosts[name].peers(), publicOf(t, running)) {
 			t.Errorf("%s no longer lists vm's new key", name)
 		}
+	}
+}
+
+// A swap stopped part way, the peers on the new key and the site still on
+// the old, leaves the cluster unhealthy: the next run finishes that swap
+// before it checks the cluster, rather than refusing on the state the swap
+// itself left.
+func TestAPartialSwapResumesOnAnUnhealthyCluster(t *testing.T) {
+	m := newMesh(t)
+	p, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.failOnce, m.failHost = "wg syncconf", "vm"
+	if err := run(t, p); err == nil {
+		t.Fatal("the swap that missed vm passed")
+	}
+	if m.tunnel("vm", "home-a") {
+		t.Fatal("the test needs the tunnel down")
+	}
+	again, err := m.build("home-a")
+	if err != nil {
+		t.Fatalf("a stopped swap does not resume: %v", err)
+	}
+	var names []string
+	for _, s := range again.Sites {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "vm,home-a" || again.Sites[0].From != Swap || strings.Join(again.Finishing, ",") != "vm" {
+		t.Fatalf("plan: %v, from %d, finishing %v", names, again.Sites[0].From, again.Finishing)
+	}
+	if err := run(t, again); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.secrets.RekeyPending()) != 0 || !m.tunnel("vm", "home-a") {
+		t.Error("the resumed run did not finish vm")
+	}
+}
+
+// An --all run that stops between sites resumes with the sites it had left:
+// a site it already promoted is not rekeyed again.
+func TestAnAllRunResumesWithoutRekeyingAgain(t *testing.T) {
+	m := newMesh(t)
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// home-a's check before and after its swap pass; home-b's first fails.
+	m.failOnce, m.failSkip = "endpoint health", 2
+	if err := run(t, p); err == nil {
+		t.Fatal("the run did not stop")
+	}
+	promoted := m.secrets.Sites["home-a"].WireGuardPrivateKey
+	if got := strings.Join(m.secrets.MeshRekeyRemaining, ","); got != "home-b,vm,watch" {
+		t.Fatalf("remaining: %s", got)
+	}
+	again, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range again.Sites {
+		names = append(names, s.Name)
+	}
+	if !again.Resumed || strings.Join(names, ",") != "home-b,vm,watch" {
+		t.Fatalf("resumed %v with %v", again.Resumed, names)
+	}
+	if err := run(t, again); err != nil {
+		t.Fatal(err)
+	}
+	if m.secrets.Sites["home-a"].WireGuardPrivateKey != promoted {
+		t.Error("home-a was rekeyed a second time")
+	}
+	if len(m.secrets.MeshRekeyRemaining) != 0 {
+		t.Errorf("the record outlived the run: %v", m.secrets.MeshRekeyRemaining)
 	}
 }

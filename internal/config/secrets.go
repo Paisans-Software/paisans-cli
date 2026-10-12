@@ -54,6 +54,11 @@ type Secrets struct {
 	// it is state the toolkit wrote about a live instance, which is what
 	// this file holds beside the credentials.
 	PocketIDGroups map[string]string `yaml:"pocket_id_groups,omitempty"`
+	// MeshRekeyRemaining is the sites a `paisans mesh rekey --all` run has
+	// left, in order, set only while one is under way: written before the
+	// first site's rekey, and each site taken off as its key is promoted, so
+	// that a stopped run resumes without rekeying a site it finished.
+	MeshRekeyRemaining []string `yaml:"mesh_rekey_remaining,omitempty"`
 
 	// Path is where these were read from, for error messages.
 	Path string `yaml:"-"`
