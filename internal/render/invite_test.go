@@ -15,7 +15,7 @@ const (
 
 // inviteServiceEnv is every variable paisans-invite's config.Load reads,
 // copied from internal/config/config.go at Paisans-Software/paisans-invite
-// commit 9211c160d74f2e4b1924c84e72c6bd8c504edfb0 (develop, 2026-10-12). It
+// v0.1.0 (commit d148a242f82e7b26a43487f0e250afda5ab69e77). It
 // is the service's environment contract: a name the service reads and this
 // toolkit does not render is a setting nobody can change, and a required one
 // is a container that refuses to start.
@@ -155,10 +155,19 @@ func TestInviteCoCRendered(t *testing.T) {
 // The image runs as distroless nonroot (uid 65532), and apply writes every
 // file root owned, so the code of conduct has to be readable by others.
 func TestInviteCoCIsWorldReadable(t *testing.T) {
+	var found int
 	for _, f := range build(t).Files {
-		if strings.HasSuffix(f.Path, "/invite/code-of-conduct.md") && f.Mode != 0o644 {
+		if !strings.HasSuffix(f.Path, "/invite/code-of-conduct.md") {
+			continue
+		}
+		found++
+		if f.Mode != 0o644 {
 			t.Errorf("%s is %04o; the service's nonroot user could not read it", f.Path, f.Mode)
 		}
+	}
+	// One per apps site the clustered invite app runs on.
+	if found != 2 {
+		t.Fatalf("%d code-of-conduct.md files rendered, want one on each of home-a and home-b", found)
 	}
 }
 
@@ -263,10 +272,25 @@ func TestInviteWithoutItsKeysIsRefused(t *testing.T) {
 // The service is reachable through the gateway on every apps site, with
 // nothing in front of it: invitees arrive before they have an account.
 func TestInviteIsRoutedToEveryAppsSiteUngated(t *testing.T) {
-	var snippet string
+	var snippet, caddyfile string
 	for path, content := range buildInvite(t, nil) {
 		if strings.HasPrefix(path, "vm/") && strings.HasSuffix(path, "/invite.caddy") {
 			snippet = content
+		}
+		if path == "vm/srv/paisans/f2a9/infra/caddy/Caddyfile" {
+			caddyfile = content
+		}
+	}
+	// The gate is placed by the gateway's host block, not the snippet, so the
+	// block is where an ungated app shows it.
+	block := hostBlock(t, caddyfile, "invite.example.org")
+	if !strings.Contains(block, "import /etc/caddy/snippets/invite.caddy") {
+		t.Errorf("the invite host block does not import its snippet:\n%s", block)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "import gate") || strings.HasPrefix(line, "forward_auth") {
+			t.Errorf("the invite host block is gated: %q\n%s", line, block)
 		}
 	}
 	if snippet == "" {

@@ -33,6 +33,7 @@ var selfKinds = map[string]config.Kind{
 	"valkey_password":    config.KindMbin,
 	"cookie_secret":      config.KindOAuth2Proxy,
 	"session_secret":     config.KindUptime,
+	"session_key":        config.KindInvite,
 	"mas_signing_key":    config.KindSynapse,
 	"mas_matrix_secret":  config.KindSynapse,
 	"static_api_key":     config.KindPocketID,
@@ -83,11 +84,17 @@ const mbinRestart = "the Mbin stack, for one restart on each site in turn"
 //     and the cache hold no session (sessions are in Postgres, above). Their
 //     cost is a restart of the Mbin stack on each site, as the spec's cost
 //     table gives it.
-//   - Pocket ID static_api_key signs nobody out: its users are the toolkit
-//     and the admin reconciler, not members (secretsgen, appSecretKeys).
+//   - invite session_key signs members out of the invite service and nothing
+//     else: it signs the service's sign-in cookie
+//     (docs/specs/2026-10-12-invite-service.md, Secrets), so a cookie signed
+//     with the old key is refused.
+//   - Pocket ID static_api_key signs nobody out: its users are the toolkit,
+//     the admin reconciler and every invite service whose identity_app names
+//     the Pocket ID app, not members (secretsgen, appSecretKeys). Each of
+//     those invite stacks is handed the next key with it (see Users).
 func AppSelfCost(key string) Cost {
 	switch key {
-	case "app_secret", "cookie_secret", "session_secret", "mas_signing_key", "mas_matrix_secret":
+	case "app_secret", "cookie_secret", "session_secret", "session_key", "mas_signing_key", "mas_matrix_secret":
 		return Cost{SignsOut: true}
 	case "mercure_jwt_secret", "valkey_password":
 		return Cost{Downtime: mbinRestart}
@@ -105,8 +112,8 @@ type appSelf struct {
 // AppSelf is the rotation of apps.<app>.<key>, a secret checked by the same
 // stack that uses it: Mbin's app_secret, mercure_jwt_secret and
 // valkey_password, oauth2-proxy's cookie_secret, uptime's session_secret,
-// MAS's mas_signing_key and mas_matrix_secret, and Pocket ID's
-// static_api_key. cost is what the plan says it costs; AppSelfCost has each
+// the invite service's session_key, MAS's mas_signing_key and
+// mas_matrix_secret, and Pocket ID's static_api_key. cost is what the plan says it costs; AppSelfCost has each
 // one, with its source.
 func AppSelf(app, key string, cost Cost) Rotator {
 	return appSelf{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key, cost: cost}
@@ -141,7 +148,43 @@ func (r appSelf) Checked(e Env, next string) error { return nil }
 // Accepts is true: the app accepts whatever it is started with.
 func (r appSelf) Accepts(e Env, next string) (bool, error) { return true, nil }
 
-func (r appSelf) Users(e Env) []Use { return appUses(e, r.app) }
+// Users is every site running the app, its own stack on each. Pocket ID's
+// static_api_key is also presented by every invite app whose identity_app
+// names it, from that app's .env, so each of those stacks is handed the next
+// key too: on a site running both, in the same step after Pocket ID, which
+// must hold the key before the invite service calls with it; on a site
+// running only the invite app, in a step of its own after every Pocket ID
+// site. Without them the invite service would keep calling with a key Pocket
+// ID no longer accepts.
+func (r appSelf) Users(e Env) []Use {
+	uses := appUses(e, r.app)
+	if r.key != "static_api_key" {
+		return uses
+	}
+	sites := render.AppSites(e.Cfg)
+	bySite := map[string]int{}
+	for i, u := range uses {
+		bySite[u.Site] = i
+	}
+	for _, name := range e.Cfg.AppNames() {
+		app := e.Cfg.Apps[name]
+		if app.Kind != config.KindInvite {
+			continue
+		}
+		if idp, _ := app.Settings["identity_app"].(string); idp != r.app {
+			continue
+		}
+		for _, site := range sites[name] {
+			if i, ok := bySite[site]; ok {
+				uses[i].Stacks = append(uses[i].Stacks, name)
+				continue
+			}
+			bySite[site] = len(uses)
+			uses = append(uses, Use{Site: site, Stacks: []string{name}})
+		}
+	}
+	return uses
+}
 
 // appUses is every site running app, as render places it (render.AppSites:
 // its pinned site, or every apps site), its own stack on each, one at a time.
