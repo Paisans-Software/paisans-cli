@@ -80,6 +80,29 @@ refused.
 * **Hosts:** none. It reads the file and nothing else.
 * **`--execute`:** not taken.
 
+### `paisans create`
+
+Asks about a new deployment at a terminal (the community and its domain, the
+DNS provider, the admins, how many machines and what each does, the apps, and
+the mail server) and writes a commented `paisans.yaml` from the answers. The
+file is checked as `validate` checks it before it is shown; a refusal offers
+the questions it came from again, and nothing is written until the file is
+refused nothing and the operator says yes. It then names `secrets set`,
+`init` and `apply`.
+
+* **Alone:** once, before anything else, for a deployment that has no
+  `paisans.yaml` yet. The whole apply never runs it.
+* **Flags:** `--config` (the file to write; default `paisans.yaml`).
+* **Hosts:** none. It asks for no secret either: `init` generates them and
+  names the ones owed from elsewhere.
+* **`--execute`:** not taken. It writes one local file, mode 0644, and refuses
+  a path that already holds one, both before the first question and at the
+  write. Exits 1 when nothing was written, including a stdin that is not a
+  terminal.
+
+See *`paisans create` writes a new deployment's file, and only that* in
+`README.md`.
+
 ### `paisans init`
 
 Gives the declaration an `id` if it has none, settles `mesh.subnet` against

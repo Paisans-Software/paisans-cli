@@ -21,6 +21,7 @@ and says so when it does. Each step is one line; `--verbose` (`-v`) shows the
 reasons, values and requests behind it.
 
 ```
+paisans create                             # a new deployment's paisans.yaml, from questions
 paisans init                               # an id, a mesh subnet and the secrets for paisans.yaml
 paisans host prepare --site vm --execute   # Docker, WireGuard and a firewall on a blank host
 paisans apply --execute                    # the whole deployment, from paisans.yaml to a running stack
@@ -1236,6 +1237,39 @@ See [`examples/paisans.example.yaml`](examples/paisans.example.yaml) and
 [`examples/secrets.example.yaml`](examples/secrets.example.yaml).
 [`examples/home-sites.yaml`](examples/home-sites.yaml) is a smaller layout whose
 data sites are home connections nothing can dial.
+
+### `paisans create` writes a new deployment's file, and only that
+
+The example declares four sites, eight apps and object storage, and someone
+starting a community has to work out which of it they need and which role
+combinations validate refuses. `paisans create` asks instead, in the words of
+what a community needs (forums, a wiki, a blog, chat, a status page), and
+writes a commented `paisans.yaml`.
+
+It offers three shapes, each a role layout validate accepts with no refusal:
+one machine; one home and a VPS, where the VPS is the gateway and carries no
+witness, because a witness there would make two etcd voters and two survive
+nothing; and two homes and a VPS, where one home is dialled too, because with
+only the VPS dialled losing it would leave each voter alone. A custom shape
+takes any roles and leaves the judgement to validate. What follows from the
+answers is decided rather than asked: every app that can join the cluster
+joins it when any site holds data, so that adding a data site later is an
+addition rather than a move; Garage runs on the data sites whenever a
+clustered app stores objects, since a clustered app may not keep files on one
+disk; the chat server goes where no database is, since it binds Patroni's
+ports.
+
+Mail is required in it, although validate only warns without it: sign in
+mails each admin's login link and members' codes, and the status page alerts
+by mail, so a deployment with no mail has admins who sign in only through a
+printed link and outages nobody hears of.
+
+It writes one file and nothing else. It asks for no secret, because `init` is
+the one command responsible for the secrets file, and reaches no host, because
+the sites may not exist yet. It refuses a file that exists: an existing
+deployment is edited, not recreated. The rendered bytes are checked exactly as
+`validate` checks a file before the operator sees them, and nothing is written
+while anything is refused.
 
 ### The config declares intent; etcd holds truth
 

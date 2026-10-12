@@ -30,6 +30,9 @@ Out:
   secret the declaration needs and names the ones owed from elsewhere, the DNS
   token and the SMTP password among them, which keeps one command responsible
   for the secrets file.
+* **Backups.** A `backup` section needs a destination, its credentials and a
+  schedule, and is added to the file by hand for now, so every file `create`
+  writes leaves `backups-off`. Asking for it is a later change.
 * **Hosts.** `create` reaches no host. Settling the mesh subnet against every
   site is `init`'s, and it runs once the sites exist.
 
@@ -118,9 +121,13 @@ reason, and so is an empty answer to a required question.
    because every other app signs in through it. Each chosen app's hostname is
    asked, with the table's default. Each app of a kind the gate can stand in
    front of (`mbin`, `outline`, `writefreely`, `element`) is asked "members
-   only?", default yes, and any yes declares the gate (`oauth2-proxy`, app
-   `gate`, at `gate.<domain>`), since `visibility_gate` without a gate app is
-   refused.
+   only?", default yes, and a yes sets `gated: true` on it. The gate is not
+   declared: the toolkit runs it at `gate.<domain>` on the gateway whenever an
+   app is gated.
+
+   Chat is not offered on the one machine shape. The chat server binds the
+   ports Patroni and bg_mon do, and its web client the port the gateway's
+   Caddy does (`port-collision`), so one machine cannot hold it.
 8. **The status page's machine.** The uptime monitor runs on a site of its own
    with the monitor role, never the gateway or the witness, because its job is
    to report their failures (see *The monitor has a site of its own* in `README.md`). When the
@@ -128,8 +135,8 @@ reason, and so is an empty answer to a required question.
    one, `health` by default, and asks its public address (required: it serves
    its own hostname) and its SSH user. Declining it drops the status page.
 9. **Mail.** Always asked, and required: SMTP host, security (`starttls` or
-   `tls`), port (587 for starttls, 465 for tls), username (default: the from
-   address), from address and from name (default: the community's name).
+   `tls`), port (587 for starttls, 465 for tls), from address, username
+   (default: the from address) and from name (default: the community's name).
    Pocket ID mails each admin's login link and every member's login codes, the
    status page alerts by mail, and Mbin mails account notices. A deployment
    with no mail has admins who sign in only through a printed link and outages
@@ -148,8 +155,11 @@ asked a question whose right answer the toolkit already knows.
 * **Placement.** Every kind that can join the cluster (`pocket-id`, `mbin`,
   `outline`, `writefreely`) is `cluster` when any site holds data, so that
   adding a data site later is an addition rather than a move. The kinds that
-  must be pinned are pinned: `oauth2-proxy`, `synapse` and `element` to the
-  first site with the apps role, `uptime` to the monitor site.
+  must be pinned are pinned where their ports are free: `synapse` to the first
+  site with neither data nor the monitor role, `element` to the first site
+  with the apps role and no gateway, and `uptime` to the monitor site. With no
+  such site, each goes to the first site with the apps role, and validate
+  judges it.
 * **Object storage.** When a clustered app stores objects (`mbin`, `outline`,
   `writefreely`), Garage runs on every data site, with a replication factor of
   the number of data sites capped at 2. A clustered app may not keep its files
@@ -180,8 +190,9 @@ through a YAML quoting function, so a name holding `:` or `#` is a string and
 not a syntax error.
 
 Before anything is shown, the rendered bytes are parsed with
-`config.LoadBytes` and checked with `validate.Check`, the same checks every
-command runs. The review shows exactly what `paisans validate` would say of
+`config.LoadBytes`, which already exists for the configuration store, and
+checked with `validate.Check`, the same checks every command runs. Nothing in
+`internal/config` changes. The review shows exactly what `paisans validate` would say of
 the file.
 
 ## Refusals and warnings
@@ -192,9 +203,12 @@ the file.
   time, so answering again is mostly Enter. This is the custom shape's normal
   path, since that is the one place the wizard lets validate judge the roles.
 * **A warning** is shown and does not stop the write, as `AGENTS.md` separates
-  the incoherent from the merely risky. The named shapes leave a known few: one
-  data site keeps a single copy of each object, and a deployment without the
-  status page has no uptime monitor.
+  the incoherent from the merely risky. The named shapes leave a known few:
+  the wizard declares no backups (`backups-off`), a
+  deployment without the status page has no uptime monitor
+  (`no-uptime-monitor`), and the high availability shape's Garage needs both
+  homes for an upload (`garage-two-sites-stop-uploads`) and pins the chat
+  server to the witness (`pinned-app-on-witness`), as the example does.
 * **End of input or Ctrl-C** at any question writes nothing and says so.
 
 ## After it writes
@@ -211,8 +225,9 @@ paisans apply                                # shows every step; --execute runs 
 
 * `internal/create`: `Prompter` (line prompts over an `io.Reader` and an
   `io.Writer`), `Answers` (what was asked, with no YAML in it), the shapes and
-  the decisions above, `Run` (the questions, in order) and `Render` (answers
-  and id to bytes, from an embedded template). It does no I/O but what it is
+  capabilities, `Wizard` (the questions, by section, each answer the default
+  when its section is asked again) and `Render` (answers and id to bytes,
+  from an embedded template, deciding what is listed above). It does no I/O but what it is
   handed, so its tests script stdin.
 * `cmd/paisans/create.go`: the flag, the two refusals, the loop of questions,
   render, validate and review, and the write.
@@ -222,12 +237,14 @@ paisans apply                                # shows every step; --execute runs 
 * The prompter: defaults, re-asking, menu bounds, a key paste ended by a blank
   line, and end of input.
 * Every named shape with no apps, with every app, and with members only on and
-  off: scripted answers, rendered, loaded with `config.LoadBytes`, checked with
-  `validate.Check`, asserting no refusal and naming each warning expected. This
+  off: rendered, loaded with `config.LoadBytes`, checked with `validate.Check`,
+  asserting no refusal and exactly the warnings listed above. This
   is what holds the claim that a named shape always validates. The same files
   also render with `render`, so a refusal only render makes is caught too.
-* A golden file per named shape under `internal/create/testdata/`, regenerated
-  with `-update`.
+* A golden file per named shape under `internal/create/testdata/`, from
+  scripted answers, regenerated with `-update`.
+* Answering any section again with Enter at every question leaves the file as
+  it was.
 * A custom shape that puts data and witness on one site: the refusal is shown,
   the sites are asked again, and the corrected answers write the file.
 * Quoting: a name and an email holding `:`, `#`, quotes and a leading `-` load
