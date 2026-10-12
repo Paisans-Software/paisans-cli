@@ -654,3 +654,49 @@ func TestAMissingOrMalformedHeartbeatTokenIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// With a client at the identity provider the monitor is SSO only: its login
+// page goes straight to the provider, and only the .env super-admin signs in
+// with a password, at /login?local=1. Without a client there is no provider to
+// send anyone to, so the variable is not rendered at all.
+func TestTheMonitorIsSSOOnlyWhenItHasAClient(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	if _, ok := secrets.OIDCClients["status"]; !ok {
+		t.Fatal("the fixture gives the monitor no client, so this test proves nothing")
+	}
+	plan, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := planFiles(plan)["watch/srv/paisans/f2a9/status/.env"]
+	if !strings.Contains(env, "\nOIDC_DISABLE_PASSWORD_LOGIN=true\n") {
+		t.Errorf("with a client the monitor is SSO only:\n%s", env)
+	}
+
+	delete(secrets.OIDCClients, "status")
+	plan, err = render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env := planFiles(plan)["watch/srv/paisans/f2a9/status/.env"]; strings.Contains(env, "OIDC_DISABLE_PASSWORD_LOGIN") {
+		t.Errorf("without a client there is no provider to be SSO only with:\n%s", env)
+	}
+}
+
+// The fork refuses to start SSO only when ADMIN_PASS is "admin", so render
+// refuses first rather than leave a container that exits after apply moved.
+func TestAnSSOOnlyMonitorRefusesTheDefaultAdminPassword(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	secrets.Apps["status"]["admin_password"] = "admin"
+	_, err := render.Build(cfg, secrets)
+	if err == nil || !strings.Contains(err.Error(), "apps.status.admin_password") {
+		t.Fatalf("got %v, want a refusal naming apps.status.admin_password", err)
+	}
+
+	// Without a client the fork only warns, but the password is still the
+	// one anybody would guess first.
+	delete(secrets.OIDCClients, "status")
+	if _, err := render.Build(cfg, secrets); err == nil {
+		t.Error("the literal admin password was accepted without a client")
+	}
+}

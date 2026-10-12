@@ -1005,9 +1005,13 @@ every site's heartbeat arrives, and where a heartbeat monitor added by hand
 is pinged.
 
 **Sign in** is the identity provider, admitting exactly the group named in
-`settings.admin_group`, which is required. Password sign in stays on as the
+`settings.admin_group`, which is required. The login page goes straight to
+it, and password sign-in is off for everyone but one account, kept as the
 break glass: Pocket ID is one of the things being watched, and a monitor you
-cannot open while it is down is no use. `ADMIN_PASS` is generated at `init`. For the same reason the monitor cannot sit behind the visibility gate
+cannot open while it is down is no use. To use it, open
+`https://<hostname>/login?local=1` and sign in as `admin` with
+`apps.<app>.admin_password` from the secrets file, which `init` generates
+(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the visibility gate
 (`visibility-gate-on-ungateable-kind`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 

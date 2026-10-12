@@ -291,10 +291,16 @@ and is accepted rather than special-cased.
   mutation: approval required, done by a human.
 * `PUBLIC_BASE_URL` is `https://<hostname>`.
 
-**Break glass: password sign in stays enabled.** Pocket ID is one of the
-monitored apps; with OIDC only, an admin is locked out of the monitor exactly
-when it matters. `ADMIN_USER` is `admin`; `ADMIN_PASS` and `SESSION_SECRET`
-are generated at init. `OIDC_DISABLE_PASSWORD_LOGIN=false`.
+**Break glass: the super-admin keeps a password.** Pocket ID is one of the
+monitored apps, so an admin must still reach the monitor while it is down.
+With a client, the kind renders `OIDC_DISABLE_PASSWORD_LOGIN=true`: the login
+page goes straight to the provider, and password sign-in is off for everyone
+except the `.env` super-admin, who signs in at `/login?local=1` (the fork's
+`README.md:302` and `src/routes/auth.js:26-47` at `v1.1.0-oidc.4`).
+`ADMIN_USER` is `admin`; `ADMIN_PASS` is `apps.<app>.admin_password` in the
+secrets file, and it and `SESSION_SECRET` are generated at init. The fork
+refuses to start SSO only when `ADMIN_PASS` is unset or `admin`
+(`src/lib/oidc.js:180-186`), and render refuses both before it gets there.
 
 **`gate:`** is allowed and pointless: the fork checks the admin group itself.
 No rule is added against it.
