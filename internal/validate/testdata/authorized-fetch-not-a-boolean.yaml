@@ -78,12 +78,8 @@ apps:
     kind: writefreely
     hostname: blog.example.org
     placement: { pinned: home-a }
-    visibility_gate: member
+    gated: true
     settings:
       authorized_fetch: "no"
   # Present only so that the gate exists: an app naming a gate no app renders
   # is a different refusal, and a fixture must break one thing.
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    placement: { pinned: home-a }

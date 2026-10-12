@@ -85,7 +85,10 @@ The exception: **`paisans apply` creating the OIDC client an app declared in
 `paisans.yaml` needs**, as part of setting that app up, takes no approval of its
 own. Every app in the stack signs in through the identity provider, so an app
 cannot run without its client, and approval to run the apply is approval for the
-clients it creates, whether a person or an agent runs it. The exception covers
+clients it creates, whether a person or an agent runs it. The gate, which no
+file declares but the toolkit runs whenever an app sets `gated` or
+`auto_login`, is covered the same way: setting either key is the approval for
+the gate's client. The exception covers
 creating a missing client, and restricting it to the app's group, only. Rotating
 a client's secret, deleting a client, and every change to groups or users stay
 in the tier above, and `apply` never replaces a client it has already recorded.
@@ -96,8 +99,8 @@ provider**, and handing each one who has not yet signed in a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
 sign into is not set up, and declaring the admin is approval for the account.
 The exception covers creating that account, marking its declared email
-verified, making it an administrator, adding it to the apps' admin groups,
-issuing the link and having the identity provider email it. Doing any of
+verified, making it an administrator, adding it to the apps' admin and
+member groups, issuing the link and having the identity provider email it. Doing any of
 these by hand, and every other change to a user, stays in the tier above.
 
 **Never without the human present**

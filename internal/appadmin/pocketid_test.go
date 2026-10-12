@@ -429,6 +429,40 @@ func TestPocketIDPutsTheAdminInEveryAdminGroup(t *testing.T) {
 	}
 }
 
+// A declared administrator joins the member groups too, and the plan says
+// which groups are which.
+func TestPocketIDPutsADeclaredAdminInTheMemberGroups(t *testing.T) {
+	f := &fakePocketID{groups: []pocketid.Group{{ID: "g-1", Name: "admins"}}}
+	req := pidRequest()
+	req.AdminGroups = []string{"admins"}
+	req.MemberGroups = []string{"members"}
+	plan, err := Build(config.KindPocketID, f, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Titles()[1]; got != "add founder to admin groups admins and member groups members" {
+		t.Errorf("title %q", got)
+	}
+	if _, err := Execute(plan, f); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, g := range f.users[0].UserGroups {
+		names = append(names, g.Name)
+	}
+	sort.Strings(names)
+	if fmt.Sprint(names) != "[admins members]" {
+		t.Errorf("founder is in %v", names)
+	}
+	again, err := Build(config.KindPocketID, f, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Actions) != 0 {
+		t.Errorf("a second run plans %v", again.Actions)
+	}
+}
+
 // A new administrator is created, put in the admin groups, then given the
 // link, in that order.
 func TestPocketIDNewAdminJoinsTheGroupsBeforeTheLink(t *testing.T) {

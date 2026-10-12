@@ -16,10 +16,9 @@ type Health struct {
 // kind with no health route of its own gets `/`, which is a deeper check than
 // a health route (it renders a page) and is said so beside it.
 var health = map[config.Kind]Health{
-	// The gateway's members gate on 4181 is a second instance of the same
-	// binary and is not checked separately. /ping answers before any auth and
-	// needs no Host (pkg/middleware/healthcheck.go:44-53 at v7.15.4); ran the
-	// image: 200 OK.
+	// /ping answers before any auth and needs no Host
+	// (pkg/middleware/healthcheck.go:44-53 at v7.15.4); ran the image: 200
+	// OK.
 	config.KindOAuth2Proxy: {"/ping", "200"},
 	// The static client has no health route; /version is a cheap file the
 	// image serves. Ran v1.12.27: /version 200, /health 404.
@@ -51,8 +50,9 @@ var health = map[config.Kind]Health{
 	// healthz is a reserved username, so no blog can claim the path
 	// (author/author.go:59).
 	config.KindWriteFreely: {"/healthz", "200"},
-	// src/server.js:63 at 1.1.0-oidc.1. Recorded for completeness: a monitor
-	// does not watch itself.
+	// src/server.js:63 at 1.1.0-oidc.1. Used for one monitor's public check of
+	// another on a separate site; a monitor does not watch itself
+	// (internal/render/uptime.go).
 	config.KindUptime: {"/healthz", "200"},
 }
 

@@ -132,3 +132,34 @@ func TestConcurrentPlansResolveOnce(t *testing.T) {
 		t.Errorf("asked the registry %d times, want once", n)
 	}
 }
+
+// listing is a registry that lists newest as every repository's newest
+// version, counting the questions.
+type listing struct {
+	moving
+	newest string
+	asked  atomic.Int32
+}
+
+func (l *listing) NewestVersion(string) (string, error) {
+	l.asked.Add(1)
+	return l.newest, nil
+}
+
+// The cache asks the registry it wraps for a repository's newest version,
+// once per run, and answers empty for one that lists none.
+func TestTheCacheAsksForTheNewestVersionOnce(t *testing.T) {
+	l := &listing{newest: "1.15.0-paisans"}
+	c := imagedigest.Cached(l)
+	for range 2 {
+		if got, err := c.NewestVersion("ghcr.io/paisans-software/mbin:stack-1"); err != nil || got != "1.15.0-paisans" {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	}
+	if n := l.asked.Load(); n != 1 {
+		t.Errorf("asked %d times", n)
+	}
+	if got, err := imagedigest.Cached(&moving{}).NewestVersion("ghcr.io/paisans-software/mbin:stack-1"); got != "" || err != nil {
+		t.Errorf("a registry that lists nothing answered %q, %v", got, err)
+	}
+}

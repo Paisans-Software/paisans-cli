@@ -50,7 +50,7 @@ func (p *Plan) probeEtcd() error {
 	// Every remaining member whose etcd runs answers, so that one which
 	// founded a cluster of its own is found whichever of them comes first.
 	var views []etcdView
-	for _, name := range p.end.Etcd.Members {
+	for _, name := range p.live(p.end.Etcd.Members) {
 		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep())
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: %w", p.Site, name, err)
@@ -75,7 +75,7 @@ func (p *Plan) probeEtcd() error {
 		}
 	}
 	if p.etcd.control == "" {
-		return fmt.Errorf("site remove %s: no etcd answers as a voter on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.end.Etcd.Members, ", "))
+		return fmt.Errorf("site remove %s: no etcd answers as a voter on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.live(p.end.Etcd.Members), ", "))
 	}
 	var problems []string
 	for i, m := range members {
@@ -102,7 +102,7 @@ func (p *Plan) probeEtcd() error {
 		listed[apply.EtcdMemberSite(p.cfg, m)] = true
 	}
 	var missing []string
-	for _, site := range p.end.Etcd.Members {
+	for _, site := range p.live(p.end.Etcd.Members) {
 		if !listed[site] {
 			missing = append(missing, site)
 			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install (paisans apply) first", site, p.cfg.EtcdMembersKey()))
@@ -130,6 +130,11 @@ func (p *Plan) probeEtcd() error {
 	}
 	if after > 0 && up*2 <= after {
 		problems = append(problems, fmt.Sprintf("without %s, %d of %d remaining members are healthy, which is no quorum", p.Site, up, after))
+	}
+	if p.Evict {
+		if err := p.evictQuorum(members, up); err != nil {
+			return err
+		}
 	}
 	if p.witness != "" && up < after {
 		problems = append(problems, fmt.Sprintf("%s leaves etcd after %s, going from two voters to one, which is safe only while both are healthy: the removal is a change two voters must both agree to", p.witness, p.Site))
@@ -334,7 +339,7 @@ func (p *Plan) probePatroni() error {
 	if len(p.cfg.Cluster.Sites) == 0 {
 		return nil
 	}
-	for _, name := range p.end.Cluster.Sites {
+	for _, name := range p.live(p.end.Cluster.Sites) {
 		command := fmt.Sprintf("if %s ps --status running --quiet patroni 2>/dev/null | grep -q .; then %s; else echo %s; fi",
 			p.dep().ComposeCmd("infra"), p.patronictl("list -f json"), noPatroni)
 		out, err := p.transports[name].Run(command)
@@ -352,7 +357,15 @@ func (p *Plan) probePatroni() error {
 		break
 	}
 	if p.patroni.at == "" {
-		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.end.Cluster.Sites, ", "))
+		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.live(p.end.Cluster.Sites), ", "))
+	}
+	// An evicted leader decides what its replicas do: a hostile one can stop
+	// them streaming, and would block its own eviction if that were refused.
+	// Their lag is what the operator weighs instead, when typing `lose
+	// writes`.
+	evictedLeads := false
+	for _, m := range p.patroni.members {
+		evictedLeads = evictedLeads || p.Evict && m.name() == p.Site && m.role() == "Leader"
 	}
 	var problems []string
 	seen := map[string]bool{}
@@ -369,11 +382,11 @@ func (p *Plan) probePatroni() error {
 			if m.state() != "running" {
 				problems = append(problems, fmt.Sprintf("the leader %s is %s", m.name(), m.state()))
 			}
-		case m.state() != "streaming":
+		case m.state() != "streaming" && !evictedLeads:
 			problems = append(problems, fmt.Sprintf("%s is %s, not streaming", m.name(), m.state()))
 		}
 	}
-	for _, name := range p.end.Cluster.Sites {
+	for _, name := range p.live(p.end.Cluster.Sites) {
 		if !seen[name] {
 			problems = append(problems, name+" is not a cluster member")
 		}
@@ -381,10 +394,20 @@ func (p *Plan) probePatroni() error {
 	if p.patroni.leader == "" {
 		problems = append(problems, "no member holds the leader key")
 	}
+	// Once the cut has started, on every remaining site or on some, a
+	// failover may be under way, and the members that stay are read as they
+	// move: the database stage waits for it, and its gate is what has to
+	// hold. A re-run after a partial cut completes it.
+	if p.Evict && (p.evict.cutDone || p.evict.cutStarted) {
+		problems = nil
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("site remove %s: the Patroni cluster is not healthy enough to change:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
 	}
-	if p.patroni.leader == p.Site {
+	if p.patroni.leader == p.Site && p.Evict {
+		p.evictLeader()
+	}
+	if p.patroni.leader == p.Site && !p.Evict {
 		for _, m := range p.patroni.members {
 			if m.role() == "Sync Standby" && m.state() == "streaming" && contains(p.end.Cluster.Sites, m.name()) {
 				p.patroni.candidate = m.name()
@@ -427,7 +450,11 @@ func (p *Plan) probeGarage() error {
 	if !contains(p.cfg.Storage.Garage.Sites, p.Site) {
 		return nil
 	}
-	p.garage.anchor = p.end.Storage.Garage.Sites[0]
+	staying := p.live(p.end.Storage.Garage.Sites)
+	if len(staying) == 0 {
+		return fmt.Errorf("site remove %s: no Garage site that runs would remain, so nothing holds the objects once %s is out. Recovery is a restore from backup. Nothing was changed", p.Site, p.Site)
+	}
+	p.garage.anchor = staying[0]
 	t := p.transports[p.garage.anchor]
 	out, err := t.Run(gcmd(p, "layout show"))
 	if err != nil {
@@ -453,19 +480,24 @@ func (p *Plan) probeGarage() error {
 	// Every Garage site that stays needs a node in the layout, and enough
 	// nodes have to stay for the replication factor: otherwise `garage layout
 	// apply` refuses the removal halfway through stage 1.
-	staying := 0
+	nodes := 0
 	inLayout := map[string]bool{}
 	for _, zone := range zones {
 		inLayout[zone] = true
 		if zone != p.Site {
-			staying++
+			nodes++
 		}
 	}
-	if staying < p.cfg.Storage.Garage.Replication {
-		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run paisans storage add for the sites missing from it first. Nothing was changed", p.Site, staying, p.Site, p.cfg.Storage.Garage.Replication)
+	if nodes < p.cfg.Storage.Garage.Replication {
+		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run paisans storage add for the sites missing from it first. Nothing was changed", p.Site, nodes, p.Site, p.cfg.Storage.Garage.Replication)
+	}
+	if p.Evict {
+		if err := p.probeDeadNode(t, nodes); err != nil {
+			return err
+		}
 	}
 	var missing []string
-	for _, site := range p.end.Storage.Garage.Sites {
+	for _, site := range staying {
 		if !inLayout[site] {
 			missing = append(missing, site)
 		}
@@ -514,7 +546,7 @@ func (p *Plan) stopPatroni() string { return p.stopService("patroni") }
 // endWantsSync is whether the end state keeps a synchronous standby: it asks
 // for one and has a replica to be it.
 func (p *Plan) endWantsSync() bool {
-	return p.end.Cluster.Synchronous && len(p.end.Cluster.Sites) >= 2
+	return p.end.Cluster.Synchronous && len(p.live(p.end.Cluster.Sites)) >= 2
 }
 
 // buildData is stage 1: the database and the objects out of the site.
@@ -668,7 +700,7 @@ func (p *Plan) patroniGate() error {
 // garageSamples reads in a row. The queue is read only once the layout is
 // stable, as storage add reads it.
 func (p *Plan) garageGate() error {
-	sites := p.end.Storage.Garage.Sites
+	sites := p.live(p.end.Storage.Garage.Sites)
 	err := poll(garageWait, garagePoll, func() error {
 		out, err := p.transports[p.garage.anchor].Run(gcmd(p, "layout show"))
 		if err != nil {
@@ -692,7 +724,10 @@ func (p *Plan) garageGate() error {
 				return fmt.Errorf("%s reports more than one live layout version, so metadata is still moving", site)
 			}
 		}
-		for i := 0; i < garageSamples; i++ {
+		// Objects only the evicted node held are gone, and their blocks are
+		// retried and fail for as long as anything references them, so the
+		// queue is not waited on once the operator has accepted the loss.
+		for i := 0; i < garageSamples && !p.evict.loseObjects; i++ {
 			if i > 0 {
 				sleep(garageGap)
 			}

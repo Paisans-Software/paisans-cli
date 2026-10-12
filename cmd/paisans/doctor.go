@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/paisans-software/paisans-stack/internal/ui"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/ownership"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
@@ -48,12 +50,18 @@ func runDoctor(args []string) error {
 	var only pathList
 	fs.Var(&only, "site", "look at this site only (repeatable); every check then runs on the named sites alone")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker and /srv are root's")
+	execute := fs.Bool("execute", false, "remove the config: keys in paisans.yaml that only repeat a value gating requires, before reading any site; no site is changed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	r := reporter()
 	if fs.NArg() > 0 {
 		return fmt.Errorf("doctor takes flags only. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+	}
+	if *execute {
+		if err := removeRedundantGateConfig(r, *configPath); err != nil {
+			return err
+		}
 	}
 	cfg, err := loadChecked(r, *configPath)
 	if err != nil {
@@ -247,7 +255,47 @@ func gatherDoctor(cfg *config.Config, sites []string, transports map[string]appl
 		}
 		in.Clocks = append(in.Clocks, sample)
 	}
+
+	in.Settings = gatherSettings(cfg, reached, transports)
 	return in
+}
+
+// gatherSettings asks each running copy of every app using the gate for the
+// settings the gate leaves to it, with the read command its kind records, on
+// every site doctor reached that the app runs on.
+func gatherSettings(cfg *config.Config, reached map[string]bool, transports map[string]apply.Transport) []doctor.SettingsProbe {
+	var out []doctor.SettingsProbe
+	placed := render.AppSites(cfg)
+	for _, name := range cfg.AppNames() {
+		app := cfg.Apps[name]
+		wanted := kinds.GateSettingsFor(app)
+		live, ok := kinds.LiveSettingsFor(app.Kind)
+		if len(wanted) == 0 || !ok {
+			continue
+		}
+		names := make([]string, len(wanted))
+		for i, s := range wanted {
+			names[i] = s.Name
+		}
+		for _, site := range placed[name] {
+			t, asked := transports[site]
+			if !asked || !reached[site] {
+				continue
+			}
+			p := doctor.SettingsProbe{Site: site, App: name}
+			got, err := t.Run(doctor.SettingsCommand(cfg.Deployment(), name, live.Service(), live.ReadCommand(names)))
+			switch {
+			case strings.Contains(got, doctor.NotRunningMarker):
+				p.NotRunning = true
+			case err != nil:
+				p.Err = errText(got, err)
+			default:
+				p.Out = got
+			}
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // gatherLeftovers takes one site's inventory with the host check's probes,
@@ -315,4 +363,49 @@ func firstOf(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// removeRedundantGateConfig is doctor --execute's one change: it takes out of
+// paisans.yaml every config: key that only repeats a value gating makes the
+// template write (kinds.RedundantGateConfig), which validate refuses as
+// config-key-already-rendered. A key with any other value contradicts the
+// gate, and changing it would change policy, so it is left for the operator.
+// It runs before validate, which would otherwise refuse the file before
+// doctor got this far, and it restores the file if the result does not load.
+// It touches no site. See docs/specs/2026-10-12-gate-settings.md.
+func removeRedundantGateConfig(r ui.Reporter, path string) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		// A file that does not load is reported by loadChecked, next.
+		return nil
+	}
+	keys := kinds.RedundantGateConfig(cfg)
+	if len(keys) == 0 {
+		return nil
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	r.Section(path)
+	for _, k := range keys {
+		st := r.Step(fmt.Sprintf("remove apps.%s.config.%s, which repeats what gating renders", k.App, k.Key))
+		if err := config.RemoveConfigKey(path, k.App, k.Key); err != nil {
+			st.Fail(err)
+			return restore(path, original, err)
+		}
+		st.Done("")
+	}
+	if _, err := config.Load(path); err != nil {
+		return restore(path, original, fmt.Errorf("the edited file no longer loads: %w", err))
+	}
+	return nil
+}
+
+// restore puts paisans.yaml back as it was before doctor --execute edited it.
+func restore(path string, original []byte, cause error) error {
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		return fmt.Errorf("%w; restoring %s also failed: %v", cause, path, err)
+	}
+	return fmt.Errorf("%w; %s is restored as it was", cause, path)
 }

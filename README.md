@@ -901,17 +901,28 @@ from this configuration and the fork reconciles it at every start:
   A ping alone reports every one of those the same way. Founder decision;
   the design is the amendment of 2026-10-09 in
   `docs/specs/2026-10-07-uptime-monitoring.md`.
-* every site Pocket ID runs on gets a check on its **admin reconciler**, which
-  fails while the `admins` group has fewer than two members (see *The admin
-  reconciler keeps `admins` equal to Pocket ID's administrators*).
-* the monitor checks no container of its own, which could only ever pass,
-  but it does check its own public URL, `https://<hostname>/healthz`: it is
-  alive whenever it can run that check, so what the check proves is the path
-  in front of it, DNS, the web server and the certificate. Behind an
-  operator's web server it is the only thing that notices a renewal that
-  silently stopped.
-* every `uptime` app pinned to a different `monitor` site gets the same
-  check of its public URL, `https://<hostname>/healthz` expecting 200. A
+* every site Pocket ID runs on gets a check on its **admin reconciler**
+  service, `<app> — admin reconciler (<site>)`, which asks `/livez` and
+  expects 200: that site's reconciler is running its passes, standby or not.
+  It says nothing about the `admins` group, which only the active instance
+  knows.
+* every Pocket ID app gets one **admins heartbeat**,
+  `<app> — admin continuity`: a push monitor its active instance feeds from
+  the reconciler's `/healthz`, so it fails while the `admins` group has
+  fewer than two members (see *The admin reconciler keeps `admins` equal to
+  Pocket ID's administrators*), and follows whichever site is active across
+  a failover with one history (below).
+* the monitor does not watch itself: its seed has no public or direct check
+  of its own app, and no ping or heartbeat of its own site. A monitor that is
+  down cannot report it, and a check from the monitor to its own host can only
+  pass. Every other app on the monitor's site is checked like any other. The
+  path in front of the monitor, DNS, the web server and the certificate, is
+  still exercised from outside it: every other site pushes its heartbeat to
+  the monitor's public hostname, so a failure there leaves every heartbeat
+  stale at once.
+* every other `uptime` app pinned to a different `monitor` site gets a
+  check of its public URL, `https://<hostname>/healthz` expecting 200, which
+  also carries the fork's 14 day certificate warning for that hostname. A
   monitor cannot report its own death, so a monitor on a separate site is
   what notices one that died, and the ping of its site, above, says whether
   it was the host. A monitor on the same site is not checked: it shares the
@@ -979,6 +990,27 @@ needs a second, so it is a warning rather than a refusal. Every one of these
 commands therefore has to reach the monitor's host, and host checks it as
 `apply` would.
 
+**The admins heartbeat is a service beside the reconciler.** Each Pocket ID
+stack, on every site the app runs on, runs `admins-heartbeat`: the
+heartbeat's curl image around a rendered `admins-heartbeat/push.sh` that once
+a minute asks the reconciler's `/healthz` over the stack's own network. A
+standby answers 200 `standby`, and nothing is pushed. The active instance
+answers 200 with the group healthy, pushed as success to
+`https://<monitor hostname>/ping/<token>`, or 503 with one line saying what is
+wrong, pushed to `.../ping/<token>/fail` with that line as a plain text body.
+No answer, or any other status, pushes nothing. Every instance pushes to the
+same token, `apps.<app>.admins_heartbeat_token`, generated at `init` (and by
+`apply`'s dry run, with the other generated secrets) in the site heartbeat
+token's shape and refused by `render` the same way, so the one monitor hears
+whichever instance is active, and silence past the grace means no instance is.
+It pushes to every monitor, the one on its own site included: what it carries
+is the group's health, not the site's reachability, and the active instance
+may be the one beside a monitor. The interval, grace and threshold are the
+site heartbeat's, and a deployment with no monitor renders no pusher. The
+fork keeps the body with the ping and shows its first line in the monitor's
+recent pings; the incident and the alert say only that the heartbeat
+reported a failure.
+
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
 never touched. An admin who ticks **Attach to new managed monitors** on their
@@ -1011,8 +1043,8 @@ break glass: Pocket ID is one of the things being watched, and a monitor you
 cannot open while it is down is no use. To use it, open
 `https://<hostname>/login?local=1` and sign in as `admin` with
 `apps.<app>.admin_password` from the secrets file, which `init` generates
-(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the visibility gate
-(`visibility-gate-on-ungateable-kind`): the gate signs in through Pocket ID,
+(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the gate
+(`gated-on-ungateable-kind`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 
 **It starts as root and drops.** `apply` writes the seed through `sudo`, so it
@@ -1813,7 +1845,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
@@ -2302,20 +2334,30 @@ apps:
   talk:
     kind: mbin
     hostname: talk.example.org
-    visibility_gate: member
+    gated: true
+    auto_login: true
+  blog:
+    kind: writefreely
+    hostname: blog.example.org
+    auto_login: true
   chat:
     kind: synapse
     hostname: matrix.example.org
-    visibility_gate: public
+    gated: false
 ```
 
-`visibility_gate` is `public`, `member` or `provisional`, and it is declared on
-the app rather than implied by which Caddy snippet somebody remembered to
-import. It is access policy, and access policy belongs in the configuration,
-not in a hand edited include. `member` admits a signed-in member of the
-community; `provisional` admits anyone signed in, member or not, and is warned
-about (`visibility-gate-provisional`) because it reads as protected while
-admitting anyone who made an account.
+Two booleans, both declared on the app rather than implied by which Caddy
+snippet somebody remembered to import, because they are access policy, and
+access policy belongs in the configuration, not in a hand edited include.
+
+| `gated` | `auto_login` | Someone with no session | A member the gate has signed in |
+|---|---|---|---|
+| `false` | `false` | reads the app as it is | reads the app as it is |
+| `true` | `false` | is sent to sign in | is let through, and meets the app's own sign-in button |
+| `false` | `true` | reads the app as it is; its sign-in page signs in at the gate first | is signed straight into the app |
+| `true` | `true` | is sent to sign in | is let through and signed straight into the app |
+
+`gated: true` admits members only. Both default to `false`.
 
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
@@ -2330,8 +2372,8 @@ gate covers everything, and four classes go to the app without it:
 | Token paths | the kind's token paths **and** `Authorization: Bearer` | the app, which refuses a token it did not issue |
 
 Everything else is redirected to sign in when there is no session, `curl`
-included, and to the gate's `/pending` page when the session belongs to
-someone who is not yet a member. Every hostname, gated or not, strips
+included, and refused with the gate's own 403 when the session belongs to
+someone who is not a member. Every hostname, gated or not, strips
 `X-Auth-Request-*` from the inbound request before anything else sees it:
 those headers are only ever the gate's verified answer, and an app that
 trusted one on an ungated hostname would be trusting whoever sent the
@@ -2340,6 +2382,9 @@ about that application, so it lives in `internal/kinds` beside the rest, read
 off the pinned tag's source with a citation for each. A token path is recorded
 only once the kind's source shows a token that reads content cannot be had
 without a member's sign-in; until then a native app's API calls meet the gate.
+Mbin's `/api/*` is one, because a gated Mbin runs as a private instance,
+which refuses any API request without a signed in user, so its mobile apps
+work behind the gate.
 
 **Anyone can send an ActivityPub header, so a gated app that federates must
 refuse an unsigned read.** Caddy cannot verify an HTTP signature without a
@@ -2347,27 +2392,44 @@ plugin, and the gateway runs no plugin whose failure to build would stop the
 identity provider loading, so the app is where the check lives. That is
 authorized fetch, on by default for Mbin and WriteFreely (see *Mbin and
 WriteFreely lock what the toolkit renders*). A gated federating app that would
-not refuse an unsigned read is refused (`visibility-gate-without-signed-fetch`):
+not refuse an unsigned read is refused (`gated-without-signed-fetch`):
 one whose kind records no way to, one with `settings.authorized_fetch: false`,
 and a WriteFreely with `private: false`, since only private mode makes a blog
 read from its allowlist alone. The monitor proves the setting is still on (see
 *Monitoring*). Reading only from instances on an allow list is a federation
 policy choice, and it is the founder's.
 
-**Auto-login is derived from the kind.** Someone the gate let through already
-holds a session at the identity provider, so the app's own "Log in with"
-button is one pointless click. Where a kind records its sign-in route and the
-cookies that mean "already signed in", a request for its front page or its
-sign-in page goes straight into that route, once every two minutes per browser
-so a user the app's own client refuses is not redirected forever. It never
-fires on a deep link: neither Mbin's nor WriteFreely's sign-in route takes a
-destination, and a deep link sent through one would land on the front page.
+**Auto-login is declared on the app and described by the kind.** A member the
+gate has signed in already holds a session at the identity provider, so the
+app's own "Log in with" button is one pointless click. Where a kind records its
+sign-in route and the cookies that mean "already signed in", a request for its
+front page or its sign-in page, from a browser holding the gate's session
+cookie, is checked with the gate and, for a member, sent straight into that
+route. Someone the gate refuses is sent back to the page they asked for and
+sees the app as they would have. Either way it happens once every two minutes
+per browser, so a member the app's own client refuses is not redirected
+forever. It never fires on a deep link: neither Mbin's nor WriteFreely's
+sign-in route takes a destination, and a deep link sent through one would land
+on the front page. `auto_login: true` on a kind with no such route is refused
+(`auto-login-without-a-rule`), because it would do nothing; Outline needs none,
+since its sign-in screen redirects itself when OIDC is its only provider.
+
+**On a public app, the sign-in page signs in at the gate.** Nobody passes the
+gate on a public app, so a visitor there would only hold the gate's session if
+they had signed in somewhere gated. Instead, a visit to the app's sign-in page
+with no gate session goes through the gate's sign-in and comes back holding
+one, so auto-login fires: the app's own "Log in" link becomes the community's
+sign-in, and one sign-in covers every app. Nothing else on a public app meets
+the gate. While the gate is down, a browser holding its session meets the
+edge's error on a public app's front page and sign-in page, the two paths
+auto-login checks; every other page, and every visitor without that session,
+reads the app as before.
 
 **The gate is enforced at the gateway, and only there. An app's published host
 port is not behind it.** The gate renders as `forward_auth` inside the
 gateway's Caddy site block, so it covers requests that arrive through the
 gateway's hostname. It does not cover the port the app's own compose file
-publishes: `talk` above is `visibility_gate: member`, and its stack publishes port 8080,
+publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
@@ -2386,7 +2448,7 @@ that kind serves can be gated.
 
 What remains the operator's is the mesh itself. A port on the mesh address is
 reachable from every mesh peer, so a compromised peer reaches the app ungated.
-`visibility_gate: member` is not protection against that, and nothing in this file
+`gated: true` is not protection against that, and nothing in this file
 claims it is. It also means the mesh interface has to be up before the app stacks start,
 because Docker cannot publish on an address the host does not have yet; that
 is the ordering that step 4 under *`init`, one site, no mesh* already requires.
@@ -2414,22 +2476,21 @@ Some combinations are refused by this today, and a homeserver pinned to a data
 site is the one worth knowing: Synapse's 8008 is the Patroni API's, and MAS's
 8009 is bg_mon's.
 
-**Leaving `visibility_gate` out of an app's stanza means the same thing as
-`visibility_gate: public`: ungated, reachable by anyone who can resolve the
-hostname.** That default has to be stated here, not only in a doc comment,
-because it is the one setting where forgetting it is indistinguishable from
-choosing it: an app with no `visibility_gate` key renders exactly like an app
-that explicitly opted out, and nothing at render time flags the absence as a
-decision skipped rather than made.
+**Leaving `gated` out of an app's stanza means the same thing as
+`gated: false`: ungated, reachable by anyone who can resolve the hostname.**
+That default has to be stated here, not only in a doc comment, because it is
+the one setting where forgetting it is indistinguishable from choosing it: an
+app with no `gated` key renders exactly like an app that explicitly opted out,
+and nothing at render time flags the absence as a decision skipped rather than
+made.
 
 **A gate on a kind that cannot sit behind one is refused**
-(`visibility-gate-on-ungateable-kind`), which is the rule below enforced rather
+(`gated-on-ungateable-kind`), which is the rule below enforced rather
 than merely stated. The case that makes this load bearing is a negative one. A
 Matrix hostname must never be gated: a Matrix client is not a browser and will
 not follow a redirect to a passkey prompt, so gating a homeserver's API or its
 `.well-known` apex breaks federation and every client's login, not just one
-member's. Pocket ID and the gate itself are the sign-in flow, so gating either
-gates the login. The monitor is what an admin opens when the sites it watches
+member's. Pocket ID is the sign-in flow, so gating it gates the login. The monitor is what an admin opens when the sites it watches
 are down, and the gate signs in at the identity provider on those sites, so a
 gated monitor is unreadable at exactly the moment it exists for, and its break
 glass password sign-in (see *Monitoring*) would sit behind the sign-in
@@ -2437,14 +2498,58 @@ it is the fallback for; its own OIDC client already admits only
 `settings.admin_group`, so the gate would add no access control, only a
 dependency. Leaving gating to a hand edited include means that failure
 shows up as clients mysteriously unable to log in, with nothing in the
-configuration saying why. A declared `visibility_gate: public` makes the
-absence of a gate a fact about the app that a reviewer can see, rather than an
-inference from what nobody wrote.
+configuration saying why. A declared `gated: false` makes the absence of a
+gate a fact about the app that a reviewer can see, rather than an inference
+from what nobody wrote.
 
-Declaring a gate when no `oauth2-proxy` app exists is refused, for the same
-reason an unknown hostname role is: the import would name a snippet nothing
-renders, and Caddy fails to load its entire configuration over one missing
-import, taking every hostname down rather than one.
+**Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
+toolkit runs it as an app named `gate`, of kind `oauth2-proxy`, at
+`gate.<community.domain>`, pinned to the gateway site. It holds no data, being
+a session cookie and nothing durable, so it sits with the edge it serves: it is
+down only when the gateway is, and that takes every app with it anyway. It is
+one container admitting the `members` group, which fails closed: a session
+outside the group is refused, never waved through. Everything an app gets, it
+gets too: a client at the identity provider, a generated cookie secret, a DNS
+record from `dns init` and a check on the monitor. Its session cookie is scoped
+to the community's domain with a leading dot, so one sign-in covers every app.
+Four things follow, and each is refused:
+
+* **Declaring an `oauth2-proxy` app.** The gate is the toolkit's; the apps it
+  was for set `gated` or `auto_login` instead.
+* **An app named `gate`, or no gateway site**, while an app uses the gate,
+  since the gate needs both the name and the gateway.
+* **A gated or auto-login app on a hostname outside the community's domain**
+  (`uses-gate-outside-the-domain`). The browser never sends the gate's cookie
+  there, so a gated app would send every member back to sign in forever and
+  auto-login would never fire.
+* **An app using the gate whose member group is not `members`**
+  (`oidc-member-group-disagrees-with-gate`). The gate admits one group and the
+  app's client the other, so they would disagree about who a member is.
+
+#### The settings gating needs are checked on both sides
+
+The gate leaves ActivityPub, and for Mbin a token holder's API calls, to the
+app, so some of the app's own settings are part of the gate: Mbin's private
+instance mode, allow list and authorized fetch, WriteFreely's private mode and
+authorized fetch. Each kind records which ones it needs and when, in
+`internal/kinds` beside its gate record, and how to read them from a running
+copy. Every one is rendered into the file the app reads and named in that
+file's lock list, so the app reads it from disk and nothing inside the app can
+change it. Nothing the toolkit does writes an app's database.
+
+* **`validate`** refuses a `config:` key the stack already writes
+  (`config-key-already-rendered`), the same rule render applies, so a key that
+  gating has made redundant or contradictory is refused before `apply` touches
+  a host. Whether a template writes a key can depend on the rest of the file,
+  so `validate` renders the deployment to find out, with secrets it generates
+  in memory and throws away: which keys a template writes never depends on a
+  secret's value.
+* **`doctor`** reads each running copy and fails when one of these settings is
+  off or not locked; see *`paisans doctor` reports what is stuck and how to
+  recover*. `doctor --execute` removes a `config:` key that only repeats what
+  gating renders.
+
+See `docs/specs/2026-10-12-gate-settings.md`.
 
 ### `storage init` provisions object storage
 
@@ -2589,14 +2694,31 @@ down: replication 3 on three or more sites, or replication 2 or more at
 about a minute. Elsewhere it is refused before anything stops. Founder
 decision.
 
-**Removing or replacing a node is not built**, by founder decision. After
-`garage layout remove` the old node must stay online until its data has moved,
-because Garage does not track block migration: a removed node's blocks become
-deletable only ten minutes after their references drop, and were observed
-leaving between about 10 and 20 minutes after the apply. A dead node needs
-`layout skip-dead-nodes`, possibly with `--allow-missing-data`. Both are
-decisions about losing data, and will get their own gates;
-`docs/specs/2026-10-07-garage-gaps.md` records what was learned.
+**Removing or replacing a node is not built**, by founder decision, except
+for a node whose site is evicted, which is skipped as dead (founder decision,
+2026-10-11; below). After `garage layout remove` the old node must stay online
+until its data has moved, because Garage does not track block migration: a
+removed node's blocks become deletable only ten minutes after their references
+drop, and were observed leaving between about 10 and 20 minutes after the
+apply. A dead node needs `layout skip-dead-nodes`, possibly with
+`--allow-missing-data`. Both are decisions about losing data, and each gets its
+own gate; `docs/specs/2026-10-07-garage-gaps.md` records what was learned.
+
+**An evicted Garage node is skipped as dead.** Garage keeps an old layout
+version live until every node in it has acknowledged and synced the new one,
+and an evicted node never will. So `site remove --evict` removes the node from
+the layout, applies it, and runs `garage layout skip-dead-nodes --version <n>`,
+which raises the acknowledgement of every node that is down to that version
+(Garage v1.0.1, `src/garage/cli/layout.rs`, `cmd_layout_skip_dead_nodes`). The
+remaining nodes still sync from each other. When they hold a copy of every
+partition, which needs `storage.garage.replication` of 2 or more and at least
+that many nodes remaining, nothing is lost and nothing is asked. Otherwise the
+objects only the evicted node held are lost: the plan says so, the operator
+types `lose objects`, and the command passes `--allow-missing-data`, which
+raises every node's sync too. The gate waits for one live layout version on
+every remaining node, and for an empty resync queue unless objects were given
+up, since their blocks are retried and fail for as long as anything references
+them. Founder decision.
 
 #### Replacing an app's key: `storage rotate-key`
 
@@ -4215,6 +4337,10 @@ else. Rebuilding a node from bare metal restores the **same** identity and no
 peer changes at all. The key travels over SSH — the same channel already trusted
 to carry every other rendered secret.
 
+Replacing a key, once someone who could read the secrets file should no longer
+hold it, is `mesh rekey`, one site at a time (see *Rekeying the mesh: `mesh
+rekey`*).
+
 ### `init` — one site, no mesh
 
 There is nothing to tunnel to yet.
@@ -5179,7 +5305,7 @@ What stays open is what a peer needs before it can sign anything: our
 instance actor carries the key it verifies our requests with, so gating it
 would leave two such servers each waiting on the other. A peer that does not
 sign its fetches cannot read either app. `false` turns it off for an ungated app, and a gated app refuses it
-(`visibility-gate-without-signed-fetch`), as does anything but a YAML boolean
+(`gated-without-signed-fetch`), as does anything but a YAML boolean
 (`authorized-fetch-not-a-boolean`).
 
 **Both answer a status-only `/healthz`.** 200 with an empty body when the
@@ -5339,12 +5465,16 @@ Founder decision, 2026-10-08.
 last pass: 200 with two or more members, 503 with fewer, on a failed write,
 with no group named `admins`, when Pocket ID does not answer, before the first
 pass, and once the last pass is more than two and a half hours old. The body
-is one line naming users by username. The uptime kind checks every site's
-reconciler, so a community down to one administrator gets an incident while that
-administrator can still fix it. Docker's healthcheck asks `/livez` instead,
-which fails only when the pass loop has hung: a new deployment has no `admins`
-group until someone makes one, and `apply`'s health gate must not hold the
-Pocket ID stack back on it.
+is one line naming users by username, and a standby's is `standby`, with a
+200. The uptime kind does not ask it directly: the active instance's
+`admins-heartbeat` pushes what it says to the monitor's
+`<app> — admin continuity` (*Monitoring*), so a community down to one
+administrator gets an incident while that administrator can still fix it,
+from whichever site is active.
+The monitor's per site check asks `/livez`, which fails only when the pass
+loop has hung, and so does Docker's healthcheck: a new deployment has no
+`admins` group until someone makes one, and `apply`'s health gate must not
+hold the Pocket ID stack back on it.
 
 **The reconciler's two writes are approved once, not per write.** An agent
 needs a human for every change to Pocket ID's groups; the reconciler is a
@@ -5513,7 +5643,7 @@ the admin reconciler and the heartbeat's curl image):
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
@@ -5582,8 +5712,18 @@ are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
 Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
 address, marked verified for the reason `app admin create` gives below, and
 `name` is split at its first space into a first and a last name. Each is put
-in every app's admin group, as `app admin create` does. Declaring the admin is
-the approval for all of it.
+in every app's admin group, as `app admin create` does, and in every app's
+member group as well. Declaring the admin is the approval for all of it.
+
+**A declared admin is a member of every app too**, because an app that gates
+on its member group would otherwise refuse its own administrator. Mbin reads
+`settings.member_group` and refuses a login whose claim lacks it unless the
+linked account is already an Mbin administrator, which a first login never
+is; releases of the fork before 1.15.1 did so even when the claim named the
+admin group. Joining the member groups makes every app admit its
+administrators, whatever it reads, including one that reads no group itself
+and relies on the client's restriction at Pocket ID. A member group that is
+also an admin group is joined once. Founder decision.
 
 The username is set when the account is created and never changed after:
 the pocket-id kind turns account editing off (`allow_own_account_edit`, under
@@ -5824,7 +5964,7 @@ apps:
       session_duration: 10080        # a week
       home_page_url: /settings/apps
       allow_user_signups: withToken
-      signup_default_groups: [provisional]
+      signup_default_groups: [members]
       email_one_time_access_as_unauthenticated: true
       email_verification: true
       allow_own_account_edit: false  # the only value it takes
@@ -6038,7 +6178,9 @@ and `ok` instead:
 ```
 
 **Each line is a Pocket ID mutation.** For an app
-declared in `paisans.yaml` the declaration approves its client; the plan is
+declared in `paisans.yaml` the declaration approves its client, and for the
+gate, which no file declares, so does setting `gated` or `auto_login` on an
+app; the plan is
 what lets an operator see what that approval does, in a dry run of either
 `apply` or the command, before `--execute`, and `--verbose` shows exactly what
 each request sends. The same probe runs
@@ -6079,13 +6221,13 @@ one that can disagree with the client. All four are confidential clients.
 Putting a user in the admin group is `app admin create`'s job, not this
 command's.
 
-**`validate` holds the groups to the gate.** The gate's `members` instance
-admits `apps.<gate>.settings.members_group`, default `members`, and a
-member gated app's client admits that app's `member_group`. When the two name
-different groups, someone is let through the gate and refused by the app, or
-admitted by the app on a path the gate leaves open, and nothing says which
-group "member" means; so an app with `visibility_gate: member` whose member
-group is not the gate's is refused (`oidc-member-group-disagrees-with-gate`).
+**`validate` holds the groups to the gate.** The gate admits `members`, and
+an app using the gate has a client admitting that app's `member_group`. When
+the two name different groups, someone is let through the gate and refused by
+the app, or admitted by the app on a path the gate leaves open, and nothing
+says which group "member" means; so an app setting `gated` or `auto_login`
+whose member group is not `members` is refused
+(`oidc-member-group-disagrees-with-gate`).
 A `member_group` or `admin_group` that is blank or not a string is refused
 too (`oidc-member-group-not-a-name`): the default would hold and the client
 would still be restricted, but what the operator wrote reads as a restriction
@@ -6171,8 +6313,8 @@ by hand is not this command's to change. **Differing in either direction is a
 refusal.** A client allowing less than the app needs cannot sign anyone in; a
 client allowing more is a privilege leak, so an extra callback URL (a sign in
 started here could finish at another host) and an extra allowed group (its
-members are exactly who the member group was meant to keep out, `provisional`
-being the usual one) are refused by name, as is PKCE on for an app that sends
+members are exactly who the member group was meant to keep out) are refused by
+name, as is PKCE on for an app that sends
 no challenge. The allow step, when it runs, sends exactly the app's groups,
 never a union with what the client held. A launch URL that is empty or a
 toolkit default is the one exception, set as above, because neither is a
@@ -6801,6 +6943,227 @@ sites a kept Caddy goes on serving, and the data `--delete-data` deletes.
 | an entry that is not the id's, or whose token or root another entry holds | everything removed is named from the id and its token |
 | `--execute` without a terminal | it asks for the site's name |
 
+#### Evicting a site: `--evict`
+
+`--host-gone` is for a host that is dead. `--evict` is for one that still runs
+and that the other admins can no longer log in to: an admin stopped
+cooperating, and their host is still a data site, a Garage node, an apps site
+or the gateway. `docs/specs/2026-10-11-site-evict.md` is the approved
+specification. How to run it is under *`paisans site remove`* in
+[docs/commands.md](docs/commands.md), and the order of everything around it
+is in [docs/guides/when-an-admin-leaves.md](docs/guides/when-an-admin-leaves.md).
+
+**Being a WireGuard peer of the remaining sites is being in the cluster.**
+etcd listens on plain `http://` with no client certificates, Patroni's REST
+API has no authentication, every data site shares one set of Postgres
+passwords and every Garage node one `rpc_secret`, and every published port
+binds the mesh address (see *So every published port binds the site's mesh
+address*). Each site has its own WireGuard key, each peer entry is a `/32`, and
+there is no preshared key, so removing the site's public key from every
+remaining site's mesh file and running `wg syncconf` drops it: no remaining
+site accepts a handshake from that key or routes anything to its address.
+Cutting the peer is what evicts.
+
+**So the cut comes first, and the host is never reached.** A plain removal
+cuts the mesh last, which a dead host does not mind; a live one is still a
+peer through stage 1, its Patroni keeps writing its member key, and a
+switchover needs the leader to step down, which a host run by someone else
+does not do. `--evict` implies `--host-gone`, and orders the stages from the
+cut:
+
+| Stage | What runs | Gate |
+|---|---|---|
+| 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `apply` and `wg syncconf`, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and `wg show` on each has no handshake with it |
+| 2. DNS | the site's address records deleted, as `site remove`'s DNS stage does, and also at names the configuration still wants (below) | listing the zones again finds nothing left to delete |
+| 3. Database | when the site leads, a wait for Patroni's own failover: the cut leader cannot renew its leader key, the key expires with Patroni's `ttl` (30 seconds by default), and a remaining member takes over; then `synchronous_mode` off when one data site remains, and the site's member key deleted from etcd, which it can no longer rewrite | a remaining site leads, and `patronictl list` no longer lists the site |
+| 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
+| 5. Storage | the site's Garage node out of the layout, then `garage layout skip-dead-nodes` (below, *An evicted Garage node is skipped as dead*) | no layout row for the site, and every remaining node settled |
+| 6. The rest of the cluster | HAProxy without its backend, each remaining replica's `patroni.env` one at a time, and the site out of every remaining gateway's deployment record, as `site remove`'s stage 2 does | HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streams again |
+| 7. Config | the site taken out of `paisans.yaml`, as `site remove`'s stage 5 | the file loads without it |
+| 8. Monitor | every monitor reseeded, as `site remove`'s stage 6 | as there |
+
+Stage 1 is strict: a site that did not take the cut is named and nothing after
+it runs. A partial cut is safe to leave, because every peer that dropped the
+key no longer talks to the site, and a re-run completes it. Every stage is
+planned from live state, as in a plain removal, so a run stopped anywhere
+resumes; a remaining site whose mesh file was written by a run that stopped
+before its interface took it is handed the file again.
+
+**Patroni's health is required of the members that stay, as in any removal,
+with two exceptions.** When the evicted site leads, its replicas' streaming
+state is its to decide: a leader in hostile hands can stop them streaming, and
+refusing on that would let it block its own eviction. Their lag is shown
+instead, and is what `lose writes` weighs. And once the cut has started on any
+remaining site, a failover may be under way and the members are read as they
+move; the database stage waits for it and its gate is what has to hold, which
+is what lets a re-run complete a partial cut.
+
+**The DNS stage deletes the records at names still wanted, too.** A removed
+host is gone, but an evicted one may be hostile, and every visitor a record
+sends it is one whose session cookie it can read. So rule 5 of *The site's DNS
+records go with it* is lifted: a record at a name the configuration without the
+site still wants is deleted as long as the other rules hold, which tie it to
+the evicted host alone. That name answers nothing until the `apply` that
+brings up the replacement creates its record at the new address.
+
+**Refused before anything changes**, besides `site remove`'s own refusals:
+
+| Refused | Because |
+|---|---|
+| the remaining healthy etcd voters are not a majority of the voters etcd has now | `member remove` needs a quorum of the current voters, the evicted one counted; recovery is restoring etcd from a remaining member, outside the toolkit |
+| two or more remaining sites with no dial endpoint, and the site the only remaining one with an endpoint | they peer only with a dialled site and relay everything else through it, so cutting it cuts them; give one an endpoint first |
+| the only data site | nothing remains to fail over to; recovery is a restore from backup |
+| a gateway whose DNS token, read from the secrets file, does not work against the provider | the evicted host holds the token it was rendered, so it is revoked at the provider and a new one set with `secrets set` first; a token that fails is most often the revoked one, still in the file, and the DNS stage could not delete the records with it |
+| a site declared for the first time whose host does not answer over ssh | whether it is new is read from its host's registry |
+| `--execute` without a terminal | an eviction is not undone by running it again |
+| `--force`, `--ssh`, `--id` or `--delete-data` | each names a host to change, and an eviction reaches none |
+
+**What it asks at the terminal.** `--execute` asks for each word in turn, and
+there is no flag that answers any of them:
+
+* `revoked`, when the site holds the gateway. The DNS token can change the
+  community's records from anywhere, and the toolkit cannot revoke it: it holds
+  the token, not a credential that manages tokens. The token in the secrets
+  file is also tried against the provider before anything changes, where a
+  provider whose record management is implemented allows it; otherwise the
+  report says it was not checked. It is asked first, before the secrets file
+  is read, since the new token is set with `secrets set` while it waits: the
+  token tried and every secret written back are the file as it is then.
+* the site's name, always.
+* `lose writes`, when the site leads and no remaining member is a streaming
+  `Sync Standby`. The plan names the most current replica and its lag in
+  received WAL, since a failover promotes it and any commit the evicted leader
+  acknowledged after its last received WAL is lost. Replication is
+  asynchronous unless `cluster.synchronous` is set, so this is the usual case
+  for a leader. With a streaming `Sync Standby` nothing is asked: it takes over
+  losing nothing. Founder decision.
+* `lose objects`, when the site's Garage node held objects nothing else does
+  (below).
+
+Patroni is read again immediately before the cut, after the answers: which
+site leads, and who would take over from it, decide whether `lose writes` is
+asked and what it agrees to, and either can change while the questions wait
+at a terminal. When the evicted site has taken or lost the leader, or the
+Sync Standby or the replica a failover would promote is another, the run stops
+before anything changes and says to run it again, which reads it afresh.
+
+**A replacement is a new site, declared in the same edit, and the eviction
+comes first.** The site's name keys its WireGuard key and heartbeat token in
+the secrets, its etcd and Patroni member names, its Garage zone, its DNS
+records and every host's records of it, so a new name keeps the old host and
+the new one apart in all of them and in every log. One edit of
+`paisans.yaml` declares the new site with the roles it takes over and pins to
+it any app pinned to the evicted one; then `site remove <old> --evict
+--execute`, then `paisans apply`, which prepares the new host, applies it and
+creates its records. Evicting first means nothing waits on a site that will not
+answer, and the old host is out of the mesh before the new one joins. Founder
+decision.
+
+* A site the configuration declares whose host holds no claim of this
+  deployment is the replacement. The eviction neither reaches it, nor claims
+  it, nor gates on it. A missing claim alone is not enough: a claim can be
+  lost, and an `ssh` section can reach the wrong host, and a site that ran
+  taken for new would be left out of the cut while its peers still talk to it.
+  So when a remaining site lists its key as a WireGuard peer, or a gateway's
+  deployment record lists it, the eviction refuses, naming the site and what
+  says it ran. `mesh rekey` decides which sites are not brought up yet the
+  same way.
+* Its secrets are generated first when the secrets file does not hold them,
+  by the same code `init` runs, on the workstation, and written encrypted to
+  `.sops.yaml`'s recipients once every question is answered. A file that
+  changed after it was read is refused rather than overwritten, since the write
+  is the whole file and would lose the change.
+* The cut is rendered without it. The cut must not wait on a host or a DNS
+  record that does not exist yet, and `apply` stops before `wg syncconf` while
+  a peer's endpoint name does not resolve; the `apply` that brings it up adds
+  it as a peer on every site.
+* The only gateway or the only apps site is not refused when the
+  configuration declares its replacement. Between the eviction and that
+  `apply` the community's names answer nothing, and the report says so. The
+  only data site and the etcd majority are refused: a replacement there is a
+  restore, outside the toolkit.
+
+**What the host still holds** is in the closing report: everything it was
+rendered, valid until rotated. Its own WireGuard key no longer works anywhere.
+The DNS token goes first, since it can point the community's names anywhere;
+then the OIDC client secrets (`oidc client create --rotate-secret`) and the
+apps' S3 keys (`storage rotate-key --app`), which work from the internet; then
+the Postgres, Garage and heartbeat secrets, which only the mesh reaches once it
+is closed and which `secrets rotate` will change where they are checked and
+where they are used together. A copy of the database and of the objects cannot
+be taken back.
+
+**An admin who could decrypt the secrets file holds every site's secrets,**
+including every other site's WireGuard private key, and WireGuard accepts a
+handshake from any address that proves a key. So their age key comes out of
+`.sops.yaml` and the file is re-encrypted under a new data key, and every
+remaining site's key is rotated with `mesh rekey --all` (*Rekeying the mesh*)
+before the replacement joins. The guide has the order.
+
+### Rekeying the mesh: `mesh rekey`
+
+`paisans mesh rekey <site>... | --all` replaces sites' WireGuard keys.
+How to run it is under *`paisans mesh rekey`* in
+[docs/commands.md](docs/commands.md).
+
+**One site at a time.** A site whose key changes loses its tunnels until every
+peer knows the new key, and two sites down at once can cost etcd its quorum.
+Each site goes through four stages, each ending at a gate:
+
+| Stage | What runs | Gate |
+|---|---|---|
+| 1. New key | a private key generated on the workstation, as `init` generates one, and written to the secrets file as `sites.<site>.wireguard_next_private_key`, beside the current | the file decrypts and holds it |
+| 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `apply` and `wg syncconf`; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
+| 3. Health | nothing | etcd healthy at every voter; exactly one Patroni member leading and `running`, and every other data site a member and `streaming` |
+| 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
+
+**A stopped run resumes.** A next key in the secrets file says the site is mid
+rekey, and which public key its host runs, read with `wg show <interface>
+public-key`, says whether stage 2 is done. A peer whose file was written but
+whose interface was not handed it is synced again. A site left mid rekey goes
+first in the next run, whether it is named or not, and its swap is finished
+before the cluster's health is read: a swap that stopped part way leaves its
+peers disagreeing about its key, which is often exactly why the cluster is
+unhealthy, so refusing on that health would leave the run unable to repair
+what it broke. The health check refuses only before a site's rekey starts. An
+`--all` run records the sites it has left in the secrets file
+(`mesh_rekey_remaining`), each taken off as its key is promoted, so a stopped
+`--all` run resumes with the sites it had left and does not rekey again a site
+it finished. Until stage 4, render still
+reads `wireguard_private_key`, the old key, so `apply`, with or without
+`--site`, refuses while any site has a next key in the secrets file and names
+the `mesh rekey` that finishes it: an `apply` then would hand the old key back
+to every peer and cut the site's tunnels, and a refusal costs nothing but the
+rekey's resume.
+
+**A relay's swap pauses Patroni.** A site with no dial endpoint routes
+everything it has no peer for through the first site that has one (*`site
+add`: a second data site, and the one hard problem*), so two undialled sites
+reach each other only through that relay. Swapping the relay's key cuts them
+apart for the moment it takes, and the relay itself with them. `validate`
+keeps two voters dialled, but etcd can still be left without a leader while
+it re-forms when several voters have no endpoint, and a Patroni leader that
+cannot renew its key then demotes itself and another member can be promoted,
+for a partition that heals in seconds. So around a relay's swap the cluster is put in
+maintenance mode with `patronictl pause --wait`, which returns once every
+member has seen it (Patroni v4.1.0, `patroni/ctl.py`); paused, Patroni keeps
+the roles it has and still reports them. The pause is read back from
+`patronictl show-config`, since patronictl reports a failed request without
+failing. etcd re-forms on its own once the tunnels are back, and the health
+gate waits for it, bounded; only then does `patronictl resume --wait` run.
+A run that stops in between leaves Patroni paused, on purpose, since resuming
+it before etcd has its voters back is the failover the pause exists to
+prevent, and the run that resumes the swap resumes Patroni after it. The plan
+says which sites relay through the site and that the cluster pauses for its
+swap. A deployment of one dialled VM and homes with no endpoint can therefore
+rekey every site, its relay included, which the eviction's runbook depends on.
+
+**Refused before anything changes:** an unhealthy etcd or Patroni, since every
+site's swap takes its tunnels down for a moment; a Patroni paused by anything
+but this rekey's own relay swap, since that is someone else's maintenance; and
+a site that does not answer over ssh, since every site is a peer of some site
+rekeyed.
+
 ### Preflight
 
 Half the design's assumptions are mechanically checkable, and every unchecked one
@@ -6955,11 +7318,18 @@ nothing right, and the closing line counts it apart from the checks that
 passed. It exits 1 when any finding is `FAIL`, so a script or a monitor can
 tell a healthy deployment from one that needs a human.
 
-It **changes nothing**, and it has no `--execute`. Every command it sends is a
-read: a list, a status, a key, a log tail. The recoveries it describes are
-printed for a human to run, because doctor is run in the middle of an outage
-and the one recovery that touches member data, a forced failover, loses
-commits. Which commits a community keeps is a human's decision.
+It **changes no host**. Every command it sends is a read: a list, a status, a
+key, a log tail. The recoveries it describes are printed for a human to run,
+because doctor is run in the middle of an outage and the one recovery that
+touches member data, a forced failover, loses commits. Which commits a
+community keeps is a human's decision. Its one change is to the local
+`paisans.yaml`, and only with `--execute`: before it loads the file, it removes
+every `config:` key that only repeats a value gating makes the template write
+(Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin), which `validate`
+otherwise refuses as `config-key-already-rendered`. The file then says the
+same thing with one fewer place to say it. A key with any other value
+contradicts the gate, and changing it would change policy, so it is left for
+the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
 check runs with the sites that did. Each ssh attempt gives up after ten
@@ -6979,6 +7349,7 @@ that the first `FAIL` is usually the cause of those after it:
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
 | Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running | any container is not running |
+| Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |

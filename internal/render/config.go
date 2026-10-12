@@ -47,8 +47,6 @@ var settingOwners = []settingOwner{
 	{config.KindMbin, "S3_BUCKET", ".env", "s3_bucket"},
 	{config.KindMbin, "S3_REGION", ".env", "s3_region"},
 
-	{config.KindOAuth2Proxy, "OAUTH2_PROXY_ALLOWED_GROUPS", "compose.yaml", "members_group"},
-
 	{config.KindOutline, "AWS_REGION", ".env", "s3_region"},
 	{config.KindOutline, "AWS_S3_FORCE_PATH_STYLE", ".env", "s3_force_path_style"},
 	{config.KindOutline, "AWS_S3_UPLOAD_BUCKET_NAME", ".env", "s3_bucket"},
@@ -173,8 +171,8 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 
 	for _, key := range sortedKeys(keys) {
 		if o, ok := omittedOnPurpose(app.Kind, key); ok {
-			return fmt.Errorf("config-key-already-rendered: apps.%s.config.%s: the template %s leaves %s out of %s/%s on purpose: %s. A key a template omits by decision is owned by the template as surely as one it writes, so a passthrough key may not put it back; that is a template change, and it is reviewable.",
-				app.Name, key, strings.TrimPrefix(sources[files[target].Path], "templates/"), o.Key, app.Dir, name, o.Why)
+			return collision(app, key, fmt.Sprintf("the template %s leaves %s out of %s/%s on purpose: %s. A key a template omits by decision is owned by the template as surely as one it writes, so a passthrough key may not put it back; that is a template change, and it is reviewable.",
+				strings.TrimPrefix(sources[files[target].Path], "templates/"), o.Key, app.Dir, name, o.Why))
 		}
 	}
 
@@ -220,11 +218,64 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 func alreadyRendered(app plannedApp, key, file, template, why string) error {
 	where := app.Dir + "/" + file
 	if setting, ok := owningSetting(app.Kind, key); ok {
-		return fmt.Errorf("config-key-already-rendered: apps.%s.config.%s: %s already sets this key, and apps.%s.settings.%s is the sanctioned input for it. Set that instead and remove the key from config.%s",
-			app.Name, key, where, app.Name, setting, why)
+		return collision(app, key, fmt.Sprintf("%s already sets this key, and apps.%s.settings.%s is the sanctioned input for it. Set that instead and remove the key from config.%s",
+			where, app.Name, setting, why))
 	}
-	return fmt.Errorf("config-key-already-rendered: apps.%s.config.%s: %s already sets this key, written by the template %s. A passthrough key may only add what a template does not write: changing a template owned value is a settings key or a template change, and both are reviewable.%s",
-		app.Name, key, where, strings.TrimPrefix(template, "templates/"), why)
+	return collision(app, key, fmt.Sprintf("%s already sets this key, written by the template %s. A passthrough key may only add what a template does not write: changing a template owned value is a settings key or a template change, and both are reviewable.%s",
+		where, strings.TrimPrefix(template, "templates/"), why))
+}
+
+// ConfigCollisionRule is the rule a passthrough key the stack already owns
+// is refused under, by render and by validate alike.
+const ConfigCollisionRule = "config-key-already-rendered"
+
+// ConfigCollision is a passthrough key the stack already owns: one a template
+// writes, one compose sets or reads, or one a template leaves out on purpose.
+type ConfigCollision struct {
+	App, Key string
+	// Detail says who owns the key and what to do instead.
+	Detail string
+}
+
+// ConfigKey is the key in paisans.yaml: apps.<app>.config.<key>.
+func (c *ConfigCollision) ConfigKey() string { return "apps." + c.App + ".config." + c.Key }
+
+func (c *ConfigCollision) Error() string {
+	return ConfigCollisionRule + ": " + c.ConfigKey() + ": " + c.Detail
+}
+
+func collision(app plannedApp, key, detail string) error {
+	return &ConfigCollision{App: app.Name, Key: key, Detail: detail}
+}
+
+// ConfigCollisions is every passthrough key the stack already owns. Build
+// stops at the first, so each key is rendered on its own here, with every
+// other app's and every other key's passthrough left out: a key's collision
+// does not depend on the others, and an operator fixing them one build at a
+// time would meet them one at a time. Which keys a template writes depends on
+// the configuration, not on secret values, so validate calls this with
+// secrets it generated and throws away.
+func ConfigCollisions(cfg *config.Config, secrets *config.Secrets) []*ConfigCollision {
+	var out []*ConfigCollision
+	for _, name := range cfg.AppNames() {
+		for _, key := range sortedKeys(cfg.Apps[name].Config) {
+			one := *cfg
+			one.Apps = map[string]config.App{}
+			for n, a := range cfg.Apps {
+				a.Config = nil
+				one.Apps[n] = a
+			}
+			app := one.Apps[name]
+			app.Config = map[string]any{key: cfg.Apps[name].Config[key]}
+			one.Apps[name] = app
+			_, err := Build(&one, secrets)
+			var c *ConfigCollision
+			if errors.As(err, &c) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
 }
 
 // interpolation matches compose's variable syntax: $$ is an escaped dollar,

@@ -247,6 +247,13 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 		// (env_config.go:182-184). README, "The toolkit administers Pocket ID
 		// through its static API key", says why it is generated here.
 		keys = append(keys, "encryption_key", "static_api_key")
+		// admins_heartbeat_token is what every instance of the app pushes
+		// the admins group's health to each monitor with, and what each
+		// monitor's seed names for the app (internal/render/adminsheartbeat.go).
+		// One per app rather than per site, so that the one monitor follows
+		// whichever instance is active. The site heartbeat token's shape and
+		// rule, for the same reasons: see heartbeat_token above.
+		keys = append(keys, adminsHeartbeatToken)
 	}
 	if app.Kind == config.KindUptime {
 		// ADMIN_PASS is the break glass sign in for when the identity
@@ -274,6 +281,12 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// adminsHeartbeatToken is the Pocket ID app secret its instances push the
+// admins group's health with: 16 random bytes, hex, which is the shape the
+// uptime fork's seed takes a token in (src/lib/sitePayload.js insertSite at
+// 1.1.0-oidc.4), as for a site's heartbeat_token.
+const adminsHeartbeatToken = "admins_heartbeat_token"
 
 // The three secrets Matrix Authentication Service needs, named here because
 // two of them are not a generated password and the difference has to be
@@ -308,6 +321,8 @@ func appSecret(key string) (string, error) {
 		return hexSecret(32)
 	case masSigningKey:
 		return rsaPrivateKeyPEM()
+	case adminsHeartbeatToken:
+		return hexSecret(16)
 	case "s3_access_key_id":
 		return garageKeyID()
 	case "s3_secret_access_key":
@@ -728,6 +743,11 @@ func password() (string, error) {
 	encoded := base64.RawURLEncoding.EncodeToString(raw)
 	return encoded, nil
 }
+
+// WireGuardPrivateKey is a new WireGuard private key, generated here on the
+// workstation as init generates every site's: `paisans mesh rekey` uses it
+// for a site's next key.
+func WireGuardPrivateKey() (string, error) { return wireGuardPrivateKey() }
 
 // wireGuardPrivateKey returns a curve25519 private key, base64 encoded, in the
 // form WireGuard expects. Clamping is what `wg genkey` does, and an unclamped

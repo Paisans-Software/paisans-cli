@@ -616,6 +616,19 @@ paisans site remove home-b --delete-data --execute     # and deletes its data, a
 paisans site remove home-b --host-gone --execute       # the host is never coming back
 ```
 
+`--evict` takes out a site whose host still runs and that nobody else can
+reach. It never reaches that host: the mesh is cut on every remaining site
+first, then its DNS records go, Patroni fails over by itself, its etcd member
+is removed and its Garage node is skipped as dead. A replacement declared in
+the same edit of `paisans.yaml` is left alone and brought up by `paisans
+apply` afterwards; its secrets are generated first if the file lacks them.
+
+```sh
+paisans site remove home-b --evict             # refusals, then every stage, what it would ask, and what the host keeps
+paisans site remove home-b --evict --execute   # asks for the site's name, and revoked, lose writes or lose objects when they apply
+paisans apply                                  # brings up the replacement the configuration declares
+```
+
 `--force` cleans one host and nothing else, and `--id` does it with no
 `paisans.yaml`:
 
@@ -636,6 +649,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | Flag | Default | Meaning |
   |------|---------|---------|
   | `--host-gone` | off | run every stage but cleaning the host, and reach it not at all |
+  | `--evict` | off | the host still runs and nobody else can reach it: cut it out of the mesh first and take it out of the cluster without reaching it; implies `--host-gone`, and refuses `--force`, `--ssh`, `--id` and `--delete-data` |
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
@@ -652,8 +666,42 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   touches the host's key allowlist. It deletes the host's configuration store
   too, the repository and the files beside it; the other sites still hold every
   version.
+  With `--evict` it needs a terminal, and asks, in order: `revoked` for a
+  gateway, once its DNS token is revoked at the provider and a new one set
+  with `secrets set`; the site's name; `lose writes` when the leader has no
+  streaming `Sync Standby`; `lose objects` when its Garage node's objects have
+  no other copy. No flag answers them.
 
-See *`site remove` takes a site out* in `README.md`.
+See *`site remove` takes a site out* and *Evicting a site: `--evict`* in
+`README.md`, and [guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md)
+for the order around an eviction.
+
+### `paisans mesh rekey`
+
+Replaces sites' WireGuard keys, one site at a time: a new key written to the
+secrets file as the site's next key, every peer's mesh file and then the
+site's own synced with it, a handshake under it from every peer, etcd and
+Patroni healthy, then the next key promoted. A stopped run resumes where it
+stopped; `apply` refuses until it finishes, since an apply renders the old key.
+
+```sh
+paisans mesh rekey home-a              # dry run: where each site's rekey stands, and every stage
+paisans mesh rekey home-a vm --execute # home-a, then vm
+paisans mesh rekey --all --execute     # every site, one at a time
+```
+
+* **Alone:** always. Nothing else rotates a WireGuard key.
+* **Flags:** `--all` (every site the configuration declares, in its order),
+  and the sites as arguments, `--config`, `--secrets`, `--execute`, `--sudo`.
+* **Hosts:** every site, since each is a peer of some site rekeyed. The
+  secrets file is read and written on this machine only.
+* **`--execute`:** rekeys each site in four gated stages, and stops at the
+  first gate that fails. Refuses before anything changes when etcd or Patroni
+  is unhealthy, Patroni is paused by something else, or a site does not answer
+  over ssh. Around the swap of a site other sites relay through, Patroni is
+  paused and then resumed once the cluster is healthy again.
+
+See *Rekeying the mesh: `mesh rekey`* in `README.md`.
 
 ### `paisans failover test`
 
@@ -673,16 +721,18 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
-that are down, Pocket ID's active instance, clocks, what is left over, and
-each host's key allowlist, with each key `ssh.keys` names that it does not
-hold and that the next `host prepare` would add, since one already in
-`authorized_keys` is never added again.
+that are down, the settings a gated app must enforce, Pocket ID's active
+instance, clocks, what is left over, and each host's key allowlist, with each
+key `ssh.keys` names that it does not hold and that the next `host prepare`
+would add, since one already in `authorized_keys` is never added again.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
-  `--sudo`.
+  `--sudo`, `--execute`.
 * **Hosts:** every site, or the named ones, read only.
-* **`--execute`:** not taken. It prints recoveries for a human to run.
+* **`--execute`:** removes from `paisans.yaml` each `config:` key that only
+  repeats a value gating renders, before loading it. It changes no host; the
+  recoveries it prints are for a human to run.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
 

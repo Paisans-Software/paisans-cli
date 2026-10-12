@@ -143,8 +143,6 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 			add(owner, "apps."+name, "tcp", addr, port)
 		}
 		switch kind {
-		case config.KindOAuth2Proxy:
-			add(owner+" members instance", "apps."+name, "tcp", addr, gateMembersPort)
 		case config.KindSynapse:
 			add(owner+" MAS", "apps."+name, "tcp", addr, masPort)
 		case config.KindPocketID:

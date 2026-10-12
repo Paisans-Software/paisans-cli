@@ -69,16 +69,8 @@ var appPort = map[config.Kind]int{
 // from its host needs it, and reading it here keeps one number in one place.
 func AppPort(kind config.Kind) int { return appPort[kind] }
 
-// gateMembersPort is the oauth2-proxy kind's second instance, one port above
-// the primary. It is a literal here, not appPort[config.KindOAuth2Proxy]+1:
-// the kind ships exactly two fixed ports, both declared explicitly in
-// internal/kinds/kinds.go's service list and in the kind's own templates, so
-// nothing computes a port at render time that those files did not already
-// name.
-const gateMembersPort = 4181
-
 // reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
-// the mesh address for the uptime monitor. A literal, like gateMembersPort:
+// the mesh address for the uptime monitor. A literal, like masPort:
 // the reconciler's own binary and the kind's compose template name the same
 // number.
 const reconcilerPort = 1412

@@ -47,6 +47,8 @@ type Cache struct {
 	// named by its digest never changes, so an answer is kept for the run
 	// like a digest is.
 	versions map[string]string
+	// newest are the answers NewestVersion got, by reference.
+	newest map[string]string
 }
 
 // Versioner reads the version label of a build named by its digest, as
@@ -65,7 +67,7 @@ type resolution struct {
 
 // Cached is a Cache in front of r.
 func Cached(r Resolver) *Cache {
-	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
+	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, newest: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
 }
 
 // Digest is the digest ref was first resolved to, resolving it now if it has
@@ -141,6 +143,41 @@ func (c *Cache) Version(ref string) (string, error) {
 	c.versions[ref] = version
 	c.mu.Unlock()
 	return version, nil
+}
+
+// Lister names the newest version-shaped tag of a reference's repository,
+// as Registry.NewestVersion does.
+type Lister interface {
+	NewestVersion(ref string) (string, error)
+}
+
+// NewestVersion is the wrapped resolver's NewestVersion for ref, asked once
+// per run, and empty with no error when the wrapped resolver lists no tags
+// or the registry could not be reached earlier in the run. It only fills in
+// an example in advice, so a failure is an empty answer, not an error.
+func (c *Cache) NewestVersion(ref string) (string, error) {
+	l, ok := c.r.(Lister)
+	if !ok {
+		return "", nil
+	}
+	c.mu.Lock()
+	if newest, ok := c.newest[ref]; ok {
+		c.mu.Unlock()
+		return newest, nil
+	}
+	if _, down := c.down[Host(ref)]; down {
+		c.mu.Unlock()
+		return "", nil
+	}
+	c.mu.Unlock()
+	newest, err := l.NewestVersion(ref)
+	if err != nil {
+		newest = ""
+	}
+	c.mu.Lock()
+	c.newest[ref] = newest
+	c.mu.Unlock()
+	return newest, nil
 }
 
 // Host is the registry host a reference is pulled from, by Docker's

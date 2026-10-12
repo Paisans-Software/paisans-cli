@@ -109,7 +109,7 @@ func TestWriteFreelyLockedSettingsAreRendered(t *testing.T) {
 		{"template only", func(a *config.App) { a.Config = nil }},
 		{"gated, authorized_fetch off", func(a *config.App) {
 			a.Config = nil
-			a.VisibilityGate = config.GateMember
+			a.Gated = true
 			a.Settings = map[string]any{"authorized_fetch": false, "private": false, "federation": false}
 		}},
 	} {

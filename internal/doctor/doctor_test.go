@@ -174,7 +174,7 @@ func TestUnreachableSiteSaysWhatIsLost(t *testing.T) {
 		}
 	}
 	vm := strings.Join(find(t, findings, SectionReach, "vm:").More, "\n")
-	for _, want := range []string{"its gateway, which every public hostname but the monitor's goes through", "one of 3 etcd votes", "chat, pinned here"} {
+	for _, want := range []string{"its gateway, which every public hostname but the monitor's goes through", "one of 3 etcd votes", "chat, gate, pinned here"} {
 		if !strings.Contains(vm, want) {
 			t.Errorf("vm's loss lacks %q:\n%s", want, vm)
 		}

@@ -267,3 +267,28 @@ func removeItem(data []byte, lines lineIndex, list *yaml.Node, name string) (edi
 	}
 	return edit{open, open + closing + 1, "[" + strings.Join(kept, ", ") + "]"}, true, nil
 }
+
+// WithoutJoining is the configuration without sites, and without the apps
+// pinned to them: what the hosts already run, when sites are declared and
+// not yet brought up. An app pinned to such a site runs nowhere until the
+// apply that brings it up, so a render of the rest must not name it.
+func (c *Config) WithoutJoining(sites ...string) *Config {
+	if len(sites) == 0 {
+		return c
+	}
+	out := c
+	for _, name := range sites {
+		out = out.WithoutSite(name)
+	}
+	apps := map[string]App{}
+	for name, app := range out.Apps {
+		apps[name] = app
+	}
+	for _, site := range sites {
+		for _, name := range c.PinnedTo(site) {
+			delete(apps, name)
+		}
+	}
+	out.Apps = apps
+	return out
+}

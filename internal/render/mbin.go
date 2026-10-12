@@ -123,7 +123,7 @@ func mbinLockedSettings(gated, sso bool) []string {
 
 // MbinLockedSettings is MBIN_LOCKED_SETTINGS, comma separated.
 func (v appValues) MbinLockedSettings() string {
-	return strings.Join(mbinLockedSettings(v.Gate != "", v.OIDC.Present), ",")
+	return strings.Join(mbinLockedSettings(v.Gated, v.OIDC.Present), ",")
 }
 
 // mbinSettingEnv maps a Mbin database setting to the environment variable

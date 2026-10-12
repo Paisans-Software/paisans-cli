@@ -10,8 +10,13 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// monitorStage is the stage number of the monitor's reseed, the last.
-const monitorStage = 6
+// monitorStage is the stage number of the monitor's reseed, the last, and
+// monitorName its name, by which a failure in it is told apart whatever its
+// number: an eviction numbers it later.
+const (
+	monitorStage = 6
+	monitorName  = "monitor"
+)
 
 // buildMonitor is stage 5, the last: every remaining monitor site's uptime
 // stack applied on its own, so that its monitors.json, rendered from the end
@@ -23,8 +28,8 @@ const monitorStage = 6
 // the apply that finishes it, since site remove cannot be run again for a site
 // the configuration no longer declares.
 func (p *Plan) buildMonitor() (*Stage, error) {
-	st := &Stage{Number: monitorStage, Name: "monitor", Short: "monitor matches the render"}
-	reseeds, err := apply.PlanMonitorReseeds(p.end, p.rendered, acme.Module(p.cfg.ACME.Provider), p.transports)
+	st := &Stage{Number: monitorStage, Name: monitorName, Short: "monitor matches the render"}
+	reseeds, err := apply.PlanMonitorReseeds(p.liveEnd(), p.rendered, acme.Module(p.cfg.ACME.Provider), p.transports)
 	if err != nil {
 		return nil, fmt.Errorf("site remove %s: %w", p.Site, err)
 	}

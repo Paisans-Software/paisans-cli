@@ -105,14 +105,24 @@ type world struct {
 	neverStreams string
 	// unhealthy names an app stack whose container has exited.
 	unhealthy string
+
+	// evicted is the site an eviction cuts off: once no other host's running
+	// interface lists its key, a leader it held fails over, as Patroni's does
+	// when the leader key expires.
+	evicted string
+	// skips is every `garage layout skip-dead-nodes` run, its arguments.
+	skips []string
 }
 
 type host struct {
-	w         *world
-	name      string
-	files     map[string]string
-	commands  []string
-	wgUp      bool
+	w        *world
+	name     string
+	files    map[string]string
+	commands []string
+	wgUp     bool
+	// wgRun is the mesh file the running interface was last handed by `wg
+	// syncconf`, nil while it runs the file on disk.
+	wgRun     *string
 	patroniUp bool
 	etcdUp    bool
 	// etcdContainer is whether the etcd container runs, which a removed
@@ -537,8 +547,10 @@ func (h *host) Run(command string) (string, error) {
 		if !h.patroniUp {
 			return "__PAISANS_NO_PATRONI__\n", nil
 		}
+		w.failover()
 		return w.patroniList(), nil
 	case strings.Contains(command, "patronictl") && strings.Contains(command, "list -f json"):
+		w.failover()
 		return w.patroniList(), nil
 	case strings.Contains(command, "show-config"):
 		return fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode), nil
@@ -609,14 +621,32 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "down\n", nil
 	case strings.Contains(command, "wg syncconf"):
+		running := h.files[wgConf]
+		h.wgRun = &running
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
+	case command == "wg show psns-f2a9 public-key":
+		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
+		if m == nil {
+			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
+		}
+		key, err := render.PublicKey(m[1])
+		if err != nil {
+			return "", err
+		}
+		return key + "\n", nil
 	case command == "wg show psns-f2a9 peers":
 		var b strings.Builder
-		for _, m := range peerRe.FindAllStringSubmatch(h.files[wgConf], -1) {
+		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\n")
+		}
+		return b.String(), nil
+	case command == "wg show psns-f2a9 latest-handshakes":
+		var b strings.Builder
+		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
+			b.WriteString(m[1] + "\t1760000000\n")
 		}
 		return b.String(), nil
 
@@ -850,6 +880,106 @@ func (h *host) Run(command string) (string, error) {
 	return "", fmt.Errorf("%s: unexpected command %q", h.name, command)
 }
 
+// runningWG is the mesh file the running interface holds.
+func (h *host) runningWG() string {
+	if h.wgRun != nil {
+		return *h.wgRun
+	}
+	return h.files[wgConf]
+}
+
+// failover promotes a remaining member once the evicted leader is cut off:
+// the Sync Standby, or else the first streaming replica.
+func (w *world) failover() {
+	if w.evicted == "" {
+		return
+	}
+	defer w.keepSync()
+	if w.member(w.evicted) == nil {
+		return
+	}
+	for _, private := range []string{w.secrets.Sites[w.evicted].WireGuardPrivateKey, w.secrets.Sites[w.evicted].WireGuardNextPrivateKey} {
+		if private == "" {
+			continue
+		}
+		key, err := render.PublicKey(private)
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		for name, h := range w.hosts {
+			if name != w.evicted && strings.Contains(h.runningWG(), key) {
+				return
+			}
+		}
+	}
+	if w.leader() != w.evicted {
+		// A cut Sync Standby stops streaming, and the leader names another.
+		gone := w.member(w.evicted)
+		if gone["State"] == "stopped" {
+			return
+		}
+		wasSync := gone["Role"] == "Sync Standby"
+		gone["Role"], gone["State"] = "Replica", "stopped"
+		for _, m := range w.members {
+			if wasSync && w.syncMode && m["Role"] == "Replica" && m["State"] == "streaming" {
+				m["Role"] = "Sync Standby"
+				break
+			}
+		}
+		return
+	}
+	var next map[string]any
+	for _, m := range w.members {
+		if m["Role"] == "Sync Standby" && m["State"] == "streaming" {
+			next = m
+		}
+	}
+	for _, m := range w.members {
+		if next == nil && m["Member"] != w.evicted && m["State"] == "streaming" {
+			next = m
+		}
+	}
+	// Replicas a hostile leader stopped streaming still run Postgres, and
+	// Patroni promotes one when it is within maximum_lag_on_failover.
+	for _, m := range w.members {
+		if next == nil && m["Member"] != w.evicted && m["State"] == "running" {
+			next = m
+		}
+	}
+	if next == nil {
+		return
+	}
+	for _, m := range w.members {
+		switch {
+		case m["Member"] == w.evicted:
+			m["Role"], m["State"] = "Replica", "stopped"
+		case m["State"] == "running":
+			// It follows the new leader.
+			m["State"] = "streaming"
+		}
+	}
+	next["Role"], next["State"] = "Leader", "running"
+}
+
+// keepSync names a streaming replica the Sync Standby when synchronous mode
+// is on and none is, as the leader does once its standby is gone.
+func (w *world) keepSync() {
+	if !w.syncMode {
+		return
+	}
+	for _, m := range w.members {
+		if m["Role"] == "Sync Standby" {
+			return
+		}
+	}
+	for _, m := range w.members {
+		if m["Role"] == "Replica" && m["State"] == "streaming" {
+			m["Role"] = "Sync Standby"
+			return
+		}
+	}
+}
+
 func envLine(content, key string) string {
 	for _, line := range strings.Split(content, "\n") {
 		if v, ok := strings.CutPrefix(line, key+"="); ok {
@@ -1056,6 +1186,13 @@ func (w *world) garage(h *host, cmd string) (string, error) {
 		w.version = v
 		w.moving, w.resyncing = 2, 2
 		return "New cluster layout with updated role assignment has been applied in cluster.\n", nil
+	case strings.HasPrefix(cmd, "layout skip-dead-nodes "):
+		w.skips = append(w.skips, strings.TrimPrefix(cmd, "layout skip-dead-nodes "))
+		if w.moving == 0 {
+			return "Error: This command cannot be called when there is only one live cluster layout version", errors.New("exit status 1")
+		}
+		w.moving = 0
+		return "Increased the ACK tracker for node\nSuccess.\n", nil
 	case cmd == "layout history":
 		if w.moving > 0 {
 			w.moving--
@@ -1244,6 +1381,9 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			entries = append(entries, render.ManifestFile{Path: rel, SHA256: hexSum(f.Content), Mode: fmt.Sprintf("%04o", f.Mode)})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+		if running, ok := h.files[wgConf]; ok {
+			h.wgRun = &running
+		}
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"
 		if contains(cfg.Etcd.Members, name) {
