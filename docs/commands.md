@@ -141,6 +141,47 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
+### `paisans secrets rotate`
+
+Replaces secrets where they are checked and where they are used, one secret at
+a time: a next value written to the secrets file, the side that checks it
+taught it, every site that presents it applied in turn and healthy before the
+next, then the next value promoted. Lists the secrets it keeps, each with why.
+A stopped run resumes where it stopped; `apply` refuses until it finishes,
+since an apply renders the old value.
+
+```sh
+paisans secrets rotate --all                               # dry run: every secret in order, its cost, and what is kept
+paisans secrets rotate --all --execute
+paisans secrets rotate cluster.standby_password --execute
+paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
+paisans secrets rotate external.acme_dns_token --execute   # hands the new token to every site using it
+```
+
+* **Alone:** always; after an admin who could read the secrets file leaves,
+  or a site is evicted, once the file is re-encrypted and the mesh rekeyed.
+* **Flags:** the secrets' paths in the secrets file as arguments, or `--all`
+  (every secret in scope, in the order *`secrets rotate` replaces a secret
+  where it is checked and where it is used* gives); `--config`, `--secrets`,
+  `--execute`, `--sudo`.
+* **Hosts:** every site, since each must answer before anything changes, and
+  each is claimed. The secrets file is read and written on this machine only.
+* **`--execute`:** rotates each secret in four gated stages, and stops at the
+  first gate that fails. Asks for `sign out` at a terminal first when a
+  rotation in the run signs members out, and is refused without one. Refuses
+  before anything changes when a `mesh rekey` is unfinished, a site does not
+  answer over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS
+  token, an SMTP password, a client secret minted at Pocket ID) still has the
+  value the hosts were last applied with: replace it at its issuer and set it
+  with `secrets set` first. `--all` also refuses a secrets file that lacks a
+  secret `init` generates, naming `paisans init`.
+
+See *`secrets rotate` replaces a secret where it is checked and where it is
+used* in `README.md`, and
+[guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md) for the order
+around it.
+
 ## Hosts
 
 ### `paisans host prepare`

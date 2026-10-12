@@ -1299,8 +1299,8 @@ deployment record beside it), listing every deployment that has claimed it:
 Every command that writes to a host **claims it first**: `apply`,
 `host prepare`, `storage init`, `storage add`, `storage rotate-key`,
 `site add`, `site remove`, `prune`, `app admin create`, `app remove`, `oidc
-client create` and `failover test`, each with `--execute`, on every site it
-will write to. The
+client create`, `secrets rotate` and `failover test`, each with `--execute`,
+on every site it will write to. The
 claim is one remote shell command run under `flock` on
 `/var/lib/paisans/registry.lock`: it reads the registry, refuses if another
 id already holds this deployment's token or root (or its WireGuard interface,
@@ -1589,7 +1589,8 @@ was held for the app's other sites, or was configured as a digest.
 A digest in `images` is taken as written, so it, or a version tag the
 publisher does not rebuild, holds an app on one build until the operator
 changes it. Commands that rewrite a compose file for a narrower reason
-(`site add`, `site remove`, `storage add`, `storage rotate-key`) resolve
+(`site add`, `site remove`, `storage add`, `storage rotate-key`, `secrets
+rotate`) resolve
 nothing and keep whatever each stack runs, whatever the configuration now
 names (another tag, a moved channel, another repository), so none of them
 moves an image nobody planned; the next `apply` shows and makes that move.
@@ -1817,6 +1818,13 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
+**`init` never replaces a generated secret; `secrets rotate` does, on
+purpose.** A secret is held where it is checked and where it is used, so a new
+value in the file alone breaks every service still on the old one. Re-running
+`init` must be safe, so it only fills in what is missing. Replacing one is a
+staged change with its own command (*`secrets rotate` replaces a secret where
+it is checked and where it is used*).
+
 **Mbin's OAuth2 keypair is generated, not placed.** Mbin signs the tokens it
 issues to API clients and apps with an RSA key that its image does not create;
 upstream's Docker install has the operator run `openssl genrsa -des3 ... 4096`
@@ -1826,9 +1834,10 @@ half encrypted with the app's `oauth_passphrase`, both halves kept in the
 secrets file and rendered to `/srv/paisans/<token>/<app>/oauth/`. A host step is what the
 toolkit exists to remove, and keeping the pair in the secrets file is what
 gives every apps site under cluster placement the same one, so a token one
-site issues verifies on another. Like every generated secret it is never
-replaced, and here that is visible to members: a new key signs out every API
-client at once.
+site issues verifies on another. `init` never replaces it, and replacing it is
+visible to members: a new key signs out every API client at once, which is why
+`secrets rotate` asks before it does (*`secrets rotate` replaces a secret where
+it is checked and where it is used*).
 
 **It is also the one private key rendered 0644, on purpose.** `apply` writes
 every file as root, and Mbin reads the key as uid 1000 after its entrypoint
@@ -1989,6 +1998,145 @@ happens to regenerate secrets. `site add`, `site remove`, `storage init`,
 load the secrets, and `secrets set` calls it with the new value in place,
 before it writes the file, so a malformed key is refused there rather than at
 the next render.
+
+### `secrets rotate` replaces a secret where it is checked and where it is used
+
+After an admin who could read `secrets.enc.yaml` leaves, or a site is
+evicted, every secret they could read has to change, or their copy of it keeps
+working. **`paisans secrets rotate <path>... | --all`** does it without anyone
+editing a file on a host. A secret is named by its path in the secrets file,
+Eg: `cluster.standby_password`; Mbin's OAuth2 passphrase, encryption key and
+keypair are one unit, named `apps.<app>.oauth`, because a private key the
+passphrase beside it does not open is an Mbin that cannot sign a token.
+`--all` is every secret in scope the deployment has. How to run it is under
+*`paisans secrets rotate`* in [docs/commands.md](docs/commands.md);
+[docs/specs/2026-10-12-secrets-rotate.md](docs/specs/2026-10-12-secrets-rotate.md)
+is the approved design.
+
+**One secret at a time, in four stages, each ending at a gate:**
+
+| Stage | Work | Gate |
+|---|---|---|
+| 1. Next value | a new value generated on the workstation and written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
+| 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
+| 3. Where it is used | every stack that presents the secret, by scoped `apply`, one site at a time | each stack healthy before the next site |
+| 4. Promote | the next value becomes the secret's own, and its entry under `rotations` is removed | the file decrypts and holds only the new value |
+
+**The checking side goes first** because some services read a secret only
+when they first initialise: the Postgres roles Spilo creates at bootstrap, a
+pinned app's own Postgres, and RabbitMQ's default user keep the old value
+however often the file is rendered again. Changing it inside the service
+before any user presents it means a user that reconnects with the new value
+is let in. Stage 3 renders from the secrets with the next value in place,
+while the file still names the old one, so a user is handed exactly the value
+the checking side already accepts.
+
+**The next value lives in the file from stage 1**, so a run that stops after
+Postgres holds the new password and before the apps do still has it. A
+rotation is pending while its path is under `rotations`; a re-run finishes the
+pending ones first, asks the checking side whether it already accepts the
+value, and hands the users the same value again, which changes nothing on a
+user that already presents it. A `--all` run records what it has left
+(`rotate_remaining`), so a stopped `--all` run resumes with those and does not
+rotate again a secret it finished. Every write is encrypted to the recipients
+`.sops.yaml` names, so once the departed admin is out of it and the file is
+re-encrypted, a next value is never readable by them.
+
+**`apply` refuses while a rotation is pending**, with or without `--site`, and
+names the `secrets rotate` that finishes it: some hosts may already check or
+present the next value, and `apply` renders the old one and would hand it back
+to them. **`secrets rotate` refuses while a `mesh rekey` is pending**, naming
+the rekey: its scoped applies render each site's current WireGuard key, which
+a site part way through its rekey may no longer run. Finishing either
+command first costs nothing but its resume.
+
+**What each secret costs:**
+
+| Secret | Checked by | Used by | Cost to members |
+|---|---|---|---|
+| `external.acme_dns_token` | the provider | each site running the toolkit's Caddy | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that sends mail with it | none |
+| `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
+| `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
+| Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret` | the app | the app | signed in browser sessions of that app end |
+| Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
+| `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
+| Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator | none |
+| `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
+| `apps.<app>.database_password` | Postgres | the app | reconnects |
+| Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
+| `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
+| `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
+| `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused for at most one push interval |
+
+Mbin's `app_secret` signs its four month remember me cookie, not the sessions
+it keeps in Postgres, so an open session lasts until it ends and the next sign
+in is asked for. MAS's documentation does not say whether Matrix sessions
+survive either of its secrets changing, so the plan takes the stricter reading.
+A cluster with one data member has no replica to switch over to, so its
+Patroni restarts in place and the database is unavailable for that restart;
+the plan says so.
+
+**`--all` runs them in the table's order**: what works from the internet
+first, the DNS token, the mail passwords, client secrets and signing keys;
+then what only the mesh reaches. The client secrets and S3 keys run as their
+own commands already do, in their place in the order: `oidc client create
+--rotate-secret`, then each site running the app applied in turn, and
+`storage rotate-key --app`, each deleting the old secret only once every site
+runs the new one (*`oidc client create` makes an app's client at Pocket ID*,
+*Replacing an app's key: `storage rotate-key`*). `--all` refuses a secrets
+file that lacks a secret `init` generates, naming `paisans init`, since a run
+that skipped one would leave it as the departed admin knew it.
+
+**A pasted secret is replaced by a person first.** The DNS token and the SMTP
+passwords are issued by a provider, and the client secret of an app whose
+client `oidc client create` cannot make (Synapse's, oauth2-proxy's) is minted
+at Pocket ID; nothing here can issue them. The operator replaces each at its
+issuer and sets it with `paisans secrets set <path>`, and `secrets rotate`
+hands the value the file then holds to every stack that renders it, one site
+at a time. It is refused while every host using it was last applied with the
+value the file holds, since rotating it then would restart them for nothing,
+and `--all` refuses until each pasted secret it includes has been replaced so.
+`secrets rotate` is what hands the new value out, so it comes between
+`secrets set` and the next `apply`. For such a client, the old secrets are
+deleted at Pocket ID after every site runs the new one, through the client ID
+the file records; without one, the plan says to delete them there by hand.
+
+**A rotation that signs members out asks first.** When the plan includes one,
+`--execute` asks the operator to type `sign out` at a terminal before any host
+is claimed, and without a terminal it is refused. After the eviction of a
+gateway, which saw every session cookie, signing members out is the point
+(Founder decision).
+
+**A secret every node must share cannot be held in two values at once.**
+Garage's `rpc_secret` is the key of every node's RPC handshake, so a node on
+the old value and one on the new cannot talk. Every Garage node is written the
+new value and restarted together, with one node as much as with several, and
+storage is unavailable until every node lists every other as healthy. `--all`
+includes it (Founder decision).
+
+**Some secrets are kept, and the plan lists each with why:**
+
+* **Pocket ID's `encryption_key` and Matrix Authentication Service's
+  `mas_encryption_secret`** encrypt data already stored. Changing either makes
+  that data unreadable, and neither project offers a re-encryption the toolkit
+  could drive. An admin who held one also holds a copy of the data it
+  protects, so rotating it would take nothing back.
+* **`cluster.admin_password`, where the admin role cannot log in.** Spilo
+  creates it `NOLOGIN` at the Spilo 4 tags `render` pins, which run Patroni 4,
+  so no login checks its password and a new one would change nothing. Where
+  the role logs in, it is rotated like `standby`.
+* **Mbin's `rabbitmq_password`, where the queue is not `rabbitmq`.** No broker
+  runs, so no account has the password, and it is kept unused.
+* **WireGuard keys**, which are `mesh rekey`'s (*Rekeying the mesh: `mesh
+  rekey`*).
+
+**Refused before anything changes:** etcd or Patroni unhealthy, since a
+password changed on a limping cluster can leave a member unable to rejoin; a
+site that does not answer over ssh, since it would keep the old value and
+break when the old one is retired; a pasted secret not yet replaced; a pending
+rotation whose stage cannot be read from the hosts; and a pending `mesh
+rekey`.
 
 ### Mail is declared once and overridden per app
 
@@ -6540,13 +6688,13 @@ decision.
 
 **What the host still holds** is in the closing report: everything it was
 rendered, valid until rotated. Its own WireGuard key no longer works anywhere.
-The DNS token goes first, since it can point the community's names anywhere;
-then the OIDC client secrets (`oidc client create --rotate-secret`) and the
-apps' S3 keys (`storage rotate-key --app`), which work from the internet; then
-the Postgres, Garage and heartbeat secrets, which only the mesh reaches once it
-is closed and which `secrets rotate` will change where they are checked and
-where they are used together. A copy of the database and of the objects cannot
-be taken back.
+The DNS token goes first, since it can point the community's names anywhere.
+The rest is `secrets rotate --all` once the mesh is rekeyed, which takes what
+works from the internet first (the OIDC client secrets, signing keys and the
+apps' S3 keys), then the Postgres, Garage and heartbeat secrets, which only
+the mesh reaches once it is closed (*`secrets rotate` replaces a secret where
+it is checked and where it is used*). A copy of the database and of the
+objects cannot be taken back.
 
 **An admin who could decrypt the secrets file holds every site's secrets,**
 including every other site's WireGuard private key, and WireGuard accepts a
