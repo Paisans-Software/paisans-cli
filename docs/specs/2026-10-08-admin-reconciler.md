@@ -101,11 +101,13 @@ before the first pass and whatever the last pass found, and 503 only once the
 last pass is stale. `apply`'s health gate reads Docker's health, and a new
 deployment has no `admins` group until an administrator makes one, so a gate on
 `/healthz` would hold the whole Pocket ID stack back on it. The uptime monitor
-reads `/healthz`. A failed write is not retried until the next pass, and the reconciler
+learns what `/healthz` says from the admins heartbeat (*Monitoring*), and its
+own per site check reads `/livez`. A failed write is not retried until the next pass, and the reconciler
 keeps no state on disk: every pass starts from what Pocket ID says.
 
-The body is plain text, one line, so it reads well in the monitor's incident
-email. It names users by username, never by email.
+The body is plain text, one line, so it reads well where the monitor shows
+it: with the failed push, in the recent pings on the admins heartbeat's page
+(*Monitoring*). It names users by username, never by email.
 
 Every write is logged on one line: the username, the user's ID, and the
 result. That log is the audit trail the approval below depends on.
@@ -147,10 +149,24 @@ refused like any other.
 
 ## Monitoring
 
-The uptime kind's generated `monitors.json` gains one check per site that runs
-Pocket ID: `<app> — admin reconciler (<site>)`, a GET of
-`http://<site address>:1412/healthz` expecting 200. There is no public check:
-the reconciler is not routed by the gateway.
+*Changed 2026-10-12, operator decision; the uptime spec's amendment of that
+date has the design.* Service health and the community's health are two
+monitors, so that neither moves between sites on a failover.
+
+* **The reconciler service, per site.** The uptime kind's generated
+  `monitors.json` holds one check per site that runs Pocket ID:
+  `<app> — admin reconciler (<site>)`, a GET of
+  `http://<site address>:1412/livez` expecting 200. It reports that site's
+  reconciler alone, and a standby passes it. There is no public check: the
+  reconciler is not routed by the gateway.
+* **The admins group, per app.** One heartbeat monitor per Pocket ID app,
+  `<app> — admins`, with the token `apps.<app>.admins_heartbeat_token`.
+  Beside the reconciler on every site, an `admins-heartbeat` service asks
+  `/healthz` once a minute over the stack's network: `standby` pushes
+  nothing, any other 200 pushes success, a 503 pushes a failure with the body,
+  and no answer pushes nothing. Every site pushes to the one token, so the
+  monitor reflects whichever instance is active, and silence past its grace
+  means none is.
 
 ## Approval
 
@@ -185,6 +201,9 @@ agent no authority to change `admins` by hand.
   in the group afterwards.
 * Render: the pocket-id golden output gains the reconciler service and the run
   directory; the uptime seed gains the reconciler checks; the port table lists 1412.
+  From 2026-10-12, the reconciler checks ask `/livez`, the seed holds the
+  admins heartbeat, and every Pocket ID stack runs the pusher, whose script's
+  branches run under `sh` against a fake curl.
 * An integration test against a real `pocket-id:v2.14.0` container, run only
   when Docker is available, as the Garage integration test is: it creates an
   administrator outside `admins`, runs one pass, and reads the group back;
