@@ -757,11 +757,11 @@ service and nothing about the group.
 
 ### Community health, per app
 
-The seed gains one heartbeat monitor per Pocket ID app, `<app> — admins`,
-with `heartbeat_token` the app's own `apps.<app>.admins_heartbeat_token` and
-the site heartbeat's other fields: `heartbeat_schedule_kind: interval`,
-`interval_seconds: 60`, `heartbeat_grace_seconds: 120`,
-`failure_threshold: 2`. Every monitor seeds it, wherever the app runs.
+The seed gains one heartbeat monitor per Pocket ID app,
+`<app> — admin continuity`, with `heartbeat_token` the app's own
+`apps.<app>.admins_heartbeat_token` and the site heartbeat's other fields:
+`heartbeat_schedule_kind: interval`, `interval_seconds: 60`,
+`heartbeat_grace_seconds: 120`, `failure_threshold: 2`. Every monitor seeds it, wherever the app runs.
 
 Each Pocket ID stack, on every site the app runs on, gains an
 `admins-heartbeat` service: the site heartbeat's image,
@@ -825,10 +825,10 @@ app's other secrets.
 
 ### Tests
 
-Seed: `/livez` on the per site check; `<app> — admins` with the app's token,
-schedule, grace and threshold, in both seeds with two monitors. Render: the
-pusher service, its 0600 env and its script on every Pocket ID site, the
-token in no compose file, both monitors' URLs with two; no monitor, no pusher
+Seed: `/livez` on the per site check; `<app> — admin continuity` with the
+app's token, schedule, grace and threshold, in both seeds with two
+monitors. Render: the pusher service, its 0600 env and its script on every
+Pocket ID site, the token in no compose file, both monitors' URLs with two; no monitor, no pusher
 and no token needed; a missing or malformed token refused by name; the
 pusher's image not listed for pinning. The script runs under `sh` against a
 fake curl: a standby pushes nothing, a healthy group pushes success to each

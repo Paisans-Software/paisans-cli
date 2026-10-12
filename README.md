@@ -906,12 +906,12 @@ from this configuration and the fork reconciles it at every start:
   expects 200: that site's reconciler is running its passes, standby or not.
   It says nothing about the `admins` group, which only the active instance
   knows.
-* every Pocket ID app gets one **admins heartbeat**, `<app> — admins`: a
-  push monitor its active instance feeds from the reconciler's `/healthz`,
-  so it fails while the `admins` group has fewer than two members (see *The
-  admin reconciler keeps `admins` equal to Pocket ID's administrators*), and
-  follows whichever site is active across a failover with one history
-  (below).
+* every Pocket ID app gets one **admins heartbeat**,
+  `<app> — admin continuity`: a push monitor its active instance feeds from
+  the reconciler's `/healthz`, so it fails while the `admins` group has
+  fewer than two members (see *The admin reconciler keeps `admins` equal to
+  Pocket ID's administrators*), and follows whichever site is active across
+  a failover with one history (below).
 * the monitor does not watch itself: its seed has no public or direct check
   of its own app, and no ping or heartbeat of its own site. A monitor that is
   down cannot report it, and a check from the monitor to its own host can only
@@ -4952,9 +4952,10 @@ with no group named `admins`, when Pocket ID does not answer, before the first
 pass, and once the last pass is more than two and a half hours old. The body
 is one line naming users by username, and a standby's is `standby`, with a
 200. The uptime kind does not ask it directly: the active instance's
-`admins-heartbeat` pushes what it says to the monitor's `<app> — admins`
-(*Monitoring*), so a community down to one administrator gets an incident
-while that administrator can still fix it, from whichever site is active.
+`admins-heartbeat` pushes what it says to the monitor's
+`<app> — admin continuity` (*Monitoring*), so a community down to one
+administrator gets an incident while that administrator can still fix it,
+from whichever site is active.
 The monitor's per site check asks `/livez`, which fails only when the pass
 loop has hung, and so does Docker's healthcheck: a new deployment has no
 `admins` group until someone makes one, and `apply`'s health gate must not

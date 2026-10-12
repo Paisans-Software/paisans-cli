@@ -31,7 +31,7 @@ func adminsToken(t *testing.T, secrets *config.Secrets) string {
 func TestTheSeedExpectsAnAdminsHeartbeatPerPocketID(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
-	m := monitors["auth — admins"]
+	m := monitors["auth — admin continuity"]
 	if m == nil {
 		t.Fatal("no admins heartbeat for auth")
 	}
@@ -48,7 +48,7 @@ func TestTheSeedExpectsAnAdminsHeartbeatPerPocketID(t *testing.T) {
 		t.Errorf("auth admins heartbeat carries a url: %v", m)
 	}
 	for name := range monitors {
-		if strings.HasSuffix(name, " — admins") && name != "auth — admins" {
+		if strings.HasSuffix(name, " — admin continuity") && name != "auth — admin continuity" {
 			t.Errorf("an admins heartbeat for something other than Pocket ID: %s", name)
 		}
 	}
@@ -109,7 +109,7 @@ func TestTwoMonitorsBothExpectTheAdminsHeartbeat(t *testing.T) {
 	token := adminsToken(t, secrets)
 	for self, site := range map[string]string{"status": "watch", "status-b": "watch-b"} {
 		monitors := byName(renderSeedAt(t, cfg, secrets, site+"/srv/paisans/f2a9/"+self+"/monitors.json"))
-		if m := monitors["auth — admins"]; m == nil || m["heartbeat_token"] != token {
+		if m := monitors["auth — admin continuity"]; m == nil || m["heartbeat_token"] != token {
 			t.Errorf("%s does not expect auth's admins heartbeat: %v", self, m)
 		}
 	}
