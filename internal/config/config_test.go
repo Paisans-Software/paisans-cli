@@ -661,3 +661,35 @@ func TestTheOldGateKeyIsRefused(t *testing.T) {
 		t.Fatalf("the error does not name the key:\n%v", err)
 	}
 }
+
+// A control character in what the review and host allow print is refused
+// where it is written, naming the field: a terminal reads ESC and its kin as
+// commands, so a key comment carrying one could redraw the review's lines.
+func TestControlCharactersAreRefused(t *testing.T) {
+	esc := `\e[1A\e[2K~ key`
+	alice := func(name, email, keys string) string {
+		return "admins:\n  alice:\n    name: \"" + name + "\"\n    email: \"" + email + "\"\n    keys: \"" + keys + "\"\n"
+	}
+	cases := []struct {
+		name, body, want string
+	}{
+		{"key comment", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+" "+esc)), "admins.alice.keys: line 1 holds a control character (U+001B)"},
+		{"tab in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", strings.Replace(fakeKeyA, " alice", `\talice`, 1))), "admins.alice.keys: line 1 holds a control character (U+0009)"},
+		{"C1 in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+` \x9b2K`)), "admins.alice.keys: line 1 holds a control character (U+009B)"},
+		{"name", withAdmin(minimal, alice(`Alice `+esc, "alice@example.org", fakeKeyA)), "admins.alice.name holds a control character (U+001B)"},
+		{"email", withAdmin(minimal, alice("Alice Example", `alice\x7f@example.org`, fakeKeyA)), "admins.alice.email holds a control character (U+007F)"},
+		{"image", strings.Replace(minimal, "    placement: cluster\n", "    placement: cluster\n    images:\n      app: \"ghcr.io/example/mbin:1.0"+esc+"\"\n", 1), "apps.talk.images.app holds a control character (U+001B)"},
+		{"acme image", strings.Replace(minimal, "admins:\n", "acme:\n  provider: desec\n  image: \"ghcr.io/example/caddy:1"+esc+"\"\nadmins:\n", 1), "acme.image holds a control character (U+001B)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := loadErr(t, c.body)
+			if !strings.Contains(msg, c.want) || !strings.Contains(msg, "terminal") {
+				t.Errorf("want %q in the refusal, got:\n%s", c.want, msg)
+			}
+			if strings.ContainsRune(msg, 0x1b) {
+				t.Errorf("the refusal prints the character itself:\n%q", msg)
+			}
+		})
+	}
+}

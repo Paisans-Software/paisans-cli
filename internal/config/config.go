@@ -966,7 +966,9 @@ func (c *Config) structural(noSubnet bool) error {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
 		}
 		for _, service := range sortedKeys(app.Images) {
-			if strings.TrimSpace(app.Images[service]) == "" {
+			if r, ok := ControlRune(app.Images[service]); ok {
+				add("apps.%s.images.%s %s", name, service, controlProblem(r))
+			} else if strings.TrimSpace(app.Images[service]) == "" {
 				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this kind ships.", name, service)
 			}
 		}
@@ -998,6 +1000,9 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if !c.Cluster.SitesDerived && len(c.Cluster.Sites) == 0 {
 		add("cluster.sites: empty. Remove the key, and the cluster is derived from the roles (every data site), or list the data sites.")
+	}
+	if r, ok := ControlRune(c.ACME.Image); ok {
+		add("acme.image %s", controlProblem(r))
 	}
 	if c.ACME.Provider == "" && len(c.CaddySites()) > 0 {
 		// The providers are deliberately not listed here. This package does not

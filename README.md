@@ -3893,6 +3893,13 @@ which is why `validate` refuses a floating tag for an app. An app's settings,
 already covers, and choose no code. A field added later that does choose code
 (a command, a hook, a mount) joins the review in the same change.
 
+**The review prints only what it can show.** A key comment, an admin's name or
+email, or an image reference holding a control character (Eg: ESC, DEL, or a
+C1 control such as CSI) is refused when the file is loaded, naming the field.
+A terminal reads those characters as commands, so a comment carrying one could
+move the cursor and redraw a review line, Eg: dress a `+ key` up as another
+admin's `~ key`.
+
 **Each host records the grant last applied**, in
 `/var/lib/paisans/granted.<token>.json`, root's and 0644. It holds
 fingerprints and image references, nothing secret, so it is readable without
