@@ -627,38 +627,48 @@ the reasoning behind each choice are in
 
 ### The monitor has a site of its own
 
-A monitor exists to report everything else failing, so it must not fail with
-what it reports. `monitor` is a site role, and the uptime app is pinned to a
-site that holds it. Founder decision.
+A monitor exists to report everything else failing, so it is best on a
+machine that fails with nothing it reports. `monitor` is a site role, and the
+uptime app is pinned to a site that holds it. Founder decision.
 
 | Combination | Result | Rule |
 |---|---|---|
-| `monitor` with `gateway` | refused | `monitor-on-gateway` |
-| `monitor` with `witness` | refused | `monitor-on-witness` |
-| `monitor` with `data` or `apps` | warned | `monitor-shares-a-site` |
+| `monitor` with `gateway`, `witness`, `data` or `apps` | warned, once per site | `monitor-shares-a-site` |
+| `web_server` on a site holding `gateway` | refused | `web-server-on-gateway` |
 | `monitor` with no uptime app pinned to it | refused | `monitor-without-uptime` |
 | an uptime app pinned to a site without `monitor` | refused | `uptime-needs-a-monitor-site` |
 | `monitor` without `public_address` | refused | `monitor-without-public-address` |
 | no app of kind `uptime` at all | warned | `no-uptime-monitor` |
 
-On the gateway the monitor goes dark with the edge it is meant to watch. On
-the witness, etcd's tiebreaker and the thing that reports etcd losing quorum
-would fail together, and the witness is usually the gateway machine anyway.
-There is no override for either. Beside `data` or `apps` it is allowed with a
-warning, because a small deployment may have no other machine; the monitor
-then cannot report that machine dying. A single machine that is also the
-gateway cannot host the monitor at all, so the smallest deployment with one is
-two machines: the second can be a small VM or box declared `roles: [monitor]`,
-which needs no other role. `roles: []` stays legal for a site hosting a pinned
-app of any other kind.
+A machine of its own is the recommendation: a small VM or box declared
+`roles: [monitor]`, which needs no other role. A deployment with no machine to
+spare may put the monitor beside the gateway, the witness, `data` or `apps`,
+and validate warns once, naming what it shares (Founder decision,
+2026-10-12). Such a monitor still checks every app and container on its
+machine and every other site, but it cannot report its own machine failing:
+when that goes down the monitor goes with it, and no alert is sent. Beside the
+witness, nothing reports etcd losing its tiebreaker either. Beside the
+gateway, the gateway's Caddy serves the monitor's hostname, so that site
+carries no `web_server` block (`web-server-on-gateway`). `roles: []` stays
+legal for a site hosting a pinned app of any other kind.
+
+`paisans gateway move` does not yet move the gateway off a site that keeps
+the monitor, and refuses, as does `paisans apply --site` on that site once
+the gateway role has left it: stopping its Caddy would take the monitor down.
+Pin the status page to another monitor site first, then move the gateway.
+Moving the monitor with the gateway works, but the move changes only the
+gateway's hostnames: it refuses while the status page's record still points
+at the old machine, so change that record first, as in *Moving an existing
+monitor* below.
 
 **It serves its own hostname.** An app pinned to a monitor site is left out
 of the gateway's Caddyfile, and `dns init` points its hostname at the
 monitor's `public_address` (and `public_address6`), which is why that address
 is required. A monitor reached only through the gateway would go dark at
-exactly the moment it is needed. What is in front of it is the site's
-`web_server` block, which only a monitor site may carry
-(`web-server-outside-monitor`):
+exactly the moment it is needed. A monitor beside the gateway is the
+exception: the gateway's own Caddy serves it, from the same address. On any
+other monitor site, what is in front of it is the site's `web_server` block,
+which only a monitor site may carry (`web-server-outside-monitor`):
 
 ```yaml
 sites:

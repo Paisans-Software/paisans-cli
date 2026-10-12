@@ -395,30 +395,43 @@ func (w *Wizard) apps() error {
 			apps = slices.DeleteFunc(apps, func(app App) bool { return app.Key == statusApp })
 		}
 	} else {
-		a.Monitor = nil
+		a.Monitor, a.MonitorOnGateway = nil, false
 	}
 	a.Apps = apps
 	return nil
 }
 
-// monitor finds the status page a machine of its own, and reports whether
-// the status page is kept.
+// monitor places the status page, on a machine of its own or beside the
+// gateway, and reports whether the status page is kept.
 func (w *Wizard) monitor() (bool, error) {
 	a := &w.Answers
 	for _, s := range a.Sites {
 		if s.Has(config.RoleMonitor) {
-			a.Monitor = nil
+			a.Monitor, a.MonitorOnGateway = nil, false
 			return true, nil
 		}
 	}
-	w.p.Say("\nThe status page runs on a machine of its own, never the gateway or the")
-	w.p.Say("witness: its job is to report their failures, so it must not fail with")
-	w.p.Say("them. It serves its own hostname, so it needs a public address.")
-	add, err := w.p.YesNo("Add a machine for it?", true)
-	if err != nil || !add {
-		a.Monitor = nil
-		return false, err
+	w.p.Say("\nThe status page reports the other machines failing, so it is best on a")
+	w.p.Say("machine of its own.")
+	if gateway := w.publicGateway(); gateway != "" {
+		def := 0
+		if a.MonitorOnGateway {
+			def = 1
+		}
+		i, err := w.p.Choose("Where it runs", []string{
+			"a machine of its own (recommended)",
+			"on " + gateway + " (takes the monitor down with it, no alerts when the gateway fails)",
+		}, def)
+		if err != nil {
+			return false, err
+		}
+		if i == 1 {
+			a.Monitor, a.MonitorOnGateway = nil, true
+			return true, nil
+		}
 	}
+	a.MonitorOnGateway = false
+	w.p.Say("It serves its own hostname, so it needs a public address.")
 	d := Site{Name: monitorSite, SSHUser: "ubuntu"}
 	if a.Monitor != nil {
 		d = *a.Monitor
@@ -436,6 +449,22 @@ func (w *Wizard) monitor() (bool, error) {
 	}
 	a.Monitor = &site
 	return true, nil
+}
+
+// publicGateway is the one site holding the gateway role with a public
+// address, which the status page needs to sit beside it, or "" when there is
+// not exactly one.
+func (w *Wizard) publicGateway() string {
+	var found []string
+	for _, s := range w.Answers.Sites {
+		if s.Has(config.RoleGateway) && s.PublicAddress != "" {
+			found = append(found, s.Name)
+		}
+	}
+	if len(found) != 1 {
+		return ""
+	}
+	return found[0]
 }
 
 func (w *Wizard) mail() error {

@@ -220,6 +220,21 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 		return nil, refuse("more than one site still holds a gateway: "+strings.Join(candidates, ", "), "A move leaves one gateway for another. Finish the moves one at a time: give the gateway role to one of them, apply it and run the move, then move it on.")
 	}
 	p.From = candidates[0]
+	if cfg.Sites[p.From].RunsCaddy() {
+		return nil, SharedRefusal(p.From)
+	}
+	// A monitor that moved off the old gateway with it keeps a record there
+	// until it is changed by hand, as for any monitor that moves; the stages
+	// below move only the gateway's hostnames, and the last stops the Caddy
+	// that record still reaches.
+	behind, err := dns.MonitorRecordsAt(ctx, provider, cfg, p.From)
+	if err != nil {
+		return nil, err
+	}
+	if len(behind) > 0 {
+		return nil, refuse(fmt.Sprintf("%s still point at %s", strings.Join(behind, ", "), p.From),
+			fmt.Sprintf("A monitor serves each from another site now, but its record was made for %s, and the move changes only the gateway's hostnames: stopping %s's Caddy would take it down. Nothing was changed. Point each at the address of the site that serves it now, at your DNS provider (README.md, \"Moving an existing monitor\"), then run the move again.", p.From, p.From))
+	}
 	p.evidence = held[p.From]
 	p.evidence.Marker = p.ours(p.evidence.Marker)
 
@@ -294,6 +309,35 @@ func inspect(t apply.Transport, d deployment.Deployment) (Evidence, error) {
 func Holds(t apply.Transport, d deployment.Deployment) (bool, error) {
 	ev, err := inspect(t, d)
 	return ev.any(), err
+}
+
+// HoldsRecordOrMarker reports whether the host t reaches holds d's deployment
+// record or a move's marker, and not its Caddy. Only a gateway is ever given
+// the record, so on a site that runs Caddy for a monitor and no longer holds
+// the gateway role, either one is a gateway being moved off a site that keeps
+// the monitor.
+func HoldsRecordOrMarker(t apply.Transport, d deployment.Deployment) (bool, error) {
+	for _, path := range []string{deployrecord.Path(d), MarkerPath(d)} {
+		_, found, err := t.ReadFile(path)
+		if err != nil {
+			return false, fmt.Errorf("%s: reading %s: %w", t.Describe(), path, err)
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SharedRefusal is the problem a move off a site that keeps the monitor is
+// refused with, by the move and by apply alike. Handing such a site off,
+// so that its Caddy keeps serving the gateway's hostnames until DNS has
+// moved and then serves the monitor's alone, is not built yet; stopping its
+// Caddy as a plain old gateway's would take the monitor down, and applying
+// it first would stop the overlap the move exists for.
+func SharedRefusal(site string) error {
+	return refuse(site+" keeps the monitor and is still this deployment's gateway",
+		"Moving the gateway off a site that keeps the monitor is not supported yet. Give "+site+" the gateway role back and apply it, or pin the status page to another monitor site first, then move the gateway.")
 }
 
 func (p *Plan) from() apply.Transport { return p.transports[p.From] }

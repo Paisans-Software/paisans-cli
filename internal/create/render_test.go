@@ -92,24 +92,32 @@ func TestNamedShapesValidate(t *testing.T) {
 	noMonitor := []string{"backups-off", "no-uptime-monitor"}
 	off := []string{"backups-off"}
 	for _, c := range []struct {
-		shape Shape
-		all   bool
-		warn  []string
+		shape     Shape
+		all       bool
+		warn      []string
+		onGateway bool
 	}{
-		{ShapeOneMachine, false, noMonitor},
-		{ShapeOneMachine, true, off},
-		{ShapeHomeAndVPS, false, noMonitor},
-		{ShapeHomeAndVPS, true, off},
-		{ShapeHighAvailability, false, noMonitor},
-		{ShapeHighAvailability, true, []string{"backups-off", "garage-two-sites-stop-uploads", "pinned-app-on-witness"}},
+		{ShapeOneMachine, false, noMonitor, false},
+		{ShapeOneMachine, true, off, false},
+		{ShapeHomeAndVPS, false, noMonitor, false},
+		{ShapeHomeAndVPS, true, off, false},
+		{ShapeHighAvailability, false, noMonitor, false},
+		{ShapeHighAvailability, true, []string{"backups-off", "garage-two-sites-stop-uploads", "pinned-app-on-witness"}, false},
+		{ShapeOneMachine, true, []string{"backups-off", "monitor-shares-a-site"}, true},
+		{ShapeHomeAndVPS, true, []string{"backups-off", "monitor-shares-a-site"}, true},
+		{ShapeHighAvailability, true, []string{"backups-off", "garage-two-sites-stop-uploads", "monitor-shares-a-site", "pinned-app-on-witness"}, true},
 	} {
 		for _, gated := range []bool{false, true} {
 			if !c.all && gated {
 				continue
 			}
-			name := fmt.Sprintf("%s/all=%v/gated=%v", shapes[c.shape].label, c.all, gated)
+			name := fmt.Sprintf("%s/all=%v/gated=%v/onGateway=%v", shapes[c.shape].label, c.all, gated, c.onGateway)
 			t.Run(name, func(t *testing.T) {
-				data, err := Render(answersFor(c.shape, c.all, gated), testID, testOrigin)
+				a := answersFor(c.shape, c.all, gated)
+				if c.onGateway {
+					a.Monitor, a.MonitorOnGateway = nil, true
+				}
+				data, err := Render(a, testID, testOrigin)
 				if err != nil {
 					t.Fatal(err)
 				}

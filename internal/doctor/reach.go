@@ -75,7 +75,7 @@ func losses(cfg *config.Config, site string) string {
 	var lost []string
 	if declared.Has(config.RoleGateway) {
 		switch {
-		case len(cfg.GatewaySites()) == 1 && len(cfg.MonitorSites()) > 0:
+		case len(cfg.GatewaySites()) == 1 && len(cfg.MonitorSites()) > 0 && !declared.Has(config.RoleMonitor):
 			lost = append(lost, "its gateway, which every public hostname but the monitor's goes through")
 		case len(cfg.GatewaySites()) == 1:
 			lost = append(lost, "its gateway, which every public hostname goes through")

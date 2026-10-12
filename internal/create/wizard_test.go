@@ -5,8 +5,11 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files under testdata/")
@@ -35,7 +38,7 @@ func appAnswers(chat bool) []string {
 	}
 	return append(out,
 		"", "", // status page: yes, hostname
-		"", "", "203.0.113.50", "", "", // its machine: add, name, address, ssh host, user
+		"", "", "203.0.113.50", "", "", // its machine: where (its own), name, address, ssh host, user
 	)
 }
 
@@ -178,19 +181,63 @@ func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
 	}
 }
 
-func TestDecliningTheMonitorMachineDropsTheStatusPage(t *testing.T) {
+// Declining the status page leaves no status page and no machine for it.
+func TestDecliningTheStatusPageDropsIt(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
-	lines = append(lines, "", "n", "n", "n", "", "", "n")
+	lines = append(lines, "", "n", "n", "n", "n")
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if _, ok := w.Answers.App(statusApp); ok || w.Answers.Monitor != nil {
+	if _, ok := w.Answers.App(statusApp); ok || w.Answers.Monitor != nil || w.Answers.MonitorOnGateway {
 		t.Errorf("the status page or its machine is still declared: %+v", w.Answers)
+	}
+}
+
+// Choosing the gateway puts the monitor beside it, offered by the gateway
+// site's name with what it costs, and answering the machines again with the
+// gateway renamed keeps it there.
+func TestTheStatusPageOnTheGateway(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines,
+		"",            // sign in hostname
+		"n", "n", "n", // no forums, wiki or blog
+		"n",    // no chat
+		"", "", // status page: yes, hostname
+		"2", // on the gateway
+	)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if want := "2) on gateway (takes the monitor down with it, no alerts when the gateway fails)"; !strings.Contains(out, want) {
+		t.Errorf("missing %q:\n%s", want, out)
+	}
+	if !w.Answers.MonitorOnGateway || w.Answers.Monitor != nil {
+		t.Fatalf("not on the gateway: %+v", w.Answers)
+	}
+	w.Answers.Sites[1].Name = "edge"
+	sites := w.Answers.AllSites()
+	if len(sites) != 2 || !sites[1].Has(config.RoleMonitor) || sites[0].Has(config.RoleMonitor) {
+		t.Fatalf("the monitor is not on the renamed gateway: %+v", sites)
+	}
+	if w.Answers.Sites[1].Has(config.RoleMonitor) {
+		t.Error("AllSites changed the answered sites")
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rules(check(t, data).Warnings()); !slices.Contains(got, "monitor-shares-a-site") || slices.Contains(got, "no-uptime-monitor") {
+		t.Errorf("warnings %v", got)
 	}
 }
 

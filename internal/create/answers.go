@@ -17,8 +17,12 @@ type Answers struct {
 	// was chosen and no site holds the monitor role. It is kept apart from
 	// Sites so that answering the sites again does not lose it.
 	Monitor *Site
-	Apps    []App
-	SMTP    SMTP
+	// MonitorOnGateway puts the status page beside the gateway instead of on
+	// a machine of its own: AllSites adds the monitor role to the site holding
+	// the gateway role, so answering the sites again keeps it.
+	MonitorOnGateway bool
+	Apps             []App
+	SMTP             SMTP
 }
 
 // Admin is one person who may log in to the sites and administer the apps.
@@ -71,9 +75,19 @@ type SMTP struct {
 }
 
 // AllSites is every site in the order the file declares them: the shape's,
-// then the monitor's.
+// the gateway's holding the monitor role too when the status page is beside
+// it, then the monitor's own machine.
 func (a Answers) AllSites() []Site {
 	sites := append([]Site{}, a.Sites...)
+	if a.MonitorOnGateway {
+		for i, s := range sites {
+			if s.Has(config.RoleGateway) {
+				s.Roles = append(append([]config.Role{}, s.Roles...), config.RoleMonitor)
+				sites[i] = s
+				break
+			}
+		}
+	}
 	if a.Monitor != nil {
 		sites = append(sites, *a.Monitor)
 	}

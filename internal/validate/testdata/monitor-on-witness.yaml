@@ -1,4 +1,4 @@
-# valid.yaml with a monitor site that is also the witness, in place of vm in etcd.
+# valid.yaml with a monitor site that is also the witness, in place of vm in etcd: allowed, with a warning.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
