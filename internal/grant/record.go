@@ -70,7 +70,7 @@ const changedMarker = "paisans: the grant record changed while it was read"
 
 // Path is the record on a host, named by the deployment's token, beside the
 // registry. It is root's and 0644: it holds fingerprints and image references,
-// nothing secret, so a plan reads it without sudo, and only root writes it,
+// nothing secret, so it is readable without sudo, and only root writes it,
 // so the login user alone cannot rewrite the baseline a review compares with.
 func Path(d deployment.Deployment) string {
 	return registry.Dir + "/granted." + d.Token() + ".json"
