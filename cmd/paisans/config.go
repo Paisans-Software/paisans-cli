@@ -496,6 +496,9 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("up to date with %s; the local edits are not published yet", describe(g, head))
 		return nil
 	case edited:
+		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, len(sites), localFiles, headFiles, *execute, stdin, stdout); handled {
+			return err
+		}
 		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
 	}
 	if !*execute {
