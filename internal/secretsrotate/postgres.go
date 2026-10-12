@@ -42,12 +42,22 @@ var (
 
 // clusterRoles maps a cluster secret to the role Spilo creates for it and
 // the variable patroni.env hands it in (render/templates/patroni.env.tmpl,
-// lines 23 to 30: PGUSER_SUPERUSER=postgres, PGUSER_STANDBY=standby,
-// PGUSER_ADMIN=admin).
+// lines 23 to 26: PGUSER_SUPERUSER=postgres, PGUSER_STANDBY=standby). These
+// are the roles that log in, so a login is what checks their password.
 var clusterRoles = map[string]struct{ role, env string }{
 	"superuser": {"postgres", "PGPASSWORD_SUPERUSER"},
-	"admin":     {"admin", "PGPASSWORD_ADMIN"},
 	"standby":   {"standby", "PGPASSWORD_STANDBY"},
+}
+
+// AdminPasswordKept is why cluster.admin_password is kept rather than
+// rotated: no login checks it, so a new value would change nothing, and the
+// rotation could never pass its own gate.
+const AdminPasswordKept = "Spilo creates the admin role NOLOGIN (postgres-appliance/scripts/post_init.sh, `CREATE ROLE admin CREATEDB` then `ALTER ROLE admin WITH CREATEDB NOLOGIN`, at the Spilo 4 tags render pins, which run Patroni 4 and so create no bootstrap users), so no login checks its password and there is nothing to rotate"
+
+// KeptPostgres is each Postgres secret that is kept rather than rotated,
+// with the reason, for the plan to list.
+func KeptPostgres() map[string]string {
+	return map[string]string{"cluster.admin_password": AdminPasswordKept}
 }
 
 // pgIdentifier is what is put into a command line or SQL as a role or a
@@ -62,7 +72,8 @@ type clusterRole struct {
 }
 
 // ClusterRole is the rotation of cluster.<name>_password, for name superuser
-// (the role postgres), admin or standby. Postgres takes the next value on the
+// (the role postgres) or standby. Asked for admin, it refuses before anything
+// changes, with AdminPasswordKept. Postgres takes the next value on the
 // leader first; then every data site's Patroni is started again with it, the
 // replicas one at a time and the leader last, after a switchover to a replica
 // that already runs with it, so that no step is a failover.
@@ -77,8 +88,8 @@ func ClusterRole(name string) Rotator {
 func (r clusterRole) Cost() Cost { return Cost{Reconnects: true} }
 
 func (r clusterRole) Precheck(e Env) error {
-	if r.role == "" {
-		return fmt.Errorf("the cluster renders no role for %q, only superuser, admin and standby", r.name)
+	if err := r.known(); err != nil {
+		return err
 	}
 	if len(e.Cfg.Cluster.Sites) == 0 {
 		return fmt.Errorf("the deployment declares no data site, so no Postgres holds this role")
@@ -86,11 +97,29 @@ func (r clusterRole) Precheck(e Env) error {
 	return nil
 }
 
+// known refuses a name with no role that logs in: admin, which is kept, or
+// one the cluster does not render.
+func (r clusterRole) known() error {
+	if r.name == "admin" {
+		return fmt.Errorf("cluster.admin_password is kept: %s", AdminPasswordKept)
+	}
+	if r.role == "" {
+		return fmt.Errorf("the cluster renders no role for %q that logs in; only superuser and standby are rotated", r.name)
+	}
+	return nil
+}
+
 func (r clusterRole) Checked(e Env, next string) error {
+	if err := r.known(); err != nil {
+		return err
+	}
 	return alterOnLeader(e, r.role, next)
 }
 
 func (r clusterRole) Accepts(e Env, next string) (bool, error) {
+	if err := r.known(); err != nil {
+		return false, err
+	}
 	return loginOnLeader(e, r.role, "postgres", next)
 }
 

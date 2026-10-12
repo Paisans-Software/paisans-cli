@@ -254,6 +254,10 @@ func (h *pgHost) RunInput(command, stdin string) (string, error) {
 			return "psql: error: connection refused", w.loginErr
 		}
 		role := loginUser.FindStringSubmatch(command)[1]
+		if role == "admin" && pinnedApp == "" {
+			// Spilo's post_init.sh creates admin NOLOGIN under Patroni 4.
+			return `psql: error: FATAL:  role "admin" is not permitted to log in`, errors.New("exit status 2")
+		}
 		want := w.roles[role]
 		if pinnedApp != "" {
 			want = w.pinned[pinnedApp]
@@ -344,7 +348,6 @@ func TestClusterRolePasswordOnlyOnStdin(t *testing.T) {
 func TestClusterRoleNames(t *testing.T) {
 	for role, want := range map[string]struct{ path, pgRole string }{
 		"superuser": {"cluster.superuser_password", "postgres"},
-		"admin":     {"cluster.admin_password", "admin"},
 		"standby":   {"cluster.standby_password", "standby"},
 	} {
 		t.Run(role, func(t *testing.T) {
@@ -373,7 +376,7 @@ func TestClusterRoleNames(t *testing.T) {
 func TestClusterRoleLeaderFromCluster(t *testing.T) {
 	w := newPGWorld(t)
 	w.leader, w.sync = "home-a", "home-b"
-	r := ClusterRole("admin")
+	r := ClusterRole("superuser")
 	var order []string
 	for _, u := range r.Users(w.env()) {
 		order = append(order, u.Site)
@@ -447,17 +450,17 @@ func TestClusterRoleRecreatesWhereApplyChangedNothing(t *testing.T) {
 	// started again: the scoped apply has nothing to write, and the running
 	// Patroni still has the old value.
 	w := newPGWorld(t)
-	w.file["home-a"]["PGPASSWORD_ADMIN"] = "the-next"
+	w.file["home-a"]["PGPASSWORD_SUPERUSER"] = "the-next"
 	s := roundTrip(w.store.s)
-	s.Cluster.AdminPassword = "the-next"
-	u := ClusterRole("admin").Users(w.env())[0]
+	s.Cluster.SuperuserPassword = "the-next"
+	u := ClusterRole("superuser").Users(w.env())[0]
 	if u.Site != "home-a" {
 		t.Fatalf("first user %s", u.Site)
 	}
 	if err := u.Do(w.env(), s); err != nil {
 		t.Fatal(err)
 	}
-	if w.running["home-a"]["PGPASSWORD_ADMIN"] != "the-next" || indexOf(w.log, "recreate home-a") < 0 {
+	if w.running["home-a"]["PGPASSWORD_SUPERUSER"] != "the-next" || indexOf(w.log, "recreate home-a") < 0 {
 		t.Fatalf("home-a's Patroni was not started again with the next value: %v", w.log)
 	}
 }
@@ -592,5 +595,32 @@ func TestAcceptsTellsAWrongPasswordFromAnUnanswerablePostgres(t *testing.T) {
 	w.loginErr = errors.New("exit status 2")
 	if _, err := r.Accepts(w.env(), "standby-old"); err == nil {
 		t.Fatal("a Postgres that does not answer read as one that refuses the password")
+	}
+}
+
+// cluster.admin_password is kept: Spilo creates admin NOLOGIN, so no login
+// checks it. Asked for it, the rotation refuses before anything changes.
+func TestClusterRoleAdminIsKept(t *testing.T) {
+	w := newPGWorld(t)
+	err := w.rotate(ClusterRole("admin"))
+	if err == nil || !strings.Contains(err.Error(), "NOLOGIN") {
+		t.Fatalf("admin was not refused as NOLOGIN: %v", err)
+	}
+	if len(w.store.s.Rotations) != 0 || w.store.s.Cluster.AdminPassword != "admin-old" {
+		t.Fatalf("the secrets file changed: rotations %v, admin %q", w.store.s.Rotations, w.store.s.Cluster.AdminPassword)
+	}
+	if w.roles["admin"] != "admin-old" || len(w.log) != 0 {
+		t.Fatalf("something changed: role %q, log %v", w.roles["admin"], w.log)
+	}
+	for _, c := range w.cmds {
+		if strings.Contains(c.stdin, "ALTER ROLE") {
+			t.Fatalf("ALTER ROLE ran: %s", c.command)
+		}
+	}
+	if _, err := ClusterRole("admin").Accepts(w.env(), "admin-old"); err == nil {
+		t.Fatal("Accepts on admin did not refuse")
+	}
+	if KeptPostgres()["cluster.admin_password"] != AdminPasswordKept {
+		t.Fatal("cluster.admin_password is not listed as kept")
 	}
 }
