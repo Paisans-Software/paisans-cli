@@ -760,3 +760,90 @@ Flatten each side to `map[path]string` using the same key paths `Get`/`Set` acce
 
 - Spec coverage: version shape (Tasks 1 to 3), trust rules and head (4), rollback by memory, majority and witnesses (7, 8), site store, daemon, timer and cleanup (5), gathering with sync first and every site reached, majority counting direct reaches (6, 7), commands (7), secrets conflicts (9), failures (7, 8), testing (each task), docs (10).
 - Interfaces used across tasks: `Files`, `Digest`, `CheckDigest` (2); `Repo`, `Version` (3); `Graph`, `Verdict`, `Judge` (4); `Push`, `Pull`, `SyncReport` (6); `Local`, `Gather`, `Publish`, `Gathered`, `Reached` (7); `ConfigPart` (8); `MergeSecrets` (9).
+
+---
+
+## Amendment, 2026-10-12: the anchor, and `admin register`
+
+The spec's trust model changed (commit `0f7eff9`): trust starts from the
+operator's own signature or a pinned root, and the digest is gone. Execution
+order from here: Task 11, Task 12, Task 5, Task 6, Task 7, Task 13, Task 8,
+Task 9, Task 10. Where Tasks 7 and 8 mention `Digest`, `CheckDigest`, a
+digest written at publish, or `Graph.Digest`, those parts no longer apply:
+publishing commits the three files as they are, and `Judge` takes the anchor
+described below. Global Constraints: the `paisans.config_digest` line no longer
+applies; add `.paisans/signing-key` (the operator's public key line) to the
+workstation state.
+
+### Task 11: Trust from an anchor
+
+**Files:**
+- Modify: `internal/configstore/trust.go`, `internal/configstore/trust_test.go`
+
+**Interfaces:**
+- Produces (replacing Task 4's `Graph`, `Judge`):
+
+```go
+type Graph struct {
+	Versions map[string]Version
+	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans.yaml
+}
+type Anchor struct {
+	Signer string // the operator's key fingerprint, from .paisans/signing-key; may be empty
+	Root   string // a pinned root sha; may be empty
+}
+type Verdict struct {
+	Trusted  map[string]bool
+	Reasons  map[string]string
+	AnchorAt string   // the version trust starts from
+	Heads    []string // highest revision first, then sha
+	Fork     bool
+}
+var ErrNoAnchor = errors.New("no version is signed by your key and no root is pinned")
+type ConflictError struct{ A, B string } // two removals that bar each other outside the anchor's history
+func Judge(g Graph, a Anchor) (Verdict, error)
+```
+
+Rules, exactly as the spec's *Which versions the workstation trusts*:
+- The anchor: among versions passing shape (tree, `Signed`, revision) whose `SignerFP` equals `a.Signer`, the one with the highest revision, then lowest sha; else `a.Root` if it is held and is a root that passes shape and is signed by an admin it lists itself; else `ErrNoAnchor`. When both exist, the signer anchor wins only if it descends from the pinned root; otherwise `ErrNoAnchor` naming both. The anchor and all its ancestors are trusted (history), whatever their own shape.
+- Extension, to a fixpoint in topological order: a version not in the anchor's history is trusted when it passes shape, every parent is trusted, its signer is a key of an admin listed in every parent, and it is not barred.
+- Removal, key by key: for each trusted version R and each parent P of R, every fingerprint in `Admins(P)` that is absent from `Admins(R)` is removed by R. A version signed by a removed fingerprint that is not an ancestor of R is barred. Only trusted versions remove. Removals in the anchor's history always stand. Compute trusted set and bars together until nothing changes. If two versions outside the anchor's history would each bar the other (or a chain of such), return `*ConflictError` naming them; never pick by revision or sha.
+- Heads: trusted versions with no trusted child, ordered by revision descending, then sha.
+
+- [ ] **Step 1: Rewrite the tests**: the forged-root attack (attacker root signed by attacker key listing attacker and the real admin's key; operator anchored by their own signature on the real chain): the forged chain is not trusted; a history with no version signed by the operator and no pin gives `ErrNoAnchor`; a pin alone anchors; a signer anchor not descending from the pin is refused; the review's attack (alice's `a2` removes bob, alice signs `a3`, bob signs `b2` on `v1` removing alice, operator is alice): head `a3`, `b2` barred; the same with an operator who signed only `v1` (anchor `v1`): `*ConflictError`; key rotation: `R` replaces alice's old key with a new one, a version signed with the old key on an older parent is barred; an admin signing their own removal is trusted; carol's concurrent version on `v2` beside alice's `a3` (both admins) gives `Fork`; clock skew and duplicate trees as before; empty graph with a pin that is not held gives `ErrNoAnchor`; Judge terminates on a cycle.
+- [ ] **Step 2: Run, see FAIL.** `go test ./internal/configstore -run Judge -v`
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run, see PASS.** `go test ./...`
+- [ ] **Step 5: Commit** `feat: trust configuration versions from the operator's own anchor`
+
+### Task 12: Remove the digest
+
+**Files:**
+- Delete: `internal/configstore/digest.go`, `internal/configstore/digest_test.go` (keep `fixture_test.go` only if a later test uses it; otherwise delete it too)
+- Modify: `internal/config/secrets.go`, `internal/config/secrets_set.go` (remove `Paisans`/`PaisansSecrets` and the `paisans.config_digest` cases); keep `DecryptSecretsBytes` only if Task 9's secrets merge will use it (it will: keep it and its test)
+- Test: existing suites
+
+- [ ] **Step 1:** Remove the code; `go build ./... && go vet ./... && go test ./...` must pass.
+- [ ] **Step 2: Commit** `refactor: drop the configuration digest from the secrets file`
+
+### Task 13: `paisans admin register`
+
+**Files:**
+- Create: `cmd/paisans/adminregister.go`; Modify: `cmd/paisans/main.go` (dispatch `admin register` beside the existing `admin` handling, and usage)
+- Modify: `internal/configstore/local.go` (`SigningKey() (string, error)`, `SetSigningKey(line string) error`, and `Attest(...)`)
+- Test: `cmd/paisans/adminregister_test.go`, `internal/configstore/local_test.go`
+
+**Interfaces:**
+- Consumes: Task 7's `Local`, `Gather`, push; Task 11's `Judge`, `Anchor`; Task 3's `Repo.Commit`, `Files`.
+- Produces: `func Attest(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (sha string, err error)` and the command `paisans admin register [--key <path.pub>] [--root <sha>] [--execute]`.
+
+Behaviour, exactly as the spec's *`paisans admin register`*:
+1. The key: `--key` names a `.pub` file; otherwise the ssh-agent's keys (`ssh-add -L`) that match a key under some `admins.<id>.keys` in the local `paisans.yaml`. None: refuse, print the agent's public key lines, and say to add one under the operator's `admins` entry and have another admin publish it. More than one admin matched: refuse, naming them, and ask for `--key`.
+2. Gather (Task 7). Anchor for this run: the pinned root if `--root` or `.paisans/config-root` is set; else the anchor rule with the chosen key; else refuse with `ErrNoAnchor`'s message.
+3. The head must be single (a fork refuses, naming `config publish --merge`) and its three files must equal the local files, unless the head is the one the pinned root leads to and the local files are absent; otherwise refuse and print a diff of `paisans.yaml` and the names of changed secrets keys.
+4. With `--execute`: commit a version with the head's tree, parent the head, revision head+1, signed with the key (`key::<line>` so ssh-agent signs); push it to every reached site; write `.paisans/signing-key`, `.paisans/config-head`, and `.paisans/config-root` if unset. Without `--execute`: show what it would sign. Nothing on any host other than the store changes.
+5. `config publish` and `apply` (Tasks 7 and 8) sign with `.paisans/signing-key` when it is set, and refuse when the agent does not hold that key.
+
+- [ ] **Step 1: Write failing tests:** no matching key refuses and prints the agent's keys; two matching admins refuse; a head differing from local files refuses with the diff; an attestation has the head's tree, one parent, revision +1, and becomes the anchor in a later `Judge`; dry run writes nothing.
+- [ ] Steps 2 to 4.
+- [ ] **Step 5: Commit** `feat: paisans admin register signs an attestation of the head`
