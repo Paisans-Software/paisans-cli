@@ -139,7 +139,7 @@ func TestHostAllowSeedsANewList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out, "Type home-a to go on: ") {
+	if !strings.HasSuffix(out, "Type home-a to proceed: ") {
 		t.Errorf("asked %q", out)
 	}
 	list := hostprep.ParseAllow(h.files[allowPath])

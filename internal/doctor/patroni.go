@@ -303,7 +303,7 @@ func stuckFinding(cfg *config.Config, in Input, sync SyncState, stuck []patroni.
 	)
 	more = append(more, startAdvice(cfg, in, x, all)...)
 	more = append(more,
-		fmt.Sprintf("  2. Only if %s is lost for good: promote %s by hand. On %s%s:", x, r, r, via(in, r)),
+		fmt.Sprintf("  2. Only if %s is lost permanently: promote %s by hand. On %s%s:", x, r, r, via(in, r)),
 		"       "+failoverCommand(cfg.Deployment(), r),
 		"     Patroni promotes the candidate a failover names even when /sync does not (Patroni v4.1.0, patroni/ha.py, manual_failover_process_no_leader: `if failover.candidate == self.state_handler.name: return True`), and --force skips patronictl's \"Are you sure you want to failover to the asynchronous node\" (patroni/ctl.py).",
 	)
@@ -359,7 +359,7 @@ func catchUp(all string) string {
 func warnings(old, candidate string) []string {
 	return []string{
 		fmt.Sprintf("     WARNING: every commit %s made after %s stopped being its synchronous standby is lost: sign ins, posts, the metadata of uploads.", old, candidate),
-		fmt.Sprintf("     WARNING: if %s returns later its data has diverged, and Patroni must rewind or reinitialise it, which discards those commits for good.", old),
+		fmt.Sprintf("     WARNING: if %s returns later its data has diverged, and Patroni must rewind or reinitialise it, which permanently discards those commits.", old),
 		"     WARNING: this changes member data. It is a human's decision, and never something to run unattended.",
 	}
 }
@@ -420,7 +420,7 @@ func genericNoLeader(cfg *config.Config, in Input, c patroni.Cluster, replicas [
 		old = sync.Leader
 	}
 	more = append(more,
-		fmt.Sprintf("  2. Only if %s is lost for good and none of the above helps: promote %s by hand. On %s%s:", old, r, r, via(in, r)),
+		fmt.Sprintf("  2. Only if %s is lost permanently and none of the above helps: promote %s by hand. On %s%s:", old, r, r, via(in, r)),
 		"       "+failoverCommand(cfg.Deployment(), r),
 	)
 	more = append(more, warnings(old, r)...)

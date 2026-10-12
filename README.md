@@ -7949,7 +7949,7 @@ this order:
 1. **Start `home-b`.** When it returns it takes the leader lock again and
    `home-a` catches up from it. No data is lost. This is the recovery to
    choose whenever `home-b` can come back.
-2. **Only if `home-b` is lost for good**, promote `home-a` by hand, on
+2. **Only if `home-b` is lost permanently**, promote `home-a` by hand, on
    `home-a`:
 
    ```
@@ -7963,7 +7963,7 @@ this order:
    every commit `home-b` made after `home-a` stopped being its synchronous
    standby is lost (sign ins, posts, the metadata of uploads); if `home-b`
    returns later its data has diverged, and Patroni must rewind or
-   reinitialise it, which discards those commits for good; and it changes
+   reinitialise it, which permanently discards those commits; and it changes
    member data, so it is a human's decision and never something to run
    unattended.
 

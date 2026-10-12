@@ -340,10 +340,10 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 		what = append(what, fmt.Sprintf("This cleans %s, the host %s runs on, out from under its cluster.", dest, site))
 	}
 	if a.deleteData {
-		what = append(what, fmt.Sprintf("This deletes this deployment's data on %s above, for good.", dest))
+		what = append(what, deletesData(stdout, dest.String()))
 	}
 	if len(what) > 0 {
-		if err := confirmSiteFor(stdin, stdout, site, strings.Join(what, " ")); err != nil {
+		if err := confirmSiteFor(stdin, stdout, site, strings.Join(what, "\n")); err != nil {
 			return err
 		}
 	}
@@ -424,7 +424,11 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 		r.Result("Nothing changed. Re-run with --execute to apply.")
 		return nil
 	}
-	if err := confirmSiteFor(stdin, stdout, plan.Site, plan.Confirmation(dest)); err != nil {
+	what, deletes := plan.Confirmation(dest)
+	if deletes != "" {
+		what += "\n" + ui.Danger(stdout, deletes)
+	}
+	if err := confirmSiteFor(stdin, stdout, plan.Site, what); err != nil {
 		return err
 	}
 	plan.Report = r
@@ -493,7 +497,13 @@ func sshFlagProblem(value string, err error) error {
 
 // confirmSite asks for the site's name before --delete-data deletes its data.
 func confirmSite(stdin io.Reader, stdout io.Writer, site string) error {
-	return confirmSiteFor(stdin, stdout, site, fmt.Sprintf("This deletes this deployment's data on %s above, for good.", site))
+	return confirmSiteFor(stdin, stdout, site, deletesData(stdout, site))
+}
+
+// deletesData is the sentence --delete-data's question sets off: what it
+// deletes, on where, and that nothing brings it back.
+func deletesData(stdout io.Writer, where string) string {
+	return ui.Danger(stdout, fmt.Sprintf("This permanently deletes this deployment's data on %s.", where))
 }
 
 // confirmSiteFor says what is about to happen, asks for the site's name at
@@ -521,9 +531,11 @@ func withoutNames(list, names []string) []string {
 }
 
 // question is one word an operator types at the terminal, and what it
-// agrees to.
+// agrees to. A question whose answer loses data is a danger, and says so in
+// bold red.
 type question struct {
 	word, what string
+	danger     bool
 }
 
 // evictionQuestions are the words an eviction asks for, in order: revoked,
@@ -536,12 +548,12 @@ func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) [
 	if plan.Gateway() {
 		out = append(out, revokedQuestion(cfg, site))
 	}
-	out = append(out, question{site, fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. An eviction is not undone by running it again.", site)})
+	out = append(out, question{word: site, what: fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. An eviction is not undone by running it again.", site)})
 	if text := plan.LoseWritesText(); text != "" {
-		out = append(out, question{"lose writes", text})
+		out = append(out, question{"lose writes", text, true})
 	}
 	if plan.LoseObjects() {
-		out = append(out, question{"lose objects", fmt.Sprintf("Skipping %s's Garage node loses the objects only it held: storage.garage.replication is %d, and the nodes that remain hold no other copy of them.", site, cfg.Storage.Garage.Replication)})
+		out = append(out, question{"lose objects", fmt.Sprintf("Skipping %s's Garage node permanently loses the objects only it held: storage.garage.replication is %d, and the nodes that remain hold no other copy of them.", site, cfg.Storage.Garage.Replication), true})
 	}
 	return out
 }
@@ -553,7 +565,7 @@ func revokedQuestion(cfg *config.Config, site string) question {
 	if provider == "" {
 		provider = "the DNS provider"
 	}
-	return question{"revoked", fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before going on. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
+	return question{word: "revoked", what: fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before you proceed. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
 }
 
 // terminal is where an eviction's questions are asked: one reader for all of
@@ -580,7 +592,11 @@ func (t *terminal) ask(questions []question) error {
 	}
 	in, stdout := t.in, t.out
 	for _, q := range questions {
-		fmt.Fprintf(stdout, "\n%s\nType %s to go on: ", strings.Join(ui.Wrap(q.what, 80), "\n"), q.word)
+		what := q.what
+		if q.danger {
+			what = ui.Danger(stdout, what)
+		}
+		prompt(stdout, what, q.word)
 		answer, err := in.ReadString('\n')
 		if err != nil && answer == "" {
 			return fmt.Errorf("site remove: no answer read. Nothing was changed")

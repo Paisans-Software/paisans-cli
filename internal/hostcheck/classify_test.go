@@ -519,7 +519,7 @@ func TestAConflictRefusalIsAProblem(t *testing.T) {
 	var b strings.Builder
 	ui.PrintError(&b, err, false)
 	out := b.String()
-	if !strings.HasPrefix(out, "FAIL "+p.Hint+"\n  - *:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container\n    web-caddy-1 (compose project web)\n  - *:443/tcp") {
+	if !strings.HasPrefix(out, "FAIL "+p.Hint+"\n  - *:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container web-caddy-1 (compose project web)\n  - *:443/tcp") {
 		t.Errorf("printed:\n%s", out)
 	}
 }

@@ -35,13 +35,18 @@ var ShortPathFrom = shortPath
 // NewForTestWidth is NewForTest on a terminal of cols columns, as New would
 // find it; 0 is a width that is not known.
 func NewForTestWidth(w io.Writer, terminal bool, cols int, clock func() time.Time) Reporter {
-	r := NewForTest(w, false, terminal, clock).(*writer)
-	r.termCols = cols
-	if cols > 0 && cols < maxWidth {
-		r.cols = cols
-	}
+	return NewForTestVerboseWidth(w, false, terminal, cols, clock)
+}
+
+// NewForTestVerboseWidth is NewForTestWidth with verbose chosen by the test.
+func NewForTestVerboseWidth(w io.Writer, verbose, terminal bool, cols int, clock func() time.Time) Reporter {
+	r := NewForTest(w, verbose, terminal, clock).(*writer)
+	r.termCols, r.cols = cols, cols
 	return r
 }
 
 // ItalicFor is Italic with the terminal chosen by the test.
 var ItalicFor = italic
+
+// DangerFor is Danger with the terminal chosen by the test.
+var DangerFor = danger

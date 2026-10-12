@@ -88,9 +88,6 @@ func TestSecretsErrorThroughMainsPrinter(t *testing.T) {
 		}
 	}
 	for _, l := range lines {
-		if len(l) > 80 {
-			t.Errorf("a line is wider than 80: %q", l)
-		}
 		if l != lines[0] && !strings.HasPrefix(l, "  ") {
 			t.Errorf("an explanation line is not indented: %q", l)
 		}

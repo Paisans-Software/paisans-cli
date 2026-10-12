@@ -500,7 +500,7 @@ func TestRefuseNoteAndWarnWrapTheirProse(t *testing.T) {
 	long := "Move what holds each one, or change the paisans.yaml key it names, and run again; the file is /var/lib/paisans/registry.json on the host, read with sudo."
 	for _, terminal := range []bool{false, true} {
 		var b strings.Builder
-		r := ui.NewForTest(&b, true, terminal, clock())
+		r := ui.NewForTestVerboseWidth(&b, true, terminal, 80, clock())
 		r.Refuse("refused", long)
 		r.Note("noted", long)
 		r.Warn("warned", long)
@@ -519,6 +519,30 @@ func TestRefuseNoteAndWarnWrapTheirProse(t *testing.T) {
 		if !strings.Contains(b.String(), "\n       Move what holds") || !strings.Contains(b.String(), "\n      Move what holds") {
 			t.Errorf("terminal %v: the prose is not aligned as before:\n%s", terminal, b.String())
 		}
+	}
+}
+
+// With no terminal width known, prose is not wrapped: whatever shows it
+// wraps it.
+func TestProseIsNotWrappedWithoutAWidth(t *testing.T) {
+	long := strings.Repeat("word ", 40)
+	var b strings.Builder
+	r := ui.NewForTest(&b, true, false, clock())
+	r.Refuse("refused", long)
+	r.Warn("warned", long)
+	if lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n"); len(lines) != 4 {
+		t.Errorf("got %d lines, want two hints and two prose lines:\n%s", len(lines), b.String())
+	}
+}
+
+// Danger sets text in bold red on a terminal, and leaves it as it is
+// anywhere else.
+func TestDangerIsBoldRedOnlyOnATerminal(t *testing.T) {
+	if got := ui.DangerFor(true, "gone"); got != "\x1b[1m\x1b[31mgone\x1b[0m" {
+		t.Errorf("terminal: got %q", got)
+	}
+	if got := ui.DangerFor(false, "gone"); got != "gone" {
+		t.Errorf("plain: got %q", got)
 	}
 }
 

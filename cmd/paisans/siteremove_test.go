@@ -317,7 +317,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
 	t.Cleanup(func() { isTerminal = saved })
-	questions := []question{{"revoked", "the token"}, {"vm", "the site"}, {"lose writes", "the lag"}, {"lose objects", "the objects"}}
+	questions := []question{{word: "revoked", what: "the token"}, {word: "vm", what: "the site"}, {word: "lose writes", what: "the lag", danger: true}, {word: "lose objects", what: "the objects", danger: true}}
 	for answers, want := range map[string]string{
 		"revoked\nvm\nlose writes\nlose objects\n": "",
 		"revoked\nvm\nyes\nlose objects\n":         `"yes" is not lose writes`,

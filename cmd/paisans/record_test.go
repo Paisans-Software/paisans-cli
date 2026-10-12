@@ -274,13 +274,11 @@ func TestConfirmWordAsksOnALineOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(out.String(), "\n")
-	if last := lines[len(lines)-1]; last != "Type home-a to go on: " {
+	if last := lines[len(lines)-1]; last != "Type home-a to proceed: " {
 		t.Errorf("the prompt's line is %q, want it alone", last)
 	}
-	for _, l := range lines {
-		if len(l) > 80 {
-			t.Errorf("line longer than 80: %q", l)
-		}
+	if lines[len(lines)-2] != what {
+		t.Errorf("the explanation is %q, want it whole on one line for the terminal to wrap", lines[len(lines)-2])
 	}
 }
 

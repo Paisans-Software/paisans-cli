@@ -119,9 +119,7 @@ func confirmWord(stdin io.Reader, stdout io.Writer, word, what string) error {
 	if !stdinIsTerminal(stdin) {
 		return fmt.Errorf("it asks for the word %s at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was changed", word)
 	}
-	// The explanation is wrapped, and the question asked on a line of its
-	// own, so the answer is typed where the eye lands.
-	fmt.Fprintf(stdout, "\n%s\nType %s to go on: ", strings.Join(ui.Wrap(what, 80), "\n"), word)
+	prompt(stdout, what, word)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')
 	if err != nil && answer == "" {
 		return fmt.Errorf("no answer read. Nothing was changed")
@@ -130,6 +128,13 @@ func confirmWord(stdin io.Reader, stdout io.Writer, word, what string) error {
 		return fmt.Errorf("%q is not %s. Nothing was changed", strings.TrimSpace(answer), word)
 	}
 	return nil
+}
+
+// prompt says what is about to happen and asks for word on a line of its
+// own, so the answer is typed where the eye lands. The explanation is not
+// wrapped: the terminal wraps it to its own width.
+func prompt(stdout io.Writer, what, word string) {
+	fmt.Fprintf(stdout, "\n%s\nType %s to proceed: ", ui.Redact(what), word)
 }
 
 // recordApplied adds what paisans.yaml declares to the deployment record on
