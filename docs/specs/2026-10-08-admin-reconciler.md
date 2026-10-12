@@ -160,7 +160,8 @@ monitors, so that neither moves between sites on a failover.
   reconciler alone, and a standby passes it. There is no public check: the
   reconciler is not routed by the gateway.
 * **The admins group, per app.** One heartbeat monitor per Pocket ID app,
-  `<app> — admins`, with the token `apps.<app>.admins_heartbeat_token`.
+  `<app> — admin continuity`, with the token
+  `apps.<app>.admins_heartbeat_token`.
   Beside the reconciler on every site, an `admins-heartbeat` service asks
   `/healthz` once a minute over the stack's network: `standby` pushes
   nothing, any other 200 pushes success, a 503 pushes a failure with the body,

@@ -36,7 +36,7 @@ import (
 
 // adminsHeartbeatName is the seed's name for a Pocket ID app's admins
 // heartbeat, built from the app key so a renamed hostname updates it in place.
-func adminsHeartbeatName(app string) string { return app + " — admins" }
+func adminsHeartbeatName(app string) string { return app + " — admin continuity" }
 
 // adminsHeartbeatService is the pusher's compose service, and the directory
 // of the app's stack its two files sit in.
