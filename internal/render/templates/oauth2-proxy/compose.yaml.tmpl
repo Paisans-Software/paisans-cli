@@ -3,8 +3,8 @@
 # One container: the gate. It runs the sign-in (/oauth2/start, the single
 # registered callback, /oauth2/sign_out) and answers the gateway's
 # forward_auth on /oauth2/auth for every app that sets gated or auto_login. It
-# admits members only, through OAUTH2_PROXY_ALLOWED_GROUPS, which fails closed:
-# a session outside the group is refused, never waved through.
+# admits members and admins, through OAUTH2_PROXY_ALLOWED_GROUPS, which fails
+# closed: a session outside both groups is refused, never waved through.
 #
 # The port is fixed rather than derived: 4180, this kind's port in
 # internal/render/plan.go's appPort, declared here as a literal.
@@ -27,9 +27,14 @@ services:
     environment:
       OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
       # Who the gate answers 202 for: members, the group every member facing
-      # app's client admits by default. validate holds an app using the gate
-      # to the same group.
-      OAUTH2_PROXY_ALLOWED_GROUPS: "members"
+      # app's client admits by default, and admins, since an admin can see
+      # everything a member can. The same two groups as the gate's client at
+      # Pocket ID (kinds.OIDCClient). validate holds an app using the gate to
+      # the same member group. A comma separated list: oauth2-proxy reads it
+      # through viper, which splits a string on commas into a list
+      # (pkg/apis/options/load.go:27-55 at v7.15.4; viper v1.21.0,
+      # viper.go:977-1022).
+      OAUTH2_PROXY_ALLOWED_GROUPS: "{{ .OIDCMemberGroup }},{{ .OIDCAdminGroup }}"
       # /oauth2/auth answers for Caddy; nothing is proxied through this
       # container. A static upstream keeps that honest.
       OAUTH2_PROXY_UPSTREAMS: "static://202"

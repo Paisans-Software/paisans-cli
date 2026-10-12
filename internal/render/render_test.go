@@ -2973,10 +2973,10 @@ func TestMbinEnvCarriesItsGroupsByDefault(t *testing.T) {
 	t.Fatal("no talk/.env was rendered")
 }
 
-// The gate's members instance admits kinds.MembersGroup when nothing is
-// declared, the same default every member facing app's client is restricted
-// to, so an empty declaration on both sides names one group.
-func TestGateAdmitsTheDefaultMemberGroup(t *testing.T) {
+// The gate admits kinds.MembersGroup and kinds.AdminsGroup, the same groups
+// every member facing app's client is restricted to by default and the ones
+// the gate's own client admits, so the gate and its client agree.
+func TestGateAdmitsMembersAndAdmins(t *testing.T) {
 	plan, err := render.Build(fixture(t), fixtureSecrets(t))
 	if err != nil {
 		t.Fatal(err)
@@ -2985,8 +2985,8 @@ func TestGateAdmitsTheDefaultMemberGroup(t *testing.T) {
 		if !strings.HasSuffix(f.Path, "/srv/paisans/f2a9/gate/compose.yaml") {
 			continue
 		}
-		if !strings.Contains(f.Content, `OAUTH2_PROXY_ALLOWED_GROUPS: "`+kinds.MembersGroup+`"`) {
-			t.Errorf("%s does not admit %s by default", f.Path, kinds.MembersGroup)
+		if !strings.Contains(f.Content, `OAUTH2_PROXY_ALLOWED_GROUPS: "`+kinds.MembersGroup+`,`+kinds.AdminsGroup+`"`) {
+			t.Errorf("%s does not admit %s and %s", f.Path, kinds.MembersGroup, kinds.AdminsGroup)
 		}
 		return
 	}

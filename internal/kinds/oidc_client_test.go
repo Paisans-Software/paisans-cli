@@ -157,9 +157,9 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 
 // The gate's client returns to oauth2-proxy's own callback on the gate's
 // hostname, sends the S256 challenge the rendered .env asks for, and admits
-// exactly the group the gate admits, whatever the settings say: the group is
-// fixed in the gate's compose file, and the gate maps no administrators.
-func TestTheGatesClientAdmitsOnlyTheGatesGroup(t *testing.T) {
+// members and admins, whatever the settings say: an admin can see everything
+// a member can, and the gate's compose file renders the same two groups.
+func TestTheGatesClientAdmitsMembersAndAdmins(t *testing.T) {
 	spec, ok := kinds.OIDCClient(config.KindOAuth2Proxy, "auth-gate.example.org", "gate")
 	if !ok {
 		t.Fatal("the toolkit does not know an oauth2-proxy client")
@@ -178,7 +178,7 @@ func TestTheGatesClientAdmitsOnlyTheGatesGroup(t *testing.T) {
 	}
 	app := config.App{Kind: config.KindOAuth2Proxy, Settings: map[string]any{"member_group": "crew", "admin_group": "mods"}}
 	admin, member := spec.Groups(app)
-	if admin != "" || member != kinds.MembersGroup {
-		t.Errorf("groups admin=%q member=%q, want only %s", admin, member, kinds.MembersGroup)
+	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
+		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, kinds.AdminsGroup, kinds.MembersGroup)
 	}
 }

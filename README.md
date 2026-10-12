@@ -2569,7 +2569,8 @@ access policy belongs in the configuration, not in a hand edited include.
 | `false` | `true` | reads the app as it is; its sign-in page signs in at the gate first | is signed straight into the app |
 | `true` | `true` | is sent to sign in | is let through and signed straight into the app |
 
-`gated: true` admits members only. Both default to `false`.
+`gated: true` admits members, and admins, who can see everything a member can.
+Both default to `false`.
 
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
@@ -6423,9 +6424,9 @@ is always `admins` and only `member_group` is a setting; the uptime monitor
 has one group, `settings.admin_group`, with no default, because `validate`
 requires it (`uptime-needs-an-admin-group`). Synapse's client is its
 authentication service's, which reads no admin group, so like Outline's it is
-`admins` plus `member_group`. The gate's is `members` alone, fixed like the
-group its compose file admits, with no setting: the gate makes nobody an
-administrator. The defaults exist because an
+`admins` plus `member_group`. The gate's is `members` and `admins`, with no
+setting, the same two groups its compose file admits: an admin can see
+everything a member can (Founder decision). The defaults exist because an
 empty pair would leave an open client: anyone who could make a Pocket ID account could sign in to the
 app. Which app reads the groups claim itself differs by kind, and the table
 says so, because for a kind that does not, the restriction is the whole
@@ -6438,7 +6439,7 @@ control and the operator should know that nothing else stands behind it:
 | `writefreely` | `/oauth/callback/generic`, built by `configureGenericOauth` and not configurable (`oauth.go:249` at writefreely-wisp `ff9dceb`) | off: nothing in the fork sends a code challenge | not read. The restriction at Pocket ID is the whole control |
 | `uptime` | `/login/oidc/callback` (`src/lib/oidc.js:26`) | on: every sign in sends an S256 challenge (`src/lib/oidc.js:96-103`) | read. `settings.admin_group` is both groups: its members administer the monitor and nobody else may sign in |
 | `synapse` | `/upstream/callback/<ulid>`, the authentication service's callback for its upstream provider (`crates/router/src/endpoints.rs:742-762` at MAS `v1.24.0`), with the id derived from the app's name | on: `mas.yaml` sets `pkce_method: always`, the S256 mode (`crates/config/src/sections/upstream_oauth2.rs:420-436`, `crates/cli/src/sync.rs:289-298`), so every sign in sends an S256 challenge (`crates/handlers/src/upstream_oauth2/cache.rs:137`, `crates/oidc-client/src/requests/authorization_code.rs:242-256`) | not read: `mas.yaml` requests no `groups` scope. The restriction at Pocket ID is the whole control |
-| `oauth2-proxy` | `/oauth2/callback` on the gate's hostname: no redirect URL is rendered, so oauth2-proxy builds it from the proxy prefix and the request's host (`oauthproxy.go:175-178,1113-1135` at `v7.15.4`) | on: the `.env` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, and with a method set every sign in sends a challenge (`oauthproxy.go:833-851`) | read. The gate admits only `OAUTH2_PROXY_ALLOWED_GROUPS`, `members` (`providers/provider_default.go:125-138`) |
+| `oauth2-proxy` | `/oauth2/callback` on the gate's hostname: no redirect URL is rendered, so oauth2-proxy builds it from the proxy prefix and the request's host (`oauthproxy.go:175-178,1113-1135` at `v7.15.4`) | on: the `.env` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, and with a method set every sign in sends a challenge (`oauthproxy.go:833-851`) | read. The gate admits a session in any group of `OAUTH2_PROXY_ALLOWED_GROUPS` (`providers/provider_default.go:125-138`), which is rendered as `members,admins`, the same two groups as its client; oauth2-proxy splits that value on commas (`pkg/apis/options/load.go:27-55`, viper `v1.21.0` `viper.go:977-1022`) |
 
 PKCE is set per client the way the app behaves, not on as a matter of course:
 a Pocket ID client with PKCE on refuses every request that carries no code
@@ -6454,6 +6455,7 @@ Putting a user in the admin group is `app admin create`'s job, not this
 command's.
 
 **`validate` holds the groups to the gate.** The gate admits `members`, and
+`admins` as every client does by default, and
 an app using the gate has a client admitting that app's `member_group`. When
 the two name different groups, someone is let through the gate and refused by
 the app, or admitted by the app on a path the gate leaves open, and nothing

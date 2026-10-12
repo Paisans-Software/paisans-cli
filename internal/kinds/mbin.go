@@ -184,15 +184,17 @@ func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 		// (caddy.snippet.gates.tmpl). PKCE is on: the .env renders
 		// OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256, and with a method set
 		// every sign in sends a challenge (oauthproxy.go:833-851). It reads
-		// the groups claim (pkg/apis/options/providers.go:10) and admits only
-		// OAUTH2_PROXY_ALLOWED_GROUPS, which compose.yaml fixes to
-		// MembersGroup (providers/provider_default.go:125-138), so the client
-		// is restricted to that group alone: the gate maps no administrators,
-		// and an admin outside it would be refused by the gate anyway. No
+		// the groups claim (pkg/apis/options/providers.go:10) and admits a
+		// session in any group of OAUTH2_PROXY_ALLOWED_GROUPS
+		// (providers/provider_default.go:125-138), which compose.yaml renders
+		// from these two groups, so the gate and its client admit the same
+		// people: members, and admins, since an admin can see everything a
+		// member can (founder decision, 2026-10-12). Neither is a setting. No
 		// launch URL: the gate has no page of its own.
 		return OIDCClientSpec{
 			CallbackURL:        "https://" + hostname + "/oauth2/callback",
 			PKCE:               true,
+			DefaultAdminGroup:  AdminsGroup,
 			DefaultMemberGroup: MembersGroup,
 			ReadsGroups:        true,
 		}, true

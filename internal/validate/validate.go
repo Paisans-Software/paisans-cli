@@ -2007,8 +2007,9 @@ func (c *checker) oidcMemberGroupNotAName() {
 // oidcMemberGroupDisagreesWithGate refuses an app using the gate whose client
 // admits a different member group than the gate does.
 //
-// Two groups decide who reads a gated app: the gate admits members, and the
-// app's client at Pocket ID admits the app's member group. When they differ,
+// Two member groups decide who reads a gated app: the gate admits members
+// (and admins, as every client does by default), and the app's client at
+// Pocket ID admits the app's member group. When they differ,
 // someone in one and not the other is let through the gate and refused by the
 // app, or admitted by the app on a path the gate does not cover. Auto-login has
 // the same split: it signs into the app whoever the gate admits, and the app's
@@ -2030,7 +2031,7 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 		}
 		c.refuse("oidc-member-group-disagrees-with-gate", fmt.Sprintf("apps.%s.settings.%s", name, spec.MemberGroupSetting),
 			"member group differs between gate and client",
-			"is %s, but the gate admits %s, and this app sets gated or auto_login. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Remove the setting, so the app admits %s too.",
+			"is %s, but the gate's member group is %s, and this app sets gated or auto_login. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Remove the setting, so the app admits %s too.",
 			member, kinds.MembersGroup, kinds.MembersGroup)
 	}
 }

@@ -776,7 +776,7 @@ func TestListClientPlanMarksWhatIsPresentDone(t *testing.T) {
 // The homeserver's client and the gate's are built like every other kind's:
 // apply and `oidc client create` make them, at the authentication service's
 // callback and at oauth2-proxy's, each with PKCE on, since both always send a
-// code challenge. The gate's admits only the group the gate admits.
+// code challenge. The gate's admits members and admins, as the gate does.
 func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
@@ -799,7 +799,7 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if want := "https://" + cfg.Apps[config.GateApp].Hostname + "/oauth2/callback"; gate.CallbackURL != want || !gate.PKCE {
 		t.Errorf("the gate's client: callback %s PKCE %v, want %s with PKCE", gate.CallbackURL, gate.PKCE, want)
 	}
-	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != "" || gate.LaunchURL != "" || !gate.RotateSecret {
+	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != kinds.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
 		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)
 	}
 }

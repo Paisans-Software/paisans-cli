@@ -210,8 +210,8 @@ only the claim `--execute` makes in the host registry, which is root's, does.
 Pocket ID, restricted to the member and admin groups the app's `settings`
 name (`member_group` and `admin_group`, defaulting to `members` and
 `admins`; uptime's one group is `admin_group`, used as both, with no default
-because `validate` requires it; the gate's is `members` alone, with no
-setting), with a launch URL so Pocket ID's dashboard lists it, by default
+because `validate` requires it; the gate's is `members` and `admins`, the
+groups its compose file admits, with no setting), with a launch URL so Pocket ID's dashboard lists it, by default
 for every kind but Synapse and the gate, which have no page for a member
 (`sso_dashboard_link` still gives either one), and records its ID and
 secret under `oidc_clients.<app>`. Every step is printed with what it sends and

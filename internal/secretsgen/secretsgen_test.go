@@ -249,12 +249,13 @@ func TestEveryOwedClientSaysWhatApplyMakes(t *testing.T) {
 }
 
 // The gate's client is created by apply like every other kind's, returns to
-// oauth2-proxy's own callback, and is restricted to the group the gate admits.
+// oauth2-proxy's own callback, and is restricted to the groups the gate admits,
+// members and admins.
 func TestTheGatesOwedClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	cfg.Apps["gate"] = config.App{Kind: config.KindOAuth2Proxy, Hostname: "auth-gate.example.org"}
 	why := owedBy(t, cfg, &config.Secrets{})["oidc_clients.gate"]
-	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the group " + kinds.MembersGroup} {
+	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + kinds.MembersGroup + " and " + kinds.AdminsGroup} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the owed client does not say %q:\n%s", want, why)
 		}
