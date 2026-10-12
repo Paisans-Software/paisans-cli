@@ -652,14 +652,14 @@ gateway, the gateway's Caddy serves the monitor's hostname, so that site
 carries no `web_server` block (`web-server-on-gateway`). `roles: []` stays
 legal for a site hosting a pinned app of any other kind.
 
-`paisans gateway move` does not yet move the gateway off a site that keeps
-the monitor, and refuses, as does `paisans apply --site` on that site once
-the gateway role has left it: stopping its Caddy would take the monitor down.
-Pin the status page to another monitor site first, then move the gateway.
-Moving the monitor with the gateway works, but the move changes only the
-gateway's hostnames: it refuses while the status page's record still points
-at the old machine, so change that record first, as in *Moving an existing
-monitor* below.
+`paisans gateway move` hands the gateway off a site that keeps the monitor
+rather than stopping its Caddy: until the hand-off, that site keeps every
+gateway route, and then its Caddy reloads with the monitor's alone (see
+*Moving the gateway*, "A site that keeps the monitor"). Moving the monitor
+with the gateway works too, but the move changes only the gateway's
+hostnames: it refuses while the status page's record still points at the old
+machine, so change that record first, as in *Moving an existing monitor*
+below.
 
 **It serves its own hostname.** An app pinned to a monitor site is left out
 of the gateway's Caddyfile, and `dns init` points its hostname at the
@@ -8055,7 +8055,8 @@ to do. Like every command that changes a deployment it is a dry run until
 | 3 | dns add | creates the new gateway's address records beside the old one's | every one is present, unproxied |
 | 4 | dns remove | checks the new gateway again, then deletes the old one's records | no hostname the gateway serves points at the old gateway |
 | 5 | wait | sleeps out the longest TTL of the deleted records | that time has passed |
-| 6 | stop | checks the new gateway again, then stops and removes the old Caddy | the old site holds nothing of a gateway's |
+| 6 | stop | checks the new gateway again, then stops and removes the old Caddy; on a site that keeps the monitor, removes the record and the marker and leaves Caddy running | the old site holds nothing of a gateway's; on a site that keeps the monitor, neither the record nor the marker |
+| 7 | hand off | only on a site that keeps the monitor: applies its `infra` stack, as `paisans apply --site <old> --only infra --execute` | the old site's Caddyfile names no hostname the gateway serves |
 
 **Answering** means: every hostname the gateway serves, each app's hostnames
 and media hostnames but never a monitor's, requested over HTTPS from the
@@ -8093,11 +8094,29 @@ instead of lengthening it.
 gateway, the new one. The old one is the site without the role whose host
 still has this deployment's gateway Caddy, its deployment record or the move's
 marker, or whose public address this deployment's records at the gateway's
-hostnames still point at. The configuration declares the end state, and what
+hostnames still point at. On a site whose roles run Caddy for a monitor, its
+Caddy is no evidence; a Caddyfile that still names a hostname the gateway
+serves is. The configuration declares the end state, and what
 is still running is a fact about the hosts, so it is read from them; a site
 that cannot be asked stops the move rather than reading as no gateway. The
 move ends by removing each of those, so a finished move finds nothing and says
 so. Two sites that both still hold a gateway are refused: one move at a time.
+
+**A site that keeps the monitor** is handed off rather than stopped: its
+Caddy serves the monitor, so it runs on. Until the hand-off, every apply of
+that site, with or without `--site`, renders it as the gateway it still is,
+because its host still holds the deployment record or the move's marker:
+its Caddyfile keeps every gateway route beside the monitor's, the gate's
+snippets and the host owner's sites. Stage 6 removes the record and the
+marker, and stage 7 applies the site's `infra` stack, which now renders the
+monitor it is, so its Caddy reloads with the monitor's routes alone. A run
+that stops between the two finds the site again by the gateway routes its
+Caddyfile still names, and runs the stages again: the DNS stage finds
+nothing to delete and records the time afresh, so the wait is one more
+default TTL, and then the hand-off. The host owner's sites in
+`/srv/caddy.d` stop stage 6 as they stop a plain move, since a monitor's
+Caddy does not serve them. `paisans apply` without `--site` asks such a site
+too, so it ends with the move.
 
 **The move needs the provider's API.** It adds and deletes through record
 management (see *`dns init` creates the records a deployment needs*), so a
