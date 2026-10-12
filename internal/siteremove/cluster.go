@@ -27,6 +27,9 @@ type siteChange struct {
 	// dbApps are the stacks here that reach the database through HAProxy,
 	// stopped around its restart.
 	dbApps []string
+	// sync hands the running interface the mesh file already on the host,
+	// which a run that stopped after writing it left unsynced.
+	sync bool
 }
 
 // haproxyFile is HAProxy's configuration, in rendered form.
@@ -43,6 +46,11 @@ func (p *Plan) isCaddyRouting(rel string) bool {
 // moved are the files this stage writes; owed are the files it leaves for an
 // apply, each with why.
 func (p *Plan) changedFiles(site string) (moved []string, owed []string) {
+	return p.changedFilesIn(site, p.rendered)
+}
+
+// changedFilesIn is changedFiles against rendered, a render without the site.
+func (p *Plan) changedFilesIn(site string, rendered *render.Plan) (moved []string, owed []string) {
 	prefix := site + "/"
 	before := map[string]string{}
 	for _, f := range p.full.Files {
@@ -51,7 +59,7 @@ func (p *Plan) changedFiles(site string) (moved []string, owed []string) {
 		}
 	}
 	after := map[string]bool{}
-	for _, f := range p.rendered.Files {
+	for _, f := range rendered.Files {
 		rel, ok := strings.CutPrefix(f.Path, prefix)
 		if !ok || rel == render.ManifestName {
 			continue
@@ -112,87 +120,17 @@ func (p *Plan) buildCluster() (*Stage, error) {
 		gates = append(gates, fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.end.Etcd.Members), ", ")))
 	}
 
-	var changes []*siteChange
-	var proxies []string
 	key, err := render.PublicKey(p.secrets.Sites[p.Site].WireGuardPrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("secrets sites.%s.wireguard_private_key: %w", p.Site, err)
 	}
-	for _, name := range p.end.SiteNames() {
-		moved, owed := p.changedFiles(name)
-		for _, o := range owed {
-			p.Notes = append(p.Notes, ownedNote(name, o))
-		}
-		t := p.transports[name]
-		c := &siteChange{site: name}
-		if len(moved) > 0 {
-			sp, err := apply.Build(name, p.rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(moved...))
-			if err != nil {
-				return nil, err
-			}
-			if conflicts := sp.Conflicts(); len(conflicts) > 0 {
-				return nil, fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", p.Site, name, conflicts[0].Path)
-			}
-			c.plan, c.paths = sp, moved
-			for _, w := range sp.Writes() {
-				st.Steps = append(st.Steps, Step{Site: name, Verb: w.Kind.String(), Title: "update files on " + name, Text: w.Path})
-			}
-			if sp.WireGuard != apply.WireGuardNone {
-				st.Steps = append(st.Steps, Step{Site: name, Verb: "mesh", Title: "update files on " + name, Text: sp.WireGuard.Describe(p.dep())})
-			}
-		}
-		for _, rel := range moved {
-			switch {
-			case rel == p.haproxyFile():
-				c.haproxy = true
-			case p.isCaddyRouting(rel):
-				c.caddy = true
-			}
-		}
-		if renders(p.rendered, name, p.haproxyFile()) {
-			proxies = append(proxies, name)
-			lists, err := p.proxyLists(name)
-			if err != nil {
-				return nil, err
-			}
-			if c.haproxy && (len(c.plan.Writes()) > 0 || lists) {
-				c.dbApps = p.databaseApps(name)
-				if len(c.dbApps) > 0 {
-					st.Steps = append(st.Steps, Step{Site: name, Verb: "stop", Title: "stop " + strings.Join(c.dbApps, ", ") + " on " + name, Text: strings.Join(c.dbApps, ", ") + ": they reach the database through this HAProxy, and an app's open connections do not survive its restart"})
-				}
-				st.Steps = append(st.Steps, Step{Site: name, Verb: "restart", Title: "restart HAProxy on " + name, Text: "HAProxy alone, without " + p.Site + "'s backend: " + p.restartHAProxy()})
-				if len(c.dbApps) > 0 {
-					st.Steps = append(st.Steps, Step{Site: name, Verb: "start", Title: "start " + strings.Join(c.dbApps, ", ") + " on " + name, Text: strings.Join(c.dbApps, ", ") + ", and check each healthy as apply does"})
-				}
-			} else {
-				c.haproxy = false
-			}
-		}
-		if c.caddy {
-			st.Steps = append(st.Steps,
-				Step{Site: name, Verb: "validate", Title: "validate Caddy routes on " + name, Text: "the routes without " + p.Site + ": " + validateCaddy(p.dep())},
-				Step{Site: name, Verb: "reload", Title: "reload Caddy on " + name, Text: "Caddy: " + reloadCaddy(p.dep())})
-		}
-		if c.plan != nil {
-			changes = append(changes, c)
-		}
+	changes, proxies, err := p.planSiteChanges(st, p.end.SiteNames(), p.rendered, func(string) bool { return true }, true)
+	if err != nil {
+		return nil, err
 	}
-	// The site leaves every remaining gateway's deployment record, so
-	// secrets prune may remove its secrets.
-	records := map[string]registry.Runner{}
-	for _, gw := range p.end.GatewaySites() {
-		records[gw] = p.transports[gw]
-	}
-	deployed, found, missing := deployrecord.Gather(records, p.dep())
-	for _, gw := range sortedCopy(keys(missing)) {
-		if !errors.Is(missing[gw], deployrecord.ErrNoRecord) {
-			return nil, fmt.Errorf("site remove %s: %w", p.Site, missing[gw])
-		}
-	}
-	forget := found > 0 && deployed.Lists("sites", p.Site)
-	if forget {
-		on := strings.Join(sortedCopy(keys(records)), ", ")
-		st.Steps = append(st.Steps, Step{Site: on, Verb: "forget", Title: "forget " + p.Site + " in the deployment record", Text: fmt.Sprintf("%s out of %s on %s, so secrets prune may remove its secrets", p.Site, deployrecord.Path(p.dep()), on)})
+	forget, records, err := p.planForget(st)
+	if err != nil {
+		return nil, err
 	}
 	replicas, err := p.replicaEnvs(st)
 	if err != nil {
@@ -240,18 +178,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			p.open.Detail("%s streams again", r.Site)
 		}
 		if forget {
-			p.work("forget " + p.Site + " in the deployment record")
-			res, err := deployrecord.Update(records, p.dep(), deployrecord.Forgetting(deployrecord.Record{Sites: []string{p.Site}}), now())
-			if err != nil {
-				return err
-			}
-			for _, gw := range sortedCopy(keys(res.Missed)) {
-				if errors.Is(res.Missed[gw], deployrecord.ErrChanged) {
-					p.Notes = append(p.Notes, recordRaced(gw, p.Site, res.Missed[gw].Error()))
-					continue
-				}
-				p.Notes = append(p.Notes, recordMissed(gw, res.Missed[gw].Error()))
-			}
+			return p.runForget(records)
 		}
 		return nil
 	}
@@ -287,7 +214,7 @@ func (p *Plan) endLeader() string {
 func (p *Plan) replicaEnvs(st *Stage) ([]*apply.ReplicaEnv, error) {
 	var out []*apply.ReplicaEnv
 	rel := apply.PatroniEnv(p.dep())
-	for _, name := range p.end.Cluster.Sites {
+	for _, name := range p.live(p.end.Cluster.Sites) {
 		if name == p.endLeader() {
 			if renderedContent(p.full, name, rel) != renderedContent(p.rendered, name, rel) {
 				p.Notes = append(p.Notes, apply.LeaderPatroniEnvNote(name))
@@ -395,7 +322,7 @@ func (p *Plan) etcdMembers() ([]apply.EtcdMember, error) {
 	return apply.ParseEtcdMembers(out)
 }
 
-func (p *Plan) etcdGate() error { return p.etcdVoters(p.end.Etcd.Members) }
+func (p *Plan) etcdGate() error { return p.etcdVoters(p.live(p.end.Etcd.Members)) }
 
 // etcdVoters waits, within etcdWait, for etcd's voters to be exactly sites,
 // with no learner, and every member healthy.
@@ -443,10 +370,16 @@ func (p *Plan) etcdVoters(sites []string) error {
 // their files changed.
 func (p *Plan) applyChange(c *siteChange) error {
 	t := p.transports[c.site]
-	if len(c.plan.Writes()) > 0 || c.plan.WireGuard != apply.WireGuardNone {
+	if c.plan != nil && (len(c.plan.Writes()) > 0 || c.plan.WireGuard != apply.WireGuardNone) {
 		p.work("update files on " + c.site)
 		if err := apply.Execute(c.plan, t); err != nil {
 			return err
+		}
+	}
+	if c.sync {
+		p.work("update files on " + c.site)
+		if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
+			return fmt.Errorf("%s: %s: %w: %s", c.site, apply.WireGuardSync.Title(p.dep()), err, lastLines(out, 3))
 		}
 	}
 	if c.haproxy {
@@ -633,7 +566,7 @@ func (p *Plan) haproxyGate(sites []string) error {
 // WireGuard peer. `wg show <interface> peers` prints one public key per line
 // (wireguard-tools, wg(8)).
 func (p *Plan) meshGate(key string) error {
-	for _, name := range p.end.SiteNames() {
+	for _, name := range p.liveSites() {
 		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " peers")
 		if err != nil {
 			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
@@ -653,4 +586,127 @@ func keys[V any](m map[string]V) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// planSiteChanges plans, on each of names, the scoped apply of the files
+// whose render changes with the site taken out and that keep admits, and the
+// one command each kind of file needs. noteOwed adds what the scoped apply
+// leaves for a whole apply to the plan's notes, once per removal.
+func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan, keep func(rel string) bool, noteOwed bool) ([]*siteChange, []string, error) {
+	var changes []*siteChange
+	var proxies []string
+	for _, name := range names {
+		all, owed := p.changedFilesIn(name, rendered)
+		if noteOwed {
+			for _, o := range owed {
+				p.Notes = append(p.Notes, ownedNote(name, o))
+			}
+		}
+		var moved []string
+		for _, rel := range all {
+			if keep(rel) {
+				moved = append(moved, rel)
+			}
+		}
+		t := p.transports[name]
+		c := &siteChange{site: name}
+		if len(moved) > 0 {
+			sp, err := apply.Build(name, rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(moved...))
+			if err != nil {
+				return nil, nil, err
+			}
+			if conflicts := sp.Conflicts(); len(conflicts) > 0 {
+				return nil, nil, fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", p.Site, name, conflicts[0].Path)
+			}
+			c.plan, c.paths = sp, moved
+			for _, w := range sp.Writes() {
+				st.Steps = append(st.Steps, Step{Site: name, Verb: w.Kind.String(), Title: "update files on " + name, Text: w.Path})
+			}
+			if sp.WireGuard != apply.WireGuardNone {
+				st.Steps = append(st.Steps, Step{Site: name, Verb: "mesh", Title: "update files on " + name, Text: sp.WireGuard.Describe(p.dep())})
+			}
+		}
+		for _, rel := range moved {
+			switch {
+			case rel == p.haproxyFile():
+				c.haproxy = true
+			case p.isCaddyRouting(rel):
+				c.caddy = true
+			}
+		}
+		if keep(p.haproxyFile()) && renders(p.rendered, name, p.haproxyFile()) {
+			proxies = append(proxies, name)
+			lists, err := p.proxyLists(name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if c.haproxy && (len(c.plan.Writes()) > 0 || lists) {
+				c.dbApps = p.databaseApps(name)
+				if len(c.dbApps) > 0 {
+					st.Steps = append(st.Steps, Step{Site: name, Verb: "stop", Title: "stop " + strings.Join(c.dbApps, ", ") + " on " + name, Text: strings.Join(c.dbApps, ", ") + ": they reach the database through this HAProxy, and an app's open connections do not survive its restart"})
+				}
+				st.Steps = append(st.Steps, Step{Site: name, Verb: "restart", Title: "restart HAProxy on " + name, Text: "HAProxy alone, without " + p.Site + "'s backend: " + p.restartHAProxy()})
+				if len(c.dbApps) > 0 {
+					st.Steps = append(st.Steps, Step{Site: name, Verb: "start", Title: "start " + strings.Join(c.dbApps, ", ") + " on " + name, Text: strings.Join(c.dbApps, ", ") + ", and check each healthy as apply does"})
+				}
+			} else {
+				c.haproxy = false
+			}
+		}
+		if c.caddy {
+			st.Steps = append(st.Steps,
+				Step{Site: name, Verb: "validate", Title: "validate Caddy routes on " + name, Text: "the routes without " + p.Site + ": " + validateCaddy(p.dep())},
+				Step{Site: name, Verb: "reload", Title: "reload Caddy on " + name, Text: "Caddy: " + reloadCaddy(p.dep())})
+		}
+		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
+			// The file was written by a run that stopped before the running
+			// interface was handed it.
+			c.sync = true
+			st.Steps = append(st.Steps, Step{Site: name, Verb: "mesh", Title: "update files on " + name, Text: apply.WireGuardSync.Describe(p.dep())})
+		}
+		if c.plan != nil || c.sync {
+			changes = append(changes, c)
+		}
+	}
+	return changes, proxies, nil
+}
+
+// planForget plans taking the site out of every remaining gateway's
+// deployment record, so secrets prune may remove its secrets.
+func (p *Plan) planForget(st *Stage) (forget bool, records map[string]registry.Runner, err error) {
+	records = map[string]registry.Runner{}
+	for _, gw := range p.live(p.end.GatewaySites()) {
+		records[gw] = p.transports[gw]
+	}
+	deployed, found, missing := deployrecord.Gather(records, p.dep())
+	for _, gw := range sortedCopy(keys(missing)) {
+		if !errors.Is(missing[gw], deployrecord.ErrNoRecord) {
+			return false, nil, fmt.Errorf("site remove %s: %w", p.Site, missing[gw])
+		}
+	}
+	forget = found > 0 && deployed.Lists("sites", p.Site)
+	if forget {
+		on := strings.Join(sortedCopy(keys(records)), ", ")
+		st.Steps = append(st.Steps, Step{Site: on, Verb: "forget", Title: "forget " + p.Site + " in the deployment record", Text: fmt.Sprintf("%s out of %s on %s, so secrets prune may remove its secrets", p.Site, deployrecord.Path(p.dep()), on)})
+	}
+	return forget, records, nil
+}
+
+// runForget takes the site out of every remaining gateway's deployment
+// record. A gateway it misses is noted, not fatal: the next change catches it
+// up.
+func (p *Plan) runForget(records map[string]registry.Runner) error {
+	p.work("forget " + p.Site + " in the deployment record")
+	res, err := deployrecord.Update(records, p.dep(), deployrecord.Forgetting(deployrecord.Record{Sites: []string{p.Site}}), now())
+	if err != nil {
+		return err
+	}
+	for _, gw := range sortedCopy(keys(res.Missed)) {
+		if errors.Is(res.Missed[gw], deployrecord.ErrChanged) {
+			p.Notes = append(p.Notes, recordRaced(gw, p.Site, res.Missed[gw].Error()))
+			continue
+		}
+		p.Notes = append(p.Notes, recordMissed(gw, res.Missed[gw].Error()))
+	}
+	return nil
 }
