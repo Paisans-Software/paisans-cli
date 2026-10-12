@@ -15,7 +15,7 @@ import (
 
 // BuildForced plans `site remove --force`: the host at dest cleaned of this
 // deployment, and nothing else. No other site is reached, the cluster's
-// refusals are not checked, and neither paisans.yaml nor the secrets file is
+// refusals are not checked, and neither paisans-stack.yaml nor the secrets file is
 // edited, because --force is for a host the cluster cannot be asked about or
 // no longer counts on (docs/specs/2026-10-09-site-remove-force.md).
 //
@@ -50,7 +50,7 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 		// proof of whose host this is, whatever --ssh spelled.
 		if e.Site != site {
 			if _, live := cfg.Sites[e.Site]; live {
-				return nil, fmt.Errorf("site remove %s: %s is %s's host, which paisans.yaml still declares, by this deployment's entry in its registry. Nothing was changed. To clean it, name that site: paisans site remove %s --force", site, dest, e.Site, e.Site)
+				return nil, fmt.Errorf("site remove %s: %s is %s's host, which "+config.FileName+" still declares, by this deployment's entry in its registry. Nothing was changed. To clean it, name that site: paisans site remove %s --force", site, dest, e.Site, e.Site)
 			}
 		}
 		p.Current = isDeclared && e.Site == site
@@ -80,7 +80,7 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 		host.Steps = append([]Step{{Site: site, Verb: "note", Title: "note the cluster", Text: fmt.Sprintf("%s is still declared and this is its host: its etcd member, Patroni replica and Garage node, and its place in every other site's mesh, stay in the cluster until a full `paisans site remove %s`, and its next `paisans apply --site %s` deploys it again", site, site, site)}}, host.Steps...)
 	}
 	p.Stages = []*Stage{host}
-	// A site paisans.yaml still declares keeps its records, which are still
+	// A site paisans-stack.yaml still declares keeps its records, which are still
 	// wanted. One it does not declare is removed from it already.
 	if !isDeclared {
 		dnsSt, err := p.buildDNS(cfg, cfg.WithoutSite(site))
@@ -105,7 +105,7 @@ func answers(what string, dest config.Destination, t apply.Transport) error {
 
 // BuildForcedByID plans `site remove --force --id`: the host at dest cleaned
 // of the deployment its registry names by ref, a full id or a token, with no
-// paisans.yaml and no secrets file (docs/specs/2026-10-10-remove-without-
+// paisans-stack.yaml and no secrets file (docs/specs/2026-10-10-remove-without-
 // config.md).
 //
 // The host stage reads the configuration for the id, the site's ssh user and

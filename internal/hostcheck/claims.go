@@ -14,7 +14,7 @@ import (
 type Claims struct {
 	Site string
 	// Listeners is render.SiteListeners, the one list of what the rendered
-	// stacks bind, each with the paisans.yaml key behind it. A listener
+	// stacks bind, each with the paisans-stack.yaml key behind it. A listener
 	// added there is claimed here without a change to this package.
 	Listeners []render.Listener
 	// Interface is this deployment's mesh interface, psns-<token>, and Mesh

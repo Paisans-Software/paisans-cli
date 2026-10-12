@@ -4,7 +4,7 @@
 // evidence, and every stage planned from live state, so a run after a fixed
 // problem resumes at the first stage with anything left to do.
 //
-// The site stays declared in paisans.yaml while the command runs, because its
+// The site stays declared in paisans-stack.yaml while the command runs, because its
 // ssh section is how its host is reached and its roles say what it holds.
 // Everything else is computed from config.WithoutSite, the end state, which
 // the last stage writes back to the file. When that end state would leave
@@ -44,7 +44,7 @@ type Options struct {
 	// DeleteData deletes the deployment root and the named volumes on the
 	// host. The caller asks for the site's name at a terminal first.
 	DeleteData bool
-	// ConfigPath is the paisans.yaml the last stage edits.
+	// ConfigPath is the paisans-stack.yaml the last stage edits.
 	ConfigPath string
 	// DNSProvider makes the provider the DNS stage deletes through, from
 	// acme.provider and the token. Nil is dns.For; tests hand in a fake.
@@ -151,7 +151,7 @@ type Plan struct {
 	// gateway's Caddy is kept for, empty when it is not kept.
 	CaddyKept []string
 	// forced is a plan BuildForced or BuildForcedByID made, and declared
-	// whether paisans.yaml still declares its site.
+	// whether paisans-stack.yaml still declares its site.
 	forced, declared bool
 	// byID is a plan BuildForcedByID made, with no configuration, and dest
 	// the host it cleans.
@@ -564,7 +564,7 @@ func (p *Plan) render(cfg *config.Config) (*render.Plan, error) {
 	return render.Build(cfg, p.secrets, opts...)
 }
 
-// buildConfig is stage 5: the site out of paisans.yaml.
+// buildConfig is stage 5: the site out of paisans-stack.yaml.
 func (p *Plan) buildConfig() *Stage {
 	st := &Stage{
 		Number: 5,

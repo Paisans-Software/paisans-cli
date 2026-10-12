@@ -187,7 +187,7 @@ gateway.
 ## `paisans storage init`
 
 ```
-paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
+paisans storage init --site <name> [--config paisans-stack.yaml] [--secrets secrets.enc.yaml]
                      [--ssh <destination>] [--execute]
 ```
 

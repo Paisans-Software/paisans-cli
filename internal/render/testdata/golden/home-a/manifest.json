@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/.env",
-      "sha256": "7d996b436813d606e40f16feef83459ff5c776fa492ec835b440f2f6b41d9a20",
+      "sha256": "7583db2d8248543001da441ea36b98768251fe690b1c73f56e750d20da9dddea",
       "mode": "0600"
     },
     {
@@ -43,12 +43,12 @@
     },
     {
       "path": "srv/paisans/f2a9/blog/config.ini",
-      "sha256": "756d09fbfaca046a0bb553cd3b041dacb9ca1df13890a7e6d1e9f0b57fa895a8",
+      "sha256": "fb68007be43c077b2b6a1e02c2d96651b303fb56c2a535ea32b431b91cb621bd",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/docs/.env",
-      "sha256": "992db9c2dfd3b3bac3aaa19bee8edcab40d2df66de0176f8095cc9d5a754a080",
+      "sha256": "91bb189b747010b08482beb66928de1e4a8cc46c82a16222dcab94bfb138a7dc",
       "mode": "0600"
     },
     {
@@ -93,7 +93,7 @@
     },
     {
       "path": "srv/paisans/f2a9/invite/.env",
-      "sha256": "39df13520dc772a7321897d725b6ef621fed48fe8e9365b31a703b3554e5775c",
+      "sha256": "4f7f31206b33e8fdca6d4c39c8a2f429c48c712730e783bc7077c011183f2207",
       "mode": "0600"
     },
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",
-      "sha256": "be6a5f11f56fa390287a723d700d79385f79b11c748a05b19b5405a80b3a8226",
+      "sha256": "eca09d45555e06fdadc104969e9d7f1821c0f67afbb41af1874aede9e051a017",
       "mode": "0600"
     },
     {

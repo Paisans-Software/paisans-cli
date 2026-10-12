@@ -58,7 +58,7 @@ func createLines(groups ...[]string) []string {
 }
 
 func TestCreateWritesAFileThatValidates(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
 		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
@@ -87,7 +87,7 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 // witness on one machine is refused, the machines are asked again, and the
 // corrected answers write the file.
 func TestCreateAsksAgainAfterARefusal(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	rec := plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
 		[]string{"4", "1", "", "data, apps, gateway, witness", "203.0.113.10", "", "", ""},
@@ -113,7 +113,7 @@ func TestCreateAsksAgainAfterARefusal(t *testing.T) {
 }
 
 func TestCreateRefusesAnExistingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	os.WriteFile(path, []byte("version: 1\n"), 0o644)
 	in := answersFile(t, "x")
 	err := runCreate([]string{"--config", path}, in, &bytes.Buffer{})
@@ -126,7 +126,7 @@ func TestCreateRefusesAnExistingFile(t *testing.T) {
 }
 
 func TestCreateRefusesStdinThatIsNotATerminal(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	in := answersFile(t, "x")
 	isTerminal = func(*os.File) bool { return false }
 	err := runCreate([]string{"--config", path}, in, &bytes.Buffer{})
@@ -139,7 +139,7 @@ func TestCreateRefusesStdinThatIsNotATerminal(t *testing.T) {
 }
 
 func TestCreateWritesNothingOnNo(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	rec := plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
 		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{"n"})...)
@@ -152,7 +152,7 @@ func TestCreateWritesNothingOnNo(t *testing.T) {
 	if !strings.HasSuffix(out.String(), "? [Y/n]: \n") {
 		t.Errorf("no blank line after the write prompt:\n%q", out.String()[max(0, out.Len()-80):])
 	}
-	if want := "paisans.yaml not written. Run paisans create again to start over."; !strings.Contains(rec.String(), want) {
+	if want := "paisans-stack.yaml not written. Run paisans create again to start over."; !strings.Contains(rec.String(), want) {
 		t.Errorf("missing %q:\n%s", want, rec.String())
 	}
 	if _, err := os.Stat(path); err == nil {
@@ -161,7 +161,7 @@ func TestCreateWritesNothingOnNo(t *testing.T) {
 }
 
 func TestCreateWritesNothingWhenInputEnds(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	in := answersFile(t, createCommunity...)
 	err := runCreate([]string{"--config", path}, in, &bytes.Buffer{})
 	if hint, _ := ui.Describe(err); !strings.Contains(hint, "nothing written") {
@@ -173,7 +173,7 @@ func TestCreateWritesNothingWhenInputEnds(t *testing.T) {
 }
 
 func TestWriteNewRefusesAFileThatAppeared(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	os.WriteFile(path, []byte("theirs\n"), 0o644)
 	if err := writeNew(path, []byte("ours\n")); err == nil {
 		t.Error("a file that appeared meanwhile was replaced")

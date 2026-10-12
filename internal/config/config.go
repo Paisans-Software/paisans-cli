@@ -1,4 +1,4 @@
-// Package config loads and structurally checks a paisans.yaml deployment
+// Package config loads and structurally checks a paisans-stack.yaml deployment
 // declaration. It performs no policy checks: those live in internal/validate,
 // so that every problem in a file can be reported at once rather than one per
 // run.
@@ -19,6 +19,12 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
+
+// FileName is the name of the deployment declaration: the default of every
+// command's --config, the name a configuration store version holds it by, and
+// the name every message gives it. It is defined once so that the name an
+// operator reads is always the name the toolkit looks for.
+const FileName = "paisans-stack.yaml"
 
 // Role is a capability a site provides. Sites declare roles; apps declare
 // placement. Keeping those separate is what stops every new app from becoming
@@ -735,7 +741,7 @@ func LoadForInit(path string) (*Config, error) { return load(path, true) }
 // configuration store holds it: the same strict decode and structural check,
 // with no file behind it, so its Path is empty.
 func LoadBytes(data []byte) (*Config, error) {
-	cfg, err := parse(data, "paisans.yaml", false)
+	cfg, err := parse(data, FileName, false)
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +761,7 @@ func LoadWithBytes(path string) (*Config, []byte, error) { return loadBytes(path
 func loadBytes(path string, noSubnet bool) (*Config, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, readProblem(path, "Run paisans from the directory that holds paisans.yaml, or name the file with --config.", err)
+		return nil, nil, readProblem(path, "Run paisans from the directory that holds "+FileName+", or name the file with --config.", err)
 	}
 	cfg, err := parse(data, path, noSubnet)
 	return cfg, data, err

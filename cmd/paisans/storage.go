@@ -25,7 +25,7 @@ import (
 func runStorageAdd(args []string) error {
 	fs := newFlagSet("storage add", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails or waits")
 	changeReplication := fs.Bool("change-replication", false, "allow Garage's reset for another replication factor: every node stopped, its stored layout set aside, the cluster laid out again. Media is unavailable for about a minute")

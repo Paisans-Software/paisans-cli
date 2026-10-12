@@ -630,7 +630,7 @@ func refused(t Runner, e Entry, why error) error {
 		case strings.HasPrefix(c.Clashes[0], "the data role"):
 			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
 		case strings.HasPrefix(c.Clashes[0], "WireGuard listen port"):
-			advice = "Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in paisans.yaml, and forward that port where the host is behind NAT"
+			advice = "Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in " + config.FileName + ", and forward that port where the host is behind NAT"
 		default:
 			advice = "Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, run `paisans init`, which picks a subnet clear of every host"
 		}

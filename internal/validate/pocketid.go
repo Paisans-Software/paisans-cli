@@ -66,7 +66,7 @@ func (c *checker) pocketIDSettingUnknown() {
 			}
 			c.warn("pocket-id-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"pocket id setting is not read by the toolkit",
-				"is not a setting the pocket-id kind reads, so it renders nothing. The settings are listed in README.md, \"Pocket ID's configuration is rendered from paisans.yaml\"; an option the toolkit does not model goes under config, by its variable name.")
+				"is not a setting the pocket-id kind reads, so it renders nothing. The settings are listed in README.md, \"Pocket ID's configuration is rendered from "+config.FileName+"\"; an option the toolkit does not model goes under config, by its variable name.")
 		}
 	}
 }

@@ -21,7 +21,7 @@ import (
 func runPreflight(args []string) error {
 	fs := newFlagSet("preflight", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	site := fs.String("site", "", "the site being added, by the name it has in the configuration")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo")
 	if err := fs.Parse(args); err != nil {

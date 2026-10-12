@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Every site keeps every signed version of `paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml`, shares them with its mesh peers, and an admin can publish, pull, list and recover them, with `apply` refusing a stale base and each host refusing an older version than it last applied.
+**Goal:** Every site keeps every signed version of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml`, shares them with its mesh peers, and an admin can publish, pull, list and recover them, with `apply` refusing a stale base and each host refusing an older version than it last applied.
 
 **Architecture:** A version is a git commit holding exactly the three files, signed with the admin's SSH key, its secrets carrying an encrypted digest of the other two. Sites hold a bare repository, served read-only over the mesh by `git daemon` and filled from peers by a timer; they never judge. The workstation keeps a bare cache at `.paisans/store.git`, gathers every copy it can reach, and decides trust with pure Go rules over the version graph.
 
@@ -15,15 +15,15 @@
 - Follow `AGENTS.md` exactly: commit subject lowercase imperative, long "why" body wrapped at 80 columns, `Founder decision.` where the founder decided; NO em dashes anywhere; no rejected alternatives in code comments, docs or commits; refuse rather than warn where incoherent.
 - Every commit message ends with exactly: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - NEVER run `git stash`; use WIP commits. Never push.
-- The three files of a version, exactly: `paisans.yaml`, `secrets.enc.yaml`, `.sops.yaml`.
+- The three files of a version, exactly: `paisans-stack.yaml`, `secrets.enc.yaml`, `.sops.yaml`.
 - Ref per version: `refs/versions/<commit sha>`.
 - Commit message trailer: `Paisans-Revision: <n>`, n = 1 + highest parent revision; the root is revision 1.
-- Secrets key: `paisans.config_digest`, value `sha256:<hex of paisans.yaml> sha256:<hex of .sops.yaml>`.
+- Secrets key: `paisans.config_digest`, value `sha256:<hex of paisans-stack.yaml> sha256:<hex of .sops.yaml>`.
 - Host repository: `/var/lib/paisans/config/<token>.git`, owned by root, directories 0755, files 0644.
 - Units: `paisans-<token>-config-daemon.service`, `paisans-<token>-config-sync.service`, `paisans-<token>-config-sync.timer` (every 15 minutes).
 - Peers file: `/var/lib/paisans/config/<token>.peers`, one mesh address per line. Sync log: `/var/lib/paisans/config/<token>.sync.json`.
 - `git daemon` binds the site's mesh address, port 9418, serves only that repository, runs as `nobody`.
-- Workstation state: `.paisans/config-root`, `.paisans/config-head`, `.paisans/store.git/`, `.paisans/incoming/`, beside `paisans.yaml`; `.paisans/.gitignore` ignores `store.git/` and `incoming/`.
+- Workstation state: `.paisans/config-root`, `.paisans/config-head`, `.paisans/store.git/`, `.paisans/incoming/`, beside `paisans-stack.yaml`; `.paisans/.gitignore` ignores `store.git/` and `incoming/`.
 - Typed words: `partial` (fewer than a majority of sites reached directly), `rollback` (an older revision than a host's record).
 - Fetches never prune; nothing on a site is ever deleted except by `site remove`.
 
@@ -102,7 +102,7 @@ In `secrets.go` add to `Secrets`:
 
 ```go
 	// Paisans holds what the toolkit records about the configuration itself.
-	// config_digest binds a published version's paisans.yaml and .sops.yaml
+	// config_digest binds a published version's paisans-stack.yaml and .sops.yaml
 	// to this file: sops's MAC covers it, so only someone who can decrypt the
 	// file can write a digest that verifies (docs/specs/2026-10-12-config-store.md).
 	Paisans PaisansSecrets `yaml:"paisans,omitempty"`
@@ -200,7 +200,7 @@ func TestCheckDigest(t *testing.T) {
 	}
 	f.Paisans = []byte("paisans: 2\n")
 	if err := CheckDigest(f, fixtureID); !errors.Is(err, ErrDigestMismatch) {
-		t.Fatalf("edited paisans.yaml: %v", err)
+		t.Fatalf("edited paisans-stack.yaml: %v", err)
 	}
 	g := fixtureVersionWithoutDigest(t)
 	if err := CheckDigest(g, fixtureID); !errors.Is(err, ErrNoDigest) {
@@ -239,7 +239,7 @@ type Files struct {
 
 var (
 	ErrNoDigest       = errors.New("the secrets file records no digest of its configuration")
-	ErrDigestMismatch = errors.New("the secrets file's digest does not match paisans.yaml and .sops.yaml")
+	ErrDigestMismatch = errors.New("the secrets file's digest does not match paisans-stack.yaml and .sops.yaml")
 )
 
 // Digest is what a version's secrets file records about the other two files.
@@ -368,7 +368,7 @@ Expected: FAIL (undefined).
 Run git with `exec.Command("git", append([]string{"-C", r.Dir}, args...)...)`, `cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")`, stdin from a `bytes.Reader` where needed, and errors that quote git's stderr.
 
 - `InitRepo`: `os.MkdirAll`; if `HEAD` is missing, `git init --bare --quiet`; then `git config receive.denyDeletes true` and `git config receive.denyNonFastForwards true`.
-- `Commit`: `git hash-object -w --stdin` for each file; `git mktree` with stdin lines `100644 blob <sha>\t.sops.yaml`, `100644 blob <sha>\tpaisans.yaml`, `100644 blob <sha>\tsecrets.enc.yaml` (sorted by name, as mktree requires); `git -c gpg.format=ssh -c user.signingKey=<signingKey> -c user.name=paisans -c user.email=paisans@invalid commit-tree <tree> -S [-p <parent>]...` with message `"paisans configuration\n\nPaisans-Revision: <n>\n"` and env `GIT_COMMITTER_DATE`/`GIT_AUTHOR_DATE` = `when.UTC().Format(time.RFC3339)`; then `git update-ref refs/versions/<sha> <sha>`.
+- `Commit`: `git hash-object -w --stdin` for each file; `git mktree` with stdin lines `100644 blob <sha>\t.sops.yaml`, `100644 blob <sha>\tpaisans-stack.yaml`, `100644 blob <sha>\tsecrets.enc.yaml` (sorted by name, as mktree requires); `git -c gpg.format=ssh -c user.signingKey=<signingKey> -c user.name=paisans -c user.email=paisans@invalid commit-tree <tree> -S [-p <parent>]...` with message `"paisans configuration\n\nPaisans-Revision: <n>\n"` and env `GIT_COMMITTER_DATE`/`GIT_AUTHOR_DATE` = `when.UTC().Format(time.RFC3339)`; then `git update-ref refs/versions/<sha> <sha>`.
 - `Versions`: `git -c gpg.ssh.allowedSignersFile=<path> log --no-walk=unsorted --format=%H%x00%P%x00%G?%x00%GF%x00%ct%x00%(trailers:key=Paisans-Revision,valueonly)%x1e --glob=refs/versions` ; split records on `\x1e`, fields on `\x00`; `Signed` is `G` or `U`; then for each SHA `git ls-tree --name-only <sha>` and set `TreeOK` when the names are exactly the three.
 - `Files`: `git cat-file blob <sha>:<name>` for each name.
 - `Bundle`: if there are no `refs/versions/*` refs return `nil, nil`; else `git bundle create <tmp> --glob=refs/versions` and read the file.
@@ -401,7 +401,7 @@ git commit -m "feat: store signed configuration versions in a bare git repositor
 ```go
 type Graph struct {
 	Versions map[string]Version
-	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans.yaml
+	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans-stack.yaml
 	Digest   func(sha string) error                       // CheckDigest of that version
 }
 type Verdict struct {
@@ -416,7 +416,7 @@ func Judge(g Graph, pinnedRoot string) (Verdict, error)
 
 Rules, in this order, exactly as the spec's *Which versions the workstation trusts*:
 1. `TreeOK`, `Signed`, and `Revision == 1 + max(parent revisions)` (1 for a root); otherwise invalid.
-2. Signer: for a root, `SignerFP` is a key of an admin in its own `paisans.yaml`; otherwise a key of an admin in every parent's `paisans.yaml`. Every parent must itself be valid.
+2. Signer: for a root, `SignerFP` is a key of an admin in its own `paisans-stack.yaml`; otherwise a key of an admin in every parent's `paisans-stack.yaml`. Every parent must itself be valid.
 3. Removal is final: for each valid version R whose parent lists admin X and which does not, any version signed by X's key that is not an ancestor of R is invalid, reason `signed by <X> after a version removed them`.
 4. Roots: when `pinnedRoot` is set, only that root and its descendants can be valid; otherwise more than one valid root returns an error listing each root's SHA, signer and date.
 5. Digest: only versions that would be heads (valid, no valid child) must pass `Digest`; an ancestor whose secrets the operator cannot decrypt stays valid (Review Focus 1). A head failing the digest is invalid, and the computation repeats until stable.
@@ -641,7 +641,7 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) (bundle []
 - Produces:
 
 ```go
-type Local struct{ Dir string } // the directory holding paisans.yaml
+type Local struct{ Dir string } // the directory holding paisans-stack.yaml
 func (l Local) Root() (string, error); func (l Local) SetRoot(sha string) error
 func (l Local) Head() (string, error); func (l Local) SetHead(sha string) error
 func (l Local) Cache() (Repo, error) // .paisans/store.git, and .paisans/.gitignore
@@ -656,15 +656,15 @@ func Gather(l Local, sites map[string]apply.Transport, configured int, id string
 func Publish(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (sha string, pushed []string, err error)
 ```
 
-`Gather`: for each site, `Pull(t, d, true)` and `FetchBundle` into the cache; record `Reached{Direct: true}` or the error; then build allowed signers from every admin key in every held version's `paisans.yaml` (write a temp file), `Versions`, and `Judge` with `Root()` as the pin, `Admins` reading `config` admin keys of that version via `config.ParseKeyLine(...).Fingerprint`, `Digest` via `CheckDigest(Files(sha), id)`. `Majority` counts only `Direct` successes.
+`Gather`: for each site, `Pull(t, d, true)` and `FetchBundle` into the cache; record `Reached{Direct: true}` or the error; then build allowed signers from every admin key in every held version's `paisans-stack.yaml` (write a temp file), `Versions`, and `Judge` with `Root()` as the pin, `Admins` reading `config` admin keys of that version via `config.ParseKeyLine(...).Fingerprint`, `Digest` via `CheckDigest(Files(sha), id)`. `Majority` counts only `Direct` successes.
 
-`Publish`: refuse when `Head()` is set and is not the gathered single head (`stale: the sites hold <sha> (revision n, signed by x); run paisans config pull`), when the gathered result is a fork (name `publish --merge`), when no loaded agent key belongs to an admin listed in the parent (or, for the first version, in the local `paisans.yaml`), or when no site is reached. Before committing, write the digest: load secrets, `Set("paisans.config_digest", Digest(paisans, sops))`, `WriteSecrets` with `Recipients`. Commit with `revision = parent+1` (1 for the first), push the cache's bundle to every reached site, `SetHead`, and `SetRoot` on the first. `--merge` passes every head as a parent.
+`Publish`: refuse when `Head()` is set and is not the gathered single head (`stale: the sites hold <sha> (revision n, signed by x); run paisans config pull`), when the gathered result is a fork (name `publish --merge`), when no loaded agent key belongs to an admin listed in the parent (or, for the first version, in the local `paisans-stack.yaml`), or when no site is reached. Before committing, write the digest: load secrets, `Set("paisans.config_digest", Digest(paisans, sops))`, `WriteSecrets` with `Recipients`. Commit with `revision = parent+1` (1 for the first), push the cache's bundle to every reached site, `SetHead`, and `SetRoot` on the first. `--merge` passes every head as a parent.
 
 Commands (all dry run unless `--execute`, as every command here):
 - `paisans config publish [--merge] [--execute]`
-- `paisans config pull [--execute]`: gather; with no local edits since `Head()` (compare files with `Files(Head())`), write the head's three files and `SetHead`; with edits, refuse, write the head's files to `.paisans/incoming/`, and print a unified diff of `paisans.yaml` and the changed secrets keys by name only (Task 9 owns the secrets merge).
+- `paisans config pull [--execute]`: gather; with no local edits since `Head()` (compare files with `Files(Head())`), write the head's three files and `SetHead`; with edits, refuse, write the head's files to `.paisans/incoming/`, and print a unified diff of `paisans-stack.yaml` and the changed secrets keys by name only (Task 9 owns the secrets merge).
 - `paisans config log`: gather without `--execute` effects; print revision, short SHA, signer admin id, date, `valid` or the reason, and which sites hold it.
-- `paisans config recover --from user@host[:port]... [--root <sha>] [--execute]`: no configuration on disk. Build transports from the given destinations, gather, then from the first valid version's `paisans.yaml` build transports for every site there and gather again (Review Focus 3 applies); without `Majority` ask for `partial` at a terminal (refuse without one); write the three files, `SetRoot`, `SetHead`.
+- `paisans config recover --from user@host[:port]... [--root <sha>] [--execute]`: no configuration on disk. Build transports from the given destinations, gather, then from the first valid version's `paisans-stack.yaml` build transports for every site there and gather again (Review Focus 3 applies); without `Majority` ask for `partial` at a terminal (refuse without one); write the three files, `SetRoot`, `SetHead`.
 
 Every prompt uses `confirmWord(stdin, stdout, word, what)`; without a terminal the command is refused before anything is written.
 
@@ -745,10 +745,10 @@ Flatten each side to `map[path]string` using the same key paths `Get`/`Set` acce
 ### Task 10: Documentation
 
 **Files:**
-- Modify: `README.md` (a section *Every site keeps signed copies of the configuration* after *Backup and restore*, with the reasoning from the spec; update *Backup and restore*'s table rows for `paisans.yaml` and `secrets.enc.yaml` to say every site holds every version; add the store's files to the table in *site remove* of what is removed)
+- Modify: `README.md` (a section *Every site keeps signed copies of the configuration* after *Backup and restore*, with the reasoning from the spec; update *Backup and restore*'s table rows for `paisans-stack.yaml` and `secrets.enc.yaml` to say every site holds every version; add the store's files to the table in *site remove* of what is removed)
 - Modify: `docs/commands.md` (`config publish`, `config pull`, `config log`, `config recover`, and the new `apply` refusals and words `partial` and `rollback`)
 - Modify: `docs/development.md` (*Run*: the new commands; *What is not here yet*: the store has run against fakes and local repositories only)
-- Modify: `docs/guides/how-a-deployment-protects-itself.md` (*Losing `paisans.yaml` or the secrets file*: from "Designed, not built" to what is built; *Not built yet*: remove the item) and `docs/guides/when-an-admin-leaves.md` (re-encrypt before publishing the version that removes an admin) when those files exist on this branch; if they arrive with the eviction branch, note it in the pull request body instead.
+- Modify: `docs/guides/how-a-deployment-protects-itself.md` (*Losing `paisans-stack.yaml` or the secrets file*: from "Designed, not built" to what is built; *Not built yet*: remove the item) and `docs/guides/when-an-admin-leaves.md` (re-encrypt before publishing the version that removes an admin) when those files exist on this branch; if they arrive with the eviction branch, note it in the pull request body instead.
 
 - [ ] **Step 1:** Write the sections. Every rule gives its reason; no em dashes; cross-reference by section name.
 - [ ] **Step 2:** Verify: every command example uses flags `cmd/paisans/config.go` defines (grep them); every internal link resolves; no real hostname, address or key in the diff (`git diff | grep -nE '([0-9]{1,3}\.){3}[0-9]{1,3}'` shows only documentation ranges and `10.44.` examples).
@@ -786,7 +786,7 @@ workstation state.
 ```go
 type Graph struct {
 	Versions map[string]Version
-	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans.yaml
+	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans-stack.yaml
 }
 type Anchor struct {
 	Signer string // the operator's key fingerprint, from .paisans/signing-key; may be empty
@@ -838,9 +838,9 @@ Rules, exactly as the spec's *Which versions the workstation trusts*:
 - Produces: `func Attest(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (sha string, err error)` and the command `paisans admin register [--key <path.pub>] [--root <sha>] [--execute]`.
 
 Behaviour, exactly as the spec's *`paisans admin register`*:
-1. The key: `--key` names a `.pub` file; otherwise the ssh-agent's keys (`ssh-add -L`) that match a key under some `admins.<id>.keys` in the local `paisans.yaml`. None: refuse, print the agent's public key lines, and say to add one under the operator's `admins` entry and have another admin publish it. More than one admin matched: refuse, naming them, and ask for `--key`.
+1. The key: `--key` names a `.pub` file; otherwise the ssh-agent's keys (`ssh-add -L`) that match a key under some `admins.<id>.keys` in the local `paisans-stack.yaml`. None: refuse, print the agent's public key lines, and say to add one under the operator's `admins` entry and have another admin publish it. More than one admin matched: refuse, naming them, and ask for `--key`.
 2. Gather (Task 7). Anchor for this run: the pinned root if `--root` or `.paisans/config-root` is set; else the anchor rule with the chosen key; else refuse with `ErrNoAnchor`'s message.
-3. The head must be single (a fork refuses, naming `config publish --merge`) and its three files must equal the local files, unless the head is the one the pinned root leads to and the local files are absent; otherwise refuse and print a diff of `paisans.yaml` and the names of changed secrets keys.
+3. The head must be single (a fork refuses, naming `config publish --merge`) and its three files must equal the local files, unless the head is the one the pinned root leads to and the local files are absent; otherwise refuse and print a diff of `paisans-stack.yaml` and the names of changed secrets keys.
 4. With `--execute`: commit a version with the head's tree, parent the head, revision head+1, signed with the key (`key::<line>` so ssh-agent signs); push it to every reached site; write `.paisans/signing-key`, `.paisans/config-head`, and `.paisans/config-root` if unset. Without `--execute`: show what it would sign. Nothing on any host other than the store changes.
 5. `config publish` and `apply` (Tasks 7 and 8) sign with `.paisans/signing-key` when it is set, and refuse when the agent does not hold that key.
 

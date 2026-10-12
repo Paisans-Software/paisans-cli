@@ -53,7 +53,7 @@ func (s secretsStore) Save(secrets *config.Secrets) error {
 func runMeshRekey(args []string) error {
 	fs := newFlagSet("mesh rekey", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rekey, one site at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rekey every site the configuration declares, in its order")

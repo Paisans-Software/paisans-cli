@@ -135,7 +135,7 @@ func listClientPlan(r ui.Reporter, app, idp, where string, plan *oidcclient.Plan
 // whose kind has a client shape (kinds.OIDCClient) gets its client ensured
 // at the deployment's Pocket ID before it renders, with the same plan and
 // the same recorder as `oidc client create`. Declaring the app in
-// paisans.yaml is the approval for its client (founder decision,
+// paisans-stack.yaml is the approval for its client (founder decision,
 // 2026-10-08), so apply does not ask again. It never rotates a secret;
 // `oidc client create --rotate-secret` does.
 type clientStep struct {

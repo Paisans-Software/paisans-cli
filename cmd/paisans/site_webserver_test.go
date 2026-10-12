@@ -32,7 +32,7 @@ func siteApply(t *testing.T, path, site string, inside bool) (*ui.Recorder, erro
 
 // apply --site on a monitor with managed_by: external writes its app's
 // site file, reloads the server in its container, records include_dir in
-// paisans.yaml and checks the app once, then ends as applied.
+// paisans-stack.yaml and checks the app once, then ends as applied.
 func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
 	checked := fakeWebServerCheck(t, nil)
 	path := externalFixture(t)
@@ -48,7 +48,7 @@ func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
 		t.Errorf("record %+v", got)
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "include_dir: /opt/caddy/paisans.d\n") {
-		t.Errorf("paisans.yaml:\n%s", data)
+		t.Errorf("paisans-stack.yaml:\n%s", data)
 	}
 	if !slices.Equal(*checked, []string{"status"}) {
 		t.Errorf("checked %v", *checked)
@@ -59,7 +59,7 @@ func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
 		"progress read the web server on watch: site file for status",
 		"progress write paisans-f2a9-status.caddy: site file for status",
 		"done site file for status: " + statusFile + " written, caddy reloaded",
-		"note watch: include_dir set to /opt/caddy/paisans.d in paisans.yaml: Apply derived it beside caddy's configuration, /opt/caddy/Caddyfile, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.",
+		"note watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml: Apply derived it beside caddy's configuration, /opt/caddy/Caddyfile, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.",
 		"step status",
 		"progress reach status.example.org: status",
 		"done status: status.example.org",

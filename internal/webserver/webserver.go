@@ -4,7 +4,7 @@
 // directory the server includes (Sync), and whether it works, checked from
 // the operator's machine (Check).
 //
-// Show reads paisans.yaml alone, and Detect only reads the host. Check
+// Show reads paisans-stack.yaml alone, and Detect only reads the host. Check
 // resolves a name, makes two HTTPS requests and opens one TCP connection, as
 // any visitor could. Sync and Remove are the one part that changes a host,
 // and they change only the toolkit's own files in the include directory,
@@ -29,7 +29,7 @@ type Target struct {
 	Hostname string
 	Mode     config.ManagedBy
 	// Listen is where the app is published for the operator's web server,
-	// as written in paisans.yaml, and ListenHost and ListenPort the same
+	// as written in paisans-stack.yaml, and ListenHost and ListenPort the same
 	// split. All three are empty with managed_by: paisans.
 	Listen     string
 	ListenHost string

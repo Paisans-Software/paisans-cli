@@ -121,7 +121,7 @@ become a setting, which is a pull request rather than a local edit.
 
 ## A credential shaped key is refused
 
-`paisans.yaml` is plaintext and meant to be read, committed and diffed.
+`paisans-stack.yaml` is plaintext and meant to be read, committed and diffed.
 `secrets.enc.yaml` is sops encrypted and exists for the other thing. A
 passthrough map is exactly where somebody pastes an API token at the end of a
 long day.

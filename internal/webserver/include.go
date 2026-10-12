@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"path"
 	"regexp"
 	"strings"
@@ -81,11 +82,11 @@ func mountAdvice(ws WebServer, seen string) string {
 	if ws.Config != "" {
 		host = path.Join(path.Dir(ws.Config), IncludeName)
 	}
-	return fmt.Sprintf("%s Add one to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container (a restart does not add a mount), then run paisans apply --execute again: it finds the directory and records it in paisans.yaml.", unmounted(ws, ""), host, seen)
+	return fmt.Sprintf("%s Add one to the volumes of that container's service in its compose file:\n\n    - %s:%s\n\nand recreate the container (a restart does not add a mount), then run paisans apply --execute again: it finds the directory and records it in "+config.FileName+".", unmounted(ws, ""), host, seen)
 }
 
 // unmounted says that the server in a container cannot see dir, the
-// include_dir paisans.yaml names, or with dir empty the directory beside
+// include_dir paisans-stack.yaml names, or with dir empty the directory beside
 // its configuration.
 func unmounted(ws WebServer, dir string) string {
 	if dir != "" {
@@ -163,7 +164,7 @@ func FileName(prefix, app string, s Server) string {
 // FileContent is what the toolkit writes for t: a header saying whose it
 // is, then the snippet `web-server show` prints for ws.
 func FileContent(t Target, ws WebServer) string {
-	header := fmt.Sprintf("# %s, the paisans app %s, written by paisans apply.\n# Every apply rewrites it, and app remove and site remove delete it:\n# change paisans.yaml rather than this file.\n", t.Hostname, t.App)
+	header := fmt.Sprintf("# %s, the paisans app %s, written by paisans apply.\n# Every apply rewrites it, and app remove and site remove delete it:\n# change "+config.FileName+" rather than this file.\n", t.Hostname, t.App)
 	switch ws.Server {
 	case ServerCaddy:
 		return header + caddySnippet(t, ws)

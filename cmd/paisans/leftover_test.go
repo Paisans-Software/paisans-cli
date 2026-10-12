@@ -20,7 +20,7 @@ import (
 // leaves them and naming `paisans app remove` for each app they belong to. A whole plan shows what it is about to mark; a
 // partial one shows the manifest's marks. Nothing left over prints nothing.
 func TestTheApplyPlanListsLeftovers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		t.Fatal(err)
 	}

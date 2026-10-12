@@ -1,4 +1,4 @@
-// Package appremove takes an app that has left paisans.yaml off every host:
+// Package appremove takes an app that has left paisans-stack.yaml off every host:
 // its containers and networks, its left over rendered files, its stack
 // directory when nothing else is in it, and its client at Pocket ID. With
 // --delete-data it also deletes the app's member data: its database and role
@@ -55,12 +55,12 @@ var nameShape = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 func Refusal(cfg *config.Config, app string) error {
 	switch {
 	case !nameShape.MatchString(app) || strings.Contains(app, ".."):
-		return fmt.Errorf("app remove: %q is not an app's name. A stack is named by one lowercase word, as it was under apps: in paisans.yaml", app)
+		return fmt.Errorf("app remove: %q is not an app's name. A stack is named by one lowercase word, as it was under apps: in "+config.FileName, app)
 	case app == infraStack:
 		return fmt.Errorf("app remove: %s is the infrastructure stack (Patroni, HAProxy, Garage and the gateway's Caddy), not an app, and is never removed by this command", app)
 	}
 	if _, ok := cfg.Apps[app]; ok {
-		return fmt.Errorf("app remove: %s is still in paisans.yaml. Take it out of paisans.yaml and run `paisans apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app)
+		return fmt.Errorf("app remove: %s is still in "+config.FileName+". Take it out of "+config.FileName+" and run `paisans apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app)
 	}
 	for _, site := range cfg.SiteNames() {
 		stacks, err := render.SiteStacks(cfg, site)

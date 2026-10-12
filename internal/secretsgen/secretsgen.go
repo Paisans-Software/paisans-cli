@@ -70,7 +70,7 @@ func (r Result) Changed() bool { return len(r.Generated) > 0 }
 // Fill generates every missing generated secret for a configuration, in place.
 //
 // It is deliberately driven by the configuration rather than by what the file
-// already contains: a site or an app added to paisans.yaml is a secret owed,
+// already contains: a site or an app added to paisans-stack.yaml is a secret owed,
 // and the whole point of re-running init is to notice that.
 func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	var result Result

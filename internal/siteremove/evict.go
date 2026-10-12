@@ -859,7 +859,7 @@ func (p *Plan) EvictReport() []string {
 		out = append(out, fmt.Sprintf("dns: the DNS token was not checked; check it yourself. %s held the token it was rendered, and %s, so this command could not try the one in the secrets file. Revoke the old one at the provider", p.Site, p.evict.tokenUnchecked))
 	}
 	if joining := p.Joining(); len(joining) > 0 {
-		out = append(out, fmt.Sprintf("apply: run `paisans apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in paisans.yaml and nowhere else", joinAnd(joining)))
+		out = append(out, fmt.Sprintf("apply: run `paisans apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", joinAnd(joining)))
 	}
 	if len(p.evict.dark) > 0 {
 		out = append(out, fmt.Sprintf("names: the community answers nothing until that apply. %s was the only remaining %s site", p.Site, strings.Join(p.evict.dark, " and ")))

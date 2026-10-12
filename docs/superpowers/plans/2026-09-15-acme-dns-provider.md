@@ -881,7 +881,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `internal/config/config.go`
 - Modify: `internal/config/config_test.go`
-- Modify: `examples/paisans.example.yaml`
+- Modify: `examples/paisans-stack.example.yaml`
 - Modify: `internal/render/testdata/deployment.yaml`, `internal/validate/testdata/*.yaml`
 
 **Interfaces:**
@@ -898,7 +898,7 @@ Add to `internal/config/config_test.go`:
 // deployment with a gateway and no provider cannot obtain a certificate, and
 // that is a missing required field rather than a policy question.
 func TestACMEProviderIsRequiredWhenAGatewayExists(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	body := strings.Replace(validConfig, "acme:\n  provider: desec\n", "", 1)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -914,7 +914,7 @@ func TestACMEProviderIsRequiredWhenAGatewayExists(t *testing.T) {
 
 // The provider is read as declared, and an override image is optional.
 func TestACMEBlockLoads(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -984,7 +984,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Add the block to every fixture and the example**
 
-Add to `examples/paisans.example.yaml`, after the `mesh:` block:
+Add to `examples/paisans-stack.example.yaml`, after the `mesh:` block:
 
 ```yaml
 # Certificates are issued over DNS-01, always. A gateway has to be able to hold
@@ -1685,7 +1685,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ```bash
 go vet ./... && go test ./...
-go run ./cmd/paisans validate --config examples/paisans.example.yaml
+go run ./cmd/paisans validate --config examples/paisans-stack.example.yaml
 ```
 
 Expected: every package passes, and the example validates with exactly one warning, the deliberate `pinned-app-on-witness` one.
@@ -1694,9 +1694,9 @@ Expected: every package passes, and the example validates with exactly one warni
 
 ```bash
 out=$(mktemp -d)
-cp examples/paisans.example.yaml "$out/paisans.yaml"
-go run ./cmd/paisans init --config "$out/paisans.yaml"
-go run ./cmd/paisans render --config "$out/paisans.yaml" --secrets "$out/secrets.enc.yaml" --out "$out/rendered"
+cp examples/paisans-stack.example.yaml "$out/paisans-stack.yaml"
+go run ./cmd/paisans init --config "$out/paisans-stack.yaml"
+go run ./cmd/paisans render --config "$out/paisans-stack.yaml" --secrets "$out/secrets.enc.yaml" --out "$out/rendered"
 grep -r "acme_dns" "$out/rendered"
 grep -r "image: ghcr.io/paisans-software/caddy" "$out/rendered"
 ```

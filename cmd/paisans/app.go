@@ -61,7 +61,7 @@ func runApp(args []string) error {
 func runAppAdminCreate(args []string, stdin io.Reader) error {
 	fs := newFlagSet("app admin create", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file, read for pocket-id's API key (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app, by the name it has in the configuration")
 	username := fs.String("username", "", "the administrator's username")

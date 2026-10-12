@@ -226,8 +226,8 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		withoutAgeKey(t)
 		path, _ := initWorld(t, nil, fakeSites(), nil)
 		t.Chdir(filepath.Dir(path))
-		err, _ := runInitShowing(t, "--config", "paisans.yaml", "--sudo=false", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
-		if err == nil || !strings.Contains(err.Error(), "beside paisans.yaml") {
+		err, _ := runInitShowing(t, "--config", "paisans-stack.yaml", "--sudo=false", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
+		if err == nil || !strings.Contains(err.Error(), "beside paisans-stack.yaml") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
 		if !strings.Contains(err.Error(), "once ~/.config/paisans exists") {

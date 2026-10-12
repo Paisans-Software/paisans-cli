@@ -55,7 +55,7 @@ type siteFile struct {
 // web server, validates the server's configuration, reloads a server in a
 // container and leaves one on the host itself for the operator to reload,
 // and removes every file it recorded there that is no longer wanted. An
-// include_dir not yet in paisans.yaml is derived beside the server's
+// include_dir not yet in paisans-stack.yaml is derived beside the server's
 // configuration and written there. Nothing is written where the server
 // does not include the directory by a wildcard. Each problem with the
 // operator's web server is a warning on its step's line, with the one set
@@ -228,7 +228,7 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	}
 	if dir.Unset() {
 		// Recorded only once the server is known to read it, so a
-		// directory nothing includes is never written into paisans.yaml.
+		// directory nothing includes is never written into paisans-stack.yaml.
 		if err := config.SetIncludeDir(configPath, site, inc.Dir); err != nil {
 			return failed(err)
 		}

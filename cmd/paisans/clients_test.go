@@ -623,7 +623,7 @@ func TestApplyRefusesAConflictBeforeContactingPocketID(t *testing.T) {
 // A deployment with no pocket-id app has no identity step: the app is
 // applied as it always was, without sign in.
 func TestApplyHasNoIdentityStepWithoutPocketID(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -173,7 +173,7 @@ func TestListKeysSayWhetherTheyWereDerived(t *testing.T) {
 
 // The example leaves both lists to the roles, as a new deployment should.
 func TestTheExampleDerivesItsLists(t *testing.T) {
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

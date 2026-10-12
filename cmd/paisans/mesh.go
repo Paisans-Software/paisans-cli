@@ -92,7 +92,7 @@ func holder(h mesh.Host, site string, clash []mesh.Taken) string {
 // every other deployment's mesh from each registry and everything each host
 // holds (see checkMeshLive), keeps the declared subnet if it overlaps none of
 // it, and otherwise rolls a random /24 that overlaps none, moving each
-// site's address into it with its host number kept. It writes paisans.yaml
+// site's address into it with its host number kept. It writes paisans-stack.yaml
 // only when it rolled, and says why. It reports whether it wrote.
 //
 // The decision is one step, "settle mesh subnet", whose result is what
@@ -218,7 +218,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 func conflictAdvice(c registry.Conflict) string {
 	for _, clash := range c.Clashes {
 		if strings.HasPrefix(clash, "WireGuard listen port") {
-			return "Give that site's endpoint another port in paisans.yaml, and forward it where the host is behind NAT"
+			return "Give that site's endpoint another port in " + config.FileName + ", and forward it where the host is behind NAT"
 		}
 	}
 	return "Use another host for that site"

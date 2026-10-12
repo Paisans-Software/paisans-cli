@@ -42,7 +42,7 @@ func foreignSecretsWorld(t *testing.T) (configPath, secretsPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath = filepath.Join(dir, "paisans.yaml")
+	configPath = filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(configPath, declaration, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestInitRefusesAnotherDeploymentsSecrets(t *testing.T) {
 	}
 }
 
-// init writes paisans.yaml's id into the secrets file it creates, and into
+// init writes paisans-stack.yaml's id into the secrets file it creates, and into
 // one that had none when it next writes it.
 func TestInitWritesTheDeploymentID(t *testing.T) {
 	for name, existing := range map[string]bool{"new file": false, "file without an id": true} {

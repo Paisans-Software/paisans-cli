@@ -60,7 +60,7 @@ func TestDeriveIncludeWithASingleFileMount(t *testing.T) {
 	}
 }
 
-// A directory paisans.yaml names is seen through the mount it is under, or
+// A directory paisans-stack.yaml names is seen through the mount it is under, or
 // refused with the mount to add.
 func TestIncludeAt(t *testing.T) {
 	if inc, why := webserver.IncludeAt(dockerCaddy, "/opt/caddy/sites/paisans"); why != "" || inc.Seen != "/etc/caddy/sites/paisans" {

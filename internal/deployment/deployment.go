@@ -4,7 +4,7 @@
 // disagree about which deployment they belong to.
 //
 // A deployment is identified by its id, a random UUID written into
-// paisans.yaml by `paisans init` and never changed afterwards. Names carry the
+// paisans-stack.yaml by `paisans init` and never changed afterwards. Names carry the
 // token, the id's first four hex digits, because a name is read by people and
 // a full UUID in every container name is noise. The token is a label for
 // humans; the id is the identity. Code that decides whether a Docker object

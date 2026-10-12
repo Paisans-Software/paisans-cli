@@ -1780,7 +1780,7 @@ var secretWords = []string{"password", "secret", "token", "apikey", "privatekey"
 
 // configKeyLooksLikeASecret refuses a key named like a credential.
 //
-// paisans.yaml is plaintext and meant to be read, committed and diffed. A
+// paisans-stack.yaml is plaintext and meant to be read, committed and diffed. A
 // passthrough map is exactly where somebody pastes an API token at the end of
 // a long day. The check is by name and is deliberately narrow: it refuses the
 // one thing it can see, and says so, rather than claiming to be a policy.
@@ -1796,7 +1796,7 @@ func (c *checker) configKeyLooksLikeASecret() {
 				}
 				c.refuse("config-key-looks-like-a-secret", fmt.Sprintf("apps.%s.config.%s", name, key),
 					"config key is named like a credential",
-					"is named like a credential (it contains %q, ignoring case and the separators _ - and .). paisans.yaml is plaintext and meant to be committed, so a secret does not belong in it: put the value in secrets.enc.yaml. This check is by name and will not catch a credential named something else, so it is no substitute for looking.",
+					"is named like a credential (it contains %q, ignoring case and the separators _ - and .). "+config.FileName+" is plaintext and meant to be committed, so a secret does not belong in it: put the value in secrets.enc.yaml. This check is by name and will not catch a credential named something else, so it is no substitute for looking.",
 					word)
 				break
 			}

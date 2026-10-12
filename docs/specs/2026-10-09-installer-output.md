@@ -56,7 +56,7 @@ detail is lost relative to today's output.
 Dry run:
 
 ```
-paisans.yaml
+paisans-stack.yaml
   ! garage consistency is dangerous: an upload is confirmed even if only 1 of 2 copies is written
 luthen-rael (ubuntu@192.0.2.10)
   ✓ host check: clean
@@ -89,11 +89,11 @@ Applied 8 files to luthen-rael.
 A refusal:
 
 ```
-paisans.yaml
+paisans-stack.yaml
   ✗ witness shares a failure domain with its only voter
     home-a and home-b are both in rack-1, so losing the rack loses quorum.
     Put the witness in another failure domain.
-paisans.yaml: 1 refusal. Nothing was changed.
+paisans-stack.yaml: 1 refusal. Nothing was changed.
 ```
 
 ## Line style
@@ -125,7 +125,7 @@ looks.
 
 ```go
 type Reporter interface {
-    Section(title string)                 // a site, "paisans.yaml", a stage
+    Section(title string)                 // a site, "paisans-stack.yaml", a stage
     Step(title string) Step               // starts a step; spinner on a TTY
     Item(title string)                    // a dry-run plan line, no outcome
     Warn(hint, detail string)             // detail shown only with --verbose
@@ -273,7 +273,7 @@ their call sites (about 90, in `validate.go`, `monitor.go`, `pocketid.go` and
 stable identifier tests assert on; it is shown only with `--verbose`.
 
 Findings print under a section that says what they are about, then a count
-line, `paisans.yaml: 1 refusal, 1 warning` (plural only when needed):
+line, `paisans-stack.yaml: 1 refusal, 1 warning` (plural only when needed):
 
 * `paisans validate` prints them under the file's path, since the file is its
   subject, and always ends with the count line, or with `no problems found`.

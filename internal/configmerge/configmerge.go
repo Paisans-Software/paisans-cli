@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"io"
 	"regexp"
 	"sort"
@@ -57,7 +58,7 @@ func (c *Collision) Error() string {
 
 // label is the comment written above added keys, so a reader of the rendered
 // file can tell them from what the template wrote.
-const label = "Set by `config` in paisans.yaml, not by a template."
+const label = "Set by `config` in " + config.FileName + ", not by a template."
 
 func sortedKeys(keys map[string]any) []string {
 	out := make([]string, 0, len(keys))

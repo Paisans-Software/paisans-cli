@@ -15,7 +15,7 @@ a protection is designed but not built, it says so.
 Two kinds of trust run through the design, and keeping them apart explains most
 of what follows.
 
-**Admins are trusted with the deployment.** Every admin holds `paisans.yaml`
+**Admins are trusted with the deployment.** Every admin holds `paisans-stack.yaml`
 and can decrypt `secrets.enc.yaml`. With those two files an admin can change
 anything: move an app, add a site, re-provision the whole stack onto their own
 hardware. The toolkit does not try to protect admins from each other at that
@@ -37,7 +37,7 @@ is how a site is taken out.
 
 ## Someone adds their key to a host they were not given
 
-**What could happen.** `paisans.yaml` is one shared file. Bob adds his name to
+**What could happen.** `paisans-stack.yaml` is one shared file. Bob adds his name to
 `home-a`'s `ssh.keys`, or replaces the key listed under `admins.alice`, and
 commits. Later Alice runs `paisans apply` with her own access, and `host
 prepare` installs Bob's key for the login user, which has `sudo` and Docker:
@@ -65,7 +65,7 @@ before merging. If you own a host, run `host allow` on it.
 
 ## Someone changes an image
 
-**What could happen.** Bob changes an app's image in `paisans.yaml` to one he
+**What could happen.** Bob changes an app's image in `paisans-stack.yaml` to one he
 controls. The next `apply` pulls and runs it on every site that runs the app,
 on the mesh, with the app's secrets.
 
@@ -121,7 +121,7 @@ ever reaching it, in an order chosen for a host that is alive and may resist:
    and its Garage node is dropped from the layout as dead. If some uploads
    existed only on that node, the operator types `lose objects` to go on.
 5. **The rest** of an ordinary `site remove`: HAProxy, the replicas'
-   configuration, `paisans.yaml`, the monitor.
+   configuration, `paisans-stack.yaml`, the monitor.
 
 A replacement host is declared in the same configuration edit, under a new
 name, and brought up by `apply` afterwards. Its WireGuard key and every secret
@@ -213,14 +213,14 @@ the mesh address: a compromised peer reaches every app ungated.
 **You do.** Evict it, and rotate what it held with `paisans secrets rotate
 --all`.
 
-## Losing `paisans.yaml` or the secrets file
+## Losing `paisans-stack.yaml` or the secrets file
 
 **What could happen.** The workstation dies and the repository holding the two
 files goes with it. The secrets file holds every credential of the deployment,
 and without it every secret must be generated again and every client created
 again.
 
-**Protects.** Every site keeps every version of `paisans.yaml`,
+**Protects.** Every site keeps every version of `paisans-stack.yaml`,
 `secrets.enc.yaml` and `.sops.yaml`, each a git commit of exactly those three
 files signed with the SSH key of the admin who published it. `paisans config
 publish` pushes a version to every site, and `apply --execute` publishes the

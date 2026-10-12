@@ -113,7 +113,7 @@ func TestDroppedIsRegardlessOfSecrets(t *testing.T) {
 	}
 }
 
-// A destination renamed or taken out of paisans.yaml leaves its credentials
+// A destination renamed or taken out of paisans-stack.yaml leaves its credentials
 // as an orphan, which prune removes. The generated keys never are: they
 // decrypt every backup already taken.
 func TestARemovedDestinationsCredentialsAreOrphans(t *testing.T) {

@@ -287,7 +287,7 @@ func readFixture(t *testing.T) string {
 
 func writeConfig(t *testing.T, data string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}

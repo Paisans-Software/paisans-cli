@@ -198,7 +198,7 @@ Expected: FAIL to compile, the package does not exist.
 // Package deployrecord is the record each gateway keeps of what the
 // deployment has deployed: its sites, apps and Pocket ID groups, by name.
 // apply adds to it and only the removal commands take from it, so a
-// paisans.yaml edited by mistake cannot shrink it, and `secrets prune` removes
+// paisans-stack.yaml edited by mistake cannot shrink it, and `secrets prune` removes
 // only what the yaml does not declare and no record lists
 // (docs/specs/2026-10-09-deployment-record.md).
 package deployrecord
@@ -431,7 +431,7 @@ Expected: PASS.
 - Consumes: `deployrecord.Record`, `Lists` (Task 1).
 - Produces:
   - `func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord.Record) []Orphan`: as today, minus every key whose name `deployed` lists. `nil` means no record: the yaml alone.
-  - `func Dropped(cfg *config.Config, deployed *deployrecord.Record) []Orphan`: every name `deployed` lists that the yaml does not declare, keyed `sites.<n>`, `apps.<n>`, `pocket_id_groups.<n>`, with `Why` = `is deployed but paisans.yaml no longer declares it` and `Leaves` = what to do (below). Empty for `nil`.
+  - `func Dropped(cfg *config.Config, deployed *deployrecord.Record) []Orphan`: every name `deployed` lists that the yaml does not declare, keyed `sites.<n>`, `apps.<n>`, `pocket_id_groups.<n>`, with `Why` = `is deployed but paisans-stack.yaml no longer declares it` and `Leaves` = what to do (below). Empty for `nil`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -499,14 +499,14 @@ In `Orphans`, add the parameter and, before each `append`, skip a name the recor
 `sites` checks `held("sites", name)`; `apps` and `oidc_clients` check `held("apps", name)`; `pocket_id_groups` checks `held("pocket_id_groups", group)`.
 
 ```go
-// Dropped is every name the record lists that paisans.yaml does not declare:
+// Dropped is every name the record lists that paisans-stack.yaml does not declare:
 // something taken out of the yaml while it still runs, by mistake or before
 // its removal command. It is reported whether or not it has secrets.
 func Dropped(cfg *config.Config, deployed *deployrecord.Record) []Orphan {
 	if deployed == nil {
 		return nil
 	}
-	const why = "is deployed but paisans.yaml no longer declares it"
+	const why = "is deployed but paisans-stack.yaml no longer declares it"
 	declared := deployrecord.FromConfig(cfg)
 	var out []Orphan
 	for _, n := range deployed.Sites {
@@ -650,7 +650,7 @@ func fixtureRecord() string {
 In `init_test.go`, `TestInitWarnsAboutOrphanedSecrets` gives `vm` a record (`sites["vm"].files = map[string]string{deployrecord.Path(...): fixtureRecord()}`), and a new test:
 
 ```go
-// A site the record lists that paisans.yaml no longer declares is warned
+// A site the record lists that paisans-stack.yaml no longer declares is warned
 // about, whether or not it has secrets.
 func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	sites := fakeSites()
@@ -660,7 +660,7 @@ func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Lines(), "sites.monitor-a is deployed but paisans.yaml no longer declares it") {
+	if !strings.Contains(out.Lines(), "sites.monitor-a is deployed but paisans-stack.yaml no longer declares it") {
 		t.Errorf("no warning:\n%s", out.Lines())
 	}
 }
@@ -713,7 +713,7 @@ func recordForWarnings(r ui.Reporter, cfg *config.Config, hosts func(string) reg
 }
 
 // warnSecrets warns once per orphaned secret and once per name the record
-// lists that paisans.yaml no longer declares. Never a refusal.
+// lists that paisans-stack.yaml no longer declares. Never a refusal.
 func warnSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, deployed *deployrecord.Record) {
 	for _, o := range secretsgen.Dropped(cfg, deployed) {
 		r.Warn(o.Key+" "+o.Why, o.Leaves+".")
@@ -726,18 +726,18 @@ func warnSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, dep
 
 `sortedKeys` is a small helper (`maps.Keys` + `slices.Sorted`). Delete `warnOrphans`.
 
-In `runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer)`: add `withoutRecord := fs.Bool("without-record", false, "trust paisans.yaml alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")` and `sudo := fs.Bool("sudo", true, "read the gateways' records through sudo, since /var/lib/paisans is root's")`. After loading secrets:
+In `runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer)`: add `withoutRecord := fs.Bool("without-record", false, "trust paisans-stack.yaml alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")` and `sudo := fs.Bool("sudo", true, "read the gateways' records through sudo, since /var/lib/paisans is root's")`. After loading secrets:
 
 ```go
 	var deployed *deployrecord.Record
 	if !*withoutRecord {
 		if len(cfg.GatewaySites()) == 0 {
-			return fmt.Errorf("secrets prune: %s declares no gateway, so there is no deployment record to read. Pass --without-record to trust paisans.yaml alone. Nothing was changed", *configPath)
+			return fmt.Errorf("secrets prune: %s declares no gateway, so there is no deployment record to read. Pass --without-record to trust paisans-stack.yaml alone. Nothing was changed", *configPath)
 		}
 		rec, missing := deploymentRecord(cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "", *sudo) })
 		if len(missing) > 0 {
 			gw := sortedKeys(missing)[0]
-			return fmt.Errorf("secrets prune: the deployment record on %s could not be read (%v), so nothing says whether what paisans.yaml no longer declares was removed or is still running. Apply the gateway first, or pass --without-record to trust paisans.yaml alone. Nothing was changed", gw, missing[gw])
+			return fmt.Errorf("secrets prune: the deployment record on %s could not be read (%v), so nothing says whether what paisans-stack.yaml no longer declares was removed or is still running. Apply the gateway first, or pass --without-record to trust paisans-stack.yaml alone. Nothing was changed", gw, missing[gw])
 		}
 		deployed = &rec
 	}
@@ -751,7 +751,7 @@ and, before writing with `--execute`:
 
 ```go
 	if *withoutRecord {
-		if err := confirmWord(stdin, stdout, "prune", fmt.Sprintf("This removes the %d secret(s) above for good, trusting paisans.yaml alone.", len(orphans))); err != nil {
+		if err := confirmWord(stdin, stdout, "prune", fmt.Sprintf("This removes the %d secret(s) above for good, trusting paisans-stack.yaml alone.", len(orphans))); err != nil {
 			return err
 		}
 	}
@@ -845,7 +845,7 @@ Expected: FAIL, `undefined: recordApplied`.
 - [ ] **Step 3: Implement**
 
 ```go
-// recordApplied adds what paisans.yaml declares to the deployment record on
+// recordApplied adds what paisans-stack.yaml declares to the deployment record on
 // a gateway, after its apply: apply only ever adds, so a yaml edited by
 // mistake cannot take a running site's protection away.
 func recordApplied(r ui.Reporter, cfg *config.Config, site string, t registry.Runner) error {
@@ -1032,7 +1032,7 @@ func TestForgetAppCleansTheRecordWhenNothingElseIsLeft(t *testing.T) {
 
 ```go
 // forgetInRecords takes names out of the deployment record on every gateway
-// paisans.yaml declares. The removal they follow is done whether or not this
+// paisans-stack.yaml declares. The removal they follow is done whether or not this
 // reaches every gateway, so a gateway it cannot reach is a warning: its
 // record keeps the secrets, which a later run of the same removal frees.
 func forgetInRecords(r ui.Reporter, cfg *config.Config, names deployrecord.Record, what string, execute, sudo bool) {
@@ -1074,7 +1074,7 @@ func listsAny(rec, names deployrecord.Record) bool {
 }
 
 // appRecordNames is what app remove takes out of a record: the app, and each
-// group the record lists that no Pocket ID app paisans.yaml declares names.
+// group the record lists that no Pocket ID app paisans-stack.yaml declares names.
 func appRecordNames(cfg *config.Config, app string, deployed deployrecord.Record) deployrecord.Record {
 	declared := deployrecord.FromConfig(cfg)
 	names := deployrecord.Record{Apps: []string{app}}

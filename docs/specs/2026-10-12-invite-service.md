@@ -21,7 +21,7 @@ Pocket ID, its Postgres cluster and its mail.
   agreement is recorded against the exact text agreed to, before any account
   is created.
 * **Approval is a deployment's choice.** `require_approval` is set in
-  `paisans.yaml`. With it off, agreeing creates the account at once.
+  `paisans-stack.yaml`. With it off, agreeing creates the account at once.
 * **An invite survives the loss of a site.** Its state is in the deployment's
   Postgres cluster, and the service runs on every apps site.
 * **A declined address is remembered, not refused.** Admins see how many times
@@ -202,9 +202,9 @@ hash matches any more.
 ### The code of conduct
 
 `code_of_conduct` holds the Markdown text itself, as a YAML block scalar in
-`paisans.yaml`, so it is versioned and synced with the rest of the configuration
-through every site's configuration store. A separate file beside `paisans.yaml`
-would not be: the store keeps `paisans.yaml`, the secrets file and `.sops.yaml`
+`paisans-stack.yaml`, so it is versioned and synced with the rest of the configuration
+through every site's configuration store. A separate file beside `paisans-stack.yaml`
+would not be: the store keeps `paisans-stack.yaml`, the secrets file and `.sops.yaml`
 only. `render` writes the text to the app's data directory, the container mounts
 it read-only, and the service renders it on the invitee's page. Its version is
 the SHA-256 of the text, recorded with every agreement, so an edit is a new

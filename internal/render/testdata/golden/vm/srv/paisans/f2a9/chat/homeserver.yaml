@@ -1,7 +1,7 @@
 # Rendered by paisans. Do not edit.
 #
 # A build artifact: `paisans apply` renders it and refuses to overwrite one
-# that has been modified locally. Change paisans.yaml or secrets.enc.yaml.
+# that has been modified locally. Change paisans-stack.yaml or secrets.enc.yaml.
 #
 # A changed file needs a restart at most, not a recreate.
 #
@@ -83,5 +83,5 @@ matrix_authentication_service:
 # only when federating with servers whose keys have to be fetched indirectly.
 trusted_key_servers: []
 
-# Set by `config` in paisans.yaml, not by a template.
+# Set by `config` in paisans-stack.yaml, not by a template.
 require_auth_for_profile_requests: true

@@ -3,7 +3,7 @@
 Date: 2026-10-09. Status: draft, for the founder's review.
 
 `paisans secrets prune` (docs/specs/2026-10-09-site-remove-force.md) removes
-the secrets of every site, app and Pocket ID group `paisans.yaml` does not
+the secrets of every site, app and Pocket ID group `paisans-stack.yaml` does not
 declare. That is right after a removal and wrong while the file is being
 edited: a site commented out, an app renamed, a bad merge, and `prune
 --execute` deletes a running site's WireGuard key or a running app's database
@@ -107,7 +107,7 @@ that is the property the record exists for.
 Readers merge the records of the gateways that answered, name by name, and a
 name is deployed while it has an add no removal saw.
 
-| In `paisans.yaml` | In a record | Meaning | `init` and `apply` | `secrets prune` |
+| In `paisans-stack.yaml` | In a record | Meaning | `init` and `apply` | `secrets prune` |
 |---|---|---|---|---|
 | yes | yes | deployed | nothing | keeps |
 | yes | no | not deployed yet | nothing; `apply` adds it | keeps |
@@ -116,10 +116,10 @@ name is deployed while it has an add no removal saw.
 
 The warning for the third row says what to do:
 
-* a site: `sites.monitor-a is deployed but paisans.yaml no longer declares
+* a site: `sites.monitor-a is deployed but paisans-stack.yaml no longer declares
   it. Restore it, or take it out with paisans site remove, or with paisans
   site remove --force --ssh <its host> if it is gone`;
-* an app: `apps.uptime is deployed but paisans.yaml no longer declares it.
+* an app: `apps.uptime is deployed but paisans-stack.yaml no longer declares it.
   Restore it, or take it out with paisans app remove uptime`. This is the
   normal state between taking an app out of the yaml and `app remove`.
 
@@ -134,9 +134,9 @@ refusal, and `init` on a deployment with no gateway applied yet reads none.
 
 Prune reads every gateway the yaml declares. A gateway that does not answer,
 or has no record, is a refusal: `secrets prune: the deployment record on vm
-could not be read (<why>), so nothing says whether what paisans.yaml no longer
+could not be read (<why>), so nothing says whether what paisans-stack.yaml no longer
 declares was removed or is still running. Apply the gateway first, or pass
---without-record to trust paisans.yaml alone. Nothing was changed`.
+--without-record to trust paisans-stack.yaml alone. Nothing was changed`.
 
 `--without-record` trusts the yaml, as prune does today. It lists every key it
 would remove, and with `--execute` asks for the word `prune` at a terminal,

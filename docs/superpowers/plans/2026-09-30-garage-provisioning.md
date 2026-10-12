@@ -78,7 +78,7 @@ Ordering is forced: before a layout is applied, `key import` fails with `Error: 
 - `internal/render/templates/mbin/.env.secret.tmpl`: `KBIN_STORAGE_URL`.
 - `internal/render/templates/outline/.env.secret.tmpl`: public bucket URL.
 - `cmd/paisans/main.go`: the `storage init` verb and usage text.
-- `README.md`, `docs/decisions.md`, `examples/paisans.example.yaml`, `examples/secrets.example.yaml`.
+- `README.md`, `docs/decisions.md`, `examples/paisans-stack.example.yaml`, `examples/secrets.example.yaml`.
 
 ---
 
@@ -764,7 +764,7 @@ Without `--execute` it prints the plan and stops. With it, it runs `garage.Execu
 - [ ] **Step 2: Update the usage text**
 
 ```
-  storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
+  storage init --site <name> [--config paisans-stack.yaml] [--secrets secrets.enc.yaml]
                [--ssh <destination>] [--execute]
 ```
 
@@ -823,7 +823,7 @@ MSG
 **Files:**
 - Create: `internal/garage/integration_test.go`
 - Modify: `docs/decisions.md`
-- Modify: `examples/paisans.example.yaml`, `examples/secrets.example.yaml`
+- Modify: `examples/paisans-stack.example.yaml`, `examples/secrets.example.yaml`
 - Modify: `README.md`
 
 **Interfaces:**
@@ -863,7 +863,7 @@ State that the formats and the ordering were established by running `dxflrs/gara
 
 - [ ] **Step 4: Update the examples**
 
-`examples/paisans.example.yaml` gains `storage.media_hostname` and `storage.garage.capacity`, with comments in the file's existing voice.
+`examples/paisans-stack.example.yaml` gains `storage.media_hostname` and `storage.garage.capacity`, with comments in the file's existing voice.
 
 `examples/secrets.example.yaml` loses the two shared Garage S3 entries and gains per app `s3_access_key_id` and `s3_secret_access_key` for each object storing app, correctly shaped. If a test asserts the examples agree with what `secretsgen` produces, it will catch a mistake here; run the full suite and believe it.
 

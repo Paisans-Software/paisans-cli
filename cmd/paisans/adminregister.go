@@ -35,7 +35,7 @@ func runAdmin(args []string, stdin io.Reader, stdout io.Writer) error {
 func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("admin register", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", configHelp)
+	configPath := fs.String("config", config.FileName, configHelp)
 	keyPath := fs.String("key", "", "the public key file (.pub) to sign with; the ssh-agent must hold it")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "sign the attestation, push it to the sites, and record the key")
@@ -144,7 +144,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // registerConfig is the configuration register reads the admins and the
-// sites from: the local paisans.yaml, or, on a workstation without the files
+// sites from: the local paisans-stack.yaml, or, on a workstation without the files
 // and with a root pinned, the version the pin leads to in the workstation's
 // own store, which a recovery's dry run fills.
 func registerConfig(l configstore.Local, path, pin string) (*config.Config, error) {
@@ -152,7 +152,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 		return config.Load(path)
 	}
 	if pin == "" {
-		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "admin register attests the version you hold, and reads the sites from paisans.yaml. Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
+		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "admin register attests the version you hold, and reads the sites from " + config.FileName + ". Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
 	}
 	g, err := configstore.GatherAnchored(l, nil, 0, "", configstore.Anchor{Root: pin}, configstore.GatherOptions{})
 	var rb *configstore.RollbackError
@@ -205,7 +205,7 @@ func registerKey(l configstore.Local, cfg *config.Config, keyPath string, stdout
 		for _, line := range held {
 			fmt.Fprintln(stdout, line)
 		}
-		explain := "Your ssh-agent holds the keys above, and paisans.yaml lists none of them under admins."
+		explain := "Your ssh-agent holds the keys above, and " + config.FileName + " lists none of them under admins."
 		if len(held) == 0 {
 			explain = "Your ssh-agent holds no key. Load yours with ssh-add."
 		}

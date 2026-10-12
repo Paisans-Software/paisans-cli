@@ -53,7 +53,7 @@ func runWebServer(args []string) error {
 	sub := args[0]
 	fs := newFlagSet("web-server "+sub, flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	appName := fs.String("app", "", "the app pinned to a monitor site, by the name it has in the configuration")
 	sudo := fs.Bool("sudo", true, "read the monitor's web server through sudo where the ssh user cannot, as docker and ss may need")
 	if err := fs.Parse(args[1:]); err != nil {

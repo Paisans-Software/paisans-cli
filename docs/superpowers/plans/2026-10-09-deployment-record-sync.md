@@ -219,7 +219,7 @@ func TestPruneTakesTheNewestRecord(t *testing.T) {
 }
 ```
 
-`withTwoGateways` appends a second gateway site `vm2` to the copied `paisans.yaml` (roles `[gateway]`, an address in the fixture's mesh, an ssh section with a documentation address) so that `cfg.GatewaySites()` is `vm, vm2`. If validation refuses two gateways in the fixture, give `vm2` what it asks for; the test only needs `GatewaySites` to name both.
+`withTwoGateways` appends a second gateway site `vm2` to the copied `paisans-stack.yaml` (roles `[gateway]`, an address in the fixture's mesh, an ssh section with a documentation address) so that `cfg.GatewaySites()` is `vm, vm2`. If validation refuses two gateways in the fixture, give `vm2` what it asks for; the test only needs `GatewaySites` to name both.
 
 - [ ] **Step 2-4:** FAIL, then `deploymentRecord` returns `deployrecord.Gather(...)`'s newest and missing (`errNoRecord` becomes `deployrecord.ErrNoRecord`), PASS. `TestOrphansKeepWhatAnyRecordLists` in secretsgen stays (it tests `Orphans` on a given record). **Step 5:** commit `feat: readers take the newest deployment record`.
 

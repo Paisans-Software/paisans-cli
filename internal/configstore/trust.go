@@ -10,7 +10,7 @@ import (
 // version's admins.
 type Graph struct {
 	Versions map[string]Version
-	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans.yaml
+	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans-stack.yaml
 }
 
 // Anchor is what the operator holds that nobody else can forge: their own
@@ -52,7 +52,7 @@ func (e *ConflictError) Error() string {
 }
 
 // UnreadableAdminsError is a version in the anchor's history whose
-// paisans.yaml cannot be read. Its removals still stand, but which keys it
+// paisans-stack.yaml cannot be read. Its removals still stand, but which keys it
 // removed is unknown, so Judge refuses rather than trust what they would bar.
 type UnreadableAdminsError struct {
 	SHA string
@@ -400,7 +400,7 @@ func (j *judgement) shape(sha string) string {
 }
 
 // extend says why a version outside the anchor's history cannot be a
-// candidate, or "" when it can. A version whose own paisans.yaml cannot be
+// candidate, or "" when it can. A version whose own paisans-stack.yaml cannot be
 // read is not trusted: its admins decide its children and its removals.
 func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 	if reason := j.shape(sha); reason != "" {

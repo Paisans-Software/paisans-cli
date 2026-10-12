@@ -163,7 +163,7 @@ func TestRunDNSInitRefusesBeforeContactingAProvider(t *testing.T) {
 		t.Fatal("the fixture no longer has the line this test edits")
 	}
 	dir := t.TempDir()
-	edited := filepath.Join(dir, "paisans.yaml")
+	edited := filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(edited, []byte(withAddress), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestDNSInitInsideApplyLeavesTheFindingsToIt(t *testing.T) {
 	edited := strings.Replace(string(data), "    endpoint: vm.example.org:51820\n",
 		"    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
 	edited = strings.Replace(edited, "    replication: 2\n", "    replication: 2\n    consistency: dangerous\n", 1)
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 // secretsOnlyEdits reports whether a pull over local edits is one that only
-// the secrets file differs in on both sides: paisans.yaml and .sops.yaml are
+// the secrets file differs in on both sides: paisans-stack.yaml and .sops.yaml are
 // each unchanged from the base or already the head's, so the head's copies are
 // the right ones to keep. When it is not, the pull refuses, as it does for any
 // edit it cannot reconcile.

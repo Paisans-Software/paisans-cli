@@ -31,14 +31,14 @@ func runGateway(args []string) error {
 	return runGatewayMove(args[1:])
 }
 
-// runGatewayMove moves the gateway role to the site paisans.yaml gives it,
+// runGatewayMove moves the gateway role to the site paisans-stack.yaml gives it,
 // from the site that still serves as the gateway, in gated stages (README,
 // "Moving the gateway"). It takes no site: the new gateway is the
 // configuration's, and the old one is found from what it still runs.
 func runGatewayMove(args []string) error {
 	fs := newFlagSet("gateway move", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /var/lib/paisans is root's")
@@ -47,7 +47,7 @@ func runGatewayMove(args []string) error {
 	}
 	r := reporter()
 	if fs.NArg() > 0 {
-		return fmt.Errorf("gateway move takes no site: the new gateway is the one paisans.yaml gives the role, and the old one is found from what it still runs")
+		return fmt.Errorf("gateway move takes no site: the new gateway is the one " + config.FileName + " gives the role, and the old one is found from what it still runs")
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {

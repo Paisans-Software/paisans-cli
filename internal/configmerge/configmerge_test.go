@@ -26,7 +26,7 @@ const (
 // The line each format writes above the keys it adds, so a reader of the
 // rendered file can tell them from what the template wrote.
 const (
-	label     = "Set by `config` in paisans.yaml, not by a template."
+	label     = "Set by `config` in paisans-stack.yaml, not by a template."
 	iniLabel  = "; " + label
 	yamlLabel = "# " + label
 )

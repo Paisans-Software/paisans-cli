@@ -24,7 +24,7 @@ const (
 // the site's ping and direct checks (see apply.MonitorReseed). It runs after
 // the configuration edit because the removal is done without it: an out of
 // date monitor alerts for a site that is gone, which is a nuisance, and holding
-// paisans.yaml at a state the cluster has left is worse. A failure here names
+// paisans-stack.yaml at a state the cluster has left is worse. A failure here names
 // the apply that finishes it, since site remove cannot be run again for a site
 // the configuration no longer declares.
 func (p *Plan) buildMonitor() (*Stage, error) {

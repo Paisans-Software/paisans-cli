@@ -44,7 +44,7 @@ func leadersAway(text string) string {
 }
 
 // replacement declares home-d, a new gateway and apps site, and pins vm's app
-// to it: the one edit of paisans.yaml that replaces vm.
+// to it: the one edit of paisans-stack.yaml that replaces vm.
 func replacement(text string) string {
 	text = strings.Replace(text, "  vm:\n    roles: [gateway, witness]", `  home-d:
     roles: [gateway, apps]
@@ -193,7 +193,7 @@ func TestAnEvictionCutsFirstAndNeverReachesTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := cfg.Sites["home-b"]; ok {
-		t.Error("paisans.yaml still declares home-b")
+		t.Error("paisans-stack.yaml still declares home-b")
 	}
 	// The cut comes before anything the cluster does.
 	firstCut, firstDel := -1, -1
@@ -402,7 +402,7 @@ sites:
     address: 10.44.0.3
     ssh: { host: home-b.local, user: ubuntu, keys: [alice] }
 `
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}

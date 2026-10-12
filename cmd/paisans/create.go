@@ -17,7 +17,7 @@ import (
 )
 
 // runCreate asks the questions behind a new deployment and writes its
-// paisans.yaml.
+// paisans-stack.yaml.
 //
 // It writes one local file and nothing else: no secret, since init is the one
 // command responsible for the secrets file, and no host, since the sites may
@@ -26,7 +26,7 @@ import (
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("create", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to write the new deployment declaration to")
+	configPath := fs.String("config", config.FileName, "path to write the new deployment declaration to")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func againOrQuit(p *create.Prompter, result validate.Result) (create.Section, er
 }
 
 // refuseExisting refuses a path that already holds a file. create writes new
-// deployments only; an existing paisans.yaml is edited, not recreated.
+// deployments only; an existing paisans-stack.yaml is edited, not recreated.
 func refuseExisting(path string) error {
 	if _, err := os.Lstat(path); err == nil {
 		return &ui.Problem{

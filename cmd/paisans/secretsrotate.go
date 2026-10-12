@@ -77,7 +77,7 @@ type rotateWiring struct {
 func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets rotate", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
@@ -698,7 +698,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			kept = append(kept, keptSecret{path, backupKeyKept})
 		}
 	}
-	// A destination paisans.yaml no longer declares is an orphan, which
+	// A destination paisans-stack.yaml no longer declares is an orphan, which
 	// secrets prune reports; it is not kept.
 	if cfg.Backup != nil {
 		for _, d := range cfg.Backup.Destinations {

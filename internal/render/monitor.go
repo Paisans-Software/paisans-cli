@@ -57,7 +57,7 @@ const (
 	WebServerGateway = "10.255.255.1"
 )
 
-// Network is a subnet a site's rendered stacks create, with the paisans.yaml
+// Network is a subnet a site's rendered stacks create, with the paisans-stack.yaml
 // key behind it, as Listener is for a port.
 type Network struct {
 	Owner  string

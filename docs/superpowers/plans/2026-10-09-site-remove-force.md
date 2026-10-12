@@ -5,7 +5,7 @@
 **Goal:**
 - `paisans site remove <site> --force [--ssh user@host[:port]]` cleans one host of this deployment, ignoring the cluster and leaving both files alone.
 - Cleaning also removes images only this deployment's containers ran.
-- `init` and `apply` warn about secrets naming things `paisans.yaml` no longer declares, and `paisans secrets prune` removes them.
+- `init` and `apply` warn about secrets naming things `paisans-stack.yaml` no longer declares, and `paisans secrets prune` removes them.
 
 **Architecture:**
 - **Stage 3 reused:** `internal/siteremove`'s stage 3 (`buildHost`, `runHost`, `verifyHost`) is reused as it is.
@@ -21,7 +21,7 @@
 - **Public repo:** use no real hostnames, IPs or deployment facts. Use 203.0.113.0/24, 198.51.100.0/24 and 192.0.2.0/24, and site names from the fixtures (`home-a`, `home-b`, `vm`, `watch`).
 - **No rejected alternatives:** docs, comments, commits and PRs never describe them.
 - **No migration code.**
-- **`--force` never edits files:** neither `paisans.yaml` nor `secrets.enc.yaml`.
+- **`--force` never edits files:** neither `paisans-stack.yaml` nor `secrets.enc.yaml`.
 - **`--force --ssh` accepts any host:** nothing on it is touched unless it carries this deployment's id or token.
 - **Confirmation on the site's own host:** `--force` on the declared site's own host asks for the site's name at a terminal at `--execute`. No flag answers it.
 - **Images:** removed by ID with `docker image rm` and without `-f`. A Docker refusal is reported as kept, never as a failure.
@@ -501,7 +501,7 @@ func forced(t *testing.T, w *world, cfg *config.Config, site string, dest config
 }
 
 // None of the cluster's refusals stop --force: home-a has apps pinned to it
-// and etcd is unhealthy. Only home-a is reached, and paisans.yaml is not
+// and etcd is unhealthy. Only home-a is reached, and paisans-stack.yaml is not
 // touched.
 func TestForcedIgnoresTheClustersRefusals(t *testing.T) {
 	w := setup(t)
@@ -527,7 +527,7 @@ func TestForcedIgnoresTheClustersRefusals(t *testing.T) {
 	}
 	after, _ := os.ReadFile(w.configPath)
 	if string(after) != string(before) {
-		t.Error("--force edited paisans.yaml")
+		t.Error("--force edited paisans-stack.yaml")
 	}
 }
 
@@ -676,7 +676,7 @@ import (
 
 // BuildForced plans `site remove --force`: the host at dest cleaned of this
 // deployment, and nothing else. No other site is reached, the cluster's
-// refusals are not checked, and neither paisans.yaml nor the secrets file is
+// refusals are not checked, and neither paisans-stack.yaml nor the secrets file is
 // edited, because --force is for a host the cluster cannot be asked about or
 // no longer counts on (docs/specs/2026-10-09-site-remove-force.md).
 //
@@ -851,7 +851,7 @@ import (
 )
 
 // Orphan is a secret naming something the configuration no longer declares:
-// a site or an app taken out of paisans.yaml, or a Pocket ID group no
+// a site or an app taken out of paisans-stack.yaml, or a Pocket ID group no
 // signup_default_groups names. Nothing reads it any more. It is reported by
 // key and never by value, and only `paisans secrets prune --execute` removes
 // it.
@@ -868,17 +868,17 @@ func Orphans(cfg *config.Config, secrets *config.Secrets) []Orphan {
 	var out []Orphan
 	for name := range secrets.Sites {
 		if _, ok := cfg.Sites[name]; !ok {
-			out = append(out, Orphan{Key: "sites." + name, Why: "names a site paisans.yaml does not declare"})
+			out = append(out, Orphan{Key: "sites." + name, Why: "names a site paisans-stack.yaml does not declare"})
 		}
 	}
 	for name := range secrets.Apps {
 		if _, ok := cfg.Apps[name]; !ok {
-			out = append(out, Orphan{Key: "apps." + name, Why: "names an app paisans.yaml does not declare"})
+			out = append(out, Orphan{Key: "apps." + name, Why: "names an app paisans-stack.yaml does not declare"})
 		}
 	}
 	for name, client := range secrets.OIDCClients {
 		if _, ok := cfg.Apps[name]; !ok {
-			out = append(out, Orphan{Key: "oidc_clients." + name, Why: "names an app paisans.yaml does not declare",
+			out = append(out, Orphan{Key: "oidc_clients." + name, Why: "names an app paisans-stack.yaml does not declare",
 				Leaves: "client " + client.ClientID + " still exists at Pocket ID, if that Pocket ID still runs; delete it there"})
 		}
 	}
@@ -928,7 +928,7 @@ Expected: PASS.
 
 ```bash
 git add internal/secretsgen
-git commit -m "feat: find secrets naming what paisans.yaml no longer declares
+git commit -m "feat: find secrets naming what paisans-stack.yaml no longer declares
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1025,7 +1025,7 @@ func runSecrets(args []string) error {
 ```
 
 ```go
-// runSecretsPrune removes the secrets that name something paisans.yaml no
+// runSecretsPrune removes the secrets that name something paisans-stack.yaml no
 // longer declares: a removed site's WireGuard key and heartbeat token, a
 // removed app's passwords and sign-in client, a Pocket ID group nothing
 // names. It lists them by key, never by value, and changes nothing without
@@ -1034,7 +1034,7 @@ func runSecrets(args []string) error {
 func runSecretsPrune(args []string) error {
 	fs := flag.NewFlagSet("secrets prune", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", "paisans-stack.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually remove them and write the file")
 	if err := fs.Parse(args); err != nil {
@@ -1054,7 +1054,7 @@ func runSecretsPrune(args []string) error {
 	}
 	orphans := secretsgen.Orphans(cfg, secrets)
 	if len(orphans) == 0 {
-		r.Result("%s names nothing paisans.yaml does not declare. Nothing to prune.", *secretsPath)
+		r.Result("%s names nothing paisans-stack.yaml does not declare. Nothing to prune.", *secretsPath)
 		return nil
 	}
 	s := r.Step("prune secrets")
@@ -1080,12 +1080,12 @@ func runSecretsPrune(args []string) error {
 		return err
 	}
 	s.Done(fmt.Sprintf("%d removed", len(orphans)))
-	r.Result("%s no longer names anything paisans.yaml does not declare.", *secretsPath)
+	r.Result("%s no longer names anything paisans-stack.yaml does not declare.", *secretsPath)
 	return nil
 }
 
 // warnOrphans warns, once per orphaned secret, that it names something
-// paisans.yaml does not declare. Never a refusal: nothing reads it.
+// paisans-stack.yaml does not declare. Never a refusal: nothing reads it.
 func warnOrphans(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) {
 	for _, o := range secretsgen.Orphans(cfg, secrets) {
 		r.Warn("secrets: "+o.Key+" "+o.Why, "`paisans secrets prune` removes it.")
@@ -1192,7 +1192,7 @@ Expected: FAIL to compile.
 Flags in `runSiteRemove`:
 
 ```go
-	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither paisans.yaml nor the secrets file edited")
+	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither paisans-stack.yaml nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
 ```
 

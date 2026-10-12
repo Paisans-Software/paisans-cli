@@ -12,10 +12,10 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-//go:embed paisans.yaml.tmpl
+//go:embed paisans-stack.yaml.tmpl
 var templateText string
 
-var fileTemplate = template.Must(template.New("paisans.yaml").Funcs(template.FuncMap{
+var fileTemplate = template.Must(template.New(config.FileName).Funcs(template.FuncMap{
 	"q": quote,
 }).Parse(templateText))
 
@@ -31,7 +31,7 @@ type Origin struct {
 	Date    string
 }
 
-// Render writes the answers as a commented paisans.yaml with deployment id
+// Render writes the answers as a commented paisans-stack.yaml with deployment id
 // id, naming by as what wrote it. What follows from the answers rather than being asked (placement,
 // object storage, replication, etcd timings) is decided here, so the same
 // answers always give the same file.
@@ -40,7 +40,7 @@ func Render(a Answers, id string, by Origin) ([]byte, error) {
 	v.Origin = by
 	var out bytes.Buffer
 	if err := fileTemplate.Execute(&out, v); err != nil {
-		return nil, fmt.Errorf("rendering paisans.yaml: %w", err)
+		return nil, fmt.Errorf("rendering "+config.FileName+": %w", err)
 	}
 	return out.Bytes(), nil
 }

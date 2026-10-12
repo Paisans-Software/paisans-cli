@@ -23,7 +23,7 @@ import (
 func runStorageRotateKey(args []string) error {
 	fs := newFlagSet("storage rotate-key", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app whose S3 key to replace, by the name it has in the configuration")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")

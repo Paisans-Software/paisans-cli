@@ -75,7 +75,7 @@ func executor(hosts map[string]*host) *Executor {
 func TestRefusedBeforeAnyHost(t *testing.T) {
 	cfg := fixture(t)
 	for app, want := range map[string]string{
-		"talk":   "still in paisans.yaml",
+		"talk":   "still in paisans-stack.yaml",
 		"infra":  "infrastructure stack",
 		"../etc": "not an app's name",
 		"":       "not an app's name",

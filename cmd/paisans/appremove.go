@@ -31,7 +31,7 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 	return clientAPI(cfg, site, "", key)
 }
 
-// runAppRemove takes an app that has left paisans.yaml off every host. See
+// runAppRemove takes an app that has left paisans-stack.yaml off every host. See
 // internal/appremove for what it touches and how each thing is proven to be
 // the app's, and README's *`app remove` takes an app off its hosts*.
 //
@@ -43,7 +43,7 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("app remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually stop, remove and delete")
 	deleteData := fs.Bool("delete-data", false, "also delete the app's database, Garage bucket and keys, named volumes and data directories; asks for the app's name at a terminal")

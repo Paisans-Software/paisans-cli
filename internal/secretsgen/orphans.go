@@ -10,7 +10,7 @@ import (
 )
 
 // Orphan is a secret naming something the configuration no longer declares:
-// a site, an app or a backup destination taken out of paisans.yaml, or a
+// a site, an app or a backup destination taken out of paisans-stack.yaml, or a
 // Pocket ID group no signup_default_groups names. Nothing reads it any more.
 // It is reported by key and never by value, and only `paisans secrets prune
 // --execute` removes it.
@@ -30,21 +30,21 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 	var out []Orphan
 	for name := range secrets.Sites {
 		if _, ok := cfg.Sites[name]; !ok && !held("sites", name) {
-			out = append(out, Orphan{Key: "sites." + name, Why: "names a site paisans.yaml does not declare"})
+			out = append(out, Orphan{Key: "sites." + name, Why: "names a site " + config.FileName + " does not declare"})
 		}
 	}
 	for name := range secrets.Apps {
 		if _, ok := cfg.Apps[name]; !ok && !held("apps", name) {
-			out = append(out, Orphan{Key: "apps." + name, Why: "names an app paisans.yaml does not declare"})
+			out = append(out, Orphan{Key: "apps." + name, Why: "names an app " + config.FileName + " does not declare"})
 		}
 	}
 	for name := range secrets.OIDCClients {
 		if _, ok := cfg.Apps[name]; !ok && !held("apps", name) {
-			out = append(out, Orphan{Key: "oidc_clients." + name, Why: "names an app paisans.yaml does not declare",
+			out = append(out, Orphan{Key: "oidc_clients." + name, Why: "names an app " + config.FileName + " does not declare",
 				Leaves: name + "'s sign-in client still exists at Pocket ID, if that Pocket ID still runs; delete it there"})
 		}
 	}
-	// A destination's credentials, once paisans.yaml no longer names it. The
+	// A destination's credentials, once paisans-stack.yaml no longer names it. The
 	// restic password and WAL-G's key never are: they decrypt every backup
 	// already taken, wherever it is.
 	destinations := map[string]bool{}
@@ -55,7 +55,7 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 	}
 	for name := range secrets.Backup.Destinations {
 		if !destinations[name] {
-			out = append(out, Orphan{Key: "backup.destinations." + name, Why: "names a backup destination paisans.yaml does not declare",
+			out = append(out, Orphan{Key: "backup.destinations." + name, Why: "names a backup destination " + config.FileName + " does not declare",
 				Leaves: "its key still exists at the provider that issued it; delete it there"})
 		}
 	}
@@ -76,14 +76,14 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 	return out
 }
 
-// Dropped is every name the record lists that paisans.yaml does not declare:
+// Dropped is every name the record lists that paisans-stack.yaml does not declare:
 // something taken out of the yaml while it still runs, by mistake or before
 // its removal command. It is reported whether or not it has secrets.
 func Dropped(cfg *config.Config, deployed *deployrecord.Record) []Orphan {
 	if deployed == nil {
 		return nil
 	}
-	const why = "is deployed but paisans.yaml no longer declares it"
+	const why = "is deployed but " + config.FileName + " no longer declares it"
 	declared := deployrecord.FromConfig(cfg)
 	var out []Orphan
 	for _, n := range deployed.Sites {

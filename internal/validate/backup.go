@@ -121,7 +121,7 @@ func (c *checker) destination(key string, d config.BackupDestination, schedule c
 			// CI logs and transcripts, and this one holds a credential.
 			c.refuse("backup-endpoint-has-credentials", key+".endpoint",
 				"endpoint holds a credential",
-				"has a user name or password in it, before the @. paisans.yaml is plaintext and meant to be committed, so remove it from the file, rotate the key if the file has left your machine, and paste it with paisans secrets set backup.destinations.%s.access_key_id and .secret_access_key.", d.Name)
+				"has a user name or password in it, before the @. "+config.FileName+" is plaintext and meant to be committed, so remove it from the file, rotate the key if the file has left your machine, and paste it with paisans secrets set backup.destinations.%s.access_key_id and .secret_access_key.", d.Name)
 		}
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || (u.Path != "" && u.Path != "/") ||
 			u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" || strings.Contains(d.Endpoint, "#") {
