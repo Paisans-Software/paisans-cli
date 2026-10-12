@@ -285,7 +285,7 @@ func TestStuckReplicaIsDiagnosedAndStartingTheLeaderComesFirst(t *testing.T) {
 	text := strings.Join(f.More, "\n")
 	command := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml exec patroni patronictl -c /home/postgres/postgres.yml failover --candidate home-a --force"
 	start := strings.Index(text, "  1. Start home-b (ssh ubuntu@home-b.local). When it returns it takes the leader lock again, and home-a catches up from it. No data is lost.")
-	force := strings.Index(text, "  2. Only if home-b is lost for good: promote home-a by hand. On home-a (ssh ubuntu@home-a.local):")
+	force := strings.Index(text, "  2. Only if home-b is lost permanently: promote home-a by hand. On home-a (ssh ubuntu@home-a.local):")
 	cmd := strings.Index(text, "       "+command)
 	if start < 0 || force < 0 || cmd < 0 || !(start < force && force < cmd) {
 		t.Fatalf("want start home-b, then the forced failover with its command, in that order (%d %d %d):\n%s", start, force, cmd, text)

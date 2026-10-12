@@ -160,7 +160,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		case m.execute && m.accepted != nil && m.accepted.Lower && m.accepted.Revision == rb.Revision && m.accepted.SHA == rb.SHA:
 			g.AcceptRollback(rb)
 		case m.execute:
-			if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the newer version is gone."); err != nil {
+			if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the newer version is gone."); err != nil {
 				return g, err
 			}
 			g.AcceptRollback(rb)
@@ -169,7 +169,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		default:
 			r.Note("--execute asks for rollback", why)
 		}
-		s = r.Step("go on from the older version")
+		s = r.Step("proceed from the older version")
 		err = nil
 	}
 	if err != nil {

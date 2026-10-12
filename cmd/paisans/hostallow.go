@@ -258,7 +258,7 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("Nothing changed. Check each fingerprint with its admin, then re-run with --execute; it asks for the site's name at a terminal.")
 		return nil
 	}
-	what := fmt.Sprintf("This lets host prepare add the keys above to %s's authorized_keys on %s, whoever runs it. Check each fingerprint with its admin before you go on.", t.user, o.site)
+	what := fmt.Sprintf("This lets host prepare add the keys above to %s's authorized_keys on %s, whoever runs it. Check each fingerprint with its admin before you proceed.", t.user, o.site)
 	if err := writeList(t, o, stdin, stdout, got.found, got.content, content, what); err != nil {
 		return err
 	}

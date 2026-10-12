@@ -159,7 +159,7 @@ func TestApproveReviews(t *testing.T) {
 			case c.want != "" && (err == nil || !strings.Contains(err.Error()+" "+problemText(err), c.want)):
 				t.Errorf("got %v, want %q", err, c.want)
 			}
-			if name != "no terminal" && !strings.HasSuffix(out.String(), "Type approve to go on: ") {
+			if name != "no terminal" && !strings.HasSuffix(out.String(), "Type approve to proceed: ") {
 				t.Errorf("the prompt: %q", out.String())
 			}
 		})
@@ -295,7 +295,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 			agentFingerprints = func() []string { return []string{alice.Fingerprint} }
 			var out bytes.Buffer
 			rec, err := prepare(t, answering(t, "approve\n"), &out, "--execute")
-			if !strings.Contains(out.String(), "Type approve to go on: ") {
+			if !strings.Contains(out.String(), "Type approve to proceed: ") {
 				t.Errorf("not asked: %q", out.String())
 			}
 			got := hosts["home-a"].record(t)

@@ -393,16 +393,19 @@ func TestByIDConfirmationNamesTheKeptCaddy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := p.Confirmation(vmDest())
-	for _, want := range []string{ourID, "vm", blog, "Caddy is kept", "data"} {
+	q, deletes := p.Confirmation(vmDest())
+	for _, want := range []string{ourID, "vm", blog, "Caddy is kept"} {
 		if !strings.Contains(q, want) {
 			t.Errorf("no %q in %q", want, q)
 		}
 	}
+	if !strings.Contains(deletes, "permanently deletes this deployment's data") {
+		t.Errorf("--delete-data: %q", deletes)
+	}
 	w = setup(t)
-	q = byID(t, w, "watch", "f2a9", siteremove.Options{}).Confirmation(vmDest())
-	if strings.Contains(q, "Caddy") || strings.Contains(q, "data") {
-		t.Errorf("a monitor without --delete-data: %q", q)
+	q, deletes = byID(t, w, "watch", "f2a9", siteremove.Options{}).Confirmation(vmDest())
+	if strings.Contains(q, "Caddy") || strings.Contains(q, "data") || deletes != "" {
+		t.Errorf("a monitor without --delete-data: %q, %q", q, deletes)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // maxSecret bounds what `secrets set` reads. The largest secret this file
@@ -127,7 +128,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("secrets prune: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", *secretsPath, config.SOPSConfigName)
 	}
 	if *withoutRecord {
-		if err := confirmWord(stdin, stdout, "prune", fmt.Sprintf("This removes the %d secret(s) above for good, trusting paisans.yaml alone.", len(orphans))); err != nil {
+		if err := confirmWord(stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting paisans.yaml alone.", len(orphans)))); err != nil {
 			return fmt.Errorf("secrets prune: %w", err)
 		}
 	}

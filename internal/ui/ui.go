@@ -91,10 +91,7 @@ const (
 func New(w io.Writer, verbose bool) Reporter {
 	r := newWriter(w, verbose, isTerminal(w))
 	cols := terminalWidth(w)
-	r.termCols = cols
-	if cols > 0 && cols < maxWidth {
-		r.cols = cols
-	}
+	r.termCols, r.cols = cols, cols
 	return r
 }
 
@@ -160,6 +157,20 @@ func italic(terminal bool, text string) string {
 		return text
 	}
 	return ital + text + reset
+}
+
+// Danger is text set in bold red when w is a terminal that should be drawn
+// on, and text as it is anywhere else: for the sentence of a confirmation
+// that says what is deleted permanently, so it is the one the eye finds.
+func Danger(w io.Writer, text string) string {
+	return danger(isTerminal(w), text)
+}
+
+func danger(terminal bool, text string) string {
+	if !terminal {
+		return text
+	}
+	return bold + red + text + reset
 }
 
 // terminalWidth is w's width in columns when w is a terminal, or 0. A
