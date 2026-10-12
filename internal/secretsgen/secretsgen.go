@@ -127,6 +127,25 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	}
 	note(created, "storage.garage.rpc_secret")
 
+	if cfg.Backup.On() {
+		// The restic repository's password and WAL-G's libsodium key, which
+		// encrypt every backup in every destination. Generated, never seen:
+		// a restore reads them from this file.
+		created, err = fillString(&secrets.Backup.ResticPassword)
+		if err != nil {
+			return result, err
+		}
+		note(created, "backup.restic_password")
+		// 32 bytes as hex, which WAL-G reads with
+		// WALG_LIBSODIUM_KEY_TRANSFORM=hex (wal-g docs/README.md,
+		// "Encryption", at v3.0.9).
+		created, err = fillHex(&secrets.Backup.WALGLibsodiumKey)
+		if err != nil {
+			return result, err
+		}
+		note(created, "backup.walg_libsodium_key")
+	}
+
 	// One WireGuard identity per site, kept in the file rather than on the
 	// host, so rebuilding a dead machine restores the same identity and no
 	// peer is reconfigured.
@@ -263,6 +282,11 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 		// cookie; unset, the fork invents one per boot and every restart
 		// signs everyone out.
 		keys = append(keys, "admin_password", "session_secret")
+	}
+	if app.Kind == config.KindInvite {
+		// email_hash_key keys the hash of a declined address; session_key
+		// signs the sign-in cookie (docs/specs/2026-10-12-invite-service.md).
+		keys = append(keys, "email_hash_key", "session_key")
 	}
 	if app.Kind == config.KindSynapse {
 		// Three, because the homeserver no longer authenticates anyone and
@@ -507,6 +531,20 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 	if o, ok := owedSMTPPassword(cfg, secrets); ok {
 		out = append(out, o)
 	}
+	if cfg.Backup.On() {
+		for _, d := range cfg.Backup.Destinations {
+			have := secrets.Backup.Destinations[d.Name]
+			for _, leaf := range []struct{ name, value string }{{"access_key_id", have.AccessKeyID}, {"secret_access_key", have.SecretAccessKey}} {
+				if leaf.value != "" {
+					continue
+				}
+				out = append(out, Owed{
+					Name: "backup.destinations." + d.Name + "." + leaf.name,
+					Why:  fmt.Sprintf("issued by the provider behind %s for the bucket %s, with read, write, list and delete on it and nothing else. Backups cannot reach %s without it", d.Endpoint, d.Bucket, d.Name),
+				})
+			}
+		}
+	}
 	for _, name := range cfg.AppNames() {
 		if _, ok := secrets.OIDCClients[name]; ok {
 			continue
@@ -551,6 +589,9 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 				", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
 		case config.KindOAuth2Proxy:
 			why += ". It is restricted to the groups " + member + " and " + admin + ", the ones the gate admits"
+		case config.KindInvite:
+			why += ". It is restricted to the groups " + member + " and " + admin +
+				", which the service reads from the groups claim as its member and admin groups"
 		case config.KindUptime:
 			why += ". The redirect URI is the fork's own (src/lib/oidc.js:26 in the uptime fork). It is restricted to the group named in apps." +
 				name + ".settings.admin_group, so the identity provider refuses everyone else before the monitor does"

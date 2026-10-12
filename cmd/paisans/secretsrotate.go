@@ -38,8 +38,22 @@ const replacedEarlier = "replaced earlier, hosts already run it: the value the s
 // Scope).
 const encryptsStoredData = "it encrypts data already stored, so changing it makes that data unreadable, and neither Pocket ID nor Matrix Authentication Service offers a re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
 
+// forgetsDeclines is why the invite service's email_hash_key is kept: the
+// service stores only the keyed hash of a declined address
+// (docs/specs/2026-10-12-invite-service.md, Declining), so a new key matches
+// none of them.
+const forgetsDeclines = "rotating it forgets every declined address"
+
 // wireguardKept is why secrets rotate leaves the WireGuard keys alone.
 const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, which moves it without dropping a tunnel"
+
+// backupKeyKept is why the restic password and WAL-G's key are kept. restic
+// wraps its repository's master key in each password, so a new password
+// leaves the key it opens unchanged, and WAL-G has no re-encryption at all.
+const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an evicted admin out of the backups is the destinations' credentials"
+
+// destinationKept is why a backup destination's credentials are kept.
+const destinationKept = "it is issued by the provider behind the destination: issue a new key there, pipe it in with `paisans secrets set`, apply, then delete the old key at the provider"
 
 // rotateStopped is what a failed health gate inside secrets rotate tells the
 // operator.
@@ -484,6 +498,10 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		return secretsrotate.DNSToken(), nil
 	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && last == "smtp_password":
 		return secretsrotate.SMTPPassword(path), nil
+	case path == "backup.restic_password", path == "backup.walg_libsodium_key":
+		return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, backupKeyKept)
+	case len(parts) == 4 && parts[0] == "backup" && parts[1] == "destinations":
+		return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, destinationKept)
 	case strings.HasPrefix(last, "wireguard_"):
 		return nil, fmt.Errorf("secrets rotate: %s is not rotated here: %s", path, wireguardKept)
 	case path == "storage.garage.admin_token":
@@ -503,6 +521,8 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.MbinOAuth(app), nil
 		case "encryption_key", "mas_encryption_secret":
 			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, encryptsStoredData)
+		case "email_hash_key":
+			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, forgetsDeclines)
 		case "oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key":
 			return nil, fmt.Errorf("secrets rotate: %s encrypts or opens Mbin's OAuth2 keypair, and is rotated with the rest of it: name apps.%s.oauth", path, app)
 		case "s3_access_key_id", "s3_secret_access_key":
@@ -604,6 +624,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	self("app_secret")
 	self("cookie_secret")
 	self("session_secret")
+	self("session_key")
 	self("mas_signing_key")
 	self("mas_matrix_secret")
 	for _, app := range cfg.AppNames() {
@@ -659,6 +680,19 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		if path := "apps." + app + ".mas_encryption_secret"; has(path) {
 			kept = append(kept, keptSecret{path, encryptsStoredData})
 		}
+	}
+	for _, app := range appsOf(config.KindInvite) {
+		if path := "apps." + app + ".email_hash_key"; has(path) {
+			kept = append(kept, keptSecret{path, forgetsDeclines})
+		}
+	}
+	for _, path := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {
+		if has(path) {
+			kept = append(kept, keptSecret{path, backupKeyKept})
+		}
+	}
+	if len(s.Backup.Destinations) > 0 {
+		kept = append(kept, keptSecret{"backup.destinations.*", destinationKept})
 	}
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".wireguard_private_key") {

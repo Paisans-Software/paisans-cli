@@ -254,9 +254,9 @@ func secretKeyAllowed(cfg *config.Config, secrets *config.Secrets, key string) e
 		section = key[:i]
 	}
 	switch section {
-	case "cluster", "storage", "sites", "apps", "external", "oidc_clients":
+	case "cluster", "storage", "backup", "sites", "apps", "external", "oidc_clients":
 	default:
-		return fmt.Errorf("secrets set: %s: there is no %q section. Secrets live under cluster, storage, sites, apps, external and oidc_clients", key, section)
+		return fmt.Errorf("secrets set: %s: there is no %q section. Secrets live under cluster, storage, backup, sites, apps, external and oidc_clients", key, section)
 	}
 	if _, set := secrets.Get(key); set {
 		return nil

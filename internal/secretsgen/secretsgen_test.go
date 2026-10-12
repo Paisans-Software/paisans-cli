@@ -4,9 +4,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -575,13 +577,13 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	if _, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{External: map[string]string{"smtp_password": "x"}})["external.smtp_password"]; ok {
 		t.Error("owed although external.smtp_password is set")
 	}
-	// The fixture's Pocket ID, auth, and its Mbin, talk, send mail too, so
-	// all three need their own.
-	perApp := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}}}
+	// The fixture's Pocket ID, auth, its Mbin, talk, and its invite app send
+	// mail too, so all four need their own.
+	perApp := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
 	if _, ok := owedBy(t, withUptime(t, smtp), perApp)["external.smtp_password"]; ok {
 		t.Error("owed although every app that sends mail has its own smtp_password")
 	}
-	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}}}
+	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), allButMbin)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "talk") {
 		t.Errorf("not owed for Mbin, which has no smtp_password of its own: %q", why)
@@ -778,5 +780,122 @@ func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
 	secrets.Apps["blog"]["s3_access_key_id"] = "not-a-garage-key"
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		t.Errorf("a key on a local storage app was checked: %v", err)
+	}
+}
+
+// withInvite is the fixture deployment with an invite app added beside its
+// other apps, pinned to the same site as the uptime fixture.
+func withInvite(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := load(t)
+	cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Hostname: "invite.example.org",
+		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
+		Settings:  map[string]any{"admin_group": "admins"}}
+	return cfg
+}
+
+// The invite service's two keys are generated once: the email hash key keys
+// the hash of every declined address, and the session key signs the sign in
+// cookie, so a regenerated one signs everyone out and a regenerated hash key
+// stops matching the addresses already recorded.
+func TestInviteKeysAreStable(t *testing.T) {
+	cfg := withInvite(t)
+	s := &config.Secrets{}
+	if _, err := secretsgen.Fill(cfg, s); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := s.Apps["invite"]["session_key"].(string)
+	if !ok {
+		t.Fatal("session_key missing from apps.invite after Fill")
+	}
+	hashKey, ok := s.Apps["invite"]["email_hash_key"].(string)
+	if !ok {
+		t.Fatal("email_hash_key missing from apps.invite after Fill")
+	}
+	if len(first) != 43 || len(hashKey) != 43 {
+		t.Fatalf("want 32 bytes as unpadded base64url: session %q, hash %q", first, hashKey)
+	}
+	if _, err := secretsgen.Fill(cfg, s); err != nil {
+		t.Fatal(err)
+	}
+	again, ok := s.Apps["invite"]["session_key"].(string)
+	if !ok {
+		t.Fatal("session_key missing from apps.invite after second Fill")
+	}
+	if again != first {
+		t.Fatal("init must never replace an existing key")
+	}
+}
+
+// Backups that are on get the restic password and WAL-G's key generated, and
+// owe each destination's credentials.
+func TestBackupSecretsAreGeneratedAndOwed(t *testing.T) {
+	cfg := load(t)
+	secrets := &config.Secrets{}
+	result, err := secretsgen.Fill(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secrets.Backup.ResticPassword) < 32 {
+		t.Errorf("restic_password %d characters", len(secrets.Backup.ResticPassword))
+	}
+	if k, err := hex.DecodeString(secrets.Backup.WALGLibsodiumKey); err != nil || len(k) != 32 {
+		t.Errorf("walg_libsodium_key is not 32 bytes of hex: %v", err)
+	}
+	for _, want := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {
+		if !slices.Contains(result.Generated, want) {
+			t.Errorf("%s is not reported generated: %v", want, result.Generated)
+		}
+	}
+	owed := strings.Join(secretsgen.OwedNames(cfg, secrets), " ")
+	for _, want := range []string{
+		"backup.destinations.offsite.access_key_id", "backup.destinations.offsite.secret_access_key",
+		"backup.destinations.home.access_key_id", "backup.destinations.home.secret_access_key",
+	} {
+		if !strings.Contains(owed, want) {
+			t.Errorf("%s is not owed: %s", want, owed)
+		}
+	}
+
+	// A second run keeps both keys, and a destination with its credentials
+	// is owed nothing.
+	restic, walg := secrets.Backup.ResticPassword, secrets.Backup.WALGLibsodiumKey
+	secrets.Backup.Destinations = map[string]config.DestinationSecrets{"offsite": {AccessKeyID: "a", SecretAccessKey: "b"}}
+	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+		t.Fatal(err)
+	}
+	if secrets.Backup.ResticPassword != restic || secrets.Backup.WALGLibsodiumKey != walg {
+		t.Error("a second run replaced a backup key")
+	}
+	if owed := strings.Join(secretsgen.OwedNames(cfg, secrets), " "); strings.Contains(owed, "offsite") || !strings.Contains(owed, "backup.destinations.home.") {
+		t.Errorf("owed after offsite's credentials were set: %s", owed)
+	}
+}
+
+// Backups off, by `enabled: false` or by no section, generate and owe
+// nothing for them.
+func TestNoBackupSecretsWhenBackupsAreOff(t *testing.T) {
+	for _, name := range []string{"enabled false", "no section"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := load(t)
+			if name == "no section" {
+				cfg.Backup = nil
+			} else {
+				no := false
+				cfg.Backup.Enabled = &no
+			}
+			secrets := &config.Secrets{}
+			if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+				t.Fatal(err)
+			}
+			if secrets.Backup.ResticPassword != "" || secrets.Backup.WALGLibsodiumKey != "" {
+				t.Error("backups off still generated backup secrets")
+			}
+			for _, owed := range secretsgen.OwedNames(cfg, secrets) {
+				if strings.HasPrefix(owed, "backup.") {
+					t.Errorf("backups off still owes %s", owed)
+				}
+			}
+		})
 	}
 }

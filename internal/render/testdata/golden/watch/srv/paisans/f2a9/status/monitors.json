@@ -197,6 +197,50 @@
       "failure_threshold": 2
     },
     {
+      "name": "invite — public",
+      "monitor_type": "active",
+      "url": "https://invite.example.org/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
+      "name": "invite — direct (home-a)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.1:8082/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "invite.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
+      "name": "invite — direct (home-b)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.2:8082/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "invite.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2
+    },
+    {
       "name": "talk — public",
       "monitor_type": "active",
       "url": "https://talk.example.org/healthz",

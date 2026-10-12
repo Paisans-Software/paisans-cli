@@ -112,3 +112,47 @@ func TestDroppedIsRegardlessOfSecrets(t *testing.T) {
 		t.Error("no record dropped something")
 	}
 }
+
+// A destination renamed or taken out of paisans.yaml leaves its credentials
+// as an orphan, which prune removes. The generated keys never are: they
+// decrypt every backup already taken.
+func TestARemovedDestinationsCredentialsAreOrphans(t *testing.T) {
+	cfg := load(t) // destinations offsite and home
+	secrets := &config.Secrets{Backup: config.BackupSecrets{
+		ResticPassword:   "r",
+		WALGLibsodiumKey: "w",
+		Destinations: map[string]config.DestinationSecrets{
+			"offsite": {AccessKeyID: "a", SecretAccessKey: "b"},
+			"old-b2":  {AccessKeyID: "AKIAOLDKEY", SecretAccessKey: "oldsecret0"},
+		},
+	}}
+	orphans := secretsgen.Orphans(cfg, secrets, nil)
+	var keys []string
+	for _, o := range orphans {
+		keys = append(keys, o.Key)
+		if strings.Contains(o.Why+o.Leaves, "AKIAOLDKEY") || strings.Contains(o.Why+o.Leaves, "oldsecret0") {
+			t.Errorf("%s reports a value", o.Key)
+		}
+	}
+	if got := strings.Join(keys, " "); !strings.Contains(got, "backup.destinations.old-b2") || strings.Contains(got, "offsite") || strings.Contains(got, "restic") || strings.Contains(got, "walg") {
+		t.Fatalf("orphans = %s", got)
+	}
+	secretsgen.Prune(secrets, orphans)
+	if _, ok := secrets.Backup.Destinations["old-b2"]; ok {
+		t.Error("prune kept old-b2's credentials")
+	}
+	if _, ok := secrets.Backup.Destinations["offsite"]; !ok || secrets.Backup.ResticPassword == "" {
+		t.Error("prune removed what is still declared")
+	}
+
+	// With the section gone, every destination's credentials are orphans,
+	// and the keys still are not.
+	cfg.Backup = nil
+	keys = nil
+	for _, o := range secretsgen.Orphans(cfg, secrets, nil) {
+		keys = append(keys, o.Key)
+	}
+	if got := strings.Join(keys, " "); !strings.Contains(got, "backup.destinations.offsite") || strings.Contains(got, "restic") {
+		t.Errorf("orphans with no backup section = %s", got)
+	}
+}

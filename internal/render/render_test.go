@@ -865,7 +865,7 @@ func walk(t *testing.T, root string) map[string]string {
 func TestEveryKindShipsACommittedTemplateSet(t *testing.T) {
 	for _, kind := range []config.Kind{
 		config.KindMbin, config.KindOutline, config.KindPocketID,
-		config.KindSynapse, config.KindWriteFreely,
+		config.KindSynapse, config.KindWriteFreely, config.KindInvite,
 	} {
 		files, err := render.TemplateSet(kind)
 		if err != nil {

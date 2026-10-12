@@ -1,0 +1,10 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Routing for invite, imported by the gateway's block for
+# invite.example.org. Never gated, and nothing refused: invitees reach it
+# before they have an account, and the service checks every sign-in itself.
+reverse_proxy 10.44.0.1:8082 10.44.0.2:8082 {
+	# Failover across apps sites; see upstream_failover in the Caddyfile.
+	import upstream_failover
+	header_up X-Forwarded-Proto https
+}

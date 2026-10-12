@@ -154,6 +154,20 @@ func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 			MemberGroupSetting: "admin_group",
 			ReadsGroups:        true,
 		}, true
+	case config.KindInvite:
+		// paisans-invite's callback is GET /auth/callback with PKCE S256
+		// (internal/web/auth.go); it reads the groups claim to tell members
+		// from admins.
+		return OIDCClientSpec{
+			CallbackURL:        "https://" + hostname + "/auth/callback",
+			LaunchURL:          LaunchURL(kind, hostname, ""),
+			PKCE:               true,
+			MemberGroupSetting: "member_group",
+			AdminGroupSetting:  "admin_group",
+			DefaultMemberGroup: MembersGroup,
+			DefaultAdminGroup:  AdminsGroup,
+			ReadsGroups:        true,
+		}, true
 	case config.KindSynapse:
 		// The relying party is the homeserver's authentication service, MAS
 		// at tag v1.24.0, so the callback is its upstream provider's,

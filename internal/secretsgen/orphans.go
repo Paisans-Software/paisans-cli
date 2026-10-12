@@ -10,10 +10,10 @@ import (
 )
 
 // Orphan is a secret naming something the configuration no longer declares:
-// a site or an app taken out of paisans.yaml, or a Pocket ID group no
-// signup_default_groups names. Nothing reads it any more. It is reported by
-// key and never by value, and only `paisans secrets prune --execute` removes
-// it.
+// a site, an app or a backup destination taken out of paisans.yaml, or a
+// Pocket ID group no signup_default_groups names. Nothing reads it any more.
+// It is reported by key and never by value, and only `paisans secrets prune
+// --execute` removes it.
 type Orphan struct {
 	Key string
 	// Why is what it names that is gone, for the report.
@@ -42,6 +42,21 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 		if _, ok := cfg.Apps[name]; !ok && !held("apps", name) {
 			out = append(out, Orphan{Key: "oidc_clients." + name, Why: "names an app paisans.yaml does not declare",
 				Leaves: name + "'s sign-in client still exists at Pocket ID, if that Pocket ID still runs; delete it there"})
+		}
+	}
+	// A destination's credentials, once paisans.yaml no longer names it. The
+	// restic password and WAL-G's key never are: they decrypt every backup
+	// already taken, wherever it is.
+	destinations := map[string]bool{}
+	if cfg.Backup != nil {
+		for _, d := range cfg.Backup.Destinations {
+			destinations[d.Name] = true
+		}
+	}
+	for name := range secrets.Backup.Destinations {
+		if !destinations[name] {
+			out = append(out, Orphan{Key: "backup.destinations." + name, Why: "names a backup destination paisans.yaml does not declare",
+				Leaves: "its key still exists at the provider that issued it; delete it there"})
 		}
 	}
 	named := map[string]bool{}
@@ -103,6 +118,8 @@ func Prune(secrets *config.Secrets, orphans []Orphan) {
 			delete(secrets.OIDCClients, name)
 		case "pocket_id_groups":
 			delete(secrets.PocketIDGroups, name)
+		case "backup":
+			delete(secrets.Backup.Destinations, strings.TrimPrefix(name, "destinations."))
 		}
 	}
 }

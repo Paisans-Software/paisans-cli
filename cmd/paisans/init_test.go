@@ -123,7 +123,7 @@ func fakeSites() map[string]*initFake {
 		"home-a": {name: "home-a.local"},
 		"home-b": {name: "home-b.local"},
 		"vm":     {name: "vm.example.org"},
-		"watch":  {name: "watch.example.org"},
+		"health": {name: "health.example.org"},
 	}
 }
 
@@ -207,7 +207,7 @@ func TestInitKeepsAClearSubnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(path)
-	if !bytes.Equal(before, after) || !strings.Contains(out.Lines(), "overlaps nothing on home-a, home-b, vm, watch; kept") {
+	if !bytes.Equal(before, after) || !strings.Contains(out.Lines(), "overlaps nothing on health, home-a, home-b, vm; kept") {
 		t.Errorf("a clear subnet was not kept as it was:\n%s", out.Lines())
 	}
 }
@@ -369,7 +369,7 @@ func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	sites := fakeSites()
 	path, out := initWorld(t, nil, sites, nil)
 	cfg, _ := config.Load(path)
-	sites["vm"].files = map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"home-a", "home-b", "vm", "watch", "monitor-a"}})}
+	sites["vm"].files = map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"health", "home-a", "home-b", "vm", "monitor-a"}})}
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}

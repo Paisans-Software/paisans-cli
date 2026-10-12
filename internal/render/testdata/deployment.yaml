@@ -1,4 +1,4 @@
-# The fixture deployment. It exercises both placements: three clustered apps
+# The fixture deployment. It exercises both placements: four clustered apps
 # and five pinned, on four sites with three stable endpoints. It is validated
 # before it is rendered (see fixture() in render_test.go), so it is a
 # configuration an operator could actually have written.
@@ -112,9 +112,15 @@ apps:
       # two groups' IDs are recorded under pocket_id_groups in the secrets.
       app_name: Example ID
       session_duration: 10080
-      allow_user_signups: withToken
+      # Disabled, and the email-code sign-in on, because the invite app below
+      # names this one: new accounts come only from invites, and a member
+      # whose sign-in link expired recovers by email code.
+      allow_user_signups: disabled
+      email_one_time_access_as_unauthenticated: true
       signup_default_groups: [members, newcomers]
       emails_verified: true
+      # Quoted in the .env, which the invite app's INVITE_ACCENT_COLOR follows.
+      accent_color: "#2f6f5e"
   chat:
     kind: synapse
     hostname: chat.example.org
@@ -159,6 +165,20 @@ apps:
     # Not show_labs_settings, which the template already writes.
     config:
       default_theme: dark
+  invite:
+    kind: invite
+    hostname: invite.example.org
+    placement: cluster
+    settings:
+      identity_app: auth
+      # One setting declared, so the golden .env shows it beside the defaults.
+      invite_quota: 5
+      # The text itself, not a path: rendered byte for byte into
+      # code-of-conduct.md in the app's directory.
+      code_of_conduct: |
+        # Be kind
+
+        To each other.
   status:
     kind: uptime
     hostname: status.example.org
