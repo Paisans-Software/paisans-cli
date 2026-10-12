@@ -288,3 +288,29 @@ func (r Repo) FetchBundle(bundle []byte) error {
 	_, err = r.git(nil, nil, "fetch", "--no-prune", "--no-tags", "--quiet", path, "refs/versions/*:refs/versions/*")
 	return err
 }
+
+// bundleVersions lists the versions a bundle names, by the same rule as
+// versionRefs: a ref under refs/versions/ named for the commit it points to.
+func (r Repo) bundleVersions(bundle []byte) ([]string, error) {
+	dir, err := os.MkdirTemp("", "paisans-bundle-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "b.bundle")
+	if err := os.WriteFile(path, bundle, 0o600); err != nil {
+		return nil, err
+	}
+	out, err := r.git(nil, nil, "bundle", "list-heads", path)
+	if err != nil {
+		return nil, err
+	}
+	var shas []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[1] == "refs/versions/"+f[0] && checkSHA(f[0]) == nil {
+			shas = append(shas, f[0])
+		}
+	}
+	return shas, nil
+}

@@ -684,11 +684,28 @@ func Load(path string) (*Config, error) { return load(path, false) }
 // every address a host binds is in that subnet.
 func LoadForInit(path string) (*Config, error) { return load(path, true) }
 
+// LoadBytes is Load for a configuration held in memory, as a version in the
+// configuration store holds it: the same strict decode and structural check,
+// with no file behind it, so its Path is empty.
+func LoadBytes(data []byte) (*Config, error) {
+	cfg, err := parse(data, "paisans.yaml", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Path = ""
+	return cfg, nil
+}
+
 func load(path string, noSubnet bool) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, readProblem(path, "Run paisans from the directory that holds paisans.yaml, or name the file with --config.", err)
 	}
+	return parse(data, path, noSubnet)
+}
+
+// parse decodes and checks data, naming it path in every problem.
+func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 	dec := yaml.NewDecoder(newReader(data))
 	dec.KnownFields(true)
 	var cfg Config

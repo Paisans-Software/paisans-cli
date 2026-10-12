@@ -78,6 +78,11 @@ Usage:
   paisans doctor   [--config paisans.yaml] [--site <name>]... [--sudo]
   paisans dns init [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
+  paisans config publish [--config paisans.yaml] [--merge] [--execute]
+  paisans config pull [--config paisans.yaml] [--root <sha>] [--execute]
+  paisans config log [--config paisans.yaml] [--root <sha>]
+  paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]
+               [--config paisans.yaml] [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
@@ -209,6 +214,21 @@ Commands:
              exactly a no-mail content init writes. Lists every other record init marked, with why
              it is kept, and lists the zone again to confirm each delete.
              Both write nothing without --execute.
+  config     The signed copies of paisans.yaml, secrets.enc.yaml and
+             .sops.yaml every site keeps. Each gathers every site's
+             versions first and trusts them from your own signing key or a
+             root pinned with --root. publish: sign the local files as a
+             version on the sites' newest and push it to every site;
+             --merge builds on every head of a fork. pull: move the local
+             files to the sites' newest version, or, over local edits,
+             show the difference and put its files in .paisans/incoming/.
+             log: list every version, its signer, and the sites holding
+             it. recover: onto an empty directory, gather from the --from
+             hosts and every site the newest version names, and write its
+             files. pull and recover ask for the word partial at a
+             terminal when fewer than half the sites answered. Write
+             nothing without --execute, but every gather keeps what it
+             found in .paisans/store.git.
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
@@ -247,8 +267,10 @@ Commands:
 host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, storage init, storage add, storage rotate-key, app admin
 create, app remove, oidc client create, secrets prune, preflight, failover test,
-doctor and init are the only commands that reach a host. Each reads it to plan,
-and changes it only with --execute; host allow and host disallow change only a
+doctor, init and config are the only commands that reach a host. Each reads it
+to plan, and changes it only with --execute; config claims nothing, starts each
+site's configuration sync and reads its store at every run, and adds to that
+store only with publish --execute; host allow and host disallow change only a
 host's key allowlist, which is the host owner's, and claim nothing; host
 deployments, preflight, doctor and init have no --execute and never change it;
 secrets prune only reads the gateways' deployment records, and its --execute
@@ -309,6 +331,8 @@ func main() {
 		}
 	case "gateway":
 		err = runGateway(os.Args[2:])
+	case "config":
+		err = runConfig(os.Args[2:], os.Stdin, os.Stdout)
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":

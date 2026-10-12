@@ -40,15 +40,27 @@ var grantRunner = func(site string, t registry.Runner) registry.Runner { return 
 // it.
 var grantNow = time.Now
 
-// agentFingerprints is the fingerprint of every key the operator's ssh agent
-// holds, as `ssh-add -l` lists them. No agent, or one holding nothing, is an
-// empty list. Tests replace it.
-var agentFingerprints = func() []string {
-	out, _ := exec.Command("ssh-add", "-l").Output()
-	var fps []string
+// agentKeys is every public key line the operator's ssh agent holds, as
+// `ssh-add -L` lists them. No agent, or one holding nothing, is an empty
+// list. Tests replace it.
+var agentKeys = func() []string {
+	out, _ := exec.Command("ssh-add", "-L").Output()
+	var lines []string
 	for _, line := range strings.Split(string(out), "\n") {
-		if f := strings.Fields(line); len(f) > 1 && strings.HasPrefix(f[1], "SHA256:") {
-			fps = append(fps, f[1])
+		if _, _, err := config.ParseKeyLine(line); err == nil {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+	return lines
+}
+
+// agentFingerprints is the fingerprint of every key the operator's ssh agent
+// holds. Tests replace it.
+var agentFingerprints = func() []string {
+	var fps []string
+	for _, line := range agentKeys() {
+		if k, _, err := config.ParseKeyLine(line); err == nil {
+			fps = append(fps, k.Fingerprint)
 		}
 	}
 	return fps

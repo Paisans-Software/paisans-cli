@@ -1,0 +1,769 @@
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/configstore"
+	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/ui"
+	"gopkg.in/yaml.v3"
+)
+
+// What follows is `paisans config`: the signed copies of the configuration
+// every site keeps (docs/specs/2026-10-12-config-store.md). publish puts the
+// local files on the sites as a new version, pull brings the sites' newest
+// trusted version to the local files, log lists every version, and recover
+// writes the newest onto a workstation that has nothing. Every decision about
+// which version to trust is made here, on the workstation, from the
+// operator's own anchor; the sites only store.
+
+// partialWord is what the operator types to go on with fewer than a majority
+// of sites reached directly: a site that lies can hide newer versions only
+// from a workstation that reaches no honest site, and a majority makes that
+// unlikely.
+const partialWord = "partial"
+
+// configSiteTransport is how a config command reaches a site paisans.yaml
+// declares: its ssh section, with sudo, since the store is root's. Tests
+// replace it.
+var configSiteTransport = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "", true)
+}
+
+// configNow is the clock a version's commit date is written by. Tests
+// replace it.
+var configNow = time.Now
+
+func runConfig(args []string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) == 0 {
+		return &ui.Problem{Hint: "config takes one subcommand", Explain: "Use publish, pull, log or recover."}
+	}
+	switch args[0] {
+	case "publish":
+		return runConfigPublish(args[1:])
+	case "pull":
+		return runConfigPull(args[1:], stdin, stdout)
+	case "log":
+		return runConfigLog(args[1:], stdout)
+	case "recover":
+		return runConfigRecover(args[1:], stdin, stdout)
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("config has no subcommand %q", args[0]), Explain: "Use publish, pull, log or recover."}
+}
+
+// configHelp is the --config flag's help, the same for every subcommand.
+const configHelp = "path to the deployment declaration; the store's state is kept in .paisans/ beside it"
+
+// workstationOf is the workstation whose paisans.yaml is at path. The three
+// files of a version have fixed names, so the configuration must be named
+// paisans.yaml for the files on disk to be the ones a version holds.
+func workstationOf(path string) (configstore.Local, error) {
+	if filepath.Base(path) != "paisans.yaml" {
+		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called paisans.yaml", Explain: "A stored version holds paisans.yaml, secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
+	}
+	return configstore.Local{Dir: filepath.Dir(path)}, nil
+}
+
+// configTransports reaches every site cfg declares.
+func configTransports(cfg *config.Config) map[string]apply.Transport {
+	out := map[string]apply.Transport{}
+	for _, name := range cfg.SiteNames() {
+		out[name] = configSiteTransport(name, cfg.Sites[name])
+	}
+	return out
+}
+
+// anchorFor is the workstation's anchor, with root pinned in place of a
+// recorded one. A root that differs from the recorded pin is refused: the
+// pin is what the operator trusted before, and replacing it is not a pull's
+// side effect.
+func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
+	a, err := l.Anchor()
+	if err != nil {
+		return a, err
+	}
+	if root == "" {
+		return a, nil
+	}
+	if !shaShape(root) {
+		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the version to pin, as paisans config log prints it on a workstation that has it."}
+	}
+	if a.Root != "" && a.Root != root {
+		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
+	}
+	a.Root = root
+	return a, nil
+}
+
+func shaShape(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	return strings.Trim(s, "0123456789abcdef") == ""
+}
+
+// gatherAt gathers from sites, reporting each, and explains a missing anchor.
+func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor) (configstore.Gathered, error) {
+	names := slices.Sorted(maps.Keys(sites))
+	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
+		return configstore.Gathered{}, err
+	}
+	s := r.Step("gather the versions every site holds")
+	g, err := configstore.GatherAnchored(l, sites, configured, id, a)
+	if err != nil {
+		s.Fail(err)
+		if errors.Is(err, configstore.ErrNoAnchor) {
+			return g, &ui.Problem{
+				Hint:    "no version to start trusting from",
+				Explain: err.Error() + ". A history found only on the sites could have been written by anyone with root on them. Pin the first version you trust with --root <sha>, or run paisans admin register to sign the version you hold.",
+				Cause:   err,
+			}
+		}
+		return g, err
+	}
+	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
+	for _, rc := range g.Reached {
+		switch {
+		case rc.Err != nil:
+			r.Step(rc.Site).End(ui.Warned, "not reached")
+			r.Explain(rc.Err.Error())
+		case rc.SyncErr != "":
+			r.Step(rc.Site).End(ui.Warned, "answered; its sync with its peers did not complete")
+			r.Explain(rc.SyncErr)
+		default:
+			r.Step(rc.Site).End(ui.OK, "answered")
+		}
+	}
+	return g, nil
+}
+
+// describe is a version in a line: revision, short hash and signer.
+func describe(g configstore.Gathered, sha string) string {
+	v := g.Versions[sha]
+	who := g.Signers[sha]
+	if who == "" {
+		who = v.SignerFP
+	}
+	return fmt.Sprintf("revision %d, %s, signed by %s", v.Revision, sha[:12], who)
+}
+
+// forkProblem is the refusal for a fork, naming each head.
+func forkProblem(g configstore.Gathered) error {
+	var heads []string
+	for _, h := range g.Verdict.Heads {
+		heads = append(heads, "- "+describe(g, h))
+	}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans config publish --merge."}
+}
+
+// confirmPartial asks for partial when fewer than a majority of the
+// configured sites answered directly, before anything is written.
+func confirmPartial(stdin io.Reader, stdout io.Writer, g configstore.Gathered, configured int) error {
+	if g.Majority {
+		return nil
+	}
+	return confirmWord(stdin, stdout, partialWord, fmt.Sprintf("Only %d of the %d sites answered directly. A site that answered could be serving an older version and hiding newer ones, which only the sites that did not answer would show.", len(g.Direct()), configured))
+}
+
+// signingKeyFor is the public key line a publish signs with: the recorded
+// signing key, which the agent must hold, or, when none is recorded, the
+// one agent key that belongs to an admin of the base (the local paisans.yaml
+// for a first version).
+func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
+	held := agentKeys()
+	recorded, err := l.SigningKey()
+	if err != nil {
+		return "", err
+	}
+	if recorded != "" {
+		k, _, _ := config.ParseKeyLine(recorded)
+		for _, line := range held {
+			if h, _, err := config.ParseKeyLine(line); err == nil && h.Fingerprint == k.Fingerprint {
+				return recorded, nil
+			}
+		}
+		return "", &ui.Problem{Hint: "your ssh-agent does not hold your signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key. Load it with ssh-add and run this again.", k.Fingerprint)}
+	}
+	base := local
+	head, err := l.Head()
+	if err != nil {
+		return "", err
+	}
+	if head != "" {
+		cache, err := l.Cache()
+		if err != nil {
+			return "", err
+		}
+		f, err := cache.Files(head)
+		if err != nil {
+			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run paisans config pull, which gathers it again.", Cause: err}
+		}
+		if base, err = config.LoadBytes(f.Paisans); err != nil {
+			return "", err
+		}
+	}
+	var found []string
+	for _, line := range held {
+		h, _, err := config.ParseKeyLine(line)
+		if err != nil {
+			continue
+		}
+		for _, admin := range base.Admins {
+			for _, al := range admin.KeyLines() {
+				if a, _, err := config.ParseKeyLine(al); err == nil && a.Fingerprint == h.Fingerprint && !slices.Contains(found, line) {
+					found = append(found, line)
+				}
+			}
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an admin", Explain: "A version is signed with an admin's key, listed under admins in the version it builds on. Load yours with ssh-add, or have another admin publish the change that adds it."}
+	}
+	return "", &ui.Problem{Hint: "your ssh-agent holds more than one admin key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
+}
+
+func runConfigPublish(args []string) error {
+	fs := flag.NewFlagSet("config publish", flag.ExitOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", "paisans.yaml", configHelp)
+	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
+	execute := fs.Bool("execute", false, "sign the version and push it to the sites")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return &ui.Problem{Hint: "config publish takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	l, err := workstationOf(*configPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	r := reporter()
+	r.Section("publish " + *configPath)
+	key, err := signingKeyFor(l, cfg)
+	if err != nil {
+		return err
+	}
+	k, _, _ := config.ParseKeyLine(key)
+	sites := configTransports(cfg)
+	if !*execute {
+		a, err := l.Anchor()
+		if err != nil {
+			return err
+		}
+		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+		if err != nil {
+			return err
+		}
+		head, err := l.Head()
+		if err != nil {
+			return err
+		}
+		parents, err := configstore.Parents(g, head, *merge)
+		if err != nil {
+			if g.Verdict.Fork && !*merge {
+				return forkProblem(g)
+			}
+			return err
+		}
+		what := "the first version"
+		if len(parents) > 0 {
+			var on []string
+			for _, p := range parents {
+				on = append(on, describe(g, p))
+			}
+			what = "a version on " + strings.Join(on, " and ")
+		}
+		r.Step("publish "+what).End(ui.Pending, "signed with "+k.Fingerprint+"; --execute signs and pushes it")
+		return nil
+	}
+	if err := settleSudo(r, cfg.SiteNames(), func(n string) apply.Transport { return sites[n] }); err != nil {
+		return err
+	}
+	publish := configstore.Publish
+	if *merge {
+		publish = configstore.PublishMerge
+	}
+	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
+	sha, pushed, err := publish(l, sites, key, configNow())
+	var pe *configstore.PushError
+	switch {
+	case errors.As(err, &pe) && len(pushed) > 0:
+		s.End(ui.Warned, fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+		for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {
+			r.Warn(site+" did not take the version", fmt.Sprintf("%v. It gets the version from its peers' sync, or from publishing again.", pe.Failed[site]))
+		}
+	case err != nil:
+		s.Fail(err)
+		if errors.Is(err, configstore.ErrNoAnchor) {
+			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans config pull --root <sha>, or paisans admin register.", Cause: err}
+		}
+		return err
+	default:
+		s.Done(fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+	}
+	r.Result("published %s", sha)
+	return nil
+}
+
+func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := flag.NewFlagSet("config pull", flag.ExitOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", "paisans.yaml", configHelp)
+	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
+	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return &ui.Problem{Hint: "config pull takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	l, err := workstationOf(*configPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	a, err := anchorFor(l, *root)
+	if err != nil {
+		return err
+	}
+	r := reporter()
+	r.Section("pull into " + *configPath)
+	sites := configTransports(cfg)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	if err != nil {
+		return err
+	}
+	if len(g.Direct()) == 0 {
+		return &ui.Problem{Hint: "no site answered", Explain: "Nothing was pulled.", Cause: configstore.UnreachedError(g)}
+	}
+	if g.Verdict.Fork {
+		return forkProblem(g)
+	}
+	if len(g.Verdict.Heads) == 0 {
+		r.Result("the sites hold no version yet; paisans config publish makes the first")
+		return nil
+	}
+	head := g.Verdict.Heads[0]
+	base, err := l.Head()
+	if err != nil {
+		return err
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return err
+	}
+	headFiles, err := cache.Files(head)
+	if err != nil {
+		return err
+	}
+	localFiles, err := l.Files()
+	if err != nil {
+		return err
+	}
+	edited := !localFiles.Equal(headFiles)
+	if base != "" && edited {
+		if bf, err := cache.Files(base); err == nil {
+			edited = !localFiles.Equal(bf)
+		}
+	}
+	switch {
+	case base == head && !edited:
+		if *execute && *root != "" {
+			if err := l.SetRoot(*root); err != nil {
+				return err
+			}
+		}
+		r.Result("up to date with %s", describe(g, head))
+		return nil
+	case base == head:
+		r.Result("up to date with %s; the local edits are not published yet", describe(g, head))
+		return nil
+	case edited:
+		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
+	}
+	if !*execute {
+		r.Step("move the local files to "+describe(g, head)).End(ui.Pending, "--execute writes them")
+		if !g.Majority {
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+		}
+		return nil
+	}
+	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		return err
+	}
+	if err := l.Checkout(head); err != nil {
+		return err
+	}
+	if *root != "" {
+		if err := l.SetRoot(*root); err != nil {
+			return err
+		}
+	}
+	r.Result("moved the local files to %s", describe(g, head))
+	return nil
+}
+
+// pullOverEdits refuses a pull that would overwrite local edits made on an
+// older base, and shows what differs: paisans.yaml as a diff, the secrets by
+// key name only. With execute the head's files go to .paisans/incoming/ for
+// a merge by hand.
+func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, head, base string, local, theirs configstore.Files, execute bool, stdout io.Writer) error {
+	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/paisans.yaml", "head/paisans.yaml")
+	if err != nil {
+		return err
+	}
+	if diff != "" {
+		fmt.Fprint(stdout, diff)
+	}
+	for _, line := range secretsKeyChanges(local.Secrets, theirs.Secrets) {
+		fmt.Fprintln(stdout, line)
+	}
+	if !bytesEqual(local.SOPS, theirs.SOPS) {
+		fmt.Fprintln(stdout, ".sops.yaml differs")
+	}
+	where := "--execute writes the head's files to " + l.Incoming() + " to merge from"
+	if execute {
+		if err := l.WriteIncoming(head); err != nil {
+			return err
+		}
+		where = "The head's files are in " + l.Incoming() + "."
+	}
+	from := "no recorded base"
+	if base != "" {
+		from = "base " + base[:12]
+	}
+	return &ui.Problem{
+		Hint:    "the local files have edits the sites' newest version lacks",
+		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with paisans config publish --merge.", from, describe(g, head), where),
+	}
+}
+
+func bytesEqual(a, b []byte) bool { return string(a) == string(b) }
+
+// unifiedDiff is git's unified diff of two texts, "" when they are equal.
+func unifiedDiff(a, b []byte, nameA, nameB string) (string, error) {
+	dir, err := os.MkdirTemp("", "paisans-diff-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	pa, pb := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	if err := os.WriteFile(pa, a, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(pb, b, 0o600); err != nil {
+		return "", err
+	}
+	cmd := exec.Command("git", "-c", "core.quotePath=false", "diff", "--no-index", "--no-color", "--src-prefix=", "--dst-prefix=", pa, pb)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
+		return "", fmt.Errorf("diff paisans.yaml: %w", err)
+	}
+	s := strings.ReplaceAll(string(out), pa, nameA)
+	return strings.ReplaceAll(s, pb, nameB), nil
+}
+
+// secretsKeyChanges names each key of the secrets file that is only on one
+// side or whose stored value differs, never a value. The file is compared
+// as stored, encrypted, and sops's own metadata is left out; a re-encrypted
+// file differs at every key.
+func secretsKeyChanges(local, theirs []byte) []string {
+	a, errA := flatKeys(local)
+	b, errB := flatKeys(theirs)
+	if errA != nil || errB != nil {
+		if !bytesEqual(local, theirs) {
+			return []string{"secrets.enc.yaml differs, and cannot be read as YAML to say where"}
+		}
+		return nil
+	}
+	var out []string
+	keys := map[string]bool{}
+	for k := range a {
+		keys[k] = true
+	}
+	for k := range b {
+		keys[k] = true
+	}
+	names := make([]string, 0, len(keys))
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		va, inA := a[k]
+		vb, inB := b[k]
+		switch {
+		case inA && !inB:
+			out = append(out, "secrets: "+k+" only in the local file")
+		case !inA && inB:
+			out = append(out, "secrets: "+k+" only in the head")
+		case va != vb:
+			out = append(out, "secrets: "+k+" differs")
+		}
+	}
+	return out
+}
+
+// flatKeys is every leaf of a YAML document by dotted key, sops's metadata
+// left out.
+func flatKeys(data []byte) (map[string]string, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	delete(doc, "sops")
+	out := map[string]string{}
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, c := range t {
+				p := k
+				if prefix != "" {
+					p = prefix + "." + k
+				}
+				walk(p, c)
+			}
+		default:
+			out[prefix] = fmt.Sprint(t)
+		}
+	}
+	walk("", doc)
+	return out, nil
+}
+
+func runConfigLog(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("config log", flag.ExitOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", "paisans.yaml", configHelp)
+	root := fs.String("root", "", "judge from this root, as if pinned, without recording it")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return &ui.Problem{Hint: "config log takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	l, err := workstationOf(*configPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	a, err := anchorFor(l, *root)
+	if err != nil {
+		return err
+	}
+	r := reporter()
+	r.Section("versions of " + *configPath)
+	sites := configTransports(cfg)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	if err != nil {
+		return err
+	}
+	shas := make([]string, 0, len(g.Versions))
+	for sha := range g.Versions {
+		shas = append(shas, sha)
+	}
+	sort.Slice(shas, func(i, j int) bool {
+		vi, vj := g.Versions[shas[i]], g.Versions[shas[j]]
+		if vi.Revision != vj.Revision {
+			return vi.Revision > vj.Revision
+		}
+		return shas[i] < shas[j]
+	})
+	for _, sha := range shas {
+		v := g.Versions[sha]
+		who := g.Signers[sha]
+		if who == "" {
+			who = v.SignerFP
+		}
+		state := "valid"
+		if !g.Verdict.Trusted[sha] {
+			state = "not trusted: " + g.Verdict.Reasons[sha]
+		}
+		if slices.Contains(g.Verdict.Heads, sha) {
+			state += ", head"
+		}
+		holders := strings.Join(g.Holders[sha], ", ")
+		if holders == "" {
+			holders = "no site that answered"
+		}
+		fmt.Fprintf(stdout, "%d  %s  %s  %s  %s  held by %s\n", v.Revision, sha[:12], who, v.Committed.Format(time.RFC3339), state, holders)
+	}
+	if len(shas) == 0 {
+		r.Result("no site holds a version yet")
+	}
+	return nil
+}
+
+func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := flag.NewFlagSet("config recover", flag.ExitOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", "paisans.yaml", configHelp)
+	var from pathList
+	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] (repeatable)")
+	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
+	id := fs.String("id", "", "the deployment's id, when a host's registry names more than one")
+	execute := fs.Bool("execute", false, "write the recovered files and state")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return &ui.Problem{Hint: "config recover takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	if len(from) == 0 {
+		return &ui.Problem{Hint: "config recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], Eg: --from admin@203.0.113.9; every site the recovered configuration names is reached after it."}
+	}
+	l, err := workstationOf(*configPath)
+	if err != nil {
+		return err
+	}
+	if l.HasFiles() {
+		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans config pull where the files exist, or recover into an empty directory with --config."}
+	}
+	a, err := anchorFor(l, *root)
+	if err != nil {
+		return err
+	}
+	r := reporter()
+	r.Section("recover into " + l.Dir)
+	hosts := map[string]apply.Transport{}
+	for _, f := range from {
+		dest, err := config.ParseDestination(f)
+		if err != nil {
+			return sshFlagProblem(f, err)
+		}
+		hosts[dest.String()] = reachDestination(dest, true)
+	}
+	deploymentID, err := recoverID(hosts, *id)
+	if err != nil {
+		return err
+	}
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a)
+	if err != nil {
+		return err
+	}
+	if len(g.Verdict.Heads) == 0 {
+		return &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
+	}
+	// Every site the newest trusted version names is reached, not only the
+	// hosts given, so a host serving an old version is outvoted by the rest.
+	cache, err := l.Cache()
+	if err != nil {
+		return err
+	}
+	first, err := cache.Files(g.Verdict.Heads[0])
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadBytes(first.Paisans)
+	if err != nil {
+		return err
+	}
+	if cfg.ID != deploymentID {
+		return &ui.Problem{Hint: "the recovered version is another deployment's", Explain: fmt.Sprintf("It declares id %s, and the hosts' store is %s's.", cfg.ID, deploymentID)}
+	}
+	sites := configTransports(cfg)
+	r.Section("every site " + describe(g, g.Verdict.Heads[0]) + " names")
+	g, err = gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	if err != nil {
+		return err
+	}
+	if g.Verdict.Fork {
+		return forkProblem(g)
+	}
+	head := g.Verdict.Heads[0]
+	pin := a.Root
+	if pin == "" {
+		if roots := g.Roots(head); len(roots) == 1 {
+			pin = roots[0]
+		}
+	}
+	if !*execute {
+		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
+		if !g.Majority {
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+		}
+		return nil
+	}
+	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		return err
+	}
+	if err := l.Checkout(head); err != nil {
+		return err
+	}
+	if pin != "" {
+		if err := l.SetRoot(pin); err != nil {
+			return err
+		}
+	}
+	r.Result("recovered %s into %s", describe(g, head), l.Dir)
+	return nil
+}
+
+// recoverID is the deployment a recovery is for: id when given, else the one
+// deployment the hosts' registries name. More than one is refused, since
+// which one to recover is the operator's to say.
+func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
+	if id != "" {
+		if !deployment.ValidID(id) {
+			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans host deployments lists it."}
+		}
+		return id, nil
+	}
+	ids := map[string]bool{}
+	var errs []error
+	for name, t := range hosts {
+		reg, err := registry.Read(t)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+		for found := range reg.Deployments {
+			ids[found] = true
+		}
+	}
+	switch len(ids) {
+	case 1:
+		for found := range ids {
+			return found, nil
+		}
+	case 0:
+		return "", &ui.Problem{Hint: "no host named lists a deployment", Explain: "Name the deployment with --id, or another host with --from.", Cause: errors.Join(errs...)}
+	}
+	var list []string
+	for found := range ids {
+		list = append(list, found)
+	}
+	sort.Strings(list)
+	return "", &ui.Problem{Hint: "the hosts list more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
+}
