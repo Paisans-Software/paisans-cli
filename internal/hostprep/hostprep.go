@@ -85,9 +85,12 @@ const (
 	KindFirewall  = "firewall"
 	KindSSHKeys   = "ssh keys"
 	KindWatchdog  = "watchdog"
+	// KindConfigStore is the repository of configuration versions, its
+	// daemon and its sync, and the git that serves them.
+	KindConfigStore = "configuration store"
 )
 
-var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog}
+var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog, KindConfigStore}
 
 // Kinds is each kind of change the plan's steps make, once: those named
 // above in their order, then any other in the order its first step runs.
@@ -205,6 +208,10 @@ type Profile interface {
 	// WatchdogModule plans loading a kernel module now, unless loaded says
 	// it already is, and loading it at every boot.
 	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error)
+	// ConfigStore plans the deployment's repository of configuration
+	// versions, the daemon that serves it to the mesh and the timer that
+	// fetches from peers, the addresses of which are given.
+	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string) (Section, error)
 	// Firewall plans the given inbound rules and, when hostWide, a default
 	// deny for everything else and enabling the firewall. The SSH rule must
 	// be in place before the firewall is enabled, and enabling must not
@@ -266,7 +273,7 @@ type options struct {
 func Shared() Option { return func(o *options) { o.shared = true } }
 
 // Build probes the site's host and returns only what is missing, in the order
-// it must run: packages, then services, then the watchdog, then the login
+// it must run: packages, then services, then the watchdog, then the configuration store, then the login
 // user's authorized keys, then the firewall, then removing authorized keys
 // no longer listed. The firewall follows the packages because the package
 // step may be what installs it; key removals are last so that nothing is
@@ -314,6 +321,12 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 		return nil, err
 	}
 	plan.add(watchdog)
+
+	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site))
+	if err != nil {
+		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
+	}
+	plan.add(store)
 
 	keys, keyRemovals, err := planAuthorizedKeys(t, d, site, declared.SSH)
 	if err != nil {

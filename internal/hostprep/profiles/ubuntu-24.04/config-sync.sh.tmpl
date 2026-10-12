@@ -1,0 +1,17 @@
+#!/bin/sh
+# Fetches every version a peer holds that this site lacks. Never prunes:
+# a ref is named for its own hash, so nothing a peer holds can replace one here.
+set -u
+repo=/var/lib/paisans/config/{{.Token}}.git
+log=/var/lib/paisans/config/{{.Token}}.sync.json
+out=""
+while IFS= read -r peer; do
+	[ -n "$peer" ] || continue
+	if timeout 60 git -C "$repo" fetch --no-prune --quiet "git://$peer/{{.Token}}.git" 'refs/versions/*:refs/versions/*' 2>/dev/null; then
+		ok=true
+	else
+		ok=false
+	fi
+	out="$out{\"peer\":\"$peer\",\"ok\":$ok},"
+done < /var/lib/paisans/config/{{.Token}}.peers
+printf '{"at":"%s","peers":[%s]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${out%,}" > "$log.tmp" && mv "$log.tmp" "$log"

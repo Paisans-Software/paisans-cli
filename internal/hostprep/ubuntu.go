@@ -34,8 +34,9 @@ var dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io", "do
 var dockerConflicts = []string{"docker.io", "docker-compose", "docker-compose-v2", "docker-doc", "docker-buildx", "podman-docker", "containerd", "runc"}
 
 // basePackages are needed whatever else is installed: wg and wg-quick for
-// the mesh, and the firewall this profile drives.
-var basePackages = []string{"wireguard-tools", "ufw"}
+// the mesh, the firewall this profile drives, and git for the configuration
+// store.
+var basePackages = []string{"wireguard-tools", "ufw", "git"}
 
 // packageKinds is the kind of change each package in an install makes, each
 // once, in the order the packages are named: Docker's are docker, and each
@@ -51,6 +52,8 @@ func packageKinds(packages []string) []string {
 			kind = KindWireGuard
 		case p == "ufw":
 			kind = KindFirewall
+		case p == "git":
+			kind = KindConfigStore
 		}
 		if !slices.Contains(out, kind) {
 			out = append(out, kind)

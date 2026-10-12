@@ -1,0 +1,13 @@
+[Unit]
+Description=paisans {{.Token}}: serve configuration versions to mesh peers, read only
+After={{.WireGuardUnit}}
+Requires={{.WireGuardUnit}}
+
+[Service]
+User=nobody
+Group=nogroup
+ExecStart=/usr/bin/git daemon --reuseaddr --listen={{.Address}} --port=9418 --base-path=/var/lib/paisans/config --export-all /var/lib/paisans/config/{{.Token}}.git
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

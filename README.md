@@ -1269,7 +1269,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 | every service and every compose network | the Docker label `community.paisans.deployment=<id>`, the full id |
 | a firewall rule `host prepare` adds | the ufw comment `paisans-<token>: <why>` |
 | the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9` (see *Two deployments on one host never share a mesh*) |
-| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned` |
+| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, the configuration store's `/var/lib/paisans/config/<token>.git`, `.peers` and `.sync.json`, `/usr/local/lib/paisans-<token>/config-sync.sh` and the units `paisans-<token>-config-daemon.service`, `-config-sync.service` and `-config-sync.timer` |
 | a DNS record `dns init` creates | the comment `paisans-<token>: created by paisans dns init` |
 
 Code that decides whether a Docker object is this deployment's matches the
@@ -4210,7 +4210,7 @@ once the line ends, and output without a terminal never shows it:
 prepare
   ✓ vm: 1.8s
   ✓ watch: 2.0s
-  ⠹ home-b: 38s (install packages: wireguard-tools, ufw)
+  ⠹ home-b: 38s (install packages: wireguard-tools, ufw, git)
   ⠹ home-a: 38s (start docker)
 ```
 
@@ -4291,7 +4291,7 @@ added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
 first. Every host's prepare is checked at the same time, drawn as with
 `--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog. Each install line
+in the order docker, wireguard, firewall, ssh keys, watchdog, configuration store. Each install line
 is its site's steps' own dry runs together, and the storage line its step's:
 `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is
@@ -4310,7 +4310,7 @@ configuration
   ✓ init: generated 4 secrets into secrets.enc.yaml (cluster.admin_password, cluster.standby_password, cluster.superuser_password and 1 more)
 
 prepare
-  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog
+  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog, configuration store
   ✓ home-b
   ✓ vm
   ✓ watch
