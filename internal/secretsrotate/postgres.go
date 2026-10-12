@@ -564,9 +564,14 @@ func leaderSite(e Env) (string, apply.Transport, error) {
 
 // poll runs check until it passes or pgWait has gone by.
 func poll(what string, check func() error) error {
+	return pollWithin(what, pgWait, pgPoll, check)
+}
+
+// pollWithin runs check every interval until it passes or wait has gone by.
+func pollWithin(what string, wait, interval time.Duration, check func() error) error {
 	n := 1
-	if pgPoll > 0 && pgWait/pgPoll > 0 {
-		n = int(pgWait / pgPoll)
+	if interval > 0 && wait/interval > 0 {
+		n = int(wait / interval)
 	}
 	var last error
 	for i := 0; i < n; i++ {
@@ -574,10 +579,10 @@ func poll(what string, check func() error) error {
 			return nil
 		}
 		if i < n-1 {
-			sleep(pgPoll)
+			sleep(interval)
 		}
 	}
-	return fmt.Errorf("%s did not happen within %s: %w", what, pgWait, last)
+	return fmt.Errorf("%s did not happen within %s: %w", what, wait, last)
 }
 
 // redact takes a password out of output: psql quotes a failing line back,
