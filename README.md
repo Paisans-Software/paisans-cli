@@ -581,15 +581,15 @@ it.
 |---|---|---|
 | `allow_user_signups` | anything but `disabled`; unset is fine, since `disabled` is Pocket ID's default. Its own signup links would admit people past the code of conduct | `invite-signups-not-disabled` |
 | `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send the sign-in link while it is off | `invite-login-link-disabled` |
-| `email_one_time_access_as_unauthenticated` | anything but `true`. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `invite-recovery-disabled` |
+| `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `invite-recovery-disabled` |
 
 Also refused: an `identity_app` that is missing or not a `pocket-id` app
 (`invite-identity-app`), no SMTP host and sender for the app
 (`invite-without-smtp`), a `code_of_conduct` that is missing, empty or not text
 (`invite-code-of-conduct-missing`), and a setting out of range
 (`invite-setting-invalid`). The service sends its own notices (an application
-waiting, an invitee's outcome) through the deployment's `smtp:` block; the
-sign-in link is Pocket ID's mail.
+waiting, an invitee's outcome) through the deployment's `smtp:` block, which the app's own `smtp:` fields may
+override; the sign-in link is Pocket ID's mail.
 
 ### The code of conduct
 
@@ -605,7 +605,7 @@ agreement, so editing the text is a new version without anyone numbering it.
 
 | Secret | What it does | Rotating it |
 |---|---|---|
-| `apps.<invite>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | forgets every declined address; `secrets rotate --all` leaves it alone |
+| `apps.<invite>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | `secrets rotate` refuses it and `--all` keeps it; only `paisans secrets set` changes it, and that forgets every declined address |
 | `apps.<invite>.session_key` | signs the service's sign-in cookie | signs everyone out of the invite service and nothing else |
 
 ## Monitoring
@@ -2215,7 +2215,7 @@ Finishing either command first costs nothing but its resume.
 | Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
 | `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
 | Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and every invite service naming that Pocket ID app (their stacks are re-applied with it) | none |
-| invite `email_hash_key` | the service | the service | every declined address is forgotten; `--all` leaves it alone |
+| invite `email_hash_key` | the service | the service | kept: `secrets rotate` refuses it and `--all` leaves it alone; `paisans secrets set` changes it and forgets every declined address |
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
@@ -2292,6 +2292,10 @@ includes it (Founder decision).
   the role logs in, it is rotated like `standby`.
 * **Mbin's `rabbitmq_password`, where the queue is not `rabbitmq`.** No broker
   runs, so no account has the password, and it is kept unused.
+* **The invite service's `email_hash_key`.** The service stores only the
+  keyed hash of each declined address, so a new key matches none of them and
+  rotating it forgets every declined address. `secrets rotate` refuses it by
+  name and `--all` keeps it; only `paisans secrets set` changes it.
 * **WireGuard keys**, which are `mesh rekey`'s (*Rekeying the mesh: `mesh
   rekey`*).
 
@@ -2355,8 +2359,9 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 `external.smtp_password`, which `init` lists as owed once something resolves a
 mail host.
 
-Four kinds read it (`kinds.SendsMail`): the invite service, which takes it as `INVITE_SMTP_*` in its `.env` for its notices to admins and invitees; the uptime monitor, which puts it in
-its seed file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`,
+Four kinds read it (`kinds.SendsMail`): the invite service, which takes it
+as `INVITE_SMTP_*` in its `.env` for its notices to admins and invitees; the
+uptime monitor, which puts it in its seed file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`,
 `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in its `.env` (see
 *Pocket ID's configuration is rendered from paisans.yaml*); and Mbin, which
 takes it as `MAILER_DSN` and its sender address (see *Mbin sends little mail,
