@@ -38,6 +38,9 @@ type pgWorld struct {
 	// apps is the database password each site's app stack presents, keyed
 	// site/app.
 	apps map[string]string
+	// adminLogin is an admin role that may log in, as Spilo 3 bootstraps it;
+	// false is the NOLOGIN admin Spilo 4's post_init.sh creates.
+	adminLogin bool
 	// loginErr is an answer to a login that is not about the password.
 	loginErr error
 	cmds     []pgCmd
@@ -254,7 +257,7 @@ func (h *pgHost) RunInput(command, stdin string) (string, error) {
 			return "psql: error: connection refused", w.loginErr
 		}
 		role := loginUser.FindStringSubmatch(command)[1]
-		if role == "admin" && pinnedApp == "" {
+		if role == "admin" && pinnedApp == "" && !w.adminLogin {
 			// Spilo's post_init.sh creates admin NOLOGIN under Patroni 4.
 			return `psql: error: FATAL:  role "admin" is not permitted to log in`, errors.New("exit status 2")
 		}
@@ -266,6 +269,14 @@ func (h *pgHost) RunInput(command, stdin string) (string, error) {
 			return fmt.Sprintf("psql: error: FATAL:  password authentication failed for user %q", role), errors.New("exit status 2")
 		}
 		return "1\n", nil
+	case strings.Contains(command, "psql") && strings.Contains(stdin, "rolcanlogin"):
+		if strings.Contains(command, "read -r") || !strings.Contains(stdin, "'admin'") {
+			w.t.Fatalf("unexpected role read: %s / %s", command, stdin)
+		}
+		if w.adminLogin {
+			return "t\n", nil
+		}
+		return "f\n", nil
 	case strings.Contains(command, "psql"):
 		if !strings.HasPrefix(stdin, apply.NoStatementLog) {
 			w.t.Errorf("SQL that sets a password does not switch statement logging off first:\n%s", stdin)
@@ -598,13 +609,15 @@ func TestAcceptsTellsAWrongPasswordFromAnUnanswerablePostgres(t *testing.T) {
 	}
 }
 
-// cluster.admin_password is kept: Spilo creates admin NOLOGIN, so no login
-// checks it. Asked for it, the rotation refuses before anything changes.
-func TestClusterRoleAdminIsKept(t *testing.T) {
+// On a cluster whose admin is NOLOGIN, as Spilo 4 creates it, no login
+// checks cluster.admin_password: the rotation refuses as kept before
+// anything changes.
+func TestClusterRoleAdminNoLoginIsKept(t *testing.T) {
 	w := newPGWorld(t)
 	err := w.rotate(ClusterRole("admin"))
-	if err == nil || !strings.Contains(err.Error(), "NOLOGIN") {
-		t.Fatalf("admin was not refused as NOLOGIN: %v", err)
+	var kept *KeptError
+	if !errors.Is(err, ErrKept) || !errors.As(err, &kept) || kept.Path != "cluster.admin_password" || !strings.Contains(kept.Reason, "NOLOGIN") {
+		t.Fatalf("admin was not refused as kept: %v", err)
 	}
 	if len(w.store.s.Rotations) != 0 || w.store.s.Cluster.AdminPassword != "admin-old" {
 		t.Fatalf("the secrets file changed: rotations %v, admin %q", w.store.s.Rotations, w.store.s.Cluster.AdminPassword)
@@ -620,7 +633,24 @@ func TestClusterRoleAdminIsKept(t *testing.T) {
 	if _, err := ClusterRole("admin").Accepts(w.env(), "admin-old"); err == nil {
 		t.Fatal("Accepts on admin did not refuse")
 	}
-	if KeptPostgres()["cluster.admin_password"] != AdminPasswordKept {
-		t.Fatal("cluster.admin_password is not listed as kept")
+}
+
+// On a cluster whose admin logs in, as Spilo 3 bootstraps it, the password is
+// a live credential and is rotated like standby's.
+func TestClusterRoleAdminThatLogsInIsRotated(t *testing.T) {
+	w := newPGWorld(t)
+	w.adminLogin = true
+	if err := w.rotate(ClusterRole("admin")); err != nil {
+		t.Fatal(err)
 	}
+	next := w.store.s.Cluster.AdminPassword
+	if next == "admin-old" || w.roles["admin"] != next || len(w.store.s.Rotations) != 0 {
+		t.Fatalf("not rotated: file %q, cluster %q, rotations %v", next, w.roles["admin"], w.store.s.Rotations)
+	}
+	for _, site := range w.cfg.Cluster.Sites {
+		if w.running[site]["PGPASSWORD_ADMIN"] != next {
+			t.Fatalf("%s runs with the old admin password", site)
+		}
+	}
+	w.noSecretOnArgv(next)
 }

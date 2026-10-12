@@ -42,23 +42,29 @@ var (
 
 // clusterRoles maps a cluster secret to the role Spilo creates for it and
 // the variable patroni.env hands it in (render/templates/patroni.env.tmpl,
-// lines 23 to 26: PGUSER_SUPERUSER=postgres, PGUSER_STANDBY=standby). These
-// are the roles that log in, so a login is what checks their password.
+// lines 23 to 30: PGUSER_SUPERUSER=postgres, PGUSER_STANDBY=standby,
+// PGUSER_ADMIN=admin). A login is what checks their password.
 var clusterRoles = map[string]struct{ role, env string }{
 	"superuser": {"postgres", "PGPASSWORD_SUPERUSER"},
+	"admin":     {"admin", "PGPASSWORD_ADMIN"},
 	"standby":   {"standby", "PGPASSWORD_STANDBY"},
 }
 
-// AdminPasswordKept is why cluster.admin_password is kept rather than
-// rotated: no login checks it, so a new value would change nothing, and the
-// rotation could never pass its own gate.
-const AdminPasswordKept = "Spilo creates the admin role NOLOGIN (postgres-appliance/scripts/post_init.sh, `CREATE ROLE admin CREATEDB` then `ALTER ROLE admin WITH CREATEDB NOLOGIN`, at the Spilo 4 tags render pins, which run Patroni 4 and so create no bootstrap users), so no login checks its password and there is nothing to rotate"
+// ErrKept is a secret kept rather than rotated, because nothing checks it.
+// A KeptError wraps it, with the path and the reason for the plan to list.
+var ErrKept = errors.New("kept")
 
-// KeptPostgres is each Postgres secret that is kept rather than rotated,
-// with the reason, for the plan to list.
-func KeptPostgres() map[string]string {
-	return map[string]string{"cluster.admin_password": AdminPasswordKept}
-}
+// KeptError is the refusal of a rotation whose secret is kept: Path is the
+// secret, and Reason is why nothing checks it.
+type KeptError struct{ Path, Reason string }
+
+func (e *KeptError) Error() string { return e.Path + " is kept: " + e.Reason }
+func (e *KeptError) Unwrap() error { return ErrKept }
+
+// AdminNoLogin is why cluster.admin_password is kept on a cluster whose admin
+// role cannot log in: no login checks the password, so a new value would
+// change nothing, and the rotation could never pass its own gate.
+const AdminNoLogin = "the cluster's admin role is NOLOGIN, so no login checks its password and there is nothing to rotate. Spilo creates it so at the Spilo 4 tags render pins, which run Patroni 4 and so create no bootstrap users (postgres-appliance/scripts/post_init.sh, `CREATE ROLE admin CREATEDB` then `ALTER ROLE admin WITH CREATEDB NOLOGIN`)"
 
 // pgIdentifier is what is put into a command line or SQL as a role or a
 // database name, the same as apply allows when it creates them.
@@ -72,8 +78,10 @@ type clusterRole struct {
 }
 
 // ClusterRole is the rotation of cluster.<name>_password, for name superuser
-// (the role postgres) or standby. Asked for admin, it refuses before anything
-// changes, with AdminPasswordKept. Postgres takes the next value on the
+// (the role postgres), admin or standby. Which admin a cluster has depends on
+// the Spilo it was bootstrapped with, so it is read from the cluster: an
+// admin that logs in is rotated like standby, and one that cannot is refused
+// before anything changes, with a KeptError. Postgres takes the next value on the
 // leader first; then every data site's Patroni is started again with it, the
 // replicas one at a time and the leader last, after a switchover to a replica
 // that already runs with it, so that no step is a failover.
@@ -88,7 +96,7 @@ func ClusterRole(name string) Rotator {
 func (r clusterRole) Cost() Cost { return Cost{Reconnects: true} }
 
 func (r clusterRole) Precheck(e Env) error {
-	if err := r.known(); err != nil {
+	if err := r.known(e); err != nil {
 		return err
 	}
 	if len(e.Cfg.Cluster.Sites) == 0 {
@@ -97,27 +105,56 @@ func (r clusterRole) Precheck(e Env) error {
 	return nil
 }
 
-// known refuses a name with no role that logs in: admin, which is kept, or
-// one the cluster does not render.
-func (r clusterRole) known() error {
-	if r.name == "admin" {
-		return fmt.Errorf("cluster.admin_password is kept: %s", AdminPasswordKept)
-	}
+// known refuses a name the cluster does not render, and an admin role that
+// cannot log in, which is kept.
+func (r clusterRole) known(e Env) error {
 	if r.role == "" {
-		return fmt.Errorf("the cluster renders no role for %q that logs in; only superuser and standby are rotated", r.name)
+		return fmt.Errorf("the cluster renders no role for %q, only superuser, admin and standby", r.name)
+	}
+	if r.name != "admin" {
+		return nil
+	}
+	ok, err := canLogin(e, r.role)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &KeptError{Path: r.SecretPath, Reason: AdminNoLogin}
 	}
 	return nil
 }
 
+// canLogin reads whether role may log in, from pg_roles on the leader over
+// the container's trusted socket (apply.Psql), so no password is involved. A
+// role that does not exist logs in no more than a NOLOGIN one.
+func canLogin(e Env, role string) (bool, error) {
+	leader, t, err := leaderSite(e)
+	if err != nil {
+		return false, err
+	}
+	sql := fmt.Sprintf("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s;\n", apply.QuoteLiteral(role))
+	out, err := t.RunInput(apply.Psql(e.Cfg.Deployment())+" -At", sql)
+	if err != nil {
+		return false, fmt.Errorf("%s: reading whether %s logs in: %w: %s", leader, role, err, lastLine(out))
+	}
+	switch strings.TrimSpace(out) {
+	case "t":
+		return true, nil
+	case "f", "":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s: reading whether %s logs in: unexpected answer %q", leader, role, lastLine(out))
+}
+
 func (r clusterRole) Checked(e Env, next string) error {
-	if err := r.known(); err != nil {
+	if err := r.known(e); err != nil {
 		return err
 	}
 	return alterOnLeader(e, r.role, next)
 }
 
 func (r clusterRole) Accepts(e Env, next string) (bool, error) {
-	if err := r.known(); err != nil {
+	if err := r.known(e); err != nil {
 		return false, err
 	}
 	return loginOnLeader(e, r.role, "postgres", next)
