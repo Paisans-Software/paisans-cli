@@ -5197,8 +5197,18 @@ are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
 Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
 address, marked verified for the reason `app admin create` gives below, and
 `name` is split at its first space into a first and a last name. Each is put
-in every app's admin group, as `app admin create` does. Declaring the admin is
-the approval for all of it.
+in every app's admin group, as `app admin create` does, and in every app's
+member group as well. Declaring the admin is the approval for all of it.
+
+**A declared admin is a member of every app too**, because an app that gates
+on its member group would otherwise refuse its own administrator. Mbin reads
+`settings.member_group` and refuses a login whose claim lacks it unless the
+linked account is already an Mbin administrator, which a first login never
+is; releases of the fork before 1.15.1 did so even when the claim named the
+admin group. Joining the member groups makes every app admit its
+administrators, whatever it reads, including one that reads no group itself
+and relies on the client's restriction at Pocket ID. A member group that is
+also an admin group is joined once. Founder decision.
 
 The username is set when the account is created and never changed after:
 the pocket-id kind turns account editing off (`allow_own_account_edit`, under

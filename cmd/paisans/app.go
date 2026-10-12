@@ -224,6 +224,31 @@ func adminGroups(cfg *config.Config) []string {
 	return out
 }
 
+// memberGroups is the member group of every app that signs in through the
+// identity provider, sorted and without duplicates, leaving out any that is
+// also an admin group: the groups a declared admin joins so that every such
+// app admits them.
+func memberGroups(cfg *config.Config) []string {
+	seen := map[string]bool{}
+	for _, group := range adminGroups(cfg) {
+		seen[group] = true
+	}
+	var out []string
+	for _, name := range cfg.AppNames() {
+		app := cfg.Apps[name]
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		if !ok {
+			continue
+		}
+		if _, group := spec.Groups(app); group != "" && !seen[group] {
+			seen[group] = true
+			out = append(out, group)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // refuseStdin refuses anything piped in, since there is nothing to read: a
 // kind here takes no password. A terminal on stdin is left unread, so an
 // interactive run never waits.

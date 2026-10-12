@@ -1777,3 +1777,43 @@ unsigned GET of a blog outbox answered 401. Mbin's behaviour was read from the
 fork's source at v1.15.0+paisans, not run; the 1.15.0-paisans image's
 declared volume was inspected from the registry. The `stack-1` tags did not
 exist on the registry when this was written, so nothing here pulls them.
+
+## 2026-10-12: A declared admin joins every app's member group
+
+Founder decision, in session, after a first login to a fresh deployment's
+Mbin was refused with `OIDC login refused: <sub> is not in members`.
+
+### What was decided
+
+`apply` puts each admin `paisans.yaml` declares in every app's member group
+as well as every app's admin group. The member groups are read from the same
+keys `oidc client create` reads (`settings.member_group`, defaulting to
+`members`); one that is also an admin group is joined once. `app admin
+create`, which makes a user the operator names, is unchanged.
+
+### Why
+
+Mbin's member gate admits a login whose claim lacks the member group only
+when the linked account is already an Mbin administrator, and a first login
+has no linked account. A declared admin in `admins` alone was therefore
+refused on the login that would have made them an administrator. The Mbin
+fork now also admits a login its admin group claim names, but an app that
+reads no group relies on its client's restriction at Pocket ID, and joining
+the member groups makes every app admit its administrators without each one
+having to know about admin groups.
+
+This widens the standing approval for `apply`'s writes to Pocket ID: adding a
+declared admin to the member groups is part of declaring them, like the admin
+groups before it.
+
+### What was weighed
+
+* **Relying on the Mbin fork's change alone.** It fixes Mbin, and only Mbin;
+  any other app gating on its member group would repeat the failure.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. The two
+new tests (`TestAdminRequestJoinsTheMemberGroups`,
+`TestPocketIDPutsADeclaredAdminInTheMemberGroups`) fail with the change
+reverted and pass with it. Not run against a live Pocket ID.
