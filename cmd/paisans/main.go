@@ -537,9 +537,6 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := refuseSharedGatewayMove(cfg, *site, transport); err != nil {
-		return err
-	}
 	host, err := hostGate(r, cfg, *site, transport)
 	if err != nil {
 		return err
@@ -920,6 +917,9 @@ func cacheDigests() (restore func()) {
 // follow it, so a caller's apply.ResolveImages(nil) keeps every deployed
 // build.
 func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
+	if err := refuseSharedGatewayMove(cfg, site, transport); err != nil {
+		return nil, err
+	}
 	// An etcd member keeps the flags it was born with, read from its host,
 	// so that etcd.members growing never changes a running member's compose
 	// file. See render.EtcdInitialPath.

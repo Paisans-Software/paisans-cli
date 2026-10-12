@@ -54,3 +54,15 @@ func TestApplyRefusesASiteThatKeepsTheMonitorAndTheGatewaysRecord(t *testing.T) 
 		t.Errorf("a site running no Caddy was refused: %v", err)
 	}
 }
+
+// secrets rotate and rotate-key apply a site's stacks through
+// scopedApplyPlan, so a shared site holding the record is refused there too:
+// a rotation of the DNS token would otherwise rewrite its Caddy mid-move.
+func TestAScopedApplyRefusesASiteThatKeepsTheMonitorAndTheGatewaysRecord(t *testing.T) {
+	cfg := sharedFixture(t)
+	record := recordHost{files: map[string]string{deployrecord.Path(cfg.Deployment()): "{}"}}
+	_, err := scopedApplyPlan(cfg, &config.Secrets{}, "watch", record, true, "infra")
+	if err == nil || !strings.Contains(err.Error(), "keeps the monitor") {
+		t.Fatalf("a scoped apply of watch with the record: %v", err)
+	}
+}
