@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -337,7 +338,7 @@ func TestApplyRefusesMidRotation(t *testing.T) {
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...))
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
 			t.Errorf("apply %v: err = %v", extra, err)
@@ -804,7 +805,7 @@ func TestRenderingCommandsRefuseMidRotation(t *testing.T) {
 	const pending = "cluster.standby_password"
 	for name, run := range map[string]func(configPath, secretsPath string) error{
 		"site add": func(c, s string) error {
-			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s, "--sudo=false"})
+			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), io.Discard)
 		},
 		"storage add": func(c, s string) error {
 			return runStorageAdd([]string{"--config", c, "--secrets", s, "--sudo=false"})
@@ -865,7 +866,7 @@ func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
 	}
 	var applyErr error
 	captureStdout(t, func() {
-		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"})
+		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"}, strings.NewReader(""), io.Discard)
 	})
 	if applyErr == nil || !strings.Contains(applyErr.Error(), `"A rotation that cannot finish"`) {
 		t.Errorf("apply: err = %v", applyErr)
