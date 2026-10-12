@@ -3556,8 +3556,17 @@ While backups are on, `validate` refuses:
 * **`backup-destination-same-place`**: two destinations with one endpoint,
   bucket and prefix. They would be one repository pruned twice, not two
   copies, and the single destination warning would not see it.
-* **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme
-  and host. The bucket goes in `bucket`.
+* **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme,
+  host and port: a path, a query, a fragment. The bucket goes in `bucket`.
+* **`backup-endpoint-has-credentials`**: a user name or password before an `@`
+  in the endpoint. `paisans.yaml` is plaintext and meant to be committed, so
+  the credential belongs in the secrets, and no finding prints it back.
+* **`backup-bucket-name`**: a bucket name S3's naming rules do not allow: 3 to
+  63 lowercase letters, digits, dots and hyphens, starting and ending with a
+  letter or a digit, no two dots together, not shaped like an IP address.
+* **`backup-prefix-not-a-path`**: a prefix with a slash at either end, an empty
+  segment, `.` or `..`, or a character outside letters, digits, dots, hyphens
+  and underscores. It names a place inside the bucket, and only one.
 * **`backup-keep-empty`**: pruning with nothing kept, which would delete every
   backup.
 * **`backup-keep-negative`** and **`backup-number-negative`**: a negative count.

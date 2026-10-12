@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -13,6 +14,16 @@ import (
 // destinationName is a destination name usable as a secrets key segment,
 // backup.destinations.<name>.access_key_id, and as an object prefix.
 var destinationName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// bucketName is the shape S3's naming rules allow: 3 to 63 lowercase
+// letters, digits, dots and hyphens, starting and ending with a letter or a
+// digit (Amazon S3 User Guide, "General purpose bucket naming rules").
+// bucketNameProblem adds the two rules a pattern says poorly.
+var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+
+// prefixSegment is one segment of a destination's prefix. It starts with a
+// letter or a digit, so neither `.` nor `..` is one.
+var prefixSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // clock is HH:MM, 00:00 to 23:59.
 var clock = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
@@ -105,11 +116,31 @@ func (c *checker) destination(key string, d config.BackupDestination, schedule c
 	}
 	if d.Endpoint != "" {
 		u, err := url.Parse(d.Endpoint)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+		if err == nil && u.User != nil {
+			// Never print the value: validate's output lands in terminals,
+			// CI logs and transcripts, and this one holds a credential.
+			c.refuse("backup-endpoint-has-credentials", key+".endpoint",
+				"endpoint holds a credential",
+				"has a user name or password in it, before the @. paisans.yaml is plaintext and meant to be committed, so remove it from the file, rotate the key if the file has left your machine, and paste it with paisans secrets set backup.destinations.%s.access_key_id and .secret_access_key.", d.Name)
+		}
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || (u.Path != "" && u.Path != "/") ||
+			u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" || strings.Contains(d.Endpoint, "#") {
 			c.refuse("backup-endpoint-not-a-url", key+".endpoint",
 				"endpoint is not an S3 endpoint URL",
-				"is %q. It is the provider's S3 endpoint, scheme and host only, Eg: https://s3.us-west-004.backblazeb2.com. The bucket goes in bucket, not in the URL.", d.Endpoint)
+				"is %s. It is the provider's S3 endpoint, scheme and host only, with a port if it needs one, Eg: https://s3.us-west-004.backblazeb2.com. The bucket goes in bucket and any path in prefix, not in the URL.", shownEndpoint(d.Endpoint))
 		}
+	}
+	if d.Bucket != "" {
+		if problem := bucketNameProblem(d.Bucket); problem != "" {
+			c.refuse("backup-bucket-name", key+".bucket",
+				"bucket is not an S3 bucket name",
+				"is %q, which %s. A bucket name is 3 to 63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or a digit, with no two dots together, and not shaped like an IP address.", d.Bucket, problem)
+		}
+	}
+	if d.Prefix != "" && !prefixIsAPath(d.Prefix) {
+		c.refuse("backup-prefix-not-a-path", key+".prefix",
+			"prefix is not a path inside the bucket",
+			"is %q. It is one or more segments joined by single slashes, with no slash at either end, each starting with a letter or a digit and holding letters, digits, dots, hyphens and underscores, Eg: communities/paisans.", d.Prefix)
 	}
 	tiers := d.Keep.Tiers()
 	// config.Schedules, not the map, sets the order, so findings come out
@@ -243,4 +274,46 @@ func destinationPlace(d config.BackupDestination) string {
 		endpoint = strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 	}
 	return endpoint + "/" + d.Bucket + "/" + strings.Trim(d.Prefix, "/")
+}
+
+// shownEndpoint is an endpoint as a finding may print it: quoted, and without
+// anything before an @, which can only be a credential.
+func shownEndpoint(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		if u.User == nil {
+			return fmt.Sprintf("%q", raw)
+		}
+		u.User = nil
+		return fmt.Sprintf("%q, with its user name and password left out here", u.String())
+	}
+	if strings.Contains(raw, "@") {
+		return "an endpoint holding an @, not shown here in case it is a credential"
+	}
+	return fmt.Sprintf("%q", raw)
+}
+
+// bucketNameProblem says what is wrong with a bucket name, or nothing.
+func bucketNameProblem(name string) string {
+	switch {
+	case len(name) < 3 || len(name) > 63:
+		return "is not 3 to 63 characters long"
+	case !bucketName.MatchString(name):
+		return "holds a character a bucket name may not, or starts or ends with a dot or a hyphen"
+	case strings.Contains(name, ".."):
+		return "has two dots together"
+	case net.ParseIP(name) != nil:
+		return "is shaped like an IP address"
+	}
+	return ""
+}
+
+// prefixIsAPath reports whether a prefix is segments joined by single
+// slashes, none of them empty, `.` or `..`.
+func prefixIsAPath(prefix string) bool {
+	for _, segment := range strings.Split(prefix, "/") {
+		if !prefixSegment.MatchString(segment) {
+			return false
+		}
+	}
+	return true
 }
