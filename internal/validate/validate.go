@@ -149,9 +149,10 @@ func Check(cfg *config.Config) Result {
 	c.latestACMEImage()
 	c.hostnameRoles()
 	c.duplicateHostname()
-	c.gateWithoutAGate()
-	c.visibilityGateOnUngateableKind()
-	c.visibilityGateWithoutSignedFetch()
+	c.gatedOnUngateableKind()
+	c.gatedWithoutSignedFetch()
+	c.autoLoginWithoutARule()
+	c.usesGateOutsideTheDomain()
 	c.authorizedFetchIsABoolean()
 	c.writefreelySettingsInRange()
 	c.homeserverMustBePinned()
@@ -198,7 +199,6 @@ func Check(cfg *config.Config) Result {
 	c.imageForAbsentPostgres()
 	c.publicAddress()
 	c.watchdogOffOnDataSite()
-	c.visibilityGateProvisional()
 
 	sort.SliceStable(c.findings, func(i, j int) bool {
 		if c.findings[i].Level != c.findings[j].Level {
@@ -1078,6 +1078,12 @@ func (c *checker) pinnedOntoWitness() {
 		if !ok || !site.Has(config.RoleWitness) {
 			continue
 		}
+		// The gate keeps nothing on disk, so it is the quiet neighbour etcd
+		// needs, and it is placed on the gateway by the toolkit, often the
+		// witness, where a warning would name a choice nobody made.
+		if app.Kind == config.KindOAuth2Proxy {
+			continue
+		}
 		c.warn("pinned-app-on-witness", fmt.Sprintf("apps.%s.placement", name),
 			"pinned app shares a site with the witness",
 			"pins the app to %s, which holds the witness role. etcd depends on fsync latency and an application with its own database is not a quiet neighbour: the failure mode is the database failing over for no reason. Prefer a separate site for pinned apps, or give etcd its own device there.",
@@ -1233,41 +1239,15 @@ func (c *checker) latestACMEImage() {
 		c.cfg.ACME.Image, why)
 }
 
-// gateWithoutAGate refuses an app declaring a gate when the deployment runs
-// none.
-//
-// The import would name a snippet nothing renders, and Caddy fails to load its
-// whole configuration over one missing import, so every hostname goes down
-// rather than one.
-func (c *checker) gateWithoutAGate() {
-	gated := false
-	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Gate() != "" {
-			gated = true
-		}
-	}
-	if !gated {
-		return
-	}
-	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindOAuth2Proxy {
-			return
-		}
-	}
-	c.refuse("gate-without-a-gate-app", "apps",
-		"an app declares a gate but no gate app exists",
-		"an app declares a gate, but no app of kind oauth2-proxy is declared, so nothing renders the snippet the gateway would import. Caddy fails to load its entire configuration over one missing import, so this would take every hostname down rather than one. Declare the gate app, or set visibility_gate: public.")
-}
-
-// visibilityGateOnUngateableKind refuses a gate on a kind that cannot sit
+// gatedOnUngateableKind refuses gated: true on a kind that cannot sit
 // behind one.
 //
 // README: "A Matrix hostname must never be gated." The gate answers a request
 // with no session with a redirect to a passkey prompt. A Matrix client is not
 // a browser and does not follow it, and neither does a federating server
 // fetching the delegation documents, so a gate on a homeserver does not
-// restrict access: it ends client login and federation outright. Pocket ID and
-// the gate itself are the sign-in flow, so gating either gates the login. The
+// restrict access: it ends client login and federation outright. Pocket ID is
+// the sign-in flow, so gating it gates the login. The
 // failure in every case reads as something mysteriously unable
 // to sign in, with nothing in the configuration saying why.
 //
@@ -1275,20 +1255,20 @@ func (c *checker) gateWithoutAGate() {
 // provider, where the group restriction decides who may be provisioned an
 // account at all. That is why this is a refusal and not a warning: there is no
 // reading of a gated one that works.
-func (c *checker) visibilityGateOnUngateableKind() {
+func (c *checker) gatedOnUngateableKind() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Gate() == "" || kinds.GateFor(app.Kind).Gateable {
+		if !app.Gated || kinds.GateFor(app.Kind).Gateable {
 			continue
 		}
-		c.refuse("visibility-gate-on-ungateable-kind", fmt.Sprintf("apps.%s.visibility_gate", name),
-			"visibility gate is set on a kind that cannot sit behind it",
-			"is %q on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt: a Matrix client or a federating server will not follow it, Pocket ID and the gate are the sign-in flow itself, and the monitor must stay readable while the sites the gate signs in through are down. Set visibility_gate: public.",
-			app.VisibilityGate, app.Kind)
+		c.refuse("gated-on-ungateable-kind", fmt.Sprintf("apps.%s.gated", name),
+			"gated is set on a kind that cannot sit behind the gate",
+			"is true on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt: a Matrix client or a federating server will not follow it, Pocket ID is the sign-in flow itself, and the monitor must stay readable while the sites the gate signs in through are down. Remove gated.",
+			app.Kind)
 	}
 }
 
-// visibilityGateWithoutSignedFetch refuses a gate on a federating app that
+// gatedWithoutSignedFetch refuses gated: true on a federating app that
 // does not refuse an unsigned ActivityPub read: one whose kind records no way
 // to, or whose settings.authorized_fetch is false.
 //
@@ -1299,16 +1279,68 @@ func (c *checker) visibilityGateOnUngateableKind() {
 // its allow list. Without that it would serve its whole read surface to
 // anyone who asked for JSON. A WriteFreely reads only from its allowlist in
 // private mode, so for one that also means private is not false.
-func (c *checker) visibilityGateWithoutSignedFetch() {
+func (c *checker) gatedWithoutSignedFetch() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Gate() == "" || !kinds.Federates(app) || kinds.SignedFetchFor(app) != nil {
+		if !app.Gated || !kinds.Federates(app) || kinds.SignedFetchFor(app) != nil {
 			continue
 		}
-		c.refuse("visibility-gate-without-signed-fetch", fmt.Sprintf("apps.%s.visibility_gate", name),
+		c.refuse("gated-without-signed-fetch", fmt.Sprintf("apps.%s.gated", name),
 			"gated federating app still answers unsigned reads",
-			"is %q, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and, for a WriteFreely, private: false, since only private mode reads from the allowlist alone), turn federation off for this app, or set visibility_gate: public.",
-			app.VisibilityGate, app.Kind)
+			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and, for a WriteFreely, private: false, since only private mode reads from the allowlist alone), turn federation off for this app, or remove gated.",
+			app.Kind)
+	}
+}
+
+// autoLoginWithoutARule refuses auto_login: true on a kind with no auto-login
+// rule. The key would do nothing, and an operator reading it would believe a
+// member is signed straight in. Outline needs none, because its sign-in
+// screen redirects itself when OIDC is its only provider; the kinds that
+// cannot sit behind the gate have none to take.
+func (c *checker) autoLoginWithoutARule() {
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if !app.AutoLogin || len(kinds.GateFor(app.Kind).AutoLogin) > 0 {
+			continue
+		}
+		c.refuse("auto-login-without-a-rule", fmt.Sprintf("apps.%s.auto_login", name),
+			"auto_login is set on a kind with no auto-login rule",
+			"is true on an app of kind %s, which has no auto-login rule, so it would do nothing. Outline's sign-in screen already redirects itself when OIDC is its only provider, and a kind that cannot sit behind the gate has nothing to skip. Remove auto_login.",
+			app.Kind)
+	}
+}
+
+// usesGateOutsideTheDomain refuses gated or auto_login on an app with a
+// hostname outside the community's domain.
+//
+// The gate's session cookie is scoped to the community's domain, so a browser
+// never sends it to a hostname elsewhere. A gated app there would send every
+// member to sign in, back to the app with no cookie, and to sign in again,
+// forever; auto-login would never fire. A media hostname is never gated, so
+// it is not checked.
+func (c *checker) usesGateOutsideTheDomain() {
+	domain := c.cfg.Community.Domain
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if !app.UsesGate() {
+			continue
+		}
+		hostnames := map[string]string{"hostname": app.Hostname}
+		for role, h := range app.Hostnames {
+			if role != kinds.MediaRole {
+				hostnames["hostnames."+role] = h
+			}
+		}
+		for _, key := range sortedKeys(hostnames) {
+			h := hostnames[key]
+			if h == domain || strings.HasSuffix(h, "."+domain) {
+				continue
+			}
+			c.refuse("uses-gate-outside-the-domain", fmt.Sprintf("apps.%s.%s", name, key),
+				"gated or auto-login app on a hostname outside the domain",
+				"is %s, outside %s, and this app sets gated or auto_login. The gate's session cookie is scoped to %s, so a browser never sends it there: a gated app would send every member back to sign in forever, and auto-login would never fire. Move the hostname under %s, or remove gated and auto_login.",
+				h, domain, domain, domain)
+		}
 	}
 }
 
@@ -1368,24 +1400,6 @@ func (c *checker) writefreelySettingsInRange() {
 				"is %q. WriteFreely accepts a whole number from %d to %d, and config.ini locks this setting, so any other value stops the blog at startup.",
 				s, r.min, r.max)
 		}
-	}
-}
-
-// visibilityGateProvisional warns about an app gated on provisional.
-//
-// The provisional instance admits everyone signed in to Pocket ID, including
-// people not yet accepted into the community. That is the right gate for a
-// surface whose audience is exactly those people, and the wrong one for
-// anything member facing, where it reads as protected while admitting anyone
-// who made an account.
-func (c *checker) visibilityGateProvisional() {
-	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Gate() != config.GateProvisional {
-			continue
-		}
-		c.warn("visibility-gate-provisional", fmt.Sprintf("apps.%s.visibility_gate", name),
-			"provisional gate admits people who are not yet members",
-			"is provisional, which admits everyone signed in to Pocket ID, including people who are not yet members. Use member for anything only the community should read.")
 	}
 }
 
@@ -1647,14 +1661,16 @@ func hostnameProblem(host string) string {
 func (c *checker) duplicateHostname() {
 	type claim struct {
 		key, hostname string
-		// derived is set for a media hostname nobody wrote, so the message
-		// can say where the name came from rather than quoting a line the
-		// file does not have.
+		// derived is set for a hostname nobody wrote (a media hostname, or
+		// the gate's), so the message can say where the name came from
+		// rather than quoting a line the file does not have; from says what
+		// it was derived from.
 		derived bool
+		from    string
 	}
 	describe := func(cl claim) string {
 		if cl.derived {
-			return cl.key + ", derived from the app's own hostname,"
+			return cl.key + ", derived from " + cl.from + ","
 		}
 		return cl.key
 	}
@@ -1662,6 +1678,11 @@ func (c *checker) duplicateHostname() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		claims := []claim{{key: fmt.Sprintf("apps.%s.hostname", name), hostname: app.Hostname}}
+		if app.Derived {
+			// The gate, which the toolkit adds when an app sets gated or
+			// auto_login, at a name under the community's domain.
+			claims[0].derived, claims[0].from = true, "the community's domain for the gate"
+		}
 		for _, role := range sortedKeys(app.Hostnames) {
 			claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, role), hostname: app.Hostnames[role]})
 		}
@@ -1672,7 +1693,7 @@ func (c *checker) duplicateHostname() {
 		// hostname, and neither line in the file says so.
 		if kinds.MediaHostnameIsDerived(c.cfg, app) {
 			if media := kinds.MediaHostname(c.cfg, app); media != "" {
-				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole), hostname: media, derived: true})
+				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
 			}
 		}
 		for _, cl := range claims {
@@ -1916,30 +1937,20 @@ func (c *checker) oidcMemberGroupNotAName() {
 	}
 }
 
-// oidcMemberGroupDisagreesWithGate refuses a member gated app whose client
+// oidcMemberGroupDisagreesWithGate refuses an app using the gate whose client
 // admits a different member group than the gate does.
 //
-// Two groups decide who reads a member gated app: the gate's members
-// instance admits its members_group, and the app's client at Pocket ID admits
-// the app's member group. When they differ, someone in one and not the other
-// is let through the gate and refused by the app, or admitted by the app on a
-// path the gate does not cover, and nothing in the configuration says which
-// group "member" means. Both default to the same name, so this fires only
-// when one was changed and the other was not.
+// Two groups decide who reads a gated app: the gate admits members, and the
+// app's client at Pocket ID admits the app's member group. When they differ,
+// someone in one and not the other is let through the gate and refused by the
+// app, or admitted by the app on a path the gate does not cover. Auto-login has
+// the same split: it signs into the app whoever the gate admits, and the app's
+// client refuses them. The gate's group is fixed, so this fires only when the
+// app's was changed.
 func (c *checker) oidcMemberGroupDisagreesWithGate() {
-	gateApp := ""
-	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindOAuth2Proxy {
-			gateApp = name
-		}
-	}
-	if gateApp == "" {
-		return
-	}
-	gateGroup := kinds.GateMembersGroup(c.cfg.Apps[gateApp])
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Gate() != config.GateMember {
+		if !app.UsesGate() {
 			continue
 		}
 		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
@@ -1947,13 +1958,13 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 			continue
 		}
 		_, member := spec.Groups(app)
-		if member == gateGroup {
+		if member == kinds.MembersGroup {
 			continue
 		}
 		c.refuse("oidc-member-group-disagrees-with-gate", fmt.Sprintf("apps.%s.settings.%s", name, spec.MemberGroupSetting),
 			"member group differs between gate and client",
-			"is %s, but apps.%s.settings.%s is %s, and this app is behind the member gate. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Name the same group in both.",
-			member, gateApp, kinds.GateMembersGroupSetting, gateGroup)
+			"is %s, but the gate admits %s, and this app sets gated or auto_login. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Remove the setting, so the app admits %s too.",
+			member, kinds.MembersGroup, kinds.MembersGroup)
 	}
 }
 

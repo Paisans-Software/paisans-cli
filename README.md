@@ -1043,8 +1043,8 @@ break glass: Pocket ID is one of the things being watched, and a monitor you
 cannot open while it is down is no use. To use it, open
 `https://<hostname>/login?local=1` and sign in as `admin` with
 `apps.<app>.admin_password` from the secrets file, which `init` generates
-(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the visibility gate
-(`visibility-gate-on-ungateable-kind`): the gate signs in through Pocket ID,
+(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the gate
+(`gated-on-ungateable-kind`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 
 **It starts as root and drops.** `apply` writes the seed through `sudo`, so it
@@ -2334,20 +2334,30 @@ apps:
   talk:
     kind: mbin
     hostname: talk.example.org
-    visibility_gate: member
+    gated: true
+    auto_login: true
+  blog:
+    kind: writefreely
+    hostname: blog.example.org
+    auto_login: true
   chat:
     kind: synapse
     hostname: matrix.example.org
-    visibility_gate: public
+    gated: false
 ```
 
-`visibility_gate` is `public`, `member` or `provisional`, and it is declared on
-the app rather than implied by which Caddy snippet somebody remembered to
-import. It is access policy, and access policy belongs in the configuration,
-not in a hand edited include. `member` admits a signed-in member of the
-community; `provisional` admits anyone signed in, member or not, and is warned
-about (`visibility-gate-provisional`) because it reads as protected while
-admitting anyone who made an account.
+Two booleans, both declared on the app rather than implied by which Caddy
+snippet somebody remembered to import, because they are access policy, and
+access policy belongs in the configuration, not in a hand edited include.
+
+| `gated` | `auto_login` | Someone with no session | A member the gate has signed in |
+|---|---|---|---|
+| `false` | `false` | reads the app as it is | reads the app as it is |
+| `true` | `false` | is sent to sign in | is let through, and meets the app's own sign-in button |
+| `false` | `true` | reads the app as it is; its sign-in page signs in at the gate first | is signed straight into the app |
+| `true` | `true` | is sent to sign in | is let through and signed straight into the app |
+
+`gated: true` admits members only. Both default to `false`.
 
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
@@ -2362,8 +2372,8 @@ gate covers everything, and four classes go to the app without it:
 | Token paths | the kind's token paths **and** `Authorization: Bearer` | the app, which refuses a token it did not issue |
 
 Everything else is redirected to sign in when there is no session, `curl`
-included, and to the gate's `/pending` page when the session belongs to
-someone who is not yet a member. Every hostname, gated or not, strips
+included, and refused with the gate's own 403 when the session belongs to
+someone who is not a member. Every hostname, gated or not, strips
 `X-Auth-Request-*` from the inbound request before anything else sees it:
 those headers are only ever the gate's verified answer, and an app that
 trusted one on an ungated hostname would be trusting whoever sent the
@@ -2382,27 +2392,44 @@ plugin, and the gateway runs no plugin whose failure to build would stop the
 identity provider loading, so the app is where the check lives. That is
 authorized fetch, on by default for Mbin and WriteFreely (see *Mbin and
 WriteFreely lock what the toolkit renders*). A gated federating app that would
-not refuse an unsigned read is refused (`visibility-gate-without-signed-fetch`):
+not refuse an unsigned read is refused (`gated-without-signed-fetch`):
 one whose kind records no way to, one with `settings.authorized_fetch: false`,
 and a WriteFreely with `private: false`, since only private mode makes a blog
 read from its allowlist alone. The monitor proves the setting is still on (see
 *Monitoring*). Reading only from instances on an allow list is a federation
 policy choice, and it is the founder's.
 
-**Auto-login is derived from the kind.** Someone the gate let through already
-holds a session at the identity provider, so the app's own "Log in with"
-button is one pointless click. Where a kind records its sign-in route and the
-cookies that mean "already signed in", a request for its front page or its
-sign-in page goes straight into that route, once every two minutes per browser
-so a user the app's own client refuses is not redirected forever. It never
-fires on a deep link: neither Mbin's nor WriteFreely's sign-in route takes a
-destination, and a deep link sent through one would land on the front page.
+**Auto-login is declared on the app and described by the kind.** A member the
+gate has signed in already holds a session at the identity provider, so the
+app's own "Log in with" button is one pointless click. Where a kind records its
+sign-in route and the cookies that mean "already signed in", a request for its
+front page or its sign-in page, from a browser holding the gate's session
+cookie, is checked with the gate and, for a member, sent straight into that
+route. Someone the gate refuses is sent back to the page they asked for and
+sees the app as they would have. Either way it happens once every two minutes
+per browser, so a member the app's own client refuses is not redirected
+forever. It never fires on a deep link: neither Mbin's nor WriteFreely's
+sign-in route takes a destination, and a deep link sent through one would land
+on the front page. `auto_login: true` on a kind with no such route is refused
+(`auto-login-without-a-rule`), because it would do nothing; Outline needs none,
+since its sign-in screen redirects itself when OIDC is its only provider.
+
+**On a public app, the sign-in page signs in at the gate.** Nobody passes the
+gate on a public app, so a visitor there would only hold the gate's session if
+they had signed in somewhere gated. Instead, a visit to the app's sign-in page
+with no gate session goes through the gate's sign-in and comes back holding
+one, so auto-login fires: the app's own "Log in" link becomes the community's
+sign-in, and one sign-in covers every app. Nothing else on a public app meets
+the gate. While the gate is down, a browser holding its session meets the
+edge's error on a public app's front page and sign-in page, the two paths
+auto-login checks; every other page, and every visitor without that session,
+reads the app as before.
 
 **The gate is enforced at the gateway, and only there. An app's published host
 port is not behind it.** The gate renders as `forward_auth` inside the
 gateway's Caddy site block, so it covers requests that arrive through the
 gateway's hostname. It does not cover the port the app's own compose file
-publishes: `talk` above is `visibility_gate: member`, and its stack publishes port 8080,
+publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
@@ -2421,7 +2448,7 @@ that kind serves can be gated.
 
 What remains the operator's is the mesh itself. A port on the mesh address is
 reachable from every mesh peer, so a compromised peer reaches the app ungated.
-`visibility_gate: member` is not protection against that, and nothing in this file
+`gated: true` is not protection against that, and nothing in this file
 claims it is. It also means the mesh interface has to be up before the app stacks start,
 because Docker cannot publish on an address the host does not have yet; that
 is the ordering that step 4 under *`init`, one site, no mesh* already requires.
@@ -2449,22 +2476,21 @@ Some combinations are refused by this today, and a homeserver pinned to a data
 site is the one worth knowing: Synapse's 8008 is the Patroni API's, and MAS's
 8009 is bg_mon's.
 
-**Leaving `visibility_gate` out of an app's stanza means the same thing as
-`visibility_gate: public`: ungated, reachable by anyone who can resolve the
-hostname.** That default has to be stated here, not only in a doc comment,
-because it is the one setting where forgetting it is indistinguishable from
-choosing it: an app with no `visibility_gate` key renders exactly like an app
-that explicitly opted out, and nothing at render time flags the absence as a
-decision skipped rather than made.
+**Leaving `gated` out of an app's stanza means the same thing as
+`gated: false`: ungated, reachable by anyone who can resolve the hostname.**
+That default has to be stated here, not only in a doc comment, because it is
+the one setting where forgetting it is indistinguishable from choosing it: an
+app with no `gated` key renders exactly like an app that explicitly opted out,
+and nothing at render time flags the absence as a decision skipped rather than
+made.
 
 **A gate on a kind that cannot sit behind one is refused**
-(`visibility-gate-on-ungateable-kind`), which is the rule below enforced rather
+(`gated-on-ungateable-kind`), which is the rule below enforced rather
 than merely stated. The case that makes this load bearing is a negative one. A
 Matrix hostname must never be gated: a Matrix client is not a browser and will
 not follow a redirect to a passkey prompt, so gating a homeserver's API or its
 `.well-known` apex breaks federation and every client's login, not just one
-member's. Pocket ID and the gate itself are the sign-in flow, so gating either
-gates the login. The monitor is what an admin opens when the sites it watches
+member's. Pocket ID is the sign-in flow, so gating it gates the login. The monitor is what an admin opens when the sites it watches
 are down, and the gate signs in at the identity provider on those sites, so a
 gated monitor is unreadable at exactly the moment it exists for, and its break
 glass password sign-in (see *Monitoring*) would sit behind the sign-in
@@ -2472,14 +2498,33 @@ it is the fallback for; its own OIDC client already admits only
 `settings.admin_group`, so the gate would add no access control, only a
 dependency. Leaving gating to a hand edited include means that failure
 shows up as clients mysteriously unable to log in, with nothing in the
-configuration saying why. A declared `visibility_gate: public` makes the
-absence of a gate a fact about the app that a reviewer can see, rather than an
-inference from what nobody wrote.
+configuration saying why. A declared `gated: false` makes the absence of a
+gate a fact about the app that a reviewer can see, rather than an inference
+from what nobody wrote.
 
-Declaring a gate when no `oauth2-proxy` app exists is refused, for the same
-reason an unknown hostname role is: the import would name a snippet nothing
-renders, and Caddy fails to load its entire configuration over one missing
-import, taking every hostname down rather than one.
+**Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
+toolkit runs it as an app named `gate`, of kind `oauth2-proxy`, at
+`gate.<community.domain>`, pinned to the gateway site. It holds no data, being
+a session cookie and nothing durable, so it sits with the edge it serves: it is
+down only when the gateway is, and that takes every app with it anyway. It is
+one container admitting the `members` group, which fails closed: a session
+outside the group is refused, never waved through. Everything an app gets, it
+gets too: a client at the identity provider, a generated cookie secret, a DNS
+record from `dns init` and a check on the monitor. Its session cookie is scoped
+to the community's domain with a leading dot, so one sign-in covers every app.
+Four things follow, and each is refused:
+
+* **Declaring an `oauth2-proxy` app.** The gate is the toolkit's; the apps it
+  was for set `gated` or `auto_login` instead.
+* **An app named `gate`, or no gateway site**, while an app uses the gate,
+  since the gate needs both the name and the gateway.
+* **A gated or auto-login app on a hostname outside the community's domain**
+  (`uses-gate-outside-the-domain`). The browser never sends the gate's cookie
+  there, so a gated app would send every member back to sign in forever and
+  auto-login would never fire.
+* **An app using the gate whose member group is not `members`**
+  (`oidc-member-group-disagrees-with-gate`). The gate admits one group and the
+  app's client the other, so they would disagree about who a member is.
 
 ### `storage init` provisions object storage
 
@@ -4793,7 +4838,7 @@ What stays open is what a peer needs before it can sign anything: our
 instance actor carries the key it verifies our requests with, so gating it
 would leave two such servers each waiting on the other. A peer that does not
 sign its fetches cannot read either app. `false` turns it off for an ungated app, and a gated app refuses it
-(`visibility-gate-without-signed-fetch`), as does anything but a YAML boolean
+(`gated-without-signed-fetch`), as does anything but a YAML boolean
 (`authorized-fetch-not-a-boolean`).
 
 **Both answer a status-only `/healthz`.** 200 with an empty body when the
@@ -5452,7 +5497,7 @@ apps:
       session_duration: 10080        # a week
       home_page_url: /settings/apps
       allow_user_signups: withToken
-      signup_default_groups: [provisional]
+      signup_default_groups: [members]
       email_one_time_access_as_unauthenticated: true
       email_verification: true
       allow_own_account_edit: false  # the only value it takes
@@ -5666,7 +5711,9 @@ and `ok` instead:
 ```
 
 **Each line is a Pocket ID mutation.** For an app
-declared in `paisans.yaml` the declaration approves its client; the plan is
+declared in `paisans.yaml` the declaration approves its client, and for the
+gate, which no file declares, so does setting `gated` or `auto_login` on an
+app; the plan is
 what lets an operator see what that approval does, in a dry run of either
 `apply` or the command, before `--execute`, and `--verbose` shows exactly what
 each request sends. The same probe runs
@@ -5707,13 +5754,13 @@ one that can disagree with the client. All four are confidential clients.
 Putting a user in the admin group is `app admin create`'s job, not this
 command's.
 
-**`validate` holds the groups to the gate.** The gate's `members` instance
-admits `apps.<gate>.settings.members_group`, default `members`, and a
-member gated app's client admits that app's `member_group`. When the two name
-different groups, someone is let through the gate and refused by the app, or
-admitted by the app on a path the gate leaves open, and nothing says which
-group "member" means; so an app with `visibility_gate: member` whose member
-group is not the gate's is refused (`oidc-member-group-disagrees-with-gate`).
+**`validate` holds the groups to the gate.** The gate admits `members`, and
+an app using the gate has a client admitting that app's `member_group`. When
+the two name different groups, someone is let through the gate and refused by
+the app, or admitted by the app on a path the gate leaves open, and nothing
+says which group "member" means; so an app setting `gated` or `auto_login`
+whose member group is not `members` is refused
+(`oidc-member-group-disagrees-with-gate`).
 A `member_group` or `admin_group` that is blank or not a string is refused
 too (`oidc-member-group-not-a-name`): the default would hold and the client
 would still be restricted, but what the operator wrote reads as a restriction
@@ -5799,8 +5846,8 @@ by hand is not this command's to change. **Differing in either direction is a
 refusal.** A client allowing less than the app needs cannot sign anyone in; a
 client allowing more is a privilege leak, so an extra callback URL (a sign in
 started here could finish at another host) and an extra allowed group (its
-members are exactly who the member group was meant to keep out, `provisional`
-being the usual one) are refused by name, as is PKCE on for an app that sends
+members are exactly who the member group was meant to keep out) are refused by
+name, as is PKCE on for an app that sends
 no challenge. The allow step, when it runs, sends exactly the app's groups,
 never a union with what the client held. A launch URL that is empty or a
 toolkit default is the one exception, set as above, because neither is a

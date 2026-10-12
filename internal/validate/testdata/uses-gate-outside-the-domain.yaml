@@ -1,7 +1,5 @@
-# valid.yaml with one thing broken: the homeserver sits behind the members
-# gate. A Matrix client will not follow the gate's redirect to a passkey
-# prompt, so this ends client login and federation rather than restricting
-# either.
+# valid.yaml with one thing broken: a gated app on a hostname outside the
+# community's domain, which the gate's session cookie never reaches.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -45,6 +43,15 @@ sites:
       host: vm.example.org
       user: ubuntu
       keys: [alice]
+  # The monitor's own machine, so that something watches the deployment.
+  watch:
+    roles: [monitor]
+    address: 10.44.0.4
+    public_address: 203.0.113.20
+    ssh:
+      host: watch.example.org
+      user: ubuntu
+      keys: [alice]
 
 cluster:
   sites: [home-a, home-b]
@@ -66,8 +73,9 @@ storage:
 apps:
   docs:
     kind: outline
-    hostname: docs.example.org
+    hostname: docs.example.net
     placement: cluster
+    gated: true
     settings:
       s3_bucket: docs-uploads
   auth:
@@ -76,17 +84,15 @@ apps:
     placement: cluster
     settings:
       file_backend: database
-  chat:
-    kind: synapse
-    hostname: chat.example.org
-    # On vm: a homeserver on a data site collides with Patroni's API on
-    # 8008, which is a different refusal.
-    placement: { pinned: vm }
-    visibility_gate: member
-  # Present only so that the gate the homeserver names exists: an app naming a
-  # gate no app renders is a different refusal, and a fixture must break one
-  # thing.
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    placement: { pinned: home-a }
+  status:
+    kind: uptime
+    hostname: status.example.org
+    placement: { pinned: watch }
+    settings:
+      admin_group: admins
+
+smtp:
+  host: smtp.example.org
+  security: starttls
+  username: status@example.org
+  from_address: status@example.org

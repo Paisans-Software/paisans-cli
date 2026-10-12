@@ -330,12 +330,6 @@ func TestAnAppTagIsPinnedOnEveryLineNamingIt(t *testing.T) {
 	if got := manifestPin(t, host, "talk", "app"); got == nil || *got != (render.ManifestPin{Stack: "talk", Service: "app", Image: mbinTag, Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
 		t.Errorf("the manifest records %+v", got)
 	}
-	// The gate's two keys share one image, and are recorded apart.
-	for _, service := range []string{"members", "provisional"} {
-		if got := manifestPin(t, host, "gate", service); got == nil || got.Reference != "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@"+buildA {
-			t.Errorf("the gate's %s is recorded as %+v", service, got)
-		}
-	}
 }
 
 // An app image declared with a digest is that build, untouched.

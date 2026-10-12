@@ -1308,13 +1308,15 @@ objects has `media`, and it is the one role that exists without being
 declared: `kinds.MediaHostname` derives `<label>-media.<domain>` from the
 app's own hostname, and `hostnames.media` only overrides it. It is also the one
 route the app's gate does not follow, because a media hostname is never gated.
-`visibility_gate` works the other way: `member` or `provisional` names which of
-the `oauth2-proxy` kind's two named snippets, `gate_member` or
-`gate_provisional`, the app's host block in the gateway `Caddyfile` imports
-ahead of the app's own snippet. `internal/render/site.go`'s
-`renderGateSnippets` renders those named snippets onto the gateway once per
-`oauth2-proxy` app declared, and the `Caddyfile` imports them at its top level,
-however many host blocks go on to import them by name. Both are read in
+`gated` and `auto_login` work the other way. `config.Load` derives the gate
+itself, an `oauth2-proxy` app named `gate` that no file declares
+(`deriveGate`), whenever an app sets either, and the app's host block in the
+gateway `Caddyfile` imports the gate's named snippets: `gate` ahead of the
+app's own snippet when gated, `gate_autologin` on the auto-login paths, and
+`gate_signin` on a public app's sign-in page. `internal/render/site.go`'s
+`renderGateSnippets` renders those named snippets onto the gateway, and the
+`Caddyfile` imports them at its top level, however many host blocks go on to
+import them by name. Both are read in
 `internal/render/appview.go`'s `values`, the same function that assembles
 everything else a template set is given, so a snippet template sees them as
 ordinary fields rather than as a special case.

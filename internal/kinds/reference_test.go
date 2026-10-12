@@ -50,9 +50,9 @@ const hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 //
 // It walks config.Kinds() and each kind's own kinds.Services() rather than a
 // list of service names written out here, so a kind added to the catalogue,
-// or a kind whose services are not named "app" - oauth2-proxy ships
-// "provisional" and "members", not one service - still gets checked: there is
-// no second list this one can fall out of step with.
+// or a kind whose services are not all named "app" (Eg: mbin's messenger),
+// still gets checked: there is no second list this one can fall out of step
+// with.
 func TestDefaultsArePinned(t *testing.T) {
 	for _, kind := range config.Kinds() {
 		services := kinds.Services(kind)

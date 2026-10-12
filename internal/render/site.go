@@ -49,15 +49,6 @@ var templateFuncs = template.FuncMap{
 	// gateMarker is the body of the gate's own redirects, so the monitor can
 	// tell the gate's 302 from an app's.
 	"gateMarker": func() string { return GateMarker },
-	// caddyhtml escapes a value for an HTML page Caddy serves with respond:
-	// HTML escaping, and braces as entities too, because Caddy expands a
-	// {placeholder} in a response body, and one in a community's name would
-	// otherwise pull a value from Caddy's environment into the page.
-	"caddyhtml": func(v string) string {
-		// Newlines become spaces: a line that was exactly the heredoc's
-		// marker would end the page and be read as configuration.
-		return strings.NewReplacer("{", "&#123;", "}", "&#125;", "\r", " ", "\n", " ").Replace(template.HTMLEscapeString(v))
-	},
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,
@@ -168,14 +159,16 @@ type route struct {
 	// the container sees it. The host block imports it rather than
 	// containing it.
 	Snippet string
-	// Gate is the gate instance in front of this hostname, member or
-	// provisional, or empty when it is public. It is the app's visibility
-	// gate, carried onto every one of its hostnames, with one exception: a
-	// media hostname is never gated (see routes).
-	Gate string
-	// What a gated hostname lets past the gate, from the kind's GateSpec.
-	// Empty on a public hostname, which has no gate to get past. See
-	// docs/specs/2026-10-08-visibility-gate.md.
+	// Gated puts this hostname behind the gate. It is the app's gated key,
+	// carried onto every one of its hostnames, with one exception: a media
+	// hostname is never gated (see routes).
+	Gated bool
+	// AutoLogin is the app's auto_login key, carried the same way. On a
+	// public hostname it is the only use the host block makes of the gate.
+	AutoLogin bool
+	// What a hostname using the gate lets past it, and its auto-login, from
+	// the kind's GateSpec. Empty on a hostname that does not use the gate.
+	// See docs/specs/2026-10-08-visibility-gate.md.
 	Bypass gateBypass
 }
 
@@ -192,8 +185,14 @@ type gateBypass struct {
 	// app refuses after the gate admitted them is redirected once rather
 	// than forever.
 	LoopBreaker string
-	OpenPaths   []string
-	TokenPaths  []string
+	// SignInPath is the app's sign-in page, which a public hostname with
+	// auto-login sends through the gate's sign-in when there is no gate
+	// session, and SignInBreaker the cookie that stops it doing so twice in
+	// two minutes.
+	SignInPath    string
+	SignInBreaker string
+	OpenPaths     []string
+	TokenPaths    []string
 }
 
 // GateSessionCookie is the gate's session cookie: oauth2-proxy's default
@@ -207,7 +206,8 @@ const GateSessionCookie = "_oauth2_proxy"
 // body rather than the status alone, and fails when the gate is gone.
 const GateMarker = "Sign in required by the visibility gate."
 
-// bypassFor is what a gated app lets past its gate, from its kind's GateSpec.
+// bypassFor is what an app using the gate lets past it, from its kind's
+// GateSpec. Auto-login is carried only when the app sets auto_login.
 //
 // An app keeping public files on its own disk also opens the paths they are
 // served on (kinds.LocalMediaPaths). In object storage they are on a media
@@ -216,14 +216,19 @@ const GateMarker = "Sign in required by the visibility gate."
 // passkey prompt any more than it would there.
 func bypassFor(cfg *config.Config, name string, app config.App) gateBypass {
 	spec := kinds.GateFor(app.Kind)
-	return gateBypass{
+	b := gateBypass{
 		ActivityPub: kinds.Federates(app),
 		InboxPaths:  spec.InboxPaths,
-		AutoLogin:   spec.AutoLogin,
-		LoopBreaker: name + "_autologin",
 		OpenPaths:   append(kinds.OpenPathsFor(app.Kind), kinds.LocalMediaPaths(cfg, app)...),
 		TokenPaths:  spec.TokenPaths,
 	}
+	if app.AutoLogin {
+		b.AutoLogin = spec.AutoLogin
+		b.LoopBreaker = name + "_autologin"
+		b.SignInPath = spec.SignInPath
+		b.SignInBreaker = name + "_gatesignin"
+	}
+	return b
 }
 
 func (p *planner) renderSite(site *siteView) ([]File, error) {
@@ -383,7 +388,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		// certificate story, so a monitor's edge is the gateway's minus the
 		// other hostnames.
 		routes := p.routesFor(site)
-		gates := site.IsGateway || gated(routes)
+		gates := site.IsGateway || usesGate(routes)
 		var mounts []string
 		if gates {
 			mounts = p.gateSnippetMounts()
@@ -521,7 +526,7 @@ func (p *planner) renderSnippets(base string, routes []route) ([]File, error) {
 }
 
 // gateSnippetTemplate defines the oauth2-proxy kind's named Caddy snippets,
-// gate_provisional and gate_members. It is not a hostname's routing: nothing
+// gate, gate_autologin and gate_signin. It is not a hostname's routing: nothing
 // imports it by path, and no host block is rendered for it. A later kind's
 // own snippet imports the names it defines, the same way the deployment this
 // toolkit generalises imports its single `(pocketid_gate)` snippet by name.
@@ -824,9 +829,8 @@ func (p *planner) routesFor(site *siteView) []route {
 		case !site.IsGateway && (!onMonitor || monitor != site.Name):
 			continue
 		}
-		gate := app.Gate()
 		var bypass gateBypass
-		if gate != "" {
+		if app.UsesGate() {
 			bypass = bypassFor(p.cfg, name, app)
 		}
 		out = append(out, route{
@@ -835,7 +839,8 @@ func (p *planner) routesFor(site *siteView) []route {
 			Hostname:  app.Hostname,
 			Upstreams: p.upstreams(name),
 			Snippet:   snippetMount + name + ".caddy",
-			Gate:      gate,
+			Gated:     app.Gated,
+			AutoLogin: app.AutoLogin,
 			Bypass:    bypass,
 		})
 		roles := sortedKeys(app.Hostnames)
@@ -852,14 +857,14 @@ func (p *planner) routesFor(site *siteView) []route {
 				continue
 			}
 			hostname := app.Hostnames[role]
-			routeGate, routeBypass := gate, bypass
+			routeGated, routeAutoLogin, routeBypass := app.Gated, app.AutoLogin, bypass
 			if role == kinds.MediaRole {
 				hostname = kinds.MediaHostname(p.cfg, app)
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
 				// redirect to a passkey prompt; Outline's private objects are
 				// protected by the signature on every URL, not by a cookie.
-				routeGate, routeBypass = "", gateBypass{}
+				routeGated, routeAutoLogin, routeBypass = false, false, gateBypass{}
 			}
 			out = append(out, route{
 				App:       name,
@@ -867,7 +872,8 @@ func (p *planner) routesFor(site *siteView) []route {
 				Hostname:  hostname,
 				Upstreams: p.upstreams(name),
 				Snippet:   snippetMount + name + "-" + role + ".caddy",
-				Gate:      routeGate,
+				Gated:     routeGated,
+				AutoLogin: routeAutoLogin,
 				Bypass:    routeBypass,
 			})
 		}
@@ -876,12 +882,12 @@ func (p *planner) routesFor(site *siteView) []route {
 	return out
 }
 
-// gated reports whether any route sits behind a gate, so a monitor's Caddy
+// usesGate reports whether any route uses the gate, so a monitor's Caddy
 // carries the gate's named snippets only when one of its own routes imports
 // them.
-func gated(routes []route) bool {
+func usesGate(routes []route) bool {
 	for _, r := range routes {
-		if r.Gate != "" {
+		if r.Gated || r.AutoLogin {
 			return true
 		}
 	}
@@ -921,9 +927,9 @@ func (p *planner) elsewhere(upstreams []string) bool {
 
 // upstreamsOnPort is upstreams with the port supplied rather than looked up,
 // for the one case where an app answers on a second, explicitly declared
-// port: the oauth2-proxy kind's members instance. It exists so that finding a
-// members upstream never computes a port from another kind's port, only from
-// the literal gateMembersPort.
+// port: the synapse kind's Matrix Authentication Service. It exists so that
+// finding that upstream never computes a port from another kind's port, only
+// from the literal masPort.
 func (p *planner) upstreamsOnPort(name string, port int) []string {
 	app, ok := p.cfg.Apps[name]
 	if !ok {

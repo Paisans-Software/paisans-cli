@@ -1,7 +1,7 @@
 # valid.yaml with one thing broken: a federating WriteFreely sits behind the
-# members gate with authorized fetch turned off. The gate leaves ActivityPub
-# to the app, so without a signature on every read every page would be
-# readable as JSON by anyone.
+# members gate with private mode off. WriteFreely checks signatures only in
+# private mode, and the gate leaves ActivityPub to the app, so every page
+# would be readable as JSON by anyone.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -80,12 +80,8 @@ apps:
     kind: writefreely
     hostname: blog.example.org
     placement: { pinned: home-a }
-    visibility_gate: member
+    gated: true
     settings:
-      authorized_fetch: false
+      private: false
   # Present only so that the gate exists: an app naming a gate no app renders
   # is a different refusal, and a fixture must break one thing.
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    placement: { pinned: home-a }

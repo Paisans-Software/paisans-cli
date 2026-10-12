@@ -75,9 +75,10 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 			t.Errorf("%s lists the declared %s as the kind's default", site, image)
 		}
 	}
-	// The gate's two instances share one image under two keys.
-	gate, n := siteImage(plan, "home-a", "gate", "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4")
-	if n != 1 || gate.Lines != 2 || strings.Join(gate.Services, ",") != "members,provisional" {
+	// The gate, which no file declares, is listed on the gateway like any
+	// other app, under its kind's default image.
+	gate, n := siteImage(plan, "vm", "gate", "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4")
+	if n != 1 || gate.Lines != 1 || strings.Join(gate.Services, ",") != "app" {
 		t.Errorf("the gate lists %+v (%d times)", gate, n)
 	}
 	if !gate.Default {

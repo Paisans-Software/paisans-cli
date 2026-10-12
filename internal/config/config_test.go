@@ -624,40 +624,74 @@ func TestACMEProviderIsRequiredForAMonitorsOwnCaddy(t *testing.T) {
 	}
 }
 
-// visibility_gate takes three values, and an absent key and `public` mean the
-// same thing, so nothing downstream compares against both.
-func TestVisibilityGateValues(t *testing.T) {
-	for value, want := range map[string]string{"public": "", "member": "member", "provisional": "provisional"} {
-		cfg, err := config.Load(write(t, minimal+"    visibility_gate: "+value+"\n"))
-		if err != nil {
-			t.Fatalf("visibility_gate: %s did not load: %v", value, err)
-		}
-		if got := cfg.Apps["talk"].Gate(); got != want {
-			t.Errorf("visibility_gate: %s is gate %q, want %q", value, got, want)
-		}
-	}
-	cfg, err := config.Load(write(t, minimal))
+// An app setting gated or auto_login brings in the gate: one oauth2-proxy app,
+// which no file declares, at gate.<domain> and pinned to the gateway. Neither
+// key set, no gate.
+func TestTheGateIsDerivedWhenAnAppUsesIt(t *testing.T) {
+	cfg, err := config.Load(write(t, validConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Apps["talk"].Gate(); got != "" {
-		t.Errorf("an absent visibility_gate is gate %q, want public", got)
+	if _, ok := cfg.Apps[config.GateApp]; ok || cfg.NeedsGate() {
+		t.Error("no app sets gated or auto_login, yet the gate is derived")
 	}
-	_, err = config.Load(write(t, minimal+"    visibility_gate: members\n"))
-	if err == nil || !strings.Contains(err.Error(), "apps.talk.visibility_gate: unknown value") {
-		t.Errorf("visibility_gate: members loaded, or was refused without naming the key: %v", err)
+	for _, key := range []string{"gated", "auto_login"} {
+		cfg, err := config.Load(write(t, validConfig+"    "+key+": true\n"))
+		if err != nil {
+			t.Fatalf("%s: true did not load: %v", key, err)
+		}
+		gate, ok := cfg.Apps[config.GateApp]
+		if !ok {
+			t.Fatalf("%s: true derived no gate", key)
+		}
+		want := config.App{
+			Kind:      config.KindOAuth2Proxy,
+			Hostname:  "gate.example.org",
+			Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
+			Derived:   true,
+		}
+		if gate.Kind != want.Kind || gate.Hostname != want.Hostname || gate.Placement != want.Placement || !gate.Derived {
+			t.Errorf("%s: true derived %+v, want %+v", key, gate, want)
+		}
 	}
 }
 
-// The key this replaced is not read. A deployment is redeployed with the new
-// key rather than converted, and an old file fails loudly instead of loading
-// with its gate silently dropped.
-func TestTheOldGateKeyIsRefused(t *testing.T) {
-	_, err := config.Load(write(t, minimal+"    gate: members\n"))
-	if err == nil {
-		t.Fatal("an app with the old gate key loaded, and would render ungated")
+// The gate is the toolkit's: a declared oauth2-proxy app is refused, and so is
+// an app holding the gate's name, or no gateway to run it on.
+func TestTheGateIsNeverDeclared(t *testing.T) {
+	declared := validConfig + `  gate:
+    kind: oauth2-proxy
+    hostname: gate.example.org
+    placement: { pinned: home-a }
+`
+	if _, err := config.Load(write(t, declared)); err == nil || !strings.Contains(err.Error(), "apps.gate.kind: oauth2-proxy is the gate") {
+		t.Errorf("a declared oauth2-proxy app loaded, or was refused without saying why: %v", err)
 	}
-	if !strings.Contains(err.Error(), "gate") {
-		t.Fatalf("the error does not name the key:\n%v", err)
+	named := validConfig + `    gated: true
+  gate:
+    kind: outline
+    hostname: wiki.example.org
+    placement: cluster
+`
+	if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "the name is the gate's") {
+		t.Errorf("an app named gate loaded beside a gated app: %v", err)
+	}
+	if _, err := config.Load(write(t, minimal+"    gated: true\n")); err == nil || !strings.Contains(err.Error(), "no site holds the gateway role") {
+		t.Errorf("a gated app loaded with no gateway: %v", err)
+	}
+}
+
+// The keys this replaced are not read. A deployment is redeployed with the new
+// keys rather than converted, and an old file fails loudly instead of loading
+// with its gate silently dropped.
+func TestTheOldGateKeysAreRefused(t *testing.T) {
+	for _, old := range []string{"gate: members", "visibility_gate: member"} {
+		_, err := config.Load(write(t, minimal+"    "+old+"\n"))
+		if err == nil {
+			t.Fatalf("an app with %q loaded, and would render ungated", old)
+		}
+		if !strings.Contains(err.Error(), strings.SplitN(old, ":", 2)[0]) {
+			t.Fatalf("the error does not name the key:\n%v", err)
+		}
 	}
 }

@@ -175,7 +175,7 @@ func TestEveryPassReportsItsNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"plan hold=blog,docs,gate,talk client=false", "note run infra down", "execute", "plan hold= client=true", "note run infra down", "execute"}
+	want := []string{"plan hold=blog,docs,talk client=false", "note run infra down", "execute", "plan hold= client=true", "note run infra down", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s\nwant:\n%s", strings.Join(log.events, "\n"), strings.Join(want, "\n"))
 	}
@@ -196,7 +196,7 @@ func TestApplyCreatesAndRecordsTheClientBeforeTheAppRenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s%s", err, stdout, stderr)
 	}
-	want := []string{"plan hold=blog,docs,gate,talk client=false", "execute", "plan hold= client=true", "execute"}
+	want := []string{"plan hold=blog,docs,talk client=false", "execute", "plan hold= client=true", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s\nwant:\n%s", strings.Join(log.events, "\n"), strings.Join(want, "\n"))
 	}
@@ -402,7 +402,7 @@ func TestApplyHoldsBackWhenItsOwnPocketIDNeverAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"plan hold=blog,docs,gate,talk client=false", "execute", "plan hold=talk client=false", "execute"}
+	want := []string{"plan hold=blog,docs,talk client=false", "execute", "plan hold=talk client=false", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s", strings.Join(log.events, "\n"))
 	}
