@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,15 @@ const (
 	namePaisans = "paisans.yaml"
 	nameSecrets = "secrets.enc.yaml"
 )
+
+var shaRE = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+func checkSHA(sha string) error {
+	if !shaRE.MatchString(sha) {
+		return fmt.Errorf("%q is not a full lowercase hex commit id", sha)
+	}
+	return nil
+}
 
 // Repo is a bare git repository holding one commit per version, each named by
 // refs/versions/<commit sha>.
@@ -39,16 +49,27 @@ type Version struct {
 }
 
 // git runs git in the repository with the user's and the system's
-// configuration shut out, so that only what this package passes applies.
+// configuration shut out, and every GIT_ variable of the caller dropped (a
+// stray GIT_DIR would point it at another repository), so that only what this
+// package passes applies.
 func (r Repo) git(stdin io.Reader, env []string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", append([]string{"-C", r.Dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_COUNT=0", "GIT_TERMINAL_PROMPT=0")
 	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		sub := args
+		for len(sub) > 1 && sub[0] == "-c" {
+			sub = sub[2:]
+		}
+		return nil, fmt.Errorf("git %s: %w: %s", sub[0], err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
@@ -79,6 +100,11 @@ func InitRepo(dir string) (Repo, error) {
 // Commit stores f as a signed commit on the given parents, records its
 // revision in a trailer, and names it with refs/versions/<sha>.
 func (r Repo) Commit(f Files, parents []string, revision int, signingKey string, when time.Time) (string, error) {
+	for _, p := range parents {
+		if err := checkSHA(p); err != nil {
+			return "", err
+		}
+	}
 	var tree strings.Builder
 	for _, e := range []struct {
 		name string
@@ -115,47 +141,92 @@ func (r Repo) Commit(f Files, parents []string, revision int, signingKey string,
 	return sha, nil
 }
 
-// hasVersions reports whether any refs/versions/* ref exists.
-func (r Repo) hasVersions() (bool, error) {
-	out, err := r.git(nil, nil, "for-each-ref", "--count=1", "--format=%(refname)", "refs/versions/")
-	return len(bytes.TrimSpace(out)) > 0, err
+// versionRefs returns the commits that refs/versions/ names correctly. A ref
+// is named for the commit it points to; one that is not, or that points at
+// anything but a commit, is not a version and is skipped.
+func (r Repo) versionRefs() ([]string, error) {
+	out, err := r.git(nil, nil, "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/versions/")
+	if err != nil {
+		return nil, err
+	}
+	var shas []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || f[2] != "commit" || f[0] != "refs/versions/"+f[1] || checkSHA(f[1]) != nil {
+			continue
+		}
+		shas = append(shas, f[1])
+	}
+	return shas, nil
+}
+
+// treeOK reports whether the tree of sha holds exactly the three files, each a
+// regular non-executable blob. Entries are read NUL-delimited so that no name
+// can pass for several.
+func (r Repo) treeOK(sha string) (bool, error) {
+	out, err := r.git(nil, nil, "ls-tree", "-z", sha)
+	if err != nil {
+		return false, err
+	}
+	want := map[string]bool{nameSOPS: true, namePaisans: true, nameSecrets: true}
+	entries := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	if len(entries) != len(want) {
+		return false, nil
+	}
+	for _, e := range entries {
+		meta, name, ok := strings.Cut(e, "\t")
+		f := strings.Fields(meta)
+		if !ok || len(f) != 3 || f[0] != "100644" || f[1] != "blob" || !want[name] {
+			return false, nil
+		}
+		delete(want, name)
+	}
+	return len(want) == 0, nil
+}
+
+// revision reads the Paisans-Revision trailer of a commit on its own, so that
+// a hostile message can spoil only its own version. Anything but one positive
+// number is 0.
+func (r Repo) revision(sha string) int {
+	out, err := r.git(nil, nil, "show", "-s", "--format=%(trailers:key=Paisans-Revision,valueonly)", sha)
+	if err != nil {
+		return 0
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > 0 {
+		return n
+	}
+	return 0
 }
 
 // Versions lists every version in the repository with git's verdict on its
 // signature, checked against the allowed-signers file at allowedSigners.
 func (r Repo) Versions(allowedSigners string) ([]Version, error) {
-	have, err := r.hasVersions()
-	if err != nil || !have {
+	shas, err := r.versionRefs()
+	if err != nil || len(shas) == 0 {
 		return nil, err
 	}
-	const format = "%H%x00%P%x00%G?%x00%GF%x00%ct%x00%(trailers:key=Paisans-Revision,valueonly)%x1e"
-	out, err := r.git(nil, nil, "-c", "gpg.ssh.allowedSignersFile="+allowedSigners,
-		"log", "--no-walk=unsorted", "--format="+format, "--glob=refs/versions")
+	// Only fixed-shape fields come from the log; nothing an author wrote.
+	const format = "%H%x00%P%x00%G?%x00%GF%x00%ct"
+	args := append([]string{"-c", "gpg.ssh.allowedSignersFile=" + allowedSigners,
+		"log", "--no-walk=unsorted", "--format=" + format}, shas...)
+	out, err := r.git(nil, nil, args...)
 	if err != nil {
 		return nil, err
 	}
 	var vs []Version
-	for _, rec := range strings.Split(string(out), "\x1e") {
-		rec = strings.TrimLeft(rec, "\n")
-		if rec == "" {
-			continue
-		}
+	for _, rec := range strings.Split(string(out), "\n") {
 		fields := strings.Split(rec, "\x00")
-		if len(fields) != 6 {
-			return nil, fmt.Errorf("git log: unexpected record %q", rec)
+		if len(fields) != 5 || checkSHA(fields[0]) != nil {
+			continue
 		}
 		v := Version{SHA: fields[0], Parents: strings.Fields(fields[1]), Signed: fields[2] == "G", SignerFP: fields[3]}
 		if secs, err := strconv.ParseInt(fields[4], 10, 64); err == nil {
 			v.Committed = time.Unix(secs, 0).UTC()
 		}
-		if n, err := strconv.Atoi(strings.TrimSpace(fields[5])); err == nil && n > 0 {
-			v.Revision = n
-		}
-		names, err := r.git(nil, nil, "ls-tree", "--name-only", v.SHA)
-		if err != nil {
+		v.Revision = r.revision(v.SHA)
+		if v.TreeOK, err = r.treeOK(v.SHA); err != nil {
 			return nil, err
 		}
-		v.TreeOK = strings.Join(strings.Fields(string(names)), " ") == nameSOPS+" "+namePaisans+" "+nameSecrets
 		vs = append(vs, v)
 	}
 	return vs, nil
@@ -163,6 +234,9 @@ func (r Repo) Versions(allowedSigners string) ([]Version, error) {
 
 // Files reads the three files of the version sha.
 func (r Repo) Files(sha string) (Files, error) {
+	if err := checkSHA(sha); err != nil {
+		return Files{}, err
+	}
 	var f Files
 	for _, e := range []struct {
 		name string
@@ -179,8 +253,8 @@ func (r Repo) Files(sha string) (Files, error) {
 
 // Bundle packs every refs/versions/* ref; it is nil when there are none.
 func (r Repo) Bundle() ([]byte, error) {
-	have, err := r.hasVersions()
-	if err != nil || !have {
+	out, err := r.git(nil, nil, "for-each-ref", "--count=1", "--format=%(refname)", "refs/versions/")
+	if err != nil || len(bytes.TrimSpace(out)) == 0 {
 		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "paisans-bundle-")
@@ -211,6 +285,6 @@ func (r Repo) FetchBundle(bundle []byte) error {
 	if _, err := r.git(nil, nil, "bundle", "verify", path); err != nil {
 		return err
 	}
-	_, err = r.git(nil, nil, "fetch", "--no-prune", "--quiet", path, "refs/versions/*:refs/versions/*")
+	_, err = r.git(nil, nil, "fetch", "--no-prune", "--no-tags", "--quiet", path, "refs/versions/*:refs/versions/*")
 	return err
 }
