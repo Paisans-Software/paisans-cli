@@ -44,6 +44,8 @@ type mesh struct {
 	failHost string
 	// sick makes etcd answer one endpoint unhealthy.
 	sick bool
+	// patroni overrides a data site's role and state in `patronictl list`.
+	patroni map[string][2]string
 	log  []string
 }
 
@@ -191,11 +193,14 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "patronictl") && strings.Contains(command, "list -f json"):
 		var out []map[string]any
 		for i, name := range m.cfg.Cluster.Sites {
-			state := "streaming"
+			role, state := "Replica", "streaming"
 			if i == 0 {
-				state = "running"
+				role, state = "Leader", "running"
 			}
-			out = append(out, map[string]any{"Member": name, "State": state})
+			if s, ok := m.patroni[name]; ok {
+				role, state = s[0], s[1]
+			}
+			out = append(out, map[string]any{"Member": name, "Role": role, "State": state})
 		}
 		data, _ := json.Marshal(out)
 		return string(data), nil
@@ -430,6 +435,22 @@ func TestARekeyRefuses(t *testing.T) {
 	if _, err := m.build("nowhere"); err == nil || !strings.Contains(err.Error(), "declares no site nowhere") {
 		t.Errorf("an undeclared site: %v", err)
 	}
+	for _, tc := range []struct {
+		name  string
+		state map[string][2]string
+		want  string
+	}{
+		{"no leader", map[string][2]string{"home-a": {"Replica", "streaming"}}, "0 members lead"},
+		{"two leaders", map[string][2]string{"home-b": {"Leader", "running"}}, "2 members lead"},
+		{"a replica not streaming", map[string][2]string{"home-b": {"Replica", "running"}}, "home-b is running, not streaming"},
+		{"a stopped leader", map[string][2]string{"home-a": {"Leader", "stopped"}}, "the leader home-a is stopped"},
+	} {
+		m.patroni = tc.state
+		if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+	m.patroni = nil
 	if m.saves != 0 {
 		t.Error("a refused rekey wrote the secrets")
 	}

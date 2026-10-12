@@ -192,7 +192,7 @@ etcd its quorum.
 |---|---|---|
 | 1. New key | a new private key generated on the workstation and written to the secrets file as the site's next key, beside the current one | the file decrypts and holds it |
 | 2. Swap | the site's own mesh file with the new key, and every peer's mesh file with the new public key in place of the old, each with `wg syncconf`, the peers at once and the site last | every peer has a handshake with the site under the new key |
-| 3. Health | none | etcd healthy with every voter; every Patroni member running or streaming |
+| 3. Health | none | etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming |
 | 4. Promote | the next key becomes the site's key in the secrets file, the old one deleted | the file decrypts and holds only the new key |
 
 A run stopped part way resumes: a site with a next key in the file is mid

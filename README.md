@@ -6543,7 +6543,7 @@ Each site goes through four stages, each ending at a gate:
 |---|---|---|
 | 1. New key | a private key generated on the workstation, as `init` generates one, and written to the secrets file as `sites.<site>.wireguard_next_private_key`, beside the current | the file decrypts and holds it |
 | 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `apply` and `wg syncconf`; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
-| 3. Health | nothing | etcd healthy with every voter, and every Patroni member running or streaming |
+| 3. Health | nothing | etcd healthy at every voter; exactly one Patroni member leading and `running`, and every other data site a member and `streaming` |
 | 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
 
 **A stopped run resumes.** A next key in the secrets file says the site is mid

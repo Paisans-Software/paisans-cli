@@ -290,7 +290,7 @@ func (p *Plan) stages(s Site) []stageText {
 	all := []stageText{
 		{"new key for " + s.Name, "the cluster checked healthy, then a new private key, generated here, written to the secrets file as sites." + s.Name + ".wireguard_next_private_key beside the current one", "the file decrypts and holds it"},
 		{"swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
-		{"check the cluster", "nothing changes", "etcd healthy with every voter, every Patroni member running or streaming"},
+		{"check the cluster", "nothing changes", "etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming"},
 		{"promote " + s.Name + "'s key", "the next key becomes sites." + s.Name + ".wireguard_private_key in the secrets file, and the old one is deleted", "the file decrypts and holds only the new key"},
 	}
 	return all[s.From-1:]
@@ -545,9 +545,11 @@ type endpointHealth struct {
 	Error    string `json:"error"`
 }
 
-// health is nil when etcd answers healthy for every voter and every Patroni
-// member is running or streaming, the cluster a site's rekey may take a
-// tunnel from.
+// health is nil when etcd answers healthy at every voter, and Patroni has
+// exactly one member leading and running and every other data site
+// streaming: the cluster a site's rekey may take a tunnel from. A paused
+// Patroni still reports its roles and states, so this reads the same during
+// a relay's swap.
 func (p *Plan) health() error {
 	d := p.dep()
 	if len(p.cfg.Etcd.Members) > 0 {
@@ -560,7 +562,7 @@ func (p *Plan) health() error {
 			}
 			return fmt.Errorf("%s: etcd's endpoint health is not JSON", p.cfg.Etcd.Members[0])
 		}
-		var sick []string
+		var sick, missing []string
 		for _, h := range health {
 			if !h.Health {
 				sick = append(sick, h.Endpoint)
@@ -570,8 +572,18 @@ func (p *Plan) health() error {
 		if len(sick) > 0 {
 			return fmt.Errorf("etcd is unhealthy at %s", strings.Join(sick, ", "))
 		}
-		if len(health) < len(p.cfg.Etcd.Members) {
-			return fmt.Errorf("etcd answers for %d of %d voters", len(health), len(p.cfg.Etcd.Members))
+		for _, name := range p.cfg.Etcd.Members {
+			at := "//" + p.cfg.Sites[name].Address + ":"
+			found := false
+			for _, h := range health {
+				found = found || strings.Contains(h.Endpoint, at)
+			}
+			if !found {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("etcd answers for no endpoint of the voter %s", strings.Join(missing, ", "))
 		}
 	}
 	if len(p.cfg.Cluster.Sites) > 0 {
@@ -584,16 +596,33 @@ func (p *Plan) health() error {
 		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &members); err != nil {
 			return fmt.Errorf("%s: patronictl list is not JSON", at)
 		}
-		var problems []string
+		// Role and State are Patroni v4.1.0's (patroni/ctl.py,
+		// output_members): the leader is "Leader" and "running", and a
+		// replica that replicates is "streaming".
+		var problems, leaders []string
+		listed := map[string]bool{}
 		for _, m := range members {
 			name, _ := m["Member"].(string)
+			role, _ := m["Role"].(string)
 			state, _ := m["State"].(string)
-			if state != "running" && state != "streaming" {
-				problems = append(problems, name+" is "+state)
+			listed[name] = true
+			switch {
+			case role == "Leader":
+				leaders = append(leaders, name)
+				if state != "running" {
+					problems = append(problems, "the leader "+name+" is "+state)
+				}
+			case state != "streaming":
+				problems = append(problems, name+" is "+state+", not streaming")
 			}
 		}
-		if len(members) < len(p.cfg.Cluster.Sites) {
-			problems = append(problems, fmt.Sprintf("%d of %d data sites are Patroni members", len(members), len(p.cfg.Cluster.Sites)))
+		if len(leaders) != 1 {
+			problems = append(problems, fmt.Sprintf("%d members lead, not one", len(leaders)))
+		}
+		for _, name := range p.cfg.Cluster.Sites {
+			if !listed[name] {
+				problems = append(problems, name+" is not a member")
+			}
 		}
 		if len(problems) > 0 {
 			return fmt.Errorf("Patroni: %s", strings.Join(problems, "; "))
