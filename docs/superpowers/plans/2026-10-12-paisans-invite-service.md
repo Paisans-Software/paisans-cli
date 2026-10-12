@@ -10,7 +10,7 @@
 
 **Spec:** `paisans-stack` `docs/specs/2026-10-12-invite-service.md`. Read it before starting; this plan argues from it.
 
-**Where this runs:** a new public repository `Paisans-Software/paisans-invite`. Task 1 creates it. It is cloned locally to `paisans.community/src/paisans-invite/`, which needs a line in that repository's root `.gitignore` (done in Task 1, on its own branch there). Worktrees go in `src/paisans-invite/.worktrees/<name>`, ignored by the new repo's own `.gitignore`. **Never use `git stash`**; other sessions share the stash.
+**Where this runs:** a new public repository `Paisans-Software/paisans-invite`. Task 1 creates it. It is cloned locally, and its worktrees go in `.worktrees/<name>` inside the clone, ignored by the new repo's own `.gitignore`. **Never use `git stash`**; other sessions share the stash.
 
 ## Global Constraints
 
@@ -64,7 +64,6 @@ The toolkit's `invite` kind renders exactly these variables. Names are part of t
 
 **Files:**
 - Create: `go.mod`, `.gitignore`, `README.md`, `CHANGELOG.md`, `internal/config/config.go`, `internal/config/config_test.go`, `.github/workflows/test.yml`, `.github/workflows/changelog.yml`
-- Modify (in `paisans.community`, its own branch `chore/ignore-src-paisans-invite`): `.gitignore`
 
 **Interfaces:**
 - Produces: `config.Load(getenv func(string) string) (Config, error)` and
@@ -93,21 +92,10 @@ The founder approved the repository in the spec. Create it public, empty, under 
 
 ```bash
 gh repo create Paisans-Software/paisans-invite --public --description "Member invites with the code of conduct before the account"
-cd /Users/wash/Developer/paisans.community/src
 git clone git@github.com:Paisans-Software/paisans-invite.git
 cd paisans-invite
 git checkout -b develop
 ```
-
-In `paisans.community` (not the new repo), on branch `chore/ignore-src-paisans-invite`, add beside `src/uptime/`:
-
-```gitignore
-# src/paisans-invite/ is the invite service (Paisans-Software/paisans-invite)
-# that the toolkit's `invite` kind runs: its own git repo and remote.
-src/paisans-invite/
-```
-
-Commit that there: `gitignore: src/paisans-invite is the invite service's own repository`.
 
 - [ ] **Step 2: Scaffold**
 

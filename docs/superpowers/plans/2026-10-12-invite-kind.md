@@ -160,13 +160,15 @@ git add -A && git commit -m "feat: the invite kind's catalogue, port, health, ga
 
 **Files:**
 - Create: `internal/validate/invite.go`, `internal/validate/invite_test.go`
-- Create fixtures: `internal/validate/testdata/invite-must-be-clustered.yaml`, `invite-identity-app.yaml`, `invite-signups-not-disabled.yaml`, `invite-login-link-disabled.yaml`, `invite-recovery-disabled.yaml`, `invite-without-smtp.yaml`, `invite-code-of-conduct-missing.yaml`, `invite-setting-invalid.yaml`, and `internal/validate/testdata/code-of-conduct.md`
+- (Superseded by the Amendment: inline text.) Create fixtures: `internal/validate/testdata/invite-must-be-clustered.yaml`, `invite-identity-app.yaml`, `invite-signups-not-disabled.yaml`, `invite-login-link-disabled.yaml`, `invite-recovery-disabled.yaml`, `invite-without-smtp.yaml`, `invite-code-of-conduct-missing.yaml`, `invite-setting-invalid.yaml`, and `internal/validate/testdata/code-of-conduct.md`
 - Modify: `internal/validate/validate.go:121-205` (register the checks in `Check()`), `internal/validate/validate_test.go:26-130` (`TestRulesFire` rows), `internal/validate/testdata/valid.yaml` (add an `invite` app so every fixture starts valid)
 
 **Interfaces:**
-- Produces rules (all `Refuse`): `invite-must-be-clustered`, `invite-identity-app`, `invite-signups-not-disabled`, `invite-login-link-disabled`, `invite-without-smtp`, `invite-code-of-conduct-missing`, `invite-setting-invalid`; and `kinds.InviteCoCPath(cfgPath, setting string) string` in `internal/kinds/invite.go` (absolute setting used as is, otherwise joined to `filepath.Dir(cfgPath)`), used by validate and render alike.
+- (Superseded by the Amendment: inline text.) Produces rules (all `Refuse`): `invite-must-be-clustered`, `invite-identity-app`, `invite-signups-not-disabled`, `invite-login-link-disabled`, `invite-without-smtp`, `invite-code-of-conduct-missing`, `invite-setting-invalid`; and `kinds.InviteCoCPath(cfgPath, setting string) string` in `internal/kinds/invite.go` (absolute setting used as is, otherwise joined to `filepath.Dir(cfgPath)`), used by validate and render alike.
 
 - [ ] **Step 1: Failing tests**
+
+(Superseded by the Amendment: inline text. Read `code_of_conduct` below as the text itself; ignore every file, path and `InviteCoCPath` reference in this block.)
 
 Add the `invite` app to `testdata/valid.yaml` (its `auth` app must not set `allow_user_signups` to anything but `disabled`, must set `email_one_time_access_as_unauthenticated: true`, and the file must have an `smtp:` block; it already has one if uptime is in it):
 
@@ -239,6 +241,8 @@ Run: `go test ./internal/validate/`
 Expected: FAIL; the rules do not exist.
 
 - [ ] **Step 3: Implement**
+
+(Superseded by the Amendment: inline text. Read `code_of_conduct` below as the text itself; ignore every file, path and `InviteCoCPath` reference in this block.)
 
 `internal/kinds/invite.go`:
 
@@ -480,6 +484,8 @@ git add -A && git commit -m "feat: init generates the invite service's email has
 
 - [ ] **Step 1: Failing tests**
 
+(Superseded by the Amendment: inline text. Read `code_of_conduct` below as the text itself; ignore every file, path and `InviteCoCPath` reference in this block.)
+
 Add to `testdata/deployment.yaml`:
 
 ```yaml
@@ -587,6 +593,8 @@ Run: `go test ./internal/render/ -run Invite`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
+
+(Superseded by the Amendment: inline text. Read `code_of_conduct` below as the text itself; ignore every file, path and `InviteCoCPath` reference in this block.)
 
 `internal/render/invite.go`:
 
@@ -773,6 +781,8 @@ git add -A && git commit -m "feat: render the invite service's compose, environm
 - Test: `internal/secretsgen/examples_test.go:19` (already enforces the secrets example), the example-validates test
 
 - [ ] **Step 1: Change the example**
+
+(Superseded by the Amendment: inline text. Read `code_of_conduct` below as the text itself; ignore every file, path and `InviteCoCPath` reference in this block.)
 
 In `auth`'s settings: `allow_user_signups: disabled` and `signup_default_groups: [members]`; keep `email_one_time_access_as_unauthenticated: true` (already there, and now required by `invite-recovery-disabled`). Add:
 
