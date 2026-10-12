@@ -48,19 +48,19 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	}
 	baseSecrets, err := config.DecryptSecretsBytes(baseFiles.Secrets, id)
 	if err != nil {
-		return true, secretsMergeProblem("the base version's secrets", err)
+		return true, secretsMergeProblem("the base version " + base[:12])
 	}
 	theirSecrets, err := config.DecryptSecretsBytes(theirs.Secrets, id)
 	if err != nil {
-		return true, secretsMergeProblem("the head's secrets", err)
+		return true, secretsMergeProblem("the head " + head[:12])
 	}
 	ours, err := config.LoadDeploymentSecrets(filepath.Join(l.Dir, "secrets.enc.yaml"), id)
 	if err != nil {
-		return true, err
+		return true, secretsMergeProblem("the local secrets.enc.yaml")
 	}
 	merged, conflicts, err := configstore.MergeSecrets(baseSecrets, ours, theirSecrets)
 	if err != nil {
-		return true, err
+		return true, &ui.Problem{Hint: "the secrets cannot be merged", Explain: err.Error() + ". Nothing was written."}
 	}
 	if len(conflicts) > 0 {
 		for _, p := range conflicts {
@@ -68,7 +68,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		}
 		return true, &ui.Problem{
 			Hint:    "the local secrets and the sites' newest version change the same key differently",
-			Explain: fmt.Sprintf("Both changed %s since %s. Nothing was written. Take the head's value (move the local secrets.enc.yaml aside and pull again), then set the key again with paisans secrets set; a pull merges the rest.", strings.Join(conflicts, ", "), base[:12]),
+			Explain: fmt.Sprintf("Both changed %s since %s. Nothing was written. Make the local value the one to keep, or the head's, by editing those keys alone: %s A pull merges the rest.", strings.Join(conflicts, ", "), base[:12], secretsConflictAdvice(conflicts)),
 		}
 	}
 	for _, p := range changedPaths(baseSecrets, ours, theirSecrets) {
@@ -98,6 +98,9 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	recipients, err := config.Recipients(scratch)
 	if err != nil {
 		return true, err
+	}
+	if len(recipients) == 0 {
+		return true, &ui.Problem{Hint: "the head's .sops.yaml names no age recipient", Explain: "The merged secrets would be written unencrypted. Nothing was written."}
 	}
 	out := filepath.Join(scratch, "secrets.enc.yaml")
 	if err := config.WriteSecrets(out, merged, recipients); err != nil {
@@ -147,6 +150,29 @@ func changedPaths(base, ours, theirs *config.Secrets) []string {
 	return out
 }
 
-func secretsMergeProblem(what string, err error) error {
-	return &ui.Problem{Hint: "cannot read " + what + " to merge the secrets", Explain: "The secrets are merged key by key, which needs both sides decrypted on this workstation.", Cause: err}
+// secretsMergeProblem refuses without the underlying error: a parse error can
+// quote a fragment of the document, which is a value.
+func secretsMergeProblem(what string) error {
+	return &ui.Problem{Hint: "cannot read " + what + " to merge the secrets", Explain: "It could not be decrypted and parsed on this workstation, and the secrets are merged key by key only with both sides readable. The reason is left out because it can quote a value."}
+}
+
+// secretsConflictAdvice says how to settle conflicting keys: the sections
+// paisans secrets set writes by it, the rest by what records them.
+func secretsConflictAdvice(conflicts []string) string {
+	var settable, recorded bool
+	for _, p := range conflicts {
+		if strings.HasPrefix(p, "pocket_id_groups.") {
+			recorded = true
+		} else {
+			settable = true
+		}
+	}
+	var out []string
+	if settable {
+		out = append(out, "set the value to keep with paisans secrets set (keeping the local value means setting it again after a pull of the head's).")
+	}
+	if recorded {
+		out = append(out, "pocket_id_groups keys are recorded by apply; taking the head's value is the default, and apply records it again.")
+	}
+	return strings.Join(out, " ")
 }

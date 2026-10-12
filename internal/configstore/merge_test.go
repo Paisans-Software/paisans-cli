@@ -112,8 +112,14 @@ func populated(v reflect.Value, prefix []string, paths *[]string) {
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Type().Field(i)
 			tag := strings.Split(f.Tag.Get("yaml"), ",")[0]
-			if !f.IsExported() || tag == "-" || tag == "" {
+			if !f.IsExported() {
 				continue
+			}
+			if tag == "-" {
+				continue
+			}
+			if tag == "" || strings.Contains(f.Tag.Get("yaml"), "inline") {
+				panic(fmt.Sprintf("field %s has no yaml name or is inlined; teach flatten and this test about it", f.Name))
 			}
 			populated(v.Field(i), append(append([]string{}, prefix...), tag), paths)
 		}
@@ -167,5 +173,16 @@ func TestFlattenCoversEverySecretsField(t *testing.T) {
 	m, conflicts := mustMerge(t, &config.Secrets{}, &s, &config.Secrets{})
 	if len(conflicts) != 0 || !reflect.DeepEqual(flatten(m), flatten(&s)) {
 		t.Fatalf("a merge dropped paths: %v vs %v (%v)", flatten(m), flatten(&s), conflicts)
+	}
+}
+
+func TestMergeRefusesANameWithADot(t *testing.T) {
+	base := secretsWith("external.x", "1")
+	ours := secretsWith("external.x", "1")
+	ours.External["a.b"] = "sentinel"
+	theirs := secretsWith("external.x", "1")
+	_, _, err := MergeSecrets(base, ours, theirs)
+	if err == nil || !strings.Contains(err.Error(), "external.a.b") || strings.Contains(err.Error(), "sentinel") {
+		t.Fatalf("got %v", err)
 	}
 }

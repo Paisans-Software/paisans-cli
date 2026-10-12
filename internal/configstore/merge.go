@@ -141,6 +141,9 @@ func clone(s *config.Secrets) *config.Secrets {
 // name already in a file is not its to judge.
 func assign(dst, src *config.Secrets, path string) error {
 	parts := strings.Split(path, ".")
+	if !routable(parts) {
+		return unroutable(path)
+	}
 	switch {
 	case parts[0] == "apps" && len(parts) == 3:
 		if dst.Apps[parts[1]] == nil {
@@ -179,6 +182,9 @@ func assign(dst, src *config.Secrets, path string) error {
 // nothing in it.
 func remove(s *config.Secrets, path string) error {
 	parts := strings.Split(path, ".")
+	if !routable(parts) {
+		return unroutable(path)
+	}
 	switch parts[0] {
 	case "apps":
 		delete(s.Apps[parts[1]], parts[2])
@@ -220,3 +226,20 @@ func remove(s *config.Secrets, path string) error {
 // Flatten is every secret the file holds by dotted path, as MergeSecrets
 // compares them.
 func Flatten(s *config.Secrets) map[string]string { return flatten(s) }
+
+// routable reports whether a path has the segments its section has. A name
+// with a dot in it flattens to a path with one too many, which cannot be told
+// from a deeper key, so it is refused rather than written somewhere else.
+// Pocket ID group names are the one section whose name is the rest of the path.
+func routable(parts []string) bool {
+	want := map[string]int{"cluster": 2, "storage": 3, "sites": 3, "apps": 3, "external": 2, "oidc_clients": 3}
+	if parts[0] == "pocket_id_groups" {
+		return len(parts) >= 2
+	}
+	n, ok := want[parts[0]]
+	return ok && len(parts) == n
+}
+
+func unroutable(path string) error {
+	return fmt.Errorf("%s holds a name with a dot in it, which a merge cannot place", path)
+}

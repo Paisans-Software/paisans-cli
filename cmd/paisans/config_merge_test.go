@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/configstore"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // mergeCase is a store of two versions of the fixture whose secrets differ,
@@ -27,6 +29,13 @@ type mergeCase struct {
 // newMergeCase encrypts base, ours and theirs to one test key. edit may change
 // the yaml of the head only.
 func newMergeCase(t *testing.T, base, ours, theirs []string, headYAML string) mergeCase {
+	t.Helper()
+	return newMergeCaseSOPS(t, base, ours, theirs, headYAML, "")
+}
+
+// newMergeCaseSOPS is newMergeCase with the head's .sops.yaml replaced by
+// headSOPS when that is not empty.
+func newMergeCaseSOPS(t *testing.T, base, ours, theirs []string, headYAML, headSOPS string) mergeCase {
 	t.Helper()
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -60,6 +69,9 @@ func newMergeCase(t *testing.T, base, ours, theirs []string, headYAML string) me
 	s := newStore(t)
 	b := configstore.Files{Paisans: []byte(yaml), Secrets: enc(base), SOPS: []byte(sops)}
 	h := configstore.Files{Paisans: []byte(yaml + headYAML), Secrets: enc(theirs), SOPS: []byte(sops)}
+	if headSOPS != "" {
+		h.SOPS = []byte(headSOPS)
+	}
 	var shas []string
 	when := time.Unix(1_800_000_000, 0)
 	sha0, err := s.repo.Commit(b, nil, 1, key, when)
@@ -173,6 +185,9 @@ func TestConfigPullSecretsConflictRefusesNamingPathsOnly(t *testing.T) {
 		if !strings.Contains(shown, "external.b") || !strings.Contains(shown, "paisans secrets set") {
 			t.Errorf("the refusal does not name the key and the command:\n%s", shown)
 		}
+		if strings.Contains(shown, "pocket_id_groups") {
+			t.Errorf("advice for a section no conflict is in:\n%s", shown)
+		}
 		if strings.Contains(shown, "external.a") {
 			t.Errorf("a key that merges is named as a conflict:\n%s", shown)
 		}
@@ -200,5 +215,43 @@ func TestConfigPullEditedYAMLOnBothSidesStillRefuses(t *testing.T) {
 	}
 	if got, _ := m.l.Files(); !got.Equal(local) {
 		t.Fatal("the local files were overwritten")
+	}
+}
+
+// A head whose .sops.yaml names no age key would have the merge written in
+// plaintext: refused before anything is written.
+func TestConfigPullMergeRefusesNoRecipients(t *testing.T) {
+	m := newMergeCaseSOPS(t, mergeBase, mergeOurs, mergeTheirs, "", "creation_rules: []\n")
+	out, err := m.pull(t, true)
+	if err == nil || !strings.Contains(problemText(err), ".sops.yaml") {
+		t.Fatalf("pull: %v\n%s", err, out)
+	}
+	if got, _ := m.l.Files(); !got.Equal(m.files) {
+		t.Fatal("files changed")
+	}
+	if h, _ := m.l.Head(); h != m.shas[0] {
+		t.Fatalf("head moved to %s", h)
+	}
+}
+
+// An unreadable secrets document is refused without the reason, which can
+// quote a value.
+func TestConfigPullUnreadableSecretsNeverQuotesThem(t *testing.T) {
+	m := newMergeCase(t, mergeBase, mergeOurs, mergeTheirs, "")
+	bad := m.files
+	bad.Secrets = []byte("version: 1\nexternal: {a: SENTINELVALUE\n  b: [SENTINELVALUE\n")
+	if err := m.l.WriteFiles(bad); err != nil {
+		t.Fatal(err)
+	}
+	out, err := m.pull(t, true)
+	if err == nil {
+		t.Fatal("pulled")
+	}
+	var p *ui.Problem
+	if errors.As(err, &p) && p.Cause != nil {
+		t.Errorf("the problem carries a cause: %v", p.Cause)
+	}
+	if shown := out + err.Error() + problemText(err); strings.Contains(shown, "SENTINELVALUE") {
+		t.Errorf("a value appears in:\n%s", shown)
 	}
 }
