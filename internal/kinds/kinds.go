@@ -181,6 +181,14 @@ var catalogue = map[config.Kind][]Service{
 		// publication, and is to be checked the same way once published.
 		{Name: "app", Image: "ghcr.io/paisans-software/uptime:1.1.0-oidc.4", Purpose: "the monitor"},
 	},
+	config.KindInvite: {
+		// paisans-invite: member invites with the code of conduct before
+		// the account (docs/specs/2026-10-12-invite-service.md). Cluster
+		// placement only, so the PostgresService row is the cluster's role
+		// and database, never a container of its own.
+		{Name: "app", Image: "ghcr.io/paisans-software/paisans-invite:develop", Purpose: "the invite service"},
+		{Name: PostgresService, Purpose: "its role and database on the cluster"},
+	},
 }
 
 // SendsMail reports whether a kind reads the deployment's smtp settings. An
@@ -190,7 +198,7 @@ var catalogue = map[config.Kind][]Service{
 // reads them as MAILER_DSN and its sender address, for its contact form and
 // the few account mails it still sends (see MbinContactEmailSetting).
 func SendsMail(kind config.Kind) bool {
-	return kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin
+	return kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin || kind == config.KindInvite
 }
 
 // Services returns a kind's services in compose order, which is the order they
@@ -326,6 +334,7 @@ var configFiles = map[config.Kind]struct {
 	config.KindSynapse:     {ConfigYAML, "homeserver.yaml"},
 	config.KindElement:     {ConfigJSON, "config.json"},
 	config.KindUptime:      {ConfigEnv, ".env"},
+	config.KindInvite:      {ConfigEnv, ".env"},
 }
 
 // ConfigFormat is the syntax of the file a kind reads its configuration from,

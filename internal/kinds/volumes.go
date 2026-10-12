@@ -99,9 +99,10 @@ var ImageVolumes = map[string][]string{
 // WriteFreely's declares none (Dockerfile at writefreely-wisp develop
 // f95d840), and 0.21.0-wisp printed null inspected the same way.
 var RepositoryVolumes = map[string][]string{
-	acme.Repository:                          nil,
-	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
-	"ghcr.io/josephquigley/writefreely-wisp": nil,
+	acme.Repository:                           nil,
+	"ghcr.io/paisans-software/mbin":           {"/app/var/"},
+	"ghcr.io/josephquigley/writefreely-wisp":  nil,
+	"ghcr.io/paisans-software/paisans-invite": nil, // distroless, declares no VOLUME
 }
 
 // DeclaredVolumes is what an image declares, as far as the toolkit has

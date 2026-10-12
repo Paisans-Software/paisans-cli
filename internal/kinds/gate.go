@@ -252,6 +252,9 @@ var gates = map[config.Kind]GateSpec{
 	// OIDC client admits only settings.admin_group, so the gate would add no
 	// access control, only a dependency.
 	config.KindUptime: {Gateable: false},
+	// Invitees reach /i/* before they have an account; a member gate would
+	// lock them out.
+	config.KindInvite: {Gateable: false},
 }
 
 // GateFor returns a kind's gate record. A kind with none recorded is not

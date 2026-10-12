@@ -62,6 +62,7 @@ var appPort = map[config.Kind]int{
 	// Not the fork's default 3000: Outline publishes 3000, and two apps on
 	// one site publish on the same mesh address.
 	config.KindUptime: 3001,
+	config.KindInvite: 8080,
 }
 
 // AppPort is the port a kind listens on, which is also the port it publishes

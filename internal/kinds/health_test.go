@@ -34,9 +34,9 @@ func TestPocketIDAnswersNoContent(t *testing.T) {
 	}
 }
 
-func TestOnlyUptimePocketIDAndMbinSendMail(t *testing.T) {
+func TestOnlyTheseKindsSendMail(t *testing.T) {
 	for _, kind := range config.Kinds() {
-		if got, want := kinds.SendsMail(kind), kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin; got != want {
+		if got, want := kinds.SendsMail(kind), kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin || kind == config.KindInvite; got != want {
 			t.Errorf("%s: SendsMail = %v", kind, got)
 		}
 	}

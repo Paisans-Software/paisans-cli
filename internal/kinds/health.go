@@ -54,6 +54,8 @@ var health = map[config.Kind]Health{
 	// another on a separate site; a monitor does not watch itself
 	// (internal/render/uptime.go).
 	config.KindUptime: {"/healthz", "200"},
+	// paisans-invite's /healthz answers 200 when its database does.
+	config.KindInvite: {"/healthz", "200"},
 }
 
 // HealthFor returns a kind's health route, false for a kind with none
