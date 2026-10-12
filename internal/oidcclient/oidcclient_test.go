@@ -28,6 +28,8 @@ type fakeIDP struct {
 	sent []string
 	// updates is every client update's body, in order.
 	updates []string
+	// nextSecret numbers the secrets Pocket ID is sent, for their IDs.
+	nextSecret int
 	// onMutation runs before a mutation is served, so a test can see what
 	// had already happened at that moment.
 	onMutation func(method, path string)
@@ -122,8 +124,18 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 		var in struct{ Secret string }
 		_ = json.Unmarshal([]byte(body), &in)
 		f.sent = append(f.sent, in.Secret)
-		f.secrets[parts[3]] = append(f.secrets[parts[3]], pocketid.ClientSecret{ID: "s", Prefix: in.Secret[:4], IsActive: true})
+		f.nextSecret++
+		f.secrets[parts[3]] = append(f.secrets[parts[3]], pocketid.ClientSecret{ID: fmt.Sprintf("s-%d", f.nextSecret), Prefix: in.Secret[:4], IsActive: true})
 		return 201, marshal(map[string]string{"secret": in.Secret})
+	case method == "DELETE" && len(parts) == 6 && parts[4] == "secrets":
+		held := f.secrets[parts[3]]
+		for i, s := range held {
+			if s.ID == parts[5] {
+				f.secrets[parts[3]] = append(held[:i:i], held[i+1:]...)
+				return 204, ""
+			}
+		}
+		return 404, `{"error":"Client secret not found"}`
 	case method == "PUT" && len(parts) == 5 && parts[4] == "allowed-user-groups":
 		var in struct {
 			UserGroupIds []string `json:"userGroupIds"`
@@ -697,5 +709,106 @@ func TestAllowSendsExactlyTheDesiredGroups(t *testing.T) {
 	}
 	if fmt.Sprint(names) != "[members admins]" {
 		t.Errorf("allowed %v", names)
+	}
+}
+
+// rotated is a client given a first secret and then a second by a rotation,
+// with the second recorded: Pocket ID holds both, and both are valid.
+func rotated(t *testing.T) (*fakeIDP, *memRecorder) {
+	t.Helper()
+	f := newFake()
+	rec := &memRecorder{}
+	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	d := talk()
+	d.RotateSecret = true
+	if err := Execute(plan(t, f, d, rec.rec), api(f), rec, secretSource("second-secret-not-real-0002")); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.secrets["c-1"]) != 2 {
+		t.Fatalf("Pocket ID holds %d secrets after the rotation", len(f.secrets["c-1"]))
+	}
+	return f, rec
+}
+
+// After a rotation, Retire deletes every secret but the recorded one, so the
+// value the app presented before stops being valid.
+func TestRetireDeletesEverySecretButTheRecordedOne(t *testing.T) {
+	f, rec := rotated(t)
+	f.mutations = nil
+	if err := Retire(api(f), "talk", rec.rec, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(f.mutations); got != "[DELETE /api/oidc/clients/c-1/secrets/s-1]" {
+		t.Errorf("mutations %s", got)
+	}
+	held := f.secrets["c-1"]
+	if len(held) != 1 || held[0].Prefix != "seco" {
+		t.Errorf("Pocket ID holds %+v", held)
+	}
+	for _, in := range f.stdins {
+		if strings.Contains(in, "DELETE") && (strings.Contains(in, "first-secret-not-real-0001") || strings.Contains(in, "second-secret-not-real-0002")) {
+			t.Errorf("a secret's value reached a request: %s", in)
+		}
+	}
+	// Run again, it finds nothing to delete.
+	f.mutations = nil
+	if err := Retire(api(f), "talk", rec.rec, nil); err != nil || len(f.mutations) != 0 {
+		t.Errorf("a second retire: %v, %v", err, f.mutations)
+	}
+}
+
+// A recorded secret Pocket ID does not hold as active means the app may still
+// present an older one: nothing is deleted.
+func TestRetireDeletesNothingWhenTheRecordedSecretIsNotLive(t *testing.T) {
+	f, _ := rotated(t)
+	f.mutations = nil
+	err := Retire(api(f), "talk", Recorded{ClientID: "c-1", ClientSecret: "third-secret-not-real-0003"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Nothing was deleted") {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "third-secret-not-real-0003") {
+		t.Errorf("the error carries the secret: %v", err)
+	}
+	if len(f.mutations) != 0 || len(f.secrets["c-1"]) != 2 {
+		t.Errorf("deleted %v", f.mutations)
+	}
+}
+
+// Pocket ID keeps four characters of a secret. Two active secrets sharing
+// them cannot be told apart, so neither is deleted and the error says so,
+// after the others are.
+func TestRetireKeepsSecretsThatShareTheRecordedPrefix(t *testing.T) {
+	f, rec := rotated(t)
+	f.secrets["c-1"] = append(f.secrets["c-1"], pocketid.ClientSecret{ID: "s-9", Prefix: "seco", IsActive: true})
+	f.mutations = nil
+	err := Retire(api(f), "talk", rec.rec, nil)
+	if err == nil || !strings.Contains(err.Error(), "s-2, s-9") {
+		t.Fatalf("got %v", err)
+	}
+	if got := fmt.Sprint(f.mutations); got != "[DELETE /api/oidc/clients/c-1/secrets/s-1]" {
+		t.Errorf("mutations %s", got)
+	}
+}
+
+// Credentials recorded without a client ID name no client to retire from.
+func TestRetireRefusesWithoutARecordedClient(t *testing.T) {
+	f, _ := rotated(t)
+	f.mutations = nil
+	if err := Retire(api(f), "talk", Recorded{ClientSecret: "second-secret-not-real-0002"}, nil); err == nil || len(f.mutations) != 0 {
+		t.Fatalf("got %v, %v", err, f.mutations)
+	}
+}
+
+// Each deletion is a step of its own, so the operator sees what was removed.
+func TestRetireReportsEachDeletion(t *testing.T) {
+	f, rec := rotated(t)
+	r := &ui.Recorder{Verbose_: true}
+	if err := Retire(api(f), "talk", rec.rec, r); err != nil {
+		t.Fatal(err)
+	}
+	if !r.Has("done", "delete old client secret s-1 of talk") {
+		t.Errorf("reported:\n%s", r.Lines())
 	}
 }

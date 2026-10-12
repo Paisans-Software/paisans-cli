@@ -492,3 +492,68 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Retire deletes every secret of the recorded client but the recorded one, so
+// that a value the app presented before a rotation stops being valid: an old
+// secret that stays valid is a secret not rotated. It is the last step of a
+// rotation, run only once every site of the app presents the recorded secret,
+// and only by the run the operator started with --execute, since each delete
+// is a Pocket ID client mutation.
+//
+// Pocket ID keeps the first four characters of a secret and nothing more of
+// it that can be compared (pocketid.SecretPrefixLength), so the recorded
+// secret is found by that prefix among the active ones. When none matches,
+// the app may still present an older secret and nothing is deleted. When more
+// than one does, those cannot be told apart and are kept, the others are
+// deleted, and the error names them: a rotation run again records a secret
+// with another prefix and retires them all. Running Retire again deletes
+// nothing more. No secret's value is sent or printed.
+func Retire(c *pocketid.Client, app string, rec Recorded, report ui.Reporter) error {
+	if report == nil {
+		report = ui.Discard
+	}
+	if rec.ClientID == "" || rec.ClientSecret == "" {
+		return fmt.Errorf("oidc_clients.%s records no client and secret to keep, so no other secret of it can be told to be old. Nothing was deleted", app)
+	}
+	held, err := c.ClientSecrets(rec.ClientID)
+	if err != nil {
+		return pocketid.Redact(fmt.Errorf("listing client %s's secrets: %w", app, err), rec.ClientSecret)
+	}
+	var keep, old []pocketid.ClientSecret
+	for _, s := range held {
+		if pocketid.HasActiveSecret([]pocketid.ClientSecret{s}, rec.ClientSecret) {
+			keep = append(keep, s)
+		} else {
+			old = append(old, s)
+		}
+	}
+	if len(keep) == 0 {
+		return fmt.Errorf("client %s (id %s) holds no active secret beginning as oidc_clients.%s.client_secret does, so the app may still sign in with an older one. Nothing was deleted", app, rec.ClientID, app)
+	}
+	for _, s := range old {
+		step := report.Step(fmt.Sprintf("delete old client secret %s of %s", s.ID, app))
+		step.Detail("DELETE /api/oidc/clients/%s/secrets/%s", rec.ClientID, s.ID)
+		if err := c.DeleteClientSecret(rec.ClientID, s.ID); err != nil {
+			err = pocketid.Redact(fmt.Errorf("deleting client %s's secret %s: %w", app, s.ID, err), rec.ClientSecret)
+			step.Fail(err)
+			return err
+		}
+		step.Done("deleted")
+	}
+	// The gate: a fresh read holds only the secrets kept.
+	after, err := c.ClientSecrets(rec.ClientID)
+	if err != nil {
+		return pocketid.Redact(fmt.Errorf("listing client %s's secrets after the deletes: %w", app, err), rec.ClientSecret)
+	}
+	var left []string
+	for _, s := range after {
+		left = append(left, s.ID)
+	}
+	if len(after) != len(keep) {
+		return fmt.Errorf("the deletes succeeded but client %s still holds secrets %s", app, strings.Join(left, ", "))
+	}
+	if len(keep) > 1 {
+		return fmt.Errorf("client %s holds %d active secrets, %s, whose first %d characters are those of oidc_clients.%s.client_secret, and Pocket ID keeps no more of a secret to tell them apart, so none of them was deleted. Rotate it again: the next secret begins differently, and its retirement deletes them", app, len(keep), strings.Join(left, ", "), pocketid.SecretPrefixLength, app)
+	}
+	return nil
+}
