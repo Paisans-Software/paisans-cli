@@ -23,7 +23,7 @@ import (
 // later only anonymous ones unless given --all, which is two different
 // surprises depending on the engine (Docker Engine 23.0 release notes).
 func runPrune(args []string) error {
-	fs := flag.NewFlagSet("prune", flag.ExitOnError)
+	fs := newFlagSet("prune", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	site := fs.String("site", "", "the site to prune, by the name it has in the configuration")

@@ -75,7 +75,7 @@ type rotateWiring struct {
 // --execute; and everything that refuses the run is checked before anything
 // changes.
 func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("secrets rotate", flag.ContinueOnError)
+	fs := newFlagSet("secrets rotate", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

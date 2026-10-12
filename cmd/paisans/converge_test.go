@@ -662,8 +662,7 @@ func TestConvergeStopsWithTheHintThatFits(t *testing.T) {
 // apply takes a site only when given --site, so nothing says it needs one:
 // not its usage, and not the commands that compare themselves with it.
 func TestNothingSaysApplyTakesOneSite(t *testing.T) {
-	entry := usage[strings.Index(usage, "\n  apply      "):]
-	entry = entry[:strings.Index(entry[1:], "\n  site ")]
+	entry := findCommand("apply").detail
 	if !strings.Contains(entry, "Without --site") {
 		t.Errorf("apply's usage entry does not say what it does without --site:%s", entry)
 	}
@@ -825,8 +824,7 @@ func TestApplyRefusesAStrayArgument(t *testing.T) {
 
 // site remove's usage entry names every flag it takes.
 func TestSiteRemoveUsageNamesForceAndSSH(t *testing.T) {
-	start := strings.Index(usage, "paisans site remove")
-	entry := usage[start : start+strings.Index(usage[start:], "\n  paisans storage")]
+	entry := strings.Join(findCommand("site remove").usage, "\n")
 	for _, flag := range []string{"--force", "--ssh"} {
 		if !strings.Contains(entry, flag) {
 			t.Errorf("site remove's usage leaves out %s:\n%s", flag, entry)
@@ -836,8 +834,7 @@ func TestSiteRemoveUsageNamesForceAndSSH(t *testing.T) {
 
 // apply --site's usage entry names every flag about one site.
 func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
-	start := strings.Index(usage, "paisans apply    --site")
-	entry := usage[start : start+strings.Index(usage[start:], "\n  paisans site")]
+	entry := findCommand("apply").usage[1]
 	for _, flag := range []string{"--ssh", "--only", "--overwrite", "--recreate", "--min-free", "--keep-images", "--execute"} {
 		if !strings.Contains(entry, flag) {
 			t.Errorf("apply --site's usage leaves out %s:\n%s", flag, entry)
@@ -845,11 +842,11 @@ func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
 	}
 }
 
-// The usage's list of the commands that reach a host names secrets prune,
+// `paisans help execute`'s list of the commands that reach a host names secrets prune,
 // which reads the gateways' deployment records over ssh.
 func TestUsageHostListNamesSecretsPrune(t *testing.T) {
-	start := strings.Index(usage, "host prepare, host deployments, host allow, host disallow, apply")
-	entry := strings.Join(strings.Fields(usage[start:start+strings.Index(usage[start:], "reach a host.")]), " ")
+	start := strings.Index(executeTopic, "host prepare, host deployments, host allow, host disallow, apply")
+	entry := strings.Join(strings.Fields(executeTopic[start:start+strings.Index(executeTopic[start:], "reach a host.")]), " ")
 	if !strings.Contains(entry, "secrets prune") {
 		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
 	}

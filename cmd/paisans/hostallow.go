@@ -43,7 +43,7 @@ type allowOptions struct {
 // parseAllow reads `<site> <name>...` and the flags, which may come before,
 // between or after them.
 func parseAllow(command string, args []string) (ui.Reporter, allowOptions, error) {
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs := newFlagSet(command, flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	var o allowOptions
 	fs.StringVar(&o.config, "config", "paisans.yaml", "path to the deployment declaration")

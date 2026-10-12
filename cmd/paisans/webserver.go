@@ -51,7 +51,7 @@ func runWebServer(args []string) error {
 		return fmt.Errorf("web-server takes one subcommand, show or check: paisans web-server show --app <name>")
 	}
 	sub := args[0]
-	fs := flag.NewFlagSet("web-server "+sub, flag.ContinueOnError)
+	fs := newFlagSet("web-server "+sub, flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	appName := fs.String("app", "", "the app pinned to a monitor site, by the name it has in the configuration")

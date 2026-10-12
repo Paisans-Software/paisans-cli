@@ -31,7 +31,7 @@ import (
 // checked against the run's approval as a step of apply with no --site, and
 // recorded once stage 4's gate has passed.
 func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("site add", flag.ExitOnError)
+	fs := newFlagSet("site add", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

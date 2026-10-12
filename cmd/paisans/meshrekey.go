@@ -51,7 +51,7 @@ func (s secretsStore) Save(secrets *config.Secrets) error {
 // Like every command that changes a host, it plans from what it reads and
 // changes nothing without --execute.
 func runMeshRekey(args []string) error {
-	fs := flag.NewFlagSet("mesh rekey", flag.ContinueOnError)
+	fs := newFlagSet("mesh rekey", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

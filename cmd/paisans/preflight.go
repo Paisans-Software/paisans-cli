@@ -19,7 +19,7 @@ import (
 // It takes no --ssh: it reaches every site, and one override cannot describe
 // several destinations.
 func runPreflight(args []string) error {
-	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
+	fs := newFlagSet("preflight", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	site := fs.String("site", "", "the site being added, by the name it has in the configuration")

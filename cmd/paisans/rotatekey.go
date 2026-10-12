@@ -21,7 +21,7 @@ import (
 // Garage site and every site running the app through their own ssh sections,
 // prints the plan, and changes anything only with --execute.
 func runStorageRotateKey(args []string) error {
-	fs := flag.NewFlagSet("storage rotate-key", flag.ExitOnError)
+	fs := newFlagSet("storage rotate-key", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
