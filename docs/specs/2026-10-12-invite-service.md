@@ -255,11 +255,11 @@ apps:
 * any `placement` other than `cluster`;
 * a setting outside the table's range.
 
-**`init` generates** `apps.<invite>.email_hash_key`, 32 random bytes.
+**`init` generates** `apps.<invite>.email_hash_key` and `apps.<invite>.session_key`, 32 random bytes each. The session key signs the service's sign-in cookie; rotating it signs everyone out of the invite service and nothing else.
 
 **`render` writes** the service's `.env`: its database connection through the
 site's HAProxy, the identity app's URL and static API key, its OIDC client ID
-and secret, the email hash key, the SMTP settings, the identity app's accent
+and secret, the email hash key, the session key, the SMTP settings, the identity app's accent
 colour, and every setting above. The code of conduct file is mounted
 read-only.
 
