@@ -480,6 +480,21 @@ func TestShowNamesEachCostAndUse(t *testing.T) {
 	}
 }
 
+// A rotation's notes are shown under it at every verbosity, not as details.
+func TestShowExplainsEachNote(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	run, err := secretsrotate.Plan(w.env(), []secretsrotate.Rotator{newRot(w, pw, "home-a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Items[0].Notes = []string{"a note the operator must read"}
+	rec := &ui.Recorder{}
+	run.Show(rec)
+	if i := rec.Index("explain", "a note the operator must read"); i < rec.Index("section", pw) {
+		t.Errorf("the note is not explained under its rotation:\n%s", rec.Lines())
+	}
+}
+
 // A precheck refuses at plan time, before anything changes.
 func TestPrecheckRefusesAtPlan(t *testing.T) {
 	w := newWorld(t, map[string]string{pw: "old"})

@@ -38,6 +38,14 @@ var selfKinds = map[string]config.Kind{
 	"static_api_key":     config.KindPocketID,
 }
 
+// AppSelfKind is the kind whose secret key is, for each key AppSelf rotates,
+// and false for any other key: what `secrets rotate` reads to find, in a
+// deployment's apps, the ones whose secret it is.
+func AppSelfKind(key string) (config.Kind, bool) {
+	kind, ok := selfKinds[key]
+	return kind, ok
+}
+
 // mbinRestart is the downtime of a rotation that restarts the Mbin stack.
 const mbinRestart = "the Mbin stack, for one restart on each site in turn"
 

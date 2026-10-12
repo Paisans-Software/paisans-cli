@@ -1,0 +1,517 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+
+	"filippo.io/age"
+
+	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/secretsrotate"
+	"github.com/paisans-software/paisans-stack/internal/ui"
+)
+
+// rotateDeployment copies the fixture deployment into a directory of its
+// own, its secrets passed through edit, and returns the two paths.
+func rotateDeployment(t *testing.T, edit func(string) string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	data, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "paisans.yaml")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if edit != nil {
+		text = edit(text)
+	}
+	secretsPath := filepath.Join(dir, "secrets.enc.yaml")
+	if err := os.WriteFile(secretsPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return configPath, secretsPath
+}
+
+// withRotation adds a pending rotation of path to the fixture's secrets.
+func withRotation(path string) func(string) string {
+	return func(text string) string {
+		return text + fmt.Sprintf("\nrotations:\n  %s: \"next-not-a-secret-0001\"\n", path)
+	}
+}
+
+// rotateFake is a site as secrets rotate reaches it: it answers ssh, reads
+// etcd and Patroni as healthy unless told otherwise, holds no registry, and
+// refuses to read any other file, so an apply it is handed fails at once.
+type rotateFake struct {
+	name string
+	cfg  *config.Config
+	w    *rotateWorld
+}
+
+type rotateWorld struct {
+	mu       sync.Mutex
+	commands []string
+	// silent is the sites that do not answer ssh.
+	silent map[string]bool
+	// sickEtcd is an etcd that reports an unhealthy endpoint.
+	sickEtcd bool
+}
+
+func (f rotateFake) Describe() string { return "ubuntu@" + f.name + ".local" }
+
+func (f rotateFake) Run(command string) (string, error) {
+	f.w.mu.Lock()
+	f.w.commands = append(f.w.commands, f.name+": "+command)
+	f.w.mu.Unlock()
+	if f.w.silent[f.name] {
+		return "", fmt.Errorf("ssh: connect to host %s.local port 22: Connection timed out", f.name)
+	}
+	switch {
+	case strings.Contains(command, "endpoint health"):
+		var list []string
+		for _, m := range f.cfg.Etcd.Members {
+			list = append(list, fmt.Sprintf(`{"endpoint":"http://%s:2379","health":%t}`, f.cfg.Sites[m].Address, !f.w.sickEtcd))
+		}
+		return "[" + strings.Join(list, ",") + "]", nil
+	case strings.Contains(command, "patronictl") && strings.Contains(command, " list"):
+		var list []string
+		for i, m := range f.cfg.Cluster.Sites {
+			role, state := "Sync Standby", "streaming"
+			if i == 0 {
+				role, state = "Leader", "running"
+			}
+			list = append(list, fmt.Sprintf(`{"Member":%q,"Role":%q,"State":%q}`, m, role, state))
+		}
+		return "[" + strings.Join(list, ",") + "]", nil
+	}
+	return "", nil
+}
+
+func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.Run(command) }
+
+func (f rotateFake) ReadFile(path string) (string, bool, error) {
+	if path == registry.Path || strings.Contains(path, "wireguard") {
+		return "", false, nil
+	}
+	return "", false, errors.New("fake: no file here")
+}
+
+func (f rotateFake) WriteFile(path, content string, mode uint32) error {
+	return errors.New("fake: nothing is written here")
+}
+
+// fakeRotateHosts puts every site behind a rotateFake and records what was
+// said, so a test can assert on it.
+func fakeRotateHosts(t *testing.T) (*rotateWorld, *ui.Recorder) {
+	t.Helper()
+	w := &rotateWorld{silent: map[string]bool{}}
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedHost, savedReporter := rotateHost, reporterOverride
+	rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
+		return rotateFake{name: name, cfg: cfg, w: w}
+	}
+	rec := &ui.Recorder{}
+	reporterOverride = rec
+	t.Cleanup(func() { rotateHost, reporterOverride = savedHost, savedReporter })
+	return w, rec
+}
+
+// noRotateHost fails the test if a host is reached.
+func noRotateHost(t *testing.T) {
+	t.Helper()
+	saved := rotateHost
+	rotateHost = func(string, config.Site, bool) apply.Transport {
+		t.Fatal("a host was reached")
+		return nil
+	}
+	t.Cleanup(func() { rotateHost = saved })
+}
+
+// terminalStdin is stdin holding answer, read as a terminal when terminal is
+// true.
+func terminalStdin(t *testing.T, answer string, terminal bool) *os.File {
+	t.Helper()
+	saved := isTerminal
+	isTerminal = func(*os.File) bool { return terminal }
+	t.Cleanup(func() { isTerminal = saved })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteString(answer)
+	w.Close()
+	t.Cleanup(func() { r.Close() })
+	return r
+}
+
+func rotateArgs(configPath, secretsPath string, extra ...string) []string {
+	return append(extra, "--config", configPath, "--secrets", secretsPath, "--sudo=false")
+}
+
+func paths(rs []secretsrotate.Rotator) []string {
+	var out []string
+	for _, r := range rs {
+		out = append(out, r.Path())
+	}
+	return out
+}
+
+// --all is every secret in scope that the deployment has, in the order the
+// spec gives: what works from the internet first, then what only the mesh
+// reaches.
+func TestSecretsRotateAllOrder(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, kept, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"external.acme_dns_token",
+		"oidc_clients.blog.client_secret",
+		"oidc_clients.docs.client_secret",
+		"oidc_clients.status.client_secret",
+		"oidc_clients.talk.client_secret",
+		"apps.talk.oauth",
+		"apps.talk.app_secret",
+		"apps.gate.cookie_secret",
+		"apps.status.session_secret",
+		"apps.chat.mas_signing_key",
+		"apps.chat.mas_matrix_secret",
+		"apps.blog.s3_secret_access_key",
+		"apps.docs.s3_secret_access_key",
+		"apps.talk.s3_secret_access_key",
+		"apps.auth.static_api_key",
+		"apps.status.admin_password",
+		"cluster.superuser_password",
+		"cluster.admin_password",
+		"cluster.standby_password",
+		"apps.auth.database_password",
+		"apps.blog.database_password",
+		"apps.chat.database_password",
+		"apps.docs.database_password",
+		"apps.talk.database_password",
+		"apps.talk.rabbitmq_password",
+		"apps.talk.valkey_password",
+		"apps.talk.mercure_jwt_secret",
+		"storage.garage.admin_token",
+		"storage.garage.rpc_secret",
+		"sites.home-a.heartbeat_token",
+		"sites.home-b.heartbeat_token",
+		"sites.vm.heartbeat_token",
+		"sites.watch.heartbeat_token",
+	}
+	if got := paths(rs); !slices.Equal(got, want) {
+		t.Errorf("--all order:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(want, "\n      "))
+	}
+	var keptPaths []string
+	for _, k := range kept {
+		keptPaths = append(keptPaths, k.Path)
+		if k.Reason == "" {
+			t.Errorf("%s is kept with no reason", k.Path)
+		}
+	}
+	for _, p := range []string{
+		"apps.auth.encryption_key",
+		"apps.chat.mas_encryption_secret",
+		"oidc_clients.chat.client_secret",
+		"oidc_clients.gate.client_secret",
+		"sites.*.wireguard_private_key",
+	} {
+		if !slices.Contains(keptPaths, p) {
+			t.Errorf("%s is not listed as kept: %v", p, keptPaths)
+		}
+	}
+}
+
+// A run builds a rotator for every rotation an earlier run left pending,
+// named or not, since the engine finishes those first.
+func TestSecretsRotateResumesEveryPendingPath(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Rotations = map[string]string{"cluster.standby_password": "next-not-a-secret-0001"}
+	rs, _, err := rotateTargets(cfg, s, []string{"apps.gate.cookie_secret"}, false, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := paths(rs); !slices.Equal(got, []string{"apps.gate.cookie_secret", "cluster.standby_password"}) {
+		t.Errorf("rotators = %v", got)
+	}
+}
+
+// Paths are refused, each with why, before any host is reached: out of
+// scope, someone else's to rotate, or not a secret at all.
+func TestSecretsRotateRefusesBeforeReachingAHost(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	for args, want := range map[string]string{
+		"":                                    "names the secrets to rotate",
+		"--all apps.gate.cookie_secret":       "--all takes no path",
+		"apps.auth.encryption_key":            "unreadable",
+		"apps.chat.mas_encryption_secret":     "unreadable",
+		"sites.home-a.wireguard_private_key":  "paisans mesh rekey",
+		"apps.talk.oauth_passphrase":          "apps.talk.oauth",
+		"external.smtp_password":              "no rotation",
+		"apps.talk.nonsense":                  "no rotation",
+		"oidc_clients.gate.client_secret":     "oauth2-proxy",
+		"cluster.standby_password nonsense.x": "no rotation",
+	} {
+		err := runSecretsRotate(rotateArgs(configPath, secretsPath, strings.Fields(args)...), strings.NewReader(""), &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err = %v, want %q", args, err, want)
+		}
+	}
+}
+
+// Review Focus 5: a rotation does not start while a mesh rekey is
+// unfinished, and says which command finishes it.
+func TestSecretsRotateRefusedMidRekey(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, func(text string) string {
+		return strings.Replace(text, `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=",`, `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=", wireguard_next_private_key: "REREREREREREREREREREREREREREREREREREREREREQ=",`, 1)
+	})
+	for _, args := range [][]string{{"--all"}, {"apps.gate.cookie_secret", "--execute"}} {
+		err := runSecretsRotate(rotateArgs(configPath, secretsPath, args...), strings.NewReader(""), &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "paisans mesh rekey") {
+			t.Errorf("%v: err = %v", args, err)
+		}
+	}
+}
+
+// Review Focus 5: apply refuses while a rotation is pending, with and
+// without --site, and names the command that finishes it.
+func TestApplyRefusesMidRotation(t *testing.T) {
+	configPath, secretsPath := rotateDeployment(t, withRotation("apps.gate.cookie_secret"))
+	log := failingSSH(t)
+	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
+		var err error
+		captureStdout(t, func() {
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...))
+		})
+		if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
+			t.Errorf("apply %v: err = %v", extra, err)
+		}
+	}
+	if reached, _ := os.ReadFile(log); len(reached) > 0 {
+		t.Errorf("a refused apply reached a host:\n%s", reached)
+	}
+}
+
+// A secret with nothing to check it is listed as kept with its reason, in
+// the dry run, beside the rotations that do run; and the dry run asks
+// nothing.
+func TestSecretsRotateListsKeptSecrets(t *testing.T) {
+	_, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	before, _ := os.ReadFile(secretsPath)
+	var out bytes.Buffer
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "apps.talk.rabbitmq_password", "apps.gate.cookie_secret"), terminalStdin(t, "", true), &out)
+	if err != nil {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	k := rec.Index("done", "apps.talk.rabbitmq_password")
+	if k < 0 || rec.Index("section", "kept") > k {
+		t.Errorf("the rabbitmq password is not listed as kept:\n%s", rec.Lines())
+	}
+	if rec.Index("explain", "starts no RabbitMQ") < k {
+		t.Errorf("the kept secret's reason is not given:\n%s", rec.Lines())
+	}
+	if rec.Index("section", "rotate apps.gate.cookie_secret") < 0 {
+		t.Errorf("the cookie secret's rotation is not planned:\n%s", rec.Lines())
+	}
+	if rec.Index("section", "rotate apps.talk.rabbitmq_password") >= 0 {
+		t.Errorf("a kept secret is planned for rotation:\n%s", rec.Lines())
+	}
+	if strings.Contains(out.String(), "Type sign out") {
+		t.Error("a dry run asked for sign out")
+	}
+	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+		t.Error("a dry run changed the secrets file")
+	}
+}
+
+// A run that signs members out asks for `sign out` at a terminal; without
+// one it is refused, and so is any other answer, with nothing changed.
+func TestSecretsRotateAsksSignOut(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		answer   string
+		terminal bool
+		want     string
+	}{
+		{"no terminal", "sign out\n", false, "stdin is not one"},
+		{"wrong word", "yes\n", true, `"yes" is not sign out`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, rec := fakeRotateHosts(t)
+			configPath, secretsPath := rotateDeployment(t, nil)
+			before, _ := os.ReadFile(secretsPath)
+			err := runSecretsRotate(rotateArgs(configPath, secretsPath, "apps.gate.cookie_secret", "--execute"), terminalStdin(t, tc.answer, tc.terminal), &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "Nothing was changed") {
+				t.Errorf("err = %v\n%s", err, rec.Lines())
+			}
+			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+				t.Error("a refused run changed the secrets file")
+			}
+		})
+	}
+
+	// Typed at a terminal, the run goes on: stage 1 writes the next value,
+	// and the fake host refuses the apply after it.
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	var out bytes.Buffer
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "apps.gate.cookie_secret", "--execute"), terminalStdin(t, "sign out\n", true), &out)
+	if err == nil || strings.Contains(err.Error(), "sign out") {
+		t.Errorf("err = %v\n%s", err, rec.Lines())
+	}
+	if !strings.Contains(out.String(), "Type sign out") {
+		t.Errorf("sign out was not asked:\n%s", out.String())
+	}
+	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if next := s.Rotations["apps.gate.cookie_secret"]; next == "" || next == "fixture-not-a-secret-gate-cookie" {
+		t.Errorf("stage 1 did not write a next value: %v", s.Rotations)
+	}
+	claimed := false
+	for _, c := range w.commands {
+		claimed = claimed || strings.Contains(c, registry.Path)
+	}
+	if !claimed {
+		t.Errorf("no host was claimed before it was written to:\n%s", strings.Join(w.commands, "\n"))
+	}
+}
+
+// A run that signs nobody out asks nothing.
+func TestSecretsRotateAsksNothingWithoutSignOut(t *testing.T) {
+	_, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	var out bytes.Buffer
+	runSecretsRotate(rotateArgs(configPath, secretsPath, "storage.garage.admin_token", "--execute"), terminalStdin(t, "", false), &out)
+	if strings.Contains(out.String(), "sign out") {
+		t.Errorf("asked:\n%s\n%s", out.String(), rec.Lines())
+	}
+}
+
+// A site that does not answer over ssh, and an unhealthy cluster, refuse
+// the run before anything changes.
+func TestSecretsRotateRefusesAnUnreadyDeployment(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*rotateWorld)
+		want  string
+	}{
+		{"silent site", func(w *rotateWorld) { w.silent["watch"] = true }, "watch does not answer over ssh"},
+		{"sick etcd", func(w *rotateWorld) { w.sickEtcd = true }, "etcd is unhealthy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, rec := fakeRotateHosts(t)
+			tc.setup(w)
+			configPath, secretsPath := rotateDeployment(t, nil)
+			before, _ := os.ReadFile(secretsPath)
+			err := runSecretsRotate(rotateArgs(configPath, secretsPath, "storage.garage.admin_token", "--execute"), strings.NewReader(""), &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "Nothing was changed") {
+				t.Errorf("err = %v\n%s", err, rec.Lines())
+			}
+			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+				t.Error("a refused run changed the secrets file")
+			}
+		})
+	}
+}
+
+// The plan says what each rotation's cost alone does not: who deletes the old
+// OIDC and S3 secrets and when, a one-member cluster's restart in place, and
+// every node a Garage rpc_secret step covers.
+func TestSecretsRotateNotes(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		"oidc_clients.docs.client_secret": "deleted at Pocket ID",
+		"apps.docs.s3_secret_access_key":  "deleted from Garage",
+		"storage.garage.rpc_secret":       "home-a, home-b",
+		"external.acme_dns_token":         "paisans secrets set external.acme_dns_token",
+	} {
+		if got := strings.Join(rotationNotes(cfg, path), " "); !strings.Contains(got, want) {
+			t.Errorf("%s: notes %q, want %q", path, got, want)
+		}
+	}
+	if got := rotationNotes(cfg, "cluster.standby_password"); len(got) != 0 {
+		t.Errorf("a two-member cluster's role notes %q", got)
+	}
+	cfg.Cluster.Sites = cfg.Cluster.Sites[:1]
+	if got := strings.Join(rotationNotes(cfg, "cluster.standby_password"), " "); !strings.Contains(got, "in place") {
+		t.Errorf("a one-member cluster's role notes %q", got)
+	}
+}
+
+// The secrets file takes the OAuth unit's path, which names no key of its
+// own, under rotations, encrypted and back.
+func TestRotationsHoldTheOAuthUnitPath(t *testing.T) {
+	dir := t.TempDir()
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "keys.txt")
+	if err := os.WriteFile(keyFile, []byte(identity.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SOPS_AGE_KEY_FILE", keyFile)
+	if err := os.WriteFile(filepath.Join(dir, config.SOPSConfigName), []byte("creation_rules:\n  - age: "+identity.Recipient().String()+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Encrypted = true
+	unit := "oauth_passphrase: p\noauth_encryption_key: k\n"
+	s.Rotations = map[string]string{"apps.talk.oauth": unit}
+	store := secretsStore{path: filepath.Join(dir, "secrets.enc.yaml"), id: s.ID}
+	if err := store.Save(s); err != nil {
+		t.Fatal(err)
+	}
+	back, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Rotations["apps.talk.oauth"] != unit || !back.Encrypted || back.UnknownKeys {
+		t.Errorf("rotations = %q, encrypted %v, unknown keys %v", back.Rotations, back.Encrypted, back.UnknownKeys)
+	}
+}

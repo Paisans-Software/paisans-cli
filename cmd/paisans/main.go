@@ -79,6 +79,8 @@ Usage:
   paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
+  paisans secrets rotate <path>... | --all [--config paisans.yaml]
+               [--secrets secrets.enc.yaml] [--sudo=false] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
                [--first-name <f>] [--last-name <l>] [--login-link]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -213,6 +215,17 @@ Commands:
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
+             rotate: replace secrets, named by their paths in the secrets
+             file (apps.<app>.oauth for Mbin's OAuth2 keys), or every one
+             in scope with --all, one at a time in gated stages: a next
+             value in the secrets file, the side that checks it, each
+             site that uses it healthy before the next, then the value
+             promoted. Lists the secrets it keeps and why. Refuses while a
+             mesh rekey is unfinished, a site does not answer, or etcd or
+             Patroni is unhealthy; apply refuses while a rotation is
+             unfinished. A run that signs members out asks for sign out
+             at a terminal. A stopped run resumes. Writes nothing
+             without --execute.
   app        admin create: make sure a user exists, is verified and is an
              administrator of Pocket ID, and is in every admin group the
              apps signing in through it read. There is no password: a
@@ -688,6 +701,9 @@ func runApply(args []string) error {
 		warnUnencrypted(r, *secretsPath)
 	}
 	if err := refuseMidRekey(secrets); err != nil {
+		return err
+	}
+	if err := refuseMidRotation(secrets); err != nil {
 		return err
 	}
 	// apply does not call secretsgen.Fill either, and this is the path that

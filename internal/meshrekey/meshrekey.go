@@ -618,17 +618,29 @@ type endpointHealth struct {
 // streaming: the cluster a site's rekey may take a tunnel from. A paused
 // Patroni still reports its roles and states, so this reads the same during
 // a relay's swap.
-func (p *Plan) health() error {
-	d := p.dep()
-	if len(p.cfg.Etcd.Members) > 0 {
-		at := p.transports[p.cfg.Etcd.Members[0]]
+func (p *Plan) health() error { return ClusterHealth(p.cfg, p.transports) }
+
+// ClusterHealth is nil when etcd answers healthy at every voter cfg declares,
+// and Patroni has exactly one member leading and running and every other
+// data site streaming. It is the gate mesh rekey holds every site's rekey
+// to, and `secrets rotate` refuses a run on a cluster that fails it, since
+// a password changed on a limping cluster can leave a member unable to
+// rejoin. transports reaches the first etcd voter and the first data site;
+// it only reads. A deployment that declares neither is healthy.
+func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) error {
+	d := cfg.Deployment()
+	if len(cfg.Etcd.Members) > 0 {
+		at := transports[cfg.Etcd.Members[0]]
+		if at == nil {
+			return fmt.Errorf("%s: no way to reach it to read etcd's health", cfg.Etcd.Members[0])
+		}
 		out, err := at.Run(apply.Etcdctl(d, "endpoint health --cluster -w json"))
 		var health []endpointHealth
 		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
 			if err != nil {
-				return fmt.Errorf("%s: etcd's endpoint health: %v", p.cfg.Etcd.Members[0], err)
+				return fmt.Errorf("%s: etcd's endpoint health: %v", cfg.Etcd.Members[0], err)
 			}
-			return fmt.Errorf("%s: etcd's endpoint health is not JSON", p.cfg.Etcd.Members[0])
+			return fmt.Errorf("%s: etcd's endpoint health is not JSON", cfg.Etcd.Members[0])
 		}
 		var sick, missing []string
 		for _, h := range health {
@@ -640,8 +652,8 @@ func (p *Plan) health() error {
 		if len(sick) > 0 {
 			return fmt.Errorf("etcd is unhealthy at %s", strings.Join(sick, ", "))
 		}
-		for _, name := range p.cfg.Etcd.Members {
-			at := "//" + p.cfg.Sites[name].Address + ":"
+		for _, name := range cfg.Etcd.Members {
+			at := "//" + cfg.Sites[name].Address + ":"
 			found := false
 			for _, h := range health {
 				found = found || strings.Contains(h.Endpoint, at)
@@ -654,9 +666,12 @@ func (p *Plan) health() error {
 			return fmt.Errorf("etcd answers for no endpoint of the voter %s", strings.Join(missing, ", "))
 		}
 	}
-	if len(p.cfg.Cluster.Sites) > 0 {
-		at := p.cfg.Cluster.Sites[0]
-		out, err := p.transports[at].Run(d.ComposeCmd("infra") + " exec -T patroni patronictl -c /home/postgres/postgres.yml list -f json")
+	if len(cfg.Cluster.Sites) > 0 {
+		at := cfg.Cluster.Sites[0]
+		if transports[at] == nil {
+			return fmt.Errorf("%s: no way to reach it to read Patroni's members", at)
+		}
+		out, err := transports[at].Run(d.ComposeCmd("infra") + " exec -T patroni patronictl -c /home/postgres/postgres.yml list -f json")
 		if err != nil {
 			return fmt.Errorf("%s: patronictl list: %v", at, err)
 		}
@@ -687,7 +702,7 @@ func (p *Plan) health() error {
 		if len(leaders) != 1 {
 			problems = append(problems, fmt.Sprintf("%d members lead, not one", len(leaders)))
 		}
-		for _, name := range p.cfg.Cluster.Sites {
+		for _, name := range cfg.Cluster.Sites {
 			if !listed[name] {
 				problems = append(problems, name+" is not a member")
 			}

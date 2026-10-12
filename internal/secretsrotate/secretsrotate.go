@@ -85,6 +85,11 @@ type Item struct {
 	Pending bool
 	// Whole is a rotation that keeps its own staging.
 	Whole bool
+	// Notes are what the plan says about this rotation beyond its cost,
+	// shown under it at every verbosity, Eg: that the old client secrets are
+	// deleted at Pocket ID once every site runs the new one. The command
+	// that plans the run fills them in, since they come from the deployment.
+	Notes []string
 }
 
 // Run is a whole run: the rotations in order.
@@ -250,6 +255,9 @@ func (r *Run) Show(w ui.Reporter) {
 		path := it.Rotator.Path()
 		w.Section("rotate " + path)
 		w.Step("cost: "+costText(it.Cost)).End(ui.Pending, "")
+		for _, note := range it.Notes {
+			w.Explain(note)
+		}
 		if it.Whole {
 			w.Step("rotated by its own staged command").End(ui.Pending, "")
 			continue
