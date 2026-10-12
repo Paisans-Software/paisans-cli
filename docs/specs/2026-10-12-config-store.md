@@ -24,6 +24,10 @@ Founder decisions, 2026-10-12, in session:
 
 * **Sites hold recovery copies now and are the shared source of truth later**;
   the version history and fork detection are built from the start.
+* **The anchor is the operator's own signature, or a pinned root.** The
+  operator's own SSH key, recorded by `paisans admin register`, or a root hash
+  they pin, is where trust starts; a history found only on the sites is never
+  trusted on its own. Founder decision, 2026-10-12.
 * **One signature, from any current admin.** Every admin is trusted with the
   whole deployment already (they hold the configuration and can decrypt the
   secrets); signatures are for telling an admin from someone who is not one, and
@@ -61,10 +65,11 @@ A version is a git commit whose tree holds exactly `paisans.yaml`,
 * **Its message** carries `Paisans-Revision: <n>`, one more than its highest
   parent. The commit date is for people; nothing decides by it, because any
   host's clock can be wrong and anyone writing a copy can set it.
-* **Its digest.** Its `secrets.enc.yaml` holds `paisans.config_digest`: the
-  SHA-256 of its `paisans.yaml` and of its `.sops.yaml`. sops computes a MAC over
-  every value with a data key only the recipients can unwrap, so only someone who
-  can decrypt the file can write a digest that verifies.
+
+The signature covers the commit, and so the three files in its tree. Nothing in
+the files themselves can prove who wrote them: encrypting to an age recipient
+needs only the recipient's public key, which every stored `.sops.yaml` names, so
+anyone can write a secrets file that decrypts for every admin.
 
 Every version is stored under a ref named for its own hash,
 `refs/versions/<sha>`, so two versions never compete for a name, and nothing is
@@ -73,34 +78,61 @@ ever deleted.
 ## Which versions the workstation trusts
 
 The sites keep whatever they are sent. Every decision is made on the workstation,
-by these rules, each checked for every version:
+and it starts from something the operator holds that nobody else can forge.
 
-1. **The digest.** The secrets file decrypts with the operator's age key, sops's
-   MAC verifies, and `paisans.config_digest` matches the version's own
-   `paisans.yaml` and `.sops.yaml`. This is the trust anchor: it holds even on a
-   workstation that has never seen the deployment, against someone with root on
-   every site that answers, because they cannot decrypt the file.
-2. **The signer.** The signing key belongs to an admin listed in every parent's
-   `paisans.yaml`. The root, which has no parent, is signed by an admin it lists
-   itself.
-3. **Removal is final.** Once a valid version removes an admin, every version
-   that admin signed and that is not an ancestor of that removal is invalid. It is
-   not a fork and is never shown as one, so a former admin cannot stall the
-   deployment by publishing from an old parent.
-4. **One root.** More than one valid root is refused, with each root's hash,
-   signer and date; the operator pins one with `--root <hash>`. A workstation
-   that has pulled before keeps the root in `.paisans/config-root` and checks it
-   every time.
+**The anchor** is the newest version signed by the operator's own SSH key, the
+one `paisans admin register` recorded (below), or a root hash the operator pins
+with `--root <hash>`. A workstation that has pulled before keeps both in
+`.paisans/`. With neither, a pull or recovery is refused and asks for
+`--root`: a history found only on the sites, however consistent, is one someone
+with root on those sites could have written, signed with their own key and
+listing themselves as an admin.
 
-**The head** is the valid version with the highest revision that no other valid
-version builds on. Two such versions are a fork.
+**Trusted** versions are the anchor, every ancestor of it, and every version
+that passes all of these:
+
+1. **Shape.** Its tree holds exactly the three files, its signature is good, and
+   its revision is one more than its highest parent's.
+2. **The signer.** Every parent is trusted, and the signing key belongs to an
+   admin listed in every parent's `paisans.yaml`. Someone who is not an admin
+   cannot extend the history, however many sites they control.
+3. **Removal is final, key by key.** When a trusted version drops a key that a
+   parent listed (an admin removed, or one of their keys rotated out), every
+   version signed by that key that is not an ancestor of the removal is not
+   trusted. A version that is not trusted removes nothing. Removals in the
+   anchor's own history always stand, because the operator signed after them.
+   Two removals that each would bar the other, neither in the anchor's history,
+   are refused and shown to the operator; nothing decides between them by
+   revision or hash, since the one who signs chooses both.
+
+**The head** is the trusted version with the highest revision that no other
+trusted version builds on. Two such versions are a fork.
 
 **Removing an admin who could decrypt the file.** Their age key comes out of
 `.sops.yaml` and the file is re-encrypted under a new data key (`sops rotate
---rm-age`) before the version that removes them is published. Until then they
-hold the data key, and could write a digest for a version built on an older
-parent that still lists them; rule 3 rejects it, and the re-encryption makes it
-impossible.
+--rm-age`) before the version that removes them is published, so nothing
+written afterwards is readable to them.
+
+## `paisans admin register`
+
+An admin who has never applied has signed nothing, so their workstation has no
+anchor of its own. `admin register` gives them one without changing anything on
+a host:
+
+* It finds the operator's key: the key in their ssh-agent that matches one listed
+  under their entry in `admins`, or the one named with `--key`. It refuses when
+  none matches and says which `admins` entry to add the key to, which another
+  admin publishes.
+* It gathers, then signs an **attestation**: a version whose tree is exactly the
+  head's and whose only parent is the head, one revision on. It records the key
+  in `.paisans/signing-key` and the attestation as the anchor.
+* It attests only a head whose three files equal the operator's local files,
+  which are the copy they already trust; otherwise it refuses and shows the
+  difference. On a workstation with a pinned root it may attest the head the
+  pin leads to.
+
+`config publish` and `apply` sign with the recorded key, so after `admin
+register` every later version is the operator's own anchor as well.
 
 ## Rollback
 
@@ -109,8 +141,8 @@ site can delete the newer ones there and serve an old one. Applying it would put
 back old secrets, undoing a `secrets rotate` or a `mesh rekey`. No signature can
 prove a version is the newest; these make an old one visible:
 
-* **The workstation remembers.** It records the newest revision it has seen and
-  refuses anything older.
+* **The workstation remembers.** Nothing older than its anchor is ever a head,
+  and it records the newest revision it has seen and refuses anything older.
 * **A majority of sites.** A pull or a recovery reports how many sites it reached
   directly, and with fewer than a majority the operator types `partial` to go on.
 * **Hosts are witnesses.** Each host's grant record
@@ -142,8 +174,10 @@ with the rest.
 
 ## Commands
 
-Local state is two files beside `paisans.yaml`: `.paisans/config-root` and
-`.paisans/config-head`, the version the local files started from.
+Local state is three files beside `paisans.yaml`: `.paisans/config-root`,
+`.paisans/config-head`, the version the local files started from, and
+`.paisans/signing-key`, the operator's public key that `admin register`
+recorded. The anchor is the newest version that key signed.
 
 **Gathering.** `pull`, `recover` and the stale-copy check in `apply` all gather
 the same way before deciding anything:
@@ -164,7 +198,8 @@ could inflate it.
 
 | Command | Does |
 |---|---|
-| `paisans config publish` | writes the digest into the secrets file, commits the three files with the base as parent, signs with an admin key from the ssh-agent, and pushes a `git bundle` to every site it reaches over the existing ssh transport, where `sudo git fetch` stores it. Refused: the base is not the sites' head; no loaded key belongs to an admin listed in the parent; no site answers |
+| `paisans admin register` | finds the operator's key, gathers, and signs an attestation of the head when it equals the local files; records the key and the anchor (above) |
+| `paisans config publish` | commits the three files with the base as parent, signs with an admin key from the ssh-agent, and pushes a `git bundle` to every site it reaches over the existing ssh transport, where `sudo git fetch` stores it. Refused: the base is not the sites' head; no loaded key belongs to an admin listed in the parent; no site answers |
 | `paisans apply --execute` | before the review, gathers and refuses a stale base; after approval, publishes, then applies, so the store shows the declared state even when the apply stops part way; writes the version into each host's grant record; refuses an older revision than a host's record unless `rollback` is typed |
 | `paisans config pull` | gathers and verifies; with no local edits, moves the files to the head; with local edits on an older base, refuses, writes the head's files to `.paisans/incoming/` and shows the difference |
 | `paisans config publish --merge` | a version whose parents are every head, after the operator has merged by hand; it resolves a fork and an incoming change alike |
@@ -187,7 +222,7 @@ the operator sets it again on the merged base.
 ## Testing
 
 * The trust rules against built histories: a forged root, a version signed by an
-  admin removed earlier, a digest mismatch, a replayed old version, a fork, a
+  admin removed earlier, a key rotated out, two removals that bar each other, a history with no anchor, a replayed old version, a fork, a
   merge, removal is final, more than one root.
 * Publishing to a local bare repository standing in for a site, and a resumed
   publish after some sites failed.
