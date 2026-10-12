@@ -109,8 +109,8 @@ func TestAnUnreachableRegistrySaysToRunAgain(t *testing.T) {
 	if want := "could not reach ghcr.io to resolve `talk` image `" + def + "`"; hint != want {
 		t.Errorf("hint\n%s\nwant\n%s", hint, want)
 	}
-	says(t, explain, "once this workstation reaches ghcr.io", "`apps.talk.images.app`", "a digest", "Apply does not keep `"+mbinTag+"`, which this site runs")
-	saysNot(t, explain, "paisans-verified", "configuration's")
+	says(t, explain, "once this workstation reaches ghcr.io", "`apps.talk.images.app`", "a digest", "Apply does not keep the running `"+mbinTag+"`: it can't confirm that build is `"+kinds.ParseReference(def).Tag+"`.")
+	saysNot(t, explain, "paisans-verified", "configuration's", "which this site runs", "is a build of")
 }
 
 // An image the registry will not show an anonymous pull is private, or
