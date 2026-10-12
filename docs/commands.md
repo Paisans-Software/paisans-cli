@@ -193,9 +193,8 @@ paisans secrets rotate --all --restart --execute           # the full list again
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
   in the run signs members out, and is refused without one. Refuses before
   anything changes when a `mesh rekey` is unfinished, a site does not answer
-  over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS token, an
-  SMTP password, a client secret minted at Pocket ID) is the value every host
-  using it runs: replace it at its issuer and set it with `secrets set` first,
+  over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS token or
+  an SMTP password) is the value every host using it runs: replace it at its issuer and set it with `secrets set` first,
   or name it with `--replaced` when that was done and applied already. Which
   value a host runs is read per secret: the host prints the hash of each line of
   the file that carries it, and the lines that carry it are compared, so another

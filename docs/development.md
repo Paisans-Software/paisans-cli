@@ -210,15 +210,18 @@ only the claim `--execute` makes in the host registry, which is root's, does.
 Pocket ID, restricted to the member and admin groups the app's `settings`
 name (`member_group` and `admin_group`, defaulting to `members` and
 `admins`; uptime's one group is `admin_group`, used as both, with no default
-because `validate` requires it), with a launch URL so Pocket ID's dashboard lists it, and records its ID and
+because `validate` requires it; the gate's is `members` alone, with no
+setting), with a launch URL so Pocket ID's dashboard lists it, except for
+Synapse and the gate, which have no page for a member, and records its ID and
 secret under `oidc_clients.<app>`. Every step is printed with what it sends and
 nothing changes without `--execute`. The secret is generated on the
 workstation and written to the secrets file before Pocket ID is sent it, and is
 never printed. `--rotate-secret` adds a new secret, leaving the old one valid.
 `apply` runs the same step for every app it starts (see *`apply` creates each
 app's OIDC client* below), so the command is for running it alone and for
-rotating. The known clients are Mbin's, Outline's, WriteFreely's and uptime's
-(`kinds.OIDCClient`), each with its callback cited from the pinned source. The launch URL is the app's
+rotating. The known clients are Mbin's, Outline's, WriteFreely's, uptime's,
+Synapse's (its authentication service's, at `kinds.MASRedirectURI`) and the
+gate's (`kinds.OIDCClient`), each with its callback cited from the pinned source. The launch URL is the app's
 hostname plus the kind's dashboard path (`kinds.DashboardPath`, Mbin's
 `/oauth/oidc/connect` so the tile signs the member in, otherwise `/`), or
 `apps.<app>.settings.sso_dashboard_link`, which `validate` refuses unless it is
@@ -960,8 +963,8 @@ secret through its four stages. Each secret is a `Rotator` (`rotator.go`) saying
 where its next value comes from, how the checking side learns it, which sites
 and stacks present it, and how the value is promoted, grouped into files by what
 checks the secret (`postgres.go`, `rabbitmq.go`, `garage.go`, `uptime.go`,
-`appsecret.go`), and `wrapped.go` for the pasted secrets and for the OIDC and S3
-rotations, which run `oidc client create --rotate-secret` and `storage
+`appsecret.go`), and `wrapped.go` for the pasted secrets (the DNS token and the
+SMTP passwords) and for the OIDC and S3 rotations, which run `oidc client create --rotate-secret` and `storage
 rotate-key` in their place in the order. `cmd/paisans/secretsrotate.go` maps a
 path to its rotator, builds `--all`'s order, and hands the engine a scoped
 `apply` rendered from the secrets with the next value in place, never from the

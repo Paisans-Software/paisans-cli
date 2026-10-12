@@ -140,14 +140,12 @@ community's decision.
       DNS token first, since it can point the community's names anywhere:
       revoke it at the provider, issue a new one scoped to the zone, and pipe
       it in. Then each SMTP password the deployment sends mail with, at the
-      mail provider, and the client secret of each app whose client `oidc
-      client create` cannot make (Synapse's, oauth2-proxy's), minted at
-      Pocket ID:
+      mail provider. Every OIDC client secret is minted by `secrets rotate`
+      itself, so none is replaced here:
 
       ```sh
       security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
       security find-generic-password -s smtp -w | paisans secrets set external.smtp_password
-      security find-generic-password -s chat-oidc -w | paisans secrets set oidc_clients.chat.client_secret
       ```
 
       `secrets rotate` hands each new value to the hosts in step 3. If an
@@ -322,9 +320,8 @@ included, and refuses while one does not answer.
    do not check.
 
 10. **Rotate the rest.** First replace the pasted secrets at their issuers
-    and set each, as in step 5.1 of the first case: each SMTP password, and
-    the client secret of each app whose client `oidc client create` cannot
-    make. When `home-b` did not hold the gateway, the DNS token is the one
+    and set each, as in step 5.1 of the first case: each SMTP password.
+    When `home-b` did not hold the gateway, the DNS token is the one
     they knew: replace it the same way. Then:
 
     ```sh
