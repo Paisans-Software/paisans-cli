@@ -36,8 +36,8 @@ The toolkit's `invite` kind renders exactly these variables. Names are part of t
 | `INVITE_LISTEN_ADDR` | listen address, default `:8080` |
 | `INVITE_PUBLIC_URL` | `https://<hostname>`, no trailing slash |
 | `INVITE_DATABASE_URL` | Postgres URL through the site's HAProxy |
-| `INVITE_SESSION_KEY` | base64 (std) of 32 bytes |
-| `INVITE_EMAIL_HASH_KEY` | base64 (std) of 32 bytes |
+| `INVITE_SESSION_KEY` | 32 bytes as unpadded base64url (43 characters), the toolkit's default secret shape |
+| `INVITE_EMAIL_HASH_KEY` | the same shape |
 | `INVITE_OIDC_ISSUER` | the identity app's URL |
 | `INVITE_OIDC_CLIENT_ID`, `INVITE_OIDC_CLIENT_SECRET` | the service's own client |
 | `INVITE_MEMBER_GROUP`, `INVITE_ADMIN_GROUP` | group names in the `groups` claim |
@@ -158,7 +158,7 @@ import (
 )
 
 func env(over map[string]string) func(string) string {
-	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	key := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	base := map[string]string{
 		"INVITE_PUBLIC_URL": "https://invite.example.org", "INVITE_DATABASE_URL": "postgres://x",
 		"INVITE_SESSION_KEY": key, "INVITE_EMAIL_HASH_KEY": key,
@@ -187,7 +187,7 @@ func TestDefaults(t *testing.T) {
 
 func TestRefusals(t *testing.T) {
 	for name, over := range map[string]map[string]string{
-		"short session key":  {"INVITE_SESSION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 16))},
+		"short session key":  {"INVITE_SESSION_KEY": base64.RawURLEncoding.EncodeToString(make([]byte, 16))},
 		"quota zero":         {"INVITE_QUOTA": "0"},
 		"quota too big":      {"INVITE_QUOTA": "101"},
 		"lifetime too long":  {"INVITE_LIFETIME_DAYS": "366"},
@@ -275,9 +275,9 @@ func Load(getenv func(string) string) (Config, error) {
 		return def
 	}
 	key := func(k string) []byte {
-		b, err := base64.StdEncoding.DecodeString(req(k))
+		b, err := base64.RawURLEncoding.DecodeString(req(k))
 		if err != nil || len(b) != 32 {
-			errs = append(errs, fmt.Errorf("%s must be base64 of exactly 32 bytes", k))
+			errs = append(errs, fmt.Errorf("%s must be 32 bytes as unpadded base64url", k))
 			return nil
 		}
 		return b
