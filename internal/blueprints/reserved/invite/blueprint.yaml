@@ -1,0 +1,50 @@
+# The invite blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/kinds reads it; Parse there documents every key.
+apiVersion: paisans.blueprint/v1
+name: invite
+services:
+  # paisans-invite: member invites with the code of conduct before
+  # the account (docs/specs/2026-10-12-invite-service.md). Cluster
+  # placement only, so the PostgresService row is the cluster's role
+  # and database, never a container of its own.
+  #
+  # 0.1.0 (git tag v0.1.0, without the `v` here) was checked against
+  # ghcr.io on 2026-10-12 by requesting the manifest for that exact
+  # tag anonymously (amd64 and arm64), and inspected after a pull: it
+  # declares no VOLUME.
+  - {name: "app", image: "ghcr.io/paisans-software/paisans-invite:0.1.0", purpose: "the invite service"}
+  - {name: "postgres", purpose: "its role and database on the cluster"}
+database: {engine: postgres}
+# Not the service's default 8080: Mbin publishes 8080, and both are
+# clustered, so they share every apps site's mesh address. The service
+# reads its port from INVITE_LISTEN_ADDR, which this toolkit renders, and
+# its image's health check probes the same variable.
+port: 8082
+config:
+  format: env
+  file: ".env"
+# paisans-invite's /healthz answers 200 when its database does.
+health: {path: "/healthz", status: [200]}
+# Invitees reach /i/* before they have an account; a member gate would
+# lock them out.
+gate: {gateable: false}
+mail: reads
+# paisans-invite's callback is GET /auth/callback with PKCE S256
+# (internal/web/auth.go); it reads the groups claim to tell members
+# from admins.
+oidc:
+  callback: "/auth/callback"
+  pkce: true
+  member_group_setting: "member_group"
+  admin_group_setting: "admin_group"
+  default_member_group: "members"
+  default_admin_group: "admins"
+  reads_groups: true
+secrets:
+  required:
+    - {key: "email_hash_key", why: "paisans-invite refuses to start without INVITE_EMAIL_HASH_KEY"}
+    - {key: "session_key", why: "paisans-invite refuses to start without INVITE_SESSION_KEY"}
+  # email_hash_key keys the hash of a declined address; session_key signs
+  # the sign-in cookie (docs/specs/2026-10-12-invite-service.md).
+  generate: ["email_hash_key", "session_key"]
+  self_rotated: ["session_key"]

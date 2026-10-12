@@ -1,10 +1,27 @@
 package render
 
-// SettingOwner is one row of the table of settings that own a rendered key,
-// exported so the external tests can check every row is true.
-type SettingOwner = settingOwner
+import (
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
+)
 
-func SettingOwners() []SettingOwner { return settingOwners }
+// SettingOwner is one setting that owns a rendered key, with its kind,
+// exported so the external tests can check every one is true.
+type SettingOwner struct {
+	Kind config.Kind
+	kinds.SettingKey
+}
+
+// SettingOwners is every kind's settings that own a rendered key.
+func SettingOwners() []SettingOwner {
+	var out []SettingOwner
+	for _, kind := range config.Kinds() {
+		for _, k := range kinds.SettingKeys(kind) {
+			out = append(out, SettingOwner{kind, k})
+		}
+	}
+	return out
+}
 
 // ComposeSets exposes the compose.yaml scan to a test of its own.
 var ComposeSets = composeSets

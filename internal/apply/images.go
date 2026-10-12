@@ -379,7 +379,7 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	host := imagedigest.Host(want)
 	switch {
 	case errors.Is(failed, imagedigest.ErrNotFound) && image.Default && kinds.Channel(want) != "":
-		// The kind's default follows a channel (internal/kinds/kinds.go),
+		// The kind's default follows a channel (its record in internal/kinds),
 		// which exists only once the fork's promote workflow has moved it
 		// to a release the toolkit was verified against
 		// (docs/specs/2026-10-11-stack-channels.md, "Promotion"). Until

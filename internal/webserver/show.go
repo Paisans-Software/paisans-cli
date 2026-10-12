@@ -162,7 +162,7 @@ func directive(lines []string, level int) string {
 // unasked.
 //
 // Each also refuses what the toolkit's own snippet for the uptime kind
-// refuses (templates/uptime/caddy.snippet.tmpl), because behind the
+// refuses (internal/blueprints/reserved/uptime/caddy.snippet.tmpl), because behind the
 // operator's web server that snippet is not in front of the app. Apache's
 // refusal is a 403 from Require rather than a 404.
 //

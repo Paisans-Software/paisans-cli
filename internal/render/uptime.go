@@ -136,21 +136,19 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		for _, site := range sites {
 			monitors = append(monitors, seedMonitor{
 				Name: directCheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, appPort[app.Kind], health.Path),
+				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, kinds.Port(app.Kind), health.Path),
 				ExpectedStatus: health.Expect, FollowRedirects: &noRedirects,
 				// What the gateway would send, minus the gateway.
 				RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
-			if app.Kind == config.KindMbin && gated {
-				// A gated Mbin runs as a private instance, so its API refuses
-				// a read with no token. Through the edge the gate answers
-				// first, so this is asked of the app directly: it is what
-				// notices an image that ignores MBIN_PRIVATE_INSTANCE.
+			if probe := kinds.GateFor(app.Kind).PrivateProbe; probe != nil && gated {
+				// Through the edge the gate answers first, so this is asked
+				// of the app directly (kinds.GateSpec.PrivateProbe).
 				monitors = append(monitors, seedMonitor{
 					Name: privateAPICheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, appPort[app.Kind], kinds.MbinPrivateAPIProbe),
-					ExpectedStatus: "401", FollowRedirects: &noRedirects,
+					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, kinds.Port(app.Kind), probe.Path),
+					ExpectedStatus: probe.Expect, FollowRedirects: &noRedirects,
 					RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 				})

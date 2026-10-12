@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -2941,7 +2943,7 @@ func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
 		if !spec.Gateable || spec.SignedFetch == nil {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join("templates", string(kind), "caddy.snippet.tmpl"))
+		body, err := fs.ReadFile(blueprints.Templates, string(kind)+"/caddy.snippet.tmpl")
 		if err != nil {
 			t.Fatal(err)
 		}

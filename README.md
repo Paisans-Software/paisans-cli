@@ -2594,11 +2594,14 @@ upstream's [config reference](https://writefreely.org/docs/latest/admin/config),
 which documents neither. Synapse reads
 [`homeserver.yaml`](https://element-hq.github.io/synapse/latest/usage/configuration/homeserver_sample_config.html).
 
-So the unit the toolkit ships per `kind` is a **template directory**, and
-`apply` renders every file in it:
+So the unit the toolkit ships per `kind` is a **blueprint**: a directory
+holding a `blueprint.yaml`, which records what the toolkit knows about the
+application, and the templates `apply` renders, every one of them
+(`docs/specs/2026-10-12-blueprints-and-catalogs.md`):
 
 ```
-templates/mbin/                             templates/writefreely/
+internal/blueprints/core/mbin/              internal/blueprints/core/writefreely/
+  blueprint.yaml                              blueprint.yaml
   compose.yaml.tmpl                           compose.yaml.tmpl
   .env.secret.tmpl                            config.ini.secret.tmpl
   caddy.snippet.tmpl                          .env.secret.tmpl
@@ -2608,7 +2611,7 @@ templates/mbin/                             templates/writefreely/
   oauth/public.pem.tmpl
 ```
 
-**A template's path is its destination.** The layout under `templates/<kind>/`
+**A template's path is its destination.** The layout of a blueprint's templates
 mirrors the layout under `/srv/paisans/<token>/<stack>/` on the host, so where a rendered file
 lands is read off the tree rather than held in a mapping somewhere else. A file
 the application expects at a path inside its own image is bind-mounted there by

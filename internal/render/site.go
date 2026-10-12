@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
@@ -514,7 +515,7 @@ func (p *planner) renderSnippets(base string, routes []route) ([]File, error) {
 		values.Hostname = r.Hostname
 		values.PublicURL = "https://" + r.Hostname
 
-		path := "templates/" + string(app.Kind) + "/" + kinds.SnippetFor(r.Role)
+		path := string(app.Kind) + "/" + kinds.SnippetFor(r.Role)
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
@@ -562,7 +563,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		path := "templates/" + string(app.Kind) + "/" + gateSnippetTemplate
+		path := string(app.Kind) + "/" + gateSnippetTemplate
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
@@ -596,7 +597,7 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 		Hostname: app.Hostname,
 		Pinned:   app.Placement.Mode == config.PlacementPinned,
 		Site:     app.Placement.Site,
-		Port:     appPort[app.Kind],
+		Port:     kinds.Port(app.Kind),
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),
 		Images:   p.appImages(app),
@@ -608,9 +609,9 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 // what git checked out, so a template left uncommitted is absent here even
 // though it is present on the machine that wrote it.
 func TemplateSet(kind config.Kind) ([]string, error) {
-	dir := "templates/" + string(kind)
+	dir := string(kind)
 	var out []string
-	err := fs.WalkDir(templateFS, dir, func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -626,12 +627,13 @@ func TemplateSet(kind config.Kind) ([]string, error) {
 
 // renderTemplateSet renders every file in a kind's template directory.
 //
-// A template's path is its destination: templates/<kind>/config/packages/x.yaml
+// A template's path is its destination: <kind>/config/packages/x.yaml in the
+// blueprint's templates (internal/blueprints)
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
-	dir := "templates/" + string(app.Kind)
-	entries, err := fs.ReadDir(templateFS, dir)
+	dir := string(app.Kind)
+	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
 		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Kind, err)
 	}
@@ -646,7 +648,7 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 
 	var files []File
 	sources := map[string]string{}
-	err = fs.WalkDir(templateFS, dir, func(path string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -692,7 +694,7 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 // rather than into the shared set, so that two kinds may name a file the same
 // thing, which they routinely do.
 func (p *planner) renderFile(path string, values appValues) (string, error) {
-	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(templateFS, path)
+	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(blueprints.Templates, path)
 	if err != nil {
 		return "", fmt.Errorf("parsing %s: %w", path, err)
 	}
@@ -905,7 +907,7 @@ func (p *planner) upstreams(name string) []string {
 	if !ok {
 		return nil
 	}
-	return p.upstreamsOnPort(name, appPort[app.Kind])
+	return p.upstreamsOnPort(name, kinds.Port(app.Kind))
 }
 
 // elsewhere reports whether a route has exactly one upstream and it is on a
