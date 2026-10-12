@@ -90,7 +90,6 @@ apps:
     placement: cluster
     settings:
       identity_app: auth
-      code_of_conduct: missing.md
   status:
     kind: uptime
     hostname: status.example.org

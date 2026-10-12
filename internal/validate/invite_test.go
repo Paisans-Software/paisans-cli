@@ -3,7 +3,6 @@ package validate_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
@@ -24,13 +23,46 @@ func TestInviteSignupsUnsetIsFine(t *testing.T) {
 	}
 }
 
-func TestInviteRecoveryUnsetCountsAsOff(t *testing.T) {
+func TestInviteRecoveryMustBeExplicitlyTrue(t *testing.T) {
+	for name, set := range map[string]func(map[string]any){
+		"false":   func(s map[string]any) { s["email_one_time_access_as_unauthenticated"] = false },
+		"deleted": func(s map[string]any) { delete(s, "email_one_time_access_as_unauthenticated") },
+	} {
+		cfg := load(t, "valid")
+		set(cfg.Apps["auth"].Settings)
+		if len(findings(validate.Check(cfg), "invite-recovery-disabled")) != 1 {
+			t.Fatalf("%s is not true and must be refused", name)
+		}
+	}
+}
+
+func TestInviteCodeOfConductIsText(t *testing.T) {
 	cfg := load(t, "valid")
-	app := cfg.Apps["auth"]
-	app.Settings["email_one_time_access_as_unauthenticated"] = false
-	cfg.Apps["auth"] = app
-	if len(findings(validate.Check(cfg), "invite-recovery-disabled")) != 1 {
-		t.Fatal("false is not true")
+	delete(cfg.Apps["invite"].Settings, "code_of_conduct")
+	if len(findings(validate.Check(cfg), "invite-code-of-conduct-missing")) != 1 {
+		t.Fatal("unset not refused")
+	}
+	for name, bad := range map[string]any{"empty": "", "whitespace": " \n\t ", "non-string": 42} {
+		if len(findings(withInviteSetting(t, "code_of_conduct", bad), "invite-code-of-conduct-missing")) != 1 {
+			t.Fatalf("%s not refused", name)
+		}
+	}
+	for name, good := range map[string]any{
+		"multi-line": "# Be kind\n\nTreat each other well.\n",
+		"path-like":  "code-of-conduct.md",
+	} {
+		if f := findings(withInviteSetting(t, "code_of_conduct", good), "invite-code-of-conduct-missing"); len(f) != 0 {
+			t.Fatalf("%s is text and must be accepted: %v", name, f)
+		}
+	}
+}
+
+func TestInviteWithoutSMTPIsTheOnlyRefusal(t *testing.T) {
+	r := validate.Check(load(t, "invite-without-smtp"))
+	for _, f := range r.Findings {
+		if f.Level == validate.Refuse && f.Rule != "invite-without-smtp" {
+			t.Fatalf("unexpected refusal %s", f.Rule)
+		}
 	}
 }
 
@@ -43,11 +75,14 @@ func TestInviteSettingRanges(t *testing.T) {
 			t.Fatalf("%s=%v not refused", key, bad)
 		}
 	}
+	for name, bad := range map[string]any{"quoted": "7", "float": 7.0} {
+		if len(findings(withInviteSetting(t, "login_link_days", bad), "invite-setting-invalid")) != 1 {
+			t.Fatalf("%s login_link_days not refused", name)
+		}
+	}
 	for key, good := range map[string]any{"invite_quota": 100, "login_link_days": 31, "require_approval": false} {
 		if len(findings(withInviteSetting(t, key, good), "invite-setting-invalid")) != 0 {
 			t.Fatalf("%s=%v is in range", key, good)
 		}
 	}
 }
-
-var _ = config.KindInvite

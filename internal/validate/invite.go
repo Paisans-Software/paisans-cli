@@ -2,7 +2,7 @@ package validate
 
 import (
 	"fmt"
-	"os"
+	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
@@ -69,14 +69,15 @@ func (c *checker) inviteWithoutSMTP() {
 	}
 }
 
+// inviteCodeOfConduct refuses a missing, non-string or blank code of
+// conduct. The setting is the Markdown text itself, so nothing reads a file.
 func (c *checker) inviteCodeOfConduct() {
 	for _, name := range c.inviteApps() {
-		setting, _ := c.cfg.Apps[name].Settings["code_of_conduct"].(string)
-		path := kinds.InviteCoCPath(c.cfg.Path, setting)
-		if fi, err := os.Stat(path); setting == "" || err != nil || !fi.Mode().IsRegular() {
+		text, ok := c.cfg.Apps[name].Settings["code_of_conduct"].(string)
+		if !ok || strings.TrimSpace(text) == "" {
 			c.refuse("invite-code-of-conduct-missing", fmt.Sprintf("apps.%s.settings.code_of_conduct", name),
-				"the code of conduct file is missing",
-				"names %q, which is not a file. Every invitee agrees to this file before an account exists. Put it beside paisans.yaml and name it here.", path)
+				"the code of conduct text is missing",
+				"is missing, empty or not text. Every invitee agrees to the code of conduct before an account exists. Put the community's code of conduct in code_of_conduct as a block of text (code_of_conduct: |).")
 		}
 	}
 }

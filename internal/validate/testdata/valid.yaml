@@ -90,7 +90,10 @@ apps:
     placement: cluster
     settings:
       identity_app: auth
-      code_of_conduct: code-of-conduct.md
+      code_of_conduct: |
+        # Be kind
+
+        Treat each other well.
   status:
     kind: uptime
     hostname: status.example.org
