@@ -98,7 +98,7 @@ func (r mbinRabbitMQ) ctl(e Env, verb string) string {
 
 func (r mbinRabbitMQ) sendable(next string) error {
 	if strings.HasPrefix(next, "-") {
-		return fmt.Errorf("%s: the password begins with a dash, which rabbitmqctl would read as an option, so it cannot be set or checked; remove the pending value and run again for a new one", r.Path())
+		return fmt.Errorf(`%s: the password begins with a dash, which rabbitmqctl would read as an option, so it cannot be set or checked. Remove the pending value as README.md, "A rotation that cannot finish", says, and run again for a new one`, r.Path())
 	}
 	if next == "" || strings.ContainsAny(next, "\n\x00") {
 		return fmt.Errorf("%s: the password is empty or holds a newline or NUL byte, which cannot be sent to the broker", r.Path())

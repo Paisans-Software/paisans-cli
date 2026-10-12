@@ -765,3 +765,38 @@ func TestWholeRunsWithNothingPending(t *testing.T) {
 		t.Fatalf("ran %v, pending when it ran: %v", h.ran, h.pending)
 	}
 }
+
+const cannotFinishSection = `"A rotation that cannot finish"`
+
+// Every refusal over a pending rotation that cannot finish names the section
+// that says how to end it by hand.
+func TestUnfinishablePendingNamesTheWayOut(t *testing.T) {
+	t.Run("no rotator", func(t *testing.T) {
+		w := newWorld(t, map[string]string{pw: "old"})
+		w.secrets.Rotations = map[string]string{"apps.gone.database_password": "x"}
+		_, err := secretsrotate.Plan(w.env(pw), []secretsrotate.Rotator{newRot(w, pw, "a")})
+		if err == nil || !strings.Contains(err.Error(), cannotFinishSection) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("its precheck refuses", func(t *testing.T) {
+		w := newWorld(t, map[string]string{pw: "old"})
+		w.secrets.Rotations = map[string]string{pw: "pw-next"}
+		r := newRot(w, pw, "a")
+		r.pre = errors.New("the configuration declares no app \"gone\"")
+		_, err := secretsrotate.Plan(w.env(pw), []secretsrotate.Rotator{prechecked{r}})
+		if err == nil || !strings.Contains(err.Error(), "declares no app") || !strings.Contains(err.Error(), cannotFinishSection) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("kept since it began", func(t *testing.T) {
+		w := newWorld(t, map[string]string{pw: "old"})
+		w.secrets.Rotations = map[string]string{pw: "pw-next"}
+		r := newRot(w, pw, "a")
+		r.pre = &secretsrotate.KeptError{Path: pw, Reason: "nothing checks it"}
+		run, err := secretsrotate.Plan(w.env(pw), []secretsrotate.Rotator{prechecked{r}})
+		if err == nil || !strings.Contains(err.Error(), cannotFinishSection) {
+			t.Fatalf("a pending rotation found kept was not refused: %v, %+v", err, run)
+		}
+	})
+}

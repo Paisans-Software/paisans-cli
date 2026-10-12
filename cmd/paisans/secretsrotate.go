@@ -466,7 +466,7 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 		}
 		r, err := rotatorFor(cfg, s, path, w)
 		if err != nil {
-			return nil, nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and no rotation of it can be built to finish it: %w", path, err)
+			return nil, nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and no rotation of it can be built to finish it: %w. %s", path, err, cannotFinish)
 		}
 		has[path] = true
 		out = append(out, r)

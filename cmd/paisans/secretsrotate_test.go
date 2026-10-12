@@ -853,3 +853,21 @@ func TestSecretsRotateReplacedIgnoresUnrelatedLines(t *testing.T) {
 		t.Fatalf("err = %v\n%s", err, rec.Lines())
 	}
 }
+
+// A pending rotation no rotation can be built for is refused, naming the way
+// to end it by hand; and so is apply while it is pending.
+func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, withRotation("apps.auth.encryption_key"))
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "apps.gate.cookie_secret"), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `"A rotation that cannot finish"`) {
+		t.Errorf("secrets rotate: err = %v", err)
+	}
+	var applyErr error
+	captureStdout(t, func() {
+		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"})
+	})
+	if applyErr == nil || !strings.Contains(applyErr.Error(), `"A rotation that cannot finish"`) {
+		t.Errorf("apply: err = %v", applyErr)
+	}
+}

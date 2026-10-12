@@ -275,3 +275,13 @@ func TestMbinRabbitMQResumesWithOneBrokerAlreadyOnTheNextValue(t *testing.T) {
 		t.Fatalf("rotations %v", w.store.s.Rotations)
 	}
 }
+
+// A pending password that begins with a dash cannot be sent to the broker,
+// and the refusal says how to remove it.
+func TestMbinRabbitMQLeadingDashNamesTheWayOut(t *testing.T) {
+	w := newMQWorld(t)
+	_, err := MbinRabbitMQ("forum").Accepts(w.env(), "-starts-with-a-dash")
+	if err == nil || !strings.Contains(err.Error(), `"A rotation that cannot finish"`) {
+		t.Fatalf("err = %v", err)
+	}
+}

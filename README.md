@@ -2143,6 +2143,41 @@ break when the old one is retired; a pasted secret not yet replaced; a pending
 rotation whose stage cannot be read from the hosts; and a pending `mesh
 rekey`.
 
+### A rotation that cannot finish
+
+A rotation is pending until it is promoted, and while it is, `apply` and every
+other command that renders refuses (*`secrets rotate` replaces a secret where
+it is checked and where it is used*). Almost every pending rotation is
+finished by running `secrets rotate` again. A few cannot be: the secret's app
+was taken out of `paisans.yaml` after the rotation began, the cluster's admin
+role turned out `NOLOGIN` after its rotation began, or a RabbitMQ password
+begins with a dash, which `rabbitmqctl` reads as an option. Each refusal over
+one of these names this section. Ending it is done by hand, in the secrets
+file, because it settles which value is the secret's, and that has to be read
+from the hosts first.
+
+1. **Find which value the side that checks it accepts.** The current value is
+   the one under the secret's own path; the next value is the one under
+   `rotations.<path>`. Where the plan can read it, `paisans secrets rotate`
+   says whether the checking side accepts the next value. For a Postgres
+   role, log in with each; for RabbitMQ, `rabbitmqctl authenticate_user` with
+   each inside the broker, though a next value that begins with a dash was
+   never sent, so the broker still accepts the current one; for a secret its app checks itself, the value the
+   app's running container was started with. A secret whose app is gone has no
+   checking side left.
+2. **Edit the file with `sops secrets.enc.yaml`**, which opens it decrypted in
+   `$EDITOR` and encrypts it again to its recipients on save. Delete the entry
+   `<path>` under `rotations`, and delete `<path>` from `rotate_remaining` when
+   it is listed there. If the checking side accepts the next value, or some
+   hosts already present it, copy it into the secret's own path in the same
+   edit first, so the file names what the hosts check (for
+   `apps.<app>.oauth`, each of the four keys the next value lists). If it
+   accepts the current value, or nothing checks it any more, delete the entry
+   alone.
+3. **Run `paisans apply`**, which now renders the value the file names to
+   every host, and `paisans secrets rotate <path>` again when the secret
+   still has to be replaced.
+
 ### Mail is declared once and overridden per app
 
 An app that sends mail reads a deployment wide `smtp:` block: `host`, `port`,

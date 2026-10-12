@@ -176,7 +176,7 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 	pending := s.RotationPending()
 	for _, path := range pending {
 		if _, ok := byPath[path]; !ok {
-			return nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and this run cannot finish it. It finishes first, before anything else changes. Nothing was changed", path)
+			return nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and this run cannot finish it. It finishes first, before anything else changes. %s Nothing was changed", path, CannotFinish)
 		}
 	}
 	if restart && len(pending) > 0 {
@@ -235,9 +235,19 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 		} else if !it.Whole {
 			ui.Secret(next)
 			it.Pending = true
+			// A pending rotation's own refusals still say whether it can
+			// finish, Eg: its app taken out of the configuration, or an admin
+			// role found NOLOGIN after it began. A pasted secret's compares
+			// the hosts with the file, which a rotation under way changes,
+			// so it is not asked.
+			if p, ok := r.(Prechecker); ok && !Pasted(r) {
+				if err := p.Precheck(e); err != nil {
+					return nil, fmt.Errorf("secrets rotate %s: a rotation is under way and cannot finish: %w. %s Nothing was changed", path, err, CannotFinish)
+				}
+			}
 			ok, err := r.Accepts(e, next)
 			if err != nil {
-				return nil, fmt.Errorf("secrets rotate %s: a rotation is under way and its stage cannot be read from the hosts: %w. A person has to look before anything else changes. Nothing was changed", path, err)
+				return nil, fmt.Errorf("secrets rotate %s: a rotation is under way and its stage cannot be read from the hosts: %w. A person has to look before anything else changes. %s Nothing was changed", path, err, CannotFinish)
 			}
 			it.From = StageChecked
 			if ok {
