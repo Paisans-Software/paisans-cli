@@ -1124,7 +1124,10 @@ may be the one beside a monitor. The interval, grace and threshold are the
 site heartbeat's, and a deployment with no monitor renders no pusher. The
 fork keeps the body with the ping and shows its first line in the monitor's
 recent pings; the incident and the alert say only that the heartbeat
-reported a failure.
+reported a failure. `secrets rotate` replaces the token, by name or with
+`--all`: every monitor learns it first, then the pusher on each site is
+recreated with it (*`secrets rotate` replaces a secret where it is checked and
+where it is used*).
 
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
@@ -2268,6 +2271,7 @@ Finishing either command first costs nothing but its resume.
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused for at most one push interval |
+| Pocket ID `admins_heartbeat_token` | the monitor | the admins heartbeat on every site the app runs on | its pushes refused for at most one push interval |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
 it keeps in Postgres, so an open session lasts until it ends and the next sign
@@ -2276,6 +2280,24 @@ survive either of its secrets changing, so the plan takes the stricter reading.
 A cluster with one data member has no replica to switch over to, so its
 Patroni restarts in place and the database is unavailable for that restart;
 the plan says so.
+
+**A heartbeat token reaches the monitors before the pusher.** The monitor
+checks a heartbeat token, and its seed is the only place it learns one, so
+stage 3 first applies every monitor's `uptime` stack on its own site, one at
+a time, which rewrites its seed with the next token and restarts it to adopt
+it. Only then is the pusher handed the token. For `sites.<site>.heartbeat_token`
+that is the site's infrastructure stack, where the changed
+`heartbeat/heartbeat.env` recreates the `heartbeat` service alone. For a Pocket
+ID app's `admins_heartbeat_token` it is every monitor, the one on a site the app
+runs on included, then the app's own stack on each of its sites in turn, where
+the changed `admins-heartbeat/heartbeat.env` recreates the `admins-heartbeat`
+service alone: `up -d` replaces only the service whose configuration changed,
+so Pocket ID, its reconciler and its database keep running and nobody is signed
+out. Between a monitor learning the token and the pusher sending it, the
+monitor answers the old one with 404, which is at most one push interval and
+inside the grace the monitor allows before counting the heartbeat missed. A
+deployment with no monitor renders no pusher, so the token is replaced in the
+file and handed to nobody.
 
 **`--all` runs them in the table's order**: what works from the internet
 first, the DNS token, the mail passwords, client secrets and signing keys;
