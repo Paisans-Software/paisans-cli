@@ -84,6 +84,15 @@ func (p *planner) requireAppSecrets(planned plannedApp) error {
 			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
 		}
 	}
+	// The fork treats ADMIN_PASS=admin exactly as it treats an unset one
+	// (src/config.js:58 at v1.1.0-oidc.4), and with OIDC_DISABLE_PASSWORD_LOGIN
+	// it refuses to start on either (src/lib/oidc.js:180-186). The uptime
+	// template turns that on whenever the app has a client, and without one
+	// the password is the first anybody would guess. `paisans secrets set`
+	// or a hand edit can still write it, so render refuses it.
+	if planned.Kind == config.KindUptime && p.appSecret(planned.Name, "admin_password") == "admin" {
+		return fmt.Errorf("secrets apps.%s.admin_password: is the literal `admin`, which the monitor treats as unset and refuses to start with when sign-in is SSO only. Set it to a generated value", planned.Name)
+	}
 	return nil
 }
 
