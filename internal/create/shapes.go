@@ -59,6 +59,15 @@ var shapes = []shape{
 	ShapeCustom: {label: "custom: choose each site's roles"},
 }
 
+// roleWhat says what a machine of each role does, for the named shapes,
+// which give a machine its roles rather than asking for them.
+var roleWhat = map[config.Role]string{
+	config.RoleData:    "holds the databases and uploaded files",
+	config.RoleApps:    "runs the apps",
+	config.RoleGateway: "is where visitors arrive: every hostname points at it",
+	config.RoleWitness: "breaks ties between the homes' databases",
+}
+
 // allRoles is the custom shape's checklist, in the order it is offered.
 var allRoles = []config.Role{
 	config.RoleData, config.RoleApps, config.RoleGateway,

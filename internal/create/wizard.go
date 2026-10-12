@@ -216,7 +216,11 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 		if i < len(prev) {
 			d = prev[i]
 		}
-		w.p.Say("\nA machine holding %s.", roleList(ss.roles))
+		w.p.Say("\nMachine %d of %d. It:", i+1, len(shapes[shape].sites))
+		for _, r := range ss.roles {
+			w.p.Say("  - %s", roleWhat[r])
+		}
+		w.p.Say("Give it a short name: paisans.yaml and every command call it by this.")
 		name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
 		if err != nil {
 			return nil, err

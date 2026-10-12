@@ -121,6 +121,37 @@ func TestOneMachineDoesNotOfferChat(t *testing.T) {
 	}
 }
 
+// A named shape's machine is introduced by what it does and what its name is
+// for, so the name prompt does not read as a question about its roles.
+func TestNamedShapeSaysWhatEachMachineDoesAndWhatItsNameIsFor(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHighAvailability]...)
+	lines = append(lines, appAnswers(true)...)
+	lines = append(lines, mailAnswers...)
+	_, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Machine 1 of 3. It:",
+		"Machine 3 of 3. It:",
+		"Give it a short name: paisans.yaml and every command call it by this.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	for _, s := range shapes[ShapeHighAvailability].sites {
+		for _, r := range s.roles {
+			if !strings.Contains(out, "  - "+roleWhat[r]+"\n") {
+				t.Errorf("role %s is not explained:\n%s", r, out)
+			}
+		}
+	}
+}
+
 func TestDecliningTheMonitorMachineDropsTheStatusPage(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
