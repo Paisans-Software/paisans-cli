@@ -156,12 +156,17 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				})
 			}
 			if app.Kind == config.KindPocketID {
-				// The admin reconciler beside each instance: 503 while admins
-				// has fewer than two members (docs/specs/2026-10-08-admin-reconciler.md).
-				// The gateway does not route it, so there is no public check.
+				// The admin reconciler service beside each instance, which
+				// /livez answers 200 while its pass loop runs, standby or
+				// not, and 503 once it is stale
+				// (docs/specs/2026-10-08-admin-reconciler.md). It is that
+				// site's service alone: the admins group's health, which
+				// only the active instance knows, is the admins heartbeat
+				// below. The gateway does not route the reconciler, so
+				// there is no public check.
 				monitors = append(monitors, seedMonitor{
 					Name: fmt.Sprintf("%s — admin reconciler (%s)", name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-					URL:            fmt.Sprintf("http://%s:%d/healthz", p.sites[site].Address, reconcilerPort),
+					URL:            fmt.Sprintf("http://%s:%d/livez", p.sites[site].Address, reconcilerPort),
 					ExpectedStatus: "200", FollowRedirects: &noRedirects,
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 				})
@@ -221,6 +226,26 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		}
 		monitors = append(monitors, seedMonitor{
 			Name: heartbeatName(site), MonitorType: "heartbeat",
+			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
+			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+		})
+	}
+
+	// One admins heartbeat per Pocket ID app, pushed by whichever of its
+	// instances is active (adminsheartbeat.go), with the app's own token
+	// and the site heartbeat's schedule, grace and threshold. Seeded by
+	// every monitor, wherever the app runs: every instance pushes to every
+	// monitor.
+	for _, name := range p.cfg.AppNames() {
+		if p.cfg.Apps[name].Kind != config.KindPocketID {
+			continue
+		}
+		token, err := p.adminsHeartbeatToken(name)
+		if err != nil {
+			return "", err
+		}
+		monitors = append(monitors, seedMonitor{
+			Name: adminsHeartbeatName(name), MonitorType: "heartbeat",
 			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})

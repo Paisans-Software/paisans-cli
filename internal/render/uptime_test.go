@@ -322,7 +322,9 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 
 // Every site Pocket ID runs on gets a check on its admin reconciler, straight to
 // the reconciler's port on the mesh, and nothing public: the gateway does not
-// route the reconciler.
+// route the reconciler. It asks /livez, the reconciler service's own health,
+// which a standby passes too; the admins group's health is the push monitor's
+// (TestTheSeedExpectsAnAdminsHeartbeatPerPocketID).
 func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
@@ -335,7 +337,7 @@ func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 		if m == nil {
 			t.Fatalf("no admin reconciler check on %s", site)
 		}
-		if want := "http://" + cfg.Sites[site].Address + ":1412/healthz"; m["url"] != want || m["expected_status"] != "200" {
+		if want := "http://" + cfg.Sites[site].Address + ":1412/livez"; m["url"] != want || m["expected_status"] != "200" {
 			t.Errorf("%s: url %v expects %v, want %s expecting 200", site, m["url"], m["expected_status"], want)
 		}
 		if _, ok := m["request_headers"]; ok {

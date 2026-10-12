@@ -55,7 +55,8 @@ func (c ComposeImage) Setting() string {
 // by the kind's default or an apps.<name>.images entry, and by acme.image.
 // The rest of the infrastructure stack (etcd, Spilo, HAProxy, Garage, the
 // heartbeat) is the toolkit's own, rendered at exact versions, and is not
-// listed.
+// listed; nor is the admins heartbeat in a Pocket ID stack, which runs the
+// heartbeat's image and is no service of the kind's.
 //
 // It reads the compose files as rendered rather than the templates' inputs,
 // so the count of lines is what the file holds, which is what apply checks
@@ -98,6 +99,9 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		for image, n := range lines {
 			names := named[image]
+			if app != "" && len(names) == 0 {
+				continue
+			}
 			sort.Strings(names)
 			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n})
 		}
