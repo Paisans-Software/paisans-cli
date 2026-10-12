@@ -94,7 +94,7 @@ func patronictlList(d deployment.Deployment) string {
 // render.PatroniAPIPort, never loopback.
 var restAPIListen = regexp.MustCompile(`restapi: \{listen: '([^']+)'`)
 
-// ownStatus asks the site's own Patroni process, from inside its container,
+// OwnStatus asks the site's own Patroni process, from inside its container,
 // for its state through its REST API. GET /patroni answers with the node's
 // status, including `state` and, on a replica, `replication_state`
 // (Patroni v4.1.0, patroni/api.py, do_GET_patroni and
@@ -104,7 +104,7 @@ var restAPIListen = regexp.MustCompile(`restapi: \{listen: '([^']+)'`)
 // (patroni/postgresql/__init__.py, replication_state_from_parameters)).
 // It is python3's urllib, since Patroni itself runs on python3 in Spilo and
 // nothing assures curl is in the image. It prints the two values on one line.
-func ownStatus(d deployment.Deployment, api string) string {
+func OwnStatus(d deployment.Deployment, api string) string {
 	script := fmt.Sprintf(`import json, urllib.request; s = json.load(urllib.request.urlopen("http://%s/patroni", timeout=5)); print(s.get("state", ""), s.get("replication_state", ""))`, api)
 	return d.ComposeCmd(infraStack) + " exec -T patroni python3 -c " + shellQuote(script)
 }
@@ -241,7 +241,7 @@ func (r *ReplicaEnv) streaming(d deployment.Deployment, t Transport, g ReplicaEn
 	if got := strings.TrimSpace(out); got != r.Want {
 		return fmt.Errorf("its Patroni runs with ETCD3_HOSTS=%s", got)
 	}
-	out, err = t.Run(ownStatus(d, r.API))
+	out, err = t.Run(OwnStatus(d, r.API))
 	if err != nil {
 		if errors.Is(err, ErrUnreachable) {
 			return err

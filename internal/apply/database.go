@@ -215,15 +215,24 @@ func patroniLeader(document string) string {
 	return ""
 }
 
-// psql is how the SQL reaches Postgres: over the container's own unix socket,
+// Psql is how the SQL reaches Postgres: over the container's own unix socket,
 // as the superuser the rendered patroni.env names. Spilo's pg_hba trusts
 // every local socket connection (zalando/spilo, postgres-appliance/scripts/
 // configure_spilo.py, `local all all trust`), so no password is needed here
 // and none is passed. -X skips any psqlrc, and ON_ERROR_STOP makes the first
 // failure the exit status rather than a line in the output.
-func psql(d deployment.Deployment) string {
+func Psql(d deployment.Deployment) string {
 	return patroniCompose(d) + " psql -X -q -U postgres -d postgres -v ON_ERROR_STOP=1"
 }
+
+// NoStatementLog switches statement logging off for the session it starts.
+// Every script that sets a password begins with it: Spilo ships
+// log_statement = 'ddl' (configure_spilo.py), and CREATE ROLE and ALTER ROLE
+// are DDL, so without it every password would be written to the server log in
+// plaintext. log_min_error_statement covers the same text on a failure.
+const NoStatementLog = "SET log_statement = 'none';\n" +
+	"SET log_min_duration_statement = -1;\n" +
+	"SET log_min_error_statement = 'panic';\n"
 
 // bootstrapSQL is the whole script for one site, sent on stdin.
 //
@@ -238,33 +247,29 @@ func psql(d deployment.Deployment) string {
 // DO block either; `\gexec` runs a generated statement as its own top level
 // command, which is the documented way to make it conditional.
 //
-// Statement logging is switched off for this session first. Spilo ships
-// log_statement = 'ddl' (configure_spilo.py), and CREATE ROLE and ALTER ROLE
-// are DDL, so without this every password would be written to the server log
-// in plaintext. log_min_error_statement covers the same text on a failure.
+// Statement logging is switched off for this session first, by
+// NoStatementLog.
 func bootstrapSQL(b *Bootstrap) string {
 	var sql strings.Builder
-	sql.WriteString("SET log_statement = 'none';\n")
-	sql.WriteString("SET log_min_duration_statement = -1;\n")
-	sql.WriteString("SET log_min_error_statement = 'panic';\n")
+	sql.WriteString(NoStatementLog)
 	for _, db := range b.Databases {
-		role, name := quoteIdent(db.Role), quoteLiteral(db.Role)
+		role, name := QuoteIdent(db.Role), QuoteLiteral(db.Role)
 		fmt.Fprintf(&sql, "-- %s\n", db.App)
 		fmt.Fprintf(&sql, "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\\gexec\n", role, name)
-		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, quoteLiteral(db.password))
+		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, QuoteLiteral(db.password))
 		fmt.Fprintf(&sql, "SELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\\gexec\n",
-			quoteIdent(db.Name), role, quoteLiteral(db.Name))
+			QuoteIdent(db.Name), role, QuoteLiteral(db.Name))
 	}
 	return sql.String()
 }
 
-// quoteIdent and quoteLiteral are belt and braces: identifiers are already
+// QuoteIdent and QuoteLiteral are belt and braces: identifiers are already
 // restricted to [a-z0-9_], but a password is any string, and the doubling
 // rule is the whole of SQL literal quoting with standard_conforming_strings
 // on, which is the default since PostgreSQL 9.1.
-func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+func QuoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
-func quoteLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+func QuoteLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
 // ErrFoundingWait is the founding stop: this site's etcd is up and another
 // founding member's is not, so its apply ends before the databases, and
@@ -347,13 +352,13 @@ func runBootstrap(plan *Plan, t Transport) error {
 	for _, db := range plan.Bootstrap.Databases {
 		done.Detail("role %s owns database %s, for %s", db.Role, db.Name, db.App)
 	}
-	out, err := t.RunInput(psql(plan.Deployment), bootstrapSQL(plan.Bootstrap))
+	out, err := t.RunInput(Psql(plan.Deployment), bootstrapSQL(plan.Bootstrap))
 	finish(done, err)
 	if err != nil {
 		// psql quotes the failing line back for a syntax error, and that line
 		// can be the one carrying a password.
 		for _, db := range plan.Bootstrap.Databases {
-			out = strings.ReplaceAll(out, quoteLiteral(db.password), "'[redacted]'")
+			out = strings.ReplaceAll(out, QuoteLiteral(db.password), "'[redacted]'")
 			out = strings.ReplaceAll(out, db.password, "[redacted]")
 		}
 		return fmt.Errorf("%s: creating app roles and databases failed, so no app stack was started:\n%s", plan.Site, out)
@@ -384,7 +389,7 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 	var out string
 	var err error
 	for i := 0; i < attempts; i++ {
-		out, err = t.RunInput(psql(plan.Deployment)+" -At", replicaSQL(plan.Bootstrap))
+		out, err = t.RunInput(Psql(plan.Deployment)+" -At", replicaSQL(plan.Bootstrap))
 		if err == nil {
 			break
 		}
@@ -430,7 +435,7 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 func replicaSQL(b *Bootstrap) string {
 	var want []string
 	for _, db := range b.Databases {
-		want = append(want, fmt.Sprintf("(%s, %s)", quoteLiteral(db.Role), quoteLiteral(db.Name)))
+		want = append(want, fmt.Sprintf("(%s, %s)", QuoteLiteral(db.Role), QuoteLiteral(db.Name)))
 	}
 	return "SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
 		" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
