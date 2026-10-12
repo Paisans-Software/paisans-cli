@@ -24,7 +24,7 @@ includes with one line you add once (step 3).
 
 ```yaml
 sites:
-  watch:
+  health:
     roles: [monitor]
     address: 10.44.0.4                # its mesh address
     public_address: 203.0.113.20      # what the internet and the mesh reach it on
@@ -35,8 +35,8 @@ sites:
 apps:
   status:
     kind: uptime
-    hostname: status.example.org
-    placement: { pinned: watch }
+    hostname: health.example.org
+    placement: { pinned: health }
     settings:
       admin_group: admins
 ```
@@ -66,10 +66,10 @@ is handed the monitor alone and nothing would route the other.
 
 ```sh
 paisans validate
-paisans host prepare --site watch            # shows what it would do
-paisans host prepare --site watch --execute
-paisans apply --site watch                   # shows what would change
-paisans apply --site watch --execute
+paisans host prepare --site health           # shows what it would do
+paisans host prepare --site health --execute
+paisans apply --site health                  # shows what would change
+paisans apply --site health --execute
 ```
 
 `host prepare` and `apply` start with the host check. A host already running a
@@ -80,14 +80,14 @@ rules, each commented `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 with `managed_by: external`;
 your web server's rules are yours.
 
-Once the monitor's stacks are up, `apply --site watch --execute` goes on to
+Once the monitor's stacks are up, `apply --site health --execute` goes on to
 your web server: it writes the site file of step 3 and runs the check of step
 6. Until your configuration includes the toolkit's directory it ends on a
 warning, `!`, that says what to add, with exit status 0.
 
 ## 3. Include the toolkit's directory
 
-`paisans apply --execute`, with or without `--site watch`, writes the monitor's site,
+`paisans apply --execute`, with or without `--site health`, writes the monitor's site,
 filled in for the web server it finds, into a file of its own, `paisans-<token>-status.caddy` or
 `.conf`, in a directory beside your server's main configuration:
 `/etc/caddy/paisans.d`, `/etc/nginx/paisans.d` or `/etc/apache2/paisans.d` on
@@ -182,7 +182,7 @@ web server
        then run paisans apply --execute again. It is a wildcard so that the
        server still starts, without the paisans sites, if the directory is ever
        gone.
-       Or set sites.watch.web_server.include_dir: false, and add what paisans
+       Or set sites.health.web_server.include_dir: false, and add what paisans
        web-server show --app status prints to your web server yourself.
 ```
 
@@ -193,8 +193,8 @@ file, validates your whole configuration, reloads a server in a container
 ```
 web server
   ✓ site file for status   /opt/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy reloaded
-  ! watch: include_dir set to /opt/caddy/paisans.d in paisans.yaml
-  ✓ status                 status.example.org
+  ! health: include_dir set to /opt/caddy/paisans.d in paisans.yaml
+  ✓ status                 health.example.org
 ```
 
 The `include_dir` line is added under the site's `web_server`, every other line
@@ -355,7 +355,7 @@ challenge you set for your other sites, whose token may not cover the
 monitor's zone:
 
 ```
-status.example.org {
+health.example.org {
 	tls {
 		issuer acme
 	}
@@ -382,7 +382,7 @@ With `acme_dns`, `show` and `apply` warn, and the site file is still written,
 since it is valid and changes nothing there:
 
 ```
-  ! site file for status: caddy's global acme_dns applies to status.example.org too
+  ! site file for status: caddy's global acme_dns applies to health.example.org too
        /opt/caddy/Caddyfile sets, in its global options:
 
            acme_dns cloudflare {$CF_API_TOKEN}
@@ -440,7 +440,7 @@ ssh, as `web-server show` does, and names it.
 |---|---|---|
 | `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 5; delete any other record for the name by hand |
 | `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 4, or the proxy if the answer is not 200 |
-| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`, then `paisans apply --site watch`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
+| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`, then `paisans apply --site health`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or drop the port in Docker's `DOCKER-USER` chain. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
 Run it again after every change until no check fails and it ends with
@@ -448,12 +448,12 @@ Run it again after every change until no check fails and it ends with
 
 `paisans apply --execute` without `--site` runs the same checks for every app
 behind your own web server once every other step has run, and `paisans apply
---site watch --execute` runs them for the monitor's apps once its stacks are
+--site health --execute` runs them for the monitor's apps once its stacks are
 up, in a `web server` section:
 
 ```
 web server
-  ✓ status   status.example.org
+  ✓ status   health.example.org
 ```
 
 When one fails the app's line is a warning, `!`, with the checks that failed
@@ -463,7 +463,7 @@ When the app's site file step above already warned, the check's line says
 only that it fails until that is fixed, so each problem comes with one set of
 instructions. The run ends on a warning, `! Deployment complete, but 1 app
 failed its web server check: status`, rather than `Deployment complete.`, or
-`Applied <n> files to watch.` for `apply --site watch`, since a visitor cannot
+`Applied <n> files to health.` for `apply --site health`, since a visitor cannot
 use the app yet. Every step ran, so the exit status is
 still 0. What apply could not do on the host, such as reaching it over ssh to
 read the record of its site files, is a failure instead, `✗`, and the run
@@ -480,7 +480,7 @@ web server
   ⠋ status: waiting for caddy's certificate: 14s
 ```
 
-It passes as soon as every check does, `✓ status   status.example.org, after
+It passes as soon as every check does, `✓ status   health.example.org, after
 14s`, and after a minute fails on the last check's result. Waiting cannot fix
 a name that does not resolve or an app reachable around the web server, so
 those fail at once. A site file already in place and unchanged is checked
