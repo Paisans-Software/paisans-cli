@@ -212,3 +212,66 @@ func TestMbinRabbitMQRotatesBrokersBeforeTheStackIsHandedTheValue(t *testing.T) 
 		t.Fatalf("log\n%v\nwant\n%v", w.log, want)
 	}
 }
+
+func TestMbinRabbitMQNextNeverBeginsWithADash(t *testing.T) {
+	w := newMQWorld(t)
+	draws := []string{"-dashed-one", "--dashed-two", "-dashed-three", "clean-value-1"}
+	old := mqGenerate
+	defer func() { mqGenerate = old }()
+	mqGenerate = func(string, *config.Secrets) (string, error) {
+		v := draws[0]
+		draws = draws[1:]
+		return v, nil
+	}
+	got, err := MbinRabbitMQ("forum").Next(w.env(), w.store.s)
+	if err != nil || got != "clean-value-1" {
+		t.Fatalf("next %q %v", got, err)
+	}
+}
+
+func TestMbinRabbitMQRefusesALeadingDashWithNoCommand(t *testing.T) {
+	w := newMQWorld(t)
+	r := MbinRabbitMQ("forum")
+	if err := r.Checked(w.env(), "-secret"); err == nil || !strings.Contains(err.Error(), "dash") {
+		t.Fatalf("checked: %v", err)
+	}
+	if _, err := r.Accepts(w.env(), "-secret"); err == nil || !strings.Contains(err.Error(), "dash") {
+		t.Fatalf("accepts: %v", err)
+	}
+	if len(w.cmds) != 0 {
+		t.Fatalf("commands ran: %v", w.cmds)
+	}
+}
+
+func TestMbinRabbitMQSendsSpacesAndQuotesUnchanged(t *testing.T) {
+	w := newMQWorld(t)
+	pw := `zq spaced'quoted"dollar$value`
+	if err := MbinRabbitMQ("forum").Checked(w.env(), pw); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range w.cmds {
+		if c.stdin != pw+"\n" || strings.Contains(c.command, "spaced") {
+			t.Fatalf("stdin %q command %q", c.stdin, c.command)
+		}
+	}
+}
+
+func TestMbinRabbitMQResumesWithOneBrokerAlreadyOnTheNextValue(t *testing.T) {
+	w := newMQWorld(t)
+	w.store.s.Rotations = map[string]string{"apps.forum.rabbitmq_password": "mq-next"}
+	w.broker["home-a"] = "mq-next"
+	if err := w.run(MbinRabbitMQ("forum")); err != nil {
+		t.Fatal(err)
+	}
+	for site, p := range w.broker {
+		if p != "mq-next" {
+			t.Fatalf("%s accepts %q", site, p)
+		}
+	}
+	if v, _ := w.store.s.Get("apps.forum.rabbitmq_password"); v != "mq-next" {
+		t.Fatalf("file holds %q", v)
+	}
+	if len(w.store.s.Rotations) != 0 {
+		t.Fatalf("rotations %v", w.store.s.Rotations)
+	}
+}

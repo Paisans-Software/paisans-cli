@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -44,6 +45,24 @@ func MbinRabbitMQ(app string) Rotator {
 	return mbinRabbitMQ{Generated: Generated{SecretPath: "apps." + app + ".rabbitmq_password"}, app: app}
 }
 
+// mqGenerate is where a new value comes from; a test replaces it.
+var mqGenerate = secretsgen.Replacement
+
+// Next is a new password that does not begin with a dash, drawn again until
+// it does not.
+func (r mbinRabbitMQ) Next(e Env, s *config.Secrets) (string, error) {
+	for i := 0; i < 64; i++ {
+		v, err := mqGenerate(r.SecretPath, s)
+		if err != nil {
+			return "", err
+		}
+		if !strings.HasPrefix(v, "-") {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("%s: no password without a leading dash after 64 draws", r.SecretPath)
+}
+
 func (r mbinRabbitMQ) Cost() Cost { return Cost{Downtime: mbinRestart} }
 
 func (r mbinRabbitMQ) Precheck(e Env) error {
@@ -65,15 +84,22 @@ func (r mbinRabbitMQ) Precheck(e Env) error {
 // authenticate_user are documented as `<username> <password>`, with no stdin
 // form; taken from the rabbitmqctl man page and not fetched for this), so a
 // shell inside the container reads it from stdin and passes it on. The
-// password therefore appears in rabbitmqctl's argv for its lifetime inside
-// the container only; it never reaches the ssh command line or the host's
-// own process list.
+// password therefore sits in rabbitmqctl's argv for the length of the call,
+// and a container's processes are visible in the host's process table too, so
+// it is in both the container's and the host's `ps` and /proc for that
+// moment. That is accepted because rabbitmqctl offers no other way in and the
+// call is short; what is kept out is the ssh command line, the shell history
+// and every log. A positional argument that begins with "-" is read as an
+// option, which is why a value that does that is never made and never sent.
 func (r mbinRabbitMQ) ctl(e Env, verb string) string {
 	return fmt.Sprintf(`%s exec -T rabbitmq sh -c 'IFS= read -r p; exec rabbitmqctl %s %s "$p"'`,
 		e.Cfg.Deployment().ComposeCmd(r.app), verb, mbinMQUser)
 }
 
 func (r mbinRabbitMQ) sendable(next string) error {
+	if strings.HasPrefix(next, "-") {
+		return fmt.Errorf("%s: the password begins with a dash, which rabbitmqctl would read as an option, so it cannot be set or checked; remove the pending value and run again for a new one", r.Path())
+	}
 	if next == "" || strings.ContainsAny(next, "\n\x00") {
 		return fmt.Errorf("%s: the password is empty or holds a newline or NUL byte, which cannot be sent to the broker", r.Path())
 	}
