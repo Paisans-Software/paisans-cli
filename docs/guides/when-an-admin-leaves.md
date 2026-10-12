@@ -117,9 +117,10 @@ community's decision.
       security find-generic-password -s chat-oidc -w | paisans secrets set oidc_clients.chat.client_secret
       ```
 
-      Do not `apply` yet. `secrets rotate` is what hands each new value to
-      the hosts, and it refuses a pasted secret every host already runs,
-      since it cannot tell one replaced and applied from one never replaced.
+      `secrets rotate` hands each new value to the hosts in step 3. If an
+      `apply` hands one out first, name it there with `--replaced <path>`,
+      since rotate refuses a pasted secret every host already runs unless it
+      is told the secret was replaced.
 
    2. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
       site at a time. `apply` refuses until it finishes, and a run that stops
@@ -279,22 +280,24 @@ included, and refuses while one does not answer.
 10. **Rotate the rest.** First replace the pasted secrets at their issuers
     and set each, as in step 5.1 of the first case: each SMTP password, and
     the client secret of each app whose client `oidc client create` cannot
-    make. Set them now and not earlier, because step 7's `apply` would have
-    handed them out already, and `secrets rotate` refuses a pasted secret
-    every host already runs. Then:
+    make. When `home-b` did not hold the gateway, the DNS token is the one
+    they knew: replace it the same way. Then:
 
     ```sh
     paisans secrets rotate --all             # every secret in order, its cost, and what is kept
     paisans secrets rotate --all --execute   # from a terminal
     ```
 
-    The DNS token could not wait for this step. When `home-b` held the
-    gateway, steps 3 and 7 already put a new token on every host that uses
-    it, so `--all` refuses it as unchanged and stops before anything
-    changes. Issue one more at the provider and set it, then run
-    `--all`, and revoke the token of step 3 once the run has handed out the
-    new one. When `home-b` did not hold the gateway, the token is the one
-    they knew: replace it the same way before `--all`.
+    When `home-b` held the gateway, steps 3 and 7 already replaced the DNS
+    token and put it on every host that uses it, and `--all` refuses it as
+    unchanged, since it cannot tell that from a token never replaced. Say so:
+
+    ```sh
+    paisans secrets rotate --all --replaced external.acme_dns_token
+    paisans secrets rotate --all --replaced external.acme_dns_token --execute
+    ```
+
+    The plan lists the token as replaced earlier and rotates everything else.
 
     It asks for `sign out`: after a gateway's eviction, signing members out
     is the point, since the evicted host saw every session cookie. A run

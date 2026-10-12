@@ -138,19 +138,61 @@ func (p pasted) Users(e Env) []Use {
 // such a file was never applied, and what it holds cannot be told, so it is
 // refused too, whatever the other sites hold.
 func (p pasted) Precheck(e Env) error {
-	s, err := e.Store.Load()
+	unchanged, sites, err := p.hostsRun(e)
 	if err != nil {
 		return err
 	}
+	if !unchanged {
+		return nil
+	}
+	return fmt.Errorf("%s is the value every host using it was last applied with (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it. When it was replaced and applied before, as an eviction does with the DNS token, pass --replaced %s instead", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path, p.path)
+}
+
+// Pasted reports whether r rotates a pasted secret: the DNS token, an SMTP
+// password, or an OIDC client secret minted at Pocket ID by hand.
+func Pasted(r Rotator) bool {
+	switch r.(type) {
+	case pasted, pastedClient:
+		return true
+	}
+	return false
+}
+
+// HostsRun reports whether every host using the pasted secret r rotates was
+// last applied with the value the secrets file holds, read the way Precheck
+// reads it: each carrying file rendered here and its hash compared with the
+// one its site's manifest records. It is what `secrets rotate --replaced`
+// accepts a path on, since a secret replaced and applied before has nothing
+// left to hand out. A rotator of a generated secret is an error.
+func HostsRun(e Env, r Rotator) (bool, error) {
+	switch p := r.(type) {
+	case pasted:
+		ok, _, err := p.hostsRun(e)
+		return ok, err
+	case pastedClient:
+		ok, _, err := p.hostsRun(e)
+		return ok, err
+	}
+	return false, fmt.Errorf("%s is not a pasted secret", r.Path())
+}
+
+// hostsRun is whether every host using the secret runs the file's value,
+// and the sites read. A site with no record of a carrying file is an error,
+// since which value it holds cannot be told.
+func (p pasted) hostsRun(e Env) (bool, []string, error) {
+	s, err := e.Store.Load()
+	if err != nil {
+		return false, nil, err
+	}
 	if _, err := p.Next(e, s); err != nil {
-		return err
+		return false, nil, err
 	}
 	files, err := carriers(e.Cfg, s, p.path)
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("nothing the configuration renders carries %s, so no host uses it", p.path)
+		return false, nil, fmt.Errorf("nothing the configuration renders carries %s, so no host uses it", p.path)
 	}
 	d := e.Cfg.Deployment()
 	var sites []string
@@ -160,16 +202,16 @@ func (p pasted) Precheck(e Env) error {
 		if recorded[f.site] == nil {
 			t := e.Sites[f.site]
 			if t == nil {
-				return fmt.Errorf("%s renders %s, and there is no way to reach it", f.site, p.path)
+				return false, nil, fmt.Errorf("%s renders %s, and there is no way to reach it", f.site, p.path)
 			}
 			content, found, err := t.ReadFile(d.Manifest())
 			if err != nil {
-				return fmt.Errorf("reading %s's manifest: %w", f.site, err)
+				return false, nil, fmt.Errorf("reading %s's manifest: %w", f.site, err)
 			}
 			var m render.Manifest
 			if found {
 				if err := json.Unmarshal([]byte(content), &m); err != nil {
-					return fmt.Errorf("%s's %s is not readable as a manifest: %w", f.site, d.Manifest(), err)
+					return false, nil, fmt.Errorf("%s's %s is not readable as a manifest: %w", f.site, d.Manifest(), err)
 				}
 			}
 			recorded[f.site] = map[string]string{}
@@ -180,16 +222,13 @@ func (p pasted) Precheck(e Env) error {
 		}
 		had := recorded[f.site][f.rel]
 		if had == "" {
-			return fmt.Errorf("%s renders %s into %s and has no record of an apply writing it, so which value it holds cannot be told. Run `paisans apply --site %s` first", f.site, p.path, f.rel, f.site)
+			return false, nil, fmt.Errorf("%s renders %s into %s and has no record of an apply writing it, so which value it holds cannot be told. Run `paisans apply --site %s` first", f.site, p.path, f.rel, f.site)
 		}
 		if had != f.sha {
 			changed = true
 		}
 	}
-	if changed {
-		return nil
-	}
-	return fmt.Errorf("%s is the value every host using it was last applied with (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path)
+	return !changed, sites, nil
 }
 
 // Carries reports whether anything cfg renders with s carries the secret at

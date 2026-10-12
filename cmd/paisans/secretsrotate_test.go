@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsrotate"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -71,6 +75,8 @@ type rotateWorld struct {
 	silent map[string]bool
 	// sickEtcd is an etcd that reports an unhealthy endpoint.
 	sickEtcd bool
+	// manifests is each site's apply manifest, as its last apply left it.
+	manifests map[string]string
 }
 
 func (f rotateFake) Describe() string { return "ubuntu@" + f.name + ".local" }
@@ -108,6 +114,14 @@ func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.R
 func (f rotateFake) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path || strings.Contains(path, "wireguard") {
 		return "", false, nil
+	}
+	if path == f.cfg.Deployment().Manifest() {
+		f.w.mu.Lock()
+		m, ok := f.w.manifests[f.name]
+		f.w.mu.Unlock()
+		if ok {
+			return m, true, nil
+		}
 	}
 	return "", false, errors.New("fake: no file here")
 }
@@ -570,5 +584,129 @@ func TestSecretsRotateAllRefusesAnUnfilledFile(t *testing.T) {
 	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), strings.NewReader(""), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "paisans init") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// applied records in every site's manifest the files rendered with the
+// secrets at secretsPath, edited by edit when it is not nil, as an apply
+// leaves it.
+func (w *rotateWorld) applied(t *testing.T, configPath, secretsPath string, edit func(*config.Secrets)) {
+	t.Helper()
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit != nil {
+		edit(s)
+	}
+	plan, err := render.Build(cfg, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.manifests = map[string]string{}
+	for _, site := range cfg.SiteNames() {
+		var m render.Manifest
+		m.Version = 1
+		for _, f := range plan.Files {
+			rel, ok := strings.CutPrefix(f.Path, site+"/")
+			if !ok {
+				continue
+			}
+			digest := sha256.Sum256([]byte(f.Content))
+			m.Files = append(m.Files, render.ManifestFile{Path: rel, SHA256: hex.EncodeToString(digest[:]), Mode: fmt.Sprintf("%04o", f.Mode)})
+		}
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.manifests[site] = string(data)
+	}
+}
+
+// A pasted secret replaced and applied before, which every host using it
+// runs, is listed with --replaced and not rotated.
+func TestSecretsRotateReplacedIsListed(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	before, _ := os.ReadFile(secretsPath)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--replaced", "external.acme_dns_token"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	k := rec.Index("done", "external.acme_dns_token")
+	if k < 0 || rec.Index("section", "kept") > k {
+		t.Errorf("the DNS token is not listed as kept:\n%s", rec.Lines())
+	}
+	if rec.Index("explain", "replaced earlier, hosts already run it") < k {
+		t.Errorf("the reason is not given:\n%s", rec.Lines())
+	}
+	if rec.Index("section", "rotate external.acme_dns_token") >= 0 {
+		t.Errorf("a replaced secret is planned for rotation:\n%s", rec.Lines())
+	}
+	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+		t.Error("the secrets file changed")
+	}
+}
+
+// --replaced takes only a pasted secret, and is refused before any host is
+// reached for a generated one.
+func TestSecretsRotateReplacedRefusesAGeneratedSecret(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all", "--replaced", "cluster.standby_password"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "pasted secret") || !strings.Contains(err.Error(), "cluster.standby_password") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// --replaced is refused for a pasted secret some host does not run yet: it
+// still has a value to hand out.
+func TestSecretsRotateReplacedRefusesWhatHostsDoNotRun(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, func(s *config.Secrets) {
+		if err := s.Set("external.acme_dns_token", "the-token-before-it-was-replaced"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--replaced", "external.acme_dns_token"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "Rotate it without --replaced") {
+		t.Errorf("err = %v\n%s", err, rec.Lines())
+	}
+}
+
+// --all refuses a pasted secret every host already runs, and passes it with
+// --replaced.
+func TestSecretsRotateAllPassesWithReplaced(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--replaced") {
+		t.Fatalf("--all without --replaced: err = %v", err)
+	}
+	pasted := []string{"external.acme_dns_token", "external.smtp_password", "oidc_clients.chat.client_secret", "oidc_clients.gate.client_secret"}
+	args := []string{"--all"}
+	for _, p := range pasted {
+		args = append(args, "--replaced", p)
+	}
+	// The fake hosts hold no Patroni cluster document, so the plan stops at
+	// the cluster's admin role, after every pasted secret: what matters
+	// here is that none of those refuses it.
+	err = runSecretsRotate(rotateArgs(configPath, secretsPath, args...), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cluster.admin_password") {
+		t.Fatalf("--all with --replaced: err = %v\n%s", err, rec.Lines())
+	}
+	for _, p := range pasted {
+		if strings.Contains(err.Error(), p) {
+			t.Errorf("--all with --replaced is refused on %s: %v", p, err)
+		}
 	}
 }

@@ -2097,8 +2097,13 @@ hands the value the file then holds to every stack that renders it, one site
 at a time. It is refused while every host using it was last applied with the
 value the file holds, since rotating it then would restart them for nothing,
 and `--all` refuses until each pasted secret it includes has been replaced so.
-`secrets rotate` is what hands the new value out, so it comes between
-`secrets set` and the next `apply`. For such a client, the old secrets are
+That refusal cannot tell a secret never replaced from one replaced and then
+applied, as an eviction does with the DNS token, so the operator says which:
+**`--replaced <path>`** names a pasted secret every host using it already runs
+from the file. It is checked the same way, against each site's manifest, and
+refused for a generated secret, for one some host does not run yet, and for
+one whose rotation is under way; a path it accepts is listed in the plan as
+replaced earlier and not rotated. For such a client, the old secrets are
 deleted at Pocket ID after every site runs the new one, through the client ID
 the file records; without one, the plan says to delete them there by hand.
 

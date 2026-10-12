@@ -79,8 +79,9 @@ Usage:
   paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
-  paisans secrets rotate <path>... | --all [--config paisans.yaml]
-               [--secrets secrets.enc.yaml] [--sudo=false] [--execute]
+  paisans secrets rotate <path>... | --all [--replaced <path>]...
+               [--config paisans.yaml] [--secrets secrets.enc.yaml]
+               [--sudo=false] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
                [--first-name <f>] [--last-name <l>] [--login-link]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -223,7 +224,8 @@ Commands:
              promoted. A pasted secret (the DNS token, an SMTP password,
              a client secret minted at Pocket ID) is handed on once it is
              replaced at its issuer and set with secrets set, and refused
-             while unchanged. Lists the secrets it keeps and why. --all
+             while unchanged; --replaced <path> lists one already replaced
+             and applied, which every host runs, instead. Lists the secrets it keeps and why. --all
              refuses a file that lacks a secret init generates. Refuses
              while a mesh rekey is unfinished, a site does not answer, or
              etcd or Patroni is unhealthy; apply refuses while a rotation

@@ -157,14 +157,18 @@ paisans secrets rotate cluster.standby_password --execute
 paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
 paisans secrets rotate external.acme_dns_token --execute   # hands the new token to every site using it
+paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token an eviction already applied
 ```
 
 * **Alone:** always; after an admin who could read the secrets file leaves,
   or a site is evicted, once the file is re-encrypted and the mesh rekeyed.
 * **Flags:** the secrets' paths in the secrets file as arguments, or `--all`
   (every secret in scope, in the order *`secrets rotate` replaces a secret
-  where it is checked and where it is used* gives); `--config`, `--secrets`,
-  `--execute`, `--sudo`.
+  where it is checked and where it is used* gives); `--replaced <path>`
+  (repeatable: a pasted secret already replaced and applied, which every host
+  using it runs; listed, not rotated, and refused for a generated secret or
+  one some host does not run yet); `--config`, `--secrets`, `--execute`,
+  `--sudo`.
 * **Hosts:** every site, since each must answer before anything changes, and
   each is claimed. The secrets file is read and written on this machine only.
 * **`--execute`:** rotates each secret in four gated stages, and stops at the
@@ -174,7 +178,8 @@ paisans secrets rotate external.acme_dns_token --execute   # hands the new token
   answer over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS
   token, an SMTP password, a client secret minted at Pocket ID) still has the
   value the hosts were last applied with: replace it at its issuer and set it
-  with `secrets set` first. `--all` also refuses a secrets file that lacks a
+  with `secrets set` first, or name it with `--replaced` when that was done
+  and applied already. `--all` also refuses a secrets file that lacks a
   secret `init` generates, naming `paisans init`.
 
 See *`secrets rotate` replaces a secret where it is checked and where it is
