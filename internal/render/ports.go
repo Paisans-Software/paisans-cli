@@ -118,8 +118,8 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		add("Caddy", roles(config.RoleGateway), "tcp", "", caddyHTTPSPort)
 	}
 	// A monitor with managed_by: paisans runs the gateway's Caddy image for its
-	// own apps, binding the same two ports on every interface. On a gateway,
-	// which validate refuses as a monitor, it is the gateway's one Caddy.
+	// own apps, binding the same two ports on every interface. Beside the
+	// gateway it is the gateway's one Caddy, which claims them already.
 	if s.Has(config.RoleMonitor) && s.WebServerManagedBy() == config.ManagedByPaisans && !s.Has(config.RoleGateway) {
 		add("Caddy", roles(config.RoleMonitor), "tcp", "", caddyHTTPPort)
 		add("Caddy", roles(config.RoleMonitor), "tcp", "", caddyHTTPSPort)

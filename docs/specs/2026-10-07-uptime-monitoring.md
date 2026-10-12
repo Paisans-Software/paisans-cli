@@ -59,7 +59,9 @@ apps:
   multi-site deployment, a home, or a dedicated VM. Pinned placement already
   accepts a site whatever its roles. *Superseded: the site must hold the
   `monitor` role, which is never the gateway or the witness. See the
-  amendment of 2026-10-08 below.*
+  amendment of 2026-10-08 below.* *Amended again 2026-10-12: beside the
+  gateway or the witness it is allowed with a warning
+  (`2026-10-12-monitor-on-gateway.md`).*
 * **No `placement: gateway`.** It was considered, so the monitor would follow
   a gateway move without an edit, and rejected. During a move two sites hold
   the gateway role, and two monitors would send every alert twice. Pinning
@@ -559,7 +561,8 @@ session, changes five things here:
   role (`uptime-needs-a-monitor-site`). A monitor site is never the gateway
   (`monitor-on-gateway`) or the witness (`monitor-on-witness`), is warned
   about beside `data` or `apps` (`monitor-shares-a-site`), and must declare
-  `public_address`. The gateway VM, which *Kind and placement* named as the
+  `public_address`. *Amended 2026-10-12: the two refusals became the one
+  `monitor-shares-a-site` warning (`2026-10-12-monitor-on-gateway.md`).* The gateway VM, which *Kind and placement* named as the
   usual multi-site place, is therefore refused.
 * **The role-less monitor site** becomes `roles: [monitor]`. `roles: []`
   with a pinned app stays legal for other kinds.

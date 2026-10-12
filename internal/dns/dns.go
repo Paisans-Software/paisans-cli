@@ -153,8 +153,9 @@ func Desired(cfg *config.Config) ([]Want, error) {
 	}
 
 	// Every public hostname is served by the gateway, except a monitor's,
-	// which the monitor serves from its own address so that it does not go
-	// dark with the gateway it reports on.
+	// which the monitor serves from its own address so that a monitor on a
+	// machine of its own does not go dark with the gateway it reports on.
+	// Beside the gateway, that address is the gateway's.
 	var viaGateway []Hostname
 	refusedMonitor := map[string]bool{}
 	for _, h := range hostnames(cfg) {
