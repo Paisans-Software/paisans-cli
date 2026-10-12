@@ -74,6 +74,7 @@ func TestRulesFire(t *testing.T) {
 		{"gated-without-signed-fetch", "gated-without-signed-fetch", validate.Refuse},
 		{"gated-without-authorized-fetch", "gated-without-signed-fetch", validate.Refuse},
 		{"auto-login-without-a-rule", "auto-login-without-a-rule", validate.Refuse},
+		{"config-key-already-rendered", "config-key-already-rendered", validate.Refuse},
 		{"uses-gate-outside-the-domain", "uses-gate-outside-the-domain", validate.Refuse},
 		{"authorized-fetch-not-a-boolean", "authorized-fetch-not-a-boolean", validate.Refuse},
 		{"writefreely-setting-invalid", "writefreely-setting-invalid", validate.Refuse},
@@ -882,5 +883,39 @@ func TestAnAppOnTheGatesHostnameIsRefused(t *testing.T) {
 	}
 	if !found {
 		t.Error("an app on the gate's hostname was not refused")
+	}
+}
+
+// Whether a template writes a key can depend on the rest of the file: a gated
+// Mbin's template writes MBIN_USE_FEDERATION_ALLOW_LIST and an ungated one
+// does not. validate renders to find out, so the same key is refused on the
+// gated app and accepted on the public one, and every colliding key is
+// reported, not only the first.
+func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	talk := cfg.Apps["talk"]
+	talk.Config = map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": true, "KBIN_META_TITLE": "A place to talk"}
+	cfg.Apps["talk"] = talk
+	var keys []string
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "config-key-already-rendered" {
+			keys = append(keys, f.Key)
+		}
+	}
+	want := []string{"apps.talk.config.MBIN_PRIVATE_INSTANCE", "apps.talk.config.MBIN_USE_FEDERATION_ALLOW_LIST"}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Errorf("gated talk: refused %v, want %v", keys, want)
+	}
+
+	talk.Gated, talk.AutoLogin = false, false
+	cfg.Apps["talk"] = talk
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "config-key-already-rendered" {
+			t.Errorf("public talk: %s refused, but its template does not write it", f.Key)
+		}
 	}
 }
