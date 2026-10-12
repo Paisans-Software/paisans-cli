@@ -93,7 +93,7 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 	for _, key := range sortedKeys(keys) {
 		if o, ok := omittedOnPurpose(app.Kind, key); ok {
 			return collision(app, key, fmt.Sprintf("the template %s leaves %s out of %s/%s on purpose: %s. A key a template omits by decision is owned by the template as surely as one it writes, so a passthrough key may not put it back; that is a template change, and it is reviewable.",
-				strings.TrimPrefix(sources[files[target].Path], "templates/"), o.Key, app.Dir, name, o.Why))
+				sources[files[target].Path], o.Key, app.Dir, name, o.Why))
 		}
 	}
 
@@ -143,7 +143,7 @@ func alreadyRendered(app plannedApp, key, file, template, why string) error {
 			where, app.Name, setting, why))
 	}
 	return collision(app, key, fmt.Sprintf("%s already sets this key, written by the template %s. A passthrough key may only add what a template does not write: changing a template owned value is a settings key or a template change, and both are reviewable.%s",
-		where, strings.TrimPrefix(template, "templates/"), why))
+		where, template, why))
 }
 
 // ConfigCollisionRule is the rule a passthrough key the stack already owns

@@ -1,16 +1,17 @@
 package kinds
 
 import (
+	"fmt"
+	"io/fs"
 	"sort"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Def is everything the toolkit records about one kind, in one place. Each
-// kind's record is in its own file, kind_<name>.go, so a kind is read in one
-// file rather than assembled from a row in each of a dozen tables, and so
-// each record can become a blueprint (docs/specs/2026-10-12-blueprints-and-
-// catalogs.md) without first being found.
+// Def is everything the toolkit records about one kind, in one place, read
+// from the kind's blueprint.yaml (docs/specs/2026-10-12-blueprints-and-
+// catalogs.md). Parse documents the format.
 //
 // A field holds what is true of the software, never of a deployment. What an
 // app's declaration decides is read through the functions that take a
@@ -102,6 +103,10 @@ type Def struct {
 	// not start, and why. Render refuses an app missing one.
 	RequiredSecrets []RequiredSecret
 
+	// Reserved is whether the kind is one no catalog may provide: the
+	// identity provider, the gate, the invite service and the monitor.
+	Reserved bool
+
 	// SelfRotated are the app secrets `secrets rotate` replaces by
 	// re-rendering the app's own stack, because the stack that presents
 	// each is also the one that checks it.
@@ -131,26 +136,51 @@ type RequiredSecret struct {
 	Why string
 }
 
-// defs is every kind's record. config.Kinds is the list of kind names the
+// defs is every kind's record, read from the blueprints built into the
+// binary (internal/blueprints). config.Kinds is the list of kind names the
 // configuration accepts; TestEveryKindHasARecord holds the two to each other.
 //
-// It is filled in init rather than where it is declared because a record
-// holds functions that read records (a gate setting's When asks Federates),
-// which Go's package initialisation would refuse as a cycle.
+// It is filled in init because a record holds functions that read records (a
+// gate setting's condition asks Federates), which Go's package initialisation
+// would refuse as a cycle. A built in blueprint that does not parse is a bug
+// in this binary, found by every test in this package, so it panics.
 var defs map[config.Kind]*Def
 
 func init() {
-	defs = map[config.Kind]*Def{
-		config.KindElement:     &elementDef,
-		config.KindInvite:      &inviteDef,
-		config.KindMbin:        &mbinDef,
-		config.KindOAuth2Proxy: &oauth2ProxyDef,
-		config.KindOutline:     &outlineDef,
-		config.KindPocketID:    &pocketIDDef,
-		config.KindSynapse:     &synapseDef,
-		config.KindUptime:      &uptimeDef,
-		config.KindWriteFreely: &writefreelyDef,
+	loaded, err := loadBuiltins()
+	if err != nil {
+		panic(err)
 	}
+	defs = loaded
+}
+
+// loadBuiltins reads every blueprint built into the binary.
+func loadBuiltins() (map[config.Kind]*Def, error) {
+	builtins, err := blueprints.Builtins()
+	if err != nil {
+		return nil, err
+	}
+	out := map[config.Kind]*Def{}
+	for _, b := range builtins {
+		hasTemplate := func(file string) bool {
+			_, err := fs.Stat(blueprints.Templates, b.Name+"/"+file)
+			return err == nil
+		}
+		d, err := Parse(b.Name, b.Spec, hasTemplate)
+		if err != nil {
+			return nil, err
+		}
+		kind := config.Kind(b.Name)
+		if extra, ok := reservedExtras[kind]; ok {
+			if b.Origin != blueprints.Reserved {
+				return nil, fmt.Errorf("blueprint %s: has Go of its own, which only a reserved blueprint may", b.Name)
+			}
+			extra(d)
+		}
+		d.Reserved = b.Origin == blueprints.Reserved
+		out[kind] = d
+	}
+	return out, nil
 }
 
 // For is a kind's record, and false for a kind this toolkit does not know.
