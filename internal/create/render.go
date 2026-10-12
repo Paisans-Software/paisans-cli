@@ -120,9 +120,10 @@ func build(a Answers, id string) view {
 			monitor = s.Name
 		}
 		// The chat server binds the ports Patroni and bg_mon do, so it goes
-		// where no data is; its web client binds 80, which the gateway's Caddy
-		// holds, so it goes where no gateway is.
-		if chat == "" && !s.Has(config.RoleData) && !s.Has(config.RoleMonitor) {
+		// where no data is, and off a monitor that is not the gateway, which
+		// serves the monitor alone; its web client binds 80, which the
+		// gateway's Caddy holds, so it goes where no gateway is.
+		if chat == "" && !s.Has(config.RoleData) && (!s.Has(config.RoleMonitor) || s.Has(config.RoleGateway)) {
 			chat = s.Name
 		}
 		if web == "" && s.Has(config.RoleApps) && !s.Has(config.RoleGateway) {
