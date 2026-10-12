@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -31,7 +33,7 @@ func runSecrets(args []string) error {
 	case len(args) >= 1 && args[0] == "rotate":
 		return runSecretsRotate(args[1:], os.Stdin, os.Stdout)
 	}
-	return fmt.Errorf("secrets takes one subcommand, set, prune or rotate: paisans secrets set <dotted.key> [--secrets path] < value, paisans secrets prune [--execute], or paisans secrets rotate <path>... | --all [--execute]")
+	return fmt.Errorf("secrets takes one subcommand, set, prune or rotate: paisans secrets set <dotted.key> [--secrets path] < value, paisans secrets set at a terminal to be asked for each owed secret, paisans secrets prune [--execute], or paisans secrets rotate <path>... | --all [--execute]")
 }
 
 // hasSecrets reports whether the secrets file holds anything under key, a
@@ -147,14 +149,15 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // runSecretsSet writes one value, read from stdin, into the encrypted secrets
-// file.
+// file. Given no key at a terminal, it asks for each owed secret in turn
+// instead (see setOwedSecrets).
 //
 // It exists so a pasted credential never touches a terminal or an editor. The
 // alternatives each leave a copy somewhere: an argument is in shell history
-// and in `ps`, a prompt is in a scrollback buffer the moment it is echoed, and
+// and in `ps`, an echoed prompt is in a scrollback buffer, and
 // `sops secrets.enc.yaml` opens the whole decrypted file in an editor that may
 // keep swap or backup files. A pipe from a keychain or another host leaves
-// none of those.
+// none of those, and neither does a prompt with echo off.
 //
 // It refuses a key that is neither already set nor owed from elsewhere. A
 // generated secret is created by `init`, and creating one by hand here would
@@ -168,11 +171,11 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if len(args) > 0 && isHelpWord(args[0]) {
 		return fs.Parse(args[:1])
 	}
-	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`")
+	key := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		key, args = args[0], args[1:]
 	}
-	key := args[0]
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	r := reporter()
@@ -180,8 +183,14 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 		return fmt.Errorf("secrets set: the value is read from stdin and never from an argument, which shell history and `ps` would both keep. Got extra argument(s)")
 	}
 
-	if stdinIsTerminal(stdin) {
-		return fmt.Errorf("secrets set: stdin is a terminal, so the value would be typed where it can be seen and kept in scrollback. Pipe it in, as in `security find-generic-password -s <item> -w | paisans secrets set %s`", key)
+	// With no key, one value on a pipe could belong to any owed secret, so
+	// the walk needs a terminal to ask on. With a key, the value is read
+	// from stdin, and typed there it would echo.
+	if key == "" && !stdinIsTerminal(stdin) {
+		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`. Run it at a terminal with no key to be asked for each owed secret in turn")
+	}
+	if key != "" && stdinIsTerminal(stdin) {
+		return fmt.Errorf("secrets set: stdin is a terminal, so the value would be typed where it can be seen and kept in scrollback. Pipe it in, as in `security find-generic-password -s <item> -w | paisans secrets set %s`, or run `paisans secrets set` with no key to be asked for it with echo off", key)
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -194,6 +203,10 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
+	}
+
+	if key == "" {
+		return setOwedSecrets(r, cfg, secrets, *secretsPath)
 	}
 
 	if err := secretKeyAllowed(cfg, secrets, key); err != nil {
@@ -229,12 +242,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 		return err
 	}
 
-	recipients, err := config.Recipients(filepath.Dir(*secretsPath))
+	recipients, err := writableRecipients(secrets, *secretsPath)
 	if err != nil {
 		return err
-	}
-	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("secrets set: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", *secretsPath, config.SOPSConfigName)
 	}
 	if err := config.WriteSecrets(*secretsPath, secrets, recipients); err != nil {
 		return err
@@ -245,6 +255,103 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 		warnUnencrypted(r, *secretsPath)
 	}
 	return nil
+}
+
+// setOwedSecrets asks at the terminal for each secret only the operator can
+// provide, saying why each is owed, and writes each answer before asking for
+// the next, so an interrupted walk keeps what was already typed. A blank
+// answer skips the key, which stays owed and is named at the end.
+//
+// A sign in client is not asked for. It is a client ID and a secret
+// together, and `apply --execute` creates it at Pocket ID and records both
+// itself.
+func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, secretsPath string) error {
+	var owed []secretsgen.Owed
+	for _, o := range secretsgen.OwedSecrets(cfg, secrets) {
+		if !strings.HasPrefix(o.Name, "oidc_clients.") {
+			owed = append(owed, o)
+		}
+	}
+	if len(owed) == 0 {
+		r.Result("Nothing is owed: every secret only you can provide is set.")
+		return nil
+	}
+	// Refused before the first prompt, not after the operator has pasted
+	// something that cannot be written.
+	recipients, err := writableRecipients(secrets, secretsPath)
+	if err != nil {
+		return err
+	}
+	var done, skipped []string
+	for _, o := range owed {
+		value, err := readOwedSecret(o)
+		if err != nil {
+			return fmt.Errorf("secrets set: reading %s: %w. %s", o.Name, err, setSoFar(done))
+		}
+		if value == "" {
+			skipped = append(skipped, o.Name)
+			continue
+		}
+		ui.Secret(value)
+		if len(value) > maxSecret {
+			return fmt.Errorf("secrets set: %s: more than %d bytes, which is not a credential this file holds. %s", o.Name, maxSecret, setSoFar(done))
+		}
+		s := r.Step("set " + o.Name)
+		if err := secrets.Set(o.Name, value); err != nil {
+			s.Fail(err)
+			return err
+		}
+		if err := config.WriteSecrets(secretsPath, secrets, recipients); err != nil {
+			s.Fail(err)
+			return err
+		}
+		s.Done("")
+		done = append(done, o.Name)
+	}
+	for _, key := range skipped {
+		r.Note("secrets: "+key+" was skipped and is still owed", "paisans secrets set "+key+" < value")
+	}
+	r.Result("Set %d of %d owed secret(s).", len(done), len(owed))
+	if len(recipients) == 0 {
+		warnUnencrypted(r, secretsPath)
+	}
+	return nil
+}
+
+// setSoFar says what an interrupted walk already wrote.
+func setSoFar(done []string) string {
+	if len(done) == 0 {
+		return "Nothing was written"
+	}
+	return "Already written: " + strings.Join(done, ", ")
+}
+
+// readOwedSecret asks for one owed secret on the controlling terminal, with
+// echo off, after saying why it is owed. An empty answer is a skip. Tests
+// replace it, since a test has no terminal to type into.
+var readOwedSecret = func(o secretsgen.Owed) (string, error) {
+	tty, err := openTTY()
+	if err != nil {
+		return "", err
+	}
+	defer tty.Close()
+	fd := int(tty.Fd())
+	fmt.Fprintf(tty, "\n%s is %s.\n", o.Name, o.Why)
+	return askPassword(tty, "Paste it, or press Enter to skip: ", 0, false, func() ([]byte, error) { return term.ReadPassword(fd) })
+}
+
+// writableRecipients is the age recipients the secrets file is written to,
+// refusing a file that is encrypted when no recipient is named beside it,
+// since writing it back would leave it in plaintext.
+func writableRecipients(secrets *config.Secrets, secretsPath string) ([]string, error) {
+	recipients, err := config.Recipients(filepath.Dir(secretsPath))
+	if err != nil {
+		return nil, err
+	}
+	if secrets.Encrypted && len(recipients) == 0 {
+		return nil, fmt.Errorf("secrets set: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", secretsPath, config.SOPSConfigName)
+	}
+	return recipients, nil
 }
 
 // secretKeyAllowed accepts a key that is already set, a key `init` reports as

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
 	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
 
 // secretsDir is a deployment directory with the fixture configuration and a
@@ -459,5 +462,165 @@ func TestSecretsSetTakesADeclaredDestinationsCredentials(t *testing.T) {
 	}
 	if _, err := set(t, configPath, secretsPath, "backup.restic_password", "x"); err == nil || !strings.Contains(err.Error(), "paisans init") {
 		t.Errorf("a generated backup key nobody created: %v", err)
+	}
+}
+
+// atTerminal makes stdin read as a terminal and answers each prompt from
+// answers by key, recording the keys asked in order. A key with no answer
+// fails the read, as an interrupted prompt does.
+func atTerminal(t *testing.T, answers map[string]string) (stdin *os.File, asked *[]string) {
+	t.Helper()
+	savedTerminal, savedRead := isTerminal, readOwedSecret
+	t.Cleanup(func() { isTerminal, readOwedSecret = savedTerminal, savedRead })
+	isTerminal = func(*os.File) bool { return true }
+	asked = &[]string{}
+	readOwedSecret = func(o secretsgen.Owed) (string, error) {
+		*asked = append(*asked, o.Name)
+		if o.Why == "" {
+			t.Errorf("%s was asked for without saying why it is owed", o.Name)
+		}
+		answer, ok := answers[o.Name]
+		if !ok {
+			return "", errors.New("interrupted")
+		}
+		return answer, nil
+	}
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f, asked
+}
+
+// owedLeaves is every owed key the walk asks for: all of them but a sign in
+// client, which apply creates and records itself.
+func owedLeaves(t *testing.T, configPath, secretsPath string) []string {
+	t.Helper()
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, name := range secretsgen.OwedNames(cfg, secrets) {
+		if !strings.HasPrefix(name, "oidc_clients.") {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// With no key at a terminal, it asks for each owed key in turn, writes each
+// answer, skips a blank one, and prints names and never values.
+func TestSecretsSetWithNoKeyAsksForEachOwedKey(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	want := owedLeaves(t, configPath, secretsPath)
+	if !slices.Contains(want, "external.acme_dns_token") || !slices.Contains(want, "backup.destinations.offsite.access_key_id") {
+		t.Fatalf("the fixture owes %v; the test needs the DNS token and a backup key", want)
+	}
+	answers := map[string]string{}
+	for i, key := range want {
+		answers[key] = fmt.Sprintf("not-a-real-value-%04d", i)
+	}
+	answers["external.acme_dns_token"] = ""
+	stdin, asked := atTerminal(t, answers)
+
+	var err error
+	printed := captureStdout(t, func() {
+		err = runSecretsSet([]string{"--config", configPath, "--secrets", secretsPath}, stdin)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(*asked, want) {
+		t.Errorf("asked for %v, want %v", *asked, want)
+	}
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range want {
+		got, _ := secrets.Get(key)
+		if key == "external.acme_dns_token" {
+			if got != "" {
+				t.Errorf("a blank answer stored %q", got)
+			}
+			continue
+		}
+		if got != answers[key] {
+			t.Errorf("%s stored %q, want %q", key, got, answers[key])
+		}
+		if strings.Contains(printed, answers[key]) {
+			t.Errorf("printed the value of %s", key)
+		}
+	}
+	if !strings.Contains(printed, "external.acme_dns_token") {
+		t.Errorf("printed %q, want the skipped key named as still owed", printed)
+	}
+}
+
+// An answer already given is written before the next is asked, so an
+// interrupted walk keeps what was typed before it.
+func TestSecretsSetWithNoKeyKeepsAnswersBeforeAnInterruption(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	want := owedLeaves(t, configPath, secretsPath)
+	stdin, _ := atTerminal(t, map[string]string{want[0]: "not-a-real-value-first"})
+
+	var err error
+	captureStdout(t, func() {
+		err = runSecretsSet([]string{"--config", configPath, "--secrets", secretsPath}, stdin)
+	})
+	if err == nil {
+		t.Fatal("an interrupted prompt was not an error")
+	}
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := secrets.Get(want[0]); got != "not-a-real-value-first" {
+		t.Errorf("%s stored %q, want the answer given before the interruption", want[0], got)
+	}
+}
+
+// With nothing owed it asks nothing and says so.
+func TestSecretsSetWithNoKeyAndNothingOwed(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	stdin, _ := atTerminal(t, map[string]string{})
+	saved := readOwedSecret
+	for i, key := range owedLeaves(t, configPath, secretsPath) {
+		if _, err := set(t, configPath, secretsPath, key, fmt.Sprintf("not-a-real-value-%04d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readOwedSecret = func(o secretsgen.Owed) (string, error) {
+		t.Errorf("asked for %s with nothing owed", o.Name)
+		return saved(o)
+	}
+
+	var err error
+	printed := captureStdout(t, func() {
+		err = runSecretsSet([]string{"--config", configPath, "--secrets", secretsPath}, stdin)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(printed, "Nothing is owed") {
+		t.Errorf("printed %q, want it to say nothing is owed", printed)
+	}
+}
+
+// With no key and stdin a pipe, it cannot tell which key one value is for.
+func TestSecretsSetWithNoKeyRefusesAPipe(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	err := runSecretsSet([]string{"--config", configPath, "--secrets", secretsPath}, strings.NewReader("not-a-real-value\n"))
+	if err == nil || !strings.Contains(err.Error(), "name the key") {
+		t.Errorf("got %v, want a refusal asking for the key", err)
+	}
+	if s, _ := config.LoadSecrets(secretsPath); s.External["acme_dns_token"] != "" {
+		t.Error("a piped value was written with no key")
 	}
 }

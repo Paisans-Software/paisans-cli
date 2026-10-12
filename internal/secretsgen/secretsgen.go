@@ -801,6 +801,12 @@ func wireGuardPrivateKey() (string, error) {
 // provider is sent it.
 func ClientSecret() (string, error) { return password() }
 
+// OwedSecrets is what Fill would report as owed, each with why, without
+// generating anything. `secrets set` with no key asks for these in turn.
+func OwedSecrets(cfg *config.Config, secrets *config.Secrets) []Owed {
+	return owed(cfg, secrets)
+}
+
 // OwedNames is the names Fill would report as owed, without generating
 // anything. `secrets set` uses it to accept exactly the keys an operator has
 // been told to supply.

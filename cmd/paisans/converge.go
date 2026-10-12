@@ -1725,13 +1725,18 @@ func checkStep(r ui.Reporter, args []string, run func([]string) error) (string, 
 }
 
 // convergeLeft names each credential the toolkit cannot generate, which only
-// the operator can provide.
+// the operator can provide. A sign in client is owed too, but apply creates
+// it at Pocket ID and records it, so naming it here would send the operator
+// to set by hand what the next run makes.
 func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath string) {
 	if secretsPath == "" {
 		secretsPath = filepath.Join(filepath.Dir(configPath), "secrets.enc.yaml")
 	}
 	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); err == nil {
 		for _, key := range secretsgen.OwedNames(cfg, secrets) {
+			if strings.HasPrefix(key, "oidc_clients.") {
+				continue
+			}
 			r.Note("secrets: "+key+" is owed and only you can provide it", "paisans secrets set "+key+" < value")
 		}
 	}

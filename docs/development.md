@@ -192,9 +192,15 @@ file, re-encrypted to the recipients in `.sops.yaml`, and prints only `set
 <key>`. It strips one trailing newline, refuses an empty value, refuses a
 terminal on stdin, and accepts a key only if it is already set, owed by `init`
 (`external.acme_dns_token`, `oidc_clients.<app>.*`), or under `external`. It
-exists so a credential issued elsewhere never touches a terminal or an editor:
-an argument is in shell history and `ps`, a prompt is in scrollback, and `sops`
-opens the whole decrypted file in an editor.
+exists so a credential issued elsewhere never touches an echoing terminal or an
+editor: an argument is in shell history and `ps`, an echoed prompt is in
+scrollback, and `sops` opens the whole decrypted file in an editor.
+
+`secrets set` with no key, at a terminal, walks `secretsgen.OwedSecrets` less
+the `oidc_clients` entries, which `apply` creates, and reads each answer on the
+controlling terminal with echo off through `readOwedSecret`, which tests
+replace. Each answer is written before the next prompt, so an interruption
+keeps what was typed; an empty answer skips the key.
 
 A whole `apply --execute` does the same, once Pocket ID runs, for every admin
 the `admins` section declares (`cmd/paisans/converge_admins.go`), through
