@@ -30,6 +30,14 @@ func TestRulesFire(t *testing.T) {
 		level   validate.Level
 	}{
 		{"witness-shares-failure-domain", "witness-shares-failure-domain", validate.Refuse},
+		{"invite-must-be-clustered", "invite-must-be-clustered", validate.Refuse},
+		{"invite-identity-app", "invite-identity-app", validate.Refuse},
+		{"invite-signups-not-disabled", "invite-signups-not-disabled", validate.Refuse},
+		{"invite-login-link-disabled", "invite-login-link-disabled", validate.Refuse},
+		{"invite-recovery-disabled", "invite-recovery-disabled", validate.Refuse},
+		{"invite-without-smtp", "invite-without-smtp", validate.Refuse},
+		{"invite-code-of-conduct-missing", "invite-code-of-conduct-missing", validate.Refuse},
+		{"invite-setting-invalid", "invite-setting-invalid", validate.Refuse},
 		{"two-etcd-voters", "two-etcd-voters", validate.Refuse},
 		{"undeclared-site", "undeclared-site", validate.Refuse},
 		{"invalid-placement", "invalid-placement", validate.Refuse},

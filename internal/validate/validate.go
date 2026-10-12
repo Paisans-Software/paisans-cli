@@ -184,6 +184,11 @@ func Check(cfg *config.Config) Result {
 	c.configKeySteersCompose()
 	c.configKeyAlreadyRendered()
 	c.portCollision()
+	c.inviteMustBeClustered()
+	c.inviteIdentityApp()
+	c.inviteWithoutSMTP()
+	c.inviteCodeOfConduct()
+	c.inviteSettingInvalid()
 
 	c.evenVoters()
 	c.oneVoterNoFailover()

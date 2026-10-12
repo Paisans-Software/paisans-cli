@@ -83,6 +83,14 @@ apps:
     placement: cluster
     settings:
       file_backend: database
+      email_one_time_access_as_unauthenticated: true
+  invite:
+    kind: invite
+    hostname: invite.example.org
+    placement: cluster
+    settings:
+      identity_app: auth
+      code_of_conduct: code-of-conduct.md
   status:
     kind: uptime
     hostname: status.example.org
