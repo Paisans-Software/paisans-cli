@@ -99,6 +99,9 @@ func runMeshRekey(args []string) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRotation(secrets, "mesh rekey"); err != nil {
+		return err
+	}
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
 		transports[name] = rekeyHost(name, cfg.Sites[name], *sudo)

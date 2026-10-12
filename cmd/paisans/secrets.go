@@ -27,8 +27,10 @@ func runSecrets(args []string) error {
 		return runSecretsSet(args[1:], os.Stdin)
 	case len(args) >= 1 && args[0] == "prune":
 		return runSecretsPrune(args[1:], os.Stdin, os.Stdout)
+	case len(args) >= 1 && args[0] == "rotate":
+		return runSecretsRotate(args[1:], os.Stdin, os.Stdout)
 	}
-	return fmt.Errorf("secrets takes one subcommand, set or prune: paisans secrets set <dotted.key> [--secrets path] < value, or paisans secrets prune [--execute]")
+	return fmt.Errorf("secrets takes one subcommand, set, prune or rotate: paisans secrets set <dotted.key> [--secrets path] < value, paisans secrets prune [--execute], or paisans secrets rotate <path>... | --all [--execute]")
 }
 
 // hasSecrets reports whether the secrets file holds anything under key, a

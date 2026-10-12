@@ -157,8 +157,9 @@ func populated(v reflect.Value, prefix []string, paths *[]string) {
 // refusedWhileSet is every field the flattener leaves out because a merge
 // refuses while it is set, so there is never a value of it to combine. A new
 // field goes here only once someone has decided a merge refuses on it, and
-// rekeyUnderway checks it; anything else the flattener misses fails the test.
-var refusedWhileSet = map[string]bool{"mesh_rekey_remaining": true}
+// underway checks it; anything else the flattener misses fails the test. A
+// map is named by its own field, and covers every key under it.
+var refusedWhileSet = map[string]bool{"mesh_rekey_remaining": true, "rotations": true, "rotate_remaining": true}
 
 // A field added to Secrets that the flattener does not cover would be
 // dropped by every merge. This fails first. Version and ID are the file's
@@ -170,7 +171,7 @@ func TestFlattenCoversEverySecretsField(t *testing.T) {
 	var header = map[string]bool{"version": true, "id": true}
 	var expected []string
 	for _, p := range want {
-		if !header[p] && !refusedWhileSet[p] {
+		if !header[p] && !refusedWhileSet[strings.Split(p, ".")[0]] {
 			expected = append(expected, p)
 		}
 	}
@@ -178,8 +179,11 @@ func TestFlattenCoversEverySecretsField(t *testing.T) {
 		var only config.Secrets
 		i := fieldByYAML(t, p)
 		reflect.ValueOf(&only).Elem().FieldByIndex(i).Set(reflect.ValueOf(s).FieldByIndex(i))
-		if rekeyUnderway(&only, &config.Secrets{}) == nil {
+		if underway(&only, &config.Secrets{}) == nil {
 			t.Errorf("%s is listed as refused while set, and a merge does not refuse on it", p)
+		}
+		if underway(&config.Secrets{}, &only) == nil {
+			t.Errorf("%s is listed as refused while set, and a merge does not refuse on theirs", p)
 		}
 	}
 	var got []string
@@ -304,5 +308,47 @@ func TestMergeRefusesANameWithADot(t *testing.T) {
 	_, _, err := MergeSecrets(base, ours, theirs)
 	if err == nil || !strings.Contains(err.Error(), "external.a.b") || strings.Contains(err.Error(), "sentinel") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestMergeRefusesWhileOursHasARotationPending(t *testing.T) {
+	base := secretsWith("cluster.admin_password", "old", "external.x", "1")
+	ours := secretsWith("cluster.admin_password", "old", "external.x", "1")
+	ours.Rotations = map[string]string{"cluster.admin_password": "next-sentinel"}
+	theirs := secretsWith("cluster.admin_password", "old", "external.x", "2")
+	m, conflicts, err := MergeSecrets(base, ours, theirs)
+	if err == nil || m != nil || conflicts != nil {
+		t.Fatalf("merged %v %v %v", m, conflicts, err)
+	}
+	for _, want := range []string{"local", "cluster.admin_password", "paisans secrets rotate"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	for _, not := range []string{"next-sentinel", "--restart"} {
+		if strings.Contains(err.Error(), not) {
+			t.Errorf("the refusal says %q: %v", not, err)
+		}
+	}
+}
+
+// A stopped --all run between two secrets has no rotation pending and a list
+// left; the list is part of the run's state all the same.
+func TestMergeRefusesWhileTheirsHasARotateRemaining(t *testing.T) {
+	base := secretsWith("external.x", "1")
+	ours := secretsWith("external.x", "2")
+	theirs := secretsWith("external.x", "1")
+	theirs.RotateRemaining = []string{"storage.garage.admin_token", "apps.talk.oauth"}
+	_, _, err := MergeSecrets(base, ours, theirs)
+	if err == nil {
+		t.Fatal("merged")
+	}
+	for _, want := range []string{"newest version", "storage.garage.admin_token", "paisans secrets rotate"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "local") || strings.Contains(err.Error(), "--restart") {
+		t.Errorf("the refusal blames the local side or offers --restart: %v", err)
 	}
 }

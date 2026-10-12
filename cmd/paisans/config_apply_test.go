@@ -199,6 +199,31 @@ func TestApplyPublishesTheNextRevisionFirst(t *testing.T) {
 	}
 }
 
+// A finished secrets rotate leaves the secrets file changed on the
+// workstation and the base where it was: its scoped applies neither gather
+// nor publish. The next apply takes that file as an edit on the sites' head
+// and publishes it as the next revision, as it does any other edit.
+func TestApplyPublishesWhatSecretsRotateLeft(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	rotated := f.files[0]
+	rotated.Secrets = []byte(strings.Replace(string(rotated.Secrets), "fixture-not-a-secret-standby", "fixture-not-a-secret-standby-rotated", 1))
+	if bytes.Equal(rotated.Secrets, f.files[0].Secrets) {
+		t.Fatal("the fixture's standby password moved; the test no longer edits the secrets")
+	}
+	if err := f.l.WriteFiles(rotated); err != nil {
+		t.Fatal(err)
+	}
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	head, _ := f.l.Head()
+	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2, a new version on "+f.shas[0][:12]) {
+		t.Errorf("head %s, pushed %v\n%s", head, f.pushed(), rec.Lines())
+	}
+}
+
 // Local files equal to the sites' head publish nothing new: the head is
 // what is applied.
 func TestApplyOnTheHeadPublishesNothingNew(t *testing.T) {

@@ -23,9 +23,9 @@ code behind each one is laid out.
 validate and render touch nothing outside the working directory. init writes
 only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
-`storage init`, `storage add`, `storage rotate-key`, `app admin create`, `app
-remove` and `oidc client create` reach a machine, and each changes
-it only with `--execute`. `preflight` and `doctor`
+`secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
+admin create`, `app remove` and `oidc client create` reach a machine, and each
+changes it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
 host `--ssh` names, with no `paisans.yaml`, and changes nothing. `host allow`
 and `host disallow` change only a site's host's key allowlist,
@@ -39,9 +39,11 @@ secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
-removed site. `site remove --evict` and `mesh rekey` also write the local
-secrets file: the replacement's generated secrets, a site's next and
-promoted WireGuard key, and the sites a `mesh rekey --all` run has left.
+removed site. `site remove --evict`, `mesh rekey` and `secrets rotate` also
+write the local secrets file: the replacement's generated secrets, a site's
+next and promoted WireGuard key, the sites a `mesh rekey --all` run has left,
+and a secret's next and promoted value with the secrets a `secrets rotate
+--all` run has left.
 `web-server show` and `web-server check` change nothing: `check` looks at a
 monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
@@ -122,6 +124,7 @@ paisans app remove docs                   # an app out of paisans.yaml, off ever
 paisans site remove home-b                # a site out of the deployment, staged
 paisans site remove home-b --evict        # a site nobody else can reach, cut out first
 paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
+paisans secrets rotate --all              # every secret's rotation, in order, with its cost
 paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
 paisans dns init                          # shows which records it would create
@@ -155,7 +158,8 @@ about it are load bearing:
   application out of a role that still holds the old one. Re-running `init` is
   therefore the intended way to fill in a site or an app added to the
   configuration later, and the second run of an unchanged deployment writes
-  nothing at all.
+  nothing at all. Replacing one on purpose is `secrets rotate`'s, which
+  changes it where it is checked before any file presents it.
 * **It generates only what it can.** A DNS token is issued by a provider, a
   mail password by the mail provider (`external.smtp_password`, when an app
   sends mail through a host and has no password of its own), and an OIDC
@@ -948,6 +952,48 @@ the key the other runs, two undialled sites reach each other through their
 relay, etcd is healthy while every voter's tunnels are up, and Patroni's pause
 is a flag that `show-config` reports.
 
+## `secrets rotate`, one secret at a time
+
+`internal/secretsrotate` is the engine: `Plan`, `PlanAll` and `PlanAllRestart`
+read where each rotation stands and change nothing, and `Run.Execute` takes each
+secret through its four stages. Each secret is a `Rotator` (`rotator.go`) saying
+where its next value comes from, how the checking side learns it, which sites
+and stacks present it, and how the value is promoted, grouped into files by what
+checks the secret (`postgres.go`, `rabbitmq.go`, `garage.go`, `uptime.go`,
+`appsecret.go`), and `wrapped.go` for the pasted secrets and for the OIDC and S3
+rotations, which run `oidc client create --rotate-secret` and `storage
+rotate-key` in their place in the order. `cmd/paisans/secretsrotate.go` maps a
+path to its rotator, builds `--all`'s order, and hands the engine a scoped
+`apply` rendered from the secrets with the next value in place, never from the
+file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
+
+* **The next value is written before any host is handed it**, and the file
+  is read back and compared after every write. A re-run takes the pending
+  value from `rotations` and never generates another while one is there.
+* **Every command that renders refuses while a rotation is pending, and
+  `secrets rotate` refuses while a `mesh rekey` is** (`refuseMidRotation`
+  and `refuseRotateMidRekey`, both in `cmd/paisans/secretsrotate.go`).
+  Either would render a value some host no longer runs. A new command that
+  renders from the secrets file and reaches a host calls `refuseMidRotation`
+  too.
+* **A kept secret is a `KeptError`, not a refusal.** A precheck that finds
+  nothing checks the secret (an admin role that cannot log in, a queue with no
+  broker) returns one, and the engine lists it in `Run.Kept` and plans the
+  rest. A pending rotation's precheck is run too, except a pasted secret's,
+  and there any refusal, a `KeptError` included, means it cannot finish; its
+  refusal ends with `secretsrotate.CannotFinish`, as every such refusal does.
+* **Stage 3 asks the rotator for its users again.** The plan's `Item.Uses`
+  are only what it shows: a cluster role's switchover moves the leader, and
+  the next cluster role in the same run restarts the new one last.
+* **A pasted secret is compared line by line.** `carriers` finds the lines a
+  render with a probe value changes, and the host prints the hash of each
+  line of its copy (`lineHashCommand`), so a file that differs elsewhere does
+  not pass for a replaced secret.
+* **Passwords never reach `argv` or a log, except where upstream leaves no
+  other way in.** SQL goes on stdin with statement logging off, as `apply`'s
+  bootstrap does; `rabbitmqctl` takes a password only as an argument, which
+  `rabbitmq.go` says and accepts for the length of the call.
+
 ## `storage add`, and what lives where
 
 `internal/storageadd` is shaped like `internal/siteadd`: Build reads every
@@ -1617,12 +1663,12 @@ is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
 (Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only
 against fakes.
 
-`secrets rotate`, which changes every shared secret where it is checked and
-where it is used together, is not built: its own specification and pull
-request. Until then, after an eviction, the DNS token is replaced with
-`secrets set`, OIDC client secrets with `oidc client create
---rotate-secret`, and the apps' S3 keys with `storage rotate-key --app`, and
-the Postgres, Garage and heartbeat secrets stay as they are.
+`secrets rotate` has never been run against a real host either. Its `ALTER
+ROLE` on the leader and the Patroni restarts and switchover around a cluster
+password, `rabbitmqctl change_password` in Mbin's broker, every Garage node
+restarted together for `rpc_secret`, and whether each app ends the sessions
+the plan says it does are read from upstream source and documentation, cited
+in `internal/secretsrotate`, and have run only against fakes.
 
 The signed copies of the configuration have run only against fakes and local
 bare repositories standing in for sites: the trust rules against built

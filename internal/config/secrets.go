@@ -59,6 +59,18 @@ type Secrets struct {
 	// first site's rekey, and each site taken off as its key is promoted, so
 	// that a stopped run resumes without rekeying a site it finished.
 	MeshRekeyRemaining []string `yaml:"mesh_rekey_remaining,omitempty"`
+	// Rotations is the next value of each secret `paisans secrets rotate` is
+	// replacing, keyed by the secret's dotted path, set only while a rotation
+	// is under way. It is written before any host is handed the value, so a
+	// run that stops after the database holds the new password and the apps
+	// still the old one finds it and finishes with it rather than generating
+	// another. A rotation is pending while its path is here; promotion moves
+	// the value to its own place and removes the entry.
+	Rotations map[string]string `yaml:"rotations,omitempty"`
+	// RotateRemaining is the paths a `paisans secrets rotate --all` run has
+	// left, in order, kept for the same reason as MeshRekeyRemaining: a
+	// stopped run resumes without rotating a secret it finished.
+	RotateRemaining []string `yaml:"rotate_remaining,omitempty"`
 
 	// Path is where these were read from, for error messages.
 	Path string `yaml:"-"`
@@ -113,6 +125,18 @@ func (s *Secrets) RekeyPending() []string {
 		if site.WireGuardNextPrivateKey != "" {
 			out = append(out, name)
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RotationPending is the path of every secret with a next value, sorted: a
+// `paisans secrets rotate` that has not finished. Hosts may already run the
+// next value while the file names the old one as current.
+func (s *Secrets) RotationPending() []string {
+	out := make([]string, 0, len(s.Rotations))
+	for path := range s.Rotations {
+		out = append(out, path)
 	}
 	sort.Strings(out)
 	return out

@@ -91,6 +91,9 @@ Usage:
   paisans admin register [--config paisans.yaml] [--key <path.pub>] [--root <sha>] [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
+  paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...
+               [--config paisans.yaml] [--secrets secrets.enc.yaml]
+               [--sudo=false] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
                [--first-name <f>] [--last-name <l>] [--login-link]
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -265,6 +268,26 @@ Commands:
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
+             rotate: replace secrets, named by their paths in the secrets
+             file (apps.<app>.oauth for Mbin's OAuth2 keys), or every one
+             in scope with --all, one at a time in gated stages: a next
+             value in the secrets file, the side that checks it, each
+             site that uses it healthy before the next, then the value
+             promoted. A pasted secret (the DNS token, an SMTP password,
+             a client secret minted at Pocket ID) is handed on once it is
+             replaced at its issuer and set with secrets set, and refused
+             while every host using it runs the value the file holds,
+             read line by line; --replaced <path> lists one already
+             replaced and applied, which every host runs, instead. Lists
+             the secrets it keeps and why. --all refuses a file that lacks
+             a secret init generates. A stopped --all resumes with what it
+             left, and says so; --all --restart starts the full list
+             again. Refuses while a mesh rekey is unfinished, a site does
+             not answer, or etcd or Patroni is unhealthy; apply and every
+             other command that renders refuse while a rotation is
+             unfinished. A run that signs members out asks for sign out
+             at a terminal, before any host is claimed. A stopped run
+             resumes. Writes nothing without --execute.
   app        admin create: make sure a user exists, is verified and is an
              administrator of Pocket ID, and is in every admin group the
              apps signing in through it read. There is no password: a
@@ -299,25 +322,25 @@ Commands:
 
 host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
-admin create, app remove, oidc client create, secrets prune, preflight, failover
-test, doctor, init, config and admin register are the only commands that
-reach a host. Each reads it to plan, and changes it only with --execute; host
-allow and host disallow change only a host's key allowlist, which is the host owner's, and
-claim nothing; config and admin register claim nothing, and their --execute
-only starts each site's configuration sync and, for publish and register, adds a
-version to its store; host deployments, preflight, doctor and init have no
---execute and never change it; secrets prune only reads the gateways' deployment
-records, and its --execute writes the local secrets file alone. With --execute,
-a command first claims each host it writes to in /var/lib/paisans/registry.json,
-and refuses if another deployment there holds this one's token, WireGuard
-interface or listen port, or a mesh subnet overlapping this one's. apply and
-host prepare also refuse when anything else on the host overlaps the mesh
-subnet. dns init and dns prune reach no host, only the DNS provider's API, and
-change it only with --execute; site remove also deletes the removed site's
-records there. web-server show and web-server check change nothing: check looks
-at a monitor's public hostname as any visitor could, and with managed_by:
-external both read the monitor's web server over ssh, show always and check when
-a check fails.
+admin create, app remove, oidc client create, secrets prune, secrets rotate,
+preflight, failover test, doctor, init, config and admin register are the only
+commands that reach a host. Each reads it to plan, and changes it only with
+--execute; host allow and host disallow change only a host's key allowlist,
+which is the host owner's, and claim nothing; config and admin register claim
+nothing, and their --execute only starts each site's configuration sync and, for
+publish and register, adds a version to its store; host deployments, preflight,
+doctor and init have no --execute and never change it; secrets prune only reads
+the gateways' deployment records, and its --execute writes the local secrets
+file alone. With --execute, a command first claims each host it writes to in
+/var/lib/paisans/registry.json, and refuses if another deployment there holds
+this one's token, WireGuard interface or listen port, or a mesh subnet
+overlapping this one's. apply and host prepare also refuse when anything else on
+the host overlaps the mesh subnet. dns init and dns prune reach no host, only
+the DNS provider's API, and change it only with --execute; site remove also
+deletes the removed site's records there. web-server show and web-server check
+change nothing: check looks at a monitor's public hostname as any visitor could,
+and with managed_by: external both read the monitor's web server over ssh, show
+always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
@@ -755,6 +778,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	loaded := configstore.Files{Paisans: paisansBytes, Secrets: secretsBytes}
 	if err := refuseMidRekey(secrets); err != nil {
+		return err
+	}
+	if err := refuseMidRotation(secrets, "apply"); err != nil {
 		return err
 	}
 	// apply does not call secretsgen.Fill either, and this is the path that

@@ -24,10 +24,10 @@ import (
 // conflicts holds paths only, sorted. A value is never put in one, so a
 // conflict is safe to print, and merged is nil when there is any.
 //
-// The merge refuses while either side has a `paisans mesh rekey` under way
-// (rekeyUnderway).
+// The merge refuses while either side has a `paisans mesh rekey` or a
+// `paisans secrets rotate` under way (underway).
 func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, conflicts []string, err error) {
-	if err := rekeyUnderway(ours, theirs); err != nil {
+	if err := underway(ours, theirs); err != nil {
 		return nil, nil, err
 	}
 	b, o, t := flatten(base), flatten(ours), flatten(theirs)
@@ -67,6 +67,16 @@ func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, c
 	return merged, nil, nil
 }
 
+// underway refuses when either side holds the state of a run that a merge
+// cannot combine: a mesh rekey (rekeyUnderway) or a secrets rotation
+// (rotationUnderway).
+func underway(ours, theirs *config.Secrets) error {
+	if err := rekeyUnderway(ours, theirs); err != nil {
+		return err
+	}
+	return rotationUnderway(ours, theirs)
+}
+
 // rekeyUnderway refuses when either side is part way through a `paisans mesh
 // rekey`: a site with a next WireGuard key, or sites a `--all` run has left.
 // A rekey's state is a sequence over live hosts, each step recorded as the
@@ -97,6 +107,36 @@ func rekeyUnderway(ours, theirs *config.Secrets) error {
 	return nil
 }
 
+// rotationUnderway refuses when either side is part way through a `paisans
+// secrets rotate`: a secret with a next value under rotations, or paths a
+// `--all` run has left under rotate_remaining. A rotation's state is a
+// sequence over live hosts, the checking side moved to the next value before
+// its users are, so combining two such states key by key could promote a
+// value no host's checking side accepts. Finishing the rotation on the side
+// that holds it settles the state, so that is what the refusal names.
+//
+// The error names paths, never a value.
+func rotationUnderway(ours, theirs *config.Secrets) error {
+	for _, side := range []struct {
+		name, finish string
+		s            *config.Secrets
+	}{
+		{"the local secrets", "run paisans secrets rotate here to finish it (with --all when the run was --all), then pull", ours},
+		{"the sites' newest version of the secrets", "finish it with paisans secrets rotate on the workstation that started it and publish, then pull", theirs},
+	} {
+		paths := side.s.RotationPending()
+		for _, p := range side.s.RotateRemaining {
+			if !slices.Contains(paths, p) {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) > 0 {
+			return fmt.Errorf("%s have a secrets rotation under way (%s), which a merge cannot combine; %s", side.name, strings.Join(paths, ", "), side.finish)
+		}
+	}
+	return nil
+}
+
 // same reports whether path holds the same value, or is absent, in both.
 func same(a, b map[string]string, path string) bool {
 	va, inA := a[path]
@@ -109,9 +149,9 @@ func same(a, b map[string]string, path string) bool {
 // version and id are not secrets and are not here.
 //
 // A field added to config.Secrets has to be added here, or a merge would drop
-// it; the test beside this file fails until it is. mesh_rekey_remaining is
-// not here because a merge refuses while it is set (rekeyUnderway), so there
-// is never a value of it to combine.
+// it; the test beside this file fails until it is. mesh_rekey_remaining,
+// rotations and rotate_remaining are not here because a merge refuses while
+// any is set (underway), so there is never a value of them to combine.
 func flatten(s *config.Secrets) map[string]string {
 	out := map[string]string{}
 	put := func(path, v string) {

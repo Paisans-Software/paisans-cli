@@ -14,17 +14,16 @@ protection works, and the scenarios behind them, are in
 use `alice` for the admin who leaves, `home-b` for a site, and `vm` for the
 gateway. The reasoning is in `README.md`, under *Keys belong to admins, and
 sites name admins*, *The admin reconciler keeps `admins` equal to Pocket ID's
-administrators*, *Evicting a site: `--evict`* and *Rekeying the mesh: `mesh
-rekey`*.
+administrators*, *Evicting a site: `--evict`*, *Rekeying the mesh: `mesh
+rekey`* and *`secrets rotate` replaces a secret where it is checked and where
+it is used*.
 
-**`secrets rotate` is not built yet.** It will rotate every shared secret where
-it is checked and where it is used together, including signing every member
-out, and has its own pull request. Until it lands, the steps below rotate what
-existing commands can: the DNS token with `paisans secrets set`, OIDC client
-secrets with `paisans oidc client create --rotate-secret`, apps' S3 keys with
-`paisans storage rotate-key --app`, and WireGuard keys with `paisans mesh
-rekey`. The Postgres, Garage and heartbeat secrets stay as they are, and each
-case says what that leaves open.
+Both cases end the same way: the secrets file re-encrypted without them, then
+the mesh rekeyed, then every other secret rotated with `paisans secrets
+rotate --all`. The order is deliberate. Re-encrypting first keeps every new
+value from them; rekeying next takes the mesh away from them, so the secrets
+only the mesh reaches are out of their reach while they are replaced; and
+`secrets rotate` refuses while a rekey is unfinished anyway.
 
 ## The `sops` commands here
 
@@ -132,41 +131,61 @@ community's decision.
    container restarts, and every app that reads that group stops treating
    them as an administrator. Closes: administration of Pocket ID and of every
    app. Open: sessions they already hold in each app, until those expire or
-   `secrets rotate` signs every member out.
+   step 5 ends them.
 
 5. **Rotate what the trust calls for.** On full trust, nothing more. Short of
-   it, in this order, credentials that work from the internet first:
+   it, in this order:
 
-   1. The DNS token: revoke it at the provider, issue a new one scoped to the
-      zone, and pipe it in, then apply the sites that render it (the gateway,
-      and a monitor with `managed_by: paisans`):
+   1. Replace the pasted secrets at their issuers, and set each new one. The
+      DNS token first, since it can point the community's names anywhere:
+      revoke it at the provider, issue a new one scoped to the zone, and pipe
+      it in. Then each SMTP password the deployment sends mail with, at the
+      mail provider, and the client secret of each app whose client `oidc
+      client create` cannot make (Synapse's, oauth2-proxy's), minted at
+      Pocket ID:
 
       ```sh
       security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
-      paisans apply --execute
+      security find-generic-password -s smtp -w | paisans secrets set external.smtp_password
+      security find-generic-password -s chat-oidc -w | paisans secrets set oidc_clients.chat.client_secret
       ```
 
-   2. Each app's OIDC client secret, then an apply to render the new one:
+      `secrets rotate` hands each new value to the hosts in step 3. If an
+      `apply` hands one out first, name it there with `--replaced <path>`,
+      since rotate refuses a pasted secret every host already runs unless it
+      is told the secret was replaced.
 
-      ```sh
-      paisans oidc client create --app talk --rotate-secret --execute
-      paisans apply --execute
-      ```
-
-      A rotation adds a secret and leaves the old one valid, so the app keeps
-      signing people in until the apply. The old one stays valid at Pocket ID
-      until it is deleted there.
-
-   3. Each app's S3 key: `paisans storage rotate-key --app talk --execute`.
-   4. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
+   2. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
       site at a time. `apply` refuses until it finishes, and a run that stops
       resumes when run again.
 
-   Open: the Postgres superuser, standby and admin passwords, the apps'
-   database passwords, Garage's `rpc_secret` and `admin_token`, the heartbeat
-   tokens and Mbin's OAuth2 keypair, until `secrets rotate`. These are reached
-   only over the mesh, except Mbin's keypair, so they matter less once step
-   4 of this list is done.
+   3. Everything else:
+
+      ```sh
+      paisans secrets rotate --all             # every secret in order, its cost, and what is kept
+      paisans secrets rotate --all --execute   # from a terminal
+      ```
+
+      One secret at a time, what works from the internet first: the pasted
+      secrets set above, the OIDC client secrets, Mbin's OAuth2 keys and the
+      apps' session secrets, the S3 keys, then the Postgres, RabbitMQ, Valkey,
+      Mercure, Garage and heartbeat secrets. It asks for `sign out` at the
+      terminal, since some of these end members' sessions; the plan says
+      which. A run that stops resumes when run again, and `apply`, like
+      every command that renders, refuses until it finishes. A plan that
+      says it is resuming an earlier `--all` run that was not this one
+      would leave the secrets that run finished as the departed admin knew
+      them: run `paisans secrets rotate --all --restart` instead, which
+      rotates every secret again. A rotation that cannot finish is ended by
+      hand: README, *A rotation that cannot finish*.
+
+   Closes: every secret they could read, except the ones the plan lists as
+   kept. Open: Pocket ID's `encryption_key` and Matrix Authentication
+   Service's `mas_encryption_secret`, which encrypt stored data and cannot be
+   changed without losing it; each is useful only to someone who also holds
+   the data it encrypts. And sessions in apps whose sessions no rotated
+   secret signs, Pocket ID's own among them, and Mbin's open sessions, until
+   they expire.
 
 ## An admin whose site is evicted
 
@@ -178,8 +197,11 @@ the same edit takes its roles over (README, *Evicting a site: `--evict`*).
 `home-b` is the site here; where the gateway differs, the step says so.
 
 The order matters: what can redirect the community's names closes first, the
-secrets file is re-encrypted before any new site's secrets are generated, and
-the mesh is rekeyed after the eviction and before the replacement joins.
+secrets file is re-encrypted before any new site's secrets are generated, the
+mesh is rekeyed after the eviction and before the replacement joins, and
+everything else is rotated once the replacement runs: `secrets rotate` hands
+each new value to every site the configuration declares, the replacement's
+included, and refuses while one does not answer.
 
 1. **When the site holds the gateway, revoke the DNS token at the provider,
    and issue a new one scoped to the zone.** Do not set it yet if step 2
@@ -299,9 +321,35 @@ the mesh is rekeyed after the eviction and before the replacement joins.
    certificates, for every client that checks revocation. Open: clients that
    do not check.
 
-10. **Rotate the rest**, in the order of step 5 of the first case: the OIDC
-    client secrets, then the apps' S3 keys. The DNS token was step 1 and the
-    WireGuard keys step 6.
+10. **Rotate the rest.** First replace the pasted secrets at their issuers
+    and set each, as in step 5.1 of the first case: each SMTP password, and
+    the client secret of each app whose client `oidc client create` cannot
+    make. When `home-b` did not hold the gateway, the DNS token is the one
+    they knew: replace it the same way. Then:
+
+    ```sh
+    paisans secrets rotate --all             # every secret in order, its cost, and what is kept
+    paisans secrets rotate --all --execute   # from a terminal
+    ```
+
+    When `home-b` held the gateway, steps 3 and 7 already replaced the DNS
+    token and put it on every host that uses it, and `--all` refuses it as
+    unchanged, since it cannot tell that from a token never replaced. Say so:
+
+    ```sh
+    paisans secrets rotate --all --replaced external.acme_dns_token
+    paisans secrets rotate --all --replaced external.acme_dns_token --execute
+    ```
+
+    The plan lists the token as replaced earlier and rotates everything else.
+
+    It asks for `sign out`: after a gateway's eviction, signing members out
+    is the point, since the evicted host saw every session cookie. A run
+    that stops resumes when run again, and `apply`, like every command that
+    renders, refuses until it finishes. When the plan says it is resuming an
+    earlier `--all` run that was not this one, add `--restart`, so every
+    secret is rotated again. A rotation that cannot finish is ended by hand:
+    README, *A rotation that cannot finish*. The WireGuard keys were step 6.
 
 11. **Remove the evicted site's secrets**, now that no site names it:
 
@@ -315,10 +363,14 @@ the mesh is rekeyed after the eviction and before the replacement joins.
 * a copy of the database and of the objects, as they were when it was cut;
 * everything it saw while it terminated TLS, when it was the gateway:
   members' session cookies, and anything typed into a form;
-* the Postgres, Garage and heartbeat secrets and Mbin's OAuth2 keypair, until
-  `secrets rotate`. The Postgres and Garage ones reach nothing once the mesh is
-  closed; Mbin's keypair signs tokens that work from the internet;
-* members' sessions in every app, until they expire or `secrets rotate` signs
-  every member out;
+* every secret it was rendered, until step 10 rotates it. The Postgres and
+  Garage ones reach nothing once the mesh is closed; Mbin's keypair signs
+  tokens that work from the internet;
+* Pocket ID's `encryption_key` and Matrix Authentication Service's
+  `mas_encryption_secret`, which `secrets rotate` keeps because they encrypt
+  stored data, and which open only what the copy above already holds;
+* members' sessions in every app, until they expire or step 10 ends them;
+  sessions no rotated secret signs, Pocket ID's own among them, and Mbin's
+  open sessions, last until they expire;
 * when they were a recipient, every secret as it was until step 2, in every
   copy of the file they hold.

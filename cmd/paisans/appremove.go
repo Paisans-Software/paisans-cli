@@ -94,6 +94,9 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseMidRotation(secrets, "app remove"); err != nil {
+		return err
+	}
 
 	hosts := map[string]appremove.Host{}
 	in := appremove.Input{DeleteData: *deleteData}

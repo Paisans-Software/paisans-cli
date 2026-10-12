@@ -150,6 +150,65 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
+### `paisans secrets rotate`
+
+Replaces secrets where they are checked and where they are used, one secret at
+a time: a next value written to the secrets file, the side that checks it
+taught it, every site that presents it applied in turn and healthy before the
+next, then the next value promoted. Lists the secrets it keeps, each with why.
+A stopped run resumes where it stopped; `apply`, and every other command that
+renders from the secrets file and reaches a host, refuses until it finishes,
+since each renders the old value.
+
+```sh
+paisans secrets rotate --all                               # dry run: every secret in order, its cost, and what is kept
+paisans secrets rotate --all --execute
+paisans secrets rotate cluster.standby_password --execute
+paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
+paisans secrets rotate external.acme_dns_token --execute   # hands the new token to every site using it
+paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token an eviction already applied
+paisans secrets rotate --all --restart --execute           # the full list again, whatever a stopped --all left
+```
+
+* **Alone:** always; after an admin who could read the secrets file leaves,
+  or a site is evicted, once the file is re-encrypted and the mesh rekeyed.
+* **Flags:** the secrets' paths in the secrets file as arguments, or `--all`
+  (every secret in scope, in the order *`secrets rotate` replaces a secret
+  where it is checked and where it is used* gives); `--restart` (with
+  `--all` only: discard what a stopped `--all` run left and rotate every
+  secret in scope again; refused while a rotation is pending, which finishes
+  first); `--replaced <path>` (repeatable: a pasted secret already replaced
+  and applied, which every host using it runs; listed, not rotated, and
+  refused for a generated secret or one some host does not run yet);
+  `--config`, `--secrets`, `--execute`, `--sudo`.
+* **A stopped `--all`:** the secrets file records what it left
+  (`rotate_remaining`), and the next `--all` does only that, saying so at
+  every verbosity and in its result: the secrets the earlier run finished
+  are not rotated again. A recorded path the deployment no longer has a
+  rotation of is refused, naming it and `--all --restart`.
+* **Hosts:** every site, since each must answer before anything changes, and
+  each is claimed. The secrets file is read and written on this machine only.
+* **`--execute`:** rotates each secret in four gated stages, and stops at the
+  first gate that fails. Asks for `sign out` at a terminal first when a rotation
+  in the run signs members out, and is refused without one. Refuses before
+  anything changes when a `mesh rekey` is unfinished, a site does not answer
+  over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS token, an
+  SMTP password, a client secret minted at Pocket ID) is the value every host
+  using it runs: replace it at its issuer and set it with `secrets set` first,
+  or name it with `--replaced` when that was done and applied already. Which
+  value a host runs is read per secret: the host prints the hash of each line of
+  the file that carries it, and the lines that carry it are compared, so another
+  change in that file does not count. `--all` also refuses a secrets file that
+  lacks a secret `init` generates, naming `paisans init`.
+
+A pending rotation that cannot finish, Eg: of a secret whose app was taken
+out of `paisans.yaml`, is ended by hand: *A rotation that cannot finish* in
+`README.md`. See *`secrets rotate` replaces a secret where it is checked and
+where it is used* there too, and
+[guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md) for the order
+around it.
+
 ### `paisans config`
 
 The signed copies of `paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
@@ -209,7 +268,9 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   again; to keep the local value, take the head's first, pull, then set the key
   back with `paisans secrets set` and publish, or edit a `pocket_id_groups` key
   with `sops`). It refuses while either side has a `paisans mesh rekey` under
-  way, naming the sites, until `mesh rekey` finishes it. `recover` refuses to
+  way, naming the sites, until `mesh rekey` finishes it, and while either side
+  has a `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
+  naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
   `.paisans/incoming/<sha>/` and refuses to choose.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
@@ -697,11 +758,13 @@ paisans mesh rekey --all --execute     # every site, one at a time
   and the sites as arguments, `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** every site, since each is a peer of some site rekeyed. The
   secrets file is read and written on this machine only.
-* **`--execute`:** rekeys each site in four gated stages, and stops at the
-  first gate that fails. Refuses before anything changes when etcd or Patroni
-  is unhealthy, Patroni is paused by something else, or a site does not answer
-  over ssh. Around the swap of a site other sites relay through, Patroni is
-  paused and then resumed once the cluster is healthy again.
+* **`--execute`:** rekeys each site in four gated stages, and stops at the first
+  gate that fails. Refuses before anything changes when etcd or Patroni is
+  unhealthy, Patroni is paused by something else, a site does not answer over
+  ssh, or a `secrets rotate` is unfinished, since its applies would render the
+  old value of the secret being rotated. Around the swap of a site other sites
+  relay through, Patroni is paused and then resumed once the cluster is healthy
+  again.
 
 See *Rekeying the mesh: `mesh rekey`* in `README.md`.
 

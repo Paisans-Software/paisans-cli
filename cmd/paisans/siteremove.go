@@ -145,6 +145,9 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRotation(secrets, "site remove"); err != nil {
+		return err
+	}
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
 	}

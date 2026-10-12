@@ -58,6 +58,9 @@ func runStorageRotateKey(args []string) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRotation(secrets, "storage rotate-key"); err != nil {
+		return err
+	}
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
 	}
@@ -122,6 +125,20 @@ func runStorageRotateKey(args []string) error {
 	return nil
 }
 
+// scopedApplyPlan is `paisans apply --site <site> --only <stack>...`
+// planned with secrets, for a rotation's switch: the same plan, refusal on a
+// host edit and health gate, scoped to stacks. A rotation rewrites an
+// environment, not an image: no resolver, so each site keeps the build it
+// runs rather than moving an app to a new one in the middle of a rotation.
+// keepImages keeps superseded images too, as apply does on a shared host.
+func scopedApplyPlan(cfg *config.Config, secrets *config.Secrets, site string, t apply.Transport, keepImages bool, stacks ...string) (*apply.Plan, error) {
+	options := []apply.Option{apply.Only(stacks...), apply.ResolveImages(nil)}
+	if keepImages {
+		options = append(options, apply.KeepImages())
+	}
+	return planSiteApply(cfg, secrets, site, t, options...)
+}
+
 // applySwitch is rotatekey.Switch as `paisans apply --site <site> --only
 // <app>`: the same plan, the same refusal on a host edit, the same health
 // gate.
@@ -135,14 +152,7 @@ type applySwitch struct {
 }
 
 func (a applySwitch) plan(site string, secrets *config.Secrets) (*apply.Plan, error) {
-	// A key rotation rewrites the app's environment, not its image: no
-	// resolver, so the switch keeps the build each site runs rather than
-	// moving the app to a new one in the middle of a rotation.
-	options := []apply.Option{apply.Only(a.app), apply.ResolveImages(nil)}
-	if a.shared[site] {
-		options = append(options, apply.KeepImages())
-	}
-	plan, err := planSiteApply(a.cfg, secrets, site, a.transports[site], options...)
+	plan, err := scopedApplyPlan(a.cfg, secrets, site, a.transports[site], a.shared[site], a.app)
 	if err != nil {
 		return nil, err
 	}

@@ -87,7 +87,9 @@ secrets file, every secret as it was when they left.
 **Protects.** Taking them out of `admins` and every `ssh.keys`, then preparing
 each site, deletes every key `host prepare` added for them. Re-encrypting the
 secrets file under a new data key keeps every later value from them. Rotating
-secrets makes what they already hold worthless.
+secrets with `paisans secrets rotate --all`, after the mesh is rekeyed, makes
+what they already hold worthless, except the two secrets that encrypt stored
+data, which it keeps.
 
 **Does not protect.** Nothing takes back the copies they hold: old versions of
 the secrets file still open with their key. A key of theirs that was in
@@ -151,8 +153,9 @@ host as a peer.
 they expire or are revoked. What it saw while it served members cannot be
 unseen.
 
-**You do.** Revoke the token first, revoke the old certificates, and sign every
-member out once `secrets rotate` exists.
+**You do.** Revoke the token first, revoke the old certificates, and sign
+members out with `paisans secrets rotate --all`, which ends the sessions the
+rotated secrets sign and asks for `sign out` before it does.
 
 ## Someone holds another site's WireGuard key
 
@@ -189,7 +192,8 @@ edited too, since every paisans command encrypts to its recipients.
 repository's history, still opens with their key. Only changing a secret makes
 their copy of it worthless.
 
-**You do.** Re-encrypt before anything new is written to the file, then rotate.
+**You do.** Re-encrypt before anything new is written to the file, then rekey
+the mesh, then rotate with `paisans secrets rotate --all`.
 
 ## Someone who is not an admin gains root on one site
 
@@ -206,7 +210,8 @@ worthless.
 from an honest site. The README says so where it explains why every port binds
 the mesh address: a compromised peer reaches every app ungated.
 
-**You do.** Evict it, and rotate what it held.
+**You do.** Evict it, and rotate what it held with `paisans secrets rotate
+--all`.
 
 ## Losing `paisans.yaml` or the secrets file
 
@@ -279,9 +284,6 @@ deployment exists.
 
 ## Not built yet
 
-* **`secrets rotate`.** Rotation of the Postgres, Garage and heartbeat secrets,
-  Mbin's keypair, and signing every member out. Until it lands, the runbook
-  rotates what existing commands can and says what stays open.
 * **A record of who owns which site.** Without it, nothing warns when one
   admin's hosts hold a majority of etcd's voters, which would let that admin
   block an eviction.
