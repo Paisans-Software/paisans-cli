@@ -224,8 +224,8 @@ func TestShortPath(t *testing.T) {
 		{"/work/deploy/staging/secrets.enc.yaml", "staging/secrets.enc.yaml"},
 		{"/work/deploy", "."},
 		{"/home/someone/keys/age.txt", "~/keys/age.txt"},
-		{"/etc/paisans.yaml", "/etc/paisans.yaml"},
-		{"staging/paisans.yaml", "staging/paisans.yaml"},
+		{"/etc/paisans-stack.yaml", "/etc/paisans-stack.yaml"},
+		{"staging/paisans-stack.yaml", "staging/paisans-stack.yaml"},
 		{"/work/deployed/x", "/work/deployed/x"},
 	} {
 		if got := ui.ShortPathFrom(c.path, "/work/deploy", "/home/someone"); got != c.want {

@@ -29,7 +29,7 @@ func secretsDir(t *testing.T, secrets string) (configPath, secretsPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath = filepath.Join(dir, "paisans.yaml")
+	configPath = filepath.Join(dir, "paisans-stack.yaml")
 	secretsPath = filepath.Join(dir, "secrets.enc.yaml")
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -377,10 +377,10 @@ func TestPruneSaysKeptOnlyWhenThereAreSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, "sites.monitor-a is deployed but paisans.yaml no longer declares it; its secrets are kept") {
+	if !strings.Contains(out, "sites.monitor-a is deployed but paisans-stack.yaml no longer declares it; its secrets are kept") {
 		t.Errorf("monitor-a:\n%s", out)
 	}
-	if strings.Contains(out, "monitor-b is deployed but paisans.yaml no longer declares it; its secrets are kept") {
+	if strings.Contains(out, "monitor-b is deployed but paisans-stack.yaml no longer declares it; its secrets are kept") {
 		t.Errorf("monitor-b has no secrets:\n%s", out)
 	}
 }

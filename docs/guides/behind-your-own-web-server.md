@@ -188,17 +188,17 @@ web server
 
 With the line there, apply creates the directory if it is missing, writes the
 file, validates your whole configuration, reloads a server in a container
-(below), and records the directory in `paisans.yaml`:
+(below), and records the directory in `paisans-stack.yaml`:
 
 ```
 web server
   ✓ site file for status   /opt/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy reloaded
-  ! health: include_dir set to /opt/caddy/paisans.d in paisans.yaml
+  ! health: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml
   ✓ status                 health.example.org
 ```
 
 The `include_dir` line is added under the site's `web_server`, every other line
-and comment of `paisans.yaml` kept. Change it there to use another directory:
+and comment of `paisans-stack.yaml` kept. Change it there to use another directory:
 the next apply moves the file. When your configuration does not validate with
 the file, apply puts back what was there and reloads nothing, so your server
 keeps the configuration it ran, and warns with the server's own error; a
@@ -501,6 +501,6 @@ whose host has died. With one monitor, watch the certificate's renewal in
 your web server yourself.
 
 Changing your web server, its certificate or its address needs nothing from
-the toolkit. Changing `listen` does: edit `paisans.yaml`, apply the site, and
+the toolkit. Changing `listen` does: edit `paisans-stack.yaml`, apply the site, and
 update the upstream in your web server to match, then run `web-server check`
 again.

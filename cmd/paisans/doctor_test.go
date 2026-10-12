@@ -364,7 +364,7 @@ func TestDoctorExecuteRemovesOnlyRedundantGateConfig(t *testing.T) {
 	if !strings.Contains(string(data), anchor) {
 		t.Fatal("the fixture's talk config moved; update this test")
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	body := strings.Replace(string(data), anchor, anchor+"      # Before gating wrote it.\n      MBIN_USE_FEDERATION_ALLOW_LIST: true\n      MBIN_PRIVATE_INSTANCE: false\n", 1)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)

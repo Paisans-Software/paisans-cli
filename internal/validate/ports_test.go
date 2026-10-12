@@ -11,7 +11,7 @@ import (
 
 func example(t *testing.T) *config.Config {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatalf("loading the example: %v", err)
 	}

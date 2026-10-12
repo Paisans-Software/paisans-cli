@@ -31,7 +31,7 @@ func runGateway(args []string) error {
 	return runGatewayMove(args[1:])
 }
 
-// runGatewayMove moves the gateway role to the site paisans.yaml gives it,
+// runGatewayMove moves the gateway role to the site paisans-stack.yaml gives it,
 // from the site that still serves as the gateway, in gated stages (README,
 // "Moving the gateway"). It takes no site: the new gateway is the
 // configuration's, and the old one is found from what it still runs.

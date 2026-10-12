@@ -36,7 +36,7 @@ var dnsProviderFor = dns.For
 
 // runSiteRemove takes one site out of the running deployment, stage by stage:
 // its data moved off, its cluster memberships removed, its host cleaned and
-// its entry taken out of paisans.yaml. See internal/siteremove and README's
+// its entry taken out of paisans-stack.yaml. See internal/siteremove and README's
 // *`site remove` takes a site out*.
 //
 // Like every command that changes a host, it plans from what it reads and
@@ -368,11 +368,11 @@ var tokenShape = regexp.MustCompile(fmt.Sprintf("^[0-9a-f]{%d}$", deployment.Tok
 
 // runSiteRemoveByID is `site remove --force --ssh <dest> --id <id or token>`:
 // one host cleaned of the deployment its registry names, with no
-// paisans.yaml and no secrets file. See siteremove.BuildForcedByID and
+// paisans-stack.yaml and no secrets file. See siteremove.BuildForcedByID and
 // docs/specs/2026-10-10-remove-without-config.md.
 //
 // Nothing says whether the deployment still runs elsewhere, or whether
-// someone still holds its paisans.yaml, so --execute always asks for the
+// someone still holds its paisans-stack.yaml, so --execute always asks for the
 // site's name at a terminal.
 func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, stdout io.Writer) error {
 	switch {

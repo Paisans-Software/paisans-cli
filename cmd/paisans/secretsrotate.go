@@ -698,7 +698,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			kept = append(kept, keptSecret{path, backupKeyKept})
 		}
 	}
-	// A destination paisans.yaml no longer declares is an orphan, which
+	// A destination paisans-stack.yaml no longer declares is an orphan, which
 	// secrets prune reports; it is not kept.
 	if cfg.Backup != nil {
 		for _, d := range cfg.Backup.Destinations {

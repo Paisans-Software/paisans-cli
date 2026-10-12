@@ -1,9 +1,9 @@
-# Removing a deployment from a host without its `paisans.yaml`
+# Removing a deployment from a host without its `paisans-stack.yaml`
 
 Date: 2026-10-10. Status: approved by the founder in session.
 
 `site remove --force` (docs/specs/2026-10-09-site-remove-force.md) cleans one
-host of one deployment. It names the deployment by `id` in `paisans.yaml`, so
+host of one deployment. It names the deployment by `id` in `paisans-stack.yaml`, so
 when that file is lost nothing can name it, and the deployment stays on every
 host it reached. The id is still on each of those hosts, in the registry at
 `/var/lib/paisans/registry.json`, with the site's name and roles.
@@ -13,7 +13,7 @@ Two commands close that:
 * `paisans host deployments` lists what a host's registry holds, and what of a
   deployment is on the host without a registry entry.
 * `paisans site remove --force --ssh <dest> --id <id or token>` cleans the host
-  of the deployment the registry names, reading neither `paisans.yaml` nor the
+  of the deployment the registry names, reading neither `paisans-stack.yaml` nor the
   secrets file.
 
 ## Scope
@@ -145,7 +145,7 @@ Besides what the host stage keeps, with why, one line each:
 ### Confirmation
 
 Nothing says whether the deployment still runs elsewhere, or whether someone
-still holds its `paisans.yaml`. So `--execute` always asks for the site's name,
+still holds its `paisans-stack.yaml`. So `--execute` always asks for the site's name,
 as the entry records it, at a terminal, with `--delete-data` or without. No
 flag answers it. The question names the deployment and the host, the owner's
 sites in `/srv/caddy.d` a kept Caddy goes on serving on a gateway, and the

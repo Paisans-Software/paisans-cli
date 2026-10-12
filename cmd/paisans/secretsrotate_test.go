@@ -34,7 +34,7 @@ func rotateDeployment(t *testing.T, edit func(string) string) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(dir, "paisans.yaml")
+	configPath := filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -983,7 +983,7 @@ func TestSecretsRotateKeepsTheBackupSecrets(t *testing.T) {
 	}
 }
 
-// A destination's credentials that paisans.yaml no longer declares are an
+// A destination's credentials that paisans-stack.yaml no longer declares are an
 // orphan for secrets prune, not a secret --all keeps, so --all lists the
 // destinations as kept only for one the configuration still names.
 func TestSecretsRotateAllKeepsNoOrphanedDestination(t *testing.T) {

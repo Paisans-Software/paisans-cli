@@ -7,7 +7,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
-// Every listener names the paisans.yaml key that makes the site bind it, so
+// Every listener names the paisans-stack.yaml key that makes the site bind it, so
 // a refusal over a port the host already uses can tell the operator what to
 // change.
 func TestEveryListenerNamesTheKeyThatClaimsIt(t *testing.T) {

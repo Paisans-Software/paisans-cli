@@ -92,7 +92,7 @@ func holder(h mesh.Host, site string, clash []mesh.Taken) string {
 // every other deployment's mesh from each registry and everything each host
 // holds (see checkMeshLive), keeps the declared subnet if it overlaps none of
 // it, and otherwise rolls a random /24 that overlaps none, moving each
-// site's address into it with its host number kept. It writes paisans.yaml
+// site's address into it with its host number kept. It writes paisans-stack.yaml
 // only when it rolled, and says why. It reports whether it wrote.
 //
 // The decision is one step, "settle mesh subnet", whose result is what

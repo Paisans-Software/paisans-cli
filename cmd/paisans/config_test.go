@@ -88,7 +88,7 @@ func testKey(t *testing.T) (string, string) {
 	return key, strings.TrimSpace(string(pub))
 }
 
-// fixtureAs is the fixture's paisans.yaml with alice's key replaced by pub.
+// fixtureAs is the fixture's paisans-stack.yaml with alice's key replaced by pub.
 func fixtureAs(t *testing.T, pub string) string {
 	t.Helper()
 	body, err := os.ReadFile(fixtureConfig())
@@ -141,9 +141,9 @@ func storedVersion(t *testing.T) (string, string, configstore.Files) {
 }
 
 // storedHistory is n versions of the fixture deployment, each on the one
-// before, each differing from the last by a comment in paisans.yaml, as the
+// before, each differing from the last by a comment in paisans-stack.yaml, as the
 // sites' bundle answers them. With forged above 0, it also holds a chain of
-// that many versions on the root signed by mallory, whose paisans.yaml lists
+// that many versions on the root signed by mallory, whose paisans-stack.yaml lists
 // her key as alice's: what someone with root on a site can write.
 func storedHistory(t *testing.T, n, forged int) ([]string, string, []configstore.Files) {
 	t.Helper()
@@ -213,7 +213,7 @@ func TestConfigRecoverWithoutAMajorityAsksPartial(t *testing.T) {
 	sha, answer, f := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
-	args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}
+	args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}
 
 	var out bytes.Buffer
 	err := runConfig(args, noTerminalStdin(), &out)
@@ -253,7 +253,7 @@ func TestConfigRecoverDryRunAndWrongWordWriteNothing(t *testing.T) {
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
-	args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans.yaml")}
+	args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml")}
 	var out bytes.Buffer
 	if err := runConfig(args, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
@@ -272,16 +272,16 @@ func TestConfigRecoverRefusals(t *testing.T) {
 	recoverHosts(t, answer)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans.yaml")}, noTerminalStdin(), &out)
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "admin register") {
 		t.Fatalf("no anchor: %v", problemText(err))
 	}
-	os.WriteFile(filepath.Join(dir, "paisans.yaml"), []byte("x"), 0o644)
-	err = runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans.yaml")}, noTerminalStdin(), &out)
+	os.WriteFile(filepath.Join(dir, "paisans-stack.yaml"), []byte("x"), 0o644)
+	err = runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(problemText(err), "already") {
 		t.Fatalf("files present: %v", problemText(err))
 	}
-	if err := runConfig([]string{"recover", "--config", filepath.Join(t.TempDir(), "paisans.yaml")}, noTerminalStdin(), &out); err == nil {
+	if err := runConfig([]string{"recover", "--config", filepath.Join(t.TempDir(), "paisans-stack.yaml")}, noTerminalStdin(), &out); err == nil {
 		t.Fatal("recover without --from ran")
 	}
 }
@@ -312,7 +312,7 @@ func pullWorkstation(t *testing.T, answer, root, base string, f configstore.File
 func TestConfigPullMovesUneditedFiles(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	if err := runConfig([]string{"pull", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
@@ -338,7 +338,7 @@ func TestConfigPullOverEditsRefusesAndShowsTheDifference(t *testing.T) {
 	edited.Secrets = []byte("a: 1\nb: 2\n")
 	l := pullWorkstation(t, answer, shas[0], shas[0], edited)
 	var out bytes.Buffer
-	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(problemText(err), "--merge") {
 		t.Fatalf("pull over edits: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 	allSitesUp(answer, &runs)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--from", "ubuntu@203.0.113.10", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, answering(t, "partial\n"), &out)
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--from", "ubuntu@203.0.113.10", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out)
 	text := problemText(err)
 	if err == nil || !strings.Contains(text, "203.0.113.9") || !strings.Contains(text, "touch /pwned") {
 		t.Fatalf("got %v: %s", err, text)
@@ -456,7 +456,7 @@ func TestConfigDryRunsDoNotSync(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	var runs []string
 	allSitesUp(answer, &runs)
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"pull", "log"} {
 		if err := runConfig([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -484,14 +484,14 @@ func TestConfigPullAsksRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("got %v", err)
 	}
 	if got, _ := l.Files(); !got.Equal(files[0]) {
 		t.Fatal("files written")
 	}
-	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, answering(t, "rollback\n"), &out); err != nil {
+	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out); err != nil {
 		t.Fatal(err)
 	}
 	if h, _ := l.Head(); h != shas[1] {
@@ -509,7 +509,7 @@ func TestConfigPublishAfterAnAcceptedRollback(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	seenPath := filepath.Join(l.Dir, ".paisans", "config-seen")
 	os.WriteFile(seenPath, []byte("9 "+strings.Repeat("b", 40)+"\n"), 0o644)
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	if err := runConfig([]string{"pull", "--config", cfgPath, "--execute"}, answering(t, "rollback\n"), &out); err != nil {
 		t.Fatal(err)
@@ -540,7 +540,7 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	seen := "9 " + strings.Repeat("b", 40)
 	os.WriteFile(filepath.Join(l.Dir, ".paisans", "config-seen"), []byte(seen+"\n"), 0o644)
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var rep, out bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
 	if err := runConfig([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -575,7 +575,7 @@ func TestConfigATriedRootRaisesNothing(t *testing.T) {
 	l := configstore.Local{Dir: t.TempDir()}
 	l.WriteFiles(files[0])
 	l.SetHead(shas[0])
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"log", "pull"} {
 		if err := runConfig([]string{sub, "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -599,7 +599,7 @@ func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 3)
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	var out bytes.Buffer
-	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
+	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := l.Files(); !got.Equal(files[1]) {
@@ -609,7 +609,7 @@ func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
 		t.Fatalf("head %s", h)
 	}
 	dir := t.TempDir()
-	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", shas[0], "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", shas[0], "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestConfigRecoverOnAForkWritesEachHead(t *testing.T) {
 	allSitesUp(answer, nil)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(problemText(err), "publish --merge") {
 		t.Fatalf("got %v", err)
 	}
@@ -665,7 +665,7 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 	agentKeys = func() []string { return []string{other} }
 	t.Cleanup(func() { agentKeys = saved })
 	var out bytes.Buffer
-	err := runConfig([]string{"publish", "--config", filepath.Join(l.Dir, "paisans.yaml")}, noTerminalStdin(), &out)
+	err := runConfig([]string{"publish", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "belongs to no admin") {
 		t.Fatalf("got %v", err)
 	}
@@ -683,7 +683,7 @@ func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
+	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
 	if err == nil || !strings.Contains(out.String(), "Type rollback") {
 		t.Fatalf("got %v\n%s", err, out.String())
 	}
@@ -704,7 +704,7 @@ func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
 	l.WriteFiles(files[0])
 	l.SetHead(shas[0])
 	var out bytes.Buffer
-	err := runConfig([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runConfig([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "partial") {
 		t.Fatalf("got %v", err)
 	}
@@ -723,7 +723,7 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 	saved := agentKeys
 	agentKeys = func() []string { return []string{pub} }
 	t.Cleanup(func() { agentKeys = saved })
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"pull", "log", "publish"} {
 		if err := runConfig([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -751,7 +751,7 @@ func TestConfigPublishOfAFirstVersionWithoutAMajorityAsksPartial(t *testing.T) {
 	if err := l.WriteFiles(f); err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var rep, out bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
 	if err := runConfig([]string{"publish", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {

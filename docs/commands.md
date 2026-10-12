@@ -12,14 +12,14 @@ reasoning.
 
 ## Most of the time, one command
 
-`paisans apply` without `--site` takes `paisans.yaml` to a complete, running
+`paisans apply` without `--site` takes `paisans-stack.yaml` to a complete, running
 stack. It runs `init`, `host prepare`, `dns init`, `apply --site`, `site add`,
 `storage init`, `storage add` and, when the gateway role has moved, `gateway
 move` itself, in the order the deployment needs them, each exactly as it runs when typed, pulls every site's images on every
 host at once before the first of them installs anything, and ends by running
 `web-server check`'s checks for each app behind the operator's own web server
 (see *`paisans apply` with no `--site` converges the whole deployment* in
-`README.md`). So the usual way to make any change is to edit `paisans.yaml`
+`README.md`). So the usual way to make any change is to edit `paisans-stack.yaml`
 and run:
 
 ```sh
@@ -39,7 +39,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | Flag | Default | Taken by | Meaning |
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
-| `--config <path>` | `paisans.yaml` | every command except `host deployments` | the deployment declaration |
+| `--config <path>` | `paisans-stack.yaml` | every command except `host deployments` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--sudo` | on | every command that reaches a host over ssh, except `app admin create` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
@@ -52,13 +52,13 @@ mesh subnet (see *A deployment has an id, and a host knows every deployment on
 it* in `README.md`).
 
 With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first show what
-`paisans.yaml` grants on each host they reach that the host has not had (a key
+`paisans-stack.yaml` grants on each host they reach that the host has not had (a key
 that may log in, an image that runs, the directory the operator's web server
 reads), and, when anything is added or changed, ask for the word `approve` at
 a terminal before that claim. Without a terminal they refuse, before any host
 changes; no flag answers the question. A run that adds or changes nothing asks
 nothing. Their dry runs show the same review and ask nothing (see *`apply` and
-`host prepare` review what `paisans.yaml` grants* in `README.md`).
+`host prepare` review what `paisans-stack.yaml` grants* in `README.md`).
 
 A command exits 0 when it did what it was asked, including when it ends on a
 warning (`!`, `WARN` off a terminal), 1 when it stopped on a failure or a
@@ -74,7 +74,7 @@ Loads the declaration and prints every problem found, refusals and warnings
 both, rather than stopping at the first. Exits non zero when anything is
 refused.
 
-* **Alone:** while editing `paisans.yaml`, before anything else reads it.
+* **Alone:** while editing `paisans-stack.yaml`, before anything else reads it.
   Every command that loads the declaration runs the same checks, so this is
   the one that does nothing else.
 * **Flags:** `--config`.
@@ -85,15 +85,15 @@ refused.
 
 Asks about a new deployment at a terminal (the community and its domain, the
 DNS provider, the admins, how many machines and what each does, the apps, and
-the mail server) and writes a commented `paisans.yaml` from the answers. The
+the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
 file is checked as `validate` checks it before it is shown; a refusal offers
 the questions it came from again, and nothing is written until the file is
 refused nothing and the operator says yes. It then names `secrets set`,
 `init` and `apply`.
 
 * **Alone:** once, before anything else, for a deployment that has no
-  `paisans.yaml` yet. The whole apply never runs it.
-* **Flags:** `--config` (the file to write; default `paisans.yaml`).
+  `paisans-stack.yaml` yet. The whole apply never runs it.
+* **Flags:** `--config` (the file to write; default `paisans-stack.yaml`).
 * **Hosts:** none. It asks for no secret either: `init` generates them and
   names the ones owed from elsewhere.
 * **`--execute`:** not taken. It writes one local file, mode 0644, and refuses
@@ -118,7 +118,7 @@ says what is still owed from elsewhere.
   root's).
 * **Hosts:** reads every site, to choose the mesh subnet. Changes none.
 * **`--execute`:** not taken. It writes local files only: the `id` and the
-  subnet into `paisans.yaml`, the secrets into the secrets file.
+  subnet into `paisans-stack.yaml`, the secrets into the secrets file.
 
 See *Three kinds of secret* and *A deployment has an id, and a host knows every
 deployment on it* in `README.md`.
@@ -163,7 +163,7 @@ See *Three kinds of secret* in `README.md`.
 
 ### `paisans secrets prune`
 
-Lists the secrets that name something `paisans.yaml` no longer declares, by key
+Lists the secrets that name something `paisans-stack.yaml` no longer declares, by key
 and never by value: a removed site's WireGuard key, a removed app's passwords
 and sign in client, a Pocket ID group nothing names, a removed backup
 destination's credentials.
@@ -176,7 +176,7 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 
 * **Alone:** always, after a site or an app has been removed.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--without-record` (off:
-  trust `paisans.yaml` alone when no gateway's deployment record can be read;
+  trust `paisans-stack.yaml` alone when no gateway's deployment record can be read;
   with `--execute` it asks for the word `prune` at a terminal), `--sudo`.
 * **Hosts:** reads each gateway's deployment record, as the ssh user since it
   holds only names and is world readable, and through sudo only for one
@@ -237,7 +237,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   generates, naming `paisans init`.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
-out of `paisans.yaml`, is ended by hand: *A rotation that cannot finish* in
+out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
 `README.md`. See *`secrets rotate` replaces a secret where it is checked and
 where it is used* there too, and
 [guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md) for the order
@@ -245,7 +245,7 @@ around it.
 
 ### `paisans config`
 
-The signed copies of `paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
+The signed copies of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
 every site keeps. Four subcommands, each gathering every site's versions first
 and trusting them only from the operator's own signature or a root pinned with
 `--root`.
@@ -267,7 +267,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
 
   | Flag | Taken by | Meaning |
   |------|----------|---------|
-  | `--config <path>` | all | the deployment declaration, which must be named `paisans.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
+  | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
   | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
   | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
@@ -277,7 +277,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   And the flags every command shares.
 * **Hosts:** every site, over ssh with `sudo` since the stores are root's, and
   each is reached, not only the ones named on the command line. `recover` has no
-  `paisans.yaml` to name them and so starts from `--from`.
+  `paisans-stack.yaml` to name them and so starts from `--from`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
   its peers; it reads what each site holds now, which can be staler. Only the
   cache in `.paisans/` beside the configuration is written.
@@ -320,7 +320,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   it publishes the version it applies and each host records it; a host whose
   record holds a newer revision, or another version at the same revision, makes
   `apply` ask for `rollback`. It needs the standard file names beside
-  `paisans.yaml` (a `--secrets` naming another file is refused), an admin key in
+  `paisans-stack.yaml` (a `--secrets` naming another file is refused), an admin key in
   the ssh-agent even for a dry run, and a sudo password for every site.
 
 See *Every site keeps signed copies of the configuration* in `README.md` and
@@ -345,7 +345,7 @@ paisans admin register --key ~/.ssh/id_ed25519.pub --execute
   `--execute`.
 * **Hosts:** every site, as `config` does.
 * **The key:** `--key`, else the one `.paisans/signing-key` records, else the
-  one key in the ssh-agent that is listed under an admin of `paisans.yaml`. It
+  one key in the ssh-agent that is listed under an admin of `paisans-stack.yaml`. It
   refuses when none matches, saying the key goes under your own entry in
   `admins` and another admin publishes that; when the agent holds more than one
   of your keys; and when it holds keys of more than one admin.
@@ -391,7 +391,7 @@ paisans host prepare --site home-a --execute  # does it
   and refused, never removed.
 * **Review:** the login user and the keys, against what the host last
   recorded in `/var/lib/paisans/granted.<token>.json`: each key added or
-  changed is a `+` or `~` line under `review what paisans.yaml grants`, each
+  changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
   removed one a `-` line, at every verbosity.
 * **Allowlist:** with `/etc/paisans/ssh-allow.<user>` on the host, a key to
   add that it does not list is a refusal in the plan, naming the key, its
@@ -412,7 +412,7 @@ paisans host prepare --site home-a --execute  # does it
 
 See *`host prepare` takes a blank host to an apply-able state*, *Docker is
 judged by its version, not its source* and *`apply` and `host prepare` review
-what `paisans.yaml` grants* in `README.md`.
+what `paisans-stack.yaml` grants* in `README.md`.
 
 ### `paisans host deployments`
 
@@ -424,13 +424,13 @@ deployment directory or labelled compose project no registry entry names.
 paisans host deployments --ssh admin@203.0.113.9   # read only
 ```
 
-* **Alone:** always, and without `paisans.yaml`: to see what a shared host
+* **Alone:** always, and without `paisans-stack.yaml`: to see what a shared host
   holds, or to find the id `site remove --id` takes.
 * **Flags:** `--ssh <user@host[:port]>` (required), `--sudo`.
 * **Hosts:** reads the one host named. Changes nothing.
 * **`--execute`:** not taken.
 
-See *`--id` cleans a host when `paisans.yaml` is lost* in `README.md`.
+See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
 ### `paisans host allow`
 
@@ -509,7 +509,7 @@ See *Every volume an image declares is mounted, and `apply` checks it* in
 
 ### `paisans apply` without `--site`
 
-Every site, from `paisans.yaml` to a running stack: the commands in this file
+Every site, from `paisans-stack.yaml` to a running stack: the commands in this file
 that it runs, in the order and under the conditions *`paisans apply` with no
 `--site` converges the whole deployment* in `README.md` gives. In order: `init`
 when it has work; `host prepare` on every host at once; a pull of every site's
@@ -538,7 +538,7 @@ images it superseded* in `README.md`).
   for before the first step.
 * **Review:** after the sudo passwords and before the first step that
   changes a host (an `init` with work runs first: it writes only local
-  files), one review of what `paisans.yaml` grants on every site, under `review`, a line per site
+  files), one review of what `paisans-stack.yaml` grants on every site, under `review`, a line per site
   with each change under it: keys, images and the web server's directory.
   With `--execute`, when anything is added or changed, it asks once for
   `approve` at a terminal, for every site, and refuses without one; each step
@@ -557,7 +557,7 @@ images it superseded* in `README.md`).
   steps; a version that reaches no site refuses, naming `host prepare`. See
   `paisans config`.
 * **Secrets:** each gateway's deployment record is read once, after the sudo
-  passwords, and each secret or recorded name `paisans.yaml` no longer uses is
+  passwords, and each secret or recorded name `paisans-stack.yaml` no longer uses is
   warned about once, by key, under `secrets`, dry run or not. The `apply`
   steps it runs do not read the record or warn again. An `init` it runs warns
   in its place.
@@ -577,7 +577,7 @@ images it superseded* in `README.md`).
   that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
   after its site file changes, restarted when the reload fails; one on the
   host itself is validated, and the warning gives the command to reload it. An `include_dir` it
-  derives is written into `paisans.yaml`. Without it, every step is checked
+  derives is written into `paisans-stack.yaml`. Without it, every step is checked
   as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
   local secrets file, as `init` would add them, which it says when it does.
@@ -611,13 +611,13 @@ starts, restarts or recreates what changed.
   asks for no gateway's sudo password.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
   the web server's `include_dir`, against what the host last recorded, under
-  `review what paisans.yaml grants`; `--only` narrows the images to its
+  `review what paisans-stack.yaml grants`; `--only` narrows the images to its
   stacks. With `--execute` it is asked for, as `approve` at a terminal, before
   the claim, when anything is added or changed; the images are recorded once
   the apply has succeeded, and the directory once the web server step has.
 * **Configuration store:** gathered and checked before the review as the whole
   apply does, with `--secrets` refused when it names a file other than the
-  `secrets.enc.yaml` beside `paisans.yaml`. `--execute` publishes the version it
+  `secrets.enc.yaml` beside `paisans-stack.yaml`. `--execute` publishes the version it
   loaded before its first change, and refuses when the site has no store, naming
   `host prepare`; the host's record of the version is written with its other
   parts. A step of the whole apply leaves this to the run, and refuses files
@@ -629,7 +629,7 @@ starts, restarts or recreates what changed.
   with `managed_by: external`, `--execute` then runs the web server step for
   the apps that monitor serves, as the whole apply does at its end: each
   app's site file written into `include_dir` (an `include_dir` it derives
-  written into `paisans.yaml`), the configuration validated, a server in a
+  written into `paisans-stack.yaml`), the configuration validated, a server in a
   container reloaded and the reload command given for one on the host, then
   `web-server check`'s checks, a line per app in a `web server` section. A
   certificate or sign in failure, which a web server still obtaining its
@@ -674,7 +674,7 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
 * **Hosts:** every site.
 * **Review:** stage 4 applies the new site's whole render, so `site add`
   reviews the new site's images as `apply --site` does: shown under `review
-  what paisans.yaml grants` before the stages, asked for as `approve` at a
+  what paisans-stack.yaml grants` before the stages, asked for as `approve` at a
   terminal with `--execute`, refused without one, and recorded once stage 4's
   gate has passed. As a step of the whole apply it asks nothing and refuses
   an image the run's review did not approve.
@@ -704,7 +704,7 @@ monitor behind the operator's own web server, the site files apply wrote into
 its `include_dir` included, after which a web server in a Docker container is
 validated and reloaded, and one on the host itself validated and left for the
 operator to reload with the command it names), its DNS records deleted, and
-its entry out of `paisans.yaml`.
+its entry out of `paisans-stack.yaml`.
 
 ```sh
 paisans site remove home-b                             # refusals, then every stage and its gate
@@ -717,7 +717,7 @@ paisans site remove home-b --host-gone --execute       # the host is never comin
 reach. It never reaches that host: the mesh is cut on every remaining site
 first, then its DNS records go, Patroni fails over by itself, its etcd member
 is removed and its Garage node is skipped as dead. A replacement declared in
-the same edit of `paisans.yaml` is left alone and brought up by `paisans
+the same edit of `paisans-stack.yaml` is left alone and brought up by `paisans
 apply` afterwards; its secrets are generated first if the file lacks them.
 
 ```sh
@@ -727,7 +727,7 @@ paisans apply                                  # brings up the replacement the c
 ```
 
 `--force` cleans one host and nothing else, and `--id` does it with no
-`paisans.yaml`:
+`paisans-stack.yaml`:
 
 ```sh
 paisans site remove monitor-a --force --ssh admin@203.0.113.9                          # dry run
@@ -750,7 +750,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
-  | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans.yaml`: the deployment to clean, as `host deployments` lists it |
+  | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, as `host deployments` lists it |
 
   And the site as an argument, `--config`, `--secrets`, `--execute`, `--sudo`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
@@ -829,7 +829,7 @@ would add, since one already in `authorized_keys` is never added again.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
   `--sudo`, `--execute`.
 * **Hosts:** every site, or the named ones, read only.
-* **`--execute`:** removes from `paisans.yaml` each `config:` key that only
+* **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
   repeats a value gating renders, before loading it. It changes no host; the
   recoveries it prints are for a human to run.
 
@@ -934,7 +934,7 @@ paisans dns prune --execute     # deletes the removes, then confirms each is gon
 
 ### `paisans gateway move`
 
-Moves the gateway role to the site `paisans.yaml` gives it, from the site that
+Moves the gateway role to the site `paisans-stack.yaml` gives it, from the site that
 still serves as the gateway, as an overlap: both gateways serve while the new
 one is checked, its address records are added beside the old one's, the old
 one's are deleted, their TTL is waited out, and only then is the old Caddy
@@ -1019,7 +1019,7 @@ See *`oidc client create` makes an app's client at Pocket ID* in `README.md`.
 
 ### `paisans app remove`
 
-Takes an app that has left `paisans.yaml` off every host, once a whole apply
+Takes an app that has left `paisans-stack.yaml` off every host, once a whole apply
 on each site has marked its files left over. For an app behind the operator's
 own web server it also deletes the site file apply wrote into the web
 server's `include_dir`, then validates that web server and reloads it when it

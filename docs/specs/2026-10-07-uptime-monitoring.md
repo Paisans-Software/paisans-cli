@@ -4,7 +4,7 @@ Status: approved in session on 2026-10-07, not implemented.
 
 A deployment watches itself. A new `uptime` kind runs the
 `josephquigley/uptime` fork, pinned to one site like any other app, and the
-toolkit seeds its monitors from `paisans.yaml`: two HTTP checks per app and a
+toolkit seeds its monitors from `paisans-stack.yaml`: two HTTP checks per app and a
 ping per site. Admins sign in through Pocket ID, and only admins can.
 
 ## What it must catch
@@ -122,7 +122,7 @@ VACUUM, steady state is a few dirtied pages per check, and with
 
 ## What gets checked
 
-Seeded from `paisans.yaml` on every apply. Every seeded monitor is tagged
+Seeded from `paisans-stack.yaml` on every apply. Every seeded monitor is tagged
 `managed`. Defaults: 60 s interval, `failure_threshold: 2`.
 
 **Per app, two HTTP checks.**
@@ -336,7 +336,7 @@ Each its own pull request on `josephquigley/uptime`, then a release tag.
 * `hostprep`: the `ContainerRules` addition above.
 * Secrets: `admin_password` and `session_secret` under the app, generated at
   init.
-* README and `examples/paisans.example.yaml`.
+* README and `examples/paisans-stack.example.yaml`.
 
 ## Testing
 

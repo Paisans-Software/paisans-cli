@@ -227,7 +227,7 @@ func TestInviteAccent(t *testing.T) {
 }
 
 // Founder requirement, 2026-10-12: the service learns Pocket ID's address
-// only from the identity app's hostname in paisans.yaml, so renaming that
+// only from the identity app's hostname in paisans-stack.yaml, so renaming that
 // host changes both values, and they stay equal.
 func TestInviteFollowsTheIdentityHostname(t *testing.T) {
 	first := buildInvite(t, nil)[inviteEnvA]

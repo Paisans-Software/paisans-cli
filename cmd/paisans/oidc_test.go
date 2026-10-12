@@ -275,7 +275,7 @@ func TestOIDCClientCreateUsesTheDashboardLinkSetting(t *testing.T) {
 		t.Fatal("the fixture no longer declares talk's settings as expected")
 	}
 	edited := strings.Replace(string(raw), setting, setting+"      sso_dashboard_link: /magazines\n", 1)
-	cfg := filepath.Join(t.TempDir(), "paisans.yaml")
+	cfg := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(cfg, []byte(edited), 0o600); err != nil {
 		t.Fatal(err)
 	}

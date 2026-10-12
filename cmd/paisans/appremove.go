@@ -31,7 +31,7 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 	return clientAPI(cfg, site, "", key)
 }
 
-// runAppRemove takes an app that has left paisans.yaml off every host. See
+// runAppRemove takes an app that has left paisans-stack.yaml off every host. See
 // internal/appremove for what it touches and how each thing is proven to be
 // the app's, and README's *`app remove` takes an app off its hosts*.
 //

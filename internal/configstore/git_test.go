@@ -196,7 +196,7 @@ func rawCommit(t *testing.T, r Repo, entries []entry, msg string) string {
 }
 
 func threeFiles() []entry {
-	return []entry{{"100644", "blob", ".sops.yaml"}, {"100644", "blob", "paisans.yaml"}, {"100644", "blob", "secrets.enc.yaml"}}
+	return []entry{{"100644", "blob", ".sops.yaml"}, {"100644", "blob", "paisans-stack.yaml"}, {"100644", "blob", "secrets.enc.yaml"}}
 }
 
 func newRepo(t *testing.T) Repo {
@@ -229,9 +229,9 @@ func TestTreeShapes(t *testing.T) {
 	msg := "m\n\nPaisans-Revision: 1\n"
 	cases := map[string][]entry{
 		"fourth file":   append(threeFiles(), entry{"100644", "blob", "extra.yaml"}),
-		"space in name": {{"100644", "blob", ".sops.yaml"}, {"100644", "blob", "paisans.yaml secrets.enc.yaml"}},
-		"symlink":       {{"100644", "blob", ".sops.yaml"}, {"120000", "blob", "paisans.yaml"}, {"100644", "blob", "secrets.enc.yaml"}},
-		"executable":    {{"100644", "blob", ".sops.yaml"}, {"100755", "blob", "paisans.yaml"}, {"100644", "blob", "secrets.enc.yaml"}},
+		"space in name": {{"100644", "blob", ".sops.yaml"}, {"100644", "blob", "paisans-stack.yaml secrets.enc.yaml"}},
+		"symlink":       {{"100644", "blob", ".sops.yaml"}, {"120000", "blob", "paisans-stack.yaml"}, {"100644", "blob", "secrets.enc.yaml"}},
+		"executable":    {{"100644", "blob", ".sops.yaml"}, {"100755", "blob", "paisans-stack.yaml"}, {"100644", "blob", "secrets.enc.yaml"}},
 		"missing file":  threeFiles()[:2],
 	}
 	for name, es := range cases {

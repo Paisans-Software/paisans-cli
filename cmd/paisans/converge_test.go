@@ -456,7 +456,7 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	body := strings.Replace(string(data), "members: [", "members: [nowhere, ", 1)
 	if body == string(data) {
 		t.Fatal("the fixture has no etcd.members list to edit")
@@ -496,7 +496,7 @@ func noID(t *testing.T) string {
 			kept = append(kept, line)
 		}
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func derivedWithNewDataSite(t *testing.T) *config.Config {
       keys: [alice]
   vm:
 `, 1)
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -806,11 +806,11 @@ func TestInitWhyNamesMissingSecrets(t *testing.T) {
 }
 
 // A path given without --config is refused with the flag to use, not
-// ignored for the default paisans.yaml.
+// ignored for the default paisans-stack.yaml.
 func TestApplyRefusesAStrayArgument(t *testing.T) {
 	fakeConverge(t, nil)
-	err := runApply([]string{"--sudo=false", "staging/paisans.yaml"}, strings.NewReader(""), io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "--config staging/paisans.yaml") {
+	err := runApply([]string{"--sudo=false", "staging/paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--config staging/paisans-stack.yaml") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -972,7 +972,7 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		if n := strings.Count(rec.Lines(), "section: configuration"); n != 1 && c.want[0] == "section configuration" {
 			t.Errorf("init %v %v: configuration header %d times:\n%s", c.init, c.args, n, rec.Lines())
 		}
-		if rec.Has("section", "paisans.yaml") || rec.Has("result", "warning") {
+		if rec.Has("section", "paisans-stack.yaml") || rec.Has("result", "warning") {
 			t.Errorf("init %v %v: the path is a section or a warning is counted:\n%s", c.init, c.args, rec.Lines())
 		}
 	}
@@ -1584,7 +1584,7 @@ func editedFixture(t *testing.T, pairs ...string) string {
 		}
 		text = edited
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}

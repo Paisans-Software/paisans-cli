@@ -128,8 +128,8 @@ func sortImages(list []Image) {
 }
 
 // WebServerOf is the include directory of a site whose apps the operator's
-// own web server serves, when paisans.yaml names one. An include_dir left
-// unset is derived on the host by apply and written into paisans.yaml, so
+// own web server serves, when paisans-stack.yaml names one. An include_dir left
+// unset is derived on the host by apply and written into paisans-stack.yaml, so
 // it is reviewed from the run after that; false writes nothing there.
 func WebServerOf(s config.Site) *WebServer {
 	if !s.Has(config.RoleMonitor) || s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil || s.WebServer.IncludeDir.Path == "" {

@@ -76,7 +76,7 @@ func newApplyStore(t *testing.T, n int) *applyStoreFixture {
 	if err := f.l.WriteFiles(local); err != nil {
 		t.Fatal(err)
 	}
-	f.cfgPath = filepath.Join(f.l.Dir, "paisans.yaml")
+	f.cfgPath = filepath.Join(f.l.Dir, "paisans-stack.yaml")
 	return f
 }
 
@@ -138,7 +138,7 @@ func TestApplyRefusesAStaleBase(t *testing.T) {
 	if claimed(logged(t, log)) || f.pushed() || hosts["vm"] != nil && hosts["vm"].writes != 0 {
 		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
 	}
-	if rec.Has("pending", "review what paisans.yaml grants") || rec.Index("step", "read what was granted") >= 0 {
+	if rec.Has("pending", "review what paisans-stack.yaml grants") || rec.Index("step", "read what was granted") >= 0 {
 		t.Errorf("reviewed before refusing:\n%s", rec.Lines())
 	}
 	if h, _ := f.l.Head(); h != f.shas[0] {

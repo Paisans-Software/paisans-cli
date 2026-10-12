@@ -86,7 +86,7 @@ func mountAdvice(ws WebServer, seen string) string {
 }
 
 // unmounted says that the server in a container cannot see dir, the
-// include_dir paisans.yaml names, or with dir empty the directory beside
+// include_dir paisans-stack.yaml names, or with dir empty the directory beside
 // its configuration.
 func unmounted(ws WebServer, dir string) string {
 	if dir != "" {

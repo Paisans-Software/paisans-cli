@@ -17,13 +17,13 @@ import (
 // owner allows host prepare to add to a login user's authorized_keys
 // (docs/specs/2026-10-11-config-review.md).
 //
-// paisans.yaml is one file every admin of a deployment edits, and whoever
+// paisans-stack.yaml is one file every admin of a deployment edits, and whoever
 // runs host prepare runs it with their own access, so any admin can get a key
 // of theirs installed through someone else's run. The list is the host
-// owner's answer to that, kept on the host where no edit to paisans.yaml
+// owner's answer to that, kept on the host where no edit to paisans-stack.yaml
 // reaches it: /etc/paisans/ssh-allow.<user>, root's and 0644, one per login
 // user and shared by every deployment on the host. It holds fingerprints,
-// not admin names, because a name is whatever paisans.yaml says it is, and
+// not admin names, because a name is whatever paisans-stack.yaml says it is, and
 // replacing the key under an admin must not carry that admin's permission to
 // the new key.
 //

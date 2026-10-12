@@ -35,7 +35,7 @@ import (
 // app-config-general-form.svelte:40-46), the form's rule is used, because
 // those are the values Pocket ID was built to be given.
 
-// PocketIDSettingType is how a setting's value is written in paisans.yaml and
+// PocketIDSettingType is how a setting's value is written in paisans-stack.yaml and
 // rendered into the .env.
 type PocketIDSettingType int
 

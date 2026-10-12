@@ -65,7 +65,7 @@ type volume struct {
 }
 
 // DiagnoseMount says why a server in a container lacks the mount of the
-// include directory: dir, the include_dir paisans.yaml names, or the
+// include directory: dir, the include_dir paisans-stack.yaml names, or the
 // directory DeriveInclude derives when dir is empty. name is the file apply
 // writes there. Without a compose file to read it is the advice
 // DeriveInclude or IncludeAt gives.

@@ -67,7 +67,7 @@ func readRecord(h registry.Runner, d deployment.Deployment) (deployrecord.Record
 }
 
 // A write another command raced says to take the site out again, with
-// --force since by then paisans.yaml no longer declares it: nothing else
+// --force since by then paisans-stack.yaml no longer declares it: nothing else
 // takes the site out of the record.
 func TestARacedRecordWriteSaysRunAgain(t *testing.T) {
 	w := setup(t)

@@ -37,7 +37,7 @@ import (
 // unlikely.
 const partialWord = "partial"
 
-// configSiteTransport is how a config command reaches a site paisans.yaml
+// configSiteTransport is how a config command reaches a site paisans-stack.yaml
 // declares: its ssh section, with sudo, since the store is root's. Tests
 // replace it.
 var configSiteTransport = func(name string, site config.Site) apply.Transport {
@@ -73,9 +73,9 @@ func runConfig(args []string, stdin io.Reader, stdout io.Writer) error {
 // configHelp is the --config flag's help, the same for every subcommand.
 const configHelp = "path to the deployment declaration; the store's state is kept in .paisans/ beside it"
 
-// workstationOf is the workstation whose paisans.yaml is at path. The three
+// workstationOf is the workstation whose paisans-stack.yaml is at path. The three
 // files of a version have fixed names, so the configuration must be named
-// paisans.yaml for the files on disk to be the ones a version holds.
+// paisans-stack.yaml for the files on disk to be the ones a version holds.
 func workstationOf(path string) (configstore.Local, error) {
 	if filepath.Base(path) != config.FileName {
 		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called " + config.FileName, Explain: "A stored version holds " + config.FileName + ", secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
@@ -236,7 +236,7 @@ func confirmPartial(stdin io.Reader, stdout io.Writer, g configstore.Gathered, c
 
 // signingKeyFor is the public key line a publish signs with: the recorded
 // signing key, which the agent must hold, or, when none is recorded, the
-// one agent key that belongs to an admin of the base (the local paisans.yaml
+// one agent key that belongs to an admin of the base (the local paisans-stack.yaml
 // for a first version).
 func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	held := agentKeys()
@@ -555,7 +555,7 @@ func recordPull(l configstore.Local, g configstore.Gathered, root string) error 
 }
 
 // pullOverEdits refuses a pull that would overwrite local edits made on an
-// older base, and shows what differs: paisans.yaml as a diff, the secrets by
+// older base, and shows what differs: paisans-stack.yaml as a diff, the secrets by
 // key name only. With execute the head's files go to .paisans/incoming/ for
 // a merge by hand.
 func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, head, base string, local, theirs configstore.Files, execute bool, stdout io.Writer) error {
@@ -580,7 +580,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 }
 
 // showDifference prints how the local files differ from the head's:
-// paisans.yaml as a diff, the secrets by key name only, never a value.
+// paisans-stack.yaml as a diff, the secrets by key name only, never a value.
 func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
 	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/"+config.FileName, "head/"+config.FileName)
 	if err != nil {

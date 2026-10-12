@@ -240,7 +240,7 @@ func (a *SudoAuth) resolve(t SSHTransport) (string, error) {
 // is known. Eg: `site home-a (ubuntu@192.0.2.10, host home-a-01)`, or
 // `box, host home-a-01` for a transport that names no site.
 //
-// The site name comes from paisans.yaml and says which site the operator
+// The site name comes from paisans-stack.yaml and says which site the operator
 // meant; the hostname comes from the host and says which machine answered.
 // An address alone says neither, and an operator who does not recognise it
 // cannot tell whether they are about to type a password into the wrong box.

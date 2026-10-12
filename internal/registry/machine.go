@@ -22,9 +22,9 @@ import (
 // This deployment's registry entry names its site, and every claim writes it,
 // so it is the answer whenever there is an entry: it names the site rather
 // than an address, which keeps it right when that site's address changes in
-// paisans.yaml. A host with no entry for this deployment but its WireGuard
+// paisans-stack.yaml. A host with no entry for this deployment but its WireGuard
 // config still in place (a registry restored or edited by hand) is read by
-// that file's Address, which is mapped to the site paisans.yaml gives it.
+// that file's Address, which is mapped to the site paisans-stack.yaml gives it.
 
 // machineAdvice is what every refusal of a second site says.
 const machineAdvice = "A site is a machine: its files, containers and WireGuard interface are named for the deployment, so a second site of it on this machine would overwrite the first. To combine roles, give one site several roles; a second environment is a second deployment."

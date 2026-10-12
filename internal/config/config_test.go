@@ -11,7 +11,7 @@ import (
 
 func write(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestUnknownKeysAreRefused(t *testing.T) {
 // deployment with a gateway and no provider cannot obtain a certificate, and
 // that is a missing required field rather than a policy question.
 func TestACMEProviderIsRequiredWhenAGatewayExists(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	body := strings.Replace(validConfig, "acme:\n  provider: desec\n", "", 1)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestACMEProviderIsRequiredWhenAGatewayExists(t *testing.T) {
 
 // The provider is read as declared, and an override image is optional.
 func TestACMEBlockLoads(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestACMEBlockLoads(t *testing.T) {
 
 // The shipped example must load. It is the documentation of the format.
 func TestExampleLoads(t *testing.T) {
-	if _, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml")); err != nil {
+	if _, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml")); err != nil {
 		t.Fatal(err)
 	}
 }

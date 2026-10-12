@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// Pocket ID's signup default groups are named in paisans.yaml and given to
+// Pocket ID's signup default groups are named in paisans-stack.yaml and given to
 // Pocket ID as IDs (kinds.PocketIDSignupGroupsSetting). An ID exists only
 // once the group exists on the running instance, so the .env cannot carry one
 // until apply has asked. This is that step: on a site running Pocket ID it

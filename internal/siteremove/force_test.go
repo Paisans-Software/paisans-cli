@@ -20,7 +20,7 @@ func forced(t *testing.T, w *world, cfg *config.Config, site string, dest config
 }
 
 // None of the cluster's refusals stop --force: home-a has apps pinned to it
-// and etcd is unhealthy. Only home-a is reached, and paisans.yaml is not
+// and etcd is unhealthy. Only home-a is reached, and paisans-stack.yaml is not
 // touched.
 func TestForcedIgnoresTheClustersRefusals(t *testing.T) {
 	w := setup(t)
@@ -46,7 +46,7 @@ func TestForcedIgnoresTheClustersRefusals(t *testing.T) {
 	}
 	after, _ := os.ReadFile(w.configPath)
 	if string(after) != string(before) {
-		t.Error("--force edited paisans.yaml")
+		t.Error("--force edited paisans-stack.yaml")
 	}
 }
 

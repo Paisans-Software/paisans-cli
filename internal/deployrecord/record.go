@@ -1,7 +1,7 @@
 // Package deployrecord is the record each gateway keeps of what the
 // deployment has deployed: its sites, apps and Pocket ID groups, by name.
 // apply adds to it and only the removal commands take from it, so a
-// paisans.yaml edited by mistake cannot shrink it, and `secrets prune` removes
+// paisans-stack.yaml edited by mistake cannot shrink it, and `secrets prune` removes
 // only what the yaml does not declare and no record lists
 // (docs/specs/2026-10-09-deployment-record.md).
 package deployrecord

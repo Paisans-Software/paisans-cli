@@ -95,7 +95,7 @@ func newMergeCaseSOPS(t *testing.T, base, ours, theirs []string, headYAML, headS
 	shas = []string{sha0, sha1}
 	local := configstore.Files{Paisans: b.Paisans, Secrets: enc(ours), SOPS: b.SOPS}
 	l := pullWorkstation(t, s.answer(t), sha0, sha0, local)
-	return mergeCase{l: l, cfg: filepath.Join(l.Dir, "paisans.yaml"), shas: shas, sops: sops, files: local}
+	return mergeCase{l: l, cfg: filepath.Join(l.Dir, "paisans-stack.yaml"), shas: shas, sops: sops, files: local}
 }
 
 func (m mergeCase) pull(t *testing.T, execute bool) (string, error) {
@@ -179,7 +179,7 @@ func TestConfigPullMergeTakesTheHeadsOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := string(must(os.ReadFile(m.cfg))); !strings.HasSuffix(got, "# edited at the head\n") {
-		t.Error("paisans.yaml is not the head's")
+		t.Error("paisans-stack.yaml is not the head's")
 	}
 }
 
@@ -219,7 +219,7 @@ func TestConfigPullSecretsConflictRefusesNamingPathsOnly(t *testing.T) {
 	}
 }
 
-// Both sides edited paisans.yaml: pull does not try to merge the secrets.
+// Both sides edited paisans-stack.yaml: pull does not try to merge the secrets.
 func TestConfigPullEditedYAMLOnBothSidesStillRefuses(t *testing.T) {
 	m := newMergeCase(t, mergeBase, mergeOurs, mergeTheirs, "# head\n")
 	local := m.files

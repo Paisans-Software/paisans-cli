@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A pinned-only `uptime` kind that runs the `josephquigley/uptime` fork, seeded from `paisans.yaml` with a public and a direct check per app and a ping per site, sending mail through a declared, per-app-overridable `smtp:` block.
+**Goal:** A pinned-only `uptime` kind that runs the `josephquigley/uptime` fork, seeded from `paisans-stack.yaml` with a public and a direct check per app and a ping per site, sending mail through a declared, per-app-overridable `smtp:` block.
 
 **Architecture:** Two repositories. The fork gains a channel flag, a boot-time seed reconciler, an entrypoint that drops from root, and `TRUST_PROXY`. The toolkit gains config (`smtp`, `KindUptime`, role-less pinned sites), a kind entry with health routes, validation, generated secrets, a template set whose seed file is built in Go, and a firewall rule.
 
@@ -995,7 +995,7 @@ func (p *planner) smtpFor(app string) smtpValues {
 #
 # The uptime monitor, pinned to {{ .App.Site }}. Its monitors are not configured
 # here or in its UI: they are seeded from monitors.json, which `apply` renders
-# from paisans.yaml, at every start.
+# from paisans-stack.yaml, at every start.
 #
 # OWNERSHIP. It starts as root on purpose. data/ is a bind mount Docker
 # creates as root, and monitors.json is a root owned 0600 file because it
@@ -1182,7 +1182,7 @@ Confirm `internal/render` does not import `internal/hostprep` (it does not as of
 ### Task 10: Example, README, decisions
 
 **Files:**
-- Modify: `examples/paisans.example.yaml` (top-level `smtp:`; app `status` pinned to `vm` with `admin_group` and a commented `smtp:` override)
+- Modify: `examples/paisans-stack.example.yaml` (top-level `smtp:`; app `status` pinned to `vm` with `admin_group` and a commented `smtp:` override)
 - Modify: `examples/secrets.example.yaml` (`apps.status` generated keys; `oidc_clients.status`; a comment that `external.smtp_password` is now read)
 - Modify: `internal/validate/validate_test.go` `TestExampleValidates` (expected warnings now include a second `pinned-app-on-witness`; update its comment to say why)
 - Modify: `README.md` (a "Monitoring" section: what is checked, pinned-only, the seed and ownership, VACUUM off, the Caddy refusals, break glass; and the `smtp:` block with per-app overrides and password lookup in the configuration section)
