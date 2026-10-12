@@ -63,6 +63,12 @@ from there. The file is re-encrypted under its current recipients at every
 write; after an eviction that is the new data key, so a next value is never
 readable by the evicted admin.
 
+**Some services read a secret only when they first initialise.** The
+Postgres roles Spilo creates at bootstrap, a pinned app's own Postgres, and
+RabbitMQ's default user keep the old value however often the file is rendered
+again. For those, stage 2 changes the secret inside the service (`ALTER ROLE`,
+`rabbitmqctl change_password`) before any file is rendered.
+
 **A secret checked in one place and used in one place** has a short window
 between stages 2 and 3 when the user still presents the old value: a reconnect
 fails and is retried. **A secret every node must share**, Garage's
@@ -83,7 +89,7 @@ restart. The plan says which kind each secret is.
 | Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator | none |
 | `cluster.*_password`, `apps.<app>.database_password` | Postgres | Patroni, HAProxy, the app | reconnects; the leader's `patroni.env` changes with a switchover, as `site add` does |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack |
-| `storage.garage.admin_token` | each Garage node | the toolkit | none |
+| `storage.garage.admin_token` | each Garage node | nothing yet: the toolkit drives Garage through its command line inside the container | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable for one restart |
 | `sites.<site>.heartbeat_token` | the monitor | the site's watchdog | none |
 
