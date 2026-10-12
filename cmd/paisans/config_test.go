@@ -734,3 +734,43 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 		}
 	}
 }
+
+// A first version, with no trusted head among the sites that answered,
+// needs a majority of sites reached directly or partial typed at a
+// terminal: a workstation reaching only an empty site must not start a
+// second history silently.
+func TestConfigPublishOfAFirstVersionWithoutAMajorityAsksPartial(t *testing.T) {
+	key, pub := testKey(t)
+	recoverHosts(t, "__PAISANS_EMPTY__\n") // home-a alone answers, holding nothing
+	saved, savedSign := agentKeys, configSignWith
+	agentKeys = func() []string { return []string{pub} }
+	configSignWith = func(string) string { return key }
+	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
+	l := configstore.Local{Dir: t.TempDir()}
+	f := configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	if err := l.WriteFiles(f); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var rep, out bytes.Buffer
+	reporterOverride = ui.NewPlain(&rep, false)
+	if err := runConfig([]string{"publish", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(rep.String(), "WARN only 1 of 4 sites answered directly") {
+		t.Errorf("dry run report:\n%s\nout:\n%s", rep.String(), out.String())
+	}
+	err := runConfig([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("no terminal: %v", problemText(err))
+	}
+	if h, _ := l.Head(); h != "" {
+		t.Fatalf("a refused publish recorded head %s", h)
+	}
+	if err := runConfig([]string{"publish", "--config", cfgPath, "--execute"}, answering(t, "partial\n"), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if h, _ := l.Head(); h == "" {
+		t.Fatal("no head after partial")
+	}
+}

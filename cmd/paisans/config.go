@@ -379,6 +379,9 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		what := "the first version"
+		if len(parents) == 0 && !g.Majority {
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "A first version starts the deployment's history, so --execute asks for the word "+partialWord+" at a terminal.")
+		}
 		if len(parents) > 0 {
 			var on []string
 			for _, p := range parents {
@@ -396,6 +399,18 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true}, stdin, stdout)
 	if err != nil {
 		return err
+	}
+	// A first version starts the history. A site that answered empty may be
+	// hiding one the sites that did not answer hold, so without a majority
+	// the operator says partial before a second history begins.
+	head, err := l.Head()
+	if err != nil {
+		return err
+	}
+	if parents, err := configstore.Parents(g, head, *merge); err == nil && len(parents) == 0 && len(g.Direct()) > 0 {
+		if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+			return err
+		}
 	}
 	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
 	sha, pushed, err := configstore.PublishFrom(l, g, sites, key, configSignWith(key), *merge, configNow())

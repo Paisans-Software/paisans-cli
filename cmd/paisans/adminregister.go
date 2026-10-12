@@ -113,16 +113,16 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		if write {
 			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
-			if !g.Majority {
-				r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
-			}
+		}
+		if !g.Majority {
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
 		}
 		return nil
 	}
-	if write {
-		if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
-			return err
-		}
+	// The attestation becomes this workstation's anchor, so it is made only
+	// from a majority, or once the operator says partial.
+	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		return err
 	}
 	s := r.Step("sign and push the attestation, signed with " + k.Fingerprint)
 	sha, pushed, err := configstore.AttestFrom(l, g, sites, pin, key, configSignWith(key), configNow())
