@@ -23,7 +23,7 @@ func (c *checker) inviteMustBeClustered() {
 		if c.cfg.Apps[name].Placement.Mode != config.PlacementCluster {
 			c.refuse("invite-must-be-clustered", fmt.Sprintf("apps.%s.placement", name),
 				"invite must have cluster placement",
-				"is not cluster. An invite must survive the loss of a site, so the invite service keeps its state in the cluster's Postgres and runs on every cluster site. Set placement: cluster.")
+				"is not cluster. An invite must survive the loss of a site, so the invite service keeps its state in the cluster's Postgres and runs on every apps site. Set placement: cluster.")
 		}
 	}
 }

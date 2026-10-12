@@ -542,7 +542,7 @@ apps:
 
 **It is cluster only** (`invite-must-be-clustered`). Its state is in the
 cluster's Postgres, under a role and database of its own, and it runs on every
-cluster site, so an invite survives the loss of a site. It listens on
+apps site, so an invite survives the loss of a site. It listens on
 container port `8082`, because `8080` belongs to a clustered Mbin on the same
 site, and answers `GET /healthz` with `200` when its database does. It is
 never put behind the gate: an invitee has no account when they open
@@ -569,11 +569,10 @@ Two calls, and nothing else:
 It authenticates with the Pocket ID app's `static_api_key`, the same key the
 toolkit uses, and a Pocket ID API key carries no scopes: the key is all of
 Pocket ID. **A leak is answered by rotating it across the deployment.** Run
-`paisans secrets set apps.<auth>.static_api_key`, then `apply` every site, then
-check Pocket ID for admins, clients and API keys nobody made.
-`paisans secrets rotate` of that key also re-applies every invite stack whose
-`identity_app` names the app, so the invite service is handed the next key with
-it.
+`paisans secrets rotate apps.<auth>.static_api_key`, which re-applies Pocket ID
+and every invite stack whose `identity_app` names the app, so the invite service
+is handed the next key with it. Then check Pocket ID for admins, clients and API
+keys nobody made.
 
 ### What `validate` refuses on the Pocket ID app
 
@@ -588,8 +587,9 @@ Also refused: an `identity_app` that is missing or not a `pocket-id` app
 (`invite-without-smtp`), a `code_of_conduct` that is missing, empty or not text
 (`invite-code-of-conduct-missing`), and a setting out of range
 (`invite-setting-invalid`). The service sends its own notices (an application
-waiting, an invitee's outcome) through the deployment's `smtp:` block, which the app's own `smtp:` fields may
-override; the sign-in link is Pocket ID's mail.
+waiting, an invitee's outcome) through the deployment's `smtp:` block, which
+the app's own `smtp:` fields may override; the sign-in link is Pocket ID's
+mail.
 
 ### The code of conduct
 

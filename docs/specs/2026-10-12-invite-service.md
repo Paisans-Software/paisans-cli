@@ -23,7 +23,7 @@ Pocket ID, its Postgres cluster and its mail.
 * **Approval is a deployment's choice.** `require_approval` is set in
   `paisans.yaml`. With it off, agreeing creates the account at once.
 * **An invite survives the loss of a site.** Its state is in the deployment's
-  Postgres cluster, and the service runs on every cluster site.
+  Postgres cluster, and the service runs on every apps site.
 * **A declined address is remembered, not refused.** Admins see how many times
   an address has been declined and when last. A member may invite it again.
 * **No data is held on people who are not members**, beyond a keyed hash of a
