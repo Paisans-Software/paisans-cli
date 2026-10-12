@@ -77,7 +77,7 @@ type rotateWiring struct {
 func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets rotate", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")

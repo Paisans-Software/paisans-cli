@@ -3,6 +3,7 @@ package webserver
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"path"
 	"slices"
 	"strings"
@@ -150,7 +151,7 @@ func DiagnoseMount(h Host, ws WebServer, dir, name string) MountDiagnosis {
 	}
 	text := fmt.Sprintf("%s Add this line to the volumes of %s in %s:\n\n    - %s:%s\n\nthen recreate its container; a restart does not add a mount:%s", unmounted(ws, dir), p.service, file, need.Source, need.Destination, up)
 	if !fixed {
-		text = strings.TrimSuffix(text, ".") + ": it finds the directory and records it in paisans.yaml."
+		text = strings.TrimSuffix(text, ".") + ": it finds the directory and records it in " + config.FileName + "."
 	}
 	for _, v := range p.volumes {
 		if v.service == p.service && v.variable {
@@ -175,7 +176,7 @@ func differs(ws WebServer, need Mount, v volume, fixed bool, imported string, it
 		if its {
 			return fmt.Sprintf("Its host path, %s, is not include_dir, %s: change it to %s.", v.source, need.Source, need.Source)
 		}
-		return fmt.Sprintf("include_dir in paisans.yaml is %s: change %s to %s.", need.Source, v.source, need.Source)
+		return fmt.Sprintf("include_dir in "+config.FileName+" is %s: change %s to %s.", need.Source, v.source, need.Source)
 	}
 	reads := fmt.Sprintf("the directory apply writes in beside %s's configuration", ws.Server)
 	if imported != "" {

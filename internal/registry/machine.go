@@ -58,7 +58,7 @@ func sameMachine(t Runner, r *Registry, cfg *config.Config, site string) error {
 			return otherSite(t, cfg, site, name, address, "")
 		}
 	}
-	return fmt.Errorf("%s: this machine holds %s with this deployment's WireGuard address %s, and no site in paisans.yaml has that address, so %s cannot be deployed on it, and nothing was changed. It is left by a site of this deployment that no longer has the address: one taken out of paisans.yaml, or one whose address changed with no registry entry to say which it was. %s If this machine is meant to be %s, clean what is left with `paisans site remove --force --ssh <this machine> --id %s` and run again; otherwise point sites.%s.ssh at another machine", t.Describe(), conf, address, site, machineAdvice, site, cfg.Deployment().Token(), site)
+	return fmt.Errorf("%s: this machine holds %s with this deployment's WireGuard address %s, and no site in "+config.FileName+" has that address, so %s cannot be deployed on it, and nothing was changed. It is left by a site of this deployment that no longer has the address: one taken out of "+config.FileName+", or one whose address changed with no registry entry to say which it was. %s If this machine is meant to be %s, clean what is left with `paisans site remove --force --ssh <this machine> --id %s` and run again; otherwise point sites.%s.ssh at another machine", t.Describe(), conf, address, site, machineAdvice, site, cfg.Deployment().Token(), site)
 }
 
 // otherSite is the refusal for a host that runs owner, another site of this
@@ -73,7 +73,7 @@ func otherSite(t Runner, cfg *config.Config, site, owner, address, kept string) 
 		what += ", or what its removal kept (" + kept + ")"
 	}
 	if _, declared := cfg.Sites[owner]; !declared {
-		return fmt.Errorf("%s: this machine already runs %s, which paisans.yaml no longer declares, so %s cannot be deployed on it, and nothing was changed. %s If this machine is meant to be %s, clean %s off it with `paisans site remove %s --force --ssh <this machine>` and run again; otherwise point sites.%s.ssh at another machine", t.Describe(), what, site, machineAdvice, site, owner, owner, site)
+		return fmt.Errorf("%s: this machine already runs %s, which "+config.FileName+" no longer declares, so %s cannot be deployed on it, and nothing was changed. %s If this machine is meant to be %s, clean %s off it with `paisans site remove %s --force --ssh <this machine>` and run again; otherwise point sites.%s.ssh at another machine", t.Describe(), what, site, machineAdvice, site, owner, owner, site)
 	}
 	return fmt.Errorf("%s: this machine already runs %s, so %s cannot be deployed on it, and nothing was changed. %s Point sites.%s.ssh at a machine of its own", t.Describe(), what, site, machineAdvice, site)
 }

@@ -25,7 +25,7 @@ import (
 func runPrune(args []string) error {
 	fs := newFlagSet("prune", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	site := fs.String("site", "", "the site to prune, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually remove the volumes marked remove")

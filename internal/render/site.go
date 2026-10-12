@@ -49,6 +49,9 @@ var templateFuncs = template.FuncMap{
 	// gateMarker is the body of the gate's own redirects, so the monitor can
 	// tell the gate's 302 from an app's.
 	"gateMarker": func() string { return GateMarker },
+	// configFile is the deployment declaration's name, so a rendered file's
+	// "change this instead" comment names the file the toolkit reads.
+	"configFile": func() string { return config.FileName },
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,

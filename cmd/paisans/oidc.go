@@ -39,7 +39,7 @@ func runOIDC(args []string) error {
 func runOIDCClientCreate(args []string) error {
 	fs := newFlagSet("oidc client create", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app the client is for, by the name it has in the configuration")
 	rotate := fs.Bool("rotate-secret", false, "add a new secret even when the recorded one is live; the old one stays valid until deleted")

@@ -26,7 +26,7 @@ import (
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("create", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to write the new deployment declaration to")
+	configPath := fs.String("config", config.FileName, "path to write the new deployment declaration to")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

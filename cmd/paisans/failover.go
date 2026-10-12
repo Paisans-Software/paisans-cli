@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 
 	"github.com/paisans-software/paisans-stack/internal/failover"
 )
@@ -20,7 +21,7 @@ func runFailover(args []string) error {
 func runFailoverTest(args []string) error {
 	fs := newFlagSet("failover test", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	execute := fs.Bool("execute", false, "actually switch the primary over and back")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo")
 	if err := fs.Parse(args); err != nil {

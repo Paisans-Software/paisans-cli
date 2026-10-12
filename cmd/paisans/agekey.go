@@ -138,7 +138,7 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 	}
 	if inside(filepath.Dir(configPath), abs) {
 		return "", &ui.Problem{
-			Hint:    "the age key file would sit beside paisans.yaml",
+			Hint:    "the age key file would sit beside " + config.FileName,
 			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
 		}
 	}

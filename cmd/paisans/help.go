@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"io"
 	"os"
 	"slices"
@@ -69,49 +70,49 @@ var helpSections = []helpSection{
 var helpCommands = []helpCommand{
 	{
 		name:    "validate",
-		summary: "Report every problem in paisans.yaml.",
-		usage:   []string{"paisans validate [--config paisans.yaml]"},
+		summary: "Report every problem in " + config.FileName + ".",
+		usage:   []string{"paisans validate [--config " + config.FileName + "]"},
 		detail:  "Load the configuration and report every problem found.",
 	},
 	{
 		name:    "create",
-		summary: "Write a new paisans.yaml by answering questions.",
-		usage:   []string{"paisans create [--config paisans.yaml]"},
-		detail: "For a new deployment: ask, at a terminal, about the community, its admins, its machines, its apps and its mail, and write a commented paisans.yaml that validate refuses nothing in, once you have read it and said yes. Refuses a file that exists. " +
+		summary: "Write a new " + config.FileName + " by answering questions.",
+		usage:   []string{"paisans create [--config " + config.FileName + "]"},
+		detail: "For a new deployment: ask, at a terminal, about the community, its admins, its machines, its apps and its mail, and write a commented " + config.FileName + " that validate refuses nothing in, once you have read it and said yes. Refuses a file that exists. " +
 			"Asks for no secret and reaches no host.",
 	},
 	{
 		name:    "init",
 		summary: "Give the configuration an id, a mesh subnet and its secrets.",
-		usage:   []string{"paisans init [--config paisans.yaml] [--secrets secrets.enc.yaml] [--sudo=false]"},
+		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--sudo=false]"},
 		detail: "Give the configuration an id if it has none; until the deployment is on any site, reach every site and keep mesh.subnet only if it overlaps nothing there, else roll a random /24 that overlaps nothing and move each site's address into it; " +
 			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere.",
 	},
 	{
 		name:    "render",
 		summary: "Write each site's artifacts to a local directory.",
-		usage:   []string{"paisans render [--config paisans.yaml] [--secrets secrets.enc.yaml] --out ./out"},
+		usage:   []string{"paisans render [--config " + config.FileName + "] [--secrets secrets.enc.yaml] --out ./out"},
 		detail:  "Validate, then write per site artifacts to a local directory.",
 	},
 	{
 		name:    "apply",
-		summary: "Take every site from paisans.yaml to a running stack.",
+		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
-			"paisans apply [--config paisans.yaml] [--secrets secrets.enc.yaml]\n" +
+			"paisans apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"              [--min-free <size>] [--keep-images] [--execute]",
-			"paisans apply --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]\n" +
+			"paisans apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"              [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
 				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--execute]",
 		},
-		detail: "Without --site: take every site from paisans.yaml to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
+		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
-			"Both, and host prepare, review the keys and images paisans.yaml grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.",
+			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.",
 	},
 	{
 		name:    "host prepare",
 		summary: "Take a blank host to the state apply assumes.",
-		usage:   []string{"paisans host prepare --site <name> [--config paisans.yaml] [--ssh <destination>]\n                     [--execute]"},
+		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute]"},
 		detail: "Take a blank host to the state apply assumes: Docker, the WireGuard tools, a firewall, and a watchdog on a data site. " +
 			"Installs only what is missing. Writes nothing without --execute.",
 	},
@@ -120,26 +121,26 @@ var helpCommands = []helpCommand{
 		summary: "List every deployment on a host.",
 		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
 		detail: "List every deployment in the registry of the host --ssh names (id, token, domain, site, roles and root, and a Caddy kept for /srv/caddy.d), and any deployment directory or labelled compose project no registry entry names. " +
-			"Needs no paisans.yaml; changes nothing.",
+			"Needs no " + config.FileName + "; changes nothing.",
 	},
 	{
 		name:    "host allow",
 		summary: "Add admins' keys to a host's key allowlist.",
-		usage:   []string{"paisans host allow <site> <admin>... [--config paisans.yaml] [--ssh <destination>]\n                   [--execute]"},
+		usage:   []string{"paisans host allow <site> <admin>... [--config " + config.FileName + "] [--ssh <destination>]\n                   [--execute]"},
 		detail: "Add each admin's key fingerprints to the site's host's key allowlist, /etc/paisans/ssh-allow.<user>, the keys host prepare may add there; a new list also holds every key a deployment already claims.\n\n" +
 			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
 	},
 	{
 		name:    "host disallow",
 		summary: "Take keys off a host's key allowlist.",
-		usage:   []string{"paisans host disallow <site> <admin|fingerprint>... [--config paisans.yaml]\n                      [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans host disallow <site> <admin|fingerprint>... [--config " + config.FileName + "]\n                      [--ssh <destination>] [--execute]"},
 		detail: "Take keys off the site's host's key allowlist, by admin or fingerprint; a key already authorized keeps working.\n\n" +
 			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
 	},
 	{
 		name:    "site add",
 		summary: "Join a new data site to the running cluster.",
-		usage:   []string{"paisans site add <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                 [--execute]"},
+		usage:   []string{"paisans site add <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                 [--execute]"},
 		detail: "Join a new data site to the running cluster in eight gated stages: preflight, mesh, etcd (learners, then promoted), the Patroni replica, synchronous mode, HAProxy, each existing replica's patroni.env, one replica restart at a time, and each monitor site's uptime stack, so it checks the new site.\n\n" +
 			"Reads every site and plans only what differs, so a re-run resumes. Writes nothing without --execute.",
 	},
@@ -147,126 +148,126 @@ var helpCommands = []helpCommand{
 		name:    "site remove",
 		summary: "Take a site out of the running deployment.",
 		usage: []string{
-			"paisans site remove <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]\n" +
+			"paisans site remove <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]",
-			"paisans site remove <site> --evict [--config paisans.yaml] [--secrets secrets.enc.yaml]\n" +
+			"paisans site remove <site> --evict [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--execute]",
 			"paisans site remove --force --ssh <user@host[:port]> --id <id or token>\n" +
 				"                    [--delete-data] [--sudo=false] [--execute]",
 		},
-		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in /srv/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of paisans.yaml.\n\n" +
+		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in /srv/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone skips the host; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
-			"--force --ssh <host> --id <id or token>, with no paisans.yaml: clean that host of the deployment its registry names, as --force does, from the registry entry alone. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
+			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment its registry names, as --force does, from the registry entry alone. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
 			"--evict: take out a site whose host still runs and that nobody else can reach, never reaching that host: the mesh cut first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.",
 	},
 	{
 		name:    "mesh rekey",
 		summary: "Replace sites' WireGuard keys, one site at a time.",
-		usage:   []string{"paisans mesh rekey <site>... | --all [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                   [--execute]"},
+		usage:   []string{"paisans mesh rekey <site>... | --all [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--execute]"},
 		detail: "Replace sites' WireGuard keys, one site at a time: a next key in the secrets, every peer's mesh file and then the site's own synced with it, a handshake under it from every peer, etcd and Patroni healthy, then the key promoted. " +
 			"A stopped run resumes. Writes nothing without --execute.",
 	},
 	{
 		name:    "gateway move",
-		summary: "Move the gateway role to the site paisans.yaml gives it.",
-		usage:   []string{"paisans gateway move [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]"},
-		detail: "Move the gateway role to the site paisans.yaml gives it, from the site that still serves as the gateway, in gated stages: carry the deployment record, check the new gateway answers for every hostname through its own address, add its address records beside the old one's, delete the old one's (only after that check, and only records dns init made for it), wait out their TTL, then stop the old gateway's Caddy.\n\n" +
+		summary: "Move the gateway role to the site " + config.FileName + " gives it.",
+		usage:   []string{"paisans gateway move [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
+		detail: "Move the gateway role to the site " + config.FileName + " gives it, from the site that still serves as the gateway, in gated stages: carry the deployment record, check the new gateway answers for every hostname through its own address, add its address records beside the old one's, delete the old one's (only after that check, and only records dns init made for it), wait out their TTL, then stop the old gateway's Caddy.\n\n" +
 			"Resumes after a fix. Writes nothing without --execute.",
 	},
 	{
 		name:    "storage init",
 		summary: "Provision object storage on a site.",
-		usage:   []string{"paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                     [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans storage init --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                     [--ssh <destination>] [--execute]"},
 		detail: "Provision object storage on a site: each app's key and bucket, and the layout when it is the only Garage site. " +
 			"Creates only what is missing, and writes nothing without --execute.",
 	},
 	{
 		name:    "storage add",
 		summary: "Join every Garage site into one cluster.",
-		usage:   []string{"paisans storage add [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                    [--change-replication] [--wait <duration>] [--stop-test] [--execute]"},
+		usage:   []string{"paisans storage add [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                    [--change-replication] [--wait <duration>] [--stop-test] [--execute]"},
 		detail: "Join every site in storage.garage.sites into one Garage cluster, in gated stages: connect, layout, sync, provision, media routes, a smoke test; and, with --change-replication, Garage's reset for another replication factor.\n\n" +
 			"Exits at a stage waiting on Garage (status 75) and resumes on the next run. Creates only what is missing, and writes nothing without --execute.",
 	},
 	{
 		name:    "storage rotate-key",
 		summary: "Replace one app's S3 key.",
-		usage:   []string{"paisans storage rotate-key --app <name> [--config paisans.yaml]\n                           [--secrets secrets.enc.yaml] [--execute]"},
+		usage:   []string{"paisans storage rotate-key --app <name> [--config " + config.FileName + "]\n                           [--secrets secrets.enc.yaml] [--execute]"},
 		detail: "Replace one app's S3 key, in gated stages: the new pair into the secrets (the old one kept beside it), the new key imported and granted, the app applied alone on every site running it, a probe written, read and deleted with the new key, and only then the old key deleted from Garage and the secrets.\n\n" +
 			"Resumes from the secrets file. Writes nothing without --execute.",
 	},
 	{
 		name:    "prune",
 		summary: "List and remove one site's dangling Docker volumes.",
-		usage:   []string{"paisans prune --site <name> [--config paisans.yaml] [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans prune --site <name> [--config " + config.FileName + "] [--ssh <destination>] [--execute]"},
 		detail: "List one site's dangling Docker volumes, with size and top level entries, and say which carry this deployment's label. " +
 			"Removes those with --execute; every other volume is kept.",
 	},
 	{
 		name:    "preflight",
 		summary: "Run the read only checks site add runs first.",
-		usage:   []string{"paisans preflight --site <new site> [--config paisans.yaml]"},
+		usage:   []string{"paisans preflight --site <new site> [--config " + config.FileName + "]"},
 		detail:  "The read only checks site add runs first, for the site being added and every site already running. Changes nothing.",
 	},
 	{
 		name:    "failover test",
 		summary: "Switch the Patroni primary to another data site and back.",
-		usage:   []string{"paisans failover test [--config paisans.yaml] [--execute]"},
+		usage:   []string{"paisans failover test [--config " + config.FileName + "] [--execute]"},
 		detail: "Switch the Patroni primary to another data site and back, checking the cluster and every app before and after each switch. " +
 			"Interrupts writes briefly, twice. Changes nothing without --execute.",
 	},
 	{
 		name:    "doctor",
 		summary: "Report what is stuck on every site, and how to recover.",
-		usage:   []string{"paisans doctor [--config paisans.yaml] [--site <name>]... [--sudo]"},
+		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--sudo]"},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
 			"Prints how to recover. Reaches hosts, changes nothing; exits 1 on any FAIL.",
 	},
 	{
 		name:    "dns init",
 		summary: "Create the public DNS records the configuration implies.",
-		usage:   []string{"paisans dns init [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]"},
+		usage:   []string{"paisans dns init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
 		detail: "Create the public DNS records the configuration implies, at the provider named by acme.provider: addresses, and records saying every name without mail (community.mail_domains, smtp senders) sends and receives none.\n\n" +
 			"Creates only what is missing, never updates or deletes, and refuses if any record conflicts. Writes nothing without --execute.",
 	},
 	{
 		name:    "dns prune",
 		summary: "Delete the records dns init made that are no longer wanted.",
-		usage:   []string{"paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]"},
+		usage:   []string{"paisans dns prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]"},
 		detail: "Delete the records dns init created that the configuration no longer implies: only one carrying init's comment, at a name under community.domain or one the configuration names, and no longer wanted; an A or AAAA pointing at a site's public address, or a TXT or MX holding exactly a no-mail content init writes.\n\n" +
 			"Lists every other record init marked, with why it is kept, and lists the zone again to confirm each delete. Writes nothing without --execute.",
 	},
 	{
 		name:    "config publish",
 		summary: "Sign the local files and push them to every site.",
-		usage:   []string{"paisans config publish [--config paisans.yaml] [--merge] [--execute]"},
-		detail: "Sign the local paisans.yaml, secrets.enc.yaml and .sops.yaml as a version on the sites' newest and push it to every site; --merge builds on every head of a fork." +
+		usage:   []string{"paisans config publish [--config " + config.FileName + "] [--merge] [--execute]"},
+		detail: "Sign the local " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the sites' newest and push it to every site; --merge builds on every head of a fork." +
 			configTrust,
 	},
 	{
 		name:    "config pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans config pull [--config paisans.yaml] [--root <sha>] [--execute]"},
+		usage:   []string{"paisans config pull [--config " + config.FileName + "] [--root <sha>] [--execute]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
 			configTrust,
 	},
 	{
 		name:    "config log",
 		summary: "List every version, its signer, and the sites holding it.",
-		usage:   []string{"paisans config log [--config paisans.yaml] [--root <sha>]"},
+		usage:   []string{"paisans config log [--config " + config.FileName + "] [--root <sha>]"},
 		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust,
 	},
 	{
 		name:    "config recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config paisans.yaml] [--execute]"},
+		usage:   []string{"paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork." +
 			configTrust,
 	},
 	{
 		name:    "admin register",
 		summary: "Sign the sites' newest version with your own key.",
-		usage:   []string{"paisans admin register [--config paisans.yaml] [--key <path.pub>] [--root <sha>] [--execute]"},
+		usage:   []string{"paisans admin register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>] [--execute]"},
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in admins, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which config publish signs with from then on.\n\n" +
@@ -276,8 +277,8 @@ var helpCommands = []helpCommand{
 		name:    "secrets set",
 		summary: "Write one value from stdin into the secrets file, or ask for each owed one.",
 		usage: []string{
-			"paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value",
-			"paisans secrets set [--config paisans.yaml] [--secrets secrets.enc.yaml]",
+			"paisans secrets set <dotted.key> [--config " + config.FileName + "] [--secrets secrets.enc.yaml] < value",
+			"paisans secrets set [--config " + config.FileName + "] [--secrets secrets.enc.yaml]",
 		},
 		detail: "Read one value from stdin and write it into the encrypted secrets file, printing only its name. " +
 			"For credentials issued elsewhere, so they never touch an echoing terminal or an editor.\n\n" +
@@ -286,15 +287,15 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "secrets prune",
-		summary: "Remove the secrets of what paisans.yaml no longer declares.",
-		usage:   []string{"paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]"},
-		detail: "Remove the secrets that name something paisans.yaml no longer declares: a removed site's keys, a removed app's passwords and sign-in client, a Pocket ID group nothing names. Lists them by key, never by value.\n\n" +
+		summary: "Remove the secrets of what " + config.FileName + " no longer declares.",
+		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
+		detail: "Remove the secrets that name something " + config.FileName + " no longer declares: a removed site's keys, a removed app's passwords and sign-in client, a Pocket ID group nothing names. Lists them by key, never by value.\n\n" +
 			"Only reads the gateways' deployment records; its --execute writes the local secrets file alone.",
 	},
 	{
 		name:    "secrets rotate",
 		summary: "Replace secrets, one at a time, in gated stages.",
-		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                       [--sudo=false] [--execute]"},
+		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--sudo=false] [--execute]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.oauth for Mbin's OAuth2 keys), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
 			"A pasted secret (the DNS token or an SMTP password) is handed on once it is replaced at its issuer and set with secrets set, and refused while every host using it runs the value the file holds, read line by line; --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
@@ -304,36 +305,36 @@ var helpCommands = []helpCommand{
 	{
 		name:    "app admin create",
 		summary: "Make a user an administrator of Pocket ID and the apps.",
-		usage:   []string{"paisans app admin create --app <pocket-id app> --username <u> --email <e>\n                         [--first-name <f>] [--last-name <l>] [--login-link]\n                         [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                         [--site <name>] [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans app admin create --app <pocket-id app> --username <u> --email <e>\n                         [--first-name <f>] [--last-name <l>] [--login-link]\n                         [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                         [--site <name>] [--ssh <destination>] [--execute]"},
 		detail: "Make sure a user exists, is verified and is an administrator of Pocket ID, and is in every admin group the apps signing in through it read. " +
 			"There is no password: a created account gets a one-time login link, printed once, to register a passkey with. Writes nothing without --execute.",
 	},
 	{
 		name:    "app remove",
-		summary: "Take an app that has left paisans.yaml off every host.",
-		usage:   []string{"paisans app remove <app> [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                   [--delete-data] [--execute]"},
-		detail: "Take an app that has left paisans.yaml off every host, once a whole apply on each site has marked its files left over: its containers and networks, its rendered files (one edited on the host is kept), its stack directory when nothing else is in it, and its Pocket ID client when the secrets file records that client's ID.\n\n" +
+		summary: "Take an app that has left " + config.FileName + " off every host.",
+		usage:   []string{"paisans app remove <app> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--delete-data] [--execute]"},
+		detail: "Take an app that has left " + config.FileName + " off every host, once a whole apply on each site has marked its files left over: its containers and networks, its rendered files (one edited on the host is kept), its stack directory when nothing else is in it, and its Pocket ID client when the secrets file records that client's ID.\n\n" +
 			"--delete-data also deletes its database and role, its Garage bucket and keys, its named volumes and its data directories, after the app's name is typed at a terminal. " +
 			"Leaves its secrets and DNS records, and says so. Writes nothing without --execute.",
 	},
 	{
 		name:    "oidc client create",
 		summary: "Create an app's client at the deployment's Pocket ID.",
-		usage:   []string{"paisans oidc client create --app <name> [--rotate-secret]\n                           [--config paisans.yaml] [--secrets secrets.enc.yaml]\n                           [--site <name>] [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans oidc client create --app <name> [--rotate-secret]\n                           [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                           [--site <name>] [--ssh <destination>] [--execute]"},
 		detail: "Create an app's client at the deployment's Pocket ID, with the groups the app reads, and record its ID and secret in the secrets file. The secret is never printed. " +
 			"Writes nothing without --execute. Supports the mbin, outline, writefreely and uptime kinds.",
 	},
 	{
 		name:    "web-server show",
 		summary: "Print what the web server in front of a monitor's app must do.",
-		usage:   []string{"paisans web-server show --app <name> [--config paisans.yaml] [--sudo=false]"},
+		usage:   []string{"paisans web-server show --app <name> [--config " + config.FileName + "] [--sudo=false]"},
 		detail: "For an app pinned to a monitor site, print what the web server in front of it must do (terminate TLS for its hostname, pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled in for the web server it finds on the monitor over ssh, read only, or for Caddy, nginx and Apache when it finds none.\n\n" +
 			"Changes nothing. With managed_by: external it reads the monitor's web server over ssh.",
 	},
 	{
 		name:    "web-server check",
 		summary: "Check, from here, that a monitor's app is served correctly.",
-		usage:   []string{"paisans web-server check --app <name> [--config paisans.yaml] [--sudo=false]"},
+		usage:   []string{"paisans web-server check --app <name> [--config " + config.FileName + "] [--sudo=false]"},
 		detail: "From this machine, check that the hostname resolves to the monitor, that /healthz answers with a valid certificate, that sign in redirects with an https callback, and that the published port is closed from outside. " +
 			"Reads only; exits 1 on any FAIL. With the toolkit's own Caddy in front (managed_by: paisans), only the first two apply.\n\n" +
 			"It looks at the monitor's public hostname as any visitor could; with managed_by: external it also reads the monitor's web server over ssh when a check fails.",
@@ -343,7 +344,7 @@ var helpCommands = []helpCommand{
 // configTrust is what every config subcommand shares, after its own
 // sentence.
 const configTrust = "\n\n" +
-	"The signed copies of paisans.yaml, secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
+	"The signed copies of " + config.FileName + ", secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
 	"With --execute, pull, recover, a publish of the first version, apply and admin register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and admin register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
@@ -408,7 +409,7 @@ func isGroup(name string) bool { return len(subcommands(name)) > 0 }
 
 // printTopHelp writes the first page: every command, one line each.
 func printTopHelp(w io.Writer) {
-	fmt.Fprint(w, "paisans installs and runs a community stack from paisans.yaml.\n\n")
+	fmt.Fprint(w, "paisans installs and runs a community stack from "+config.FileName+".\n\n")
 	fmt.Fprint(w, "Usage: paisans <command> [flags]\n")
 	for _, s := range helpSections {
 		fmt.Fprintf(w, "\n%s:\n", s.title)

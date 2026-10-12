@@ -90,14 +90,14 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	beside := filepath.Join(l.Dir, "secrets.enc.yaml")
 	if secretsPath != "" && !samePath(secretsPath, beside) {
-		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside paisans.yaml", Explain: "apply publishes the version it applies, and a version holds the secrets.enc.yaml beside paisans.yaml. Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside paisans.yaml."}
+		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside " + config.FileName, Explain: "apply publishes the version it applies, and a version holds the secrets.enc.yaml beside " + config.FileName + ". Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside " + config.FileName + "."}
 	}
 	files, err := l.Files()
 	if err == nil && loaded != nil {
 		files.Paisans, files.Secrets = loaded.Paisans, loaded.Secrets
 	}
 	if err != nil {
-		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes paisans.yaml, secrets.enc.yaml and .sops.yaml from " + l.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
+		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + l.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
 	}
 	a, err := l.Anchor()
 	if err != nil {

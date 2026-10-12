@@ -46,11 +46,11 @@ const doctorConnectTimeout = 10
 func runDoctor(args []string) error {
 	fs := newFlagSet("doctor", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	var only pathList
 	fs.Var(&only, "site", "look at this site only (repeatable); every check then runs on the named sites alone")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker and /srv are root's")
-	execute := fs.Bool("execute", false, "remove the config: keys in paisans.yaml that only repeat a value gating requires, before reading any site; no site is changed")
+	execute := fs.Bool("execute", false, "remove the config: keys in "+config.FileName+" that only repeat a value gating requires, before reading any site; no site is changed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -15,7 +15,7 @@ import (
 //go:embed paisans.yaml.tmpl
 var templateText string
 
-var fileTemplate = template.Must(template.New("paisans.yaml").Funcs(template.FuncMap{
+var fileTemplate = template.Must(template.New(config.FileName).Funcs(template.FuncMap{
 	"q": quote,
 }).Parse(templateText))
 
@@ -40,7 +40,7 @@ func Render(a Answers, id string, by Origin) ([]byte, error) {
 	v.Origin = by
 	var out bytes.Buffer
 	if err := fileTemplate.Execute(&out, v); err != nil {
-		return nil, fmt.Errorf("rendering paisans.yaml: %w", err)
+		return nil, fmt.Errorf("rendering "+config.FileName+": %w", err)
 	}
 	return out.Bytes(), nil
 }

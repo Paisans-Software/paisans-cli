@@ -46,7 +46,7 @@ func parseAllow(command string, args []string) (ui.Reporter, allowOptions, error
 	fs := newFlagSet(command, flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	var o allowOptions
-	fs.StringVar(&o.config, "config", "paisans.yaml", "path to the deployment declaration")
+	fs.StringVar(&o.config, "config", config.FileName, "path to the deployment declaration")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section")
 	fs.BoolVar(&o.execute, "execute", false, "actually write the list; asks for the site's name at a terminal")
 	fs.BoolVar(&o.sudo, "sudo", true, "run remote commands through sudo, since /etc/paisans is root's")
@@ -66,7 +66,7 @@ func parseAllow(command string, args []string) (ui.Reporter, allowOptions, error
 		what = "admin|fingerprint"
 	}
 	if len(positional) < 2 {
-		return nil, o, &ui.Problem{Hint: command + " takes a site and at least one " + strings.ReplaceAll(what, "|", " or "), Explain: "Usage: paisans " + command + " <site> <" + what + ">... [--config paisans.yaml] [--execute]"}
+		return nil, o, &ui.Problem{Hint: command + " takes a site and at least one " + strings.ReplaceAll(what, "|", " or "), Explain: "Usage: paisans " + command + " <site> <" + what + ">... [--config " + config.FileName + "] [--execute]"}
 	}
 	o.site, o.names = positional[0], positional[1:]
 	return reporter(), o, nil

@@ -2,6 +2,7 @@ package hostcheck
 
 import (
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"net"
 	"strings"
 
@@ -431,7 +432,7 @@ func (r *Report) Refusal() error {
 		}
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("%s holds %s %s claims, so nothing was changed", r.Host, things, r.Site),
-			Explain: strings.Join(lines, "\n") + "\nMove what holds each one, or change the paisans.yaml key it names, and run again.",
+			Explain: strings.Join(lines, "\n") + "\nMove what holds each one, or change the " + config.FileName + " key it names, and run again.",
 		}
 	case Shared:
 		if why := firewallGap(r.Inventory.Firewall); why != "" {
