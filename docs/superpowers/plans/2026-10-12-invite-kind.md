@@ -30,7 +30,7 @@
 
 1. **`allow_user_signups` unset on the identity app.** Pocket ID's default is `disabled`, so unset passes; only an explicit `withToken` or `open` is refused. Pinned in Task 2 (`TestInviteSignupsUnsetIsFine`).
 2. **`code_of_conduct` given as an absolute path, or with `..`.** Resolved against the directory of `paisans.yaml`; an absolute path is used as is; a missing file is refused by validate before render ever reads it. Pinned in Task 2 (fixture `invite-code-of-conduct-missing`) and Task 4 (`TestInviteCoCRendered`).
-3. **Two `pocket-id` apps, or the identity app named in `identity_app` differing from the one `identityProviderURL` finds.** The invite app's issuer, API key and accent colour all come from the app named in `identity_app`, never from a search. Pinned in Task 4 (`TestInviteReadsItsNamedIdentityApp`).
+3. **A renamed identity host, or two `pocket-id` apps, or the identity app named in `identity_app` differing from the one `identityProviderURL` finds.** A changed `hostname` re-renders `INVITE_IDP_URL` and `INVITE_OIDC_ISSUER` and the next apply recreates the invite stack (Task 4 `TestInviteFollowsTheIdentityHostname`, `TestInviteEnvChangedByIdentityHostnameRecreates`). The invite app's issuer, API key and accent colour all come from the app named in `identity_app`, never from a search. Pinned in Task 4 (`TestInviteReadsItsNamedIdentityApp`).
 4. **An accent colour unset, or `default`, on the identity app.** `INVITE_ACCENT_COLOR` renders empty and the service uses its own default. Pinned in Task 4 (`TestInviteAccent`).
 5. **Re-running `init` after the invite app exists.** The two keys are never regenerated (secretsgen fills only missing keys). Pinned in Task 3 (`TestInviteKeysAreStable`).
 
@@ -552,6 +552,29 @@ func TestInviteAccent(t *testing.T) {
 }
 ```
 
+And the founder's requirement that a renamed identity host reaches the service:
+
+```go
+func TestInviteFollowsTheIdentityHostname(t *testing.T) {
+	cfg, secrets := fixtureConfig(t) // the loader TestGoldenTree uses
+	first := renderEnv(t, cfg, secrets, "/invite/.env")
+	auth := cfg.Apps["auth"]
+	auth.Hostname = "login.renamed.example"
+	cfg.Apps["auth"] = auth
+	second := renderEnv(t, cfg, secrets, "/invite/.env")
+	for _, key := range []string{"INVITE_IDP_URL", "INVITE_OIDC_ISSUER"} {
+		if got := lineValue(second, key); got != "https://login.renamed.example" {
+			t.Fatalf("%s = %q after the identity hostname changed", key, got)
+		}
+		if lineValue(first, key) == lineValue(second, key) {
+			t.Fatalf("%s did not change", key)
+		}
+	}
+}
+```
+
+In `internal/apply/apply_test.go`, beside `TestAnEnvFileChangeRecreates` (`:1639`), add `TestInviteEnvChangedByIdentityHostnameRecreates`: plan a site whose host already holds the invite stack rendered with the old identity hostname, change the identity app's `hostname`, plan again, and assert the invite stack is planned for recreate because its `.env` changed. Reuse that test's fixtures and assertions; if the existing test is already generic over any app's `.env`, a second case naming the invite stack is enough.
+
 Write `findFile` (first rendered path ending in the suffix) and `lineValue` (value of `KEY=` in a dotenv) in the test file if no equivalent exists; reuse `TestGoldenTree`'s rendering call for `renderFixture`.
 
 - [ ] **Step 2: Run them to see them fail**
@@ -637,7 +660,7 @@ and in `oidcFor`'s switch:
 		redirect = "https://" + planned.Hostname + "/auth/callback"
 ```
 
-and set the issuer for invite from `v.Invite.IdentityURL` rather than `identityProviderURL()` if the two could differ (they cannot while one deployment has one Pocket ID app; note it in a comment, keep `identityProviderURL()`).
+The invite service's issuer and API base both come from `v.Invite.IdentityURL`, which is built from the identity app's `hostname` in `paisans.yaml` (founder requirement 2026-10-12: the service never learns Pocket ID's address any other way). `INVITE_OIDC_ISSUER` and `INVITE_IDP_URL` are therefore always the same value.
 
 `templates/invite/compose.yaml.tmpl`:
 
@@ -683,7 +706,7 @@ INVITE_PUBLIC_URL={{ .PublicURL }}
 INVITE_DATABASE_URL={{ .DSN }}
 INVITE_SESSION_KEY={{ .Secret "session_key" }}
 INVITE_EMAIL_HASH_KEY={{ .Secret "email_hash_key" }}
-INVITE_OIDC_ISSUER={{ .OIDC.Issuer }}
+INVITE_OIDC_ISSUER={{ .Invite.IdentityURL }}
 INVITE_OIDC_CLIENT_ID={{ .OIDC.ClientID }}
 INVITE_OIDC_CLIENT_SECRET={{ .OIDC.ClientSecret }}
 INVITE_MEMBER_GROUP={{ .OIDCMemberGroup }}
