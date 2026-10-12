@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -117,6 +120,24 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
+	// One reader for every answer an eviction asks for, so none is read
+	// ahead and lost between questions.
+	term := &terminal{stdin: stdin, out: stdout}
+	// A gateway's DNS token is revoked and replaced while `revoked` waits,
+	// with `secrets set`, which writes the secrets file. So it is asked
+	// before the file is read: the token checked and every secret written
+	// back are the ones the operator has just set.
+	asked := false
+	if *execute && *evict && cfg.Sites[site].Has(config.RoleGateway) {
+		if err := term.ask([]question{revokedQuestion(cfg, site)}); err != nil {
+			return err
+		}
+		asked = true
+	}
+	loaded, err := os.ReadFile(*secretsPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
@@ -203,11 +224,17 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	if *evict {
-		if err := confirmEviction(stdin, stdout, evictionQuestions(cfg, site, plan)); err != nil {
+		var questions []question
+		for _, q := range evictionQuestions(cfg, site, plan) {
+			if !asked || q.word != "revoked" {
+				questions = append(questions, q)
+			}
+		}
+		if err := term.ask(questions); err != nil {
 			return err
 		}
 		if filled.Changed() {
-			if err := writeFilled(r, *secretsPath, secrets, filled); err != nil {
+			if err := writeFilled(r, *secretsPath, loaded, secrets, filled); err != nil {
 				return err
 			}
 		}
@@ -504,11 +531,7 @@ type question struct {
 func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) []question {
 	var out []question
 	if plan.Gateway() {
-		provider := cfg.ACME.Provider
-		if provider == "" {
-			provider = "the DNS provider"
-		}
-		out = append(out, question{"revoked", fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before going on. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)})
+		out = append(out, revokedQuestion(cfg, site))
 	}
 	out = append(out, question{site, fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. An eviction is not undone by running it again.", site)})
 	if text := plan.LoseWritesText(); text != "" {
@@ -520,14 +543,39 @@ func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) [
 	return out
 }
 
+// revokedQuestion is `revoked`, asked when the evicted site holds the
+// gateway.
+func revokedQuestion(cfg *config.Config, site string) question {
+	provider := cfg.ACME.Provider
+	if provider == "" {
+		provider = "the DNS provider"
+	}
+	return question{"revoked", fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before going on. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
+}
+
+// terminal is where an eviction's questions are asked: one reader for all of
+// them, however many times it asks.
+type terminal struct {
+	stdin io.Reader
+	in    *bufio.Reader
+	out   io.Writer
+}
+
 // confirmEviction asks each question in turn, from one reader so that no
 // answer is read ahead and lost, and refuses at the first wrong answer.
 // There is no flag to answer any of them.
 func confirmEviction(stdin io.Reader, stdout io.Writer, questions []question) error {
-	if !stdinIsTerminal(stdin) {
+	return (&terminal{stdin: stdin, out: stdout}).ask(questions)
+}
+
+func (t *terminal) ask(questions []question) error {
+	if !stdinIsTerminal(t.stdin) {
 		return noTerminal("An eviction is not undone by running it again")
 	}
-	in := bufio.NewReader(stdin)
+	if t.in == nil {
+		t.in = bufio.NewReader(t.stdin)
+	}
+	in, stdout := t.in, t.out
 	for _, q := range questions {
 		fmt.Fprintf(stdout, "\n%s\nType %s to go on: ", strings.Join(ui.Wrap(q.what, 80), "\n"), q.word)
 		answer, err := in.ReadString('\n')
@@ -543,8 +591,18 @@ func confirmEviction(stdin io.Reader, stdout io.Writer, questions []question) er
 
 // writeFilled writes the secrets init's generation filled in, encrypted to
 // the recipients beside the file, before the eviction renders anything from
-// them.
-func writeFilled(r ui.Reporter, path string, secrets *config.Secrets, filled secretsgen.Result) error {
+// them. The whole file is written back from what was read, so a file that
+// changed since, loaded as its bytes then, is refused rather than
+// overwritten: the change would be lost, and the plan was rendered without
+// it.
+func writeFilled(r ui.Reporter, path string, loaded []byte, secrets *config.Secrets, filled secretsgen.Result) error {
+	now, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if !bytes.Equal(now, loaded) {
+		return fmt.Errorf("site remove: %s changed after it was read, so writing the generated secrets back would lose that change, and the plan was made without it. Nothing was written or changed: run site remove --evict again, which reads it afresh", path)
+	}
 	recipients, err := config.Recipients(filepath.Dir(path))
 	if err != nil {
 		return err

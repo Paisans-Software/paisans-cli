@@ -50,7 +50,7 @@ type mesh struct {
 	paused bool
 	// promotedAt is where in log each site's key was promoted.
 	promotedAt map[string]int
-	log  []string
+	log        []string
 }
 
 type host struct {

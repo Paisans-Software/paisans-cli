@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -364,5 +366,82 @@ func TestEvictionQuestionsFollowThePlan(t *testing.T) {
 	}
 	if strings.Join(words, ",") != "home-b" {
 		t.Errorf("asked %v", words)
+	}
+}
+
+// `revoked` is asked before the secrets file is read: the operator sets the
+// new DNS token with `secrets set` while it waits, and the token checked and
+// every secret written back must be that file's.
+func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
+	noSiteHosts(t)
+	saved := isTerminal
+	isTerminal = func(*os.File) bool { return true }
+	t.Cleanup(func() { isTerminal = saved })
+	data, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(string(data), "  vm:\n", `  home-d:
+    roles: [gateway, apps, witness]
+    address: 10.44.0.6
+    endpoint: home-d.example.org:51820
+    ssh:
+      host: home-d.example.org
+      user: ubuntu
+      keys: [alice]
+  vm:
+`, 1)
+	text = strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-d }")
+	text = strings.Replace(text, "members: [home-a, home-b, vm]", "members: [home-a, home-b, home-d, vm]", 1)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "paisans.yaml")
+	if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteString("revoked\n")
+	w.Close()
+	defer r.Close()
+	var out bytes.Buffer
+	err = runSiteRemove([]string{"vm", "--evict", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
+	if err == nil {
+		t.Fatal("an eviction with no secrets file went on")
+	}
+	if !strings.Contains(out.String(), "Type revoked") {
+		t.Errorf("the secrets were read before revoked was asked: %v\n%s", err, out.String())
+	}
+}
+
+// The generated secrets are written back only to the file as it was read: a
+// file changed since is refused, and keeps the change.
+func TestWriteFilledRefusesAFileChangedSinceItWasRead(t *testing.T) {
+	data, err := os.ReadFile(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := config.LoadSecrets(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(data), "external:", "external:\n  acme_dns_token: \"the-new-one\"", 1)
+	if changed == string(data) {
+		t.Fatal("the fixture has no external section")
+	}
+	if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = writeFilled(ui.Discard, path, data, secrets, secretsgen.Result{Generated: []string{"sites.home-d.wireguard_private_key"}})
+	if err == nil || !strings.Contains(err.Error(), "changed after it was read") {
+		t.Fatalf("err = %v", err)
+	}
+	if now, _ := os.ReadFile(path); string(now) != changed {
+		t.Error("the change made since the read was overwritten")
 	}
 }

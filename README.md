@@ -6481,7 +6481,9 @@ there is no flag that answers any of them:
   the token, not a credential that manages tokens. The token in the secrets
   file is also tried against the provider before anything changes, where a
   provider whose record management is implemented allows it; otherwise the
-  report says it was not checked.
+  report says it was not checked. It is asked first, before the secrets file
+  is read, since the new token is set with `secrets set` while it waits: the
+  token tried and every secret written back are the file as it is then.
 * the site's name, always.
 * `lose writes`, when the site leads and no remaining member is a streaming
   `Sync Standby`. The plan names the most current replica and its lag in
@@ -6523,7 +6525,9 @@ decision.
   same way.
 * Its secrets are generated first when the secrets file does not hold them,
   by the same code `init` runs, on the workstation, and written encrypted to
-  `.sops.yaml`'s recipients once every question is answered.
+  `.sops.yaml`'s recipients once every question is answered. A file that
+  changed after it was read is refused rather than overwritten, since the write
+  is the whole file and would lose the change.
 * The cut is rendered without it. The cut must not wait on a host or a DNS
   record that does not exist yet, and `apply` stops before `wg syncconf` while
   a peer's endpoint name does not resolve; the `apply` that brings it up adds
