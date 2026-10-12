@@ -234,6 +234,10 @@ paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
   every key some deployment's sidecar already claims for the user, listed
   apart as `keep`, so that making a list refuses no access the host already
   has.
+* **Existing list:** every line it does not change is kept as written,
+  comments included, and the new keys are added at its end. A line that is
+  neither a comment nor a fingerprint is refused, naming it, and nothing is
+  written until the owner fixes it by hand.
 * **`--execute`:** asks for the site's name at a terminal, never answered by a
   flag, and refuses without one; then writes the list under
   `/etc/paisans/authorized_keys.lock`, by a temporary file and a rename, only
@@ -259,6 +263,8 @@ paisans host disallow home-a SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA 
 * **The last line:** taking it leaves an empty list, which allows no key, and
   it says so. To allow every key again, the owner deletes the file by hand.
   With no list at all there is nothing to take off, and nothing is written.
+* **The rest of the list:** kept as written, comments included; a line it
+  cannot read is refused, as by `host allow`.
 * **`--execute`:** as `host allow`.
 
 See *host prepare manages the login user's authorized keys* in `README.md`.

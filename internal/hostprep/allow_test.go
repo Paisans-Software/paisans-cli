@@ -182,6 +182,38 @@ func TestParseAllow(t *testing.T) {
 	}
 }
 
+// A line is split on any run of whitespace, as the guard's awk splits it,
+// so a fingerprint followed by a tab is the fingerprint the guard finds.
+func TestParseAllowSplitsOnWhitespace(t *testing.T) {
+	fp := fingerprint(keyAlice)
+	lines := hostprep.ParseAllow(fp + "\talice  laptop\n")
+	if len(lines) != 1 || lines[0] != (hostprep.AllowLine{Fingerprint: fp, Comment: "alice  laptop"}) {
+		t.Errorf("%+v", lines)
+	}
+}
+
+// Rewriting a list keeps every line it does not change as the owner wrote
+// it, comments included, and refuses a line it cannot read rather than
+// dropping it.
+func TestAllowFileKeepsWhatItDoesNotChange(t *testing.T) {
+	alice, bob, carol := fingerprint(keyAlice), fingerprint(keyBob), fingerprint(keyCarol)
+	content := "# the owner's own header\n" + alice + "\talice, checked by phone\n\n# bob's laptop\n" + bob + " bob\n"
+	f, err := hostprep.ParseAllowFile(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Add([]hostprep.AllowLine{{Fingerprint: carol, Comment: "carol"}}); got != content+carol+" carol\n" {
+		t.Errorf("add:\n%s", got)
+	}
+	got, removed := f.Remove([]hostprep.AllowLine{{Fingerprint: bob}})
+	if got != "# the owner's own header\n"+alice+"\talice, checked by phone\n\n# bob's laptop\n" || len(removed) != 1 || removed[0].Fingerprint != bob {
+		t.Errorf("remove %+v:\n%s", removed, got)
+	}
+	if _, err := hostprep.ParseAllowFile("# fine\n" + alice + " alice\nSHA256:short bob\n"); err == nil || !strings.Contains(err.Error(), "line 3") || !strings.Contains(err.Error(), "SHA256:short bob") {
+		t.Errorf("an unreadable line: %v", err)
+	}
+}
+
 // runFails is run for a command that must fail, saying want.
 func runFails(t *testing.T, dir, command string, files map[string]string, want string) {
 	t.Helper()

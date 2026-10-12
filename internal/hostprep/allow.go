@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -42,22 +43,104 @@ type AllowLine struct {
 var fingerprintShape = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 
 // ParseAllow reads a list: one fingerprint per line, anything after it a
-// comment, and `#` starting a comment line. A line that is not a fingerprint
-// allows nothing, so a mistyped line can only refuse a key, never allow one.
+// comment, and `#` starting a comment line. A line is split at its first run
+// of whitespace, as the guard's awk splits it, so the two never disagree on
+// what a line allows. A line that is not a fingerprint allows nothing, so a
+// mistyped line can only refuse a key, never allow one.
 func ParseAllow(content string) []AllowLine {
 	var out []AllowLine
 	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		if l, ok := parseAllowLine(line); ok {
+			out = append(out, l)
 		}
-		fp, comment, _ := strings.Cut(line, " ")
-		if !fingerprintShape.MatchString(fp) {
-			continue
-		}
-		out = append(out, AllowLine{Fingerprint: fp, Comment: strings.TrimSpace(comment)})
 	}
 	return out
+}
+
+// parseAllowLine reads one line of a list. ok is false for a blank line, a
+// comment, and a line whose first field is not a fingerprint.
+func parseAllowLine(line string) (AllowLine, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return AllowLine{}, false
+	}
+	fp := strings.Fields(line)[0]
+	if !fingerprintShape.MatchString(fp) {
+		return AllowLine{}, false
+	}
+	return AllowLine{Fingerprint: fp, Comment: strings.TrimSpace(strings.TrimPrefix(line, fp))}, true
+}
+
+// AllowFile is a list as its owner wrote it, line by line, for host allow
+// and host disallow to change. The file is the owner's: a comment they wrote
+// or a line the command does not change is kept as it is, and only the
+// lines a command adds or takes off differ.
+type AllowFile struct {
+	lines []string
+}
+
+// ParseAllowFile reads a list to rewrite it. A line that is neither blank,
+// a comment, nor a fingerprint is refused, naming it: ParseAllow ignores
+// such a line, which allows nothing, but a rewrite would have to keep or
+// drop it without knowing what the owner meant, so the owner fixes it by
+// hand.
+func ParseAllowFile(content string) (AllowFile, error) {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for n, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if _, ok := parseAllowLine(line); !ok {
+			return AllowFile{}, fmt.Errorf("line %d, %s, is not a fingerprint (SHA256: and 43 characters) and a comment", n+1, strconv.Quote(t))
+		}
+	}
+	return AllowFile{lines: lines}, nil
+}
+
+// Lines is every key the file allows.
+func (f AllowFile) Lines() []AllowLine { return ParseAllow(f.content()) }
+
+func (f AllowFile) content() string {
+	if len(f.lines) == 0 {
+		return ""
+	}
+	return strings.Join(f.lines, "\n") + "\n"
+}
+
+// Add is the file with lines appended, each as EncodeAllow writes it.
+func (f AllowFile) Add(lines []AllowLine) string {
+	var b strings.Builder
+	b.WriteString(f.content())
+	for _, l := range lines {
+		b.WriteString(encodeAllowLine(l))
+	}
+	return b.String()
+}
+
+// Remove is the file without each line allowing a fingerprint drop holds,
+// and the lines it took off.
+func (f AllowFile) Remove(drop []AllowLine) (string, []AllowLine) {
+	var kept []string
+	var removed []AllowLine
+	for _, line := range f.lines {
+		if l, ok := parseAllowLine(line); ok && Allows(drop, l.Fingerprint) {
+			removed = append(removed, l)
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return AllowFile{lines: kept}.content(), removed
+}
+
+func encodeAllowLine(l AllowLine) string {
+	if l.Comment == "" {
+		return l.Fingerprint + "\n"
+	}
+	return l.Fingerprint + " " + l.Comment + "\n"
 }
 
 // Allows reports whether lines hold fingerprint.
@@ -73,11 +156,7 @@ func EncodeAllow(user string, lines []AllowLine) string {
 	b.WriteString("# Changed with paisans host allow and host disallow. An empty list\n")
 	b.WriteString("# allows no key; deleting this file allows every key.\n")
 	for _, l := range lines {
-		b.WriteString(l.Fingerprint)
-		if l.Comment != "" {
-			b.WriteString(" " + l.Comment)
-		}
-		b.WriteString("\n")
+		b.WriteString(encodeAllowLine(l))
 	}
 	return b.String()
 }

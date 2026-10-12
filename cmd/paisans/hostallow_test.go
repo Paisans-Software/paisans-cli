@@ -244,6 +244,38 @@ func TestHostAllowShowsHostTextEscaped(t *testing.T) {
 	}
 }
 
+// A list the owner has written comments into keeps them, and every line
+// the command does not change, as written; a line neither command can read
+// is refused, named, and nothing is written.
+func TestHostAllowKeepsTheOwnersLines(t *testing.T) {
+	cfg := withBob(t)
+	owned := "# the owner's note\n" + fp(t, carolKey) + "\tcarol, checked by phone\n"
+	h := &allowFake{files: map[string]string{allowPath: owned}}
+	fakeAllowHost(t, h)
+	if _, _, err := allowRun(t, runHostAllow, answering(t, "home-a\n"), "home-a", "bob", "--config", cfg, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.files[allowPath]; !strings.HasPrefix(got, owned) || !strings.Contains(got, fp(t, bobKey)+" bob bob@example.org\n") {
+		t.Errorf("allow rewrote the owner's lines:\n%s", got)
+	}
+	if _, _, err := allowRun(t, runHostDisallow, answering(t, "home-a\n"), "home-a", "bob", "--config", cfg, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.files[allowPath]; got != owned {
+		t.Errorf("disallow rewrote the owner's lines:\n%s", got)
+	}
+
+	for name, run := range map[string]func([]string, io.Reader, io.Writer) error{"allow": runHostAllow, "disallow": runHostDisallow} {
+		broken := owned + "SHA256:short bob\n"
+		h := &allowFake{files: map[string]string{allowPath: broken}}
+		fakeAllowHost(t, h)
+		_, _, err := allowRun(t, run, answering(t, "home-a\n"), "home-a", "bob", "--config", cfg, "--execute")
+		if err == nil || !strings.Contains(problemText(err), "line 3") || !strings.Contains(problemText(err), "SHA256:short bob") || h.writes != 0 {
+			t.Errorf("%s: %v, %d writes", name, err, h.writes)
+		}
+	}
+}
+
 func readFixture(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(fixtureConfig())

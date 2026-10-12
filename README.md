@@ -3797,8 +3797,11 @@ SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
 
 It holds fingerprints, not admin names, because a name is whatever
 `paisans.yaml` says it is: replacing the key under `admins.alice.keys` must not
-carry Alice's permission to the new key. A line that is not a fingerprint
-allows nothing, so a mistyped line can only refuse a key.
+carry Alice's permission to the new key. A line is the fingerprint, then any
+run of spaces or tabs, then a comment; it is read that way both when `host
+prepare` plans and when its append checks the list on the host, so the two
+never disagree. A line that is not a fingerprint allows nothing, so a mistyped
+line can only refuse a key.
 
 **No file, every key allowed.** A host behaves as it did before until its
 owner makes a list. Founder decision. An empty file allows no key.
@@ -3835,7 +3838,10 @@ nothing in the registry and touch nothing of a deployment's, and `--execute`
 asks for the site's name at a terminal, since writing the list is granting or
 withdrawing access and is never scripted. The list is written under the same
 lock as `authorized_keys`, by a temporary file and a rename, and only over the
-list that was read. How to run them is under *`paisans host allow`* and
+list that was read. The file is the owner's, so both keep every line they do
+not change as it was written, comments included, and refuse a list holding a
+line they cannot read, naming it, rather than keep or drop a line whose
+meaning they do not know; the owner fixes it by hand. How to run them is under *`paisans host allow`* and
 *`paisans host disallow`* in [docs/commands.md](docs/commands.md); `doctor`
 reports each host's list.
 

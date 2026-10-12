@@ -148,6 +148,20 @@ func allowLabel(l hostprep.AllowLine) string {
 	return ui.Visible(l.Fingerprint + " (" + l.Comment + ")")
 }
 
+// readList reads a list to rewrite it, refusing one with a line it cannot
+// read: the rewrite keeps every line it does not change as the owner wrote
+// it, and cannot keep or drop a line without knowing what it means.
+func readList(t *allowTarget, o allowOptions, content string) (hostprep.AllowFile, error) {
+	f, err := hostprep.ParseAllowFile(content)
+	if err != nil {
+		return f, &ui.Problem{
+			Hint:    t.path + " on " + o.site + " has a line this command cannot read",
+			Explain: sentence(err.Error()) + " It allows no key as it is. host allow and host disallow keep every line they do not change, so they change nothing until it is fixed or deleted by hand, Eg: with sudoedit " + t.path + ". Nothing was changed.",
+		}
+	}
+	return f, nil
+}
+
 // writeList asks for the site's name and writes the list, unless it changed
 // since it was read.
 func writeList(t *allowTarget, o allowOptions, stdin io.Reader, stdout io.Writer, found bool, was, content, what string) error {
@@ -197,7 +211,11 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	lines := hostprep.ParseAllow(got.content)
+	file, err := readList(t, o, got.content)
+	if err != nil {
+		return err
+	}
+	lines := file.Lines()
 	// A new list starts with every key a deployment already claims, so
 	// that making one refuses no access the host already has.
 	var seeded []hostprep.AllowLine
@@ -228,8 +246,13 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !got.found {
 		r.Explain(fmt.Sprintf("%s has no list yet, so host prepare adds any key now. Once written, it adds only the keys the list holds.", o.site))
 	}
-	next := append(append(append([]hostprep.AllowLine{}, lines...), seeded...), added...)
-	content := hostprep.EncodeAllow(t.user, next)
+	// An existing list keeps every line as its owner wrote it, and gains the
+	// new keys at its end.
+	content := file.Add(added)
+	if !got.found {
+		content = hostprep.EncodeAllow(t.user, append(seeded, added...))
+	}
+	next := hostprep.ParseAllow(content)
 	showList(r, t.path, content)
 	if !o.execute {
 		r.Result("Nothing changed. Check each fingerprint with its admin, then re-run with --execute; it asks for the site's name at a terminal.")
@@ -283,16 +306,21 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("%s has no list for %s, so host prepare adds any key and there is nothing to take off. paisans host allow makes one.", o.site, t.user)
 		return nil
 	}
-	lines := hostprep.ParseAllow(got.content)
-	var kept []hostprep.AllowLine
-	taken := 0
-	for _, l := range lines {
-		if hostprep.Allows(drop, l.Fingerprint) {
-			r.Step("disallow "+allowLabel(l)).End(ui.Pending, "")
-			taken++
-			continue
-		}
-		kept = append(kept, l)
+	file, err := readList(t, o, got.content)
+	if err != nil {
+		return err
+	}
+	lines := file.Lines()
+	content, removed := file.Remove(drop)
+	// A list left with no line at all says what it is, and that it allows
+	// nothing, rather than being a bare empty file.
+	if strings.TrimSpace(content) == "" {
+		content = hostprep.EncodeAllow(t.user, nil)
+	}
+	kept := hostprep.ParseAllow(content)
+	taken := len(removed)
+	for _, l := range removed {
+		r.Step("disallow "+allowLabel(l)).End(ui.Pending, "")
 	}
 	for _, d := range drop {
 		if !hostprep.Allows(lines, d.Fingerprint) {
@@ -307,7 +335,6 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(kept) == 0 {
 		r.Note("the list will be empty, which allows no key", "host prepare then adds no key on "+o.site+". To allow every key again, delete "+t.path+" by hand.")
 	}
-	content := hostprep.EncodeAllow(t.user, kept)
 	showList(r, t.path, content)
 	if !o.execute {
 		r.Result("Nothing changed. Re-run with --execute; it asks for the site's name at a terminal.")
