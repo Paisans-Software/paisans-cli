@@ -2074,18 +2074,31 @@ things this deployment does not have. To start this deployment fresh, move the
 file aside and run `paisans init`; `paisans apply` creates a new one as well. A
 file without an `id` or a `version` is read, and has both from its next write.
 
-**Pasted and captured secrets go in through a pipe.** `paisans secrets set
-<dotted.key>` reads the value from stdin, writes it into `secrets.enc.yaml`
-re-encrypted to the recipients in `.sops.yaml`, and prints only `Set <key>.`:
+**Pasted and captured secrets go in through a pipe, or a prompt with echo
+off.** `paisans secrets set <dotted.key>` reads the value from stdin, writes it
+into `secrets.enc.yaml` re-encrypted to the recipients in `.sops.yaml`, and
+prints only `Set <key>.`:
 
 ```
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
 ```
 
 Every other way of getting a value into the file leaves a copy: an argument is
-in shell history and in `ps`, a prompt is in a scrollback buffer, and `sops
-secrets.enc.yaml` opens the whole decrypted file in an editor that may keep swap
-or backup files. It refuses a terminal on stdin for the same reason. It accepts
+in shell history and in `ps`, an echoed prompt is in a scrollback buffer, and
+`sops secrets.enc.yaml` opens the whole decrypted file in an editor that may
+keep swap or backup files. Given a key, it refuses a terminal on stdin for the
+same reason.
+
+Given no key at a terminal, `paisans secrets set` asks for each secret still
+owed in turn, saying why each is owed, and reads the answer on the controlling
+terminal with echo off, which leaves no copy on the screen. The owed list is
+the one `init` and `apply` print, so the operator is asked for exactly what
+they were told to supply. Each answer is written before the next is asked, so
+an interrupted walk keeps what was typed; an empty answer skips the key, which
+stays owed and is named at the end. A sign in client is not asked for: it is a
+client ID and a secret together, and `apply --execute` creates and records it.
+With no key and a pipe on stdin it refuses, since one value could belong to
+any owed key. It accepts
 a key that is already set (a rotation), a key `init` reports as owed, or any key
 under `external`; it refuses a generated key nobody created, because `init`
 creates those with the shapes their consumers require, and it refuses an unknown

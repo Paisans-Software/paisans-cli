@@ -145,10 +145,19 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 
 * **Alone:** always. The whole apply names it, in a note, for each credential
   still owed.
-* **Flags:** the key, as the first argument; `--config`, `--secrets`.
+Run with no key at a terminal, it asks for each secret still owed in turn,
+with echo off, writing each answer before asking for the next. An empty answer
+skips a key.
+
+```
+paisans secrets set
+```
+
+* **Flags:** the key, as the first argument, or none to be asked for each owed
+  secret; `--config`, `--secrets`.
 * **Hosts:** none.
-* **`--execute`:** not taken. It writes the local file at once, and refuses a
-  terminal on stdin.
+* **`--execute`:** not taken. It writes the local file at once. Given a key it
+  refuses a terminal on stdin; given none it refuses anything else.
 
 See *Three kinds of secret* in `README.md`.
 

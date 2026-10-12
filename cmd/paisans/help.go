@@ -274,10 +274,15 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "secrets set",
-		summary: "Write one value from stdin into the secrets file.",
-		usage:   []string{"paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value"},
+		summary: "Write one value from stdin into the secrets file, or ask for each owed one.",
+		usage: []string{
+			"paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value",
+			"paisans secrets set [--config paisans.yaml] [--secrets secrets.enc.yaml]",
+		},
 		detail: "Read one value from stdin and write it into the encrypted secrets file, printing only its name. " +
-			"For credentials issued elsewhere, so they never touch a terminal or an editor.",
+			"For credentials issued elsewhere, so they never touch an echoing terminal or an editor.\n\n" +
+			"With no key, at a terminal, ask for each secret still owed in turn, saying why it is owed, and read each with echo off. " +
+			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.",
 	},
 	{
 		name:    "secrets prune",
