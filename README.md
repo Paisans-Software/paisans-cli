@@ -2965,37 +2965,37 @@ other than the repo they decrypt. A copy of the first two on every site is no
 substitute: the encrypted file on a site is readable only with an age key, so
 losing every admin's key still loses every credential.
 
-The first two need no backup of their own beyond the sites, because every
-site keeps every signed version of them and `paisans config recover` writes
-them onto an empty workstation. The sites are one failure domain's worth of
-copies, though: a copy outside them, in object storage, waits for the backup design,
+The first two need no backup of their own beyond the sites, because every site
+keeps every signed version of them and `paisans config recover` writes them onto
+an empty workstation. The sites are one failure domain's worth of copies,
+though: a copy outside them, in object storage, waits for the backup design,
 which is not built.
 
 ## Every site keeps signed copies of the configuration
 
-`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins'
-workstations (see *Backup and restore*), so a lost workstation without a copy
-elsewhere loses the topology and every credential. Every site therefore keeps
-every version of the three files, each signed by the admin who published it,
-and an admin with an empty workstation can recover them from any host.
+`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
+(see *Backup and restore*), so a lost workstation without a copy elsewhere loses
+the topology and every credential. Every site therefore keeps every version of
+the three files, each signed by the admin who published it, and an admin with an
+empty workstation can recover them from any host.
 `docs/specs/2026-10-12-config-store.md` is the approved specification, and
 *`paisans config`* and *`paisans admin register`* in
 [docs/commands.md](docs/commands.md) give the commands' mechanics.
 
 The copies are recovery copies now and are built to become the deployment's
-shared source of truth: every version records its parent, two versions from
-one parent are a fork, and `apply` refuses to run from files older than the
-sites' newest version. The one loss this cannot protect is every admin losing
-their age key, which is why *Rendered configuration is a build artifact* tells
-every deployment to add a second recipient to `.sops.yaml`.
+shared source of truth: every version records its parent, two versions from one
+parent are a fork, and `apply` refuses to run from files older than the sites'
+newest version. The one loss this cannot protect is every admin losing their age
+key, which is why *Rendered configuration is a build artifact* tells every
+deployment to add a second recipient to `.sops.yaml`.
 
 **A version is a signed git commit of exactly the three files.** A commit
 holding anything else is invalid. It is signed with the publishing admin's SSH
 key by git's `gpg.format=ssh`, so signing goes through the operator's ssh-agent
 and needs no new key. The signature covers the tree, and so the files, because
 nothing in the files can prove who wrote them: encrypting to an age recipient
-needs only the recipient's public key, which every stored `.sops.yaml` names,
-so anyone could write a secrets file that decrypts for every admin. A version
+needs only the recipient's public key, which every stored `.sops.yaml` names, so
+anyone could write a secrets file that decrypts for every admin. A version
 carries `Paisans-Revision: <n>`, one more than its highest parent. Nothing
 decides by the commit date, because any host's clock can be wrong and anyone
 writing a copy can set it. Each version is kept under `refs/versions/<sha>`, a
@@ -3006,12 +3006,12 @@ ever deleted.
 
 A site keeps whatever it is sent, so every decision is made on the workstation.
 It starts from something the operator holds that nobody else can forge: the
-newest version signed by the operator's own SSH key, or a root hash the
-operator pins with `--root`. **A history found only on the sites is never
-trusted on its own, however consistent it looks**, because someone with root on
-those sites could have written it, signed with their own key and listing
-themselves as an admin. With neither an own signature nor a pin, a pull or a
-recovery is refused and asks for one.
+newest version signed by the operator's own SSH key, or a root hash the operator
+pins with `--root`. **A history found only on the sites is never trusted on its
+own, however consistent it looks**, because someone with root on those sites
+could have written it, signed with their own key and listing themselves as an
+admin. With neither an own signature nor a pin, a pull or a recovery is refused
+and asks for one.
 
 From that anchor a version is trusted when it passes three rules, each of which
 closes a forgery:
@@ -3045,8 +3045,8 @@ since the file is still encrypted to their key.
 
 A version that was really published verifies forever, so someone who controls a
 site can delete the newer ones there and serve an old one. Applying it would put
-back old secrets, undoing a `storage rotate-key`. No signature can
-prove a version is the newest, so three memories make an old one visible:
+back old secrets, undoing a `storage rotate-key`. No signature can prove a
+version is the newest, so three memories make an old one visible:
 
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
@@ -3054,9 +3054,9 @@ prove a version is the newest, so three memories make an old one visible:
 | A majority of sites | a pull, recovery, registration or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
 | The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
 
-So a host attacker can roll back only the hosts they hold. What stays is a
-fresh workstation that reaches only sites the attacker controls: it can be
-served an old, genuine version, and applying it reaches only those sites.
+So a host attacker can roll back only the hosts they hold. What stays is a fresh
+workstation that reaches only sites the attacker controls: it can be served an
+old, genuine version, and applying it reaches only those sites.
 
 ### How a site stores them
 
@@ -3082,9 +3082,9 @@ and nothing is pruned.
 
 1. With `--execute`, every site reached starts its sync with its peers and the
    command waits, so a version only a site the operator cannot log in to holds
-   (Eg: a host whose allowlist leaves them out) arrives through one they can.
-   A dry run and `config log` start no sync, because a command changes a host
-   only with `--execute`; they read what each site holds now.
+   (Eg: a host whose allowlist leaves them out) arrives through one they can. A
+   dry run and `config log` start no sync, because a command changes a host only
+   with `--execute`; they read what each site holds now.
 2. Every site is reached over ssh, with `sudo` because the store is root's:
    those the configuration names, or, for a recovery, those the first version
    that verifies names, not only the hosts given on the command line.
@@ -3094,27 +3094,27 @@ and nothing is pruned.
 ### Commands
 
 ```sh
-paisans admin register --execute              # sign an attestation of the head, record your key
-paisans config publish --execute              # sign the local files as a new version, push to every site
-paisans config pull --execute                 # move the local files to the sites' newest version
-paisans config log                            # every version: revision, signer, which sites hold it
-paisans config publish --merge --execute      # one version on every head of a fork
-paisans config recover --from admin@203.0.113.9 --execute   # onto a workstation with nothing
+paisans admin register --execute      # sign an attestation, record your key
+paisans config publish --execute      # sign the local files, push to every site
+paisans config pull --execute         # move the files to the sites' newest
+paisans config log                    # every version, signer, holding sites
+paisans config publish --merge --execute   # one version on every head of a fork
+paisans config recover --from admin@203.0.113.9 --execute   # empty workstation
 ```
 
-* **`paisans admin register`** gives an admin who has never published an
-  anchor of their own, since they have signed nothing. It finds the
-  key in their ssh-agent that matches one listed under their entry in `admins`
-  (or the one `--key` names), gathers, and signs an attestation: a version with
-  the head's tree and the head as its only parent. It records the key in
+* **`paisans admin register`** gives an admin who has never published an anchor
+  of their own, since they have signed nothing. It finds the key in their
+  ssh-agent that matches one listed under their entry in `admins` (or the one
+  `--key` names), gathers, and signs an attestation: a version with the head's
+  tree and the head as its only parent. It records the key in
   `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
   It attests only a head whose files equal the operator's local files, since an
   attestation says "I hold this version"; otherwise it shows the difference. It
   changes only the sites' stores, and nothing without `--execute`.
 * **`paisans config publish`** commits the files with the base as parent, signs,
-  and pushes to every site it reaches. It refuses when its base is not the sites'
-  head, when no loaded key belongs to an admin the parent lists, and when no site
-  answers; a site that missed it gets it from its peers.
+  and pushes to every site it reaches. It refuses when its base is not the
+  sites' head, when no loaded key belongs to an admin the parent lists, and when
+  no site answers; a site that missed it gets it from its peers.
 * **`paisans config pull`** moves files with no local edits to the head. Over
   local edits on an older base it refuses, shows the difference, and with
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
@@ -3124,13 +3124,13 @@ paisans config recover --from admin@203.0.113.9 --execute   # onto a workstation
   deployment when a host's registry lists more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an admin to decide, never an order.
-* **`apply`** gathers before the review, so a fork or files older than the sites'
-  newest version are refused before the operator is asked anything; after the
-  approval it publishes the very bytes it loaded and applies, so the store shows
-  the declared state even when the apply stops part way, and each host records
-  the version it was given. A version that reaches no site is refused, naming
-  `host prepare` for a site with no store yet, because a version no site holds is
-  not one the hosts can be checked against.
+* **`apply`** gathers before the review, so a fork or files older than the
+  sites' newest version are refused before the operator is asked anything; after
+  the approval it publishes the very bytes it loaded and applies, so the store
+  shows the declared state even when the apply stops part way, and each host
+  records the version it was given. A version that reaches no site is refused,
+  naming `host prepare` for a site with no store yet, because a version no site
+  holds is not one the hosts can be checked against.
 
 ### Secrets are merged key by key
 
@@ -3143,9 +3143,8 @@ key locally to it and pull again. To keep the local value, take the head's value
 first so the pull can merge the rest, pull, then set the key back to your value
 with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
 records and `secrets set` does not accept, is edited in the file with `sops`
-instead. A file that cannot
-be decrypted and parsed here is refused without quoting its error, because a
-parse error can quote a value.
+instead. A file that cannot be decrypted and parsed here is refused without
+quoting its error, because a parse error can quote a value.
 
 ## Bootstrapping a site
 
@@ -4317,14 +4316,14 @@ it:
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
 **The configuration is published once the stores exist.** The version `apply`
-applies is gathered before the review, so a fork or files older than the
-sites' newest version are refused before anything is asked (see *Every site
-keeps signed copies of the configuration*). It is published after the `host
-prepare` steps, which create every site's store, and before any other step
-changes a host: it cannot be pushed to a store that does not exist yet, and
-`host prepare`'s own changes are reviewed already. Publishing earlier than the
-first change keeps the store showing the declared state even if the run stops
-part way. A run that stops between prepare and publish has granted keys without
+applies is gathered before the review, so a fork or files older than the sites'
+newest version are refused before anything is asked (see *Every site keeps
+signed copies of the configuration*). It is published after the `host prepare`
+steps, which create every site's store, and before any other step changes a
+host: it cannot be pushed to a store that does not exist yet, and `host
+prepare`'s own changes are reviewed already. Publishing earlier than the first
+change keeps the store showing the declared state even if the run stops part
+way. A run that stops between prepare and publish has granted keys without
 publishing the version, and the next run publishes it. A version that reaches no
 site is refused, naming `host prepare`, because the hosts are checked against
 what the store holds. `apply --site` without a store refuses in the same words.
@@ -4501,20 +4500,20 @@ out the configuration's findings, which the run showed at its start, and its
 own closing line, since the run ends on its own.
 
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
-subnet and the secrets file reads but lacks a generated secret, it generates
-the missing ones into that file, as `init` would: only what is missing, nothing
+subnet and the secrets file reads but lacks a generated secret, it generates the
+missing ones into that file, as `init` would: only what is missing, nothing
 overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
-what it wrote, never a value, and the closing line says the secrets were
-added; the later steps are then checked rather than waiting on init. A missing
-id, subnet or secrets file is still left to `init`, which `--execute` runs
-first. Every host's prepare is checked at the same time, drawn as with
-`--execute`. A prepare line names each kind of change its site's plan makes, in
-the order docker, wireguard, firewall, ssh keys, watchdog, configuration store.
-Each install line is its site's steps' own dry runs together, and the storage
-line its step's: `✓` when every one is up to date, a dim `·` with `after
-prepare` (or `after init`) while a step waits on one that has not run, `○` when
-there is work, with what each step found, and `✗` when a step would refuse, with
-the refusal's hint after the site and what to do below it. A refusal outranks a
+what it wrote, never a value, and the closing line says the secrets were added;
+the later steps are then checked rather than waiting on init. A missing id,
+subnet or secrets file is still left to `init`, which `--execute` runs first.
+Every host's prepare is checked at the same time, drawn as with `--execute`. A
+prepare line names each kind of change its site's plan makes, in the order
+docker, wireguard, firewall, ssh keys, watchdog, configuration store. Each
+install line is its site's steps' own dry runs together, and the storage line
+its step's: `✓` when every one is up to date, a dim `·` with `after prepare` (or
+`after init`) while a step waits on one that has not run, `○` when there is
+work, with what each step found, and `✗` when a step would refuse, with the
+refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
 work. `-v` lists each step under its line with its own status. Each pull line is
 the plan its site's apply would make: `○` with how many images it would pull and
