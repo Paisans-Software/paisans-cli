@@ -4,7 +4,7 @@
 
 **Goal:** Teach `paisans` a new app kind, `invite`, that deploys `ghcr.io/paisans-software/paisans-invite` with cluster placement, its own Postgres role, its own OIDC client, mail, two generated keys, the identity app's static API key and accent colour, and the deployment's code of conduct mounted read-only.
 
-**Architecture:** A kind in this toolkit is not one struct but an entry in each of several per-kind tables (catalogue, port, health, gate, config file, volumes, mail, OIDC client shape) plus validate rules, secret keys and a template set. This plan adds `invite` to each, following the `uptime` and `outline` entries, and adds one thing no kind has yet: a file read from beside `paisans.yaml` at render time.
+**Architecture:** A kind in this toolkit is not one struct but an entry in each of several per-kind tables (catalogue, port, health, gate, config file, volumes, mail, OIDC client shape) plus validate rules, secret keys and a template set. This plan adds `invite` to each, following the `uptime` and `outline` entries, and renders one file no kind has had before: the code of conduct, taken from the app's settings and mounted read-only.
 
 **Tech Stack:** Go 1.25, the toolkit's own packages (`internal/config`, `internal/kinds`, `internal/validate`, `internal/secretsgen`, `internal/render`), golden-file tests.
 
@@ -21,17 +21,17 @@
 - Kind name `invite`; constant `config.KindInvite`.
 - Placement: `cluster` only. Rule `invite-must-be-clustered`.
 - Container port `8080`; health `GET /healthz` answers `200`.
-- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, a path relative to `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
+- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, the Markdown text inline in `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
 - Generated secrets: `apps.<invite>.email_hash_key`, `apps.<invite>.session_key`, both the default `password()` shape (32 random bytes, unpadded base64url). Plus `database_password`, which `UsesPostgres` already brings.
 - The environment variable names are exactly the service plan's contract table; rename nothing.
-- `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; that app's `email_one_time_access_as_unauthenticated` not set to `true` (rule `invite-recovery-disabled`; founder decision 2026-10-12: a member whose 7-day link expired recovers through Pocket ID's email-code sign-in); no SMTP host and sender for the invite app; a `code_of_conduct` file that does not exist; a placement other than `cluster`; a setting out of range.
+- `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; that app's `email_one_time_access_as_unauthenticated` not set to `true` (rule `invite-recovery-disabled`; founder decision 2026-10-12: a member whose 7-day link expired recovers through Pocket ID's email-code sign-in); no SMTP host and sender for the invite app; a `code_of_conduct` that is missing, blank or not text; a placement other than `cluster`; a setting out of range.
 - The example configuration's `signup_default_groups` becomes `[members]`, and its `allow_user_signups` becomes `disabled`.
 - README: no rejected alternatives; describe what is, not what was weighed.
 
 ## Review Focus
 
 1. **`allow_user_signups` unset on the identity app.** Pocket ID's default is `disabled`, so unset passes; only an explicit `withToken` or `open` is refused. Pinned in Task 2 (`TestInviteSignupsUnsetIsFine`).
-2. **`code_of_conduct` given as an absolute path, or with `..`.** Resolved against the directory of `paisans.yaml`; an absolute path is used as is; a missing file is refused by validate before render ever reads it. Pinned in Task 2 (fixture `invite-code-of-conduct-missing`) and Task 4 (`TestInviteCoCRendered`).
+2. **A code of conduct that looks like a path (`code-of-conduct.md`).** It is text; nothing reads files. Pinned in Task 2 (`TestInviteCodeOfConductIsText`) and Task 4 (`TestInviteCoCRendered`).
 3. **A renamed identity host, or two `pocket-id` apps, or the identity app named in `identity_app` differing from the one `identityProviderURL` finds.** A changed `hostname` re-renders `INVITE_IDP_URL` and `INVITE_OIDC_ISSUER` and the next apply recreates the invite stack (Task 4 `TestInviteFollowsTheIdentityHostname`, `TestInviteEnvChangedByIdentityHostnameRecreates`). The invite app's issuer, API key and accent colour all come from the app named in `identity_app`, never from a search. Pinned in Task 4 (`TestInviteReadsItsNamedIdentityApp`).
 4. **An accent colour unset, or `default`, on the identity app.** `INVITE_ACCENT_COLOR` renders empty and the service uses its own default. Pinned in Task 4 (`TestInviteAccent`).
 5. **Re-running `init` after the invite app exists.** The two keys are never regenerated (secretsgen fills only missing keys). Pinned in Task 3 (`TestInviteKeysAreStable`).
