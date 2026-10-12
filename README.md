@@ -2372,6 +2372,9 @@ about that application, so it lives in `internal/kinds` beside the rest, read
 off the pinned tag's source with a citation for each. A token path is recorded
 only once the kind's source shows a token that reads content cannot be had
 without a member's sign-in; until then a native app's API calls meet the gate.
+Mbin's `/api/*` is one, because a gated Mbin runs as a private instance,
+which refuses any API request without a signed in user, so its mobile apps
+work behind the gate.
 
 **Anyone can send an ActivityPub header, so a gated app that federates must
 refuse an unsigned read.** Caddy cannot verify an HTTP signature without a

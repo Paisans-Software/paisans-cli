@@ -2829,6 +2829,8 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 		"not header Cookie *talk_autologin*",
 		"redir * /oauth/oidc/connect 302",
 		"@open path /oauth/* ",
+		"/api/client /api/info /api/instance",
+		"path /api/*\n\t\theader Authorization \"Bearer *\"",
 		"import gate_member\n",
 	}
 	at := 0
@@ -2838,9 +2840,6 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 			t.Fatalf("talk's gated host block lacks %q after position %d:\n%s", want, at, talk)
 		}
 		at += i + len(want)
-	}
-	if strings.Contains(talk, "@token") {
-		t.Errorf("mbin has no token paths, yet talk lets a token past the gate:\n%s", talk)
 	}
 
 	docs := hostBlock(t, caddyfile, "docs.example.org")

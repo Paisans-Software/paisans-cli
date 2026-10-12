@@ -119,3 +119,24 @@ func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
 		t.Errorf("mbin probe is %q", probe)
 	}
 }
+
+// A gated Mbin lets a native app through on its token, and opens before sign
+// in only the three API routes the app calls before it holds one. The rest of
+// the API, /api/instance/* included, needs the token. MBIN_PRIVATE_INSTANCE is
+// what makes the token path safe; render's mbin_env_test.go holds that it is
+// rendered for every gated Mbin.
+func TestMbinOpensItsAPIToATokenOnly(t *testing.T) {
+	spec := kinds.GateFor(config.KindMbin)
+	if !slices.Contains(spec.TokenPaths, "/api/*") {
+		t.Errorf("mbin token paths %v lack /api/*, so a native app meets the gate", spec.TokenPaths)
+	}
+	var api []string
+	for _, p := range spec.OpenPaths {
+		if strings.HasPrefix(p, "/api") {
+			api = append(api, p)
+		}
+	}
+	if want := []string{"/api/client", "/api/info", "/api/instance"}; !slices.Equal(api, want) {
+		t.Errorf("mbin opens %v of its API, want exactly %v", api, want)
+	}
+}
