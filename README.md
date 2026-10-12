@@ -3282,8 +3282,13 @@ key locally to it and pull again. To keep the local value, take the head's value
 first so the pull can merge the rest, pull, then set the key back to your value
 with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
 records and `secrets set` does not accept, is edited in the file with `sops`
-instead. A file that cannot be decrypted and parsed here is refused without
-quoting its error, because a parse error can quote a value.
+instead. A side with a `paisans mesh rekey` under way (a site with a next
+WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
+`mesh rekey` to finish it first on the side that holds it: a rekey's state is a
+sequence over live hosts, so combining two such states key by key could promote
+a key no host runs, and a rekey finishes in minutes. A file that cannot be
+decrypted and parsed here is refused without quoting its error, because a parse
+error can quote a value.
 
 ## Bootstrapping a site
 

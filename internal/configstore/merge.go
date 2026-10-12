@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -22,7 +23,13 @@ import (
 //
 // conflicts holds paths only, sorted. A value is never put in one, so a
 // conflict is safe to print, and merged is nil when there is any.
+//
+// The merge refuses while either side has a `paisans mesh rekey` under way
+// (rekeyUnderway).
 func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, conflicts []string, err error) {
+	if err := rekeyUnderway(ours, theirs); err != nil {
+		return nil, nil, err
+	}
 	b, o, t := flatten(base), flatten(ours), flatten(theirs)
 	paths := map[string]bool{}
 	for _, m := range []map[string]string{b, o, t} {
@@ -60,6 +67,36 @@ func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, c
 	return merged, nil, nil
 }
 
+// rekeyUnderway refuses when either side is part way through a `paisans mesh
+// rekey`: a site with a next WireGuard key, or sites a `--all` run has left.
+// A rekey's state is a sequence over live hosts, each step recorded as the
+// host takes it, so combining two such states key by key could promote a key
+// no host runs. A rekey finishes in minutes, so refusing costs one command on
+// the side that holds it.
+//
+// Any next key counts, with or without mesh_rekey_remaining beside it: only a
+// rekey writes one. The error names sites, never a key.
+func rekeyUnderway(ours, theirs *config.Secrets) error {
+	for _, side := range []struct {
+		name, finish string
+		s            *config.Secrets
+	}{
+		{"the local secrets", "run paisans mesh rekey here to finish it, then pull", ours},
+		{"the sites' newest version of the secrets", "finish it with paisans mesh rekey on the workstation that started it and publish, then pull", theirs},
+	} {
+		sites := side.s.RekeyPending()
+		for _, name := range side.s.MeshRekeyRemaining {
+			if !slices.Contains(sites, name) {
+				sites = append(sites, name)
+			}
+		}
+		if len(sites) > 0 {
+			return fmt.Errorf("%s have a mesh rekey under way (%s), which a merge cannot combine; %s", side.name, strings.Join(sites, ", "), side.finish)
+		}
+	}
+	return nil
+}
+
 // same reports whether path holds the same value, or is absent, in both.
 func same(a, b map[string]string, path string) bool {
 	va, inA := a[path]
@@ -72,7 +109,9 @@ func same(a, b map[string]string, path string) bool {
 // version and id are not secrets and are not here.
 //
 // A field added to config.Secrets has to be added here, or a merge would drop
-// it; the test beside this file fails until it is.
+// it; the test beside this file fails until it is. mesh_rekey_remaining is
+// not here because a merge refuses while it is set (rekeyUnderway), so there
+// is never a value of it to combine.
 func flatten(s *config.Secrets) map[string]string {
 	out := map[string]string{}
 	put := func(path, v string) {
@@ -87,6 +126,7 @@ func flatten(s *config.Secrets) map[string]string {
 	put("storage.garage.rpc_secret", s.Storage.Garage.RPCSecret)
 	for name, site := range s.Sites {
 		put("sites."+name+".wireguard_private_key", site.WireGuardPrivateKey)
+		put("sites."+name+".wireguard_next_private_key", site.WireGuardNextPrivateKey)
 		put("sites."+name+".heartbeat_token", site.HeartbeatToken)
 	}
 	for app, values := range s.Apps {
@@ -156,11 +196,14 @@ func assign(dst, src *config.Secrets, path string) error {
 		name := strings.Join(parts[1:], ".")
 		dst.PocketIDGroups[name] = src.PocketIDGroups[name]
 	case parts[0] == "sites" && len(parts) == 3:
-		site := dst.Sites[parts[1]]
-		if parts[2] == "heartbeat_token" {
-			site.HeartbeatToken = src.Sites[parts[1]].HeartbeatToken
-		} else {
-			site.WireGuardPrivateKey = src.Sites[parts[1]].WireGuardPrivateKey
+		site, from := dst.Sites[parts[1]], src.Sites[parts[1]]
+		switch parts[2] {
+		case "heartbeat_token":
+			site.HeartbeatToken = from.HeartbeatToken
+		case "wireguard_next_private_key":
+			site.WireGuardNextPrivateKey = from.WireGuardNextPrivateKey
+		default:
+			site.WireGuardPrivateKey = from.WireGuardPrivateKey
 		}
 		dst.Sites[parts[1]] = site
 	case parts[0] == "oidc_clients" && len(parts) == 3:
@@ -197,9 +240,12 @@ func remove(s *config.Secrets, path string) error {
 		delete(s.PocketIDGroups, strings.Join(parts[1:], "."))
 	case "sites":
 		site := s.Sites[parts[1]]
-		if parts[2] == "heartbeat_token" {
+		switch parts[2] {
+		case "heartbeat_token":
 			site.HeartbeatToken = ""
-		} else {
+		case "wireguard_next_private_key":
+			site.WireGuardNextPrivateKey = ""
+		default:
 			site.WireGuardPrivateKey = ""
 		}
 		s.Sites[parts[1]] = site

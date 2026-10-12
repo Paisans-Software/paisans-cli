@@ -56,6 +56,16 @@ func newMergeCaseSOPS(t *testing.T, base, ours, theirs []string, headYAML, headS
 	enc := func(kv []string) []byte {
 		s := &config.Secrets{Version: config.SecretsVersion, ID: cfg.ID}
 		for i := 0; i < len(kv); i += 2 {
+			// Set does not take a next key, which only a rekey writes.
+			if site, ok := strings.CutSuffix(strings.TrimPrefix(kv[i], "sites."), ".wireguard_next_private_key"); ok {
+				if s.Sites == nil {
+					s.Sites = map[string]config.SiteSecrets{}
+				}
+				v := s.Sites[site]
+				v.WireGuardNextPrivateKey = kv[i+1]
+				s.Sites[site] = v
+				continue
+			}
 			if err := s.Set(kv[i], kv[i+1]); err != nil {
 				t.Fatal(err)
 			}
@@ -261,5 +271,32 @@ func TestConfigPullUnreadableSecretsNeverQuotesThem(t *testing.T) {
 	}
 	if shown := out + err.Error() + problemText(err); strings.Contains(shown, "SENTINELVALUE") {
 		t.Errorf("a value appears in:\n%s", shown)
+	}
+}
+
+// A rekey under way on either side refuses the merge before anything is
+// written, and says what finishes it.
+func TestConfigPullMergeRefusesWhileARekeyIsUnderWay(t *testing.T) {
+	ours := append([]string{"sites.home-a.wireguard_next_private_key", "next-sentinel"}, mergeOurs...)
+	m := newMergeCase(t, mergeBase, ours, mergeTheirs, "")
+	for _, execute := range []bool{false, true} {
+		out, err := m.pull(t, execute)
+		if err == nil {
+			t.Fatal("pulled")
+		}
+		shown := out + err.Error() + problemText(err)
+		if !strings.Contains(shown, "paisans mesh rekey") || !strings.Contains(shown, "home-a") {
+			t.Errorf("the refusal does not name the rekey:\n%s", shown)
+		}
+		noValues(t, shown)
+		if strings.Contains(shown, "next-sentinel") {
+			t.Errorf("the next key appears in:\n%s", shown)
+		}
+		if got, _ := m.l.Files(); !got.Equal(m.files) {
+			t.Fatal("files changed")
+		}
+		if h, _ := m.l.Head(); h != m.shas[0] {
+			t.Fatalf("head moved to %s", h)
+		}
 	}
 }

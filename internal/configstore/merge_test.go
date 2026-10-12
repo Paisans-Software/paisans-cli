@@ -141,10 +141,24 @@ func populated(v reflect.Value, prefix []string, paths *[]string) {
 	case reflect.Int:
 		v.SetInt(1)
 		*paths = append(*paths, strings.Join(prefix, "."))
+	case reflect.Slice:
+		// A slice is never a secret the merge combines; a field that is one
+		// must be named in refusedWhileSet, or the test fails on it.
+		v.Set(reflect.Append(reflect.MakeSlice(v.Type(), 0, 1), reflect.New(v.Type().Elem()).Elem()))
+		if v.Index(0).Kind() == reflect.String {
+			v.Index(0).SetString("x")
+		}
+		*paths = append(*paths, strings.Join(prefix, "."))
 	default:
 		panic(fmt.Sprintf("populate: %s is a %s, which the exhaustiveness test does not know", strings.Join(prefix, "."), v.Kind()))
 	}
 }
+
+// refusedWhileSet is every field the flattener leaves out because a merge
+// refuses while it is set, so there is never a value of it to combine. A new
+// field goes here only once someone has decided a merge refuses on it, and
+// rekeyUnderway checks it; anything else the flattener misses fails the test.
+var refusedWhileSet = map[string]bool{"mesh_rekey_remaining": true}
 
 // A field added to Secrets that the flattener does not cover would be
 // dropped by every merge. This fails first. Version and ID are the file's
@@ -156,8 +170,16 @@ func TestFlattenCoversEverySecretsField(t *testing.T) {
 	var header = map[string]bool{"version": true, "id": true}
 	var expected []string
 	for _, p := range want {
-		if !header[p] {
+		if !header[p] && !refusedWhileSet[p] {
 			expected = append(expected, p)
+		}
+	}
+	for p := range refusedWhileSet {
+		var only config.Secrets
+		i := fieldByYAML(t, p)
+		reflect.ValueOf(&only).Elem().FieldByIndex(i).Set(reflect.ValueOf(s).FieldByIndex(i))
+		if rekeyUnderway(&only, &config.Secrets{}) == nil {
+			t.Errorf("%s is listed as refused while set, and a merge does not refuse on it", p)
 		}
 	}
 	var got []string
@@ -169,10 +191,108 @@ func TestFlattenCoversEverySecretsField(t *testing.T) {
 	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("flatten produced\n%v\nthe struct has\n%v", got, expected)
 	}
-	// And every path it produces is one a merge can write back.
-	m, conflicts := mustMerge(t, &config.Secrets{}, &s, &config.Secrets{})
-	if len(conflicts) != 0 || !reflect.DeepEqual(flatten(m), flatten(&s)) {
-		t.Fatalf("a merge dropped paths: %v vs %v (%v)", flatten(m), flatten(&s), conflicts)
+	// And every path it produces is one a merge can write back, and take out
+	// again. assign and remove are what the merge calls; the merge itself
+	// refuses this file, which has a rekey under way.
+	m := clone(&config.Secrets{})
+	for p := range flatten(&s) {
+		if err := assign(m, &s, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !reflect.DeepEqual(flatten(m), flatten(&s)) {
+		t.Fatalf("assign dropped paths: %v vs %v", flatten(m), flatten(&s))
+	}
+	for p := range flatten(&s) {
+		if err := remove(m, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if left := flatten(m); len(left) != 0 {
+		t.Fatalf("remove left %v", left)
+	}
+}
+
+// fieldByYAML is the index of the Secrets field whose yaml name is name.
+func fieldByYAML(t *testing.T, name string) []int {
+	t.Helper()
+	typ := reflect.TypeOf(config.Secrets{})
+	for i := 0; i < typ.NumField(); i++ {
+		if strings.Split(typ.Field(i).Tag.Get("yaml"), ",")[0] == name {
+			return []int{i}
+		}
+	}
+	t.Fatalf("Secrets has no field %s", name)
+	return nil
+}
+
+// Each site's next key is a site secret like its current one, and a merge
+// keeps it apart from the current key.
+func TestFlattenCarriesTheNextKeyApart(t *testing.T) {
+	s := secretsWith("sites.a.wireguard_private_key", "current")
+	site := s.Sites["a"]
+	site.WireGuardNextPrivateKey = "next"
+	s.Sites["a"] = site
+	got := flatten(s)
+	if got["sites.a.wireguard_private_key"] != "current" || got["sites.a.wireguard_next_private_key"] != "next" {
+		t.Fatalf("flatten %v", got)
+	}
+}
+
+// withNextKey is s with site's next WireGuard key set, as a `paisans mesh
+// rekey` under way leaves it.
+func withNextKey(s *config.Secrets, site string) *config.Secrets {
+	v := s.Sites[site]
+	v.WireGuardNextPrivateKey = "next-sentinel"
+	s.Sites[site] = v
+	return s
+}
+
+func TestMergeRefusesWhileOursHasARekeyUnderWay(t *testing.T) {
+	base := secretsWith("sites.home-a.wireguard_private_key", "k", "external.x", "1")
+	ours := withNextKey(secretsWith("sites.home-a.wireguard_private_key", "k", "external.x", "1"), "home-a")
+	theirs := secretsWith("sites.home-a.wireguard_private_key", "k", "external.x", "2")
+	m, conflicts, err := MergeSecrets(base, ours, theirs)
+	if err == nil || m != nil || conflicts != nil {
+		t.Fatalf("merged %v %v %v", m, conflicts, err)
+	}
+	for _, want := range []string{"local", "home-a", "paisans mesh rekey"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "next-sentinel") {
+		t.Errorf("the refusal quotes the key: %v", err)
+	}
+}
+
+func TestMergeRefusesWhileTheirsHasARekeyRemaining(t *testing.T) {
+	base := secretsWith("external.x", "1")
+	ours := secretsWith("external.x", "2")
+	theirs := secretsWith("external.x", "1")
+	theirs.MeshRekeyRemaining = []string{"home-b", "vm"}
+	_, _, err := MergeSecrets(base, ours, theirs)
+	if err == nil {
+		t.Fatal("merged")
+	}
+	for _, want := range []string{"newest version", "home-b", "paisans mesh rekey"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "local") {
+		t.Errorf("the refusal blames the local side: %v", err)
+	}
+}
+
+// A next key is only ever written by a rekey, so one alone, with no
+// mesh_rekey_remaining beside it, is a rekey under way all the same.
+func TestMergeRefusesOnANextKeyAlone(t *testing.T) {
+	base := secretsWith("external.x", "1")
+	ours := secretsWith("external.x", "1")
+	theirs := withNextKey(secretsWith("external.x", "1", "sites.vm.heartbeat_token", "t"), "vm")
+	if _, _, err := MergeSecrets(base, ours, theirs); err == nil || !strings.Contains(err.Error(), "vm") {
+		t.Fatalf("got %v", err)
 	}
 }
 
