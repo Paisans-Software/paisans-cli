@@ -20,7 +20,7 @@
 
 - Kind name `invite`; constant `config.KindInvite`.
 - Placement: `cluster` only. Rule `invite-must-be-clustered`.
-- Container port `8080`; health `GET /healthz` answers `200`.
+- Container port `8082` (8080 collides with a clustered Mbin on the same site; controller ruling); health `GET /healthz` answers `200`.
 - Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, the Markdown text inline in `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
 - Generated secrets: `apps.<invite>.email_hash_key`, `apps.<invite>.session_key`, both the default `password()` shape (32 random bytes, unpadded base64url). Plus `database_password`, which `UsesPostgres` already brings.
 - The environment variable names are exactly the service plan's contract table; rename nothing.
@@ -141,7 +141,7 @@ and `KindInvite: true` in `knownKinds`.
 		}, true
 ```
 
-`internal/render/plan.go`, `appPort`: `config.KindInvite: 8080,`
+`internal/render/plan.go`, `appPort`: `config.KindInvite: 8082,`
 
 - [ ] **Step 4: Run the whole suite**
 
