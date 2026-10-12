@@ -22,10 +22,11 @@ import (
 // and holds the registry a recovery reads the deployment's id from. A host
 // that is down fails everything. runs, when set, logs every command run on
 // any host sharing it. A host with noPush answers but refuses a pushed
-// bundle.
+// bundle; one whose noStore says so has no store to push into.
 type storeHost struct {
 	name, answer, registry string
 	down, noPush           bool
+	noStore                func() bool
 	runs                   *[]string
 }
 
@@ -38,6 +39,9 @@ func (h *storeHost) Run(c string) (string, error) {
 	}
 	if strings.Contains(c, "bundle create") {
 		return h.answer, nil
+	}
+	if h.noStore != nil && h.noStore() && strings.HasPrefix(c, "if [ -d ") {
+		return "__PAISANS_NO_STORE__\n", nil
 	}
 	if h.noPush && strings.Contains(c, "bundle verify") {
 		return "fatal: repository not found", errors.New("exit status 128")

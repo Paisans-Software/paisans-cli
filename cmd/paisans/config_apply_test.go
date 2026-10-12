@@ -321,6 +321,9 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	if err == nil || !strings.Contains(problemText(err), "no site took the version") || claimed(logged(t, log)) {
 		t.Fatalf("got %v, claimed %v", problemText(err), claimed(logged(t, log)))
 	}
+	if strings.Contains(problemText(err), "pushes it again") {
+		t.Errorf("promises a push: %s", problemText(err))
+	}
 
 	refuse(false)
 	log = loggingSSH(t, "")
@@ -331,9 +334,70 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	}
 }
 
-// The files read before the review are the ones published: an edit made
+// apply --site on a deployment whose sites have no store yet refuses before
+// the first change, naming host prepare for each site.
+func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
+	f := newApplyStore(t, 0)
+	none := func() bool { return true }
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: f.answer, runs: f.runs, noStore: none}
+	}
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	text := problemText(err)
+	for _, site := range []string{"home-a", "home-b", "vm", "watch"} {
+		if err == nil || !strings.Contains(text, "paisans host prepare --site "+site+" --execute") {
+			t.Errorf("does not name host prepare for %s: %v", site, text)
+		}
+	}
+	if claimed(logged(t, log)) || f.pushed() {
+		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	}
+}
+
+// apply without --site on a deployment whose sites have no store yet
+// publishes once its host prepare steps have made them, before any other
+// step, and goes on.
+func TestConvergePublishesAfterHostPrepare(t *testing.T) {
+	f := newApplyStore(t, 0)
+	prepared := false
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: f.answer, runs: f.runs, noStore: func() bool { return !prepared }}
+	}
+	ran := fakeConverge(t, nil)
+	saved := convergePrepare
+	t.Cleanup(func() { convergePrepare = saved })
+	convergePrepare = func(env prepareEnv, args []string) error {
+		prepared = true
+		return saved(env, args)
+	}
+	fakeRunGrants(t)
+	rec := recordConverge(t)
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", problemText(err), rec.Lines())
+	}
+	head, _ := f.l.Head()
+	if head == "" || !f.pushed() {
+		t.Fatalf("head %q, pushed %v", head, f.pushed())
+	}
+	prepare, publish := rec.Index("section", "prepare"), rec.Index("done", "publish revision 1")
+	next := rec.Index("section", "install")
+	if !(prepare >= 0 && prepare < publish && publish < next) {
+		t.Errorf("order: prepare %d, publish %d, install %d\n%s", prepare, publish, next, rec.Lines())
+	}
+	if len(*ran) == 0 || !strings.HasPrefix((*ran)[0], "host prepare") {
+		t.Errorf("ran %q", *ran)
+	}
+}
+
+// The bytes apply loaded are the ones published: an edit made on disk
 // while the operator was asked is not.
-func TestApplyPublishesTheFilesItRead(t *testing.T) {
+func TestApplyPublishesTheFilesItLoaded(t *testing.T) {
 	f := newApplyStore(t, 1)
 	f.based(t)
 	read := f.files[0]
@@ -341,27 +405,46 @@ func TestApplyPublishesTheFilesItRead(t *testing.T) {
 	if err := f.l.WriteFiles(read); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(f.cfgPath)
+	cfg, paisans, err := config.LoadWithBytes(f.cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := gatherForApply(ui.Discard, f.cfgPath, "", cfg, true, noTerminalStdin(), io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
+	loaded := configstore.Files{Paisans: paisans, Secrets: read.Secrets}
 	later := read
 	later.Paisans = append(append([]byte{}, read.Paisans...), "# edited while asked\n"...)
 	if err := f.l.WriteFiles(later); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := v.land(ui.Discard, nil, true, noTerminalStdin(), io.Discard)
+	v, err := gatherForApply(ui.Discard, f.cfgPath, "", &loaded, cfg, true, noTerminalStdin(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := v.publish(ui.Discard, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cache, _ := f.l.Cache()
 	got, err := cache.Files(applied.sha)
-	if err != nil || !got.Equal(read) {
+	if err != nil || !got.Equal(read) || !applied.files.Equal(read) {
 		t.Errorf("published %q, %v", got.Paisans[len(got.Paisans)-40:], err)
+	}
+}
+
+// A step of apply without --site whose files are not what the run
+// published refuses before it changes anything.
+func TestAStepRefusesFilesTheRunDidNotPublish(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	published := f.files[0]
+	published.Paisans = append(append([]byte{}, published.Paisans...), "# published\n"...)
+	reviewedByRun = &runReview{approved: map[string]grant.Review{}, version: &appliedVersion{sha: strings.Repeat("d", 40), revision: 2, files: published}}
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	if err == nil || !strings.Contains(problemText(err), "changed after the run published it") || claimed(logged(t, log)) {
+		t.Errorf("got %v, claimed %v", problemText(err), claimed(logged(t, log)))
 	}
 }
 
@@ -482,8 +565,8 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	if n := strings.Count(rec.Lines(), "done: publish revision 2"); n != 1 || !f.pushed() || len(*ran) == 0 {
 		t.Errorf("published %d times, pushed %v, ran %q\n%s", n, f.pushed(), *ran, rec.Lines())
 	}
-	review, publish, prepare := rec.Index("section", "review"), rec.Index("done", "publish revision 2"), rec.Index("section", "prepare")
-	if !(review >= 0 && review < publish && publish < prepare) {
-		t.Errorf("order: review %d, publish %d, prepare %d\n%s", review, publish, prepare, rec.Lines())
+	review, prepare, publish, install := rec.Index("section", "review"), rec.Index("section", "prepare"), rec.Index("done", "publish revision 2"), rec.Index("section", "install")
+	if !(review >= 0 && review < prepare && prepare < publish && publish < install) {
+		t.Errorf("order: review %d, prepare %d, publish %d, install %d\n%s", review, prepare, publish, install, rec.Lines())
 	}
 }

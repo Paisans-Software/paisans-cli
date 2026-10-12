@@ -765,7 +765,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
-	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), cfg, execute, o.stdin, o.stdout)
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.stdin, o.stdout)
 	if err != nil {
 		return err
 	}
@@ -777,8 +777,12 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
 		reviews, pending, _ := convergeReview(r, cfg, o)
-		// What --execute checks every host's record against and publishes.
-		if _, err := store.land(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
+		// What --execute checks every host's record against before its
+		// first step, and publishes once host prepare has made the stores.
+		if err := store.check(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
+			return err
+		}
+		if _, err := store.publish(r, false, publishWhen); err != nil {
 			return err
 		}
 		convergeLeft(r, cfg, secretsPath, configPath)
@@ -801,13 +805,19 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// Approved, and before the first step: every host's record is checked
-	// against the version and the version published, once for the run, so
-	// the store holds what is applied even if the run stops part way. Each
-	// apply step records it.
-	if reviewedByRun.version, err = store.land(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
+	// against the version, which only reads. The version is published once
+	// for the run, after the host prepare steps, which make every site's
+	// store, and before any other step changes a host, so the store holds
+	// what is applied even if the run stops part way. Each apply step
+	// records it, and refuses files that are not it.
+	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
-	if err := convergeExecute(r, cfg, steps, o); err != nil {
+	publish := func() (err error) {
+		reviewedByRun.version, err = store.publish(r, true, publishWhen)
+		return err
+	}
+	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
 	// Each step pointed the retries and holds at its own reporter; the
@@ -1207,9 +1217,19 @@ const resumeAdvice = "Run paisans apply --execute again to resume."
 // at; and an install line per site and one for storage, each spinning while
 // one of its steps runs. It stops at the first failure, so a DNS conflict
 // stops the run before any site is applied.
-func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
+//
+// publish is called once, after the prepare steps and before the first
+// other step that runs, or at the end when none does.
+func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions, publish func() error) error {
+	published := false
 	for i := 0; i < len(steps); {
 		s := steps[i]
+		if !published && s.Stage != stageInit && s.Stage != stagePrepare {
+			published = true
+			if err := publish(); err != nil {
+				return err
+			}
+		}
 		switch {
 		case s.Stage == stageInit:
 			i++
@@ -1245,8 +1265,15 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			i++
 		}
 	}
+	if !published {
+		return publish()
+	}
 	return nil
 }
+
+// publishWhen is when apply without --site publishes the version it
+// applies, as its plan says.
+const publishWhen = "after host prepare, which makes every site's store, and before any other step"
 
 // convergePrepareAll runs steps, the prepare lines', every host at once,
 // each on its own line, which ends with its host. A host that fails stops

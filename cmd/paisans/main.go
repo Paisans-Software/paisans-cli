@@ -27,6 +27,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/grant"
@@ -704,7 +705,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
 	}
 
-	cfg, err := config.Load(*configPath)
+	// The files are read once: the bytes loaded here are what is applied and
+	// what is published as the version applied.
+	cfg, paisansBytes, err := config.LoadWithBytes(*configPath)
 	if err != nil {
 		return err
 	}
@@ -721,13 +724,14 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
+	secrets, secretsBytes, err := config.LoadDeploymentSecretsWithBytes(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	loaded := configstore.Files{Paisans: paisansBytes, Secrets: secretsBytes}
 	// apply does not call secretsgen.Fill either, and this is the path that
 	// actually reaches a host: a malformed key has to stop here, not just
 	// print a confusing failure partway through provisioning on the machine.
@@ -742,9 +746,13 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	// step of apply without --site the run did this once for every site.
 	var store storeVersion
 	if reviewedByRun == nil {
-		if store, err = applyStore(r, *configPath, *secretsPath, cfg, *execute, stdin, stdout); err != nil {
+		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, stdin, stdout); err != nil {
 			return err
 		}
+	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
+		// The run published one version and every step applies it: files
+		// edited since are not what the store holds.
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "paisans.yaml or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
@@ -793,7 +801,10 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	// and site add apply no version.
 	switch {
 	case store != nil && review != nil:
-		if review.version, err = store.land(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
+		if err := store.check(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
+			return err
+		}
+		if review.version, err = store.publish(r, *execute, "before the first change"); err != nil {
 			return err
 		}
 	case reviewedByRun != nil && review != nil:

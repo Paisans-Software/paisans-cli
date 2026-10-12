@@ -51,10 +51,10 @@ func TestPushWritesThenVerifiesAndFetchesWithoutForce(t *testing.T) {
 	if h.files[tmp] != "BUNDLE" {
 		t.Fatalf("bundle not written at %s: %v", tmp, h.files)
 	}
-	if len(h.commands) != 2 || h.commands[0] != "write "+tmp {
+	if len(h.commands) != 3 || h.commands[1] != "write "+tmp {
 		t.Fatalf("commands = %q", h.commands)
 	}
-	c := h.commands[1]
+	c := h.commands[2]
 	for _, want := range []string{"bundle verify", "fetch --no-prune", "'refs/versions/*:refs/versions/*'", "rm -f '" + tmp + "'"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("command lacks %q: %s", want, c)
@@ -142,6 +142,24 @@ func TestPullKeepsTheBundleWhenTheSyncLogIsMalformed(t *testing.T) {
 	if err != nil || string(b) != "PACK" || r == nil || r.SyncErr == "" {
 		t.Fatalf("got %q %+v %v", b, r, err)
 	}
+}
+
+// A site whose store host prepare has not made yet is told apart from any
+// other failure, before anything is written there, so the refusal can name
+// the command that makes it.
+func TestPushToASiteWithNoStore(t *testing.T) {
+	h := &noStoreSite{fakeSite{files: map[string]string{}}}
+	err := Push(h, dep, []byte("B"))
+	if !errors.Is(err, ErrNoStore) || len(h.files) != 0 {
+		t.Fatalf("err = %v, files %v", err, h.files)
+	}
+}
+
+type noStoreSite struct{ fakeSite }
+
+func (f *noStoreSite) Run(c string) (string, error) {
+	f.commands = append(f.commands, c)
+	return "Last login: today\n" + noStoreMark + "\n", nil
 }
 
 type failingRun struct{ fakeSite }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/keystore"
@@ -29,7 +30,7 @@ func TestMain(m *testing.M) {
 	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
 	// No test's apply reaches a configuration store; a test about the
 	// store sets gatherForApply back.
-	applyStore = func(ui.Reporter, string, string, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {
+	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {
 		return noStore{}, nil
 	}
 	// No test reaches the workstation's keystore: init makes and reads age
@@ -49,9 +50,11 @@ func TestMain(m *testing.M) {
 // nothing.
 type noStore struct{}
 
-func (noStore) land(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.Writer) (*appliedVersion, error) {
-	return nil, nil
+func (noStore) check(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.Writer) error {
+	return nil
 }
+
+func (noStore) publish(ui.Reporter, bool, string) (*appliedVersion, error) { return nil, nil }
 
 // testCaddyDigest is the build every test's registry says Caddy's tag names.
 const testCaddyDigest = "sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186"

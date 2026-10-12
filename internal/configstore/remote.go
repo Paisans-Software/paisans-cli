@@ -3,6 +3,7 @@ package configstore
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -18,6 +19,14 @@ import (
 // an answer, not a failure, because a site that was never published to is the
 // ordinary state before the first publish.
 const emptyMark = "__PAISANS_EMPTY__"
+
+// noStoreMark is what the push's first command prints for a site with no
+// repository.
+const noStoreMark = "__PAISANS_NO_STORE__"
+
+// ErrNoStore is a site with no configuration store yet: one host prepare
+// has not run on since the store was added. paisans host prepare makes it.
+var ErrNoStore = errors.New("no configuration store; paisans host prepare makes it")
 
 // SyncReport is what a site's last sync reached, as the sync script logged it.
 type SyncReport struct {
@@ -59,6 +68,15 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 		return err
 	}
 	tmp, repo := incomingPath(d), hostprep.ConfigRepo(d)
+	// A site host prepare has not given a store has nowhere to take the
+	// bundle, and is told apart so the refusal can name what makes one.
+	out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then echo ok; else echo %s; fi", quote(repo), noStoreMark))
+	if err != nil {
+		return fmt.Errorf("look for the store on %s: %w: %s", t.Describe(), err, strings.TrimSpace(out))
+	}
+	if lastLine(out) == noStoreMark {
+		return fmt.Errorf("%s: %w", t.Describe(), ErrNoStore)
+	}
 	if err := t.WriteFile(tmp, string(bundle), 0o600); err != nil {
 		return fmt.Errorf("write the bundle to %s: %w", t.Describe(), err)
 	}
