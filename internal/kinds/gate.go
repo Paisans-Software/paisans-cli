@@ -39,8 +39,15 @@ type GateSpec struct {
 	TokenPaths []string
 
 	// AutoLogin skips the app's own "Log in with" button for someone the gate
-	// already let through.
+	// already let through. An app takes it only with auto_login: true.
 	AutoLogin []AutoLoginRule
+
+	// SignInPath is the app's own sign-in page. On a public app with
+	// auto_login, a visit there with no gate session goes through the gate's
+	// sign-in first and comes back with one, so auto-login can fire: the
+	// app's own "Log in" link becomes the community's sign-in. Empty for a
+	// kind with no auto-login.
+	SignInPath string
 
 	// SignedFetch is how a federating kind refuses an unsigned ActivityPub
 	// read. Nil for a kind that does not federate, or that cannot refuse one,
@@ -93,13 +100,37 @@ var gates = map[config.Kind]GateSpec{
 			// base.html.twig:48-59, assets/app.js:9).
 			"/build/*", "/assets/*", "/favicon.ico", "/favicon.svg", "/mbin_logo.svg",
 			"/manifest.json", "/sw.js", "/custom-style",
+			// What a native app calls before it holds a token: it registers
+			// its own client, then reads what the instance is. Mbin answers
+			// these to anyone, private instance or not (security.yaml:143-146
+			// at v1.15.0+paisans). Exact paths, not prefixes: the rest of
+			// /api/instance/* stays behind the gate.
+			//
+			// Registering a client grants nothing by itself. A public client
+			// still needs /authorize, which needs a member's sign-in. A
+			// confidential client_credentials client comes with a bot user
+			// (CreateClientApi.php:122-138), created unverified (User.php:188),
+			// and the API firewall's user checker refuses an unverified user
+			// (security.yaml:27, UserChecker.php:55), so its token reads
+			// nothing unless an admin verifies that bot. Anonymous
+			// registration is rate limited to two clients per six hours
+			// (rate_limiter.yaml:9-12).
+			"/api/client", "/api/info", "/api/instance",
 		},
 		// The four routes InboxSignatureSubscriber verifies before dispatch
 		// (InboxSignatureSubscriber.php:51-56, activity_pub.yaml:35-94).
 		InboxPaths: []string{"/i/inbox", "/f/inbox", "/u/*/inbox", "/m/*/inbox"},
-		// Empty: /api/* read endpoints answer anonymous callers
-		// (EntriesRetrieveApi.php:72-80, security.yaml:148), and anonymous
-		// POST /api/client mints a client (CreateClientApi.php:95,122-139).
+		// A native app reads and writes through /api/* with the token its
+		// WebView sign-in earned, and holds no gate session. Safe only
+		// because a gated Mbin runs as a private instance
+		// (MBIN_PRIVATE_INSTANCE, locked, rendered for every gated Mbin and
+		// tested in render's mbin_env_test.go): Mbin's catch-all access rule
+		// then refuses any request without a signed in user
+		// (security.yaml:152), and /api sits on a stateless OAuth2 firewall
+		// that refuses a token it did not issue (security.yaml:22-27). A
+		// public Mbin answers /api/* reads with no user at all, so without
+		// that mode this path would rest on the firewall alone.
+		TokenPaths: []string{"/api/*"},
 		AutoLogin: []AutoLoginRule{{
 			Paths: []string{"/", "/login"},
 			// OidcController::connect takes no destination
@@ -109,6 +140,9 @@ var gates = map[config.Kind]GateSpec{
 			// defaults (framework.yaml:26-31, security.yaml:59-66).
 			AbsentCookies: []string{"PHPSESSID", "REMEMBERME"},
 		}},
+		// The sign-in page Symfony sends an unauthenticated visitor to
+		// (security.yaml:90 at v1.15.0+paisans).
+		SignInPath: "/login",
 		// MBIN_AUTHORIZED_FETCH, on unless settings.authorized_fetch turns it
 		// off, and MBIN_USE_FEDERATION_ALLOW_LIST when gated, both named in
 		// MBIN_LOCKED_SETTINGS, so an admin cannot turn either off. The
@@ -156,6 +190,8 @@ var gates = map[config.Kind]GateSpec{
 			// only its absence means anything: a first visit.
 			{Paths: []string{"/"}, Target: "/oauth/generic", AbsentCookies: []string{"wfu"}},
 		},
+		// The sign-in page, the one the rule above sends to /oauth/generic.
+		SignInPath: "/login",
 		// authorized_fetch requires a valid signature on every ActivityPub
 		// read and inbox delivery, public or private, and leaves only
 		// discovery and the instance actor open (authorized_fetch.go:35-50 at
@@ -204,7 +240,8 @@ var gates = map[config.Kind]GateSpec{
 	// A Matrix client is not a browser and will not follow a redirect to a
 	// passkey prompt, and neither will a federating server.
 	config.KindSynapse: {Gateable: false},
-	// The sign-in flow itself: gating it would gate the login.
+	// The sign-in flow itself: gating it would gate the login. The gate is
+	// never declared, so the second can only be reached through a test.
 	config.KindPocketID:    {Gateable: false},
 	config.KindOAuth2Proxy: {Gateable: false},
 	// The monitor is what an admin opens when the sites it watches are down.

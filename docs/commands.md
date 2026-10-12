@@ -528,16 +528,18 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
-that are down, Pocket ID's active instance, clocks, what is left over, and
-each host's key allowlist, with each key `ssh.keys` names that it does not
-hold and that the next `host prepare` would add, since one already in
-`authorized_keys` is never added again.
+that are down, the settings a gated app must enforce, Pocket ID's active
+instance, clocks, what is left over, and each host's key allowlist, with each
+key `ssh.keys` names that it does not hold and that the next `host prepare`
+would add, since one already in `authorized_keys` is never added again.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
-  `--sudo`.
+  `--sudo`, `--execute`.
 * **Hosts:** every site, or the named ones, read only.
-* **`--execute`:** not taken. It prints recoveries for a human to run.
+* **`--execute`:** removes from `paisans.yaml` each `config:` key that only
+  repeats a value gating renders, before loading it. It changes no host; the
+  recoveries it prints are for a human to run.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
 

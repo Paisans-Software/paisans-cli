@@ -70,16 +70,16 @@ func TestRulesFire(t *testing.T) {
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
 		{"unknown-hostname-role", "unknown-hostname-role", validate.Refuse},
 		{"duplicate-hostname", "duplicate-hostname", validate.Refuse},
-		{"gate-without-a-gate-app", "gate-without-a-gate-app", validate.Refuse},
-		{"visibility-gate-on-ungateable-kind", "visibility-gate-on-ungateable-kind", validate.Refuse},
-		{"visibility-gate-without-signed-fetch", "visibility-gate-without-signed-fetch", validate.Refuse},
-		{"visibility-gate-without-authorized-fetch", "visibility-gate-without-signed-fetch", validate.Refuse},
+		{"gated-on-ungateable-kind", "gated-on-ungateable-kind", validate.Refuse},
+		{"gated-without-signed-fetch", "gated-without-signed-fetch", validate.Refuse},
+		{"gated-without-authorized-fetch", "gated-without-signed-fetch", validate.Refuse},
+		{"auto-login-without-a-rule", "auto-login-without-a-rule", validate.Refuse},
+		{"config-key-already-rendered", "config-key-already-rendered", validate.Refuse},
+		{"uses-gate-outside-the-domain", "uses-gate-outside-the-domain", validate.Refuse},
 		{"authorized-fetch-not-a-boolean", "authorized-fetch-not-a-boolean", validate.Refuse},
 		{"writefreely-setting-invalid", "writefreely-setting-invalid", validate.Refuse},
-		{"visibility-gate-provisional", "visibility-gate-provisional", validate.Warn},
-		{"visibility-gate-on-the-gate", "visibility-gate-on-ungateable-kind", validate.Refuse},
-		{"visibility-gate-on-pocket-id", "visibility-gate-on-ungateable-kind", validate.Refuse},
-		{"visibility-gate-on-the-monitor", "visibility-gate-on-ungateable-kind", validate.Refuse},
+		{"gated-on-pocket-id", "gated-on-ungateable-kind", validate.Refuse},
+		{"gated-on-the-monitor", "gated-on-ungateable-kind", validate.Refuse},
 		{"homeserver-must-be-pinned", "homeserver-must-be-pinned", validate.Refuse},
 		{"storage-local-on-cluster", "storage-local-on-cluster", validate.Refuse},
 		{"storage-s3-on-a-local-only-kind", "storage-s3-on-a-local-only-kind", validate.Refuse},
@@ -859,5 +859,63 @@ func TestSitesBehindOneRouterAreTwoMachines(t *testing.T) {
 	share(cfg, 2202, ":51820")
 	if !validate.Check(cfg).Has("sites-share-a-machine") {
 		t.Error("two sites dialled at one address and port were not refused")
+	}
+}
+
+// An app on the gate's hostname collides with the gate, which no file
+// declares, so the message says where the gate's name came from rather than
+// quoting a line the file does not have.
+func TestAnAppOnTheGatesHostnameIsRefused(t *testing.T) {
+	cfg := load(t, "valid")
+	docs := cfg.Apps["docs"]
+	docs.Gated = true
+	docs.Hostname = cfg.GateHostname()
+	cfg.Apps["docs"] = docs
+	cfg.Apps[config.GateApp] = config.App{Kind: config.KindOAuth2Proxy, Hostname: cfg.GateHostname(), Derived: true}
+	var found bool
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "duplicate-hostname" {
+			found = true
+			if !strings.Contains(f.Message, "is not declared, so it is derived as") {
+				t.Errorf("the refusal does not say the gate's name is derived: %s", f.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("an app on the gate's hostname was not refused")
+	}
+}
+
+// Whether a template writes a key can depend on the rest of the file: a gated
+// Mbin's template writes MBIN_USE_FEDERATION_ALLOW_LIST and an ungated one
+// does not. validate renders to find out, so the same key is refused on the
+// gated app and accepted on the public one, and every colliding key is
+// reported, not only the first.
+func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	talk := cfg.Apps["talk"]
+	talk.Config = map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": true, "KBIN_META_TITLE": "A place to talk"}
+	cfg.Apps["talk"] = talk
+	var keys []string
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "config-key-already-rendered" {
+			keys = append(keys, f.Key)
+		}
+	}
+	want := []string{"apps.talk.config.MBIN_PRIVATE_INSTANCE", "apps.talk.config.MBIN_USE_FEDERATION_ALLOW_LIST"}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Errorf("gated talk: refused %v, want %v", keys, want)
+	}
+
+	talk.Gated, talk.AutoLogin = false, false
+	cfg.Apps["talk"] = talk
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "config-key-already-rendered" {
+			t.Errorf("public talk: %s refused, but its template does not write it", f.Key)
+		}
 	}
 }

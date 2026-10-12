@@ -98,13 +98,70 @@ blog-media.example.org {
 }
 
 
+# Public, with auto-login: a member the gate has signed in goes straight into
+# the app's own sign-in, and a visitor on its sign-in page with no gate session
+# signs in at the gate first. Everything else is the public app. See
+# docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 blog.example.org {
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
-	# name a user unless the gate put the name there, and an ungated app that
-	# trusted the header would otherwise trust whoever sent the request.
+	# name a user unless the gate put the name there.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/blog.caddy
+
+	# Auto-login: a member the gate has signed in goes straight into the
+	# app's own sign-in, which completes without a prompt. Ahead of anything
+	# else matching its path, so the session holder takes this. The gate
+	# checks the session; blog_autologin stops a visitor it
+	# refuses, or a member the app refuses, from being sent again for two
+	# minutes.
+	@autologin_0 {
+		method GET HEAD
+		header Accept *text/html*
+		not header Authorization *
+		path /login
+		header Cookie *_oauth2_proxy*
+		not header Cookie *blog_autologin*
+	}
+	handle @autologin_0 {
+		import gate_autologin /oauth/generic blog_autologin
+	}
+
+	# Auto-login: a member the gate has signed in goes straight into the
+	# app's own sign-in, which completes without a prompt. Ahead of anything
+	# else matching its path, so the session holder takes this. The gate
+	# checks the session; blog_autologin stops a visitor it
+	# refuses, or a member the app refuses, from being sent again for two
+	# minutes.
+	@autologin_1 {
+		method GET HEAD
+		header Accept *text/html*
+		not header Authorization *
+		path /
+		header Cookie *_oauth2_proxy*
+		not header Cookie *wfu*
+		not header Cookie *blog_autologin*
+	}
+	handle @autologin_1 {
+		import gate_autologin /oauth/generic blog_autologin
+	}
+
+	# The app's sign-in page, with no gate session: sign in at the gate and
+	# come back holding one, so the auto-login above fires.
+	@gate_signin {
+		method GET HEAD
+		header Accept *text/html*
+		not header Authorization *
+		path /login
+		not header Cookie *_oauth2_proxy*
+		not header Cookie *blog_gatesignin*
+	}
+	handle @gate_signin {
+		import gate_signin blog_gatesignin
+	}
+
+	handle {
+		import /etc/caddy/snippets/blog.caddy
+	}
 }
 
 
@@ -178,7 +235,7 @@ talk-media.example.org {
 }
 
 
-# Gated: visibility_gate member. Every request goes to the gate except the
+# Gated. Every request goes to the gate except the
 # classes that carry their own authentication, which the app verifies. Each is
 # its own handle with a named matcher, and Caddy keeps those in the order they
 # are written, so this is the order they are matched in. See
@@ -245,11 +302,12 @@ talk.example.org {
 		import /etc/caddy/snippets/talk.caddy
 	}
 
-	# Auto-login: someone the gate already let through goes straight into the
-	# app's own sign-in, which completes without a prompt. Before the open
-	# paths, because a path can be both and the session holder must take this.
-	# talk_autologin stops a user the app refuses from being
-	# redirected again for two minutes.
+	# Auto-login: a member the gate has signed in goes straight into the
+	# app's own sign-in, which completes without a prompt. Ahead of anything
+	# else matching its path, so the session holder takes this. The gate
+	# checks the session; talk_autologin stops a visitor it
+	# refuses, or a member the app refuses, from being sent again for two
+	# minutes.
 	@autologin_0 {
 		method GET HEAD
 		header Accept *text/html*
@@ -261,21 +319,30 @@ talk.example.org {
 		not header Cookie *talk_autologin*
 	}
 	handle @autologin_0 {
-		header Set-Cookie "talk_autologin=1; Path=/; Max-Age=120; Secure; HttpOnly; SameSite=Lax"
-		# The * is required: a first argument starting with / is read as a
-		# path matcher, and the redirect silently becomes an empty 200.
-		redir * /oauth/oidc/connect 302
+		import gate_autologin /oauth/oidc/connect talk_autologin
 	}
 
 	# Open paths: the sign-in itself, federation discovery and what those
 	# pages load. They hold no private content.
-	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /healthz
+	@open path /oauth/* /authorize /consent /token /login /.well-known/webfinger /.well-known/host-meta /.well-known/nodeinfo /nodeinfo/* /i/actor /contexts /contexts.jsonld /build/* /assets/* /favicon.ico /favicon.svg /mbin_logo.svg /manifest.json /sw.js /custom-style /api/client /api/info /api/instance /healthz
 	handle @open {
 		import /etc/caddy/snippets/talk.caddy
 	}
 
+	# Token paths, with a bearer token. The app refuses one it did not
+	# issue. Any other Authorization, and one anywhere else, goes to the gate
+	# like anything else: an app can serve a request it does not read the
+	# header of as an anonymous one.
+	@token {
+		path /api/*
+		header Authorization "Bearer *"
+	}
+	handle @token {
+		import /etc/caddy/snippets/talk.caddy
+	}
+
 	handle {
-		import gate_member
+		import gate
 		import /etc/caddy/snippets/talk.caddy
 	}
 }

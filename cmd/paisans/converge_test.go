@@ -2157,6 +2157,21 @@ func TestAdminRequest(t *testing.T) {
 
 func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
 
+// A declared admin joins every app's member group as well as its admin group,
+// since an app whose member gate does not admit its administrator refuses
+// their first login. app admin create, which names its user, does not.
+func TestAdminRequestJoinsTheMemberGroups(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Admins["alice"] = config.Admin{Name: "Alice Example", Email: "alice@example.org"}
+	req := adminRequest(cfg, "auth", "alice")
+	if want := memberGroups(cfg); len(want) == 0 || !slices.Equal(req.MemberGroups, want) {
+		t.Errorf("member groups %v, want %v", req.MemberGroups, want)
+	}
+	if !slices.Contains(req.MemberGroups, "members") {
+		t.Errorf("member groups %v lack members", req.MemberGroups)
+	}
+}
+
 // The check asks the Pocket ID app admin create would call, with its key, read
 // only, through the run's sudo, and answers whether a user is an admin.
 func TestConvergeAdminCheckAsksPocketIDReadOnly(t *testing.T) {

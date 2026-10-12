@@ -1,5 +1,5 @@
-# A coherent three site deployment. Every fixture in this directory is a
-# variation on this one, so that a test names exactly the thing it breaks.
+# valid.yaml with one thing broken: a config key Outline's template already
+# writes, which would be a second place to set the app's public URL.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -43,6 +43,15 @@ sites:
       host: vm.example.org
       user: ubuntu
       keys: [alice]
+  # The monitor's own machine, so that something watches the deployment.
+  watch:
+    roles: [monitor]
+    address: 10.44.0.4
+    public_address: 203.0.113.20
+    ssh:
+      host: watch.example.org
+      user: ubuntu
+      keys: [alice]
 
 cluster:
   sites: [home-a, home-b]
@@ -66,7 +75,8 @@ apps:
     kind: outline
     hostname: docs.example.org
     placement: cluster
-    visibility_gate: member
+    config:
+      URL: https://elsewhere.example.org
     settings:
       s3_bucket: docs-uploads
   auth:
@@ -75,3 +85,15 @@ apps:
     placement: cluster
     settings:
       file_backend: database
+  status:
+    kind: uptime
+    hostname: status.example.org
+    placement: { pinned: watch }
+    settings:
+      admin_group: admins
+
+smtp:
+  host: smtp.example.org
+  security: starttls
+  username: status@example.org
+  from_address: status@example.org
