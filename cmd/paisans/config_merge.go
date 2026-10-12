@@ -158,9 +158,10 @@ func secretsMergeProblem(what string) error {
 
 // secretsConflictAdvice says what settles conflicting keys, and that nothing
 // happens by itself. The pull refuses while any key conflicts, so the head's
-// value is taken by setting the key locally to it and pulling again; paisans
-// secrets set does that for a key it accepts, and a pocket_id_groups key,
-// which apply records, is not one.
+// value is taken by setting the key locally to it and pulling again; to keep
+// the local value, take the head's first, so the pull can merge the rest, then
+// set the key back and publish. paisans secrets set does the setting for a key
+// it accepts; a pocket_id_groups key, which apply records, is not one.
 func secretsConflictAdvice(conflicts []string) string {
 	var settable, recorded bool
 	for _, p := range conflicts {
@@ -171,13 +172,13 @@ func secretsConflictAdvice(conflicts []string) string {
 		}
 	}
 	out := []string{"The pull refuses while a key conflicts and takes neither side's value by itself.",
-		"To take the head's value, set that key locally to the head's value and pull again."}
+		"To take the head's value, set that key locally to the head's value and pull again.",
+		"To keep the local value, take the head's first so the pull can merge the rest, pull, then set the key back to your value and publish."}
 	if settable {
-		out = append(out, "paisans secrets set does it for a key it accepts.")
+		out = append(out, "paisans secrets set sets a key it accepts.")
 	}
 	if recorded {
-		out = append(out, "A pocket_id_groups key is recorded by apply, and paisans secrets set does not accept it; set it in the file with sops.")
+		out = append(out, "A pocket_id_groups key is recorded by apply, and paisans secrets set does not accept it; edit the file with sops.")
 	}
-	out = append(out, "To keep the local value, keep it: the pull merges the rest once no key conflicts, and the merge is then published.")
 	return strings.Join(out, " ")
 }

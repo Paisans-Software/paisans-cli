@@ -188,7 +188,7 @@ func TestConfigPullSecretsConflictRefusesNamingPathsOnly(t *testing.T) {
 		if strings.Contains(shown, "pocket_id_groups") {
 			t.Errorf("advice for a section no conflict is in:\n%s", shown)
 		}
-		for _, want := range []string{"refuses while a key conflicts", "set that key locally to the head's value", "keep it"} {
+		for _, want := range []string{"refuses while a key conflicts", "set that key locally to the head's value", "take the head's first", "set the key back to your value and publish"} {
 			if !strings.Contains(shown, want) {
 				t.Errorf("the advice does not say %q:\n%s", want, shown)
 			}
