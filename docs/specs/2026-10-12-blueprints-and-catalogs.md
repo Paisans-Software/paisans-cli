@@ -1,7 +1,7 @@
 # Blueprints and catalogs
 
 Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12. Not
-implemented. Names marked *proposed* below are not yet created anywhere.
+implemented.
 
 Every application the toolkit can run is compiled into the binary today. What
 the toolkit knows about a kind is spread over about thirty files: the service
@@ -428,8 +428,7 @@ with it.
 
 The core catalog holds every first party blueprint that is not reserved:
 `element`, `mbin`, `outline`, `synapse` and `writefreely`. Its URL is compiled
-into the binary (*proposed*:
-`https://github.com/paisans-software/paisans-blueprints`).
+into the binary: `https://github.com/Paisans-Software/blueprints`.
 
 * **It is always there.** A deployment with no `catalogs:` key uses it, and so
   does one that declares other catalogs. Declaring a third party catalog never

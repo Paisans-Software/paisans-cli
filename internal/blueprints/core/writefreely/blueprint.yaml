@@ -1,5 +1,5 @@
-# The writefreely blueprint. A core blueprint.
-# internal/kinds reads it; Parse there documents every key.
+# The writefreely blueprint, in the core catalog.
+# paisans-stack reads it; internal/kinds.Parse there documents every key.
 apiVersion: paisans.blueprint/v1
 name: writefreely
 services:
