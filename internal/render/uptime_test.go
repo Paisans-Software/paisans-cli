@@ -377,7 +377,9 @@ func TestTheMonitorDoesNotCheckItself(t *testing.T) {
 // public URL, so a monitor host that dies is noticed by the one still
 // running. Neither checks itself.
 func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
-	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	// The fixture's mail server, which its invite app and the Pocket ID it
+	// names cannot be validated without.
+	cfg, secrets := withMonitor(t, fixture(t).SMTP, nil)
 	watchB := cfg.Sites["watch"]
 	watchB.Address = "10.44.0.5"
 	watchB.Endpoint = "watch-b.example.org:51820"
@@ -566,7 +568,9 @@ func TestEveryWatchedSitePushesAHeartbeatToTheMonitor(t *testing.T) {
 // withTwoMonitors is withMonitor plus a second monitor site and app.
 func withTwoMonitors(t *testing.T) (*config.Config, *config.Secrets) {
 	t.Helper()
-	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	// The fixture's mail server, which its invite app and the Pocket ID it
+	// names cannot be validated without.
+	cfg, secrets := withMonitor(t, fixture(t).SMTP, nil)
 	watchB := cfg.Sites["watch"]
 	watchB.Address = "10.44.0.5"
 	watchB.Endpoint = "watch-b.example.org:51820"

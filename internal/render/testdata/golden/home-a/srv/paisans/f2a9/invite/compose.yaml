@@ -1,0 +1,35 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# invite has cluster placement: no Postgres service of its own, and a
+# connection to the local HAProxy on 10.44.0.1:5000. Its state is
+# all in that database, so the container has no volume of its own.
+name: paisans-f2a9-invite
+
+services:
+  app:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: ghcr.io/paisans-software/paisans-invite:develop
+    restart: unless-stopped
+    # The image declares its own healthcheck, the binary probing /healthz on
+    # INVITE_LISTEN_ADDR's port, which apply's health gate reads.
+    env_file:
+      - .env
+    # The mesh address only. Docker's own iptables rules bypass a host
+    # firewall, so a port published on every interface of a host with a
+    # public address is reachable from the internet whatever ufw says. The
+    # gateway, over the mesh, is the only thing that should reach it.
+    ports:
+      - "10.44.0.1:8082:8082"
+    # The code of conduct, rendered from apps.invite.settings.code_of_conduct.
+    # A root owned 0644 file: the image runs as distroless nonroot (uid
+    # 65532), which reads it as other. It carries nothing secret.
+    volumes:
+      - /srv/paisans/f2a9/invite/code-of-conduct.md:/etc/paisans-invite/code-of-conduct.md:ro
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"

@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/.env",
-      "sha256": "1b19b3b6a2415578f515367919916d1acfe688dab252d40dccfe60785b90991d",
+      "sha256": "d56601a9c64189f9707e45f0ddd0dede1b5d83d9fb6e9c0a9cb672ed1e0d1a78",
       "mode": "0600"
     },
     {
@@ -75,6 +75,21 @@
       "path": "srv/paisans/f2a9/infra/patroni.env",
       "sha256": "8a7bf5a399549846ead0821deb319c1e8d2add34e2611f417b6968dcd03bb733",
       "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/invite/.env",
+      "sha256": "03449fe5c7bc1b639b04d7351bb3656ab7ff3e432f5f1f562482db4edad174f5",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/invite/code-of-conduct.md",
+      "sha256": "6629eab7b44d509415c059291116cc674630874d244ae3fa5ddf9e9d3de7b978",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/invite/compose.yaml",
+      "sha256": "5957489f55afbd980d0fcd365bb828434cb433ddbf19878d12ed198fe448d684",
+      "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",

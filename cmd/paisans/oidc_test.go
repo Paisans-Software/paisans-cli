@@ -14,7 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
-// idpFake is a Pocket ID with the fixture's recorded clients (docs, blog)
+// idpFake is a Pocket ID with the fixture's recorded clients (docs, blog, invite)
 // already in place with live secrets, the groups members and admins, and no
 // talk client until one is created.
 type idpFake struct {
@@ -49,6 +49,8 @@ func newIDPFake() *idpFake {
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://docs.example.org")},
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org")},
+		"invite": {ID: "fixture-not-a-secret-invite-id", Name: "invite", CallbackURLs: []string{"https://invite.example.org/auth/callback"},
+			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://invite.example.org")},
 	}}
 }
 

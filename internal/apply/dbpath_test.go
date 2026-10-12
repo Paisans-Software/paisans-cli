@@ -42,7 +42,7 @@ func indexOf(cmds []string, sub string) int {
 
 func TestTheClusterDatabaseAppsAreClusterPlacedAndUsePostgres(t *testing.T) {
 	cfg := fixtureConfig(t)
-	if got := strings.Join(apply.ClusterDatabaseApps(cfg), ","); got != "auth,docs,talk" {
+	if got := strings.Join(apply.ClusterDatabaseApps(cfg), ","); got != "auth,docs,invite,talk" {
 		t.Errorf("got %s: blog and chat have their own Postgres, gate and web use none", got)
 	}
 }
@@ -56,10 +56,10 @@ func TestAHAProxyChangeRestartsTheDatabaseApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(stacks(p), ","); got != "infra,auth,docs,talk" {
+	if got := strings.Join(stacks(p), ","); got != "infra,auth,docs,invite,talk" {
 		t.Fatalf("actions %s", got)
 	}
-	for _, app := range []string{"auth", "docs", "talk"} {
+	for _, app := range []string{"auth", "docs", "invite", "talk"} {
 		a, _ := actionOn(p, app)
 		if a.Recreate || !strings.HasPrefix(a.Reason, "its database path changed (HAProxy/Patroni moved)") {
 			t.Errorf("%s: %s, %s", app, a.Command(apply.Fixture), a.Reason)
@@ -85,7 +85,7 @@ func TestAHAProxyChangeRestartsTheDatabaseApps(t *testing.T) {
 	if infra < 0 || infraGate < infra || bootstrap < infraGate {
 		t.Fatalf("infra %d, its gate %d, bootstrap %d:\n%s", infra, infraGate, bootstrap, strings.Join(cmds, "\n"))
 	}
-	for _, app := range []string{"auth", "docs", "talk"} {
+	for _, app := range []string{"auth", "docs", "invite", "talk"} {
 		restart := indexOf(cmds, "/srv/paisans/f2a9/"+app+"/compose.yaml restart")
 		gate := indexOf(cmds, "/srv/paisans/f2a9/"+app+"/compose.yaml ps --all")
 		if restart < bootstrap || gate < restart {
@@ -104,7 +104,7 @@ func TestAPatroniChangeRestartsTheDatabaseApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(stacks(p), ","); got != "infra,auth,docs,talk" {
+	if got := strings.Join(stacks(p), ","); got != "infra,auth,docs,invite,talk" {
 		t.Errorf("actions %s", got)
 	}
 }
@@ -217,7 +217,7 @@ func TestOnlyAndTheDatabasePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(stacks(infra), ","); got != "infra,auth,docs,talk" {
+	if got := strings.Join(stacks(infra), ","); got != "infra,auth,docs,invite,talk" {
 		t.Errorf("--only infra acts on %s", got)
 	}
 }
