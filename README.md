@@ -6514,7 +6514,13 @@ decision.
 
 * A site the configuration declares whose host holds no claim of this
   deployment is the replacement. The eviction neither reaches it, nor claims
-  it, nor gates on it.
+  it, nor gates on it. A missing claim alone is not enough: a claim can be
+  lost, and an `ssh` section can reach the wrong host, and a site that ran
+  taken for new would be left out of the cut while its peers still talk to it.
+  So when a remaining site lists its key as a WireGuard peer, or a gateway's
+  deployment record lists it, the eviction refuses, naming the site and what
+  says it ran. `mesh rekey` decides which sites are not brought up yet the
+  same way.
 * Its secrets are generated first when the secrets file does not hold them,
   by the same code `init` runs, on the workstation, and written encrypted to
   `.sops.yaml`'s recipients once every question is answered.

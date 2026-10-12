@@ -35,7 +35,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/meshkey"
-	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -150,22 +149,18 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 		if out, err := t.Run("true"); err != nil {
 			return nil, fmt.Errorf("mesh rekey: %s does not answer over ssh (%v: %s). Every site is a peer of a site being rekeyed and has its mesh file changed, so every one must answer. Fix ssh and run again. Nothing was changed", name, err, strings.TrimSpace(out))
 		}
-		reg, err := registry.Read(t)
-		if err != nil {
-			return nil, fmt.Errorf("mesh rekey: %w", err)
-		}
-		if _, ok := reg.Deployments[cfg.ID]; !ok {
-			p.Joining = append(p.Joining, name)
-		}
+	}
+	secrets, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	if p.Joining, err = meshkey.Joining(cfg, secrets, "", transports); err != nil {
+		return nil, fmt.Errorf("mesh rekey: %w", err)
 	}
 	for _, name := range sites {
 		if contains(p.Joining, name) {
 			return nil, fmt.Errorf("mesh rekey: %s holds no claim of this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
 		}
-	}
-	secrets, err := store.Load()
-	if err != nil {
-		return nil, err
 	}
 	p.all = all
 	if all {

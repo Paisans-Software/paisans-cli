@@ -160,7 +160,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// would make it look prepared.
 	monitors := cfg.MonitorSites()
 	if *evict {
-		joining, err := siteremove.JoiningSites(cfg, site, transports)
+		joining, err := siteremove.JoiningSites(cfg, secrets, site, transports)
 		if err != nil {
 			return err
 		}

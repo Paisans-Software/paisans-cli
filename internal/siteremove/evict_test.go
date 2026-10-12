@@ -1,14 +1,17 @@
 package siteremove_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/deployrecord"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/dns/dnstest"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -58,9 +61,39 @@ func replacement(text string) string {
 	return strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-d }")
 }
 
-// joining makes site's host a fresh one: no claim, no files, in no cluster.
+// joining makes site's host a fresh one: no claim, no files, in no cluster,
+// and every other site's mesh as an apply without it rendered it, since it
+// has never run.
 func (w *world) joining(site string) {
 	w.hosts[site] = &host{w: w, name: site, files: map[string]string{}, images: map[string]bool{}}
+	rendered, err := render.Build(w.cfg.WithoutJoining(site), w.secrets)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	for name, h := range w.hosts {
+		if name == site {
+			continue
+		}
+		for _, f := range rendered.Files {
+			if f.Path != name+wgConf {
+				continue
+			}
+			h.files[wgConf] = f.Content
+			running := f.Content
+			h.wgRun = &running
+			var m render.Manifest
+			if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+				w.t.Fatal(err)
+			}
+			for i := range m.Files {
+				if "/"+m.Files[i].Path == wgConf {
+					m.Files[i].SHA256 = hexSum(f.Content)
+				}
+			}
+			data, _ := json.MarshalIndent(m, "", "  ")
+			h.files[dep.Manifest()] = string(data) + "\n"
+		}
+	}
 	var etcd = w.etcd[:0]
 	for _, m := range w.etcd {
 		if m.Name != site {
@@ -659,4 +692,39 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A site whose host lost its claim is not taken for a new one while anything
+// says it ran in this deployment: a remaining site listing its key, or a
+// gateway's deployment record listing it. Taken for new, it would be left out
+// of the cut while its peers still talk to it.
+func TestAnEvictionRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
+	t.Run("a peer lists its key", func(t *testing.T) {
+		w, zone := evictWorld(t, "home-b")
+		delete(w.hosts["home-c"].files, registry.Path)
+		_, err := w.build("home-b", evictOptions(zone))
+		if err == nil || !strings.Contains(err.Error(), "home-c's host holds no claim") || !strings.Contains(err.Error(), "home-a lists its WireGuard key as a peer") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("the gateway's record lists it", func(t *testing.T) {
+		w, zone := evictWorld(t, "home-b", replacement)
+		w.joining("home-d")
+		w.hosts["vm"].files[deployrecord.Path(dep)] = deployrecord.Encode(deployrecord.Record{Sites: []string{"home-a", "home-b", "home-c", "home-d", "vm", "watch"}})
+		_, err := w.build("home-b", evictOptions(zone))
+		if err == nil || !strings.Contains(err.Error(), "home-d's host holds no claim") || !strings.Contains(err.Error(), "deployment record on the gateway lists it") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("nothing does", func(t *testing.T) {
+		w, zone := evictWorld(t, "home-b", replacement)
+		w.joining("home-d")
+		p, err := w.build("home-b", evictOptions(zone))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(p.Joining(), ","); got != "home-d" {
+			t.Errorf("joining: %s", got)
+		}
+	})
 }

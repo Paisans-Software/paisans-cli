@@ -316,6 +316,36 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 	return m
 }
 
+// joining makes site's host a fresh one, no claim and no files, and every
+// other site's mesh as an apply without it rendered it, since it has never
+// run.
+func (m *mesh) joining(site string) {
+	m.hosts[site].files, m.hosts[site].run = map[string]string{}, ""
+	rendered, err := render.Build(m.cfg.WithoutJoining(site), m.secrets)
+	if err != nil {
+		m.t.Fatal(err)
+	}
+	d := m.cfg.Deployment()
+	for name, h := range m.hosts {
+		content := renderedFile(rendered, name, d.WireGuardConf())
+		if name == site || content == "" {
+			continue
+		}
+		h.files[wgConf], h.run = content, content
+		var man render.Manifest
+		if err := json.Unmarshal([]byte(h.files[d.Manifest()]), &man); err != nil {
+			m.t.Fatal(err)
+		}
+		for i := range man.Files {
+			if man.Files[i].Path == d.WireGuardConf() {
+				man.Files[i].SHA256 = sum(content)
+			}
+		}
+		data, _ := json.MarshalIndent(man, "", "  ")
+		h.files[d.Manifest()] = string(data) + "\n"
+	}
+}
+
 func (m *mesh) transports() map[string]apply.Transport {
 	out := map[string]apply.Transport{}
 	for name, h := range m.hosts {
@@ -594,8 +624,7 @@ func TestARekeyRefusesAPausedPatroni(t *testing.T) {
 // apply, is neither rekeyed nor written to, and no peer is handed it.
 func TestARekeyLeavesASiteNotBroughtUpAlone(t *testing.T) {
 	m := newMesh(t)
-	m.hosts["watch"].files = map[string]string{}
-	m.hosts["watch"].run = ""
+	m.joining("watch")
 	p, err := BuildAll(m.cfg, m, m.transports())
 	if err != nil {
 		t.Fatal(err)
@@ -716,5 +745,16 @@ func TestAnAllRunResumesWithoutRekeyingAgain(t *testing.T) {
 	}
 	if len(m.secrets.MeshRekeyRemaining) != 0 {
 		t.Errorf("the record outlived the run: %v", m.secrets.MeshRekeyRemaining)
+	}
+}
+
+// A site whose host lost its claim, while its peers still list its key, is
+// not taken for one not brought up yet: a rekey would leave it out while it
+// runs.
+func TestARekeyRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
+	m := newMesh(t)
+	delete(m.hosts["watch"].files, registry.Path)
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch's host holds no claim") || !strings.Contains(err.Error(), "lists its WireGuard key as a peer") {
+		t.Errorf("err = %v", err)
 	}
 }

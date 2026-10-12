@@ -22,7 +22,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/meshkey"
-	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
 )
@@ -147,29 +146,18 @@ func (p *Plan) liveSites() []string { return p.live(p.end.SiteNames()) }
 // pinned to them, which run nowhere until the apply that brings them up.
 func (p *Plan) liveEnd() *config.Config { return p.end.WithoutJoining(p.Joining()...) }
 
-// JoiningSites reads, on every site cfg declares but site, whether its host
-// holds this deployment's claim, and returns the ones that do not. A host
-// that does not answer is an error: whether it is new cannot be told.
-func JoiningSites(cfg *config.Config, site string, transports map[string]apply.Transport) ([]string, error) {
-	var out []string
-	for _, name := range cfg.SiteNames() {
-		if name == site {
-			continue
-		}
-		t, ok := transports[name]
-		if !ok {
-			return nil, fmt.Errorf("site remove %s: no way to reach site %s", site, name)
-		}
-		reg, err := registry.Read(t)
-		if err != nil {
-			if errors.Is(err, apply.ErrUnreachable) {
-				return nil, fmt.Errorf("site remove %s: %s does not answer over ssh (%v). Every remaining site is read, and a site declared for the first time is read to see that its host holds no claim yet. Fix ssh and run again. Nothing was changed", site, name, err)
-			}
-			return nil, fmt.Errorf("site remove %s: %w", site, err)
-		}
-		if _, ok := reg.Deployments[cfg.ID]; !ok {
-			out = append(out, name)
-		}
+// JoiningSites is the sites cfg declares, but site, that are new to this
+// deployment (meshkey.Joining): no claim on their host, and no remaining site
+// or gateway record that says they ever ran in it. A host that does not
+// answer is an error: whether it is new cannot be told.
+func JoiningSites(cfg *config.Config, secrets *config.Secrets, site string, transports map[string]apply.Transport) ([]string, error) {
+	out, err := meshkey.Joining(cfg, secrets, site, transports)
+	var none *meshkey.NoAnswer
+	switch {
+	case errors.As(err, &none) && errors.Is(err, apply.ErrUnreachable):
+		return nil, fmt.Errorf("site remove %s: %s does not answer over ssh (%v). Every remaining site is read, and a site declared for the first time is read to see that its host holds no claim yet. Fix ssh and run again. Nothing was changed", site, none.Site, none.Err)
+	case err != nil:
+		return nil, fmt.Errorf("site remove %s: %w", site, err)
 	}
 	return out, nil
 }
@@ -177,7 +165,7 @@ func JoiningSites(cfg *config.Config, site string, transports map[string]apply.T
 // readJoining finds the joining sites, and takes them out of the transports,
 // so that nothing in the eviction reaches them.
 func (p *Plan) readJoining() error {
-	names, err := JoiningSites(p.cfg, p.Site, p.transports)
+	names, err := JoiningSites(p.cfg, p.secrets, p.Site, p.transports)
 	if err != nil {
 		return err
 	}
