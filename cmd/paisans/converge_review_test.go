@@ -52,7 +52,7 @@ func TestConvergeAsksOnceForEverySite(t *testing.T) {
 	if err := convergeWith(t, answering(t, "approve\n"), &out, "--execute"); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
-	if n := strings.Count(out.String(), "Type approve to go on: "); n != 1 {
+	if n := strings.Count(out.String(), "Type approve to proceed: "); n != 1 {
 		t.Errorf("asked %d times:\n%s", n, out.String())
 	}
 	if !strings.Contains(out.String(), "on home-a, vm") {

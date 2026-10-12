@@ -179,16 +179,18 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 }
 
 // Confirmation is what --execute says before it asks for the site's name:
-// what is cleaned off dest, and what goes with it that the plan alone shows.
-func (p *Plan) Confirmation(dest config.Destination) string {
+// what is cleaned off dest, and what goes with it that the plan alone shows,
+// then, with --delete-data, the sentence saying the data is deleted, apart so
+// that it can be set off.
+func (p *Plan) Confirmation(dest config.Destination) (what, deletes string) {
 	out := fmt.Sprintf("This cleans deployment %s (%s), site %s, off %s, and nothing says whether it still runs.", p.cfg.ID, p.cfg.Community.Domain, p.Site, dest)
 	if len(p.CaddyKept) > 0 {
 		out += fmt.Sprintf(" Its Caddy is kept, reduced to the host owner's sites in %s: %s.", render.HostSitesDir, strings.Join(p.CaddyKept, ", "))
 	}
 	if p.DeleteData {
-		out += fmt.Sprintf(" It deletes this deployment's data on %s for good.", dest)
+		deletes = fmt.Sprintf("This permanently deletes this deployment's data on %s.", dest)
 	}
-	return out
+	return out, deletes
 }
 
 // DeploymentID is the id of the deployment the plan removes.

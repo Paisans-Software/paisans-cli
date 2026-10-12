@@ -40,20 +40,12 @@ func parseProblem(path, what string, err error) error {
 	} else {
 		lines = []string{strings.TrimPrefix(err.Error(), "yaml: ")}
 	}
-	unknown := false
 	for i, l := range lines {
-		if fixed := unknownField.ReplaceAllString(l, "unknown key $1"); fixed != l {
-			lines[i], unknown = fixed, true
-		}
-		lines[i] = "- " + strings.TrimSpace(lines[i])
-	}
-	explain := strings.Join(lines, "\n")
-	if unknown {
-		explain += "\nEvery key is checked, so a misspelt one is refused rather than ignored."
+		lines[i] = "- " + strings.TrimSpace(unknownField.ReplaceAllString(l, "unknown key $1"))
 	}
 	return &ui.Problem{
 		Hint:    ui.ShortPath(path) + " cannot be read as " + what,
-		Explain: explain,
+		Explain: strings.Join(lines, "\n"),
 		Cause:   fmt.Errorf("parsing %s: %w", path, err),
 	}
 }

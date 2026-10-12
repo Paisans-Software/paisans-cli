@@ -145,7 +145,7 @@ func TestErrorVerboseShowsTheCauseChain(t *testing.T) {
 }
 
 // Only the narrower of the terminal and 80 columns is used.
-func TestErrorWrapsAtTheNarrowerWidth(t *testing.T) {
+func TestErrorWrapsAtTheTerminalWidth(t *testing.T) {
 	var b strings.Builder
 	ui.PrintErrorForTest(&b, secretsProblem(), false, false, 40)
 	for _, l := range strings.Split(strings.TrimSpace(b.String()), "\n")[1:] {
@@ -155,10 +155,25 @@ func TestErrorWrapsAtTheNarrowerWidth(t *testing.T) {
 	}
 	b.Reset()
 	ui.PrintErrorForTest(&b, secretsProblem(), false, false, 200)
+	wide := false
 	for _, l := range strings.Split(strings.TrimSpace(b.String()), "\n")[1:] {
-		if len(l) > 80 {
-			t.Errorf("a line is wider than 80 on a wide terminal: %q", l)
+		if len(l) > 200 {
+			t.Errorf("a line is wider than the terminal: %q", l)
 		}
+		wide = wide || len(l) > 80
+	}
+	if !wide {
+		t.Errorf("a wide terminal was wrapped at 80:\n%s", b.String())
+	}
+}
+
+// Off a terminal of known width the explanation is not wrapped: whatever
+// shows it wraps it.
+func TestErrorIsNotWrappedWithoutAWidth(t *testing.T) {
+	var b strings.Builder
+	ui.PrintErrorForTest(&b, &ui.Problem{Hint: "refused", Explain: strings.Repeat("word ", 40)}, false, false, 0)
+	if lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n"); len(lines) != 2 {
+		t.Errorf("got %d lines, want the hint and one explanation line:\n%s", len(lines), b.String())
 	}
 }
 

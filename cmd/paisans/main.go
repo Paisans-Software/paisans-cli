@@ -41,325 +41,17 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-const usage = `paisans renders and checks a community stack declaration.
-
-Usage:
-  paisans validate [--config paisans.yaml]
-  paisans create   [--config paisans.yaml]
-  paisans init     [--config paisans.yaml] [--secrets secrets.enc.yaml] [--sudo=false]
-  paisans render   [--config paisans.yaml] [--secrets secrets.enc.yaml] --out ./out
-  paisans host prepare --site <name> [--config paisans.yaml] [--ssh <destination>]
-               [--execute]
-  paisans host deployments --ssh <user@host[:port]> [--sudo=false]
-  paisans host allow <site> <admin>... [--config paisans.yaml] [--ssh <destination>]
-               [--execute]
-  paisans host disallow <site> <admin|fingerprint>... [--config paisans.yaml]
-               [--ssh <destination>] [--execute]
-  paisans apply    [--config paisans.yaml] [--secrets secrets.enc.yaml]
-                   [--min-free <size>] [--keep-images] [--execute]
-                   every site, from paisans.yaml to a running stack, in order
-  paisans apply    --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-                   [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...
-                   [--recreate <stack>]... [--min-free <size>] [--keep-images] [--execute]
-  paisans site add <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--execute]
-  paisans site remove <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]
-  paisans site remove <site> --evict [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--execute]
-  paisans site remove --force --ssh <user@host[:port]> --id <id or token>
-               [--delete-data] [--sudo=false] [--execute]
-  paisans gateway move [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
-  paisans mesh rekey <site>... | --all [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--execute]
-  paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--ssh <destination>] [--execute]
-  paisans storage add [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--change-replication] [--wait <duration>] [--stop-test] [--execute]
-  paisans storage rotate-key --app <name> [--config paisans.yaml]
-               [--secrets secrets.enc.yaml] [--execute]
-  paisans prune    --site <name> [--config paisans.yaml] [--ssh <destination>] [--execute]
-  paisans preflight --site <new site> [--config paisans.yaml]
-  paisans failover test [--config paisans.yaml] [--execute]
-  paisans doctor   [--config paisans.yaml] [--site <name>]... [--sudo]
-  paisans dns init [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
-  paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
-  paisans config publish [--config paisans.yaml] [--merge] [--execute]
-  paisans config pull [--config paisans.yaml] [--root <sha>] [--execute]
-  paisans config log [--config paisans.yaml] [--root <sha>]
-  paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]
-               [--config paisans.yaml] [--execute]
-  paisans admin register [--config paisans.yaml] [--key <path.pub>] [--root <sha>] [--execute]
-  paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
-  paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
-  paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...
-               [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--sudo=false] [--execute]
-  paisans app admin create --app <pocket-id app> --username <u> --email <e>
-               [--first-name <f>] [--last-name <l>] [--login-link]
-               [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--site <name>] [--ssh <destination>] [--execute]
-  paisans app remove <app> [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--delete-data] [--execute]
-  paisans oidc client create --app <name> [--rotate-secret]
-               [--config paisans.yaml] [--secrets secrets.enc.yaml]
-               [--site <name>] [--ssh <destination>] [--execute]
-  paisans web-server show  --app <name> [--config paisans.yaml] [--sudo=false]
-  paisans web-server check --app <name> [--config paisans.yaml] [--sudo=false]
-
-Commands:
-  validate   Load the configuration and report every problem found.
-  create     For a new deployment: ask, at a terminal, about the community,
-             its admins, its machines, its apps and its mail, and write a
-             commented paisans.yaml that validate refuses nothing in, once
-             you have read it and said yes. Refuses a file that exists.
-             Asks for no secret and reaches no host.
-  init     Give the configuration an id if it has none; until the
-             deployment is on any site, reach every site and keep
-             mesh.subnet only if it overlaps nothing there, else roll a
-             random /24 that overlaps nothing and move each site's address
-             into it; then generate the secrets it needs, filling in only
-             what is missing, and say what is still owed from elsewhere.
-  render     Validate, then write per site artifacts to a local directory.
-  host       prepare: take a blank host to the state apply assumes: Docker,
-             the WireGuard tools, a firewall, and a watchdog on a data site.
-             Installs only what is missing. Writes nothing without --execute.
-             deployments: list every deployment in the registry of the host
-             --ssh names (id, token, domain, site, roles and root, and a
-             Caddy kept for /srv/caddy.d), and any deployment directory or
-             labelled compose project no registry entry names. Needs no
-             paisans.yaml; changes nothing.
-             allow: add each admin's key fingerprints to the site's host's
-             key allowlist, /etc/paisans/ssh-allow.<user>, the keys host
-             prepare may add there; a new list also holds every key a
-             deployment already claims. disallow: take keys off it, by
-             admin or fingerprint; a key already authorized keeps working.
-             Both are the host owner's: --execute asks for the site's name
-             at a terminal. Write nothing without --execute.
-  apply      Without --site: take every site from paisans.yaml to a running
-             stack, running init, host prepare, apply, site add, storage
-             and dns init in the order the deployment needs. With --site:
-             compare that site's rendered artifacts with what is on its
-             host and show what would change. Changes nothing on a
-             host without --execute; without --site, the dry run may add
-             missing generated secrets to the local secrets file, and
-             says so when it does. Both, and host prepare, review the keys
-             and images paisans.yaml grants against what each host last
-             applied; --execute asks for the word approve at a terminal
-             when anything is added or changed, and asks nothing when
-             nothing is.
-  site       add: join a new data site to the running cluster in eight gated
-             stages: preflight, mesh, etcd (learners, then promoted), the
-             Patroni replica, synchronous mode, HAProxy, each existing
-             replica's patroni.env, one replica restart at a time, and each
-             monitor site's uptime stack, so it checks the new site. Reads
-             every site and plans only what differs, so a re-run resumes.
-             Writes nothing without --execute.
-             remove: take a site out of the running deployment in gated
-             stages: its data out (the Patroni leader switched to
-             the Sync Standby, its Garage node out of the layout and the
-             objects moved), out of the cluster (its etcd member, and the
-             mesh, HAProxy and gateway routes on every remaining site, and
-             each replica's patroni.env, one at a time; one data site out
-             of two and a witness takes the witness out of etcd too),
-             its host cleaned of everything provably this deployment's
-             (a gateway's Caddy kept, reduced to the host owner's sites in
-             /srv/caddy.d, while there are any), the A and AAAA records
-             dns init made for its public address deleted at the DNS
-             provider, and its entry out of paisans.yaml.
-             Refuses the only gateway, data or apps site, a site an app
-             is pinned to, and an unhealthy cluster. --host-gone skips
-             the host; --delete-data deletes its data after the site's
-             name is typed at a terminal. Writes nothing without
-             --execute.
-             remove --force --ssh <host> --id <id or token>, with no
-             paisans.yaml: clean that host of the deployment its registry
-             names, as --force does, from the registry entry alone.
-             DNS is not modified. --execute asks for the site's name at
-             a terminal.
-             remove --evict: take out a site whose host still runs and
-             that nobody else can reach, never reaching that host: the
-             mesh cut first on every remaining site, then its DNS records,
-             Patroni's own failover, its etcd member, its Garage node
-             skipped as dead, then the rest as remove does. Generates the
-             secrets of a replacement declared in the same edit, which
-             apply then brings up. --execute asks for the site's name, and
-             for revoked, lose writes or lose objects when they apply.
-  mesh       rekey: replace sites' WireGuard keys, one site at a time: a
-             next key in the secrets, every peer's mesh file and then the
-             site's own synced with it, a handshake under it from every
-             peer, etcd and Patroni healthy, then the key promoted. A
-             stopped run resumes. Writes nothing without --execute.
-  gateway    move: move the gateway role to the site paisans.yaml gives it,
-             from the site that still serves as the gateway, in gated
-             stages: carry the deployment record, check the new gateway
-             answers for every hostname through its own address, add its
-             address records beside the old one's, delete the old one's
-             (only after that check, and only records dns init made for
-             it), wait out their TTL, then stop the old gateway's Caddy.
-             Resumes after a fix. Writes nothing without --execute.
-  storage    init: provision object storage on a site: each app's key and
-             bucket, and the layout when it is the only Garage site.
-             add: join every site in storage.garage.sites into one Garage
-             cluster, in gated stages: connect, layout, sync, provision,
-             media routes, a smoke test; and, with --change-replication,
-             Garage's reset for another replication factor. Exits at a
-             stage waiting on Garage (status 75) and resumes on the next
-             run. Both create only what is missing, and write nothing
-             without --execute.
-             rotate-key: replace one app's S3 key, in gated stages: the
-             new pair into the secrets (the old one kept beside it), the
-             new key imported and granted, the app applied alone on every
-             site running it, a probe written, read and deleted with the
-             new key, and only then the old key deleted from Garage and
-             the secrets. Resumes from the secrets file. Writes nothing
-             without --execute.
-  prune      List one site's dangling Docker volumes, with size and top level
-             entries, and say which carry this deployment's label.
-             Removes those with --execute; every other volume is kept.
-  preflight  The read only checks site add runs first, for the site being
-             added and every site already running. Changes nothing.
-  failover   test: switch the Patroni primary to another data site and
-             back, checking the cluster and every app before and after
-             each switch. Interrupts writes briefly, twice. Changes
-             nothing without --execute.
-  doctor     Reach every site, or the ones --site names, and report what is
-             stuck: unreachable sites, etcd quorum and version, the Patroni
-             leader and why a replica will not promote, containers that are
-             down, Pocket ID's active instance, and clocks. Prints how to
-             recover. Reaches hosts, changes nothing; exits 1 on any FAIL.
-  dns        init: create the public DNS records the configuration implies,
-             at the provider named by acme.provider: addresses, and records
-             saying every name without mail (community.mail_domains, smtp
-             senders) sends and receives none. Creates only what is
-             missing, never updates or deletes, and refuses if any record
-             conflicts.
-             prune: delete the records dns init created that the
-             configuration no longer implies: only one carrying init's
-             comment, at a name under community.domain or one the
-             configuration names, and no longer wanted; an A or AAAA
-             pointing at a site's public address, or a TXT or MX holding
-             exactly a no-mail content init writes. Lists every other record init marked, with why
-             it is kept, and lists the zone again to confirm each delete.
-             Both write nothing without --execute.
-  config     The signed copies of paisans.yaml, secrets.enc.yaml and
-             .sops.yaml every site keeps. Each gathers every site's
-             versions first and trusts them from your own signing key or a
-             root pinned with --root. publish: sign the local files as a
-             version on the sites' newest and push it to every site;
-             --merge builds on every head of a fork. pull: move the local
-             files to the sites' newest version, or, over local edits,
-             show the difference and put its files in .paisans/incoming/.
-             log: list every version, its signer, and the sites holding
-             it. recover: onto an empty directory, gather from the --from
-             hosts and every site the trusted heads name, and write the
-             head's files, or each head's in .paisans/incoming/ with a
-             fork. With --execute, pull, recover, a publish of the first
-             version, apply and admin register ask for the word partial
-             at a terminal when no more than half the sites answered
-             directly; publish, pull, recover, apply and admin register
-             ask for rollback when the newest version is older than one
-             seen here before, and log only warns. With --execute each
-             site first syncs with its peers; without it, and in log, no
-             site is changed and only .paisans/ here is written.
-  admin      register: sign an attestation of the sites' newest version
-             with your own key, so trust starts from your signature: the
-             key in your ssh-agent listed under your entry in admins, or
-             the one --key names. Signs only a version equal to your local
-             files, or, with no files and a root pinned, the one the pin
-             leads to, and then writes its files. Records the key in
-             .paisans/signing-key, which config publish signs with from
-             then on. Changes only the sites' configuration stores, and
-             nothing without --execute.
-  secrets    set: read one value from stdin and write it into the encrypted
-             secrets file, printing only its name. For credentials issued
-             elsewhere, so they never touch a terminal or an editor.
-             rotate: replace secrets, named by their paths in the secrets
-             file (apps.<app>.oauth for Mbin's OAuth2 keys), or every one
-             in scope with --all, one at a time in gated stages: a next
-             value in the secrets file, the side that checks it, each
-             site that uses it healthy before the next, then the value
-             promoted. A pasted secret (the DNS token or an SMTP
-             password) is handed on once it is replaced at its issuer
-             and set with secrets set, and refused
-             while every host using it runs the value the file holds,
-             read line by line; --replaced <path> lists one already
-             replaced and applied, which every host runs, instead. Lists
-             the secrets it keeps and why. --all refuses a file that lacks
-             a secret init generates. A stopped --all resumes with what it
-             left, and says so; --all --restart starts the full list
-             again. Refuses while a mesh rekey is unfinished, a site does
-             not answer, or etcd or Patroni is unhealthy; apply and every
-             other command that renders refuse while a rotation is
-             unfinished. A run that signs members out asks for sign out
-             at a terminal, before any host is claimed. A stopped run
-             resumes. Writes nothing without --execute.
-  app        admin create: make sure a user exists, is verified and is an
-             administrator of Pocket ID, and is in every admin group the
-             apps signing in through it read. There is no password: a
-             created account gets a one-time login link, printed once, to
-             register a passkey with. Writes nothing without --execute.
-             remove: take an app that has left paisans.yaml off every
-             host, once a whole apply on each site has marked its files
-             left over: its containers and networks, its rendered files
-             (one edited on the host is kept), its stack directory when
-             nothing else is in it, and its Pocket ID client when the
-             secrets file records that client's ID. --delete-data also
-             deletes its database and role, its Garage bucket and keys,
-             its named volumes and its data directories, after the app's
-             name is typed at a terminal. Leaves its secrets and DNS
-             records, and says so. Writes nothing without --execute.
-  oidc       client create: create an app's client at the deployment's
-             Pocket ID, with the groups the app reads, and record its ID and
-             secret in the secrets file. The secret is never printed.
-             Writes nothing without --execute. Supports the mbin, outline,
-             writefreely and uptime kinds.
-  web-server show: for an app pinned to a monitor site, print what the web
-             server in front of it must do (terminate TLS for its hostname,
-             pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled
-             in for the web server it finds on the monitor over ssh, read
-             only, or for Caddy, nginx and Apache when it finds none.
-             check: from this machine, check that the hostname resolves to
-             the monitor, that /healthz answers with a valid certificate,
-             that sign in redirects with an https callback, and that the
-             published port is closed from outside. Reads only; exits 1 on
-             any FAIL. With the toolkit's own Caddy in front (managed_by:
-             paisans), only the first two apply.
-
-host prepare, host deployments, host allow, host disallow, apply, prune, site
-add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
-admin create, app remove, oidc client create, secrets prune, secrets rotate,
-preflight, failover test, doctor, init, config and admin register are the only
-commands that reach a host. Each reads it to plan, and changes it only with
---execute; host allow and host disallow change only a host's key allowlist,
-which is the host owner's, and claim nothing; config and admin register claim
-nothing, and their --execute only starts each site's configuration sync and, for
-publish and register, adds a version to its store; host deployments, preflight,
-doctor and init have no --execute and never change it; secrets prune only reads
-the gateways' deployment records, and its --execute writes the local secrets
-file alone. With --execute, a command first claims each host it writes to in
-/var/lib/paisans/registry.json, and refuses if another deployment there holds
-this one's token, WireGuard interface or listen port, or a mesh subnet
-overlapping this one's. apply and host prepare also refuse when anything else on
-the host overlaps the mesh subnet. dns init and dns prune reach no host, only
-the DNS provider's API, and change it only with --execute; site remove also
-deletes the removed site's records there. web-server show and web-server check
-change nothing: check looks at a monitor's public hostname as any visitor could,
-and with managed_by: external both read the monitor's web server over ssh, show
-always and check when a check fails.
-Everything else writes files locally and stops.
-
-Every command takes -v or --verbose. By default each step is one line; with it,
-the reasons, values, request bodies and command output behind each step show
-too. A failure always says what went wrong and what to do; with -v, the
-underlying error shows under it too.
-`
-
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+	page, asked, run := resolveHelp(os.Args[1:])
+	switch {
+	case page != nil && asked:
+		page(os.Stdout)
+		return
+	case page != nil:
+		page(os.Stderr)
 		os.Exit(2)
 	}
+	os.Args = append(os.Args[:1], run...)
 	var err error
 	switch os.Args[1] {
 	case "validate":
@@ -383,7 +75,7 @@ func main() {
 		case len(os.Args) >= 3 && os.Args[2] == "disallow":
 			err = runHostDisallow(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(usageError(os.Stderr, "host takes one subcommand, prepare, deployments, allow or disallow"))
+			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments, allow or disallow"))
 		}
 	case "site":
 		switch {
@@ -392,7 +84,7 @@ func main() {
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(usageError(os.Stderr, "site takes one subcommand, add or remove"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, add or remove"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])
@@ -419,7 +111,7 @@ func main() {
 		case len(os.Args) >= 3 && os.Args[2] == "rotate-key":
 			err = runStorageRotateKey(os.Args[3:])
 		default:
-			os.Exit(usageError(os.Stderr, "storage takes one subcommand, init, add or rotate-key"))
+			os.Exit(groupError(os.Stderr, "storage", "storage takes one subcommand, init, add or rotate-key"))
 		}
 	case "prune":
 		err = runPrune(os.Args[2:])
@@ -436,11 +128,8 @@ func main() {
 		case len(os.Args) >= 3 && os.Args[2] == "prune":
 			err = runDNSPrune(os.Args[3:])
 		default:
-			os.Exit(usageError(os.Stderr, "dns takes one subcommand, init or prune"))
+			os.Exit(groupError(os.Stderr, "dns", "dns takes one subcommand, init or prune"))
 		}
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return
 	default:
 		os.Exit(usageError(os.Stderr, fmt.Sprintf("unknown command %q", os.Args[1])))
 	}
@@ -448,16 +137,31 @@ func main() {
 	// process exits, whatever the outcome. os.Exit runs no deferred call, so
 	// this comes first on both paths.
 	apply.CloseConnections()
+	// A command whose flags parse with ContinueOnError returns ErrHelp once
+	// its flag set has printed its page for --help: help, not a failure.
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
 	if err != nil {
 		os.Exit(reportError(os.Stderr, err, verboseRun))
 	}
 }
 
-// usageError prints msg in the error form, then the usage, and returns the
-// status for a command line paisans cannot run.
+// usageError prints msg in the error form, then the list of commands, and
+// returns the status for a command line paisans cannot run.
 func usageError(w io.Writer, msg string) int {
 	ui.PrintError(w, errors.New(msg), false)
-	fmt.Fprintf(w, "\n%s", usage)
+	fmt.Fprintln(w)
+	printTopHelp(w)
+	return 2
+}
+
+// groupError is usageError for a group given a subcommand it does not have:
+// msg, then the group's own page.
+func groupError(w io.Writer, group, msg string) int {
+	ui.PrintError(w, errors.New(msg), false)
+	fmt.Fprintln(w)
+	printGroupHelp(w, group)
 	return 2
 }
 
@@ -481,7 +185,7 @@ func reportError(w io.Writer, err error, verbose bool) int {
 }
 
 func runValidate(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ExitOnError)
+	fs := newFlagSet("validate", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	if err := fs.Parse(args); err != nil {
@@ -516,7 +220,7 @@ func runValidate(args []string) error {
 // deployment up is `apply`, and that is a separate decision from having
 // credentials to stand it up with.
 func runInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
@@ -657,7 +361,7 @@ func reportOwed(r ui.Reporter, filled secretsgen.Result) {
 }
 
 func runRender(args []string) error {
-	fs := flag.NewFlagSet("render", flag.ExitOnError)
+	fs := newFlagSet("render", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the sops encrypted secrets (default: secrets.enc.yaml beside the config)")
@@ -722,7 +426,7 @@ func runRender(args []string) error {
 // the identity step in clients.go: declaring the app is the approval for
 // its client, so `--execute` creates and records it like any other secret.
 func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("apply", flag.ExitOnError)
+	fs := newFlagSet("apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
@@ -1251,7 +955,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 // It must run after the infrastructure stack is up, since Garage has to be
 // reachable to be asked what it already has.
 func runStorageInit(args []string) error {
-	fs := flag.NewFlagSet("storage init", flag.ExitOnError)
+	fs := newFlagSet("storage init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
@@ -1335,7 +1039,7 @@ func runStorageInit(args []string) error {
 // modelled on runStorageInit: probe read only, print, and change the host only
 // with --execute. It needs no secrets; nothing it installs is a credential.
 func runHostPrepare(args []string) error {
-	fs := flag.NewFlagSet("host prepare", flag.ExitOnError)
+	fs := newFlagSet("host prepare", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	o := hostPrepareFlags(fs)
 	if err := parseFlags(fs, args); err != nil {
@@ -1388,7 +1092,7 @@ type prepareEnv struct {
 // routed. -v is accepted and changes nothing here; env.r is already as
 // verbose as the run.
 func runHostPrepareIn(env prepareEnv, args []string) error {
-	fs := flag.NewFlagSet("host prepare", flag.ContinueOnError)
+	fs := newFlagSet("host prepare", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var verbose bool
 	verboseFlags(fs, &verbose)
@@ -1608,7 +1312,7 @@ func runDNSPrune(args []string) error {
 // are worked out before the secrets are opened or the provider is contacted,
 // so a configuration that cannot name its records is refused offline.
 func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagSet)) (ui.Reporter, *config.Config, []dns.Want, dns.Provider, bool, error) {
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs := newFlagSet(name, flag.ExitOnError)
 	reporter := commonFlags(fs)
 	for _, add := range extra {
 		add(fs)

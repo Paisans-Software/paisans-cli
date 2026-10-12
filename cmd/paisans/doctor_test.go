@@ -197,7 +197,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		}
 	}
 	start := strings.Index(out, "1. Start home-b (ssh ubuntu@home-b.local)")
-	force := strings.Index(out, "2. Only if home-b is lost for good")
+	force := strings.Index(out, "2. Only if home-b is lost permanently")
 	command := strings.Index(out, "patronictl -c /home/postgres/postgres.yml failover --candidate home-a --force")
 	warning := strings.Index(out, "WARNING: every commit home-b made")
 	if start < 0 || !(start < force && force < command && command < warning) {

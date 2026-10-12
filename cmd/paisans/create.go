@@ -7,6 +7,7 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/create"
@@ -23,7 +24,7 @@ import (
 // not exist yet. The file is written only once validate refuses nothing in it
 // and the operator has read it and said yes.
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("create", flag.ExitOnError)
+	fs := newFlagSet("create", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to write the new deployment declaration to")
 	if err := fs.Parse(args); err != nil {
@@ -48,6 +49,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
+	by := create.Origin{Version: toolkitVersion(), Date: time.Now().Format("2006-01-02")}
 	p := create.NewPrompter(stdin, stdout)
 	w := create.NewWizard(p)
 	p.Say("paisans create writes %s for a new deployment. Enter takes the answer", ui.ShortPath(path))
@@ -57,7 +59,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err := w.Ask(section); err != nil {
 			return createAborted(err)
 		}
-		data, err := create.Render(w.Answers, id)
+		data, err := create.Render(w.Answers, id, by)
 		if err != nil {
 			return err
 		}

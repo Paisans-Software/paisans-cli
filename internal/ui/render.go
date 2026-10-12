@@ -14,6 +14,7 @@ const (
 	green  = "\x1b[32m"
 	red    = "\x1b[31m"
 	yellow = "\x1b[33m"
+	bold   = "\x1b[1m"
 	dim    = "\x1b[2m"
 	ital   = "\x1b[3m"
 	reset  = "\x1b[0m"
@@ -23,7 +24,8 @@ const (
 type writer struct {
 	mu sync.Mutex
 	// cols is how wide prose is wrapped: the terminal's width when it is
-	// known, never more than maxWidth.
+	// known, so a wrapped line keeps its indent, and 0, not wrapped, when it
+	// is not.
 	cols int
 	// termCols is the terminal's own width, 0 when it is not known. A hint
 	// wraps only when it is narrower than the hint's line.
@@ -44,7 +46,7 @@ type writer struct {
 }
 
 func newWriter(w io.Writer, verbose, terminal bool) *writer {
-	return &writer{w: &tracked{w: w}, cols: maxWidth, verbose: verbose, terminal: terminal, now: time.Now, tick: 100 * time.Millisecond}
+	return &writer{w: &tracked{w: w}, verbose: verbose, terminal: terminal, now: time.Now, tick: 100 * time.Millisecond}
 }
 
 type step struct {

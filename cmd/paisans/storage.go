@@ -23,7 +23,7 @@ import (
 // time, and another replication factor is a whole-cluster stop, so the unit
 // of work is the cluster. docs/specs/2026-10-07-multisite-garage.md.
 func runStorageAdd(args []string) error {
-	fs := flag.NewFlagSet("storage add", flag.ExitOnError)
+	fs := newFlagSet("storage add", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

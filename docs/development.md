@@ -513,14 +513,16 @@ its own wording (`storageadd.Waiting`, `config.LoadError`) unwraps to its
 `Problem`. Any other error prints whole in the same form, its first line as
 the hint. Name a file in a hint with `ui.ShortPath`, never in a command meant
 to be copied. Refusal explanations, notes and the final error's explanation
-are wrapped by the reporter at the terminal's width, at most 80 columns,
-breaking only at spaces, so write them as prose and a list as lines starting
-`- `, without wrapping them by hand.
+are wrapped by the reporter at the terminal's width, breaking only at spaces,
+so a wrapped line keeps its indent; off a terminal they are not wrapped at
+all. Write them as prose and a list as lines starting `- `, without wrapping
+them by hand. A type-to-confirm question is printed unwrapped, and the
+sentence saying what it deletes permanently goes through `ui.Danger`.
 
 Tests assert on `ui.Recorder` events, not on rendered text, so a change to the
 wording of a line or to the plain rendering does not break a test about what a
 command did. `cmd/paisans/output_test.go` drives the dry runs and executions
-against their fakes and holds the default output to short lines without
+against their fakes and holds piped default output to plain text, without
 escapes.
 
 **A file edited on the host is a conflict, and a conflict stops the whole

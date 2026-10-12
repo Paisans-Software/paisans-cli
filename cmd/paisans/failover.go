@@ -18,7 +18,7 @@ func runFailover(args []string) error {
 // dry run by default like every command that reaches a host, and more
 // deliberately so than most: each switch interrupts writes for everyone.
 func runFailoverTest(args []string) error {
-	fs := flag.NewFlagSet("failover test", flag.ExitOnError)
+	fs := newFlagSet("failover test", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	execute := fs.Bool("execute", false, "actually switch the primary over and back")

@@ -16,10 +16,11 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// Default output is for reading at a glance: plain when piped, and no line
-// long enough to be an explanation. Run over the dry runs and executions the
-// command tests already drive against their fakes.
-func TestDefaultOutputIsShortAndPlain(t *testing.T) {
+// Default output is plain when piped: no colour and no redrawn lines. Lines
+// are not wrapped there, since whatever shows them wraps them. Run over the
+// dry runs and executions the command tests already drive against their
+// fakes.
+func TestDefaultOutputIsPlain(t *testing.T) {
 	runs := fixtureRuns(t)
 	var names []string
 	for name := range runs {
@@ -36,16 +37,6 @@ func TestDefaultOutputIsShortAndPlain(t *testing.T) {
 		}
 		if strings.ContainsAny(out, "\x1b\r") {
 			t.Errorf("%s: escapes in piped output", name)
-		}
-		for _, line := range strings.Split(out, "\n") {
-			// A failed step's line carries its result in full. A refusal's
-			// explanation is wrapped to 80 columns, so it is held to the
-			// same width as everything else. host prepare's install
-			// packages names every package it installs, as many as a fresh
-			// host needs.
-			if len(line) > 100 && !strings.HasPrefix(strings.TrimSpace(line), "FAIL") && !strings.Contains(line, " install packages: ") {
-				t.Errorf("%s: long line in default output (%d): %q", name, len(line), line)
-			}
 		}
 	}
 }

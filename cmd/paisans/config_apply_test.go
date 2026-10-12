@@ -305,7 +305,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type rollback to go on: ") || !claimed(logged(t, log)) {
+	if !strings.Contains(out.String(), "Type rollback to proceed: ") || !claimed(logged(t, log)) {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 
@@ -504,7 +504,7 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type rollback to go on: ") || !claimed(logged(t, log)) || !f.pushed() {
+	if !strings.Contains(out.String(), "Type rollback to proceed: ") || !claimed(logged(t, log)) || !f.pushed() {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 }

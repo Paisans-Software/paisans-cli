@@ -453,7 +453,7 @@ func (t SSHTransport) authProblem(err error, out string) error {
 	case strings.Contains(last, "Host key verification failed") && strings.Contains(out, "REMOTE HOST IDENTIFICATION HAS CHANGED"):
 		return &ui.Problem{
 			Hint:    t.Describe() + " offered a host key other than the one known",
-			Explain: fmt.Sprintf("Either the host was reinstalled, or something is answering in its place. Find out which before going on. Once you know it is the same host, remove the old key with ssh-keygen -R %s, connect once with %s to accept the new one, and run again.", shellQuote(t.knownHostsName()), t.connectCommand()),
+			Explain: fmt.Sprintf("Either the host was reinstalled, or something is answering in its place. Find out which before you proceed. Once you know it is the same host, remove the old key with ssh-keygen -R %s, connect once with %s to accept the new one, and run again.", shellQuote(t.knownHostsName()), t.connectCommand()),
 			Cause:   err,
 		}
 	case strings.Contains(last, "Host key verification failed"):

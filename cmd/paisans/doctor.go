@@ -44,7 +44,7 @@ const doctorConnectTimeout = 10
 // It takes no --ssh, like preflight: it reaches several sites, and one
 // override cannot name them all.
 func runDoctor(args []string) error {
-	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	fs := newFlagSet("doctor", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	var only pathList
