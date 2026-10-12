@@ -591,10 +591,10 @@ client is created at the one Pocket ID, its issuer and key come from
 (`invite-without-smtp`), a `code_of_conduct` that is missing, empty or not text
 (`invite-code-of-conduct-missing`), and a setting out of range
 (`invite-setting-invalid`). A setting the kind does not read is a warning
-(`invite-setting-unknown`), since it renders nothing. The service sends its own notices (an application
-waiting, an invitee's outcome) through the deployment's `smtp:` block, which
-the app's own `smtp:` fields may override; the sign-in link is Pocket ID's
-mail.
+(`invite-setting-unknown`), since it renders nothing. The service sends its
+own notices (an application waiting, an invitee's outcome) through the
+deployment's `smtp:` block, which the app's own `smtp:` fields may override;
+the sign-in link is Pocket ID's mail.
 
 ### The code of conduct
 
