@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/garage"
+	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
@@ -916,22 +917,41 @@ func cacheDigests() (restore func()) {
 // Images are resolved through imageDigests unless options say otherwise: they
 // follow it, so a caller's apply.ResolveImages(nil) keeps every deployed
 // build.
-func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
-	if err := refuseSharedGatewayMove(cfg, site, transport); err != nil {
-		return nil, err
-	}
-	// An etcd member keeps the flags it was born with, read from its host,
-	// so that etcd.members growing never changes a running member's compose
-	// file. See render.EtcdInitialPath.
-	var renderOptions []render.Option
+// siteRenderOptions are the facts read from site's host that its render
+// needs. An etcd member keeps the flags it was born with, so that
+// etcd.members growing never changes a running member's compose file (see
+// render.EtcdInitialPath). A site that keeps the monitor while the gateway
+// role has left it, and whose host still holds the gateway's record or a
+// move's marker, is still the gateway DNS points at: it keeps every route
+// until gateway move hands it off. Only a gateway is ever given the record,
+// so a plain monitor never renders as one.
+func siteRenderOptions(cfg *config.Config, site string, transport apply.Transport) ([]render.Option, error) {
+	var out []render.Option
 	if contains(cfg.Etcd.Members, site) {
 		initial, found, err := apply.ReadEtcdInitial(transport, cfg.Deployment())
 		if err != nil {
 			return nil, err
 		}
 		if found {
-			renderOptions = append(renderOptions, render.WithEtcdInitial(site, initial))
+			out = append(out, render.WithEtcdInitial(site, initial))
 		}
+	}
+	if s := cfg.Sites[site]; !s.Has(config.RoleGateway) && s.RunsCaddy() {
+		departing, err := gatewaymove.HoldsRecordOrMarker(transport, cfg.Deployment())
+		if err != nil {
+			return nil, err
+		}
+		if departing {
+			out = append(out, render.WithDepartingGateway(site))
+		}
+	}
+	return out, nil
+}
+
+func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
+	renderOptions, err := siteRenderOptions(cfg, site, transport)
+	if err != nil {
+		return nil, err
 	}
 	rendered, err := render.Build(cfg, secrets, renderOptions...)
 	if err != nil {

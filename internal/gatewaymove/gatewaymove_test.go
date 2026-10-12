@@ -108,6 +108,10 @@ type world struct {
 	// old are the ids of the records the move may delete; kept those it
 	// must not.
 	old, kept []string
+	// applySite is the hand-off's apply, nil for a move that has none, and
+	// checkSite its dry run.
+	applySite func(site string) error
+	checkSite func(site string) error
 }
 
 func newWorld(t *testing.T, edits ...func(string) string) *world {
@@ -173,6 +177,8 @@ func (w *world) transports() map[string]apply.Transport {
 func (w *world) options() gatewaymove.Options {
 	return gatewaymove.Options{
 		DNSProvider: w.zone.For("cloudflare"),
+		ApplySite:   w.applySite,
+		CheckSite:   w.checkSite,
 		Probes: gatewaymove.Probes{
 			Get: func(_ context.Context, address, hostname, _ string) (int, error) {
 				w.gets++
@@ -488,28 +494,162 @@ func TestAnotherMovesMarkerDoesNotSkipTheWait(t *testing.T) {
 	}
 }
 
-// The old gateway kept the monitor: the move finds it through DNS but must
-// not stop its Caddy, which still serves the monitor, so it is refused
-// before anything runs.
-func TestAMoveOffASiteThatKeepsTheMonitorIsRefused(t *testing.T) {
+// sharedWorld is the world with home-a, the old gateway, keeping the
+// monitor: its roles run Caddy for the status page, its Caddy serves every
+// gateway hostname, and the hand-off's apply rewrites its Caddyfile to the
+// status page alone. applied lists each site applied; failApply makes the
+// next apply fail.
+type shared struct {
+	*world
+	applied   []string
+	failApply bool
+}
+
+func sharedWorld(t *testing.T) *shared {
+	t.Helper()
 	w := newWorld(t, func(s string) string {
 		s = strings.Replace(s, "  home-a:\n    roles: [data, apps]\n", "  home-a:\n    roles: [data, apps, monitor]\n", 1)
 		return strings.Replace(s, "placement: { pinned: watch }", "placement: { pinned: home-a }", 1)
 	})
-	_, err := w.build()
-	if err == nil || !strings.Contains(err.Error(), "keeps the monitor") {
-		t.Fatalf("want the shared-site refusal, got %v", err)
+	sw := &shared{world: w}
+	path := gatewaymove.CaddyfilePath(w.cfg.Deployment())
+	var b strings.Builder
+	for _, h := range dns.GatewayHostnames(w.cfg) {
+		fmt.Fprintf(&b, "%s {\n\timport snippets/app.caddy\n}\n", h.Name)
 	}
-	if len(w.hosts["home-a"].caddy) != 1 {
-		t.Error("home-a's Caddy was touched")
+	b.WriteString("status.example.org {\n\timport snippets/status.caddy\n}\n")
+	w.hosts["home-a"].files[path] = b.String()
+	w.applySite = func(site string) error {
+		sw.applied = append(sw.applied, site)
+		if sw.failApply {
+			sw.failApply = false
+			return errors.New("apply failed")
+		}
+		w.hosts[site].files[path] = "status.example.org {\n\timport snippets/status.caddy\n}\n"
+		return nil
 	}
-	held, err := gatewaymove.HoldsRecordOrMarker(w.hosts["home-a"], w.cfg.Deployment())
-	if err != nil || !held {
-		t.Errorf("home-a holds the record: %v %v", held, err)
+	return sw
+}
+
+// handedOff checks home-a kept its Caddy, holds neither the record nor the
+// marker, serves no gateway hostname, and that DNS moved.
+func (sw *shared) handedOff(t *testing.T) {
+	t.Helper()
+	a := sw.hosts["home-a"]
+	if len(a.caddy) != 1 {
+		t.Errorf("home-a's Caddy was stopped: %v", a.caddy)
 	}
-	held, err = gatewaymove.HoldsRecordOrMarker(w.hosts["home-b"], w.cfg.Deployment())
-	if err != nil || held {
-		t.Errorf("home-b holds nothing: %v %v", held, err)
+	d := sw.cfg.Deployment()
+	for _, path := range []string{deployrecord.Path(d), gatewaymove.MarkerPath(d)} {
+		if _, ok := a.files[path]; ok {
+			t.Errorf("home-a still holds %s", path)
+		}
+	}
+	caddyfile := a.files[gatewaymove.CaddyfilePath(d)]
+	for _, h := range dns.GatewayHostnames(sw.cfg) {
+		if slices.Contains(strings.Split(caddyfile, "\n"), h.Name+" {") {
+			t.Errorf("home-a still serves %s:\n%s", h.Name, caddyfile)
+		}
+		if got := sw.at(h.Name); !slices.Equal(got, []string{newIP}) {
+			t.Errorf("%s points at %v, want only %s", h.Name, got, newIP)
+		}
+	}
+}
+
+// The old gateway keeps the monitor: the move runs seven stages, keeps its
+// Caddy, and hands it off by applying it once.
+func TestAMoveOffASiteThatKeepsTheMonitorHandsItOff(t *testing.T) {
+	sw := sharedWorld(t)
+	p := sw.mustBuild()
+	if p.From != "home-a" || len(p.Stages) != 7 || p.Stages[6].Name != "hand off" {
+		t.Fatalf("from %q, %d stages", p.From, len(p.Stages))
+	}
+	if err := sw.run(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(sw.applied, []string{"home-a"}) {
+		t.Errorf("applied %v, want home-a once", sw.applied)
+	}
+	sw.handedOff(t)
+	again := sw.mustBuild()
+	if again.From != "" {
+		t.Errorf("a finished hand-off still finds %s", again.From)
+	}
+}
+
+// The hand-off's apply failed after the record and marker went: the next
+// run finds home-a by the routes its Caddy still carries, and finishes.
+func TestAHandOffStoppedAfterStageSixResumes(t *testing.T) {
+	sw := sharedWorld(t)
+	sw.failApply = true
+	if err := sw.run(); err == nil || !strings.Contains(err.Error(), "stage 7") {
+		t.Fatalf("want a stop at stage 7: %v", err)
+	}
+	d := sw.cfg.Deployment()
+	if _, ok := sw.hosts["home-a"].files[deployrecord.Path(d)]; ok {
+		t.Fatal("stage 6 left the record")
+	}
+	p := sw.mustBuild()
+	if p.From != "home-a" {
+		t.Fatalf("the resumed run does not find home-a: %q", p.From)
+	}
+	// Released already: the record, the marker and DNS are done with, so
+	// only the hand-off is left to do.
+	for _, st := range p.Stages[:6] {
+		if st.Skipped == "" {
+			t.Errorf("stage %d (%s) is not skipped on a released site", st.Number, st.Name)
+		}
+	}
+	slept := sw.slept
+	if err := sw.run(); err != nil {
+		t.Fatal(err)
+	}
+	if sw.slept != slept {
+		t.Errorf("the resumed run waited %s again", sw.slept-slept)
+	}
+	sw.handedOff(t)
+}
+
+// A hand-off that fails says how to apply the old site directly, which works
+// once the record and the marker are gone.
+func TestAFailedHandOffNamesTheApplyThatFinishesIt(t *testing.T) {
+	sw := sharedWorld(t)
+	sw.failApply = true
+	err := sw.run()
+	if want := "paisans apply --site home-a --only infra --execute"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want %q in: %v", want, err)
+	}
+}
+
+// A dry run lists the hand-off and applies nothing.
+func TestADryRunAppliesNothing(t *testing.T) {
+	sw := sharedWorld(t)
+	p := sw.mustBuild()
+	p.Show(&ui.Recorder{})
+	if len(sw.applied) != 0 {
+		t.Errorf("a dry run applied %v", sw.applied)
+	}
+}
+
+// A monitor that was never the gateway serves only its own hostname: the
+// move finds the plain old gateway, in six stages, and never applies.
+func TestAPlainMonitorIsNeverAnOldGateway(t *testing.T) {
+	w := newWorld(t)
+	d := w.cfg.Deployment()
+	w.hosts["watch"].caddy = []string{"face"}
+	w.hosts["watch"].files[gatewaymove.CaddyfilePath(d)] = "status.example.org {\n}\n"
+	applied := false
+	w.applySite = func(string) error { applied = true; return nil }
+	p := w.mustBuild()
+	if p.From != "home-a" || len(p.Stages) != 6 {
+		t.Fatalf("from %q, %d stages", p.From, len(p.Stages))
+	}
+	if err := w.run(); err != nil {
+		t.Fatal(err)
+	}
+	w.moved(t)
+	if applied || len(w.hosts["watch"].caddy) != 1 {
+		t.Errorf("the plain monitor was touched: applied %t, caddy %v", applied, w.hosts["watch"].caddy)
 	}
 }
 
@@ -533,5 +673,41 @@ func TestAMoveLeavingAStatusRecordBehindIsRefused(t *testing.T) {
 	}
 	if len(w.hosts["home-a"].caddy) != 1 {
 		t.Error("home-a's Caddy was touched")
+	}
+}
+
+// The hand-off's apply is tried as a dry run before anything moves, so a
+// refusal it would meet at stage 7, after DNS has moved, stops the move at
+// the start instead.
+func TestAHandOffItsApplyWouldRefuseStopsTheMoveBeforeItStarts(t *testing.T) {
+	sw := sharedWorld(t)
+	var checked []string
+	sw.checkSite = func(site string) error {
+		checked = append(checked, site)
+		return errors.New("--secrets names a file other than secrets.enc.yaml")
+	}
+	err := sw.run()
+	if err == nil || !strings.Contains(err.Error(), "secrets.enc.yaml") {
+		t.Fatalf("want the dry run's refusal: %v", err)
+	}
+	if !slices.Equal(checked, []string{"home-a"}) || len(sw.applied) != 0 {
+		t.Errorf("checked %v, applied %v", checked, sw.applied)
+	}
+	if _, ok := sw.hosts["home-a"].files[deployrecord.Path(sw.cfg.Deployment())]; !ok {
+		t.Error("the record was removed")
+	}
+	for _, h := range dns.GatewayHostnames(sw.cfg) {
+		if got := sw.at(h.Name); !slices.Equal(got, []string{oldIP}) {
+			t.Errorf("%s points at %v: DNS changed", h.Name, got)
+		}
+	}
+}
+
+// A plain move has no hand-off, so nothing is tried.
+func TestAPlainMoveTriesNoHandOff(t *testing.T) {
+	w := newWorld(t)
+	w.checkSite = func(site string) error { t.Errorf("tried a hand-off of %s", site); return nil }
+	if err := w.run(); err != nil {
+		t.Fatal(err)
 	}
 }

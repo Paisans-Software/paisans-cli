@@ -138,6 +138,9 @@ This ships in two pull requests. Founder decision, 2026-10-12.
 
 ### First: refuse it
 
+> **Superseded 2026-10-12** by `2026-10-12-gateway-handoff.md`, which
+> replaces this refusal with the hand-off.
+
 With the rest of this spec. Both `paisans gateway move` and
 `paisans apply --site` (which `apply` runs for every site) refuse when the
 site concerned does not hold `gateway`, runs Caddy for the monitor, and its

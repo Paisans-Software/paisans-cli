@@ -42,6 +42,16 @@ type Options struct {
 	// Probes reach the new gateway over HTTPS, tell the time and wait. The
 	// zero value is DefaultProbes.
 	Probes Probes
+	// ApplySite applies a site's infra stack, as apply --site <site> --only
+	// infra --execute. The hand-off off a site that keeps the monitor calls
+	// it once the site no longer holds the gateway's record, so that its
+	// Caddy reloads with the monitor's routes alone.
+	ApplySite func(site string) error
+	// CheckSite is ApplySite's dry run. An executed move off a site that
+	// keeps the monitor runs it before the first stage, so a refusal the
+	// hand-off's apply would meet after DNS has moved stops the move at the
+	// start instead.
+	CheckSite func(site string) error
 }
 
 // dnsTimeout bounds one plan or one run against the provider.
@@ -55,6 +65,7 @@ const (
 	stageRemove
 	stageWait
 	stageStop
+	stageHandOff
 )
 
 // Stage is one stage of the move: its steps, then its gate.
@@ -87,9 +98,15 @@ type Evidence struct {
 	// HostSites are the files in /srv/caddy.d the Caddy serves for the
 	// host's owner.
 	HostSites []string
+	// Routes is whether the site's Caddyfile names a hostname the gateway
+	// serves. It is read only on a site whose roles run Caddy, where the
+	// Caddy itself is not evidence: it is what still finds a site that keeps
+	// the monitor once its record and marker are gone, until the hand-off has
+	// reloaded it.
+	Routes bool
 }
 
-func (e Evidence) any() bool { return len(e.Caddy) > 0 || e.Record || e.Marker != nil }
+func (e Evidence) any() bool { return len(e.Caddy) > 0 || e.Record || e.Marker != nil || e.Routes }
 
 // Marker is written on the old gateway's host once its DNS records are
 // deleted, so that a run that stops during the wait resumes it rather than
@@ -104,6 +121,12 @@ type Marker struct {
 
 // Until is when every resolver has forgotten the deleted records.
 func (m Marker) Until() time.Time { return m.DeletedAt.Add(time.Duration(m.TTL) * time.Second) }
+
+// CaddyfilePath is the Caddyfile on a site's host that runs the toolkit's
+// Caddy.
+func CaddyfilePath(d deployment.Deployment) string {
+	return d.Path("infra", "caddy", "Caddyfile")
+}
 
 // MarkerPath is the marker on the old gateway's host, beside the deployment
 // record and named by the token the same way.
@@ -127,6 +150,11 @@ type Plan struct {
 	provider   dns.Provider
 	probes     Probes
 	evidence   Evidence
+	// shared is whether From runs Caddy for a monitor, which the move hands
+	// off rather than stops.
+	shared    bool
+	applySite func(site string) error
+	checkSite func(site string) error
 }
 
 func (p *Plan) reporter() ui.Reporter {
@@ -156,7 +184,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	if probes.Get == nil {
 		probes = DefaultProbes()
 	}
-	p := &Plan{To: to, cfg: cfg, transports: transports, probes: probes}
+	p := &Plan{To: to, cfg: cfg, transports: transports, probes: probes, applySite: o.ApplySite, checkSite: o.CheckSite}
 
 	// The DNS stages need the provider's API; a move it cannot reach is
 	// refused rather than left half done, since the old gateway may only be
@@ -181,17 +209,22 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 
 	// The old gateway: a site without the role that still holds what a
 	// gateway holds. A site whose roles run Caddy (a monitor in ingress mode
-	// paisans) holds it legitimately and is not asked.
+	// paisans) holds its Caddy legitimately, so there the record, the marker
+	// and the gateway's routes are the evidence, never the Caddy.
 	held := map[string]Evidence{}
 	for _, site := range cfg.SiteNames() {
-		if site == to || cfg.Sites[site].RunsCaddy() {
+		if site == to {
 			continue
 		}
 		t, ok := transports[site]
 		if !ok {
 			return nil, fmt.Errorf("gateway move: no way to reach %s", site)
 		}
-		ev, err := inspect(t, cfg.Deployment())
+		read := inspect
+		if cfg.Sites[site].RunsCaddy() {
+			read = func(t apply.Transport, d deployment.Deployment) (Evidence, error) { return inspectDeparting(t, cfg) }
+		}
+		ev, err := read(t, cfg.Deployment())
 		if err != nil {
 			return nil, err
 		}
@@ -220,13 +253,11 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 		return nil, refuse("more than one site still holds a gateway: "+strings.Join(candidates, ", "), "A move leaves one gateway for another. Finish the moves one at a time: give the gateway role to one of them, apply it and run the move, then move it on.")
 	}
 	p.From = candidates[0]
-	if cfg.Sites[p.From].RunsCaddy() {
-		return nil, SharedRefusal(p.From)
-	}
+	p.shared = cfg.Sites[p.From].RunsCaddy()
 	// A monitor that moved off the old gateway with it keeps a record there
 	// until it is changed by hand, as for any monitor that moves; the stages
-	// below move only the gateway's hostnames, and the last stops the Caddy
-	// that record still reaches.
+	// below move only the gateway's hostnames, and the last stops or reloads
+	// the Caddy that record still reaches.
 	behind, err := dns.MonitorRecordsAt(ctx, provider, cfg, p.From)
 	if err != nil {
 		return nil, err
@@ -252,11 +283,26 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 		return nil, refuse(fmt.Sprintf("%d of %s's records conflict with what the provider holds", len(mp.Conflicts), p.To), strings.Join(lines, "\n")+"\nNothing was changed. Change each at your DNS provider, then run the move again.")
 	}
 
-	p.Stages = []*Stage{p.recordStage(), p.serveStage(), p.addStage(mp), p.removeStage(mp), p.waitStage(mp), p.stopStage()}
-	p.Notes = append(p.Notes,
-		fmt.Sprintf("%s keeps 80 and 443 open until its next host prepare (or apply without --site) after the move, which removes them.", p.From),
-		fmt.Sprintf("The old Caddy's files and certificates stay on %s, recorded as left over; the new gateway issued its own.", p.From),
-	)
+	p.Stages = []*Stage{p.recordStage(), p.serveStage(), p.addStage(mp), p.removeStage(mp), p.waitStage(mp)}
+	if p.shared {
+		p.Stages = append(p.Stages, p.releaseStage(), p.handOffStage())
+		// A run stopped at the hand-off finds the site by its routes alone:
+		// the record and the marker are gone and DNS has moved, so every
+		// stage before the hand-off is done, and running them again would
+		// write a marker and wait out a TTL for nothing.
+		if !p.evidence.Record && p.evidence.Marker == nil && mp.Clear() {
+			for _, st := range p.Stages[:len(p.Stages)-1] {
+				st.Skipped = p.From + " was released already: it holds neither the record nor the marker, and no record points at it"
+			}
+		}
+		p.Notes = append(p.Notes, fmt.Sprintf("%s keeps its Caddy, which serves the monitor's hostnames alone once handed off.", p.From))
+	} else {
+		p.Stages = append(p.Stages, p.stopStage())
+		p.Notes = append(p.Notes,
+			fmt.Sprintf("%s keeps 80 and 443 open until its next host prepare (or apply without --site) after the move, which removes them.", p.From),
+			fmt.Sprintf("The old Caddy's files and certificates stay on %s, recorded as left over; the new gateway issued its own.", p.From),
+		)
+	}
 	if len(p.evidence.HostSites) > 0 {
 		p.Notes = append(p.Notes, fmt.Sprintf("%s's /srv/caddy.d holds %s. The old Caddy is not stopped while it does: move those files to %s's /srv/caddy.d, or delete them, then run the move again.", p.From, strings.Join(p.evidence.HostSites, ", "), p.To))
 	}
@@ -329,15 +375,62 @@ func HoldsRecordOrMarker(t apply.Transport, d deployment.Deployment) (bool, erro
 	return false, nil
 }
 
-// SharedRefusal is the problem a move off a site that keeps the monitor is
-// refused with, by the move and by apply alike. Handing such a site off,
-// so that its Caddy keeps serving the gateway's hostnames until DNS has
-// moved and then serves the monitor's alone, is not built yet; stopping its
-// Caddy as a plain old gateway's would take the monitor down, and applying
-// it first would stop the overlap the move exists for.
-func SharedRefusal(site string) error {
-	return refuse(site+" keeps the monitor and is still this deployment's gateway",
-		"Moving the gateway off a site that keeps the monitor is not supported yet. Give "+site+" the gateway role back and apply it, or pin the status page to another monitor site first, then move the gateway.")
+// Departing reports whether the host t reaches, of a site whose roles run
+// Caddy for a monitor, still holds what a gateway being handed off holds: the
+// record, the marker, or a Caddyfile naming a hostname the gateway serves.
+// apply without --site asks it of such sites, to know whether a move is still
+// to run.
+func Departing(t apply.Transport, cfg *config.Config) (bool, error) {
+	ev, err := inspectDeparting(t, cfg)
+	return ev.any(), err
+}
+
+// inspectDeparting is inspect for a site whose roles run Caddy: its Caddy is
+// legitimately there, so it is not evidence, and its routes are.
+func inspectDeparting(t apply.Transport, cfg *config.Config) (Evidence, error) {
+	ev, err := inspect(t, cfg.Deployment())
+	if err != nil {
+		return ev, err
+	}
+	ev.Caddy = nil
+	routes, err := gatewayRoutes(t, cfg)
+	if err != nil {
+		return ev, err
+	}
+	ev.Routes = len(routes) > 0
+	return ev, nil
+}
+
+// gatewayRoutes are the hostnames the gateway serves that the Caddyfile on
+// the host t reaches names as a site block, sorted. A missing Caddyfile names
+// none.
+func gatewayRoutes(t apply.Transport, cfg *config.Config) ([]string, error) {
+	path := CaddyfilePath(cfg.Deployment())
+	content, found, err := t.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: reading %s: %w", t.Describe(), path, err)
+	}
+	if !found {
+		return nil, nil
+	}
+	served := map[string]bool{}
+	for _, h := range dns.GatewayHostnames(cfg) {
+		served[h.Name] = true
+	}
+	var out []string
+	for _, line := range strings.Split(content, "\n") {
+		head, ok := strings.CutSuffix(strings.TrimRight(line, " \t"), "{")
+		if !ok || line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		for _, name := range strings.FieldsFunc(head, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+			if served[name] && !slices.Contains(out, name) {
+				out = append(out, name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (p *Plan) from() apply.Transport { return p.transports[p.From] }
@@ -660,6 +753,89 @@ func (p *Plan) stopStage() *Stage {
 	return st
 }
 
+// releaseStage is stopStage for an old gateway that keeps the monitor: its
+// Caddy keeps running, since the monitor needs it, and what marks it as the
+// old gateway goes, so that applying it renders the monitor it now is. The
+// host owner's sites refuse it as they refuse a stop: a monitor's Caddy does
+// not serve /srv/caddy.d, so the hand-off would take them dark.
+func (p *Plan) releaseStage() *Stage {
+	d := p.dep()
+	st := &Stage{
+		Number: stageStop, Name: "stop",
+		Short: p.From + " is no longer a gateway",
+		Gate:  fmt.Sprintf("%s holds neither this deployment's record nor the move's marker; its Caddy runs on for the monitor", p.From),
+	}
+	if p.evidence.Record {
+		st.Steps = append(st.Steps, "remove the deployment record from "+p.From)
+	}
+	st.Steps = append(st.Steps, "remove the move's marker from "+p.From)
+	for _, f := range p.evidence.HostSites {
+		st.Kept = append(st.Kept, f+": the host owner's site, which the monitor's Caddy does not serve")
+	}
+	st.run = func() error {
+		if err := p.verify(); err != nil {
+			return err
+		}
+		ev, err := inspect(p.from(), d)
+		if err != nil {
+			return err
+		}
+		if len(ev.HostSites) > 0 {
+			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which a monitor's Caddy does not serve, so handing %s off would take them dark. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir, strings.Join(ev.HostSites, ", "), p.From, p.To, render.HostSitesDir))
+		}
+		s := p.reporter().Step("forget " + p.From + " as a gateway")
+		if out, err := p.from().Run("rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))); err != nil {
+			err = fmt.Errorf("%s: %w: %s", p.From, err, strings.TrimSpace(out))
+			s.Fail(err)
+			return err
+		}
+		s.Done("")
+		return nil
+	}
+	st.gate = func() error {
+		ev, err := inspect(p.from(), d)
+		if err != nil {
+			return err
+		}
+		if ev.Record || ev.Marker != nil {
+			return fmt.Errorf("%s still holds a gateway's: record %t, marker %t", p.From, ev.Record, ev.Marker != nil)
+		}
+		return nil
+	}
+	return st
+}
+
+// handOffStage applies the old gateway that keeps the monitor, now that it
+// holds neither the record nor the marker, so that its Caddy reloads with the
+// monitor's routes alone.
+func (p *Plan) handOffStage() *Stage {
+	st := &Stage{
+		Number: stageHandOff, Name: "hand off",
+		Short: p.From + " serves the monitor alone",
+		Gate:  fmt.Sprintf("%s's Caddyfile names no hostname the gateway serves", p.From),
+	}
+	if p.evidence.Routes {
+		st.Steps = append(st.Steps, fmt.Sprintf("apply %s's infra stack, so that its Caddy serves the monitor's hostnames alone", p.From))
+	}
+	st.run = func() error {
+		if p.applySite == nil {
+			return fmt.Errorf("no way to apply %s was given to the move", p.From)
+		}
+		return p.applySite(p.From)
+	}
+	st.gate = func() error {
+		routes, err := gatewayRoutes(p.from(), p.cfg)
+		if err != nil {
+			return err
+		}
+		if len(routes) > 0 {
+			return fmt.Errorf("%s's Caddyfile still names %s", p.From, strings.Join(routes, ", "))
+		}
+		return nil
+	}
+	return st
+}
+
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // Pending is how many stages have steps to run.
@@ -714,6 +890,9 @@ func Execute(p *Plan) error {
 		return nil
 	}
 	r := p.reporter()
+	if err := p.checkHandOff(); err != nil {
+		return err
+	}
 	for _, st := range p.Stages {
 		r.Section(stageTitle(st))
 		if st.Skipped != "" {
@@ -738,9 +917,33 @@ func Execute(p *Plan) error {
 	return nil
 }
 
+// checkHandOff tries the hand-off's apply as a dry run before any stage
+// runs, when the move has a hand-off left to do. Its own refusals, such as a
+// secrets file other than the one beside the configuration or no admin key
+// to sign with, would otherwise meet the move at stage 7, after DNS has
+// moved and the record is gone.
+func (p *Plan) checkHandOff() error {
+	if !p.shared || p.checkSite == nil {
+		return nil
+	}
+	last := p.Stages[len(p.Stages)-1]
+	if last.Number != stageHandOff || last.Skipped != "" || len(last.Steps) == 0 {
+		return nil
+	}
+	if err := p.checkSite(p.From); err != nil {
+		return fmt.Errorf("the hand-off's apply of %s would be refused, so nothing was changed: %w\nFix that, then run paisans gateway move --execute again", p.From, err)
+	}
+	return nil
+}
+
 func (p *Plan) fail(st *Stage, err error) error {
 	head := fmt.Sprintf("gateway move stopped at stage %d (%s)", st.Number, st.Name)
-	const next = "Fix the cause and run paisans gateway move --execute again: it resumes at the first stage with anything left to do"
+	next := "Fix the cause and run paisans gateway move --execute again: it resumes at the first stage with anything left to do"
+	if st.Number == stageHandOff {
+		// The record and the marker are gone by now, so the old site applies
+		// like any other, with whatever flags its own refusal asks for.
+		next = fmt.Sprintf("Fix the cause, then apply %s directly: paisans apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). paisans gateway move --execute also resumes here", p.From, p.From)
+	}
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
 		return pr
 	}

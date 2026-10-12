@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -42,6 +44,8 @@ func runGatewayMove(args []string) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /var/lib/paisans is root's")
+	keepImages := fs.Bool("keep-images", false, "passed to the hand-off's apply of a site that keeps the monitor")
+	minFree := fs.String("min-free", "", "passed to the hand-off's apply of a site that keeps the monitor")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -74,8 +78,23 @@ func runGatewayMove(args []string) error {
 	for _, name := range cfg.SiteNames() {
 		transports[name] = gatewayTransport(name, cfg.Sites[name], *sudo)
 	}
+	options := gatewayMoveOptions()
+	flags := handOffFlags{config: *configPath, secrets: *secretsPath, sudo: *sudo, verbose: r.Verbose(), keepImages: *keepImages, minFree: *minFree}
+	if options.ApplySite == nil {
+		// The hand-off off a site that keeps the monitor applies its infra
+		// stack as typed by hand, with this move's own files and options, so
+		// it claims, reviews and gates exactly as apply does. Only an executed
+		// move reaches it, after its dry run has passed before the first
+		// stage.
+		options.ApplySite = func(site string) error {
+			return runApply(handOffArgs(site, flags, true), os.Stdin, os.Stdout)
+		}
+		options.CheckSite = func(site string) error {
+			return runApply(handOffArgs(site, flags, false), os.Stdin, os.Stdout)
+		}
+	}
 	plan, err := ui.Get(r, "find the gateway to move from", func() (*gatewaymove.Plan, error) {
-		return gatewaymove.Build(cfg, secrets, transports, gatewayMoveOptions())
+		return gatewaymove.Build(cfg, secrets, transports, options)
 	})
 	if err != nil {
 		return err
@@ -112,4 +131,34 @@ func runGatewayMove(args []string) error {
 		r.Result("The gateway moved from %s to %s: every gate passed.", plan.From, plan.To)
 	}
 	return nil
+}
+
+// handOffFlags are the move's own options that its hand-off's apply takes.
+type handOffFlags struct {
+	config, secrets           string
+	sudo, verbose, keepImages bool
+	minFree                   string
+}
+
+// handOffArgs is apply --site <site> --only infra with the move's own
+// options, executed or as its dry run.
+func handOffArgs(site string, f handOffFlags, execute bool) []string {
+	args := []string{"--site", site, "--only", "infra", "--config", f.config}
+	if f.secrets != "" {
+		args = append(args, "--secrets", f.secrets)
+	}
+	args = append(args, "--sudo="+strconv.FormatBool(f.sudo))
+	if f.verbose {
+		args = append(args, "-v")
+	}
+	if f.keepImages {
+		args = append(args, "--keep-images")
+	}
+	if f.minFree != "" {
+		args = append(args, "--min-free", f.minFree)
+	}
+	if execute {
+		args = append(args, "--execute")
+	}
+	return args
 }

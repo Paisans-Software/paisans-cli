@@ -379,14 +379,20 @@ var convergeReadInitial = func(cfg *config.Config, member string, sudo bool) (re
 }
 
 // convergeHoldsGateway reads whether a site's host holds this deployment's
-// gateway Caddy, record or move marker. Tests replace it.
+// gateway Caddy, record or move marker. On a site whose roles run Caddy for a
+// monitor, the Caddy is not evidence; the record, the marker and a Caddyfile
+// still naming the gateway's hostnames are. Tests replace it.
 var convergeHoldsGateway = func(cfg *config.Config, site string, sudo bool) (bool, error) {
-	return gatewaymove.Holds(siteTransport(site, cfg.Sites[site], "", sudo), cfg.Deployment())
+	t := siteTransport(site, cfg.Sites[site], "", sudo)
+	if cfg.Sites[site].RunsCaddy() {
+		return gatewaymove.Departing(t, cfg)
+	}
+	return gatewaymove.Holds(t, cfg.Deployment())
 }
 
 // convergeGatewayMove reports whether a gateway move is still to run: a
-// site that neither holds the gateway role nor runs Caddy for a monitor
-// still holds what a gateway holds. Only with exactly one gateway declared,
+// site that does not hold the gateway role still holds what a gateway holds,
+// or, keeping the monitor, still has to be handed off. Only with exactly one gateway declared,
 // which is what a move goes to. A site that does not answer is an error,
 // as for the etcd reads: a move left unfinished keeps an old gateway
 // running.
@@ -396,7 +402,7 @@ func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
 		return false, nil
 	}
 	for _, site := range cfg.SiteNames() {
-		if site == gateways[0] || cfg.Sites[site].RunsCaddy() {
+		if site == gateways[0] {
 			continue
 		}
 		held, err := convergeHoldsGateway(cfg, site, sudo)
@@ -494,7 +500,8 @@ func convergeFlags(args []string, o convergeOptions) []string {
 	if o.Verbose {
 		out = append(out, "-v")
 	}
-	if args[0] == "apply" {
+	// gateway move takes them for the apply its hand-off runs.
+	if args[0] == "apply" || args[0] == "gateway" {
 		if o.MinFree != "" {
 			out = append(out, "--min-free", o.MinFree)
 		}
