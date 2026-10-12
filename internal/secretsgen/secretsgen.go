@@ -523,22 +523,12 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 			// set reads no OIDC value at all.
 			continue
 		}
-		why := "minted by the identity provider, and creating a client there is a mutation a human approves. The toolkit records the value afterwards rather than automating the approval away"
-		if cfg.Apps[name].Kind == config.KindSynapse {
-			// Said here rather than only in the rendered configuration,
-			// because the rendered configuration is 0600 and does not exist
-			// until apply, which is after the operator needed this. A client
-			// registered with the wrong redirect URI fails at the end of the
-			// first sign in, once the member has already authenticated.
-			why += ". Register its redirect URI as " +
-				kinds.MASRedirectURI(cfg.Apps[name].Hostname, name) +
-				", which is the authentication service's callback for this upstream provider and not the /oauth/callback every other kind uses"
-		}
-		// A kind with a known client shape has its client created by apply
-		// itself, since declaring the app is the approval for it (founder
-		// decision, 2026-10-08). The redirect URI and PKCE are still named,
-		// because they are what apply creates and what an operator checking
-		// an existing client needs to see.
+		// Every other kind has a known client shape, so apply creates its
+		// client itself, since declaring the app is the approval for it
+		// (founder decision, 2026-10-08). The redirect URI and PKCE are still
+		// named, because they are what apply creates and what an operator
+		// checking an existing client needs to see.
+		var why string
 		created := "created at the deployment's Pocket ID by `paisans apply --execute` on a site that runs " + name +
 			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `paisans oidc client create --app " + name +
 			"` runs the same step alone. "
@@ -546,7 +536,7 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 			// The fork's OidcClient extends KnpU's OAuth2PKCEClient and always
 			// sends a code challenge (src/Security/Oidc/OidcClient.php:18 at
 			// tag v1.13.3+paisans).
-			spec, _ := kinds.OIDCClient(config.KindMbin, cfg.Apps[name].Hostname)
+			spec, _ := kinds.OIDCClient(config.KindMbin, cfg.Apps[name].Hostname, name)
 			admin, member := spec.Groups(cfg.Apps[name])
 			why = created + "The client's redirect URI is " +
 				kinds.MbinRedirectURI(cfg.Apps[name].Hostname) + ", with PKCE enabled: Mbin always sends a code challenge. It is restricted to the groups " +
@@ -556,11 +546,27 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 			// Neither app reads a groups claim, so the client's restriction at
 			// Pocket ID is the whole control, and the owed text says so where
 			// an operator checking an existing client will read it.
-			spec, _ := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname)
+			spec, _ := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname, name)
 			_, member := spec.Groups(cfg.Apps[name])
 			why = created + "The client's redirect URI is " + spec.CallbackURL +
 				", with PKCE off: the app sends no code challenge, and a Pocket ID client with PKCE on refuses a request without one. It is restricted to the groups " +
 				member + " and " + kinds.AdminsGroup + ", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
+		}
+		if cfg.Apps[name].Kind == config.KindSynapse {
+			// Said here rather than only in the rendered configuration,
+			// because the rendered configuration is 0600 and does not exist
+			// until apply, which is after an operator checking an existing
+			// client needed this.
+			spec, _ := kinds.OIDCClient(config.KindSynapse, cfg.Apps[name].Hostname, name)
+			_, member := spec.Groups(cfg.Apps[name])
+			why = created + "The client's redirect URI is " + spec.CallbackURL +
+				", the authentication service's callback for this upstream provider, with PKCE enabled: the service sends a code challenge because Pocket ID's discovery advertises S256. It is restricted to the groups " +
+				member + " and " + kinds.AdminsGroup + ", and that restriction is the whole control: the service reads no groups claim"
+		}
+		if cfg.Apps[name].Kind == config.KindOAuth2Proxy {
+			why = created + "The client's redirect URI is https://" + cfg.Apps[name].Hostname +
+				"/oauth2/callback, with PKCE enabled: the gate always sends a code challenge. It is restricted to the group " +
+				kinds.MembersGroup + ", the one the gate admits"
 		}
 		if cfg.Apps[name].Kind == config.KindUptime {
 			why = created + "The client's redirect URI is https://" + cfg.Apps[name].Hostname +

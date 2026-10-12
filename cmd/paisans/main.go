@@ -273,9 +273,9 @@ Commands:
              in scope with --all, one at a time in gated stages: a next
              value in the secrets file, the side that checks it, each
              site that uses it healthy before the next, then the value
-             promoted. A pasted secret (the DNS token, an SMTP password,
-             a client secret minted at Pocket ID) is handed on once it is
-             replaced at its issuer and set with secrets set, and refused
+             promoted. A pasted secret (the DNS token or an SMTP
+             password) is handed on once it is replaced at its issuer
+             and set with secrets set, and refused
              while every host using it runs the value the file holds,
              read line by line; --replaced <path> lists one already
              replaced and applied, which every host runs, instead. Lists

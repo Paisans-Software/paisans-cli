@@ -13,7 +13,7 @@ import (
 // a person must be in to sign in at all, so the client is restricted to it at
 // Pocket ID and a non-admin is refused before the monitor sees them.
 func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
-	spec, ok := kinds.OIDCClient(config.KindUptime, "status.example.org")
+	spec, ok := kinds.OIDCClient(config.KindUptime, "status.example.org", "status")
 	if !ok {
 		t.Fatal("the toolkit does not know an uptime client")
 	}
@@ -37,7 +37,7 @@ func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
 // names neither gets a client restricted to members and admins, and the fork
 // reads the same two names, so a member-only Mbin needs nothing declared.
 func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
-	spec, _ := kinds.OIDCClient(config.KindMbin, "talk.example.org")
+	spec, _ := kinds.OIDCClient(config.KindMbin, "talk.example.org", "talk")
 	admin, member := spec.Groups(config.App{Kind: config.KindMbin})
 	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
 		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, kinds.AdminsGroup, kinds.MembersGroup)
@@ -76,7 +76,7 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 		{config.KindWriteFreely, "https://docs.example.org/oauth/callback/generic"},
 	}
 	for _, tc := range cases {
-		spec, ok := kinds.OIDCClient(tc.kind, "docs.example.org")
+		spec, ok := kinds.OIDCClient(tc.kind, "docs.example.org", "docs")
 		if !ok {
 			t.Errorf("the toolkit does not know a %s client", tc.kind)
 			continue
@@ -109,7 +109,7 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 // app would admit anyone with a Pocket ID account.
 func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 	for _, kind := range []config.Kind{config.KindMbin, config.KindOutline, config.KindWriteFreely, config.KindElement, config.KindUptime} {
-		spec, ok := kinds.OIDCClient(kind, "app.example.org")
+		spec, ok := kinds.OIDCClient(kind, "app.example.org", "app")
 		if !ok || !kinds.GateFor(kind).Gateable {
 			continue
 		}
@@ -120,5 +120,65 @@ func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 		if _, member := spec.Groups(app); member == "" {
 			t.Errorf("%s: an empty declaration gives an unrestricted client", kind)
 		}
+	}
+}
+
+// The homeserver's client belongs to its authentication service: it returns
+// to that service's callback for the app's upstream provider, sends a code
+// challenge because Pocket ID's discovery advertises S256, and is restricted
+// to the member group and admins, which is the whole control, since the
+// service reads no groups claim. It has no dashboard tile.
+func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
+	spec, ok := kinds.OIDCClient(config.KindSynapse, "matrix.example.org", "chat")
+	if !ok {
+		t.Fatal("the toolkit does not know a synapse client")
+	}
+	if spec.CallbackURL != kinds.MASRedirectURI("matrix.example.org", "chat") {
+		t.Errorf("callback %s, want the authentication service's", spec.CallbackURL)
+	}
+	if !spec.PKCE {
+		t.Error("MAS sends a code challenge whenever discovery advertises S256, so PKCE must be on")
+	}
+	if spec.ReadsGroups {
+		t.Error("MAS requests no groups claim, so the spec must not say it reads one")
+	}
+	if spec.LaunchURL != "" {
+		t.Errorf("launch URL %s, want none", spec.LaunchURL)
+	}
+	admin, member := spec.Groups(config.App{Kind: config.KindSynapse})
+	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
+		t.Errorf("groups admin=%q member=%q", admin, member)
+	}
+	_, member = spec.Groups(config.App{Kind: config.KindSynapse, Settings: map[string]any{"member_group": "crew"}})
+	if member != "crew" {
+		t.Errorf("member group %q with member_group set", member)
+	}
+}
+
+// The gate's client returns to oauth2-proxy's own callback on the gate's
+// hostname, sends the S256 challenge the rendered .env asks for, and admits
+// exactly the group the gate admits, whatever the settings say: the group is
+// fixed in the gate's compose file, and the gate maps no administrators.
+func TestTheGatesClientAdmitsOnlyTheGatesGroup(t *testing.T) {
+	spec, ok := kinds.OIDCClient(config.KindOAuth2Proxy, "auth-gate.example.org", "gate")
+	if !ok {
+		t.Fatal("the toolkit does not know an oauth2-proxy client")
+	}
+	if spec.CallbackURL != "https://auth-gate.example.org/oauth2/callback" {
+		t.Errorf("callback %s", spec.CallbackURL)
+	}
+	if !spec.PKCE {
+		t.Error("the gate always sends a code challenge, so PKCE must be on")
+	}
+	if !spec.ReadsGroups {
+		t.Error("the gate reads the groups claim, so the spec must say so")
+	}
+	if spec.LaunchURL != "" {
+		t.Errorf("launch URL %s, want none", spec.LaunchURL)
+	}
+	app := config.App{Kind: config.KindOAuth2Proxy, Settings: map[string]any{"member_group": "crew", "admin_group": "mods"}}
+	admin, member := spec.Groups(app)
+	if admin != "" || member != kinds.MembersGroup {
+		t.Errorf("groups admin=%q member=%q, want only %s", admin, member, kinds.MembersGroup)
 	}
 }

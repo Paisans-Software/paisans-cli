@@ -204,12 +204,12 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The OIDC clients of kinds `oidc client create` cannot build are pasted.
+	// Every OIDC client secret is minted by `oidc client create`, the
+	// homeserver's and the gate's among them: only the DNS token and the
+	// SMTP password are pasted.
 	for _, r := range rs {
-		if r.Path() == "oidc_clients.gate.client_secret" {
-			if _, ok := r.(secretsrotate.Whole); ok {
-				t.Error("gate's client secret is rotated by oidc client create")
-			}
+		if strings.HasPrefix(r.Path(), "oidc_clients.") && secretsrotate.Pasted(r) {
+			t.Errorf("%s is rotated as a pasted secret", r.Path())
 		}
 	}
 	want := []string{
@@ -494,15 +494,29 @@ func TestSecretsRotateRefusesAnUnreadyDeployment(t *testing.T) {
 	}
 }
 
+// The homeserver's client secret and the gate's are rotated by `oidc client
+// create --rotate-secret`, as every other client's is, never as a pasted
+// secret a person mints at Pocket ID first.
+func TestSecretsRotateMintsTheHomeserversAndTheGatesClientSecrets(t *testing.T) {
+	for _, path := range []string{"oidc_clients.chat.client_secret", "oidc_clients.gate.client_secret"} {
+		r, err := rotatorFor(path, rotateWiring{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secretsrotate.Pasted(r) {
+			t.Errorf("%s is rotated as a pasted secret", path)
+		}
+		if _, ok := r.(secretsrotate.Whole); !ok {
+			t.Errorf("%s is not rotated by oidc client create", path)
+		}
+	}
+}
+
 // The plan says what each rotation's cost alone does not: who deletes the old
 // OIDC and S3 secrets and when, a one-member cluster's restart in place, and
 // every node a Garage rpc_secret step covers.
 func TestSecretsRotateNotes(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,23 +526,18 @@ func TestSecretsRotateNotes(t *testing.T) {
 		"storage.garage.rpc_secret":       "home-a, home-b",
 		"external.acme_dns_token":         "paisans secrets set external.acme_dns_token",
 		"external.smtp_password":          "paisans secrets set external.smtp_password",
-		"oidc_clients.gate.client_secret": "old client secrets are deleted at Pocket ID",
+		"oidc_clients.chat.client_secret": "oidc client create --app chat --rotate-secret",
+		"oidc_clients.gate.client_secret": "oidc client create --app gate --rotate-secret",
 	} {
-		if got := strings.Join(rotationNotes(cfg, s, path), " "); !strings.Contains(got, want) {
+		if got := strings.Join(rotationNotes(cfg, path), " "); !strings.Contains(got, want) {
 			t.Errorf("%s: notes %q, want %q", path, got, want)
 		}
 	}
-	if got := rotationNotes(cfg, s, "cluster.standby_password"); len(got) != 0 {
+	if got := rotationNotes(cfg, "cluster.standby_password"); len(got) != 0 {
 		t.Errorf("a two-member cluster's role notes %q", got)
 	}
-	gate := s.OIDCClients["gate"]
-	gate.ClientID = ""
-	s.OIDCClients["gate"] = gate
-	if got := strings.Join(rotationNotes(cfg, s, "oidc_clients.gate.client_secret"), " "); !strings.Contains(got, "by hand") {
-		t.Errorf("a pasted client with no recorded ID notes %q", got)
-	}
 	cfg.Cluster.Sites = cfg.Cluster.Sites[:1]
-	if got := strings.Join(rotationNotes(cfg, s, "cluster.standby_password"), " "); !strings.Contains(got, "in place") {
+	if got := strings.Join(rotationNotes(cfg, "cluster.standby_password"), " "); !strings.Contains(got, "in place") {
 		t.Errorf("a one-member cluster's role notes %q", got)
 	}
 }
@@ -702,7 +711,7 @@ func TestSecretsRotateAllPassesWithReplaced(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--replaced") {
 		t.Fatalf("--all without --replaced: err = %v", err)
 	}
-	pasted := []string{"external.acme_dns_token", "external.smtp_password", "oidc_clients.chat.client_secret", "oidc_clients.gate.client_secret"}
+	pasted := []string{"external.acme_dns_token", "external.smtp_password"}
 	args := []string{"--all"}
 	for _, p := range pasted {
 		args = append(args, "--replaced", p)

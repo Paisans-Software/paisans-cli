@@ -1957,7 +1957,7 @@ func (c *checker) adminGroupNotAdmins() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -1982,7 +1982,7 @@ func (c *checker) adminGroupNotAdmins() {
 func (c *checker) oidcMemberGroupNotAName() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -2020,7 +2020,7 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 		if !app.UsesGate() {
 			continue
 		}
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -2046,7 +2046,7 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 func (c *checker) oidcClientUnrestricted() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok || !kinds.GateFor(app.Kind).Gateable {
 			continue
 		}

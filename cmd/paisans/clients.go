@@ -37,7 +37,7 @@ func pocketIDApp(cfg *config.Config) string {
 // clientDesired is the client an app needs at Pocket ID, from its kind and
 // its declaration, and whether this toolkit knows its kind's client.
 func clientDesired(name string, app config.App, rotate bool) (oidcclient.Desired, bool) {
-	spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+	spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 	if !ok {
 		return oidcclient.Desired{}, false
 	}
@@ -196,7 +196,7 @@ func newClientStep(r ui.Reporter, cfg *config.Config, site, destination, secrets
 		if !slices.Contains(sites[name], site) || (len(only) > 0 && !slices.Contains(only, name)) {
 			continue
 		}
-		if _, ok := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname); ok {
+		if _, ok := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname, name); ok {
 			c.apps = append(c.apps, name)
 		}
 		if name == c.idp {

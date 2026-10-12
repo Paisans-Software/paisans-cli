@@ -144,7 +144,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	targets, replacedRs, err := takeReplaced(cfg, secrets, targets, replaced, wiring)
+	targets, replacedRs, err := takeReplaced(targets, replaced, wiring)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		kept = append(kept, keptSecret{Path: k.Path, Reason: k.Reason})
 	}
 	for i := range run.Items {
-		run.Items[i].Notes = rotationNotes(cfg, secrets, run.Items[i].Rotator.Path())
+		run.Items[i].Notes = rotationNotes(cfg, run.Items[i].Rotator.Path())
 	}
 	showKept(r, kept)
 	if !*execute || r.Verbose() {
@@ -386,18 +386,18 @@ func refuseReplacedPending(s *config.Secrets, replaced []string) error {
 // and a generated one named here would be left as the departed admin knew
 // it. Kept in its place, a path an earlier --all run left is taken off that
 // run's list rather than refused as one with no rotation.
-func takeReplaced(cfg *config.Config, s *config.Secrets, targets []secretsrotate.Rotator, replaced []string, w rotateWiring) ([]secretsrotate.Rotator, []secretsrotate.Rotator, error) {
+func takeReplaced(targets []secretsrotate.Rotator, replaced []string, w rotateWiring) ([]secretsrotate.Rotator, []secretsrotate.Rotator, error) {
 	var rs []secretsrotate.Rotator
 	for _, path := range replaced {
 		if slices.ContainsFunc(rs, func(r secretsrotate.Rotator) bool { return r.Path() == path }) {
 			continue
 		}
-		r, err := rotatorFor(cfg, s, path, w)
+		r, err := rotatorFor(path, w)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !secretsrotate.Pasted(r) {
-			return nil, nil, fmt.Errorf("secrets rotate: --replaced takes a pasted secret (the DNS token, an SMTP password, a client secret minted at Pocket ID), and %s is generated here, so only a rotation replaces it. Nothing was changed", path)
+			return nil, nil, fmt.Errorf("secrets rotate: --replaced takes a pasted secret (the DNS token or an SMTP password), and %s is generated here, so only a rotation replaces it. Nothing was changed", path)
 		}
 		rs = append(rs, r)
 	}
@@ -445,7 +445,7 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 		}
 	} else {
 		for _, path := range named {
-			r, err := rotatorFor(cfg, s, path, w)
+			r, err := rotatorFor(path, w)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -464,7 +464,7 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 		if has[path] {
 			continue
 		}
-		r, err := rotatorFor(cfg, s, path, w)
+		r, err := rotatorFor(path, w)
 		if err != nil {
 			return nil, nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and no rotation of it can be built to finish it: %w. %s", path, err, cannotFinish)
 		}
@@ -476,7 +476,7 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 
 // rotatorFor is the rotation of the secret at path, or why secrets rotate
 // does not rotate it.
-func rotatorFor(cfg *config.Config, s *config.Secrets, path string, w rotateWiring) (secretsrotate.Rotator, error) {
+func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
 	switch {
@@ -495,9 +495,6 @@ func rotatorFor(cfg *config.Config, s *config.Secrets, path string, w rotateWiri
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		return secretsrotate.Heartbeat(parts[1]), nil
 	case len(parts) == 3 && parts[0] == "oidc_clients" && last == "client_secret":
-		if app, ok := cfg.Apps[parts[1]]; ok && pastedClient(parts[1], app) {
-			return secretsrotate.PastedClient(parts[1], clientRetire(s, parts[1], w)), nil
-		}
 		return secretsrotate.OIDCClient(parts[1], w.oidcRun, w.oidcRetire), nil
 	case len(parts) == 3 && parts[0] == "apps":
 		app := parts[1]
@@ -522,24 +519,6 @@ func rotatorFor(cfg *config.Config, s *config.Secrets, path string, w rotateWiri
 		}
 	}
 	return nil, fmt.Errorf("secrets rotate: there is no rotation for %s. It names a secret by its path in the secrets file, Eg: cluster.standby_password, or apps.<app>.oauth for Mbin's OAuth2 keys. Nothing was changed", path)
-}
-
-// pastedClient reports whether app's OIDC client secret is rotated as a
-// pasted secret: `oidc client create --rotate-secret` knows only some kinds'
-// clients, and for the rest a human mints the new secret at Pocket ID.
-func pastedClient(name string, app config.App) bool {
-	_, ok := clientDesired(name, app, true)
-	return !ok
-}
-
-// clientRetire is how a pasted client secret's old secrets are retired at
-// Pocket ID: by the client ID the file records, or not at all when it
-// records none, which the plan then says.
-func clientRetire(s *config.Secrets, app string, w rotateWiring) func(string) error {
-	if s.OIDCClients[app].ClientID == "" {
-		return nil
-	}
-	return w.oidcRetire
 }
 
 // refuseUnfilled refuses --all on a secrets file that lacks a secret init
@@ -613,10 +592,6 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	for _, name := range cfg.AppNames() {
 		if !has("oidc_clients." + name + ".client_secret") {
-			continue
-		}
-		if pastedClient(name, cfg.Apps[name]) {
-			rs = append(rs, secretsrotate.PastedClient(name, clientRetire(s, name, w)))
 			continue
 		}
 		rs = append(rs, secretsrotate.OIDCClient(name, w.oidcRun, w.oidcRetire))
@@ -698,16 +673,9 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 // cost: when the old secret stops being valid where another command retires
 // it, a restart in place where there is nothing to switch over to, and what
 // a step named for one site covers.
-func rotationNotes(cfg *config.Config, s *config.Secrets, path string) []string {
+func rotationNotes(cfg *config.Config, path string) []string {
 	parts := strings.Split(path, ".")
 	switch {
-	case len(parts) == 3 && parts[0] == "oidc_clients" && cfg.Apps[parts[1]].Kind != "" && pastedClient(parts[1], cfg.Apps[parts[1]]):
-		app := parts[1]
-		minted := fmt.Sprintf("the client secret the file holds now: mint a new one for %s at Pocket ID and set it with `paisans secrets set %s` before this runs, or it is refused as unchanged; each site running %s is then applied in turn", app, path, app)
-		if s.OIDCClients[app].ClientID == "" {
-			return []string{minted, fmt.Sprintf("the secrets file records no client ID for %s, so its old secrets are not deleted here: delete them at Pocket ID by hand once every site runs the new one", app)}
-		}
-		return []string{minted, "the old client secrets are deleted at Pocket ID only after every site runs the new one"}
 	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && parts[2] == "smtp_password":
 		return []string{fmt.Sprintf("the password the file holds now: replace it at the mail provider and set it with `paisans secrets set %s` before this runs, or it is refused as unchanged", path)}
 	case len(parts) == 3 && parts[0] == "oidc_clients":
