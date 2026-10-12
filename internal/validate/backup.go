@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // destinationName is a destination name usable as a secrets key segment,
@@ -23,6 +24,8 @@ func (c *checker) backup() {
 	if !b.On() {
 		return
 	}
+	c.pinnedPostgresWithoutWALG()
+	c.excludedApps()
 	if !scheduleKnown(b.Schedule) {
 		c.refuse("backup-schedule-unknown", "backup.schedule",
 			"schedule is not daily, weekly, monthly or yearly",
@@ -141,4 +144,46 @@ func finer(tier, schedule config.Schedule) bool {
 
 func schedulePeriod(s config.Schedule) string {
 	return map[config.Schedule]string{config.ScheduleDaily: "day", config.ScheduleWeekly: "week", config.ScheduleMonthly: "month", config.ScheduleYearly: "year"}[s]
+}
+
+// pinnedPostgresWithoutWALG refuses a pinned app whose Postgres image is not
+// the postgres-walg image while backups are on: that database would have no
+// backup, and nothing else would say so. The app either runs the image or
+// opts out with `backup: false`, which is warned about.
+func (c *checker) pinnedPostgresWithoutWALG() {
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if !app.BacksUp() || app.Placement.Mode != config.PlacementPinned || !kinds.Has(app.Kind, kinds.PostgresService) {
+			continue
+		}
+		image := app.Images[kinds.PostgresService]
+		if image == "" || imageRepository(image) == kinds.WALGImage {
+			continue
+		}
+		c.refuse("pinned-postgres-without-walg", fmt.Sprintf("apps.%s.images.postgres", name),
+			"this Postgres would have no backup",
+			"is %s, which carries no WAL-G, so while backups are on this database would not be backed up. Use %s:<major>, or leave images.postgres unset, or opt the app out with apps.%s.backup: false.", image, kinds.WALGImage, name)
+	}
+}
+
+// excludedApps warns about every app opted out of backups, on every run.
+func (c *checker) excludedApps() {
+	for _, name := range c.cfg.AppNames() {
+		if !c.cfg.Apps[name].BacksUp() {
+			c.warn("backup-app-excluded", fmt.Sprintf("apps.%s.backup", name),
+				"this app is not backed up",
+				"is false: nothing %s owns, its database, files or buckets, is backed up.", name)
+		}
+	}
+}
+
+// imageRepository is an image reference without its tag or digest.
+func imageRepository(ref string) string {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		ref = ref[:i]
+	}
+	return ref
 }

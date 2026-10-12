@@ -1,9 +1,11 @@
 package validate_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
@@ -115,4 +117,77 @@ func TestNoSectionIsNotRefused(t *testing.T) {
 	if r := validate.Check(cfg); r.Refused() {
 		t.Fatalf("a deployment without backups was refused: %v", r.Refusals())
 	}
+}
+func TestPinnedPostgresWithoutWALG(t *testing.T) {
+	no := false
+	for _, tc := range []struct {
+		name      string
+		image     string
+		appOff    bool
+		backupOff bool
+		refuse    bool
+	}{
+		{"another image", "postgres:17-trixie", false, false, true},
+		{"the walg image by tag", kinds.WALGImage + ":17", false, false, false},
+		{"the walg image by digest", kinds.WALGImage + "@sha256:" + strings.Repeat("a", 64), false, false, false},
+		{"a lookalike repository", kinds.WALGImage + "-fork:17", false, false, true},
+		{"the app opted out", "postgres:17-trixie", true, false, false},
+		{"backups off", "postgres:17-trixie", false, true, false},
+		{"no backup section", "postgres:17-trixie", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := withPinnedForum(t)
+			app := cfg.Apps["forum"]
+			app.Images = map[string]string{kinds.PostgresService: tc.image}
+			if tc.appOff {
+				app.Backup = &no
+			}
+			cfg.Apps["forum"] = app
+			if tc.backupOff {
+				cfg.Backup.Enabled = &no
+			}
+			if tc.name == "no backup section" {
+				cfg.Backup = nil
+			}
+			if got := refused(validate.Check(cfg), "pinned-postgres-without-walg"); got != tc.refuse {
+				t.Fatalf("refused = %v, want %v", got, tc.refuse)
+			}
+		})
+	}
+}
+
+// withPinnedForum is the valid fixture plus an Mbin pinned to watch, which
+// runs a Postgres of its own.
+func withPinnedForum(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := load(t, "valid")
+	cfg.Apps["forum"] = config.App{
+		Kind:      config.KindMbin,
+		Hostname:  "forum.example.org",
+		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
+	}
+	if !kinds.Has(config.KindMbin, kinds.PostgresService) {
+		t.Fatal("mbin no longer declares a postgres service; pick a kind that does")
+	}
+	return cfg
+}
+
+func TestAnExcludedAppIsWarnedAbout(t *testing.T) {
+	no := false
+	cfg := withPinnedForum(t)
+	app := cfg.Apps["forum"]
+	app.Backup = &no
+	cfg.Apps["forum"] = app
+	if !warned(validate.Check(cfg), "backup-app-excluded") {
+		t.Fatal("no warning for an app opted out of backups")
+	}
+}
+
+func warned(r validate.Result, rule string) bool {
+	for _, f := range r.Findings {
+		if f.Level == validate.Warn && f.Rule == rule {
+			return true
+		}
+	}
+	return false
 }
