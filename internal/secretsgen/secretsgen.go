@@ -729,6 +729,11 @@ func password() (string, error) {
 	return encoded, nil
 }
 
+// WireGuardPrivateKey is a new WireGuard private key, generated here on the
+// workstation as init generates every site's: `paisans mesh rekey` uses it
+// for a site's next key.
+func WireGuardPrivateKey() (string, error) { return wireGuardPrivateKey() }
+
 // wireGuardPrivateKey returns a curve25519 private key, base64 encoded, in the
 // form WireGuard expects. Clamping is what `wg genkey` does, and an unclamped
 // key is not wrong so much as not canonical: the same key would be derived

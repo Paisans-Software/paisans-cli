@@ -86,6 +86,12 @@ type GarageSecrets struct {
 
 type SiteSecrets struct {
 	WireGuardPrivateKey string `yaml:"wireguard_private_key"`
+	// WireGuardNextPrivateKey is the key `paisans mesh rekey` is moving the
+	// site to, set only while a rekey is under way: it is written before any
+	// host is handed it, so a run that stops part way finds it and resumes,
+	// and it becomes WireGuardPrivateKey once every peer has a handshake with
+	// the site under it. Render never reads it. README, "Rekeying the mesh".
+	WireGuardNextPrivateKey string `yaml:"wireguard_next_private_key,omitempty"`
 	// HeartbeatToken is what the site's host pushes to every monitor with,
 	// and what each monitor's seed names for the site: 32 lowercase hex
 	// characters, generated at init. README, "Monitoring".
