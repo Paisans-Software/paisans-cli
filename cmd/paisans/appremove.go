@@ -41,7 +41,7 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 // brings it back: a flag can sit in a script or a shell history and be run
 // again by somebody who did not mean it, and a typed name cannot.
 func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("app remove", flag.ContinueOnError)
+	fs := newFlagSet("app remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")

@@ -43,7 +43,7 @@ var dnsProviderFor = dns.For
 // changes nothing without --execute. --delete-data asks for the site's name
 // at a terminal, for the reason app remove does.
 func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("site remove", flag.ContinueOnError)
+	fs := newFlagSet("site remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

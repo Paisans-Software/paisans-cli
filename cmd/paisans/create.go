@@ -23,7 +23,7 @@ import (
 // not exist yet. The file is written only once validate refuses nothing in it
 // and the operator has read it and said yes.
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("create", flag.ExitOnError)
+	fs := newFlagSet("create", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to write the new deployment declaration to")
 	if err := fs.Parse(args); err != nil {

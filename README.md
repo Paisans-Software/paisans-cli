@@ -32,9 +32,11 @@ paisans site remove home-b --execute       # take a site out of the deployment
 paisans doctor                             # what is unhealthy, and how to recover
 ```
 
-`paisans help` lists every command, and [docs/commands.md](docs/commands.md)
-describes each one: what it does, when to run it on its own rather than
-through `paisans apply`, its flags, and what it changes.
+`paisans help` lists every command in a line each, `paisans help <command>`
+(or `paisans <command> --help`) gives one command's usage, details and flags,
+and [docs/commands.md](docs/commands.md) describes each one: what it does,
+when to run it on its own rather than through `paisans apply`, its flags, and
+what it changes.
 
 ## Design rules that everything else follows from
 

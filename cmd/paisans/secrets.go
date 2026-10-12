@@ -60,7 +60,7 @@ func hasSecrets(s *config.Secrets, key string) bool {
 // --execute. A sign-in client's secret going does not delete the client at
 // Pocket ID, which it says.
 func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("secrets prune", flag.ContinueOnError)
+	fs := newFlagSet("secrets prune", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
@@ -160,14 +160,17 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 // skip the shape checks init applies; changing one that exists is a rotation,
 // which is allowed.
 func runSecretsSet(args []string, stdin io.Reader) error {
+	fs := newFlagSet("secrets set", flag.ContinueOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
+	if len(args) > 0 && isHelpWord(args[0]) {
+		return fs.Parse(args[:1])
+	}
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`")
 	}
 	key := args[0]
-	fs := flag.NewFlagSet("secrets set", flag.ContinueOnError)
-	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
-	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}

@@ -77,7 +77,7 @@ func parseDeploymentsProbe(out string) (leftoverProbe, error) {
 // entry. It needs no configuration, and changes nothing. See
 // docs/specs/2026-10-10-remove-without-config.md.
 func runHostDeployments(args []string) error {
-	fs := flag.NewFlagSet("host deployments", flag.ContinueOnError)
+	fs := newFlagSet("host deployments", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port]")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's")
