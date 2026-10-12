@@ -20,7 +20,7 @@ var versionLine = regexp.MustCompile(`(?m)^version:[^\n]*\n`)
 // identity, so nothing but an operator's own edit ever replaces it.
 //
 // The id is written as one line after `version:`, and the rest of the file is
-// left byte for byte as it was. paisans.yaml is a file people read and
+// left byte for byte as it was. paisans-stack.yaml is a file people read and
 // comment, and a round trip through a YAML encoder would reformat it.
 func EnsureID(path string) (id string, added bool, err error) {
 	data, err := os.ReadFile(path)

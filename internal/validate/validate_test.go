@@ -278,7 +278,7 @@ func TestPocketIDOnTwoAppsSitesIsAllowed(t *testing.T) {
 // either is down, and its home backup destination is never pruned. The
 // monitor has a site of its own and adds none.
 func TestExampleValidates(t *testing.T) {
-	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatalf("loading the example: %v", err)
 	}

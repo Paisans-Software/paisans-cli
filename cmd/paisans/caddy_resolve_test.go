@@ -15,7 +15,7 @@ import (
 // which is what a real `paisans apply` hands its plan, and the dry run says
 // which build that is.
 func TestApplyPlansCaddyAtTheResolvedBuild(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	gateway := strings.Replace(freshSite, "roles: [data, apps]", "roles: [data, apps, gateway]", 1)
 	if err := os.WriteFile(path, []byte(gateway), 0o600); err != nil {
 		t.Fatal(err)

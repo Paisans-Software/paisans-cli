@@ -121,7 +121,7 @@ the direct checks stay green.
 
 ### Helping an operator behind their own web server
 
-**`paisans ingress show <app>`** prints a hand-off sheet, from `paisans.yaml`
+**`paisans ingress show <app>`** prints a hand-off sheet, from `paisans-stack.yaml`
 alone, no host contact:
 
 * the hostname, the upstream (`listen`), the health path;
@@ -156,7 +156,7 @@ alone.
 
 ### Claims
 
-Computed from `paisans.yaml` and the site name, with no host contact: what the
+Computed from `paisans-stack.yaml` and the site name, with no host contact: what the
 toolkit will take on that machine.
 
 * **Listening ports** with protocol and bind address. WireGuard's udp port;
@@ -211,7 +211,7 @@ day someone installs something beside the toolkit.
 else, in a dry run as well as with `--execute`, and print the report.
 
 **conflict: refused.** Nothing is changed. The report has one line per
-conflict: the resource, the `paisans.yaml` key that claims it, and what holds
+conflict: the resource, the `paisans-stack.yaml` key that claims it, and what holds
 it (container and compose project, or process and PID). There is no override:
 the operator moves the foreign service or changes the config.
 
@@ -239,7 +239,7 @@ cannot see: ports, interfaces, firewall policy, other people's containers.
 ## Part 3: OIDC clients created by `apply`
 
 Founder decision, 2026-10-08. Creating an app's client at the deployment's own
-Pocket ID is part of setting the app up, and `paisans.yaml` is what approves
+Pocket ID is part of setting the app up, and `paisans-stack.yaml` is what approves
 it: declaring an app of a kind with a known client shape (`kinds.OIDCClient`,
 today `mbin` and `uptime`) is the approval for that client.
 

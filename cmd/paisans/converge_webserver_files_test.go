@@ -115,7 +115,7 @@ func convergeAt(t *testing.T, path string, extra ...string) error {
 
 // With the directory included by a wildcard, apply writes the app's site
 // file into it, validates and reloads the server, records the file in the
-// manifest, and writes the directory it derived into paisans.yaml with a
+// manifest, and writes the directory it derived into paisans-stack.yaml with a
 // warning saying so. The next run finds it unchanged and reloads nothing.
 func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 	fakeConverge(t, nil)
@@ -129,9 +129,9 @@ func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	want := strings.Replace(string(before), "      listen: 127.0.0.1:8480\n", "      listen: 127.0.0.1:8480\n      include_dir: /opt/caddy/paisans.d\n", 1)
 	if string(after) != want {
-		t.Errorf("paisans.yaml:\n%s", after)
+		t.Errorf("paisans-stack.yaml:\n%s", after)
 	}
-	if i := rec.Index("note", "watch: include_dir set to /opt/caddy/paisans.d in paisans.yaml"); i < 0 {
+	if i := rec.Index("note", "watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml"); i < 0 {
 		t.Errorf("no warning for the yaml edit:\n%s", rec.Lines())
 	}
 	if !strings.Contains(f.server.Files[statusFile], "reverse_proxy 127.0.0.1:8480") {
@@ -160,12 +160,12 @@ func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 		t.Errorf("a second run changed something: %v\n%s", f.server.Asked, rec.Lines())
 	}
 	if again, _ := os.ReadFile(path); string(again) != want {
-		t.Errorf("paisans.yaml changed again:\n%s", again)
+		t.Errorf("paisans-stack.yaml changed again:\n%s", again)
 	}
 }
 
 // With no line including the directory, nothing is written, nothing goes
-// into paisans.yaml, the warning carries the one line to add, and the run
+// into paisans-stack.yaml, the warning carries the one line to add, and the run
 // does not end as complete.
 func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	fakeConverge(t, nil)
@@ -185,7 +185,7 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 		t.Errorf("wrote %v, asked %v", f.server.Files, f.server.Asked)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Errorf("paisans.yaml was edited:\n%s", after)
+		t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 	}
 	i := rec.Index("warned", "site file for status")
 	if i < 0 || rec.Events[i].Extra != "caddy does not include /etc/caddy/paisans.d" || rec.Events[i+1].Kind != "explain" {
@@ -243,7 +243,7 @@ func TestApplyRefusesAnImportAboveTheGlobalOptions(t *testing.T) {
 				t.Errorf("wrote %v, asked %v", f.server.Files, f.server.Asked)
 			}
 			if after, _ := os.ReadFile(path); string(after) != string(before) {
-				t.Errorf("paisans.yaml was edited:\n%s", after)
+				t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 			}
 			i := rec.Index("warned", "site file for status")
 			if i < 0 || rec.Events[i].Extra != "caddy imports /etc/caddy/paisans.d above its global options block" || rec.Events[i+1].Kind != "explain" {
@@ -308,7 +308,7 @@ func TestApplyWithIncludeDirFalseWritesNothing(t *testing.T) {
 		t.Errorf("the web server was asked %v", f.server.Asked)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Errorf("paisans.yaml was edited")
+		t.Errorf("paisans-stack.yaml was edited")
 	}
 	if !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
@@ -357,7 +357,7 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 		t.Fatal("complete")
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Errorf("paisans.yaml was edited:\n%s", after)
+		t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 	}
 	i := rec.Index("warned", "site file for status")
 	if i < 0 || rec.Events[i].Extra != "no directory caddy reads to write in" || !strings.Contains(rec.Events[i+1].Text, "- /opt/caddy/paisans.d:/etc/caddy/paisans.d") {
@@ -690,7 +690,7 @@ func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
 	}
 }
 
-// A hostname renamed in paisans.yaml rewrites the app's file in place: the
+// A hostname renamed in paisans-stack.yaml rewrites the app's file in place: the
 // old name is served no more once the server reloads.
 func TestApplyRewritesTheSiteFileForARenamedHostname(t *testing.T) {
 	fakeConverge(t, nil)

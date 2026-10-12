@@ -1,4 +1,4 @@
-// Package appremove takes an app that has left paisans.yaml off every host:
+// Package appremove takes an app that has left paisans-stack.yaml off every host:
 // its containers and networks, its left over rendered files, its stack
 // directory when nothing else is in it, and its client at Pocket ID. With
 // --delete-data it also deletes the app's member data: its database and role

@@ -17,7 +17,7 @@ import (
 //
 // It is a section rather than a destination string because a destination says
 // where and as whom, and nothing about which keys. The keys are the part every
-// admin shares: paisans.yaml is one file for the whole deployment, so it lists
+// admin shares: paisans-stack.yaml is one file for the whole deployment, so it lists
 // public keys, which are safe to share, and never a path to a private key,
 // which is one admin's and lives on one admin's machine. `host prepare` makes
 // the listed keys the user's authorized keys, so the file is also the record
@@ -146,7 +146,7 @@ type AuthorizedKey struct {
 
 // ParseKeyLine reads one authorized_keys line. Options, if the line has any,
 // are returned rather than refused, because authorized_keys on a host may
-// carry them; paisans.yaml may not, and Keys refuses them there.
+// carry them; paisans-stack.yaml may not, and Keys refuses them there.
 func ParseKeyLine(line string) (AuthorizedKey, []string, error) {
 	pub, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(line))
 	if err != nil {

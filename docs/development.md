@@ -27,7 +27,7 @@ writes one new file there. init writes only local files, and reads every site ov
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
-host `--ssh` names, with no `paisans.yaml`, and changes nothing. `host allow`
+host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `host allow`
 and `host disallow` change only a site's host's key allowlist,
 `/etc/paisans/ssh-allow.<user>`, which is the host owner's, so they claim
 nothing; with `--execute` they ask for the site's name at a terminal.
@@ -67,7 +67,7 @@ Each command that changes a host first claims it in the host registry,
 `cmd/paisans/claim.go` is the one place that happens, and `internal/registry`
 holds the decision and the locked shell command. Every name and path those
 commands use comes from `internal/deployment`, derived from the `id` in
-`paisans.yaml`. README.md "A deployment has an id, and a host knows every
+`paisans-stack.yaml`. README.md "A deployment has an id, and a host knows every
 deployment on it" has the reasoning.
 
 The registry entry also carries the deployment's WireGuard interface
@@ -94,7 +94,7 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 has the reasoning.
 
 `apply`, `apply --site`, `host prepare` and `site add` review what
-`paisans.yaml` grants before their first change. `internal/grant` computes a site's grant from the
+`paisans-stack.yaml` grants before their first change. `internal/grant` computes a site's grant from the
 configuration and the render (the login user, every key of the admins
 `ssh.keys` names, every rendered service's image, and the web server's
 `include_dir`), compares it with the host's record,
@@ -103,13 +103,13 @@ registry's lock. `cmd/paisans/review.go` shows the review and asks for
 `approve` through `confirmWord`, refusing without a terminal;
 `cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
 every site, which its steps check against rather than asking again. README.md
-"`apply` and `host prepare` review what `paisans.yaml` grants" has the
+"`apply` and `host prepare` review what `paisans-stack.yaml` grants" has the
 reasoning.
 
 ```
-paisans validate --config examples/paisans.example.yaml
-paisans init     --config examples/paisans.example.yaml
-paisans render   --config examples/paisans.example.yaml \
+paisans validate --config examples/paisans-stack.example.yaml
+paisans init     --config examples/paisans-stack.example.yaml
+paisans render   --config examples/paisans-stack.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
 paisans host prepare --site home-a        # the host check, then what a blank host lacks
 paisans host allow home-a bob             # bob's fingerprints, and home-a's allowlist as it would be
@@ -120,7 +120,7 @@ paisans prune    --site home-a            # lists dangling volumes, and which go
 paisans preflight --site home-b           # site add's read only checks
 paisans storage add                       # every Garage stage, from live state
 paisans storage rotate-key --app talk     # replaces one app's S3 key, staged
-paisans app remove docs                   # an app out of paisans.yaml, off every host
+paisans app remove docs                   # an app out of paisans-stack.yaml, off every host
 paisans site remove home-b                # a site out of the deployment, staged
 paisans site remove home-b --evict        # a site nobody else can reach, cut out first
 paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
@@ -140,10 +140,10 @@ stopping at the first, because fixing a file one error per run is miserable. It
 exits non zero when anything was refused.
 
 `create` asks a new deployment's questions at a terminal and writes its
-`paisans.yaml`. `internal/create` holds the questions (`wizard.go`), the three
+`paisans-stack.yaml`. `internal/create` holds the questions (`wizard.go`), the three
 named shapes and the capabilities they are asked in (`shapes.go`), the checks
 each answer meets when it is typed (`checks.go`), and the template the file is
-rendered from (`paisans.yaml.tmpl`, through `render.go`, which also decides
+rendered from (`paisans-stack.yaml.tmpl`, through `render.go`, which also decides
 placement, object storage and etcd timings from the answers). The rendered
 bytes go through `config.LoadBytes` and `validate.Check` before they are
 shown, and a refusal leads back to the section its key names
@@ -252,7 +252,7 @@ toolkit default (`kinds.ToolkitLaunchURLs`); any other value is left, with a
 warning if `sso_dashboard_link` asks for something else. See *`oidc client
 create` makes an app's client at Pocket ID* in `README.md`.
 
-`app remove <app>` takes an app that has left `paisans.yaml` off every host.
+`app remove <app>` takes an app that has left `paisans-stack.yaml` off every host.
 `internal/appremove` holds it: `Refusal` and `Build` are pure functions of the
 configuration and what the probes read (`ProbeSite`, which runs
 `hostcheck.Inspect`, hashes the app's manifest files and reads its stack
@@ -374,7 +374,7 @@ sites before any of them changes. README.md *The host check: what is already on
 a host decides how much is touched* has the reasoning; what the code does:
 
 * **Claims** (`hostcheck.ClaimsFor`) are `render.SiteListeners`, each
-  listener carrying the `paisans.yaml` key behind it (`render.Listener.Key`),
+  listener carrying the `paisans-stack.yaml` key behind it (`render.Listener.Key`),
   plus the `psns-<token>` interface, the endpoint's port (none without an
   endpoint), the mesh subnet, and each subnet the site's stacks pin
   (`render.SiteNetworks`, with its key; only an app on a monitor with `managed_by:
@@ -868,7 +868,7 @@ undo:
   that would leave one data site and a witness as two etcd voters, the
   witness out of `etcd.members` and its `witness` role too. Stage 5 writes
   exactly that with `config.RemoveSite`, or `config.RemoveSiteAndWitness` in
-  the witness case, both editing `paisans.yaml` in place the way
+  the witness case, both editing `paisans-stack.yaml` in place the way
   `config.SetMesh` does: the site's block and the comment lines directly
   above it, one item in each list, one capacity line, every other byte kept.
   `Refusal` validates the end state, so a removal never writes a file
@@ -1178,7 +1178,7 @@ The `-i` files are the listed **public** keys, written per invocation into a
 0700 directory and removed after. With `IdentitiesOnly`, ssh offers exactly
 those and signs with whichever one's private half is in the operator's agent;
 README's *How the operator's ssh uses them* cites ssh(1) and ssh_config(5) for
-it. `paisans.yaml` never names a private key, because it is shared by every
+it. `paisans-stack.yaml` never names a private key, because it is shared by every
 admin and a private key is one admin's. `--ssh <destination>` replaces the
 section whole and is passed verbatim, as it was before the section existed.
 
@@ -1207,7 +1207,7 @@ a marker for every answer it can give, as the set aside script does.
 
 ## `gateway move`, and the one other path that deletes DNS records
 
-`paisans gateway move` moves the gateway role to the site `paisans.yaml` gives
+`paisans gateway move` moves the gateway role to the site `paisans-stack.yaml` gives
 it, from the site that still serves as the gateway, as the overlap README's
 *Moving the gateway* describes. It is a dry run unless `--execute` is given,
 takes no site, and is built the way `site remove` is: `internal/gatewaymove`
@@ -1391,7 +1391,7 @@ installed, on a workstation or anywhere else.
 | `cmd/paisans` | the command, flag parsing, and how findings are printed |
 | `cmd/admin-reconciler` | the admin reconciler's binary and its image's Dockerfile: the pass loop, `/healthz`, and `healthcheck` |
 | `internal/adminreconciler` | one admin reconciler pass: who to add to `admins` and who to remove, the two writes, the floor under removals, and what `/healthz` says |
-| `internal/config` | loading `paisans.yaml`, and decrypting `secrets.enc.yaml` |
+| `internal/config` | loading `paisans-stack.yaml`, and decrypting `secrets.enc.yaml` |
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
 | `internal/deployment` | a deployment's id and token, and every name, path and label derived from them |
@@ -1464,7 +1464,7 @@ receives the upstreams from the inventory, which is what keeps a pinned app and
 a clustered app the same shape.
 
 An app can answer on more than one hostname, and a gate can sit in front of
-it, and both are properties of the app declared in `paisans.yaml` rather than
+it, and both are properties of the app declared in `paisans-stack.yaml` rather than
 anything encoded in a template's filename alone. `internal/kinds/hostnames.go`
 is the closed set of extra hostname roles a kind understands beyond the
 primary; `SnippetFor` maps a role to `caddy.snippet.<role>.tmpl`, so a role a
@@ -1653,7 +1653,7 @@ before.
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
 * **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
-  `approve` at a terminal when what `paisans.yaml` grants adds or changes
+  `approve` at a terminal when what `paisans-stack.yaml` grants adds or changes
   something, and refuse without one, before the claim. A flag that answered
   it would end up in every script, and approving is the control. Tests in
   `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
@@ -1679,7 +1679,7 @@ takes the narrowest action that makes the rest live. `site add` has never been
 run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
 the same way.
-Nor have the review of what `paisans.yaml` grants, its record on each host,
+Nor have the review of what `paisans-stack.yaml` grants, its record on each host,
 the allowlist's refusal in `host prepare`, and `host allow` and `host
 disallow`: the shell they send is run against local files in the tests, not
 observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover

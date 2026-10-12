@@ -250,7 +250,7 @@ func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 	}
 }
 
-// A forced removal of a site paisans.yaml no longer declares has no address
+// A forced removal of a site paisans-stack.yaml no longer declares has no address
 // for it, so its DNS stage skips, and no provider is made.
 func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
@@ -394,7 +394,7 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	text = strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-d }")
 	text = strings.Replace(text, "members: [home-a, home-b, vm]", "members: [home-a, home-b, home-d, vm]", 1)
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "paisans.yaml")
+	configPath := filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}

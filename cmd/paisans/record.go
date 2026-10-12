@@ -32,7 +32,7 @@ func deploymentRecord(cfg *config.Config, hosts recordHosts) (deployrecord.Recor
 // through sudo unless the operator turned it off.
 type recordHosts func(gw string, elevated bool) registry.Runner
 
-// recordReaders is every gateway paisans.yaml declares, each read as the
+// recordReaders is every gateway paisans-stack.yaml declares, each read as the
 // ssh user and through hosts(gw, true) only when that is denied.
 func recordReaders(cfg *config.Config, hosts recordHosts) map[string]registry.Runner {
 	out := map[string]registry.Runner{}
@@ -58,7 +58,7 @@ func readDeploymentRecord(r ui.Reporter, cfg *config.Config, hosts recordHosts) 
 	return rec, missing
 }
 
-// gatewayHosts is every gateway paisans.yaml declares, reached through hosts.
+// gatewayHosts is every gateway paisans-stack.yaml declares, reached through hosts.
 func gatewayHosts(cfg *config.Config, hosts func(string) registry.Runner) map[string]registry.Runner {
 	out := map[string]registry.Runner{}
 	for _, gw := range cfg.GatewaySites() {
@@ -101,7 +101,7 @@ func recordForWarnings(r ui.Reporter, cfg *config.Config, hosts recordHosts) *de
 }
 
 // warnSecrets warns once per orphaned secret and once per name the record
-// lists that paisans.yaml no longer declares. Never a refusal.
+// lists that paisans-stack.yaml no longer declares. Never a refusal.
 func warnSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, deployed *deployrecord.Record) {
 	for _, o := range secretsgen.Dropped(cfg, deployed) {
 		r.Warn(o.Key+" "+o.Why, o.Leaves+".")
@@ -137,7 +137,7 @@ func prompt(stdout io.Writer, what, word string) {
 	fmt.Fprintf(stdout, "\n%s\nType %s to proceed: ", ui.Redact(what), word)
 }
 
-// recordApplied adds what paisans.yaml declares to the deployment record on
+// recordApplied adds what paisans-stack.yaml declares to the deployment record on
 // every gateway, after a gateway's apply: apply only ever adds, so a yaml
 // edited by mistake cannot take a running site's protection away. A gateway
 // it cannot reach is warned about and caught up by the next change.
@@ -194,7 +194,7 @@ func reportMissed(r ui.Reporter, res deployrecord.Result) {
 }
 
 // forgetInRecords takes names out of the deployment record on every gateway
-// paisans.yaml declares. Without execute it lists them, and reports whether
+// paisans-stack.yaml declares. Without execute it lists them, and reports whether
 // the merged records still list one. A gateway it cannot reach is warned
 // about, never a failure: the removal it follows is done, and the next change
 // to the record catches that gateway up.
@@ -260,7 +260,7 @@ func listsAny(rec, names deployrecord.Record) bool {
 }
 
 // appRecordNames is what app remove takes out of a record: the app, and each
-// group the record lists that no Pocket ID app paisans.yaml declares names.
+// group the record lists that no Pocket ID app paisans-stack.yaml declares names.
 func appRecordNames(cfg *config.Config, app string, deployed deployrecord.Record) deployrecord.Record {
 	declared := deployrecord.FromConfig(cfg)
 	names := deployrecord.Record{Apps: []string{app}}

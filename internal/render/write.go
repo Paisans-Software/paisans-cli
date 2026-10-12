@@ -105,7 +105,7 @@ type ManifestFile struct {
 	SHA256 string `json:"sha256"`
 	Mode   string `json:"mode"`
 	// Leftover marks a file an apply wrote that the site no longer renders,
-	// Eg: an app taken out of paisans.yaml. A whole apply keeps the entry, so
+	// Eg: an app taken out of paisans-stack.yaml. A whole apply keeps the entry, so
 	// the file stays provably this deployment's, and never deletes the file.
 	// LeftoverSince is when a whole apply first found it left over, RFC 3339.
 	// A file rendered again loses both.

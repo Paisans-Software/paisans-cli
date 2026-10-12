@@ -33,7 +33,7 @@ etcd:
 // The site, the witness's membership and its role go in one write, and every
 // other line stays as it was.
 func TestRemoveSiteAndWitness(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(witnessFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestRemoveSiteAndWitness(t *testing.T) {
 // A witness role written alone on a block list cannot become an empty list in
 // place, and the file is left as it was.
 func TestRemoveSiteAndWitnessRefusesALoneBlockRole(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	text := strings.Replace(witnessFile, "      - gateway   # public\n", "", 1)
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestRemoveSiteAndWitnessRefusesALoneBlockRole(t *testing.T) {
 // out of etcd, so that and the site's block are the whole edit, and the file
 // loads with the one data site as the one voter.
 func TestRemoveSiteAndWitnessWithDerivedMembers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	text := witnessFile[:strings.Index(witnessFile, "etcd:\n")]
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)

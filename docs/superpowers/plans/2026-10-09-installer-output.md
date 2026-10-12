@@ -902,9 +902,9 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 		{Level: validate.Refuse, Rule: "witness-shares-failure-domain", Key: "sites.home-c", Hint: "witness shares a failure domain with its only voter", Message: "Put the witness in another failure domain."},
 		{Level: validate.Warn, Rule: "garage-consistency-dangerous", Key: "storage.garage.consistency", Hint: "garage consistency is dangerous", Message: "Reads can miss a recent upload."},
 	}}
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", res)
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", res)
 	out := b.String()
-	for _, want := range []string{"paisans.yaml\n", "FAIL witness shares a failure domain", "Put the witness in another failure domain.", "WARN garage consistency is dangerous", "paisans.yaml: 1 refusal, 1 warning"} {
+	for _, want := range []string{"paisans-stack.yaml\n", "FAIL witness shares a failure domain", "Put the witness in another failure domain.", "WARN garage consistency is dangerous", "paisans-stack.yaml: 1 refusal, 1 warning"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
@@ -915,7 +915,7 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 		}
 	}
 	b.Reset()
-	reportFindings(ui.NewPlain(&b, true), "paisans.yaml", res)
+	reportFindings(ui.NewPlain(&b, true), "paisans-stack.yaml", res)
 	for _, want := range []string{"Reads can miss", "garage-consistency-dangerous", "storage.garage.consistency"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("verbose output lacks %q:\n%s", want, b.String())
@@ -925,14 +925,14 @@ func TestRefusalShowsHintAndExplanation(t *testing.T) {
 
 func TestNoFindingsPrintsNothing(t *testing.T) {
 	var b strings.Builder
-	reportFindings(ui.NewPlain(&b, false), "paisans.yaml", validate.Result{})
+	reportFindings(ui.NewPlain(&b, false), "paisans-stack.yaml", validate.Result{})
 	if b.Len() != 0 {
 		t.Errorf("printed %q for a clean file", b.String())
 	}
 }
 ```
 
-(`paisans validate` itself, `main.go:299`, still prints `paisans.yaml: no problems found` for a clean file: that command's whole output is the verdict. Do that in `runValidate`, not in `reportFindings`.)
+(`paisans validate` itself, `main.go:299`, still prints `paisans-stack.yaml: no problems found` for a clean file: that command's whole output is the verdict. Do that in `runValidate`, not in `reportFindings`.)
 
 - [ ] **Step 2: Run, verify FAIL.**
 
@@ -1360,8 +1360,8 @@ OIDC (`clients.go`):
 - [ ] **Step 5: Smoke the rendering by hand** with the fixture config in `examples/` (no host needed: a dry run against an unreachable host fails at the host check, which still exercises sections, findings and the step failure line):
 
 ```bash
-go run ./cmd/paisans apply --config examples/paisans.yaml --site home-a --ssh nobody@192.0.2.1 2>&1 | head -30
-go run ./cmd/paisans apply --config examples/paisans.yaml --site home-a --ssh nobody@192.0.2.1 -v 2>&1 | head -60
+go run ./cmd/paisans apply --config examples/paisans-stack.yaml --site home-a --ssh nobody@192.0.2.1 2>&1 | head -30
+go run ./cmd/paisans apply --config examples/paisans-stack.yaml --site home-a --ssh nobody@192.0.2.1 -v 2>&1 | head -60
 ```
 
 Expected: default output has no line longer than 100 characters and no rule IDs; verbose shows the rule IDs and the ssh error output. Check `ls examples/` for the actual fixture file name first.

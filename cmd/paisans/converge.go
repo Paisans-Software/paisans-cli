@@ -439,7 +439,7 @@ func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]r
 
 // convergeSecrets is the secrets check apply without --site makes once for
 // the whole run, under a section of its own: each gateway's deployment record
-// read once, and each secret and recorded name paisans.yaml no longer uses
+// read once, and each secret and recorded name paisans-stack.yaml no longer uses
 // warned about once. The applies it runs as steps skip theirs (a
 // checkReporter). A secrets file not written yet has nothing to check.
 func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) {
@@ -647,7 +647,7 @@ func missingID(path string) bool {
 }
 
 // runConverge is `paisans apply` without --site: every step that takes
-// paisans.yaml to a complete, running stack, run in the order the deployment
+// paisans-stack.yaml to a complete, running stack, run in the order the deployment
 // needs them and stopped at the first failure. Run again, it reads live state
 // again and carries on. See docs/specs/2026-10-09-apply-converge.md.
 func runConverge(r ui.Reporter, o convergeOptions) error {

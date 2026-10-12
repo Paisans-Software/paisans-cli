@@ -73,7 +73,7 @@ func reach(sites map[string]*storeSite, names ...string) map[string]apply.Transp
 
 const testID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 
-// testConfig is a paisans.yaml that loads, listing each admin's key. alice
+// testConfig is a paisans-stack.yaml that loads, listing each admin's key. alice
 // is always one, since the site's ssh section names her. note changes the
 // community's name, so two edits differ.
 func testConfig(note string, admins map[string]string) []byte {
@@ -559,7 +559,7 @@ func TestGatherSyncsOnlyWhenAsked(t *testing.T) {
 }
 
 // forge adds a chain of n versions on parent to a site's store, each signed
-// by mallory and listing mallory as an admin in its own paisans.yaml, which
+// by mallory and listing mallory as an admin in its own paisans-stack.yaml, which
 // is the history someone with root on a site can write.
 func forge(t *testing.T, s *storeSite, mallory operator, parent string, rev, n int) []string {
 	t.Helper()
@@ -830,7 +830,7 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 	return publishFrom(l, g, sites, o, push)
 }
 
-// attest gathers from the sites the local paisans.yaml declares, anchored
+// attest gathers from the sites the local paisans-stack.yaml declares, anchored
 // on the pinned root and on keyLine, and calls attestFrom through push.
 func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string, now time.Time, pull PullFunc, push PushFunc) (string, error) {
 	f, err := l.Files()

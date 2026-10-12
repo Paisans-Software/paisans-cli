@@ -70,7 +70,7 @@ func TestASiteIsOneMachine(t *testing.T) {
 	}{
 		{"a blank host", map[string]string{}, nil},
 		{"this site's entry", map[string]string{Path: registryHolding(t, addressed("home-a", "10.44.0.1")), conf: wgConf("10.44.0.1")}, nil},
-		// home-a's address changed in paisans.yaml: the host's file still
+		// home-a's address changed in paisans-stack.yaml: the host's file still
 		// has the old one, and the entry says the host is home-a.
 		{"this site readdressed", map[string]string{Path: registryHolding(t, addressed("home-a", "10.44.0.9")), conf: wgConf("10.44.0.9")}, nil},
 		{"this site's config, no entry", map[string]string{conf: wgConf("10.44.0.1")}, nil},
@@ -79,9 +79,9 @@ func TestASiteIsOneMachine(t *testing.T) {
 		{"another site's config, no entry", map[string]string{conf: wgConf("10.44.0.2")},
 			[]string{"already runs site home-b (10.44.0.2)", "A site is a machine"}},
 		{"a site no longer declared", map[string]string{Path: registryHolding(t, addressed("vm", "10.44.0.3"))},
-			[]string{"site vm (10.44.0.3) of this deployment, which paisans.yaml no longer declares", "paisans site remove vm --force --ssh"}},
+			[]string{"site vm (10.44.0.3) of this deployment, which paisans-stack.yaml no longer declares", "paisans site remove vm --force --ssh"}},
 		{"an address no site has", map[string]string{conf: wgConf("10.44.0.7")},
-			[]string{"address 10.44.0.7", "no site in paisans.yaml has that address", "--id f2a9"}},
+			[]string{"address 10.44.0.7", "no site in paisans-stack.yaml has that address", "--id f2a9"}},
 		{"a kept Caddy", map[string]string{Path: registryHolding(t, KeepCaddy(addressed("home-b", "10.44.0.2")))},
 			[]string{"site home-b (10.44.0.2) of this deployment, or what its removal kept (caddy), so home-a"}},
 	} {

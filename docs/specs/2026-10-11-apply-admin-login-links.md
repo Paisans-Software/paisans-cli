@@ -18,7 +18,7 @@ of their own, and the run reports whether that send failed.
 
 ## Scope
 
-In: the admins in `paisans.yaml`'s `admins` section, on every Pocket ID app the
+In: the admins in `paisans-stack.yaml`'s `admins` section, on every Pocket ID app the
 deployment runs, on a whole `apply --execute`.
 
 Out:
@@ -164,7 +164,7 @@ with its steps: `create administrator fern`, `issue login link for fern`,
 
 These are Pocket ID user writes, which Agent Instructions puts behind per-use
 approval. The founder decided on 2026-10-11 that **declaring an admin in
-`paisans.yaml` is the approval** for apply to make that admin's account, bring
+`paisans-stack.yaml` is the approval** for apply to make that admin's account, bring
 it up to the table above, issue them a login link and have Pocket ID email it,
 in the way the 2026-10-08 standing exception treats a declared app's OIDC
 client and signup groups. Every other user write, and every one of these done

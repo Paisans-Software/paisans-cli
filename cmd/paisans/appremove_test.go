@@ -25,7 +25,7 @@ func noHosts(t *testing.T) {
 func TestAppRemoveRefusesADeclaredApp(t *testing.T) {
 	noHosts(t)
 	err := runAppRemove([]string{"talk", "--config", fixtureConfig()}, strings.NewReader(""), &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "still in paisans.yaml") {
+	if err == nil || !strings.Contains(err.Error(), "still in paisans-stack.yaml") {
 		t.Errorf("err = %v", err)
 	}
 	err = runAppRemove([]string{"--config", fixtureConfig(), "infra"}, strings.NewReader(""), &bytes.Buffer{})

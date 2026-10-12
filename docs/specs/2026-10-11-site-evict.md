@@ -132,7 +132,7 @@ the old host and the new one apart in every one of those, and in every log.
 
 The flow is one configuration edit and two commands:
 
-1. In one edit of `paisans.yaml`: the new site declared, with the roles it
+1. In one edit of `paisans-stack.yaml`: the new site declared, with the roles it
    takes over; any app pinned to the evicted site pinned to the new one.
 2. `paisans site remove <old> --evict --execute`. The new site's secrets are
    generated first if they are missing, so the end state can be rendered with

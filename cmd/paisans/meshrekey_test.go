@@ -44,7 +44,7 @@ func TestApplyRefusesMidRekey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(dir, "paisans.yaml")
+	configPath := filepath.Join(dir, "paisans-stack.yaml")
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

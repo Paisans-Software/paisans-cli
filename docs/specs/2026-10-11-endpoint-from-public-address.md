@@ -2,7 +2,7 @@
 
 Date: 2026-10-11. Status: the rule is approved by the founder in session; the decisions below are recommendations for review.
 
-A site in `paisans.yaml` carries up to four addresses: `address` (its mesh
+A site in `paisans-stack.yaml` carries up to four addresses: `address` (its mesh
 address), `endpoint` (the `host:port` the other sites' WireGuard dials),
 `public_address` and `public_address6` (what the internet reaches it on), and
 `ssh.host`. On a cloud VM `endpoint` and `public_address` are the same address
@@ -24,7 +24,7 @@ Out:
 
 * **`ssh.host`.** It is unchanged: an override, defaulting to
   `public_address`, then the endpoint's host.
-* **Converting a file.** An existing `paisans.yaml` with explicit endpoints is
+* **Converting a file.** An existing `paisans-stack.yaml` with explicit endpoints is
   read under the rules below as it stands.
 
 ## The rule

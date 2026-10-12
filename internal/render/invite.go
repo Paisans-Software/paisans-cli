@@ -10,7 +10,7 @@ import (
 // inviteValues is what the invite kind's templates need beyond any app's.
 type inviteValues struct {
 	// IdentityURL is the public URL of the pocket-id app identity_app names,
-	// from its hostname in paisans.yaml and nothing else. The service is
+	// from its hostname in paisans-stack.yaml and nothing else. The service is
 	// given it twice, as its OIDC issuer and as the API it creates accounts
 	// at, and the two are always the same value.
 	IdentityURL string

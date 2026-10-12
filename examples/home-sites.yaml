@@ -123,7 +123,7 @@ storage:
 
 backup:
   # Leave this out, or write `enabled: false`, and nothing is backed up;
-  # validate and apply say so on every run. See paisans.example.yaml for what
+  # validate and apply say so on every run. See paisans-stack.example.yaml for what
   # each key means. Credentials go in with `paisans secrets set
   # backup.destinations.<name>.access_key_id` and `.secret_access_key`.
   schedule: daily

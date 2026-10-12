@@ -2,7 +2,7 @@
 
 Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12.
 
-`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins'
+`paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins'
 workstations, usually in a git repository. Losing them loses the deployment's
 topology and every credential (README, *Backup and restore*), and nothing in the
 toolkit keeps another copy. This spec makes every site keep every version of the
@@ -57,7 +57,7 @@ Out, each for a stated reason:
 
 ## A version
 
-A version is a git commit whose tree holds exactly `paisans.yaml`,
+A version is a git commit whose tree holds exactly `paisans-stack.yaml`,
 `secrets.enc.yaml` and `.sops.yaml`. A commit holding anything else is invalid.
 
 * **Signed** with the publishing admin's SSH key, by git's `gpg.format=ssh`, so
@@ -96,7 +96,7 @@ that passes all of these:
 1. **Shape.** Its tree holds exactly the three files, its signature is good, and
    its revision is one more than its highest parent's.
 2. **The signer.** Every parent is trusted, and the signing key belongs to an
-   admin listed in every parent's `paisans.yaml`. Someone who is not an admin
+   admin listed in every parent's `paisans-stack.yaml`. Someone who is not an admin
    cannot extend the history, however many sites they control.
 3. **Removal is final, key by key.** When a trusted version drops a key that a
    parent listed (an admin removed, or one of their keys rotated out), every
@@ -181,7 +181,7 @@ old, genuine version, and applying it reaches only those sites.
   created by `host prepare`, which also installs `git`.
 * A read-only `git daemon`, unit `paisans-<token>-config-daemon`, bound to the
   site's mesh address and serving only that directory. The mesh interface is
-  already let in whole by the firewall. A mesh peer reads `paisans.yaml` and the
+  already let in whole by the firewall. A mesh peer reads `paisans-stack.yaml` and the
   encrypted secrets, both of which a peer is already trusted with.
 * A timer, `paisans-<token>-config-sync`, every 15 minutes, fetching from each
   peer's mesh address, listed in a rendered file.
@@ -205,7 +205,7 @@ with the rest.
 
 ## Commands
 
-Local state is four files beside `paisans.yaml`, in `.paisans/`: `config-root`,
+Local state is four files beside `paisans-stack.yaml`, in `.paisans/`: `config-root`,
 the pinned root; `config-head`, the version the local files started from;
 `config-seen`, the newest revision this workstation has seen (see *Rollback*);
 and `signing-key`, the operator's public key that `admin register` recorded. The
@@ -223,7 +223,7 @@ admin's would start its trust from their signature rather than its own.
 already in `.paisans/` is the operator's own and is left as it is.
 
 The three files of a version have fixed names, so `--config` must name a file
-called `paisans.yaml`, with `secrets.enc.yaml` and `.sops.yaml` beside it.
+called `paisans-stack.yaml`, with `secrets.enc.yaml` and `.sops.yaml` beside it.
 
 **Gathering.** `pull`, `recover` and the stale-copy check in `apply` all gather
 the same way before deciding anything:
@@ -250,7 +250,7 @@ could inflate it.
 |---|---|
 | `paisans admin register` | finds the operator's key, gathers, and signs an attestation of the head when it equals the local files; records the key and the anchor (above) |
 | `paisans config publish` | commits the three files with the base as parent, signs with an admin key from the ssh-agent, and pushes a `git bundle` to every site it reaches over the existing ssh transport, where `sudo git fetch` stores it. Refused: the base is not the sites' head, including when the workstation has no base and the sites hold versions (a second root would result; run `config pull` first); no loaded key belongs to an admin listed in the parent; no site answers |
-| `paisans apply`, with or without `--execute` | gathers before the review, and refuses a fork and a stale base; it needs the standard file names beside `paisans.yaml` and an admin key in the ssh-agent even for a dry run, since it checks what `--execute` would sign with |
+| `paisans apply`, with or without `--execute` | gathers before the review, and refuses a fork and a stale base; it needs the standard file names beside `paisans-stack.yaml` and an admin key in the ssh-agent even for a dry run, since it checks what `--execute` would sign with |
 | `paisans apply --execute` | after approval, publishes, then applies, so the store shows the declared state even when the apply stops part way; the version published is the very bytes apply loaded and applies, never a second read of the files; writes the version into each host's grant record; refuses an older revision than a host's record, or another version at the same revision, unless `rollback` is typed |
 | `paisans config pull` | gathers and verifies; with no local edits, moves the files to the head; with local edits on an older base, refuses, writes the head's files to `.paisans/incoming/` and shows the difference |
 | `paisans config publish --merge` | a version whose parents are every head, after the operator has merged by hand; it resolves a fork and an incoming change alike |

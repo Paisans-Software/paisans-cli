@@ -57,7 +57,7 @@
 | `internal/ingress/ingress.go`, `show.go`, `check.go` (create) | target, hand-off sheet, read only checks |
 | `internal/ingress/*_test.go` (create) | tests, `httptest` TLS servers |
 | `cmd/paisans/ingress.go`, `main.go` (modify) | the two commands |
-| `examples/paisans.example.yaml`, `examples/secrets.example.yaml` (modify) | a monitor site |
+| `examples/paisans-stack.example.yaml`, `examples/secrets.example.yaml` (modify) | a monitor site |
 | `docs/guides/behind-your-own-web-server.md` (create) | the guide |
 | `README.md`, `docs/development.md`, `docs/specs/2026-10-07-uptime-monitoring.md` (modify) | the design, the code map, the amendment |
 
@@ -997,8 +997,8 @@ git commit -m "feat: check a monitor's web server from the operator's machine"
 Usage lines:
 
 ```
-  paisans ingress show  --app <name> [--config paisans.yaml]
-  paisans ingress check --app <name> [--config paisans.yaml]
+  paisans ingress show  --app <name> [--config paisans-stack.yaml]
+  paisans ingress check --app <name> [--config paisans-stack.yaml]
 ```
 
 - [ ] **Step 1: Write the failing test**: `runIngress([]string{"show", "--app", "status", "--config", fixture})` prints the sheet; `check` with `ingressProbes` replaced by a fake that fails item 1 returns an error; an unknown subcommand is refused.
@@ -1012,11 +1012,11 @@ Usage lines:
 ### Task 11: Example, guide, README, development notes, spec amendment
 
 **Files:**
-- Modify: `examples/paisans.example.yaml`, `examples/secrets.example.yaml`
+- Modify: `examples/paisans-stack.example.yaml`, `examples/secrets.example.yaml`
 - Create: `docs/guides/behind-your-own-web-server.md`
 - Modify: `README.md` (*Monitoring*, the role list in *Configuration* where it is listed), `docs/development.md` (*Run*, *Layout*, *Refuse and warn* where roles are named), `docs/specs/2026-10-07-uptime-monitoring.md` (an amendment pointing at the new spec; the "Any declared site" and role-less monitor site paragraphs marked as superseded)
 
-- [ ] **Step 1:** Example gains a `watch` site `roles: [monitor]` with `public_address: 203.0.113.20` and a commented `ingress` block; `status` moves there; secrets example gains `watch`'s key. Run `go test ./internal/config ./internal/secretsgen -count=1` and `go run ./cmd/paisans validate --config examples/paisans.example.yaml` (expect the one existing warning).
+- [ ] **Step 1:** Example gains a `watch` site `roles: [monitor]` with `public_address: 203.0.113.20` and a commented `ingress` block; `status` moves there; secrets example gains `watch`'s key. Run `go test ./internal/config ./internal/secretsgen -count=1` and `go run ./cmd/paisans validate --config examples/paisans-stack.example.yaml` (expect the one existing warning).
 - [ ] **Step 2:** Write the guide and README, in the house style: no em dashes, reasons given, no rejected alternatives.
 - [ ] **Step 3:** Check every link and every fenced YAML block parses.
 - [ ] **Step 4: Commit**: `git commit -m "docs: describe the monitor role and its ingress"`

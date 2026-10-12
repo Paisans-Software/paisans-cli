@@ -25,8 +25,8 @@ secrets/
 
 # A real deployment's config names real hosts. The toolkit repo ships only
 # examples; a deployment keeps its own config directory elsewhere.
-paisans.yaml
-!examples/paisans.example.yaml
+paisans-stack.yaml
+!examples/paisans-stack.example.yaml
 
 # secrets.enc.yaml IS meant to be committed — but only ever encrypted. Refuse
 # the decrypted form outright: it is the one mistake with no undo once pushed.

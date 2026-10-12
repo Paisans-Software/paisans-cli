@@ -132,7 +132,7 @@ func TestTheDNSStageDeletesAndConfirms(t *testing.T) {
 	}
 }
 
-// A provider error partway stops the removal before paisans.yaml is edited,
+// A provider error partway stops the removal before paisans-stack.yaml is edited,
 // says what was deleted and what was not, and the same command resumes.
 func TestTheDNSStageStoppedPartwayResumes(t *testing.T) {
 	w, zone := dnsWorld(t, ownAddress)
@@ -147,7 +147,7 @@ func TestTheDNSStageStoppedPartwayResumes(t *testing.T) {
 		}
 	}
 	if cfg, err := config.Load(w.configPath); err != nil || cfg.Sites["home-b"].Address == "" {
-		t.Fatalf("paisans.yaml was edited before the DNS stage finished: %v", err)
+		t.Fatalf("paisans-stack.yaml was edited before the DNS stage finished: %v", err)
 	}
 	zone.FailDelete = ""
 	w.cfg, _ = config.Load(w.configPath)
@@ -248,7 +248,7 @@ func TestTheDNSStageRunsWithHostGone(t *testing.T) {
 	}
 }
 
-// A forced removal of a site paisans.yaml still declares leaves its records,
+// A forced removal of a site paisans-stack.yaml still declares leaves its records,
 // which are still wanted, and has no DNS stage. One it does not declare has
 // no address in it, and skips.
 func TestForcedRemovalsDNSStage(t *testing.T) {

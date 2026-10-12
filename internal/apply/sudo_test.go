@@ -280,7 +280,7 @@ func equalPrefix(got, want []string) bool {
 	return true
 }
 
-// The prompt names the site from paisans.yaml and the name the host gives
+// The prompt names the site from paisans-stack.yaml and the name the host gives
 // itself beside the address, so an operator who does not recognise an
 // address can still tell which site and which machine is asking.
 func TestThePromptNamesTheSiteAndTheHost(t *testing.T) {

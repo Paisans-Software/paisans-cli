@@ -699,7 +699,7 @@ MSG
 - Modify: `internal/render/templates/writefreely/config.ini.secret.tmpl`
 - Modify: `internal/render/templates/writefreely/compose.yaml.tmpl`
 - Modify: `internal/render/render_test.go`
-- Modify: `README.md`, `docs/decisions.md`, `examples/paisans.example.yaml`
+- Modify: `README.md`, `docs/decisions.md`, `examples/paisans-stack.example.yaml`
 - Test: `internal/render/render_test.go`
 
 **Interfaces:**
@@ -843,7 +843,7 @@ was the rejected alternative, that the image is an unreleased `develop` build
 pinned by digest and why, and the finding that the fork serves its own images
 so its bucket stays private.
 
-`examples/paisans.example.yaml`: if it comments on the blog being SQLite or
+`examples/paisans-stack.example.yaml`: if it comments on the blog being SQLite or
 pinned for that reason, correct it.
 
 - [ ] **Step 8: Run everything and commit**

@@ -1,10 +1,10 @@
-# Reviewing what `paisans.yaml` grants before it is applied
+# Reviewing what `paisans-stack.yaml` grants before it is applied
 
 Date: 2026-10-11. Status: approved by the founder in session, 2026-10-11.
 Implementation holds until the eviction design
 (docs/specs/2026-10-11-site-evict.md) is decided.
 
-`paisans.yaml` is one file every admin of a deployment edits and commits, and
+`paisans-stack.yaml` is one file every admin of a deployment edits and commits, and
 whoever runs `apply` runs it with their own access. So any admin can grant
 themselves a host through someone else's run:
 
@@ -62,7 +62,7 @@ Out, each for a stated reason:
   (a command, a hook, a mount) joins the review in the same change.
 * **Who wrote a change.** The toolkit cannot know. The review shows *what*
   changed; finding who changed it is the repository's history.
-* **Signing `paisans.yaml`.** Where the file is kept differs per deployment,
+* **Signing `paisans-stack.yaml`.** Where the file is kept differs per deployment,
   and the toolkit does not assume a forge.
 
 ## What is reviewed
@@ -80,7 +80,7 @@ configuration and the render, never from the host.
 
 The include directory is where root writes files the operator's web server
 reads. How that server is reloaded is found by apply from the server it
-detects on the host, so paisans.yaml does not choose it, and it is not part of
+detects on the host, so paisans-stack.yaml does not choose it, and it is not part of
 a grant computed from the configuration.
 
 A key is the same key when its fingerprint is; a change of comment or of the
@@ -165,7 +165,7 @@ scriptable.
 
 ### Who approved
 
-When exactly one admin's key in `paisans.yaml` is loaded in the operator's ssh
+When exactly one admin's key in `paisans-stack.yaml` is loaded in the operator's ssh
 agent (`ssh-add -l`), the record also says `approved_by: <admin>`; otherwise
 it says nothing. This is a label for the next reader, not a check: anyone can
 load any key they hold.
@@ -183,7 +183,7 @@ SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk bob
 ```
 
 It holds fingerprints, not admin names, because a name is whatever
-`paisans.yaml` says it is: replacing the key under `admins.alice.keys` must not
+`paisans-stack.yaml` says it is: replacing the key under `admins.alice.keys` must not
 carry Alice's permission to the new key.
 
 **No file, every key allowed.** Settled above.
@@ -210,7 +210,7 @@ paisans host allow home-a bob             # dry run: the fingerprints, and the f
 paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
 ```
 
-* Reads each admin's keys from `paisans.yaml` and shows every fingerprint with
+* Reads each admin's keys from `paisans-stack.yaml` and shows every fingerprint with
   its comment. The operator checks them against the admin, out of band if they
   are not sure, because those are what the file will hold.
 * **When the file does not exist yet, it is created holding also every key

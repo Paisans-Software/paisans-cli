@@ -11,7 +11,7 @@ runtime. [docs/decisions.md](docs/decisions.md) records why.
 
 ## What it does
 
-It installs a complete community stack on every site `paisans.yaml` declares,
+It installs a complete community stack on every site `paisans-stack.yaml` declares,
 one machine or several, then adds sites later as a manually invoked, additive
 step, without touching application configuration.
 Every command that changes a host prints its plan and changes nothing on a
@@ -21,13 +21,13 @@ and says so when it does. Each step is one line; `--verbose` (`-v`) shows the
 reasons, values and requests behind it.
 
 ```
-paisans create                             # a new deployment's paisans.yaml, from questions
-paisans init                               # an id, a mesh subnet and the secrets for paisans.yaml
+paisans create                             # a new deployment's paisans-stack.yaml, from questions
+paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
 paisans host prepare --site vm --execute   # Docker, WireGuard and a firewall on a blank host
-paisans apply --execute                    # the whole deployment, from paisans.yaml to a running stack
+paisans apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
 paisans apply --site vm --execute          # render the site and bring it up
 paisans site add home-b --execute          # join another data site to the running cluster
-paisans app remove blog --execute          # take an app that has left paisans.yaml off its hosts
+paisans app remove blog --execute          # take an app that has left paisans-stack.yaml off its hosts
 paisans site remove home-b --execute       # take a site out of the deployment
 paisans doctor                             # what is unhealthy, and how to recover
 ```
@@ -601,7 +601,7 @@ the sign-in link is Pocket ID's mail.
 ### The code of conduct
 
 `code_of_conduct` is the text, not a path, so it is versioned and synced with
-the rest of `paisans.yaml` through every site's configuration store. `render`
+the rest of `paisans-stack.yaml` through every site's configuration store. `render`
 writes it to `code-of-conduct.md` in the app's data directory and the container
 mounts it read-only. Its SHA-256 is the version recorded with each person's
 agreement, so editing the text is a new version without anyone numbering it.
@@ -809,7 +809,7 @@ block, a configuration it refuses, a file edited on the host, a reload
 left to the operator, and a failed web server check. What apply itself could
 not do is a failure, `✗`, and the run ends failed with exit status 1: the
 monitor's host not reached over ssh, the record of its site files not read
-or written, a site file not read, written or removed there, or `paisans.yaml`
+or written, a site file not read, written or removed there, or `paisans-stack.yaml`
 not written.
 
 **A container without the directory is diagnosed from its compose file.**
@@ -849,9 +849,9 @@ and with a literal one it warns with the line it found and the one to use
 instead; either way the run does not end as complete.
 
 `include_dir` unset, apply derives it beside the server's main configuration,
-`<its directory>/paisans.d`, and writes it into `paisans.yaml` under the
+`<its directory>/paisans.d`, and writes it into `paisans-stack.yaml` under the
 site's `web_server`, in place, keeping every comment, with a warning saying so
-(`health: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
+(`health: include_dir set to /etc/nginx/paisans.d in paisans-stack.yaml`). It is
 recorded only once the server is found to include it. For a server in a
 container the directory must be visible inside it: the host path comes from
 the mount of the configuration's directory, and the line names the path as
@@ -1343,7 +1343,7 @@ own private git repo). The toolkit ships examples under `examples/`.
 
 | File | Contents | Committable |
 |------|----------|-------------|
-| `paisans.yaml` | topology, sites, clusters, apps, placements, versions | yes, plain |
+| `paisans-stack.yaml` | topology, sites, clusters, apps, placements, versions | yes, plain |
 | `secrets.enc.yaml` | every credential, encrypted with sops + age | yes, encrypted |
 
 They are separate on purpose. Editing topology is the common operation, and
@@ -1351,7 +1351,7 @@ with one combined file every edit would decrypt everything into an editor and a
 temporary file. Split, a hostname change needs no key at all, and a change can
 be reviewed by someone who cannot read the secrets.
 
-See [`examples/paisans.example.yaml`](examples/paisans.example.yaml) and
+See [`examples/paisans-stack.example.yaml`](examples/paisans-stack.example.yaml) and
 [`examples/secrets.example.yaml`](examples/secrets.example.yaml).
 [`examples/home-sites.yaml`](examples/home-sites.yaml) is a smaller layout whose
 data sites are home connections nothing can dial.
@@ -1362,7 +1362,7 @@ The example declares four sites, eight apps and object storage, and someone
 starting a community has to work out which of it they need and which role
 combinations validate refuses. `paisans create` asks instead, in the words of
 what a community needs (forums, a wiki, a blog, chat, a status page), and
-writes a commented `paisans.yaml`.
+writes a commented `paisans-stack.yaml`.
 
 It offers three shapes, each a role layout validate accepts with no refusal:
 one machine; one home and a VPS, where the VPS is the gateway and carries no
@@ -1427,7 +1427,7 @@ role coming off the witness, is the whole edit.
 
 ### A deployment has an id, and a host knows every deployment on it
 
-`paisans.yaml` carries a top level `id`: a random version 4 UUID, lowercase,
+`paisans-stack.yaml` carries a top level `id`: a random version 4 UUID, lowercase,
 in canonical form.
 
 ```yaml
@@ -1528,11 +1528,11 @@ that already runs another site of this deployment, naming that site and its
 mesh address, before anything is written, and a dry run refuses the same way.
 Which site a host runs is read from this deployment's registry entry, which
 names it; on a host with no entry, from the `Address` in
-`/etc/wireguard/psns-<token>.conf`, matched to the site `paisans.yaml` gives
+`/etc/wireguard/psns-<token>.conf`, matched to the site `paisans-stack.yaml` gives
 that address. Reading the name first is what lets a site's address change: the
 entry still names the site, and `apply` restarts the interface with the new
 `Address` (see *`apply` brings the mesh interface up before anything binds to
-it*). A host left by a site that `paisans.yaml` no longer declares is cleaned
+it*). A host left by a site that `paisans-stack.yaml` no longer declares is cleaned
 with `site remove --force` before another site takes it.
 
 `validate` refuses what a file alone can show to be one machine: two sites
@@ -1666,7 +1666,7 @@ becomes `10.212.37.3`), replacing each value where it stands so comments and
 layout survive, and says what it chose and why:
 
 ```
-paisans.yaml: rolled mesh.subnet 10.212.37.0/24 (10.44.0.0/24 overlapped deployment 0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5 (example.net)'s mesh 10.44.0.0/24 on home-a).
+paisans-stack.yaml: rolled mesh.subnet 10.212.37.0/24 (10.44.0.0/24 overlapped deployment 0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5 (example.net)'s mesh 10.44.0.0/24 on home-a).
   sites.home-a.address 10.44.0.1 -> 10.212.37.1
 ```
 
@@ -1824,7 +1824,7 @@ ID*). An Mbin app's `queue` is one because it decides which services the stack
 runs (see *Mbin's queues are in Postgres by default*). A key no template asks
 for is ignored without a word, except on a Pocket ID app, where `validate`
 warns, `pocket-id-setting-unknown` (see *Pocket ID's configuration is
-rendered from paisans.yaml*). That is the direction in which choosing
+rendered from paisans-stack.yaml*). That is the direction in which choosing
 wrong is silent, and the reason this section exists: an application option put
 under `settings` renders nothing and says nothing.
 
@@ -1892,7 +1892,7 @@ them:
 for an underscore rather than a path.
 
 **A key named like a credential is refused as `config-key-looks-like-a-secret`.**
-`paisans.yaml` is plaintext and meant to be committed; the value belongs in
+`paisans-stack.yaml` is plaintext and meant to be committed; the value belongs in
 `secrets.enc.yaml`. The check is by name: the key is lowercased, `_`, `-` and
 `.` are removed, and what is left is searched for `password`, `secret`,
 `token`, `apikey` and `privatekey`, so `SENDGRID_API_KEY` and `privateKey` are
@@ -2036,7 +2036,7 @@ The captured case matters. An identity provider holds a client secret and the
 app needs the identical value; recording it here makes it reproducible instead
 of existing on exactly one host. Creating one is a privileged mutation, and
 for the deployment's own Pocket ID the approval is the declaration: an app in
-`paisans.yaml` whose kind has a known client shape approves that client, so
+`paisans-stack.yaml` whose kind has a known client shape approves that client, so
 `apply --execute` creates it as part of setting the app up, and a dry run
 prints every mutation first. For Pocket ID the value is not even captured.
 The toolkit generates it, records it here, and then hands it to Pocket ID,
@@ -2045,8 +2045,8 @@ app's client at Pocket ID*.
 
 **The file names its format and its deployment.** Its first two keys are
 `version`, the secrets file's own format (currently 2, and independent of
-`paisans.yaml`'s `version`), and `id`, the id of the deployment it belongs to,
-the same value as `paisans.yaml`'s `id`:
+`paisans-stack.yaml`'s `version`), and `id`, the id of the deployment it belongs to,
+the same value as `paisans-stack.yaml`'s `id`:
 
 ```yaml
 version: 2
@@ -2060,7 +2060,7 @@ Every write of the file sets both, whether by `init`, `apply`, `secrets set` or
 toolkit wrote it. A version 1 file is read as it is and written as version 2,
 the first with the backup section: a toolkit that reads only version 1 would
 drop that section, and with it the two keys every backup needs, so it must
-refuse the file instead. A file whose `id` is not `paisans.yaml`'s is refused by every
+refuse the file instead. A file whose `id` is not `paisans-stack.yaml`'s is refused by every
 command that reads it:
 
 ```
@@ -2106,7 +2106,7 @@ top level section, because a value written where nothing reads it looks
 delivered and is not.
 
 **Secrets nothing declares are pruned.** A site or an app taken out of
-`paisans.yaml` leaves its secrets behind. A secret is orphaned when it names
+`paisans-stack.yaml` leaves its secrets behind. A secret is orphaned when it names
 something the configuration does not declare:
 
 | Secret | Orphaned when |
@@ -2121,7 +2121,7 @@ The restic password and WAL-G's key are never orphaned, even with no `backup`
 section: they decrypt every backup already taken.
 
 **What is deployed is recorded on each gateway**, so that a site or an app
-missing from `paisans.yaml` by mistake (commented out, renamed, a bad merge)
+missing from `paisans-stack.yaml` by mistake (commented out, renamed, a bad merge)
 does not lose its secrets. `/var/lib/paisans/deployed.<token>.json` on every
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
 nothing else. Because it holds nothing else, it is **readable without sudo**:
@@ -2152,7 +2152,7 @@ record another command changed meanwhile is warned about too, with "run this
 command again". The record also carries an `updated_at`, the writer's clock,
 for people reading the file; nothing compares it.
 
-| In `paisans.yaml` | In a record | `init` and `apply` | `secrets prune` |
+| In `paisans-stack.yaml` | In a record | `init` and `apply` | `secrets prune` |
 |---|---|---|---|
 | yes | either | nothing | keeps its secrets |
 | no | yes | warn that it is deployed but no longer declared, with what to do, whether or not it has secrets | keeps its secrets, and says why |
@@ -2164,7 +2164,7 @@ record existed is silent. `apply` without `--site` reads each gateway's record
 once, before its first step, and shows each of these warnings once, under
 `secrets`; the applies it runs as steps leave them to it. `paisans secrets prune` reads every gateway's record
 and refuses when one cannot be read or has none: apply the gateway first, or
-pass `--without-record` to trust `paisans.yaml` alone, which with `--execute`
+pass `--without-record` to trust `paisans-stack.yaml` alone, which with `--execute`
 asks for the word `prune` at a terminal. It lists what it would remove and
 changes nothing; with `--execute` it removes them and writes the file,
 encrypted to the same recipients, and refuses an encrypted file with no
@@ -2418,7 +2418,7 @@ A rotation is pending until it is promoted, and while it is, `apply` and every
 other command that renders refuses (*`secrets rotate` replaces a secret where
 it is checked and where it is used*). Almost every pending rotation is
 finished by running `secrets rotate` again. A few cannot be: the secret's app
-was taken out of `paisans.yaml` after the rotation began, the cluster's admin
+was taken out of `paisans-stack.yaml` after the rotation began, the cluster's admin
 role turned out `NOLOGIN` after its rotation began, or a RabbitMQ password
 begins with a dash, which `rabbitmqctl` reads as an option. Each refusal over
 one of these names this section. Ending it is done by hand, in the secrets
@@ -2463,7 +2463,7 @@ Four kinds read it (`kinds.SendsMail`): the invite service, which takes it as
 uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
 `SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
-paisans.yaml*); and Mbin, which takes it as `MAILER_DSN` and its sender address
+paisans-stack.yaml*); and Mbin, which takes it as `MAILER_DSN` and its sender address
 (see *Mbin sends little mail, and says where from*). The password goes into
 that `.env` beside the other credentials it already carries, written 0600 like
 every rendered file that holds a secret, and quoted so that a `$` or a `#` a
@@ -2499,7 +2499,7 @@ rendered file that has local modifications until the difference is resolved.
 ```
 WORKSTATION                        HOST                          CONTAINER
 ───────────                        ────                          ─────────
-paisans.yaml      ─┐
+paisans-stack.yaml      ─┐
 secrets.enc.yaml  ─┤ render
 age key           ─┘   │
                        │ ssh push
@@ -2519,7 +2519,7 @@ account, and writes the public key to `.sops.yaml`. The key is never printed,
 because a secret on a terminal is in a scrollback buffer and this one opens
 every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
-`paisans.yaml`, since that directory is usually a git repository.
+`paisans-stack.yaml`, since that directory is usually a git repository.
 
 **The keystore, or the file you named, then holds the only copy.** Losing it
 loses every secret in the file, so add a second recipient to `.sops.yaml`,
@@ -2544,7 +2544,7 @@ A secret in a bind-mounted file is cheaper to change, for the reason below.
 
 #### A file `apply` no longer renders is left over, and stays recorded
 
-Taking an app out of `paisans.yaml`, or moving it to another site, leaves its
+Taking an app out of `paisans-stack.yaml`, or moving it to another site, leaves its
 files and containers on the host. **`apply` never deletes them**, because
 stopping a stack and removing its data is a decision with member data in it,
 and an apply that only meant to change a configuration must not make it.
@@ -3414,7 +3414,7 @@ partway plans again from a fresh listing, so a re-run resumes.
 `site remove` deletes a removed site's records with the same planner and the
 same delete, comparing against the configuration before and without the site
 rather than as it stands (see *`site remove` takes a site out*). That is the
-one case prune cannot cover: once the site is out of `paisans.yaml`, its
+one case prune cannot cover: once the site is out of `paisans-stack.yaml`, its
 address is no longer declared, and prune keeps every record pointing at it.
 
 ### A data site's watchdog is declared, not assumed
@@ -3499,7 +3499,7 @@ restore that looks complete until someone goes looking for their account.
 
 | Artifact | Holds | Without it |
 |----------|-------|------------|
-| `paisans.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
+| `paisans-stack.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
 | `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an admin's age key still decrypts it |
 | Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
@@ -3522,7 +3522,7 @@ which is not built.
 
 ## Every site keeps signed copies of the configuration
 
-`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
+`paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
 (see *Backup and restore*), so a lost workstation without a copy elsewhere loses
 the topology and every credential. Every site therefore keeps every version of
 the three files, each signed by the admin who published it, and an admin with an
@@ -3569,7 +3569,7 @@ closes a forgery:
 | Rule | Because |
 |------|---------|
 | Shape: the tree holds exactly the three files, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
-| The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
+| The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans-stack.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
 | Removal is final, key by key: when a trusted version drops a key a parent listed (an admin removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an admin removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real admin |
 
 The rule works key by key, not admin by admin, because rotating one of an
@@ -3616,7 +3616,7 @@ old, genuine version, and applying it reaches only those sites.
 * a bare repository at `/var/lib/paisans/config/<token>.git`, owned by root;
 * a read-only `git daemon`, the unit `paisans-<token>-config-daemon`, bound to
   the site's mesh address and serving only that directory. The mesh is already
-  let in whole by the firewall, and a mesh peer reads `paisans.yaml` and the
+  let in whole by the firewall, and a mesh peer reads `paisans-stack.yaml` and the
   encrypted secrets, both of which a peer is trusted with already;
 * a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches the
   versions each peer's mesh address serves, so a site that was down when a
@@ -3726,7 +3726,7 @@ side accepts. A file that cannot be
 decrypted and parsed here is refused without quoting its error, because a parse
 error can quote a value.
 
-### Backups are declared in `paisans.yaml`, and may be added later
+### Backups are declared in `paisans-stack.yaml`, and may be added later
 
 The `backup` section says how often a run happens and where the backups go.
 The design is `docs/specs/2026-10-11-backups.md`. What exists so far is the
@@ -3773,7 +3773,7 @@ While backups are on, `validate` refuses:
 * **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme,
   host and port: a path, a query, a fragment. The bucket goes in `bucket`.
 * **`backup-endpoint-has-credentials`**: a user name or password before an `@`
-  in the endpoint. `paisans.yaml` is plaintext and meant to be committed, so
+  in the endpoint. `paisans-stack.yaml` is plaintext and meant to be committed, so
   the credential belongs in the secrets, and no finding prints it back.
 * **`backup-bucket-name`**: a bucket name S3's naming rules do not allow: 3 to
   63 lowercase letters, digits, dots and hyphens, starting and ending with a
@@ -3915,7 +3915,7 @@ leave the other's access resting on a key nobody listed for them.
 
 #### Public keys, not a path to a private key
 
-`paisans.yaml` is one file that every admin of the deployment shares and
+`paisans-stack.yaml` is one file that every admin of the deployment shares and
 commits. A private key is one admin's, on one admin's machine, at a path that is
 different on everybody's. So the file lists **public** keys, every admin's,
 which are safe to share and which are the same everywhere, and it never names a
@@ -4114,7 +4114,7 @@ reports what went wrong exactly as it would have. `site remove --host-gone`
 never reaches the leaving host, so it is not asked. A command about one host
 asks before its first sudo command, as above.
 
-The prompt names the site as `paisans.yaml` does and the name the host gives
+The prompt names the site as `paisans-stack.yaml` does and the name the host gives
 itself (`uname -n`), beside the address ssh reached. An address alone is often
 one the operator does not recognise, and typing a root password needs
 certainty about which machine is asking: the site name says which site the
@@ -4239,7 +4239,7 @@ because each ends by applying the monitor's stack with a new seed.
 
 The check has three parts, in `internal/hostcheck`:
 
-* **Claims**, from `paisans.yaml` alone: every port the site will bind, with
+* **Claims**, from `paisans-stack.yaml` alone: every port the site will bind, with
   its protocol, its address and the key that makes the site bind it
   (`render.SiteListeners`, the list the renderer itself uses, so the check
   cannot drift from what is deployed), the `psns-<token>` interface, the mesh
@@ -4296,7 +4296,7 @@ provider's 10.0.0.0/8 private network) is shorter than the one `psns-<token>`
 adds, so the mesh still wins; it is printed as a note. A `psns-<token>` the
 toolkit did not write conflicts.
 
-A conflict line names the resource, the `paisans.yaml` key that claims it, and
+A conflict line names the resource, the `paisans-stack.yaml` key that claims it, and
 what holds it (a container and its compose project, or a process and its PID).
 **There is no override.** The operator moves the other service or changes the
 configuration, because the claim cannot be taken while something else holds
@@ -4650,12 +4650,12 @@ keys is refused. The key the current connection used is not removed either, by
 construction: the transport offers only listed keys, so the session's key is a
 listed one, unless `--ssh` or the operator's own `IdentityFile` chose another.
 
-**The host's owner may bound which keys it adds.** `paisans.yaml` is one file
+**The host's owner may bound which keys it adds.** `paisans-stack.yaml` is one file
 every admin of a deployment edits, and whoever runs `host prepare` runs it with
 their own access, so any admin can get a key of theirs made an authorized key
 of `ssh.user` through someone else's run. That user has `sudo` and is in the
 `docker` group, so the key is root on the host. The review (see *`apply` and
-`host prepare` review what `paisans.yaml` grants*) is the operator's check on
+`host prepare` review what `paisans-stack.yaml` grants*) is the operator's check on
 that; this one is the host owner's, who may not be the one running the
 command. `/etc/paisans/ssh-allow.<user>`, root's and 0644, one per login user
 and shared by every deployment on the host, lists the fingerprints `host
@@ -4668,7 +4668,7 @@ SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
 ```
 
 It holds fingerprints, not admin names, because a name is whatever
-`paisans.yaml` says it is: replacing the key under `admins.alice.keys` must not
+`paisans-stack.yaml` says it is: replacing the key under `admins.alice.keys` must not
 carry Alice's permission to the new key. A line is the fingerprint, then any
 run of spaces or tabs, then a comment; it is read that way both when `host
 prepare` plans and when its append checks the list on the host, so the two
@@ -4742,9 +4742,9 @@ uncommented rules; the commented form, adoption and removal are written from
 ufw's source, not observed, as are `systemctl show -p RuntimeWatchdogUSec` and
 `dpkg-query`. The first real run of each should be read rather than trusted.
 
-### `apply` and `host prepare` review what `paisans.yaml` grants
+### `apply` and `host prepare` review what `paisans-stack.yaml` grants
 
-`paisans.yaml` is one file every admin of a deployment edits and commits, and
+`paisans-stack.yaml` is one file every admin of a deployment edits and commits, and
 whoever runs `apply` runs it with their own access. So any admin can grant
 themselves a host through someone else's run: by adding their name to a
 site's `ssh.keys`, or replacing the key under an admin it already names, which
@@ -4845,7 +4845,7 @@ in every script within a week, and approving is the control.
 image behaves as it always has, terminal or not, so routine applies stay
 scriptable.
 
-**Who approved.** When exactly one admin's key in `paisans.yaml` is loaded in
+**Who approved.** When exactly one admin's key in `paisans-stack.yaml` is loaded in
 the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
 `approved_by: <admin>`; otherwise it records no name. It is a label for the
 next reader, not a check: anyone can load any key they hold. Who wrote a change
@@ -4969,7 +4969,7 @@ whose peers are all addresses, resolves nothing.
 
 ### `paisans apply` with no `--site` converges the whole deployment
 
-`paisans apply` without `--site` takes `paisans.yaml` to a complete, running
+`paisans apply` without `--site` takes `paisans-stack.yaml` to a complete, running
 stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
 deployment needs them, and with `--execute` runs them in the same process,
@@ -5004,7 +5004,7 @@ publishing the version, and the next run publishes it. A version that reaches no
 site is refused, naming `host prepare`, because the hosts are checked against
 what the store holds. `apply --site` without a store refuses in the same words.
 Gathering reaches every site with `sudo` and needs the standard file names
-beside `paisans.yaml`, so a deployment with renamed files cannot use `apply`
+beside `paisans-stack.yaml`, so a deployment with renamed files cannot use `apply`
 until they are renamed; and a dry run needs an admin key in the ssh-agent too,
 because it checks the key `--execute` would sign with.
 
@@ -5045,9 +5045,9 @@ step is the command an operator would type, so it plans, gates, claims and
 refuses as that command does, and the sudo password each host asks for is
 asked once for the run, every one of them before the first step (see *A sudo
 that wants a password is asked for once, on a terminal*). Then, before the
-first step that changes a host, it shows one review of what `paisans.yaml`
+first step that changes a host, it shows one review of what `paisans-stack.yaml`
 grants on every site, and asks once when anything is added or changed (see
-*`apply` and `host prepare` review what `paisans.yaml` grants*); each step then
+*`apply` and `host prepare` review what `paisans-stack.yaml` grants*); each step then
 applies what was approved, and refuses anything that changed since. An `init`
 with work to do runs ahead of the review: it writes only local files, and the
 images reviewed are rendered from the secrets it generates. `-v` reaches every step, and `--keep-images` and
@@ -5786,10 +5786,10 @@ gated. See *Mbin and WriteFreely lock what the toolkit renders*.
 ### Mbin and WriteFreely lock what the toolkit renders
 
 Both apps keep most of their settings in their database and offer them on an
-admin page, so a setting rendered from `paisans.yaml` would hold only until an
-admin saved that page, after which the database would win and `paisans.yaml`
+admin page, so a setting rendered from `paisans-stack.yaml` would hold only until an
+admin saved that page, after which the database would win and `paisans-stack.yaml`
 would describe a deployment that no longer exists. Founder instruction: the
-toolkit locks every database setting it renders, so `paisans.yaml` stays the
+toolkit locks every database setting it renders, so `paisans-stack.yaml` stays the
 only source and an admin cannot drift from it through the app.
 
 * **Mbin** reads each setting named in `MBIN_LOCKED_SETTINGS` from the
@@ -6261,7 +6261,7 @@ also an admin group is joined once. Founder decision.
 
 The username is set when the account is created and never changed after:
 the pocket-id kind turns account editing off (`allow_own_account_edit`, under
-*Pocket ID's configuration is rendered from paisans.yaml*), so nobody can
+*Pocket ID's configuration is rendered from paisans-stack.yaml*), so nobody can
 rename themselves or change their email, and apply never renames an account.
 Renaming an admin's key in the `admins` section therefore makes a second
 account rather than renaming the first. An account is found by its username,
@@ -6430,7 +6430,7 @@ when it is a terminal, so an interactive run never waits on it.
 The calls go through Pocket ID's REST API with its static API key; see *The
 toolkit administers Pocket ID through its static API key*.
 
-### Pocket ID's configuration is rendered from paisans.yaml
+### Pocket ID's configuration is rendered from paisans-stack.yaml
 
 The `pocket-id` kind always renders `UI_CONFIG_DISABLED=true`, and every
 application setting Pocket ID has is then rendered too, from
@@ -6442,7 +6442,7 @@ left unset takes Pocket ID's own default (`appconfig/model.go:120-175`).
 
 The reason is the one behind every rendered file (see *Rendered configuration
 is a build artifact*). A setting made in the admin page lives in the database,
-where nobody reviews it, a diff does not show it and `paisans.yaml` does not
+where nobody reviews it, a diff does not show it and `paisans-stack.yaml` does not
 know it. Rendered, it is one reviewed line, every instance of a Pocket ID on
 more than one apps site reads the same `.env`, so a promoted standby signs
 people in exactly as the active one did, and restoring the database cannot
@@ -6618,7 +6618,7 @@ records both in the secrets file, where `render` already reads them
 shape** (`kinds.OIDCClient`, today `mbin`, `outline`, `writefreely`,
 `uptime`, `synapse` and `oauth2-proxy`). Creating an app's
 client at the deployment's own Pocket ID is part of setting the app up, and
-declaring the app in `paisans.yaml` is the approval for that client. Founder
+declaring the app in `paisans-stack.yaml` is the approval for that client. Founder
 decision, 2026-10-08. So a first apply of a site needs nothing run before it:
 
 ```sh
@@ -6712,7 +6712,7 @@ and `ok` instead:
 ```
 
 **Each line is a Pocket ID mutation.** For an app
-declared in `paisans.yaml` the declaration approves its client, and for the
+declared in `paisans-stack.yaml` the declaration approves its client, and for the
 gate, which no file declares, so does setting `gated` or `auto_login` on an
 app; the plan is
 what lets an operator see what that approval does, in a dry run of either
@@ -6865,13 +6865,13 @@ fails unless a fresh plan is empty.
 
 ### `app remove` takes an app off its hosts
 
-Taking an app out of `paisans.yaml` and applying stops routing to it and
+Taking an app out of `paisans-stack.yaml` and applying stops routing to it and
 leaves the rest on its hosts, as the section on left over files says.
 `app remove` is the decision to take the rest away, made for one app by name.
 How to run it, and its flags, are under *`paisans app remove`* in
 [docs/commands.md](docs/commands.md).
 
-**It refuses an app still in `paisans.yaml`**, and the infrastructure stack,
+**It refuses an app still in `paisans-stack.yaml`**, and the infrastructure stack,
 which is never an app. It reads every site before it changes any, and refuses
 when any site still holds a rendered file of the app's that no whole apply has
 marked left over. The mark is the proof the command rests on: a whole apply
@@ -6946,7 +6946,7 @@ why.
 
 The straightforward case, because the VM has a stable address and is the one
 thing everything else can dial. There is no command for joining it on its own:
-the VM is declared in `paisans.yaml` like any other site, with its roles, its
+the VM is declared in `paisans-stack.yaml` like any other site, with its roles, its
 mesh address, its `public_address` and its `ssh` section, and the whole
 deployment is applied (see *`paisans apply` with no `--site` converges the
 whole deployment*):
@@ -6998,7 +6998,7 @@ data site to vote.
 
 ### `site add`: a second data site, and the one hard problem
 
-Home-b is declared in `paisans.yaml` at its end state, `roles: [data]`, and the
+Home-b is declared in `paisans-stack.yaml` at its end state, `roles: [data]`, and the
 VM gains the `witness` role in the same edit, so the voters go from one to
 three at once (see *Adding a site, and the constraint that shapes it*). The
 whole apply then runs `init` for home-b's secrets, `host prepare` on
@@ -7188,7 +7188,7 @@ changed").
 ### `site remove` takes a site out
 
 The reverse of `site add`, for one site by name. The site stays declared in
-`paisans.yaml` while the command runs, because its `ssh` section is how its
+`paisans-stack.yaml` while the command runs, because its `ssh` section is how its
 host is reached and its roles say what it holds; everything else is computed
 from the configuration with the site taken out, the end state, and the last
 stage writes that back to the file. `docs/specs/2026-10-08-site-remove.md` is
@@ -7230,7 +7230,7 @@ re-run impossible: a failure there names the `apply` that finishes it.
 | 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `apply`: `psns-<token>.conf` (`wg syncconf`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
 | 3. Clean the host | below; skipped with `--host-gone`. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
 | 4. DNS | the address records this deployment's `dns init` made for the site, deleted at the provider (below, *The site's DNS records go with it*); skipped, saying why in one line, when `acme.provider` is not set, its token is not in the secrets, or the site has no public address | listing the zones again finds nothing left to delete |
-| 5. Config | the site taken out of `paisans.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
+| 5. Config | the site taken out of `paisans-stack.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
 | 6. Monitor | every remaining monitor site's `uptime` stack applied on its own, so its `monitors.json`, rendered from the end state, no longer names the site and the restarted monitor deletes its ping and direct checks; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*). The monitor site itself is never the one removed, since its app is pinned to it | the seed on the host matches the render and the stack is healthy; a failure here comes after the removal and names the `apply` that finishes it |
 
 **Two data sites and a witness go to one voter.** Taking one data site out of
@@ -7277,7 +7277,7 @@ deployment's is left alone and not listed:
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
 | the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
-| the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
+| the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 | the host's key allowlist | nothing: `/etc/paisans/ssh-allow.<user>` is the host owner's, shared by every deployment on the host | never touched. Taking a deployment off does not change what the owner allows |
 
 The check that nothing of this deployment's is left comes last, after the
@@ -7363,7 +7363,7 @@ stage 4, dns
 `--execute` plans again from a fresh listing, deletes each record by its id,
 and lists each zone again to confirm it is gone. A provider error stops the
 stage, naming what was deleted and what was not; running the same command
-again resumes, since `paisans.yaml` still declares the site until stage 5.
+again resumes, since `paisans-stack.yaml` still declares the site until stage 5.
 Without `acme.provider`, without its token in the secrets, for a site with
 no public address, or when the provider cannot be read as the plan is made,
 the stage is skipped with one line saying why, and the removal goes on.
@@ -7379,9 +7379,9 @@ A full removal checks the cluster first, and when the other hosts are gone
 every one of its refusals holds, so nothing cleans the host that is left.
 `--force` runs stage 3 alone against one host: stages 1, 2, 5 and 6 do not
 run, none of their refusals are checked, no other site is reached but the
-gateways, which take a site `paisans.yaml` no longer declares out of their
+gateways, which take a site `paisans-stack.yaml` no longer declares out of their
 deployment record, and neither
-`paisans.yaml` nor the secrets file is edited. A site `paisans.yaml` still
+`paisans-stack.yaml` nor the secrets file is edited. A site `paisans-stack.yaml` still
 declares has no DNS stage, since its records are still wanted; for one it does
 not declare, the DNS stage follows and is skipped, saying its records are
 deleted by hand, since nothing names its public address.
@@ -7413,7 +7413,7 @@ No flag answers either question. Any other host is not asked about.
 | an undeclared site without `--ssh` | there is no way to reach its host |
 | `--ssh` not of the form `user@host[:port]` | the user is who the command logs in as; Eg: `admin@203.0.113.9` |
 | `--ssh` without `--force` | a full removal reaches the site through its `ssh` section |
-| `--ssh` naming a host whose registry entry is another site `paisans.yaml` still declares | the entry is the proof of whose host it is; name that site instead |
+| `--ssh` naming a host whose registry entry is another site `paisans-stack.yaml` still declares | the entry is the proof of whose host it is; name that site instead |
 | `--force` with `--host-gone` | `--force` cleans one host, and `--host-gone` reaches none |
 | a host that does not answer over ssh | what is on it cannot be read |
 | the site's own host, or `--delete-data`, with `--execute` and no terminal | it takes a running site from under its cluster, or deletes member data |
@@ -7421,7 +7421,7 @@ No flag answers either question. Any other host is not asked about.
 **A lost deployment.** When the data and gateway hosts are destroyed and the
 monitors survive on hosts that also run other people's services:
 
-1. Take the monitor sites and their `uptime` apps out of `paisans.yaml`, then
+1. Take the monitor sites and their `uptime` apps out of `paisans-stack.yaml`, then
    run `paisans site remove <monitor> --force --ssh <its host> --execute
    --delete-data` once per monitor, from a terminal. Only what is this
    deployment's goes; the owner's containers, images, Caddy and ufw rules stay.
@@ -7437,12 +7437,12 @@ monitors survive on hosts that also run other people's services:
    conflict until it is changed; the monitors' records, whose addresses are no
    longer declared, are deleted by hand too.
 
-#### `--id` cleans a host when `paisans.yaml` is lost
+#### `--id` cleans a host when `paisans-stack.yaml` is lost
 
-`--force` names the deployment by the `id` in `paisans.yaml`. When that file
+`--force` names the deployment by the `id` in `paisans-stack.yaml`. When that file
 is lost, the id is still on every host the deployment reached, in the
 registry. `paisans host deployments` lists it, and `--id` cleans the host of
-it, reading neither `paisans.yaml` nor the secrets file.
+it, reading neither `paisans-stack.yaml` nor the secrets file.
 `docs/specs/2026-10-10-remove-without-config.md` is the approved
 specification. How to run both, and their flags, are under *`paisans host
 deployments`* and *`paisans site remove`* in [docs/commands.md](docs/commands.md).
@@ -7465,7 +7465,7 @@ with `--delete-data`, the files the manifest proves, the units, ufw rules and
 keys, `/srv/paisans/<token>` (empty directories, or everything with
 `--delete-data`), the deployment record and the registry entry.
 
-What needs the rest of `paisans.yaml` is not done. Every `--id` run, dry run or not, warns
+What needs the rest of `paisans-stack.yaml` is not done. Every `--id` run, dry run or not, warns
 `DNS records for this deployment, if any exist, were not modified`: there is no
 provider or token to delete them with. The line under it is the comment to
 search for at the provider, and the address when `--ssh` named one.
@@ -7521,7 +7521,7 @@ cut:
 | 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
 | 5. Storage | the site's Garage node out of the layout, then `garage layout skip-dead-nodes` (below, *An evicted Garage node is skipped as dead*) | no layout row for the site, and every remaining node settled |
 | 6. The rest of the cluster | HAProxy without its backend, each remaining replica's `patroni.env` one at a time, and the site out of every remaining gateway's deployment record, as `site remove`'s stage 2 does | HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streams again |
-| 7. Config | the site taken out of `paisans.yaml`, as `site remove`'s stage 5 | the file loads without it |
+| 7. Config | the site taken out of `paisans-stack.yaml`, as `site remove`'s stage 5 | the file loads without it |
 | 8. Monitor | every monitor reseeded, as `site remove`'s stage 6 | as there |
 
 Stage 1 is strict: a site that did not take the cut is named and nothing after
@@ -7594,7 +7594,7 @@ comes first.** The site's name keys its WireGuard key and heartbeat token in
 the secrets, its etcd and Patroni member names, its Garage zone, its DNS
 records and every host's records of it, so a new name keeps the old host and
 the new one apart in all of them and in every log. One edit of
-`paisans.yaml` declares the new site with the roles it takes over and pins to
+`paisans-stack.yaml` declares the new site with the roles it takes over and pins to
 it any app pinned to the evicted one; then `site remove <old> --evict
 --execute`, then `paisans apply`, which prepares the new host, applies it and
 creates its records. Evicting first means nothing waits on a site that will not
@@ -7865,7 +7865,7 @@ key, a log tail. The recoveries it describes are printed for a human to run,
 because doctor is run in the middle of an outage and the one recovery that
 touches member data, a forced failover, loses commits. Which commits a
 community keeps is a human's decision. Its one change is to the local
-`paisans.yaml`, and only with `--execute`: before it loads the file, it removes
+`paisans-stack.yaml`, and only with `--execute`: before it loads the file, it removes
 every `config:` key that only repeats a value gating makes the template write
 (Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin), which `validate`
 otherwise refuses as `config-key-already-rendered`. The file then says the
@@ -8079,7 +8079,7 @@ so the records are already short lived and the wait is minutes. A record made
 by hand with a long TTL is not the move's to delete, so it stops the move
 instead of lengthening it.
 
-**The old gateway is found, never declared.** `paisans.yaml` names one
+**The old gateway is found, never declared.** `paisans-stack.yaml` names one
 gateway, the new one. The old one is the site without the role whose host
 still has this deployment's gateway Caddy, its deployment record or the move's
 marker, or whose public address this deployment's records at the gateway's

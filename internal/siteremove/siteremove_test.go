@@ -107,7 +107,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 
 // A whole removal: home-b leaves etcd, Patroni, Garage, the mesh and every
 // HAProxy; its host keeps only what is not provably this deployment's; and
-// paisans.yaml no longer declares it.
+// paisans-stack.yaml no longer declares it.
 func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 	w := setup(t)
 	edited := root + "/talk/compose.yaml"
@@ -216,7 +216,7 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := cfg.Sites["home-b"]; ok || contains(cfg.Etcd.Members, "home-b") || contains(cfg.Cluster.Sites, "home-b") || contains(cfg.Storage.Garage.Sites, "home-b") {
-		t.Errorf("paisans.yaml still names home-b")
+		t.Errorf("paisans-stack.yaml still names home-b")
 	}
 	data, _ := os.ReadFile(w.configPath)
 	if !strings.Contains(string(data), "# The third data site.") {

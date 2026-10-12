@@ -4,7 +4,7 @@
 //
 // The records are derived, never declared. Every app hostname, the media
 // hostname and every site endpoint given as a name already appear in
-// paisans.yaml, and the address each one points at is a site's
+// paisans-stack.yaml, and the address each one points at is a site's
 // public_address. A second list of records in the configuration would be a
 // second source of truth for the same names, and the one that drifts.
 //
@@ -74,7 +74,7 @@ type Want struct {
 	Name    string
 	Content string
 	// Sources are the configuration keys that require this record, so that a
-	// conflict can name the line in paisans.yaml it is about.
+	// conflict can name the line in paisans-stack.yaml it is about.
 	Sources []string
 	// Priority is an MX record's preference.
 	Priority int

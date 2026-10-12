@@ -10,11 +10,11 @@ its own sidecar recorded it, without looking at any other deployment's
 sidecar. A key one deployment wrote and another still needed was deleted from
 under the second, which then could not log in. This makes a key line's removal
 depend on every deployment's claim, and gives each key a name an operator can
-trace from the host back to `paisans.yaml`.
+trace from the host back to `paisans-stack.yaml`.
 
 ## Scope
 
-In: the `ssh` section of `paisans.yaml`, the sidecar format, `host prepare`'s
+In: the `ssh` section of `paisans-stack.yaml`, the sidecar format, `host prepare`'s
 plan for authorized keys, the lock around every write to a sidecar or to
 `authorized_keys`, `site remove`'s deletion of its own sidecars, the example
 and the README.
@@ -30,7 +30,7 @@ Out:
   section to write instead. A sidecar line in an older format is not a claim
   this deployment can act on (see *Sidecar*).
 
-## `paisans.yaml`
+## `paisans-stack.yaml`
 
 `ssh.public_key` is replaced by `ssh.keys`, a mapping from a key's name to its
 `.pub` line:
@@ -126,7 +126,7 @@ The deletion runs under the same lock.
 
 ## Example and README
 
-`examples/paisans.example.yaml` and every fixture use `ssh.keys`. The README's
+`examples/paisans-stack.example.yaml` and every fixture use `ssh.keys`. The README's
 *host prepare manages the login user's authorized keys* gets both tables above,
 the sidecar format, the lock, and how to trace a key:
 `sudo grep -H <fingerprint> /etc/paisans/*.owned`.

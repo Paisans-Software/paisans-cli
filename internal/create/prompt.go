@@ -1,5 +1,5 @@
 // Package create asks the questions behind `paisans create` and writes a new
-// deployment's paisans.yaml from the answers.
+// deployment's paisans-stack.yaml from the answers.
 //
 // It does no I/O but what it is handed: the prompter reads the reader and
 // writes the writer it is made with, and Render returns bytes. The command

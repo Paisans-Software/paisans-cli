@@ -90,7 +90,7 @@ Every rule still runs, on the list each command reads.
 
 ## The yaml writers
 
-`site remove`'s last stage edits `paisans.yaml` in place (`RemoveSite`,
+`site remove`'s last stage edits `paisans-stack.yaml` in place (`RemoveSite`,
 `RemoveSiteAndWitness`). Each edits `etcd.members` and `cluster.sites` only when
 the file has the key. When it does not, the site's block going, or the
 `witness` role coming off the witness, is the whole edit, and the derived lists
@@ -114,7 +114,7 @@ The refusal names the key as written and that removing it derives the list.
 
 ## Example and README
 
-`examples/paisans.example.yaml` leaves both keys out, with a comment saying
+`examples/paisans-stack.example.yaml` leaves both keys out, with a comment saying
 they are derived and when to write them: one voter by choice, or fewer voters
 than data sites. The README's configuration sections, *Adding a site*, *The
 witness is a third location*, *`cluster.sites` and the `data` role name the

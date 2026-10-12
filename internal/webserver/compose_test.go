@@ -179,7 +179,7 @@ func TestDiagnoseMountWithoutCompose(t *testing.T) {
 	}
 }
 
-// An include_dir paisans.yaml names is the mount's host path: declared on
+// An include_dir paisans-stack.yaml names is the mount's host path: declared on
 // the server's service, the container predates it.
 func TestDiagnoseMountForAnIncludeDir(t *testing.T) {
 	s := composeHost("services:\n  web:\n    volumes:\n      - /srv/sites:/etc/caddy/sites\n")

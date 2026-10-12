@@ -200,7 +200,7 @@ func TestABareSectionIsOnAndAnAbsentOneIsOff(t *testing.T) {
 		{"absent", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "paisans.yaml")
+			path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 			if err := os.WriteFile(path, []byte(base+tc.section), 0o600); err != nil {
 				t.Fatal(err)
 			}

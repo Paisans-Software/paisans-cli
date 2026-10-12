@@ -3,7 +3,7 @@
 Status: approved in session on 2026-10-12. Founder direction: move the
 passthrough collision check into `validate`; describe, per kind, the settings
 `gated` and `auto_login` need; have `doctor` check the live apps against that
-description and `paisans.yaml` against it, and fix what it can with
+description and `paisans-stack.yaml` against it, and fix what it can with
 `--execute`. No central per-kind branching in `doctor`. Founder decision: only
 settings written and locked on disk are in scope; nothing writes an app's
 database.
@@ -35,7 +35,7 @@ render uses, as a refusal. It renders the deployment with throwaway secrets:
 the render's refusal into a finding. The throwaway secrets never leave memory.
 
 * Rendering needs no real secret to find a collision: which keys a template
-  writes depends on `paisans.yaml`, not on secret values. Checked on
+  writes depends on `paisans-stack.yaml`, not on secret values. Checked on
   2026-10-12: the example renders cleanly this way, and staging's file with
   `MBIN_USE_FEDERATION_ALLOW_LIST` back in `talk.config` is refused with the
   same message render gives.
@@ -129,7 +129,7 @@ is a property of the software, not a setting.
 
 ## Part 3: `doctor` reads both sides
 
-**`paisans.yaml`.** `doctor` loads the file through `validate`, as every
+**`paisans-stack.yaml`.** `doctor` loads the file through `validate`, as every
 command that reaches a host does, so a `config:` or `settings:` key that
 contradicts gating stops it with `validate`'s refusal
 (`config-key-already-rendered`, `gated-without-signed-fetch`). When the
@@ -156,20 +156,20 @@ safely, and no other:
 
 | Drift | `--execute` does |
 |---|---|
-| a `config:` key that repeats the value gating requires (Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin) | removes the key from `paisans.yaml`, keeping every other line |
+| a `config:` key that repeats the value gating requires (Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin) | removes the key from `paisans-stack.yaml`, keeping every other line |
 | a `config:` or `settings:` key that contradicts what gating needs (Eg: `authorized_fetch: false`) | nothing: that is a decision in the file, and changing it changes policy. The finding says which line to edit |
 | a setting wrong, or not locked, in the running app | nothing: names `paisans apply --site <site>`, or the image when the app does not lock it |
 
 The edit prints what it removed and the file is loaded again afterwards; a
 file that no longer loads is restored and the run fails.
 
-**Not migration code.** Founder decision: the `paisans.yaml` edit removes
+**Not migration code.** Founder decision: the `paisans-stack.yaml` edit removes
 only a key whose value the toolkit now renders identically, so the file says
 the same thing with one fewer place to say it. It converts no older schema
 (`visibility_gate` and a declared `oauth2-proxy` stay refused, never
 rewritten), and it never changes a value.
 
-**Tier.** `doctor --execute` changes no host: it edits `paisans.yaml` alone.
+**Tier.** `doctor --execute` changes no host: it edits `paisans-stack.yaml` alone.
 
 ## Not in scope
 

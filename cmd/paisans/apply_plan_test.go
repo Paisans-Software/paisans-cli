@@ -129,7 +129,7 @@ apps:
 // order Execute runs them in, so an operator reading a dry run reads the real
 // sequence.
 func TestAFreshSitePlanShowsTheDatabaseBeforeTheApp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAFreshSitePlanShowsTheDatabaseBeforeTheApp(t *testing.T) {
 // through t and reporting to r, as runApply builds it.
 func freshPlan(tb testing.TB, r ui.Reporter, t apply.Transport) *apply.Plan {
 	tb.Helper()
-	path := filepath.Join(tb.TempDir(), "paisans.yaml")
+	path := filepath.Join(tb.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		tb.Fatal(err)
 	}

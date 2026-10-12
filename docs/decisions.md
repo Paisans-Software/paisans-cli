@@ -485,7 +485,7 @@ and no S3 support: it kept its data in a SQLite file in its own data
 directory, and that was the whole reason the kind could only be pinned. The
 kind now renders the [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp)
 fork instead, which adds both. Its `config.ini` carries `[database] type =
-postgres` and `[storage] type = s3`, so the same `paisans.yaml` that used
+postgres` and `[storage] type = s3`, so the same `paisans-stack.yaml` that used
 to render a SQLite file now renders a Postgres connection and an S3 bucket,
 and the blog can join the cluster like any other app.
 
@@ -701,7 +701,7 @@ already refuses.
 
 `config-key-looks-like-a-secret` lowercases a key, removes `_`, `-` and `.`,
 and refuses it if what is left contains `password`, `secret`, `token`, `apikey`
-or `privatekey`, because `paisans.yaml` is plaintext and committed and a
+or `privatekey`, because `paisans-stack.yaml` is plaintext and committed and a
 passthrough map is where a token gets pasted at the end of a long day. The
 separators are removed because the first version matched `apikey` and
 `private_key` as written, and the final review found `SENDGRID_API_KEY` and
@@ -1150,7 +1150,7 @@ tunnel; both down is the host.
 `go build ./... && go vet ./... && go test ./...`, with the golden tree
 regenerated and its diff read: the `heartbeat` service and its two files on
 every watched site, three heartbeat entries in the monitor's seed, and the
-image pin. `paisans validate` on `examples/paisans.example.yaml`: 0 refusals.
+image pin. `paisans validate` on `examples/paisans-stack.example.yaml`: 0 refusals.
 Nothing was run against a host or the registry; the fork release and curl's
 image tag are to be checked against their registries before this ships.
 
@@ -1207,7 +1207,7 @@ two SPF records and a null MX, and its mail would fail.
 
 `go build ./... && go vet ./... && go test ./...`; the tests in
 `internal/dns/mail_test.go` were checked to fail with `isLockdown` and the
-DKIM comparison broken. `paisans validate` on `examples/paisans.example.yaml`:
+DKIM comparison broken. `paisans validate` on `examples/paisans-stack.example.yaml`:
 0 refusals. Nothing was run against a DNS provider.
 
 ## 2026-10-11: Mbin reads the deployment's mail settings, and the configuration owns them
@@ -1370,7 +1370,7 @@ machine they share.
   first, with its dry run reading the same, refuses a host already running
   another site of this deployment and names that site and its mesh address.
   The site is read from this deployment's registry entry, which names it, so
-  a site whose address changed in `paisans.yaml` is still recognised as
+  a site whose address changed in `paisans-stack.yaml` is still recognised as
   itself; on a host with no entry, from the `Address` in the deployment's
   WireGuard config. The awk merge refuses it again under the lock.
 * `validate` refuses two sites with one mesh address
@@ -1701,7 +1701,7 @@ label). Nothing was run against a deployment.
 Founder instruction: "Update the toolkit to configure Mbin and WriteFreely
 with the locked settings and authorized fetch configs by default (assuming the
 keys are missing from the yaml)". The goal is that an admin cannot drift from
-`paisans.yaml` through the apps' admin pages. It is the toolkit side of the
+`paisans-stack.yaml` through the apps' admin pages. It is the toolkit side of the
 `stack-1` template contract in `docs/specs/2026-10-11-stack-channels.md`.
 
 ### What was decided
@@ -1785,7 +1785,7 @@ Mbin was refused with `OIDC login refused: <sub> is not in members`.
 
 ### What was decided
 
-`apply` puts each admin `paisans.yaml` declares in every app's member group
+`apply` puts each admin `paisans-stack.yaml` declares in every app's member group
 as well as every app's admin group. The member groups are read from the same
 keys `oidc client create` reads (`settings.member_group`, defaulting to
 `members`); one that is also an admin group is joined once. `app admin
@@ -1913,7 +1913,7 @@ push a visitor into a sign-in they never asked for.
 
 `go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty, the
 golden trees regenerated and their diffs read. `paisans validate` on
-`examples/paisans.example.yaml`: two warnings, no refusals. The rendered
+`examples/paisans-stack.example.yaml`: two warnings, no refusals. The rendered
 gateway configuration passed `caddy validate` in
 `ghcr.io/paisans-software/caddy:2`. The public auto-login host block, run in
 that image against a stub gate, behaved as specified: an anonymous visitor read
@@ -1939,7 +1939,7 @@ Founder decisions. The design is `docs/specs/2026-10-12-gate-settings.md`.
   `doctor` reads every kind through that record and never branches on one.
 * `doctor` gains a `settings` section, which fails a running copy with one
   of them off or not locked, and names `apply` as the fix.
-* `doctor --execute` removes from `paisans.yaml` a `config:` key that only
+* `doctor --execute` removes from `paisans-stack.yaml` a `config:` key that only
   repeats a value gating renders. It changes no host.
 * Only settings the toolkit writes and locks on disk are in scope. Nothing
   writes an app's database.
@@ -1968,7 +1968,7 @@ always a file to render again, which `apply` already does and checks.
 ### What was run
 
 `go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. A copy
-of a real `paisans.yaml` with `MBIN_USE_FEDERATION_ALLOW_LIST` in a gated
+of a real `paisans-stack.yaml` with `MBIN_USE_FEDERATION_ALLOW_LIST` in a gated
 Mbin's `config:` passes `validate` before this change and is refused after it,
 in 1.3 seconds. Not run against a live Mbin or WriteFreely: each read is taken
 from the fork's source (Mbin's `SettingsManager.php` at `v1.15.1+paisans`,

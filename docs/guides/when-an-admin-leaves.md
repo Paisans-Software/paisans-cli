@@ -84,7 +84,7 @@ The admin hands over, and the others trust that they keep nothing and use
 nothing they kept. How much to rotate depends on that trust, and is the
 community's decision.
 
-1. **Take them out of `paisans.yaml`.** Delete their entry under `admins`,
+1. **Take them out of `paisans-stack.yaml`.** Delete their entry under `admins`,
    and their name from every site's `ssh.keys`. Taking the admin out of
    `admins` changes nothing at Pocket ID; steps 3 and 4 do the rest.
    Nothing is published yet. Closes nothing yet. Open: everything.
@@ -238,7 +238,7 @@ included, and refuses while one does not answer.
    file is the usual reason. Closes nothing new; it is what the DNS stage
    deletes the evicted host's records with.
 
-4. **In one edit of `paisans.yaml`:** take them out of `admins` and every
+4. **In one edit of `paisans-stack.yaml`:** take them out of `admins` and every
    site's `ssh.keys`; declare the replacement as a new site, under a new
    name, with the roles `home-b` held; and pin to it any app pinned to
    `home-b`. The new name keeps the old host and the new one apart in the

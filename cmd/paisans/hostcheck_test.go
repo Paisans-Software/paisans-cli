@@ -159,7 +159,7 @@ func TestGateSitesChecksEachAndNamesTheShared(t *testing.T) {
 // rotate-key's switch is an apply, and on a shared site it keeps images as
 // apply does there.
 func TestTheRotateKeySwitchKeepsImagesOnASharedSite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(freshSite), 0o600); err != nil {
 		t.Fatal(err)
 	}

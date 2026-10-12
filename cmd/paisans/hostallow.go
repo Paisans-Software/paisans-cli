@@ -18,7 +18,7 @@ import (
 // fingerprints host prepare may add to the login user's authorized_keys
 // there (internal/hostprep/allow.go). The list is the host owner's, shared
 // by every deployment on the host, so these commands claim nothing in the
-// registry and touch nothing of a deployment's. They read paisans.yaml only
+// registry and touch nothing of a deployment's. They read paisans-stack.yaml only
 // to name the site's host, its login user, and an admin's keys.
 //
 // Writing the list is an owner granting or withdrawing access, so it is

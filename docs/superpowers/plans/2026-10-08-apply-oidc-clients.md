@@ -516,7 +516,7 @@ Expected: FAIL, `undefined: sitePass`.
 // clientStep is apply's identity step for one site. Every app the site runs
 // whose kind has a client shape (kinds.OIDCClient) gets its client ensured at
 // the deployment's Pocket ID before it renders, with the same plan and the
-// same recorder as `oidc client create`. Declaring the app in paisans.yaml is
+// same recorder as `oidc client create`. Declaring the app in paisans-stack.yaml is
 // the approval for its client (founder decision, 2026-10-08), so apply does
 // not ask again. It never rotates a secret.
 type clientStep struct {

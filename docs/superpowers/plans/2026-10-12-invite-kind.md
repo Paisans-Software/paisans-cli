@@ -14,14 +14,14 @@
 
 **Where:** `paisans-stack`, a worktree `.worktrees/invite-kind` on branch `feat/invite-kind` from `develop`, one pull request into `develop`. Never `git stash`.
 
-> **Amendment, controller ruling 2026-10-12 (supersedes every mention of a code-of-conduct *file* below).** The toolkit's configuration store versions and syncs only `paisans.yaml`, the secrets file and `.sops.yaml`; configs are also loaded from it with `config.LoadBytes`, where `cfg.Path` is empty. So `code_of_conduct` holds the **Markdown text itself** (a YAML block scalar in `paisans.yaml`), not a path. Consequences: no `kinds.InviteCoCPath`; `invite-code-of-conduct-missing` refuses a missing, empty (after trimming) or non-string value; `inviteValuesFor` takes the text from the setting (no `os.ReadFile`); fixtures and the example carry the text inline (no `code-of-conduct.md` files in testdata or examples); the rendered `code-of-conduct.md` in the app's data directory and its read-only mount stay exactly as below, so the service's `INVITE_COC_PATH` is unchanged. Review Focus 2 becomes: "a code of conduct given as a path-like string is just text; nothing reads files".
+> **Amendment, controller ruling 2026-10-12 (supersedes every mention of a code-of-conduct *file* below).** The toolkit's configuration store versions and syncs only `paisans-stack.yaml`, the secrets file and `.sops.yaml`; configs are also loaded from it with `config.LoadBytes`, where `cfg.Path` is empty. So `code_of_conduct` holds the **Markdown text itself** (a YAML block scalar in `paisans-stack.yaml`), not a path. Consequences: no `kinds.InviteCoCPath`; `invite-code-of-conduct-missing` refuses a missing, empty (after trimming) or non-string value; `inviteValuesFor` takes the text from the setting (no `os.ReadFile`); fixtures and the example carry the text inline (no `code-of-conduct.md` files in testdata or examples); the rendered `code-of-conduct.md` in the app's data directory and its read-only mount stay exactly as below, so the service's `INVITE_COC_PATH` is unchanged. Review Focus 2 becomes: "a code of conduct given as a path-like string is just text; nothing reads files".
 
 ## Global Constraints
 
 - Kind name `invite`; constant `config.KindInvite`.
 - Placement: `cluster` only. Rule `invite-must-be-clustered`.
 - Container port `8082` (8080 collides with a clustered Mbin on the same site; controller ruling); health `GET /healthz` answers `200`.
-- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, the Markdown text inline in `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
+- Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `login_link_days` 1–31 (7; how long the sign-in link Pocket ID emails lasts, and what the invitee's page says), `code_of_conduct` (required, the Markdown text inline in `paisans-stack.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
 - Generated secrets: `apps.<invite>.email_hash_key`, `apps.<invite>.session_key`, both the default `password()` shape (32 random bytes, unpadded base64url). Plus `database_password`, which `UsesPostgres` already brings.
 - The environment variable names are exactly the service plan's contract table; rename nothing.
 - `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; that app's `email_one_time_access_as_unauthenticated` not set to `true` (rule `invite-recovery-disabled`; founder decision 2026-10-12: a member whose 7-day link expired recovers through Pocket ID's email-code sign-in); no SMTP host and sender for the invite app; a `code_of_conduct` that is missing, blank or not text; a placement other than `cluster`; a setting out of range.
@@ -268,7 +268,7 @@ var InviteSettingDefaults = map[string]string{
 }
 
 // InviteCoCPath is where the code of conduct is read from: an absolute
-// setting as written, a relative one beside paisans.yaml.
+// setting as written, a relative one beside paisans-stack.yaml.
 func InviteCoCPath(cfgPath, setting string) string {
 	if filepath.IsAbs(setting) {
 		return setting
@@ -356,7 +356,7 @@ func (c *checker) inviteCodeOfConduct() {
 		if fi, err := os.Stat(path); setting == "" || err != nil || !fi.Mode().IsRegular() {
 			c.refuse("invite-code-of-conduct-missing", fmt.Sprintf("apps.%s.settings.code_of_conduct", name),
 				"the code of conduct file is missing",
-				"Every invitee agrees to this file before an account exists. Put it beside paisans.yaml and name it here; %s was not found.", path)
+				"Every invitee agrees to this file before an account exists. Put it beside paisans-stack.yaml and name it here; %s was not found.", path)
 		}
 	}
 }
@@ -616,7 +616,7 @@ type inviteValues struct {
 }
 
 // inviteValuesFor reads the identity app the invite app names, never one
-// found by search, and the code of conduct from beside paisans.yaml.
+// found by search, and the code of conduct from beside paisans-stack.yaml.
 func (p *planner) inviteValuesFor(name string) (inviteValues, error) {
 	app := p.cfg.Apps[name]
 	idp, _ := app.Settings["identity_app"].(string)
@@ -672,7 +672,7 @@ and in `oidcFor`'s switch:
 		redirect = "https://" + planned.Hostname + "/auth/callback"
 ```
 
-The invite service's issuer and API base both come from `v.Invite.IdentityURL`, which is built from the identity app's `hostname` in `paisans.yaml` (founder requirement 2026-10-12: the service never learns Pocket ID's address any other way). `INVITE_OIDC_ISSUER` and `INVITE_IDP_URL` are therefore always the same value.
+The invite service's issuer and API base both come from `v.Invite.IdentityURL`, which is built from the identity app's `hostname` in `paisans-stack.yaml` (founder requirement 2026-10-12: the service never learns Pocket ID's address any other way). `INVITE_OIDC_ISSUER` and `INVITE_IDP_URL` are therefore always the same value.
 
 `templates/invite/compose.yaml.tmpl`:
 
@@ -776,7 +776,7 @@ git add -A && git commit -m "feat: render the invite service's compose, environm
 ### Task 5: Example configuration and README
 
 **Files:**
-- Modify: `examples/paisans.example.yaml` (`auth` at `:272-296`; add the invite app after uptime at `:385-397`), `examples/secrets.example.yaml`, add `examples/code-of-conduct.md`
+- Modify: `examples/paisans-stack.example.yaml` (`auth` at `:272-296`; add the invite app after uptime at `:385-397`), `examples/secrets.example.yaml`, add `examples/code-of-conduct.md`
 - Modify: `README.md`: a new `## Invites` section beside `## Monitoring` (`:501`); the per-kind OIDC table (`:5692`); the volumes table (`:5125-5130`); the mail paragraph (`:2038-2049`); the pinned-only/cluster-only text (`:239`); the Pocket ID signup paragraph (around `:5441` and `:5488`) so its example is `signup_default_groups: [members]` and `allow_user_signups: disabled`
 - Test: `internal/secretsgen/examples_test.go:19` (already enforces the secrets example), the example-validates test
 
@@ -811,7 +811,7 @@ Write it from the spec, in the README's voice (statements of what is, with file 
 
 - [ ] **Step 3: Run the whole suite**
 
-Run: `go vet ./... && go test ./... && go run ./cmd/paisans validate --config examples/paisans.example.yaml`
+Run: `go vet ./... && go test ./... && go run ./cmd/paisans validate --config examples/paisans-stack.example.yaml`
 Expected: PASS, and the example has no refusals.
 
 - [ ] **Step 4: Commit**

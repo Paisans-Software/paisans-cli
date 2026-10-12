@@ -3,7 +3,7 @@
 Date: 2026-10-08. Status: approved by the founder in session. The reverse of
 `site add` (docs/specs/2026-10-07-site-add.md): take one site out of a running
 deployment, move its data elsewhere first, take it out of the cluster, clean
-its host, and take it out of `paisans.yaml`. On the host it leaves everything
+its host, and take it out of `paisans-stack.yaml`. On the host it leaves everything
 that is not provably this deployment's alone.
 
 ## Scope
@@ -51,7 +51,7 @@ paisans site remove home-b --execute --delete-data   # asks for "home-b" at a te
 paisans site remove home-b --execute --host-gone     # the host is never coming back
 ```
 
-The last stage edits `paisans.yaml`, so a finished removal leaves nothing to
+The last stage edits `paisans-stack.yaml`, so a finished removal leaves nothing to
 run again. A run stopped part way resumes: every stage is built from live
 state, so a re-run plans only what is still to do and checks every gate again.
 
@@ -88,7 +88,7 @@ evidence. Nothing after it runs.
 | 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped, since a removed member cannot rejoin and would restart in a loop; with two data sites and a witness, the witness's member too (below); on every remaining site, the files whose render changes with the site taken out, by scoped applies: the mesh file (`wg syncconf`), HAProxy (restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then every remaining replica's `patroni.env`, one replica at a time (below) | etcd's voters are exactly the end state's and every member is healthy; HAProxy lists exactly the end state's cluster sites with the leader `UP`; no remaining site has the removed site as a WireGuard peer; each replica streams again before the next is touched |
 | 3. Clean the host | Below. Skipped with `--host-gone`. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby on another site takes over, up to about 90 seconds if the instance does not stop cleanly. The stop is clean, so the standby takes over at its next retry; 90 seconds is how long a registration takes to age when an instance dies (`docs/specs/2026-10-07-pocket-id-standby.md`) | nothing of this deployment's is left on the host but what the plan said it keeps |
 | 4. DNS | The address records this deployment's `dns init` made for the site, deleted when the configuration without it wants none at their names and no remaining site shares their address (docs/specs/2026-10-09-site-remove-force.md); skipped, with one line, without a provider, a token or a public address | listing the zones again finds nothing left to delete |
-| 5. Config | The site taken out of `paisans.yaml`, comments kept; with two data sites and a witness, in the same write, the witness out of `etcd.members` and the `witness` role off its site | the file loads without the site, and without the witness in etcd |
+| 5. Config | The site taken out of `paisans-stack.yaml`, comments kept; with two data sites and a witness, in the same write, the witness out of `etcd.members` and the `witness` role off its site | the file loads without the site, and without the witness in etcd |
 
 ### Two data sites and a witness
 

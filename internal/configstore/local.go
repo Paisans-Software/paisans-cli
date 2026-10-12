@@ -17,7 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 )
 
-// Local is an operator's workstation: the directory holding paisans.yaml,
+// Local is an operator's workstation: the directory holding paisans-stack.yaml,
 // secrets.enc.yaml and .sops.yaml, and beside them .paisans/ with what the
 // workstation remembers about the store (docs/specs/2026-10-12-config-store.md,
 // *Commands*).
@@ -270,7 +270,7 @@ func (l Local) Cache() (Repo, error) {
 
 func (l Local) path(name string) string { return filepath.Join(l.Dir, name) }
 
-// Files reads the three files beside paisans.yaml.
+// Files reads the three files beside paisans-stack.yaml.
 func (l Local) Files() (Files, error) {
 	var f Files
 	for _, e := range []struct {
@@ -296,7 +296,7 @@ func (l Local) HasFiles() bool {
 	return false
 }
 
-// WriteFiles writes the three files beside paisans.yaml, each replaced whole.
+// WriteFiles writes the three files beside paisans-stack.yaml, each replaced whole.
 // The secrets file stays readable only by its owner, as init writes it.
 func (l Local) WriteFiles(f Files) error { return writeFiles(l.Dir, f) }
 
@@ -316,7 +316,7 @@ func writeFiles(dir string, f Files) error {
 	return nil
 }
 
-// Checkout writes the version sha's three files beside paisans.yaml and
+// Checkout writes the version sha's three files beside paisans-stack.yaml and
 // records it as the head.
 func (l Local) Checkout(sha string) error {
 	cache, err := l.Cache()
@@ -545,7 +545,7 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	return g, nil
 }
 
-// versionConfigs reads a version's paisans.yaml, decoded as strictly as
+// versionConfigs reads a version's paisans-stack.yaml, decoded as strictly as
 // config.Load decodes the local one, and remembers each answer.
 func versionConfigs(cache Repo) func(sha string) (*config.Config, error) {
 	type result struct {
@@ -677,7 +677,7 @@ type publishOpts struct {
 // whose rollback the operator accepted), signs it with keyLine (a public key
 // line the ssh-agent holds), and pushes the cache to every site that
 // answered. It refuses a base that is not the sites' head, a fork, a key
-// that no admin of the parent lists (of the local paisans.yaml for the first
+// that no admin of the parent lists (of the local paisans-stack.yaml for the first
 // version), and a run that reaches no site. It records the change to the
 // seen record the gather carries, the version as the head, the first as the
 // root, and the key as the signing key when none is recorded. Unchanged

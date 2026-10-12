@@ -82,7 +82,7 @@ func registryHolding(t *testing.T, id, token, subnet string) string {
 // points init at fakes for its sites and at random.
 func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFake, random []byte) (string, *ui.Recorder) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 	if edit != nil {
 		body = edit(body)
 	}
-	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestInitRefusesWhenASiteIsUnreachable(t *testing.T) {
 	}
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(before, after) {
-		t.Error("init changed paisans.yaml although a site was unreachable")
+		t.Error("init changed paisans-stack.yaml although a site was unreachable")
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err == nil {
 		t.Error("init generated secrets although it refused")
@@ -267,7 +267,7 @@ func TestInitGivesUpAfterMaxRolls(t *testing.T) {
 	}
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(before, after) {
-		t.Error("init wrote paisans.yaml although it found no subnet")
+		t.Error("init wrote paisans-stack.yaml although it found no subnet")
 	}
 }
 
@@ -330,7 +330,7 @@ func TestInitWarnsAboutAPlaintextFile(t *testing.T) {
 	}
 }
 
-// A secret naming a site paisans.yaml no longer declares is warned about by
+// A secret naming a site paisans-stack.yaml no longer declares is warned about by
 // key, and init leaves it for `secrets prune`.
 func TestInitWarnsAboutOrphanedSecrets(t *testing.T) {
 	sites := fakeSites()
@@ -352,7 +352,7 @@ func TestInitWarnsAboutOrphanedSecrets(t *testing.T) {
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Lines(), "secrets: sites.monitor-a names a site paisans.yaml does not declare") {
+	if !strings.Contains(out.Lines(), "secrets: sites.monitor-a names a site paisans-stack.yaml does not declare") {
 		t.Errorf("no warning:\n%s", out.Lines())
 	}
 	if strings.Contains(out.Lines(), "not-a-real-key-0003") {
@@ -363,7 +363,7 @@ func TestInitWarnsAboutOrphanedSecrets(t *testing.T) {
 	}
 }
 
-// A site the record lists that paisans.yaml no longer declares is warned
+// A site the record lists that paisans-stack.yaml no longer declares is warned
 // about, whether or not it has secrets.
 func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	sites := fakeSites()
@@ -373,7 +373,7 @@ func TestInitWarnsAboutADroppedSite(t *testing.T) {
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Lines(), "sites.monitor-a is deployed but paisans.yaml no longer declares it") {
+	if !strings.Contains(out.Lines(), "sites.monitor-a is deployed but paisans-stack.yaml no longer declares it") {
 		t.Errorf("no warning:\n%s", out.Lines())
 	}
 	secrets, err := config.LoadDeploymentSecrets(filepath.Join(filepath.Dir(path), "secrets.enc.yaml"), cfg.ID)

@@ -76,7 +76,7 @@ type gathered struct {
 // gatherForApply gathers as config publish does, without the side effects
 // in a dry run: no site syncs. The seen record is written only when the
 // version is published, after the review's approval (configstore.PublishFiles).
-// loaded is the paisans.yaml and secrets.enc.yaml the caller loaded and
+// loaded is the paisans-stack.yaml and secrets.enc.yaml the caller loaded and
 // applies, which are what is published; nil reads them here, for apply
 // without --site, whose steps each check that they load the same.
 // It refuses, before the review, what --execute could not publish: files
