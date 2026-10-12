@@ -137,3 +137,75 @@ func (r heartbeat) Users(e Env) []Use {
 	}
 	return append(out, Use{Site: r.site, Stacks: []string{"infra"}})
 }
+
+// adminsHeartbeatGap is what an admins heartbeat rotation costs, for the
+// same reason as heartbeatGap: between the monitors restarting with the next
+// token and the active Pocket ID instance's pusher being recreated with it,
+// that instance still pushes the old one, which the monitors answer 404 to.
+// Nobody is signed out, and Pocket ID keeps running throughout.
+const adminsHeartbeatGap = "the admins heartbeat, which the monitors may refuse for at most one push interval between learning the next token and the active instance pushing it"
+
+// adminsHeartbeat rotates the token a Pocket ID app's instances push the
+// admins group's health with.
+type adminsHeartbeat struct {
+	Generated
+	app string
+}
+
+// AdminsHeartbeat is the rotation of apps.<app>.admins_heartbeat_token, the
+// token every instance of a Pocket ID app pushes the admins heartbeat with
+// (internal/render/adminsheartbeat.go). The monitors learn it first, as for
+// a site's heartbeat: every uptime app, on its own site, is applied in turn,
+// which rewrites its monitors.json and restarts it so the seed reconcile
+// adopts the token. Every monitor, the one on a site the app runs on
+// included, since every monitor's seed names the app's admins heartbeat.
+// Then each site running the app, its own stack, whose
+// admins-heartbeat/heartbeat.env changes. Only the admins-heartbeat service
+// reads that file, and `up -d` replaces only the service whose configuration
+// changed, so Pocket ID, its reconciler and its database are left running. A
+// deployment with no monitor has no user: no pusher is rendered, and the
+// token is replaced in the file and handed to nobody.
+func AdminsHeartbeat(app string) Rotator {
+	return adminsHeartbeat{Generated: Generated{SecretPath: "apps." + app + ".admins_heartbeat_token"}, app: app}
+}
+
+func (r adminsHeartbeat) Cost() Cost { return Cost{Downtime: adminsHeartbeatGap} }
+
+// Precheck refuses an app that is not a Pocket ID app, and one that runs on
+// no site.
+func (r adminsHeartbeat) Precheck(e Env) error {
+	app, ok := e.Cfg.Apps[r.app]
+	if !ok {
+		return fmt.Errorf("the configuration declares no app %q", r.app)
+	}
+	if app.Kind != config.KindPocketID {
+		return fmt.Errorf("apps.%s is %s, and admins_heartbeat_token is a secret of %s", r.app, app.Kind, config.KindPocketID)
+	}
+	return runsSomewhere(e, r.app)
+}
+
+// Checked has nothing to do: the monitors check the token, and they are
+// handed it as the first users.
+func (r adminsHeartbeat) Checked(e Env, next string) error { return nil }
+
+func (r adminsHeartbeat) Accepts(e Env, next string) (bool, error) { return true, nil }
+
+// Users is every monitor, in app order, each on its own site, then every
+// site running the app, its own stack on each: the monitors
+// render.adminsHeartbeatTargets has the app push to, and its pushers.
+func (r adminsHeartbeat) Users(e Env) []Use {
+	var out []Use
+	placed := render.AppSites(e.Cfg)
+	for _, name := range e.Cfg.AppNames() {
+		if e.Cfg.Apps[name].Kind != config.KindUptime {
+			continue
+		}
+		for _, site := range placed[name] {
+			out = append(out, Use{Site: site, Stacks: []string{name}})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return append(out, appUses(e, r.app)...)
+}
