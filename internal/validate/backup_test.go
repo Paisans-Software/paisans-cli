@@ -43,6 +43,12 @@ func TestBackupRefusals(t *testing.T) {
 		{"no name", "backup-destination-name", func(b *config.Backup) { b.Destinations[0].Name = "" }},
 		{"a name that is no secrets key", "backup-destination-name", func(b *config.Backup) { b.Destinations[0].Name = "B2 main" }},
 		{"same name twice", "backup-destination-duplicate", func(b *config.Backup) { b.Destinations[1].Name = b.Destinations[0].Name }},
+		{"two names for one bucket", "backup-destination-same-place", func(b *config.Backup) {
+			b.Destinations[1].Endpoint, b.Destinations[1].Bucket = b.Destinations[0].Endpoint, b.Destinations[0].Bucket
+		}},
+		{"one bucket, the endpoint spelled with a slash and capitals", "backup-destination-same-place", func(b *config.Backup) {
+			b.Destinations[1].Endpoint, b.Destinations[1].Bucket = "HTTPS://S3.Example.net/", b.Destinations[0].Bucket
+		}},
 		{"endpoint without a scheme", "backup-endpoint-not-a-url", func(b *config.Backup) { b.Destinations[0].Endpoint = "s3.example.net" }},
 		{"endpoint with a path", "backup-endpoint-not-a-url", func(b *config.Backup) { b.Destinations[0].Endpoint = "https://s3.example.net/bucket" }},
 		{"prune with nothing kept", "backup-keep-empty", func(b *config.Backup) { b.Destinations[0].Keep = config.Keep{} }},
@@ -92,6 +98,16 @@ func TestBackupAccepts(t *testing.T) {
 				t.Fatalf("refused: %v", r.Refusals())
 			}
 		})
+	}
+}
+
+func TestOneBucketUnderTwoPrefixesIsTwoPlaces(t *testing.T) {
+	r := withBackup(t, func(b *config.Backup) {
+		b.Destinations[1].Endpoint, b.Destinations[1].Bucket = b.Destinations[0].Endpoint, b.Destinations[0].Bucket
+		b.Destinations[1].Prefix = "second"
+	})
+	if refused(r, "backup-destination-same-place") {
+		t.Fatalf("two prefixes in one bucket were refused: %v", r.Refusals())
 	}
 }
 

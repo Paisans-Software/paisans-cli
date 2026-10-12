@@ -58,9 +58,21 @@ func (c *checker) backup() {
 		return
 	}
 	seen := map[string]bool{}
+	places := map[string]string{}
 	for i, d := range b.Destinations {
 		key := fmt.Sprintf("backup.destinations[%d]", i)
 		c.destination(key, d, b.Schedule, seen)
+		if d.Endpoint == "" || d.Bucket == "" {
+			continue
+		}
+		place := destinationPlace(d)
+		if first, ok := places[place]; ok {
+			c.refuse("backup-destination-same-place", key,
+				"two destinations are one bucket",
+				"is %s, the same endpoint, bucket and prefix as %s. Two destinations are two copies only if they are two places: they would share one repository and prune it twice, and the single destination warning would not fire. Use another bucket or provider, or a different prefix.", d.Name, first)
+			continue
+		}
+		places[place] = d.Name
 	}
 	if len(b.Destinations) == 1 {
 		c.warn("backup-single-destination", "backup.destinations",
@@ -220,4 +232,15 @@ func (c *checker) backupMonitor() {
 	c.warn("backup-without-a-monitor", "backup",
 		"no monitor to report failed backups to",
 		"is on, but the deployment runs no uptime app, so a failed backup run is reported to nobody. Declare one (README, \"Monitoring\").")
+}
+
+// destinationPlace is where a destination's objects go, spelled one way: the
+// endpoint's scheme and host lowercased, the bucket, and the prefix without
+// its outer slashes.
+func destinationPlace(d config.BackupDestination) string {
+	endpoint := strings.ToLower(strings.TrimRight(d.Endpoint, "/"))
+	if u, err := url.Parse(d.Endpoint); err == nil && u.Host != "" {
+		endpoint = strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+	}
+	return endpoint + "/" + d.Bucket + "/" + strings.Trim(d.Prefix, "/")
 }

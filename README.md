@@ -3553,6 +3553,9 @@ While backups are on, `validate` refuses:
   that is not lowercase letters, digits and hyphens, or one used twice. The
   name is part of the destination's secrets' keys,
   `backup.destinations.<name>.access_key_id`, so it has to be one.
+* **`backup-destination-same-place`**: two destinations with one endpoint,
+  bucket and prefix. They would be one repository pruned twice, not two
+  copies, and the single destination warning would not see it.
 * **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme
   and host. The bucket goes in `bucket`.
 * **`backup-keep-empty`**: pruning with nothing kept, which would delete every
