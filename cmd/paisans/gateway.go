@@ -36,7 +36,7 @@ func runGateway(args []string) error {
 // "Moving the gateway"). It takes no site: the new gateway is the
 // configuration's, and the old one is found from what it still runs.
 func runGatewayMove(args []string) error {
-	fs := flag.NewFlagSet("gateway move", flag.ExitOnError)
+	fs := newFlagSet("gateway move", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")

@@ -78,7 +78,7 @@ func TestWizardWritesEachNamedShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			data, err := Render(w.Answers, testID)
+			data, err := Render(w.Answers, testID, testOrigin)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestAnsweringAgainKeepsEveryAnswerAsTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := Render(w.Answers, testID)
+	first, err := Render(w.Answers, testID, testOrigin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAnsweringAgainKeepsEveryAnswerAsTheDefault(t *testing.T) {
 		if err := w.Ask(s); err != nil {
 			t.Fatalf("%s: %v\n%s", s, err, out.String())
 		}
-		again, err := Render(w.Answers, testID)
+		again, err := Render(w.Answers, testID, testOrigin)
 		if err != nil {
 			t.Fatal(err)
 		}

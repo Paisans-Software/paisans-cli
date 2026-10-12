@@ -41,7 +41,7 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 // brings it back: a flag can sit in a script or a shell history and be run
 // again by somebody who did not mean it, and a typed name cannot.
 func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("app remove", flag.ContinueOnError)
+	fs := newFlagSet("app remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
@@ -249,7 +249,7 @@ func confirmName(stdin io.Reader, stdout io.Writer, app string) error {
 	if !stdinIsTerminal(stdin) {
 		return fmt.Errorf("app remove: --delete-data asks for the app's name at a terminal, and stdin is not one. Nothing was changed")
 	}
-	fmt.Fprintf(stdout, "\nThis deletes %s's member data above, for good.\nType %s to go on: ", app, app)
+	prompt(stdout, ui.Danger(stdout, fmt.Sprintf("This permanently deletes %s's member data above.", app)), app)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')
 	if err != nil && answer == "" {
 		return fmt.Errorf("app remove: no answer read. Nothing was changed")

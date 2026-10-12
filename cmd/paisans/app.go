@@ -59,7 +59,7 @@ func runApp(args []string) error {
 // app is refused by name: its administrators come only through single sign
 // on, so the refusal points at this command run against Pocket ID.
 func runAppAdminCreate(args []string, stdin io.Reader) error {
-	fs := flag.NewFlagSet("app admin create", flag.ContinueOnError)
+	fs := newFlagSet("app admin create", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file, read for pocket-id's API key (default: secrets.enc.yaml beside the config)")

@@ -45,11 +45,11 @@ func assertEveryFlagSetHasCommonFlags(t *testing.T) {
 			continue
 		}
 		src, _ := os.ReadFile(f)
-		sets := strings.Count(string(src), "flag.NewFlagSet(")
+		sets := strings.Count(string(src), "flag.NewFlagSet(") + strings.Count(string(src), "newFlagSet(")
 		// A FlagSet that keeps -v to itself, rather than in the process's
 		// verboseRun, registers it with verboseFlags.
 		common := strings.Count(string(src), "commonFlags(") + strings.Count(string(src), "verboseFlags(")
-		if f == "flags.go" {
+		if f == "flags.go" || f == "help.go" {
 			continue
 		}
 		if common < sets {

@@ -279,7 +279,7 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
 		return nil
 	}
-	if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the host's version is gone from the sites."); err != nil {
+	if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {
 		return &ui.Problem{Hint: hint, Explain: why + "\n" + sentence(err.Error())}
 	}
 	return nil

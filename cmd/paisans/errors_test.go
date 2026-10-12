@@ -88,9 +88,6 @@ func TestSecretsErrorThroughMainsPrinter(t *testing.T) {
 		}
 	}
 	for _, l := range lines {
-		if len(l) > 80 {
-			t.Errorf("a line is wider than 80: %q", l)
-		}
 		if l != lines[0] && !strings.HasPrefix(l, "  ") {
 			t.Errorf("an explanation line is not indented: %q", l)
 		}
@@ -129,13 +126,13 @@ func TestAGarageWaitStillExits75(t *testing.T) {
 }
 
 // A command line paisans cannot run says so in the error form, then the
-// usage, and exits 2.
+// list of commands, and exits 2.
 func TestUsageErrorIsInTheErrorForm(t *testing.T) {
 	var b strings.Builder
 	if code := usageError(&b, "host takes one subcommand, prepare or deployments"); code != 2 {
 		t.Errorf("exit %d, want 2", code)
 	}
-	if !strings.HasPrefix(b.String(), "FAIL host takes one subcommand, prepare or deployments\n\n"+usage[:20]) {
+	if !strings.HasPrefix(b.String(), "FAIL host takes one subcommand, prepare or deployments\n\npaisans installs") {
 		t.Errorf("got:\n%s", b.String()[:200])
 	}
 }

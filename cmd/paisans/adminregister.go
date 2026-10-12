@@ -33,7 +33,7 @@ func runAdmin(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("admin register", flag.ExitOnError)
+	fs := newFlagSet("admin register", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
 	keyPath := fs.String("key", "", "the public key file (.pub) to sign with; the ssh-agent must hold it")

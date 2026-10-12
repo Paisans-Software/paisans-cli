@@ -1,11 +1,7 @@
-# paisans.yaml: the whole deployment, declared. Written by `paisans create`.
+# Written by paisans v0.0.0-test on 2026-01-02.
 #
 # This file is plain and safe to commit. It holds no secrets: those live in
 # secrets.enc.yaml, encrypted with sops and age, which `paisans init` makes.
-#
-# It declares intent, never status. Edit it and run `paisans apply` to change
-# the deployment; examples/paisans.example.yaml in the toolkit explains every
-# key this file can hold.
 
 version: 1
 # The deployment's identity. Never changes.

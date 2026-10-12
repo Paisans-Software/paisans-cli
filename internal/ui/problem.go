@@ -47,9 +47,9 @@ func (p *Problem) Unwrap() error { return p.Cause }
 // command exits 0.
 type Warning struct{ Problem }
 
-// maxWidth is the widest prose is wrapped to, however wide the terminal: a
-// longer line is harder to read, not easier.
-const maxWidth = 80
+// hintWidth is the longest first line of a plain error that is shown whole
+// as its hint; a longer one is cut at its first sentence.
+const hintWidth = 80
 
 // Describe is what the error printer shows for err without --verbose: the
 // hint and explanation of the outermost Problem in its chain, or, for any
@@ -66,7 +66,7 @@ func Describe(err error) (hint, explain string) {
 	}
 	msg := strings.TrimSpace(err.Error())
 	hint, explain, _ = strings.Cut(msg, "\n")
-	if len(hint) > maxWidth {
+	if len(hint) > hintWidth {
 		if i := strings.Index(hint, ". "); i > 0 {
 			explain = strings.TrimSpace(hint[i+2:] + "\n" + explain)
 			hint = hint[:i]
@@ -78,7 +78,8 @@ func Describe(err error) (hint, explain string) {
 // PrintError writes the error that ends a command to w, in the visual
 // language of a refusal: a red ✗ (FAIL off a terminal), or a Warning's yellow
 // ! (WARN), and the hint, then the
-// explanation indented and wrapped to the terminal, at most 80 columns. With
+// explanation indented and wrapped to the terminal's width, so a wrapped
+// line keeps its indent, and not wrapped at all off a terminal. With
 // verbose, the cause chain follows, one link a line, with full paths.
 func PrintError(w io.Writer, err error, verbose bool) {
 	printError(w, err, verbose, isTerminal(w), terminalWidth(w))
@@ -86,9 +87,6 @@ func PrintError(w io.Writer, err error, verbose bool) {
 
 func printError(w io.Writer, err error, verbose, terminal bool, width int) {
 	w = RedactWriter(w)
-	if width <= 0 || width > maxWidth {
-		width = maxWidth
-	}
 	hint, explain := Describe(err)
 	mark, plain := red+"✗"+reset, "FAIL"
 	var warn *Warning
@@ -100,7 +98,10 @@ func printError(w io.Writer, err error, verbose, terminal bool, width int) {
 	} else {
 		fmt.Fprintf(w, "%s %s\n", plain, hint)
 	}
-	for _, line := range Wrap(explain, width-2) {
+	if width > 0 {
+		width -= 2
+	}
+	for _, line := range Wrap(explain, width) {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
 	if !verbose {
@@ -184,7 +185,8 @@ func ownText(e, next error) ([]string, bool) {
 
 // Wrap breaks text into lines of at most width characters, at spaces only,
 // so a path, a command or a URL is never split; a word longer than width
-// gets a line of its own. Each line of text wraps on its own and keeps its
+// gets a line of its own. A width of 0 or less breaks nothing, for output
+// that is not a terminal of known width. Each line of text wraps on its own and keeps its
 // indentation, and a list item's continuation lines align under its text
 // after "- ". Blank lines are dropped.
 //
@@ -199,7 +201,7 @@ func Wrap(text string, width int) []string {
 		}
 		// A line that fits is left as written, so columns in it stay
 		// aligned.
-		if len(line) <= width {
+		if width <= 0 || len(line) <= width {
 			out = append(out, line)
 			continue
 		}

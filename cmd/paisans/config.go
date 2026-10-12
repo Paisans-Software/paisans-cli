@@ -160,7 +160,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		case m.execute && m.accepted != nil && m.accepted.Lower && m.accepted.Revision == rb.Revision && m.accepted.SHA == rb.SHA:
 			g.AcceptRollback(rb)
 		case m.execute:
-			if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the newer version is gone."); err != nil {
+			if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the newer version is gone."); err != nil {
 				return g, err
 			}
 			g.AcceptRollback(rb)
@@ -169,7 +169,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		default:
 			r.Note("--execute asks for rollback", why)
 		}
-		s = r.Step("go on from the older version")
+		s = r.Step("proceed from the older version")
 		err = nil
 	}
 	if err != nil {
@@ -326,7 +326,7 @@ func adminsHolding(cfg *config.Config, held []string) map[string][]string {
 }
 
 func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("config publish", flag.ExitOnError)
+	fs := newFlagSet("config publish", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
@@ -439,7 +439,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("config pull", flag.ExitOnError)
+	fs := newFlagSet("config pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
@@ -695,7 +695,7 @@ func flatKeys(data []byte) (map[string]string, error) {
 }
 
 func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("config log", flag.ExitOnError)
+	fs := newFlagSet("config log", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
 	root := fs.String("root", "", "judge from this root, as if pinned, without recording it")
@@ -761,7 +761,7 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("config recover", flag.ExitOnError)
+	fs := newFlagSet("config recover", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
 	var from pathList
