@@ -186,7 +186,12 @@ var catalogue = map[config.Kind][]Service{
 		// the account (docs/specs/2026-10-12-invite-service.md). Cluster
 		// placement only, so the PostgresService row is the cluster's role
 		// and database, never a container of its own.
-		{Name: "app", Image: "ghcr.io/paisans-software/paisans-invite:develop", Purpose: "the invite service"},
+		//
+		// 0.1.0 (git tag v0.1.0, without the `v` here) was checked against
+		// ghcr.io on 2026-10-12 by requesting the manifest for that exact
+		// tag anonymously (amd64 and arm64), and inspected after a pull: it
+		// declares no VOLUME.
+		{Name: "app", Image: "ghcr.io/paisans-software/paisans-invite:0.1.0", Purpose: "the invite service"},
 		{Name: PostgresService, Purpose: "its role and database on the cluster"},
 	},
 }

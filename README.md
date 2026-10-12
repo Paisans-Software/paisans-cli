@@ -2359,18 +2359,18 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 `external.smtp_password`, which `init` lists as owed once something resolves a
 mail host.
 
-Four kinds read it (`kinds.SendsMail`): the invite service, which takes it
-as `INVITE_SMTP_*` in its `.env` for its notices to admins and invitees; the
-uptime monitor, which puts it in its seed file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`,
-`SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in its `.env` (see
-*Pocket ID's configuration is rendered from paisans.yaml*); and Mbin, which
-takes it as `MAILER_DSN` and its sender address (see *Mbin sends little mail,
-and says where from*). The password goes into that `.env` beside the other
-credentials it already carries, written 0600 like every rendered file that
-holds a secret, and quoted so that a `$` or a `#` a mail provider issued
-arrives as issued. An `smtp:` block on any other
-kind is refused, `smtp-on-a-kind-without-mail`, because an override nothing
-reads is ignored without a word.
+Four kinds read it (`kinds.SendsMail`): the invite service, which takes it as
+`INVITE_SMTP_*` in its `.env` for its notices to admins and invitees; the
+uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
+`SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
+paisans.yaml*); and Mbin, which takes it as `MAILER_DSN` and its sender address
+(see *Mbin sends little mail, and says where from*). The password goes into
+that `.env` beside the other credentials it already carries, written 0600 like
+every rendered file that holds a secret, and quoted so that a `$` or a `#` a
+mail provider issued arrives as issued. An `smtp:` block on any other kind is
+refused, `smtp-on-a-kind-without-mail`, because an override nothing reads is
+ignored without a word.
 
 Two fields mean slightly less to Pocket ID than to the monitor, because of
 what Pocket ID can express (Mbin's own differences are in its section):

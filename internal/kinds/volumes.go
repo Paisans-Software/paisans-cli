@@ -49,6 +49,9 @@ var ImageVolumes = map[string][]string{
 	// the same Dockerfile, whose only VOLUME is /data, and is to be inspected
 	// once published.
 	"ghcr.io/paisans-software/uptime:1.1.0-oidc.4": {"/data"},
+	// Distroless, declares none: `docker image inspect` printed null for this
+	// exact tag on 2026-10-12.
+	"ghcr.io/paisans-software/paisans-invite:0.1.0": nil,
 	// Declares none: cmd/admin-reconciler/Dockerfile has no VOLUME, checked with
 	// `docker image inspect` on a local build on 2026-10-08.
 	"ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d": nil,
@@ -99,10 +102,9 @@ var ImageVolumes = map[string][]string{
 // WriteFreely's declares none (Dockerfile at writefreely-wisp develop
 // f95d840), and 0.21.0-wisp printed null inspected the same way.
 var RepositoryVolumes = map[string][]string{
-	acme.Repository:                           nil,
-	"ghcr.io/paisans-software/mbin":           {"/app/var/"},
-	"ghcr.io/josephquigley/writefreely-wisp":  nil,
-	"ghcr.io/paisans-software/paisans-invite": nil, // distroless, declares no VOLUME
+	acme.Repository:                          nil,
+	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
+	"ghcr.io/josephquigley/writefreely-wisp": nil,
 }
 
 // DeclaredVolumes is what an image declares, as far as the toolkit has
