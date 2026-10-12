@@ -15,6 +15,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -191,15 +192,6 @@ func (h *host) Run(command string) (string, error) {
 	return "", nil
 }
 
-func contains(list []string, s string) bool {
-	for _, item := range list {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}
-
 func sum(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
@@ -238,6 +230,14 @@ func newMesh(t *testing.T) *mesh {
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[d.Manifest()] = string(manifest) + "\n"
 		h.run = h.files[wgConf]
+		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
+		id, e := registry.For(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		reg.Deployments[id] = e
+		data, err := registry.Encode(reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.files[registry.Path] = string(data)
 		m.hosts[name] = h
 	}
 	saved := []any{sleep, handshakeWait, handshakePoll, healthWait, healthPoll}
@@ -428,5 +428,33 @@ func TestARekeyRefusesTheOnlyRelay(t *testing.T) {
 	}
 	if err := refuseLostRelay(m.cfg, []string{"home-a"}); err != nil {
 		t.Errorf("home-a relays nothing: %v", err)
+	}
+}
+
+// A site declared and not brought up yet, a replacement waiting for its
+// apply, is neither rekeyed nor written to, and no peer is handed it.
+func TestARekeyLeavesASiteNotBroughtUpAlone(t *testing.T) {
+	m := newMesh(t)
+	m.hosts["watch"].files = map[string]string{}
+	m.hosts["watch"].run = ""
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range p.Sites {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "home-a,home-b,vm" || strings.Join(p.Joining, ",") != "watch" {
+		t.Fatalf("rekeys %v, joining %v", names, p.Joining)
+	}
+	if err := run(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.hosts["watch"].files) != 0 {
+		t.Error("the site not brought up was written to")
+	}
+	if _, err := m.build("watch"); err == nil || !strings.Contains(err.Error(), "holds no claim") {
+		t.Errorf("naming it: %v", err)
 	}
 }

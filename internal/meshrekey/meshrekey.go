@@ -32,6 +32,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -78,6 +79,11 @@ type Site struct {
 type Plan struct {
 	Sites  []Site
 	Report ui.Reporter
+	// Joining are the sites the configuration declares whose hosts hold no
+	// claim of this deployment yet, Eg: a replacement declared before an
+	// eviction. They are no site's peer until the apply that brings them up,
+	// so a rekey neither writes to them nor renders them.
+	Joining []string
 
 	cfg        *config.Config
 	store      Store
@@ -100,6 +106,16 @@ func Build(cfg *config.Config, store Store, sites []string, transports map[strin
 	if len(sites) == 0 {
 		return nil, fmt.Errorf("mesh rekey: name the sites to rekey, or --all")
 	}
+	return build(cfg, store, sites, false, transports)
+}
+
+// BuildAll plans the rekey of every site the configuration declares and its
+// hosts run, in the configuration's order.
+func BuildAll(cfg *config.Config, store Store, transports map[string]apply.Transport) (*Plan, error) {
+	return build(cfg, store, nil, true, transports)
+}
+
+func build(cfg *config.Config, store Store, sites []string, all bool, transports map[string]apply.Transport) (*Plan, error) {
 	p := &Plan{cfg: cfg, store: store, transports: transports}
 	seen := map[string]bool{}
 	for _, name := range sites {
@@ -111,9 +127,6 @@ func Build(cfg *config.Config, store Store, sites []string, transports map[strin
 		}
 		seen[name] = true
 	}
-	if err := refuseLostRelay(cfg, sites); err != nil {
-		return nil, err
-	}
 	for _, name := range cfg.SiteNames() {
 		t, ok := transports[name]
 		if !ok {
@@ -122,6 +135,29 @@ func Build(cfg *config.Config, store Store, sites []string, transports map[strin
 		if out, err := t.Run("true"); err != nil {
 			return nil, fmt.Errorf("mesh rekey: %s does not answer over ssh (%v: %s). Every site is a peer of a site being rekeyed and has its mesh file changed, so every one must answer. Fix ssh and run again. Nothing was changed", name, err, strings.TrimSpace(out))
 		}
+		reg, err := registry.Read(t)
+		if err != nil {
+			return nil, fmt.Errorf("mesh rekey: %w", err)
+		}
+		if _, ok := reg.Deployments[cfg.ID]; !ok {
+			p.Joining = append(p.Joining, name)
+		}
+	}
+	for _, name := range sites {
+		if contains(p.Joining, name) {
+			return nil, fmt.Errorf("mesh rekey: %s holds no claim of this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
+		}
+	}
+	if all {
+		for _, name := range cfg.SiteNames() {
+			if !contains(p.Joining, name) {
+				sites = append(sites, name)
+			}
+		}
+	}
+	p.cfg = cfg.WithoutJoining(p.Joining...)
+	if err := refuseLostRelay(p.cfg, sites); err != nil {
+		return nil, err
 	}
 	if err := p.health(); err != nil {
 		return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`paisans doctor` says how) and run again. Nothing was changed", err)
@@ -494,4 +530,13 @@ func poll(wait, every time.Duration, check func() error) error {
 		}
 	}
 	return err
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }

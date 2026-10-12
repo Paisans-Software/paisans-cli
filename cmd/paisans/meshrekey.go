@@ -82,9 +82,7 @@ func runMeshRekey(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "")
 	}
-	if *all {
-		sites = cfg.SiteNames()
-	}
+	every := *all
 	for _, name := range sites {
 		if _, ok := cfg.Sites[name]; !ok {
 			return &ui.Problem{Hint: fmt.Sprintf("%s declares no site %s", ui.ShortPath(*configPath), name), Explain: "Declared sites are " + strings.Join(cfg.SiteNames(), ", ") + "."}
@@ -109,6 +107,9 @@ func runMeshRekey(args []string) error {
 		return err
 	}
 	plan, err := ui.Get(r, "read every site", func() (*meshrekey.Plan, error) {
+		if every {
+			return meshrekey.BuildAll(cfg, store, transports)
+		}
 		return meshrekey.Build(cfg, store, sites, transports)
 	})
 	if err != nil {
@@ -117,8 +118,9 @@ func runMeshRekey(args []string) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site is a peer of some site rekeyed, so every one is written to.
-	if err := claimSites(r, cfg, *execute, *sudo, cfg.SiteNames()...); err != nil {
+	// Every site is a peer of some site rekeyed, so every one is written to,
+	// but a site not brought up yet, which a claim would make look prepared.
+	if err := claimSites(r, cfg, *execute, *sudo, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
 		return err
 	}
 	if !*execute {
@@ -129,6 +131,10 @@ func runMeshRekey(args []string) error {
 	if err := meshrekey.Execute(plan); err != nil {
 		return err
 	}
-	r.Result("%s rekeyed: every peer has a handshake under each new key, and %s holds only the new keys.", strings.Join(sites, ", "), *secretsPath)
+	var names []string
+	for _, s := range plan.Sites {
+		names = append(names, s.Name)
+	}
+	r.Result("%s rekeyed: every peer has a handshake under each new key, and %s holds only the new keys.", strings.Join(names, ", "), *secretsPath)
 	return nil
 }

@@ -139,27 +139,7 @@ func (p *Plan) liveSites() []string { return p.live(p.end.SiteNames()) }
 
 // liveEnd is the end state without the joining sites, and without the apps
 // pinned to them, which run nowhere until the apply that brings them up.
-func (p *Plan) liveEnd() *config.Config {
-	joining := p.Joining()
-	if len(joining) == 0 {
-		return p.end
-	}
-	end := p.end
-	for _, name := range joining {
-		end = end.WithoutSite(name)
-	}
-	apps := map[string]config.App{}
-	for name, app := range end.Apps {
-		apps[name] = app
-	}
-	for _, site := range joining {
-		for _, name := range p.end.PinnedTo(site) {
-			delete(apps, name)
-		}
-	}
-	end.Apps = apps
-	return end
-}
+func (p *Plan) liveEnd() *config.Config { return p.end.WithoutJoining(p.Joining()...) }
 
 // JoiningSites reads, on every site cfg declares but site, whether its host
 // holds this deployment's claim, and returns the ones that do not. A host
