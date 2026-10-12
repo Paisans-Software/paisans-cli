@@ -365,7 +365,11 @@ func (w *Wizard) apps() error {
 				if p, ok := prev[spec.key]; ok {
 					def = p.MembersOnly
 				}
-				if app.MembersOnly, err = w.p.YesNo("Members only (behind the gate)?", def); err != nil {
+				w.p.Say("Who can see the %s?", spec.what)
+				w.p.Say("  yes: members only. Anyone else is sent to sign in first;")
+				w.p.Say("       other communities still federate with it.")
+				w.p.Say("  no:  anyone who can reach it.")
+				if app.MembersOnly, err = w.p.YesNo("Members only?", def); err != nil {
 					return err
 				}
 			}

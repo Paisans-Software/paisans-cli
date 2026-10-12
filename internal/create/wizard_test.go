@@ -152,6 +152,32 @@ func TestNamedShapeSaysWhatEachMachineDoesAndWhatItsNameIsFor(t *testing.T) {
 	}
 }
 
+// The members-only question names the app and says what each answer means
+// for someone who is not a member.
+func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	_, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Who can see the forums and social?",
+		"Who can see the wiki?",
+		"  yes: members only. Anyone else is sent to sign in first;",
+		"  no:  anyone who can reach it.",
+		"Members only? [Y/n]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestDecliningTheMonitorMachineDropsTheStatusPage(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
