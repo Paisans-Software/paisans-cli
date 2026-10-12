@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/getsops/sops/v3"
@@ -96,6 +97,20 @@ type SiteSecrets struct {
 	// and what each monitor's seed names for the site: 32 lowercase hex
 	// characters, generated at init. README, "Monitoring".
 	HeartbeatToken string `yaml:"heartbeat_token"`
+}
+
+// RekeyPending is every site with a next WireGuard key, sorted: a `paisans
+// mesh rekey` that has not finished. Its host may already run the next key,
+// and the file names the old one as current until the rekey promotes it.
+func (s *Secrets) RekeyPending() []string {
+	var out []string
+	for name, site := range s.Sites {
+		if site.WireGuardNextPrivateKey != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type OIDCClient struct {

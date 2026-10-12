@@ -687,6 +687,9 @@ func runApply(args []string) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRekey(secrets); err != nil {
+		return err
+	}
 	// apply does not call secretsgen.Fill either, and this is the path that
 	// actually reaches a host: a malformed key has to stop here, not just
 	// print a confusing failure partway through provisioning on the machine.

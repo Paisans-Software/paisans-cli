@@ -171,8 +171,9 @@ from outside at all.
 **Does not protect.** Until the rekey finishes, the old keys work.
 
 **You do.** Rekey right after re-encrypting the secrets file, whenever an admin
-who was a recipient leaves or is evicted. Run no `apply` while a rekey is in
-progress, since `apply` would render the old key back.
+who was a recipient leaves or is evicted. Finish a rekey that stopped before
+anything else: `apply` refuses while one is unfinished, since it would render
+the old key back.
 
 ## A former recipient still has the secrets file
 

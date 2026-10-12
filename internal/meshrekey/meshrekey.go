@@ -250,7 +250,7 @@ func (p *Plan) stages(s Site) []stageText {
 func Execute(p *Plan) error {
 	for _, s := range p.Sites {
 		if err := p.rekey(s); err != nil {
-			return fmt.Errorf("mesh rekey %s stopped: %w. Nothing after it ran. Fix the cause and run mesh rekey again: it resumes where this stopped. Run no apply on any site until it finishes: an apply renders the key the secrets file holds as current, which is the old one until the last stage", s.Name, err)
+			return fmt.Errorf("mesh rekey %s stopped: %w. Nothing after it ran. Fix the cause and run mesh rekey again: it resumes where this stopped. Until it finishes apply refuses: it renders the key the secrets file holds as current, which is the old one until the last stage", s.Name, err)
 		}
 	}
 	return nil

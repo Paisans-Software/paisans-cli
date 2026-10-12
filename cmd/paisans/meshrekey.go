@@ -138,3 +138,20 @@ func runMeshRekey(args []string) error {
 	r.Result("%s rekeyed: every peer has a handshake under each new key, and %s holds only the new keys.", strings.Join(names, ", "), *secretsPath)
 	return nil
 }
+
+// refuseMidRekey refuses a command that renders mesh files while a mesh
+// rekey is unfinished. A site with a next key in the secrets file may already
+// run it, and every peer that lists the site with it; render names the
+// current key, the old one, so an apply would hand the old key back to those
+// peers and cut the site's tunnels. Finishing the rekey promotes the key,
+// after which render names the key the host runs.
+func refuseMidRekey(secrets *config.Secrets) error {
+	pending := secrets.RekeyPending()
+	if len(pending) == 0 {
+		return nil
+	}
+	return &ui.Problem{
+		Hint:    "a mesh rekey is unfinished",
+		Explain: fmt.Sprintf("The secrets file holds a next WireGuard key for %s, so a mesh rekey stopped part way. Its host may already run that key, and apply renders the old one, which would cut its tunnels. Finish the rekey first: paisans mesh rekey %s --execute (or --all, when the run was --all), then apply. Nothing was changed.", strings.Join(pending, ", "), strings.Join(pending, " ")),
+	}
+}

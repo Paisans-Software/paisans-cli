@@ -434,7 +434,7 @@ Replaces sites' WireGuard keys, one site at a time: a new key written to the
 secrets file as the site's next key, every peer's mesh file and then the
 site's own synced with it, a handshake under it from every peer, etcd and
 Patroni healthy, then the next key promoted. A stopped run resumes where it
-stopped; run no `apply` until it finishes, since an apply renders the old key.
+stopped; `apply` refuses until it finishes, since an apply renders the old key.
 
 ```sh
 paisans mesh rekey home-a              # dry run: where each site's rekey stands, and every stage

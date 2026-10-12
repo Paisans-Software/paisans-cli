@@ -6550,9 +6550,11 @@ Each site goes through four stages, each ending at a gate:
 rekey, and which public key its host runs, read with `wg show <interface>
 public-key`, says whether stage 2 is done. A peer whose file was written but
 whose interface was not handed it is synced again. Until stage 4, render still
-reads `wireguard_private_key`, the old key, so no `apply` should run while a
-rekey is unfinished: it would put the old key back. The error that stops a run
-says so.
+reads `wireguard_private_key`, the old key, so `apply`, with or without
+`--site`, refuses while any site has a next key in the secrets file and names
+the `mesh rekey` that finishes it: an `apply` then would hand the old key back
+to every peer and cut the site's tunnels, and a refusal costs nothing but the
+rekey's resume.
 
 **Refused before anything changes:** an unhealthy etcd or Patroni, since every
 site's swap takes its tunnels down for a moment; a site that does not answer

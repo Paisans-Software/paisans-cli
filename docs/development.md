@@ -900,8 +900,9 @@ and `config.WriteSecrets`. README.md's *Rekeying the mesh: `mesh rekey`* has
 the design. The swap renders the configuration with the site's next key in
 place of its current one and moves only the mesh file, by scoped `apply`, on
 every peer and then the site; render never reads
-`wireguard_next_private_key`, so a whole `apply` mid rekey puts the old key
-back, which the error that stops a run says. Where a rekey stands is read
+`wireguard_next_private_key`, so `apply` and `apply --site` refuse while the
+secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
+they would put the old key back. Where a rekey stands is read
 from the secrets file and `wg show <interface> public-key`, and nothing else.
 The tests run a mesh in maps in which a handshake is up when both ends run a
 peer entry for the key the other runs.
