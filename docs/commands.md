@@ -2,8 +2,9 @@
 
 One entry per `paisans` command: what it does, when an operator runs it on its
 own, its flags with their defaults, whether it reaches a host, and what it
-does without and with `--execute`. `paisans help` prints the same list in
-short, from `cmd/paisans/main.go`.
+does without and with `--execute`. `paisans help` lists the commands in a line
+each, and `paisans help <command>` or `paisans <command> --help` prints one
+command's usage, what it does and its flags, from `cmd/paisans/help.go`.
 
 This file holds the mechanics. Why each command behaves as it does is in
 `README.md`, and each entry names the section there that carries the
