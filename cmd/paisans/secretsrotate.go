@@ -691,8 +691,16 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			kept = append(kept, keptSecret{path, backupKeyKept})
 		}
 	}
-	if len(s.Backup.Destinations) > 0 {
-		kept = append(kept, keptSecret{"backup.destinations.*", destinationKept})
+	// A destination paisans.yaml no longer declares is an orphan, which
+	// secrets prune reports; it is not kept.
+	if cfg.Backup != nil {
+		for _, d := range cfg.Backup.Destinations {
+			path := "backup.destinations." + d.Name
+			if has(path+".access_key_id") || has(path+".secret_access_key") {
+				kept = append(kept, keptSecret{"backup.destinations.*", destinationKept})
+				break
+			}
+		}
 	}
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".wireguard_private_key") {

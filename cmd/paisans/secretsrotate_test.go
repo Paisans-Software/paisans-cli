@@ -986,3 +986,25 @@ func TestSecretsRotateKeepsTheBackupSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A destination's credentials that paisans.yaml no longer declares are an
+// orphan for secrets prune, not a secret --all keeps, so --all lists the
+// destinations as kept only for one the configuration still names.
+func TestSecretsRotateAllKeepsNoOrphanedDestination(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &config.Secrets{Backup: config.BackupSecrets{
+		Destinations: map[string]config.DestinationSecrets{"gone": {AccessKeyID: "a", SecretAccessKey: "b"}},
+	}}
+	_, kept, err := rotateAll(cfg, s, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range kept {
+		if k.Path == "backup.destinations.*" {
+			t.Errorf("--all lists backup.destinations.* as kept with only an orphaned destination's credentials")
+		}
+	}
+}
