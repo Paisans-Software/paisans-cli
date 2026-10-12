@@ -47,7 +47,7 @@ sites:
       host: home.local
       user: ubuntu
       keys: [alice]
-  vps:
+  gateway:
     roles: [gateway]
     address: 10.44.0.2
     # What the internet reaches this site on. `paisans dns init` points
@@ -121,7 +121,7 @@ apps:
   chat:
     kind: synapse
     hostname: chat.example.org
-    placement: { pinned: vps }
+    placement: { pinned: gateway }
   web:
     kind: element
     hostname: web.example.org

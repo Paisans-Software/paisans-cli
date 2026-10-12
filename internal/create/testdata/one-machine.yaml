@@ -40,7 +40,7 @@ admins:
 # mesh.subnet, stable forever, and each ssh section is how the toolkit reaches
 # the site: a public key per admin, never a private one.
 sites:
-  server:
+  example-community:
     roles: [data, apps, gateway]
     address: 10.44.0.1
     # What the internet reaches this site on. `paisans dns init` points
@@ -66,7 +66,7 @@ storage:
   garage:
     # Preference order: the first site takes every write. Put the site with
     # the best upload first.
-    sites: [server]
+    sites: [example-community]
     # Copies of each object. One copy on one site is lost with that site, and
     # validate warns about it until a second Garage site is added.
     replication: 1

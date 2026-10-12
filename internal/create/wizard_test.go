@@ -121,6 +121,63 @@ func TestOneMachineDoesNotOfferChat(t *testing.T) {
 	}
 }
 
+// A named shape's machine is introduced by what it does, so the name prompt
+// does not read as a question about its roles.
+func TestNamedShapeSaysWhatEachMachineDoes(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHighAvailability]...)
+	lines = append(lines, appAnswers(true)...)
+	lines = append(lines, mailAnswers...)
+	_, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Machine 1 of 3. It:",
+		"Machine 3 of 3. It:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	for _, s := range shapes[ShapeHighAvailability].sites {
+		for _, r := range s.roles {
+			if !strings.Contains(out, "  - "+roleWhat[r]+"\n") {
+				t.Errorf("role %s is not explained:\n%s", r, out)
+			}
+		}
+	}
+}
+
+// The members-only question names the app and says what each answer means
+// for someone who is not a member.
+func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	_, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Who can see the forums and social?",
+		"Who can see the wiki?",
+		"  yes: members only. Anyone else is sent to sign in first;",
+		"  no:  public. Anyone, including search engines and bots, can read what\n" +
+			"       the app shows to visitors who are not signed in.",
+		"Members only? [Y/n]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestDecliningTheMonitorMachineDropsTheStatusPage(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
@@ -189,6 +246,49 @@ func TestSectionFor(t *testing.T) {
 	} {
 		if got := SectionFor(key); got != want {
 			t.Errorf("SectionFor(%q) = %s, want %s", key, got, want)
+		}
+	}
+}
+
+func TestSlug(t *testing.T) {
+	for in, want := range map[string]string{
+		"Paisans Staging Single": "paisans-staging-single",
+		"Paisans Community":      "paisans-community",
+		"example.org":            "example-org",
+		"  Café & Friends!  ":    "caf-friends",
+		"42 Club":                "club",
+		"A Very Long Community Name That Goes On On": "a-very-long-community-name-that",
+		"!!!": "",
+	} {
+		got := slug(in)
+		if got != want {
+			t.Errorf("slug(%q) = %q, want %q", in, got, want)
+		}
+		if got != "" && checkSiteName(got) != nil {
+			t.Errorf("slug(%q) = %q is not a valid site name", in, got)
+		}
+	}
+}
+
+// One machine's name defaults to the community's slug, then the domain's,
+// since the one machine is the whole deployment.
+func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"Paisans Staging Single", "paisans-staging-single"},
+		{"!!!", "example-org"},
+	} {
+		var lines []string
+		lines = append(lines, tc.name, "example.org", "")
+		lines = append(lines, adminAnswers...)
+		lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+		lines = append(lines, appAnswers(false)...)
+		lines = append(lines, mailAnswers...)
+		w, out, err := run(t, script(lines...))
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Name ["+tc.want+"]") || w.Answers.Sites[0].Name != tc.want {
+			t.Errorf("community %q: site = %q, want %q", tc.name, w.Answers.Sites[0].Name, tc.want)
 		}
 	}
 }

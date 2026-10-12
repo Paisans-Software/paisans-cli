@@ -1,6 +1,7 @@
 package create
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -213,10 +214,19 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 	var sites []Site
 	for i, ss := range shapes[shape].sites {
 		d := Site{Name: ss.name, SSHUser: "ubuntu"}
+		if shape == ShapeOneMachine {
+			// The one machine is the whole deployment, so it is named for it.
+			if n := cmp.Or(slug(w.Answers.Name), slug(w.Answers.Domain)); n != "" {
+				d.Name = n
+			}
+		}
 		if i < len(prev) {
 			d = prev[i]
 		}
-		w.p.Say("\nA machine holding %s.", roleList(ss.roles))
+		w.p.Say("\nMachine %d of %d. It:", i+1, len(shapes[shape].sites))
+		for _, r := range ss.roles {
+			w.p.Say("  - %s", roleWhat[r])
+		}
 		name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
 		if err != nil {
 			return nil, err
@@ -361,7 +371,12 @@ func (w *Wizard) apps() error {
 				if p, ok := prev[spec.key]; ok {
 					def = p.MembersOnly
 				}
-				if app.MembersOnly, err = w.p.YesNo("Members only (behind the gate)?", def); err != nil {
+				w.p.Say("Who can see the %s?", spec.what)
+				w.p.Say("  yes: members only. Anyone else is sent to sign in first;")
+				w.p.Say("       other communities still federate with it.")
+				w.p.Say("  no:  public. Anyone, including search engines and bots, can read what")
+				w.p.Say("       the app shows to visitors who are not signed in.")
+				if app.MembersOnly, err = w.p.YesNo("Members only?", def); err != nil {
 					return err
 				}
 			}
