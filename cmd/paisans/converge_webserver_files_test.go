@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -107,7 +108,7 @@ func convergeAt(t *testing.T, path string, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...))
+		err = runApply(append([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }

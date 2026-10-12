@@ -327,12 +327,18 @@ func (c *Config) adminProblems() []string {
 		if !keyName.MatchString(id) {
 			add("admins.%s: not a name this toolkit accepts, since it is recorded on each host beside the admin's keys. Use a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters.", id)
 		}
-		if strings.TrimSpace(a.Name) == "" {
+		// A control character is refused before anything else is said of
+		// the field: the refusal would print it.
+		if r, ok := ControlRune(a.Name); ok {
+			add("admins.%s.name %s", id, controlProblem(r))
+		} else if strings.TrimSpace(a.Name) == "" {
 			add("admins.%s.name: required. Give the admin's first and last name, Eg: name: Alice Example.", id)
 		} else if first, last, _ := strings.Cut(strings.TrimSpace(a.Name), " "); first == "" || strings.TrimSpace(last) == "" {
 			add("admins.%s.name: %q is not a first and a last name. Give both, separated by a space, Eg: name: Alice Example; apply gives the admin's Pocket ID account the first word as its first name and the rest as its last.", id, a.Name)
 		}
-		if a.Email == "" {
+		if r, ok := ControlRune(a.Email); ok {
+			add("admins.%s.email %s", id, controlProblem(r))
+		} else if a.Email == "" {
 			add("admins.%s.email: required. Give the address the admin is reached at, Eg: %s@example.org.", id, id)
 		} else if addr, err := mail.ParseAddress(a.Email); err != nil || addr.Address != a.Email {
 			add("admins.%s.email: %q is not an email address alone, Eg: %s@example.org.", id, a.Email, id)
@@ -342,6 +348,10 @@ func (c *Config) adminProblems() []string {
 			add("admins.%s.keys: required. Give at least one public key, the whole line of the .pub file, one per line, Eg:\n  keys: |\n    ssh-ed25519 AAAA... %s@example.org", id, id)
 		}
 		for n, line := range lines {
+			if r, ok := ControlRune(line); ok {
+				add("admins.%s.keys: line %d %s", id, n+1, controlProblem(r))
+				continue
+			}
 			key, options, err := ParseKeyLine(line)
 			switch {
 			case err != nil:
@@ -420,4 +430,23 @@ func (s Site) Destination() Destination {
 func hasAdmin(admins map[string]Admin, id string) bool {
 	_, ok := admins[id]
 	return ok
+}
+
+// ControlRune is the first control character in s, if it holds one: a C0
+// control (below U+0020, tab and line breaks included), DEL, or a C1 control
+// (U+0080 to U+009F). A terminal reads these as commands rather than text,
+// and ESC or CSI followed by a few printable characters moves the cursor,
+// clears a line or rewrites one already printed.
+func ControlRune(s string) (rune, bool) {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// controlProblem is the refusal of a field holding r, after its path.
+func controlProblem(r rune) string {
+	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file, host allow or doctor prints; remove it.", r)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +64,7 @@ func TestApplyRefusesMidRekey(t *testing.T) {
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...))
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err == nil || !strings.Contains(err.Error(), "mesh rekey is unfinished") {
 			t.Errorf("apply %v: err = %v", extra, err)

@@ -1,5 +1,5 @@
-# valid.yaml with a member gated Mbin whose member group (the default, members)
-# is not the gate's members_group.
+# valid.yaml with a gated Mbin whose member group is not members, the group the
+# gate admits.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -63,17 +63,13 @@ storage:
     replication: 1
 
 apps:
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    placement: { pinned: home-a }
-    settings:
-      members_group: crew
   talk:
     kind: mbin
     hostname: talk.example.org
     placement: cluster
-    visibility_gate: member
+    gated: true
+    settings:
+      member_group: crew
   docs:
     kind: outline
     hostname: docs.example.org

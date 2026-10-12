@@ -1,6 +1,9 @@
 package kinds
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Reference is a container image reference, split far enough to tell a pinned
 // one from a floating one. It is deliberately not a full parser: the toolkit
@@ -72,4 +75,23 @@ func (r Reference) Floating() string {
 	default:
 		return "it does not name one build"
 	}
+}
+
+// channelTag is a toolkit channel: stack-<N>, the latest release of a fork
+// promoted for the toolkit's template contract N
+// (docs/specs/2026-10-11-stack-channels.md).
+var channelTag = regexp.MustCompile(`^stack-([0-9]+)$`)
+
+// Channel is the channel a reference follows (Eg: stack-1), empty when its
+// tag is not one. A digest beside the tag does not change which channel the
+// tag names.
+func Channel(ref string) string {
+	parsed := ParseReference(ref)
+	if parsed.Digest != "" {
+		parsed = ParseReference(parsed.Name)
+	}
+	if channelTag.MatchString(parsed.Tag) {
+		return parsed.Tag
+	}
+	return ""
 }

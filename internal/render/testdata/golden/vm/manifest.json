@@ -32,8 +32,18 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/gate/.env",
+      "sha256": "e5e7ec1d9864f6dca30c4e76ec4e32c2dcb3183be60ab603dd6b6645ab46ee26",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/gate/compose.yaml",
+      "sha256": "a517957e8d7c796cd54170671049a8df5797e3f824c6255fe3197ac669f06b1f",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "192c662dca3dea8f9223a8ef74832306fccc09f61e246518d44f9abd0100d051",
+      "sha256": "a42baeaf9f29d49e68acc4b8dbd215b7111e3e0e868cd6633c46cec0b09e0f36",
       "mode": "0644"
     },
     {
@@ -78,12 +88,12 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy",
-      "sha256": "148792c853a4211ccbf502f49159ee8df5715ed8f63ed8d7405ac4281772df6b",
+      "sha256": "2ca16e2d87d9ad61170a91d9b6ec7a27c3de05299e82d27712c724c625745995",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/gate.caddy",
-      "sha256": "86df659fa456a9d52c92fe587be045eced9a46c4f1e445aaf5103c889652fa62",
+      "sha256": "2fcf9e5e980af08b0c072c09c3b80b6c83e4ba1b1c4300f6ad6596f6612f870b",
       "mode": "0644"
     },
     {

@@ -563,7 +563,7 @@ func TestConvergeInstallAsPrinted(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := b.String()
-		quiet := "\ninstall\n  todo vm: 5 changes\n  todo home-a\n  todo home-b\n  todo watch\n  todo storage\nNothing changed"
+		quiet := "\ninstall\n  todo vm: 5 changes\n  todo home-a\n  todo home-b\n  todo watch\n  todo storage\n"
 		listed := "\ninstall\n  todo vm: 5 changes\n" +
 			"      ○ apply --site vm: 5 changes\n" +
 			"      · apply --site vm: after the earlier apply --site vm\n" +

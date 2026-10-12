@@ -3,15 +3,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/siteadd"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
@@ -20,7 +23,14 @@ import (
 // It takes no --ssh: it reaches every site, and an override for one would
 // leave the rest to their sections anyway, so every site is reached through
 // its own ssh section.
-func runSiteAdd(args []string) error {
+//
+// Its stage 4 applies the new site's whole render, every app and
+// infrastructure image, as apply --site would, so it reviews the new site's
+// images as apply --site does (review.go): shown before the first change,
+// approved at a terminal with --execute when anything is added or changed,
+// checked against the run's approval as a step of apply with no --site, and
+// recorded once stage 4's gate has passed.
+func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("site add", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
@@ -92,6 +102,30 @@ func runSiteAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The review comes before the claim, which is the first change: an
+	// operator who does not approve leaves every host as it was. Its images
+	// are the new site's render, as stage 4 applies it. Keys are host
+	// prepare's, which the new site has had already.
+	rendered, err := render.Build(cfg, secrets)
+	if err != nil {
+		return err
+	}
+	g, err := grant.For(cfg, rendered, site)
+	if err != nil {
+		return err
+	}
+	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, site, g, grant.Scope{Images: true}, transports[site], *execute, "paisans site add "+site+" --execute")
+	if err != nil {
+		return err
+	}
+	// A dry run shows it here too, ahead of the stages, and asks nothing.
+	// As a step of apply without --site there is none: the run shows one for
+	// every site.
+	pending := 0
+	if review != nil && !*execute {
+		showReview(r, "review what paisans.yaml grants", review.review, false)
+		pending = review.review.Pending()
+	}
 	// Site add writes to every site: the mesh, HAProxy and etcd change on
 	// each, not only on the new one.
 	if err := claimSites(r, cfg, *execute, *sudo, cfg.SiteNames()...); err != nil {
@@ -112,10 +146,17 @@ func runSiteAdd(args []string) error {
 	if !*execute {
 		dryRunFound(count(plan.PendingStages(), "stage"), nil)
 		reportOwedApplies(r, plan.Owed)
+		if pending > 0 {
+			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above before its first change.", approveWord)
+			return nil
+		}
 		r.Result("Nothing changed. Re-run with --execute to apply.")
 		return nil
 	}
 	plan.Report = r
+	if review != nil {
+		plan.Replicated = func() error { return recordGrant(r, review, cfg.Deployment(), approvedBy) }
+	}
 	if err := siteadd.Execute(plan); err != nil {
 		return err
 	}

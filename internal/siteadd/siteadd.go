@@ -66,6 +66,8 @@ type Stage struct {
 	run      func() error
 	gate     func() error
 	rollback func() error
+	// passed runs once the gate has passed, before the next stage starts.
+	passed func() error
 }
 
 // Plan is a whole join, decided from the live deployment.
@@ -87,6 +89,12 @@ type Plan struct {
 	// SharedSites are the monitor sites the host check found shared, whose
 	// reseed keeps its images the same way.
 	SharedSites map[string]bool
+	// Replicated runs once stage 4's gate has passed: the new site then
+	// runs every image of its render, whether this run started them or an
+	// earlier one did. site add records the images part of the site's grant
+	// there (internal/grant), as apply does once its steps have succeeded.
+	// An error stops the join at stage 4, and the next run resumes there.
+	Replicated func() error
 
 	cfg        *config.Config
 	secrets    *config.Secrets
@@ -546,6 +554,11 @@ func Execute(p *Plan) error {
 			}
 		}
 		g.Done("passed")
+		if st.passed != nil {
+			if err := st.passed(); err != nil {
+				return p.fail(st, err)
+			}
+		}
 	}
 	return nil
 }

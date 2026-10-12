@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/appremove"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -52,6 +53,9 @@ type hostPlan struct {
 	root       dirState
 	// record is whether the host holds this deployment's record, a gateway's.
 	record bool
+	// granted is whether the host holds the record of what this deployment
+	// last granted there, which goes with the registry entry.
+	granted bool
 	// deleteRoot is --delete-data with no edited file under the root.
 	deleteRoot bool
 	// caddy is the gateway's Caddy kept for the host owner's sites, nil
@@ -340,6 +344,9 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if _, hp.record, err = t.ReadFile(deployrecord.Path(d)); err != nil {
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, deployrecord.Path(d), err)
 	}
+	if _, hp.granted, err = t.ReadFile(grant.Path(d)); err != nil {
+		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, grant.Path(d), err)
+	}
 
 	out, err := t.Run(p.unitsCommand())
 	if err != nil {
@@ -559,6 +566,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	case hp.root.exists:
 		add("remove", "remove empty directories", "the empty directories under %s", d.Root())
 	}
+	if hp.granted {
+		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
+	}
 	if hp.registry {
 		add("remove", "remove registry entry", "deployment %s from %s", d.ID, registry.Path)
 	}
@@ -713,6 +723,15 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
+	// The grant record goes with the registry entry: a later deployment
+	// with this token would otherwise be reviewed against a baseline it
+	// never applied.
+	if hp.granted {
+		p.work("delete the grant record")
+		if err := run("deleting the grant record", grant.RemoveCommand(d)); err != nil {
+			return err
+		}
+	}
 	if hp.registry {
 		p.work("remove registry entry")
 		if err := registry.Unclaim(t, d.ID); err != nil {
@@ -817,6 +836,6 @@ func (p *Plan) hostGoneLeft() string {
 	if in := p.cfg.Sites[p.Site].WebServer; in != nil && in.IncludeDir.Path != "" {
 		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
 	}
-	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, ufw rules commented %s:, the keys %s lists and that record, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardConf(), d.Prefix(), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSH.User), registry.Path) + web
+	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, ufw rules commented %s:, the keys %s lists and that record, %s, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
+		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardConf(), d.Prefix(), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSH.User), grant.Path(d), registry.Path) + web
 }

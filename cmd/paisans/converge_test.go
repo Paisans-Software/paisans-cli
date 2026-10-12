@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/grant"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -284,6 +286,19 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
 		return render.EtcdInitial{}, false, nil
 	}
+	// The run's review reads each site's grant record; here each already
+	// holds what the configuration grants, so nothing asks for approval.
+	// fakeRunGrants says otherwise.
+	savedRecord, savedGrantHost := convergeRecord, convergeGrantHost
+	convergeRecord = func(_ *config.Config, _ string, g grant.Grant, _ bool) (grant.Record, error) {
+		return grant.Update(grant.Record{}, g, grant.AllScope, time.Unix(0, 0), ""), nil
+	}
+	convergeGrantHost = func(*config.Config, string, bool) registry.Runner { return &memGrant{} }
+	// The review renders what the run applies, from secrets init may have
+	// generated; here init is a fake that generates nothing, so the render
+	// is one with no files, and so no images.
+	savedRender := convergeRender
+	convergeRender = func(*config.Config, *config.Secrets) (*render.Plan, error) { return &render.Plan{}, nil }
 	// A dry run may write the secrets file it reads. The committed fixture
 	// is complete, so it never should be: one that changed means the
 	// fixture configuration gained a generated secret its secrets lack.
@@ -293,6 +308,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
 		convergePullPlan, convergePullImage = savedPullPlan, savedPull
 		registryHost = savedRegistry
+		convergeRecord, convergeGrantHost, convergeRender = savedRecord, savedGrantHost, savedRender
 		if now, _ := os.ReadFile(fixtureSecretsPath()); string(now) != string(fixtureBefore) {
 			t.Errorf("%s was rewritten: add the generated secret it lacks to it, and restore it", fixtureSecretsPath())
 		}
@@ -304,7 +320,7 @@ func converge(t *testing.T, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...))
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }
@@ -457,7 +473,7 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	}
 	rec := recordConverge(t)
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"})
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), "was refused") {
 		t.Errorf("err = %v, want the configuration refused", err)
@@ -500,7 +516,7 @@ func TestConvergeWithoutAnIDPlansInit(t *testing.T) {
 	fakeConverge(t, nil)
 	path := noID(t)
 	var err error
-	out := captureStdout(t, func() { err = runApply([]string{"--config", path, "--sudo=false"}) })
+	out := captureStdout(t, func() { err = runApply([]string{"--config", path, "--sudo=false"}, strings.NewReader(""), io.Discard) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +555,7 @@ func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	out := ""
 	captureStdout(t, func() {})
 	out = captureStdout(t, func() {
-		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}); err != nil {
+		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -801,7 +817,7 @@ func TestInitWhyNamesMissingSecrets(t *testing.T) {
 // ignored for the default paisans.yaml.
 func TestApplyRefusesAStrayArgument(t *testing.T) {
 	fakeConverge(t, nil)
-	err := runApply([]string{"--sudo=false", "staging/paisans.yaml"})
+	err := runApply([]string{"--sudo=false", "staging/paisans.yaml"}, strings.NewReader(""), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--config staging/paisans.yaml") {
 		t.Errorf("err = %v", err)
 	}
@@ -832,7 +848,7 @@ func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
 // The usage's list of the commands that reach a host names secrets prune,
 // which reads the gateways' deployment records over ssh.
 func TestUsageHostListNamesSecretsPrune(t *testing.T) {
-	start := strings.Index(usage, "host prepare, host deployments, apply")
+	start := strings.Index(usage, "host prepare, host deployments, host allow, host disallow, apply")
 	entry := strings.Join(strings.Fields(usage[start:start+strings.Index(usage[start:], "reach a host.")]), " ")
 	if !strings.Contains(entry, "secrets prune") {
 		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
@@ -1075,7 +1091,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "pocket id" || section == "secrets" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "pocket id" || section == "secrets" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
@@ -1711,7 +1727,7 @@ func TestConvergeStopsOnASecretsFileThatDoesNotRead(t *testing.T) {
 	unreadable := t.TempDir() // a directory: present, and not a secrets file
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable, "--sudo=false"})
+		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable, "--sudo=false"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), unreadable) {
 		t.Errorf("err = %v, want it to name %s", err, unreadable)
@@ -2140,6 +2156,21 @@ func TestAdminRequest(t *testing.T) {
 }
 
 func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
+
+// A declared admin joins every app's member group as well as its admin group,
+// since an app whose member gate does not admit its administrator refuses
+// their first login. app admin create, which names its user, does not.
+func TestAdminRequestJoinsTheMemberGroups(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Admins["alice"] = config.Admin{Name: "Alice Example", Email: "alice@example.org"}
+	req := adminRequest(cfg, "auth", "alice")
+	if want := memberGroups(cfg); len(want) == 0 || !slices.Equal(req.MemberGroups, want) {
+		t.Errorf("member groups %v, want %v", req.MemberGroups, want)
+	}
+	if !slices.Contains(req.MemberGroups, "members") {
+		t.Errorf("member groups %v lack members", req.MemberGroups)
+	}
+}
 
 // The check asks the Pocket ID app admin create would call, with its key, read
 // only, through the run's sudo, and answers whether a user is an admin.

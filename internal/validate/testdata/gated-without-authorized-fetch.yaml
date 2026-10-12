@@ -1,7 +1,7 @@
-# valid.yaml with one thing broken: the monitor sits behind the members
-# gate. The monitor is what an admin opens when the sites it watches are
-# down, and the gate signs in at the identity provider on those sites, so a
-# gated monitor is unreadable at exactly the moment it exists for.
+# valid.yaml with one thing broken: a federating WriteFreely sits behind the
+# members gate with authorized fetch turned off. The gate leaves ActivityPub
+# to the app, so without a signature on every read every page would be
+# readable as JSON by anyone.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -45,14 +45,6 @@ sites:
       host: vm.example.org
       user: ubuntu
       keys: [alice]
-  watch:
-    roles: [monitor]
-    address: 10.44.0.4
-    public_address: 203.0.113.20
-    ssh:
-      host: watch.local
-      user: ubuntu
-      keys: [alice]
 
 cluster:
   sites: [home-a, home-b]
@@ -84,21 +76,12 @@ apps:
     placement: cluster
     settings:
       file_backend: database
+  blog:
+    kind: writefreely
+    hostname: blog.example.org
+    placement: { pinned: home-a }
+    gated: true
+    settings:
+      authorized_fetch: false
   # Present only so that the gate exists: an app naming a gate no app renders
   # is a different refusal, and a fixture must break one thing.
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    placement: { pinned: home-a }
-  status:
-    kind: uptime
-    hostname: status.example.org
-    placement: { pinned: watch }
-    visibility_gate: member
-    settings:
-      admin_group: admins
-
-smtp:
-  host: smtp.example.org
-  security: starttls
-  from_address: status@example.org

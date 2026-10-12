@@ -170,7 +170,7 @@ func TestAWitnessWithNoOtherRole(t *testing.T) {
 		}
 	})
 	t.Run("an app pinned to it", func(t *testing.T) {
-		edits := append(append(append([]func(string) string(nil), twoAndAWitness...), box...), replace("placement: { pinned: home-a }\n  status", "placement: { pinned: box }\n  status"))
+		edits := append(append(append([]func(string) string(nil), twoAndAWitness...), box...), replace("placement: { pinned: home-a }\n    settings:\n      homeserver", "placement: { pinned: box }\n    settings:\n      homeserver"))
 		cfg, _, path := worldConfig(t, edits...)
 		if err := siteremove.Refusal(cfg, "home-b", siteremove.Options{}); err != nil {
 			t.Fatal(err)

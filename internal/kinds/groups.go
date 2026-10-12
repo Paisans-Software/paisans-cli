@@ -2,14 +2,12 @@ package kinds
 
 import (
 	"strings"
-
-	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
 // The two identity provider groups every member facing app's client is
 // restricted to when its declaration names none. Both are the toolkit's
 // defaults rather than fixed names: an app's settings may replace either, and
-// `validate` holds a member gated app's member group to the gate's.
+// `validate` holds the member group of an app using the gate to the gate's.
 const (
 	// MembersGroup is the group a person must be in to sign in to a member
 	// facing app, and the one the gate's members instance admits.
@@ -21,17 +19,6 @@ const (
 	// administrators are the ones somebody is watching.
 	AdminsGroup = "admins"
 )
-
-// GateMembersGroupSetting is the gate app's setting naming the group its
-// members instance admits (OAUTH2_PROXY_ALLOWED_GROUPS in
-// templates/oauth2-proxy/compose.yaml.tmpl).
-const GateMembersGroupSetting = "members_group"
-
-// GateMembersGroup is the group a gate app's members instance admits: its
-// members_group setting, or MembersGroup.
-func GateMembersGroup(gate config.App) string {
-	return groupSetting(gate.Settings, GateMembersGroupSetting, MembersGroup)
-}
 
 // groupSetting reads a group name from settings, taking fallback when the
 // key is absent, blank or not a string. A blank name is treated as absent so

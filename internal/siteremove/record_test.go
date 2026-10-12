@@ -9,6 +9,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
+	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 )
 
@@ -77,5 +79,32 @@ func TestARacedRecordWriteSaysRunAgain(t *testing.T) {
 	}
 	if out := strings.Join(p.Remains(), "\n"); !strings.Contains(out, "site remove home-b --force") {
 		t.Errorf("no run-again note:\n%s", out)
+	}
+}
+
+// Cleaning a host deletes the record of what this deployment granted there,
+// with its registry entry, and leaves the host's key allowlist, which is the
+// host owner's and shared by every deployment on it.
+func TestCleaningAHostDeletesItsGrantRecordAndKeepsTheAllowlist(t *testing.T) {
+	w := setup(t)
+	vm := w.hosts["vm"]
+	vm.files[grant.Path(dep)] = grant.Encode(grant.Record{})
+	vm.files[hostprep.AllowPath("ubuntu")] = "# the owner's\n"
+	dest, _ := config.ParseDestination("ubuntu@192.0.2.10")
+	p, err := siteremove.BuildForced(w.cfg.WithoutSite("vm"), w.secrets, "vm", dest, vm, siteremove.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasStepIn(stageNamed(p, "clean the host"), "vm", "delete", grant.Path(dep)) {
+		t.Fatalf("no grant record deletion:\n%s", printed(p))
+	}
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := vm.files[grant.Path(dep)]; ok {
+		t.Error("the grant record is still on the host")
+	}
+	if _, ok := vm.files[hostprep.AllowPath("ubuntu")]; !ok {
+		t.Error("the host's allowlist was deleted")
 	}
 }

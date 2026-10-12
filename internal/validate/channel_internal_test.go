@@ -8,21 +8,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-func TestChannelOf(t *testing.T) {
-	for ref, want := range map[string]string{
-		"ghcr.io/paisans-software/mbin:stack-1":                  "stack-1",
-		"ghcr.io/paisans-software/mbin:stack-12@sha256:0123abcd": "stack-12",
-		"ghcr.io/paisans-software/mbin:1.15.0-paisans":           "",
-		"ghcr.io/paisans-software/mbin:stack-one":                "",
-		"ghcr.io/paisans-software/mbin@sha256:0123abcd":          "",
-		"localhost:5000/mbin":                                    "",
-	} {
-		if got := channelOf(ref); got != want {
-			t.Errorf("channelOf(%s) = %q, want %q", ref, got, want)
-		}
-	}
-}
-
 // The rule works off whatever the kind's default is: it warns when an app's
 // image names a channel other than the default's, and only then.
 func TestImageChannelDiffers(t *testing.T) {

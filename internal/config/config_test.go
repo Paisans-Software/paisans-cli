@@ -624,40 +624,106 @@ func TestACMEProviderIsRequiredForAMonitorsOwnCaddy(t *testing.T) {
 	}
 }
 
-// visibility_gate takes three values, and an absent key and `public` mean the
-// same thing, so nothing downstream compares against both.
-func TestVisibilityGateValues(t *testing.T) {
-	for value, want := range map[string]string{"public": "", "member": "member", "provisional": "provisional"} {
-		cfg, err := config.Load(write(t, minimal+"    visibility_gate: "+value+"\n"))
-		if err != nil {
-			t.Fatalf("visibility_gate: %s did not load: %v", value, err)
-		}
-		if got := cfg.Apps["talk"].Gate(); got != want {
-			t.Errorf("visibility_gate: %s is gate %q, want %q", value, got, want)
-		}
-	}
-	cfg, err := config.Load(write(t, minimal))
+// An app setting gated or auto_login brings in the gate: one oauth2-proxy app,
+// which no file declares, at gate.<domain> and pinned to the gateway. Neither
+// key set, no gate.
+func TestTheGateIsDerivedWhenAnAppUsesIt(t *testing.T) {
+	cfg, err := config.Load(write(t, validConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Apps["talk"].Gate(); got != "" {
-		t.Errorf("an absent visibility_gate is gate %q, want public", got)
+	if _, ok := cfg.Apps[config.GateApp]; ok || cfg.NeedsGate() {
+		t.Error("no app sets gated or auto_login, yet the gate is derived")
 	}
-	_, err = config.Load(write(t, minimal+"    visibility_gate: members\n"))
-	if err == nil || !strings.Contains(err.Error(), "apps.talk.visibility_gate: unknown value") {
-		t.Errorf("visibility_gate: members loaded, or was refused without naming the key: %v", err)
+	for _, key := range []string{"gated", "auto_login"} {
+		cfg, err := config.Load(write(t, validConfig+"    "+key+": true\n"))
+		if err != nil {
+			t.Fatalf("%s: true did not load: %v", key, err)
+		}
+		gate, ok := cfg.Apps[config.GateApp]
+		if !ok {
+			t.Fatalf("%s: true derived no gate", key)
+		}
+		want := config.App{
+			Kind:      config.KindOAuth2Proxy,
+			Hostname:  "gate.example.org",
+			Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
+			Derived:   true,
+		}
+		if gate.Kind != want.Kind || gate.Hostname != want.Hostname || gate.Placement != want.Placement || !gate.Derived {
+			t.Errorf("%s: true derived %+v, want %+v", key, gate, want)
+		}
 	}
 }
 
-// The key this replaced is not read. A deployment is redeployed with the new
-// key rather than converted, and an old file fails loudly instead of loading
-// with its gate silently dropped.
-func TestTheOldGateKeyIsRefused(t *testing.T) {
-	_, err := config.Load(write(t, minimal+"    gate: members\n"))
-	if err == nil {
-		t.Fatal("an app with the old gate key loaded, and would render ungated")
+// The gate is the toolkit's: a declared oauth2-proxy app is refused, and so is
+// an app holding the gate's name, or no gateway to run it on.
+func TestTheGateIsNeverDeclared(t *testing.T) {
+	declared := validConfig + `  gate:
+    kind: oauth2-proxy
+    hostname: gate.example.org
+    placement: { pinned: home-a }
+`
+	if _, err := config.Load(write(t, declared)); err == nil || !strings.Contains(err.Error(), "apps.gate.kind: oauth2-proxy is the gate") {
+		t.Errorf("a declared oauth2-proxy app loaded, or was refused without saying why: %v", err)
 	}
-	if !strings.Contains(err.Error(), "gate") {
-		t.Fatalf("the error does not name the key:\n%v", err)
+	named := validConfig + `    gated: true
+  gate:
+    kind: outline
+    hostname: wiki.example.org
+    placement: cluster
+`
+	if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "the name is the gate's") {
+		t.Errorf("an app named gate loaded beside a gated app: %v", err)
+	}
+	if _, err := config.Load(write(t, minimal+"    gated: true\n")); err == nil || !strings.Contains(err.Error(), "no site holds the gateway role") {
+		t.Errorf("a gated app loaded with no gateway: %v", err)
+	}
+}
+
+// The keys this replaced are not read. A deployment is redeployed with the new
+// keys rather than converted, and an old file fails loudly instead of loading
+// with its gate silently dropped.
+func TestTheOldGateKeysAreRefused(t *testing.T) {
+	for _, old := range []string{"gate: members", "visibility_gate: member"} {
+		_, err := config.Load(write(t, minimal+"    "+old+"\n"))
+		if err == nil {
+			t.Fatalf("an app with %q loaded, and would render ungated", old)
+		}
+		if !strings.Contains(err.Error(), strings.SplitN(old, ":", 2)[0]) {
+			t.Fatalf("the error does not name the key:\n%v", err)
+		}
+	}
+}
+
+// A control character in what the review and host allow print is refused
+// where it is written, naming the field: a terminal reads ESC and its kin as
+// commands, so a key comment carrying one could redraw the review's lines.
+func TestControlCharactersAreRefused(t *testing.T) {
+	esc := `\e[1A\e[2K~ key`
+	alice := func(name, email, keys string) string {
+		return "admins:\n  alice:\n    name: \"" + name + "\"\n    email: \"" + email + "\"\n    keys: \"" + keys + "\"\n"
+	}
+	cases := []struct {
+		name, body, want string
+	}{
+		{"key comment", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+" "+esc)), "admins.alice.keys: line 1 holds a control character (U+001B)"},
+		{"tab in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", strings.Replace(fakeKeyA, " alice", `\talice`, 1))), "admins.alice.keys: line 1 holds a control character (U+0009)"},
+		{"C1 in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+` \x9b2K`)), "admins.alice.keys: line 1 holds a control character (U+009B)"},
+		{"name", withAdmin(minimal, alice(`Alice `+esc, "alice@example.org", fakeKeyA)), "admins.alice.name holds a control character (U+001B)"},
+		{"email", withAdmin(minimal, alice("Alice Example", `alice\x7f@example.org`, fakeKeyA)), "admins.alice.email holds a control character (U+007F)"},
+		{"image", strings.Replace(minimal, "    placement: cluster\n", "    placement: cluster\n    images:\n      app: \"ghcr.io/example/mbin:1.0"+esc+"\"\n", 1), "apps.talk.images.app holds a control character (U+001B)"},
+		{"acme image", strings.Replace(minimal, "admins:\n", "acme:\n  provider: desec\n  image: \"ghcr.io/example/caddy:1"+esc+"\"\nadmins:\n", 1), "acme.image holds a control character (U+001B)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := loadErr(t, c.body)
+			if !strings.Contains(msg, c.want) || !strings.Contains(msg, "terminal") {
+				t.Errorf("want %q in the refusal, got:\n%s", c.want, msg)
+			}
+			if strings.ContainsRune(msg, 0x1b) {
+				t.Errorf("the refusal prints the character itself:\n%q", msg)
+			}
+		})
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/garage"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -48,6 +49,10 @@ Usage:
   paisans host prepare --site <name> [--config paisans.yaml] [--ssh <destination>]
                [--execute]
   paisans host deployments --ssh <user@host[:port]> [--sudo=false]
+  paisans host allow <site> <admin>... [--config paisans.yaml] [--ssh <destination>]
+               [--execute]
+  paisans host disallow <site> <admin|fingerprint>... [--config paisans.yaml]
+               [--ssh <destination>] [--execute]
   paisans apply    [--config paisans.yaml] [--secrets secrets.enc.yaml]
                    [--min-free <size>] [--keep-images] [--execute]
                    every site, from paisans.yaml to a running stack, in order
@@ -108,6 +113,13 @@ Commands:
              Caddy kept for /srv/caddy.d), and any deployment directory or
              labelled compose project no registry entry names. Needs no
              paisans.yaml; changes nothing.
+             allow: add each admin's key fingerprints to the site's host's
+             key allowlist, /etc/paisans/ssh-allow.<user>, the keys host
+             prepare may add there; a new list also holds every key a
+             deployment already claims. disallow: take keys off it, by
+             admin or fingerprint; a key already authorized keeps working.
+             Both are the host owner's: --execute asks for the site's name
+             at a terminal. Write nothing without --execute.
   apply      Without --site: take every site from paisans.yaml to a running
              stack, running init, host prepare, apply, site add, storage
              and dns init in the order the deployment needs. With --site:
@@ -115,7 +127,11 @@ Commands:
              host and show what would change. Changes nothing on a
              host without --execute; without --site, the dry run may add
              missing generated secrets to the local secrets file, and
-             says so when it does.
+             says so when it does. Both, and host prepare, review the keys
+             and images paisans.yaml grants against what each host last
+             applied; --execute asks for the word approve at a terminal
+             when anything is added or changed, and asks nothing when
+             nothing is.
   site       add: join a new data site to the running cluster in eight gated
              stages: preflight, mesh, etcd (learners, then promoted), the
              Patroni replica, synchronous mode, HAProxy, each existing
@@ -245,23 +261,24 @@ Commands:
              any FAIL. With the toolkit's own Caddy in front (managed_by:
              paisans), only the first two apply.
 
-host prepare, host deployments, apply, prune, site add, site remove, mesh
-rekey, storage init, storage add, storage rotate-key, app admin create, app remove, oidc
-client create, secrets prune, preflight, failover test, doctor and init are the
-only commands that reach a host.
-Each reads it to plan, and changes it only with --execute; host deployments,
-preflight, doctor and init have no --execute and never change it; secrets
-prune only reads the gateways' deployment records, and its --execute writes
-the local secrets file alone. With --execute, a command first
-claims each host it writes to in /var/lib/paisans/registry.json, and refuses if
-another deployment there holds this one's token, WireGuard interface or listen
-port, or a mesh subnet overlapping this one's. apply and host prepare also
-refuse when anything else on the host overlaps the mesh subnet. dns init and dns
-prune reach no host, only the DNS provider's API, and change it only with
---execute; site remove also deletes the removed site's records there. web-server
-show and web-server check change nothing: check looks at a monitor's public
-hostname as any visitor could, and with managed_by: external both read the
-monitor's web server over ssh, show always and check when a check fails.
+host prepare, host deployments, host allow, host disallow, apply, prune, site
+add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
+admin create, app remove, oidc client create, secrets prune, preflight, failover
+test, doctor and init are the only commands that reach a host. Each reads it to
+plan, and changes it only with --execute; host allow and host disallow change
+only a host's key allowlist, which is the host owner's, and claim nothing; host
+deployments, preflight, doctor and init have no --execute and never change it;
+secrets prune only reads the gateways' deployment records, and its --execute
+writes the local secrets file alone. With --execute, a command first claims each
+host it writes to in /var/lib/paisans/registry.json, and refuses if another
+deployment there holds this one's token, WireGuard interface or listen port, or
+a mesh subnet overlapping this one's. apply and host prepare also refuse when
+anything else on the host overlaps the mesh subnet. dns init and dns prune reach
+no host, only the DNS provider's API, and change it only with --execute; site
+remove also deletes the removed site's records there. web-server show and
+web-server check change nothing: check looks at a monitor's public hostname as
+any visitor could, and with managed_by: external both read the monitor's web
+server over ssh, show always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
@@ -284,20 +301,24 @@ func main() {
 	case "render":
 		err = runRender(os.Args[2:])
 	case "apply":
-		err = runApply(os.Args[2:])
+		err = runApply(os.Args[2:], os.Stdin, os.Stdout)
 	case "host":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "prepare":
 			err = runHostPrepare(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "deployments":
 			err = runHostDeployments(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "allow":
+			err = runHostAllow(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "disallow":
+			err = runHostDisallow(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(usageError(os.Stderr, "host takes one subcommand, prepare or deployments"))
+			os.Exit(usageError(os.Stderr, "host takes one subcommand, prepare, deployments, allow or disallow"))
 		}
 	case "site":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "add":
-			err = runSiteAdd(os.Args[3:])
+			err = runSiteAdd(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
 		default:
@@ -626,7 +647,7 @@ func runRender(args []string) error {
 // An app that signs in through Pocket ID has its client ensured first, by
 // the identity step in clients.go: declaring the app is the approval for
 // its client, so `--execute` creates and records it like any other secret.
-func runApply(args []string) error {
+func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
@@ -660,7 +681,7 @@ func runApply(args []string) error {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
-		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree})
+		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -720,6 +741,21 @@ func runApply(args []string) error {
 		return err
 	}
 	host, err := hostGate(r, cfg, *site, transport)
+	if err != nil {
+		return err
+	}
+	// The review comes before the claim, which is the first change: an
+	// operator who does not approve leaves the host exactly as it was. Its
+	// images are the render's, as written, never the host's.
+	rendered, err := render.Build(cfg, secrets)
+	if err != nil {
+		return err
+	}
+	g, err := grant.For(cfg, rendered, *site)
+	if err != nil {
+		return err
+	}
+	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -838,6 +874,14 @@ func runApply(args []string) error {
 		if len(plan.Sweep) > 0 {
 			summary = strings.TrimPrefix(summary+", "+plural(len(plan.Sweep), "old image")+" to sweep", ", ")
 		}
+		// The review ends the site's plan: what --execute asks approval
+		// for. As a step of apply without --site there is none here: the
+		// run shows one for every site.
+		pending := 0
+		if review != nil {
+			showReview(r, "review what paisans.yaml grants", review.review, false)
+			pending = review.review.Pending()
+		}
 		// As a step of apply without --site, the web server is the run's,
 		// which lists it once.
 		if _, step := r.(checkReporter); !step {
@@ -846,11 +890,14 @@ func runApply(args []string) error {
 		// A plan --execute would refuse, Eg: a file edited on the host, is
 		// where the run would stop, not work it would do.
 		dryRunFound(summary, apply.Refusal(plan))
-		if changes == 0 && len(plan.Sweep) == 0 {
+		switch {
+		case changes == 0 && len(plan.Sweep) == 0 && pending == 0:
 			r.Result("%s is up to date. Nothing to apply.", *site)
-			return err
+		case changes == 0 && len(plan.Sweep) == 0:
+			r.Result("%s is up to date. Nothing changed; --execute asks you to approve the review above and records it.", *site)
+		default:
+			r.Result("Nothing changed. Re-run with --execute to apply.")
 		}
-		r.Result("Nothing changed. Re-run with --execute to apply.")
 		return err
 	}
 
@@ -898,7 +945,24 @@ func runApply(args []string) error {
 	}); err != nil {
 		return err
 	}
-	return siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
+	// What the steps applied is recorded once they have all succeeded:
+	// the images now, and the web server's directory once its step has
+	// written there. As a step of apply with no --site, the web server is
+	// the run's, which records it.
+	if review != nil {
+		images := *review
+		images.scope.WebServer = false
+		if err := recordGrant(r, &images, cfg.Deployment(), approvedBy); err != nil {
+			return err
+		}
+	}
+	err = siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
+	if _, step := r.(checkReporter); err == nil && !step && review != nil {
+		web := *review
+		web.scope = grant.Scope{WebServer: true}
+		return recordGrant(r, &web, cfg.Deployment(), approvedBy)
+	}
+	return err
 }
 
 // planningEverySite is set while apply without --site runs, for every
@@ -1170,7 +1234,7 @@ func runHostPrepare(args []string) error {
 	// dryRunFound is read when it is called: apply's check sets it around
 	// the run.
 	found := func(summary string, stop error) { dryRunFound(summary, stop) }
-	return hostPrepare(prepareEnv{r: reporter(), found: found}, *o)
+	return hostPrepare(prepareEnv{r: reporter(), found: found, stdin: os.Stdin, stdout: os.Stdout}, *o)
 }
 
 // hostPrepareOptions are host prepare's flags.
@@ -1202,6 +1266,11 @@ type prepareEnv struct {
 	// retries, when set, receives the command's ssh retries in place of
 	// the process's retry log.
 	retries io.Writer
+	// stdin and stdout are where the review asks for approval, as
+	// runSiteRemove takes them. Under apply with no --site, which asks once
+	// for every site, they are unused.
+	stdin  io.Reader
+	stdout io.Writer
 }
 
 // runHostPrepareIn is host prepare run with args through env, on none of the
@@ -1262,6 +1331,16 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
+	// The review comes before the claim, which is the first change: an
+	// operator who does not approve leaves the host exactly as it was.
+	g, err := grant.For(cfg, nil, o.site)
+	if err != nil {
+		return err
+	}
+	review, approvedBy, err := stepReview(r, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans host prepare --site "+o.site+" --execute")
+	if err != nil {
+		return err
+	}
 	if err := claimHosts(r, cfg, o.execute, map[string]registry.Runner{o.site: transport}); err != nil {
 		return err
 	}
@@ -1285,16 +1364,31 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 
 	if !o.execute {
 		// The kinds of change the plan makes, which apply's dry run shows
-		// on this step's line.
-		env.found(strings.Join(plan.Kinds(), ", "), nil)
-		if len(plan.Steps) == 0 {
-			r.Result("%s is prepared. Nothing to do.", o.site)
-			return nil
+		// on this step's line. As a step of it there is no review here:
+		// apply shows one for every site.
+		pending := 0
+		if review != nil {
+			showReview(r, "review what paisans.yaml grants", review.review, false)
+			pending = review.review.Pending()
 		}
-		r.Result("Nothing changed. Re-run with --execute to apply.")
+		refusal := hostprep.Refusal(plan)
+		env.found(strings.Join(plan.Kinds(), ", "), refusal)
+		switch {
+		case refusal != nil:
+			r.Result("Nothing changed. --execute would stop at the refusal above.")
+		case len(plan.Steps) == 0 && pending == 0:
+			r.Result("%s is prepared. Nothing to do.", o.site)
+		case len(plan.Steps) == 0:
+			r.Result("%s is prepared. Nothing changed; --execute asks you to approve the review above and records it.", o.site)
+		default:
+			r.Result("Nothing changed. Re-run with --execute to apply.")
+		}
 		return nil
 	}
 	if err := hostprep.Execute(plan, transport, r); err != nil {
+		return err
+	}
+	if err := recordGrant(r, review, cfg.Deployment(), approvedBy); err != nil {
 		return err
 	}
 	r.Result("Prepared %s.", o.site)

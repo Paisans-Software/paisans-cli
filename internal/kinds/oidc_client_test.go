@@ -122,14 +122,3 @@ func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 		}
 	}
 }
-
-// The gate's members group is the one setting every member gated app's
-// member group has to agree with, with the same default.
-func TestGateMembersGroupDefaultsToMembers(t *testing.T) {
-	if got := kinds.GateMembersGroup(config.App{Kind: config.KindOAuth2Proxy}); got != kinds.MembersGroup {
-		t.Errorf("default %q", got)
-	}
-	if got := kinds.GateMembersGroup(config.App{Kind: config.KindOAuth2Proxy, Settings: map[string]any{"members_group": "crew"}}); got != "crew" {
-		t.Errorf("declared %q", got)
-	}
-}

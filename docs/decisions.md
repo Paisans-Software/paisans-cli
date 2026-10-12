@@ -1777,3 +1777,198 @@ unsigned GET of a blog outbox answered 401. Mbin's behaviour was read from the
 fork's source at v1.15.0+paisans, not run; the 1.15.0-paisans image's
 declared volume was inspected from the registry. The `stack-1` tags did not
 exist on the registry when this was written, so nothing here pulls them.
+
+## 2026-10-12: A declared admin joins every app's member group
+
+Founder decision, in session, after a first login to a fresh deployment's
+Mbin was refused with `OIDC login refused: <sub> is not in members`.
+
+### What was decided
+
+`apply` puts each admin `paisans.yaml` declares in every app's member group
+as well as every app's admin group. The member groups are read from the same
+keys `oidc client create` reads (`settings.member_group`, defaulting to
+`members`); one that is also an admin group is joined once. `app admin
+create`, which makes a user the operator names, is unchanged.
+
+### Why
+
+Mbin's member gate admits a login whose claim lacks the member group only
+when the linked account is already an Mbin administrator, and a first login
+has no linked account. A declared admin in `admins` alone was therefore
+refused on the login that would have made them an administrator. The Mbin
+fork now also admits a login its admin group claim names, but an app that
+reads no group relies on its client's restriction at Pocket ID, and joining
+the member groups makes every app admit its administrators without each one
+having to know about admin groups.
+
+This widens the standing approval for `apply`'s writes to Pocket ID: adding a
+declared admin to the member groups is part of declaring them, like the admin
+groups before it.
+
+### What was weighed
+
+* **Relying on the Mbin fork's change alone.** It fixes Mbin, and only Mbin;
+  any other app gating on its member group would repeat the failure.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. The two
+new tests (`TestAdminRequestJoinsTheMemberGroups`,
+`TestPocketIDPutsADeclaredAdminInTheMemberGroups`) fail with the change
+reverted and pass with it. Not run against a live Pocket ID.
+
+## 2026-10-12: A gated Mbin lets a native app through on its token
+
+Founder decision.
+
+### What was decided
+
+Mbin's gate record gains `/api/*` as a token path, so a request there with
+`Authorization: Bearer` reaches Mbin with no gate session, and opens
+`/api/client`, `/api/info` and `/api/instance` (exact paths) with no token.
+The visibility gate spec's *Which kinds have token paths* has the reasoning
+and the citations.
+
+### Why
+
+The gate record kept `/api/*` behind the gate because a public Mbin answers
+its API reads to anyone. A gated Mbin has since become a private instance
+(the 2026-10-11 record above), which refuses any request without a signed in
+user, so a token path no longer opens anything. Keeping the API behind the
+gate cost Mbin's mobile apps, which sign in through a WebView and then call
+`/api/*` with no gate cookie. The three open routes are what such an app calls
+before it holds a token.
+
+### What was weighed
+
+* **Gating `/api/client` and accepting broken mobile apps.** Registration
+  alone grants nothing: a public client still needs a member's sign-in at
+  `/authorize`, and a `client_credentials` client's bot user is created
+  unverified, which the API firewall refuses. Anonymous registration can
+  still add unverified bot users, rate limited to two per six hours, which
+  was judged acceptable.
+* **`KBIN_ADMIN_ONLY_OAUTH_CLIENTS`.** It closes anonymous registration, and
+  with it the mobile apps' own registration.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, with the golden tree
+regenerated and its diff read. `TestMbinOpensItsAPIToATokenOnly` fails with
+the gate record reverted and passes with it. Not run against a live Mbin or a
+mobile app: which routes a given app calls before sign-in is read from Mbin's
+access rules, not observed.
+
+## 2026-10-12: The gate is two booleans on the app, and the toolkit runs it
+
+Founder decisions, in session. The design is the amended
+`docs/specs/2026-10-08-visibility-gate.md`.
+
+### What was decided
+
+* **Two per-app booleans, `gated` and `auto_login`**, both default false,
+  replace `visibility_gate: public | member | provisional`. `gated: true` is
+  the member gate. `auto_login: true` skips the app's own sign-in button for
+  a member the gate has signed in, on a gated app or a public one.
+* **The provisional concept is retired.** No gate admits a signed-in
+  non-member, so the gate is one oauth2-proxy instance with
+  `OAUTH2_PROXY_ALLOWED_GROUPS=members`, and the second instance, the 403
+  redirect and the `/pending` page are gone.
+* **The gate is never declared.** When any app sets either key, `config.Load`
+  derives an app named `gate` at `gate.<community.domain>`, pinned to the
+  first gateway site. A declared `oauth2-proxy` app is refused.
+* **A public app can take auto-login.** Its auto-login paths check the gate's
+  session with `forward_auth` before redirecting, and its sign-in page, with
+  no gate session, signs in at the gate first and comes back holding one.
+* **`validate` refuses** `auto_login` on a kind with no auto-login rule
+  (`auto-login-without-a-rule`) and either key on an app whose hostname is
+  outside the community's domain (`uses-gate-outside-the-domain`). The gate
+  rules are renamed for the key: `gated-on-ungateable-kind`,
+  `gated-without-signed-fetch`.
+
+### Why
+
+The gate took a declared app with a hostname and a placement, plus a
+three-valued key on each app, to say one thing: whether members only may read
+an app. The founder asked for a boolean. With the provisional group retired,
+the two-instance split had nothing left to separate. Deriving the gate on the
+gateway keeps it beside the edge it serves, so it is down only when the
+gateway is. Auto-login on a public app gives single sign-on to apps that stay
+readable by anyone; it checks the session rather than trusting the cookie's
+name because, with no gate behind it, a stale or forged cookie would otherwise
+push a visitor into a sign-in they never asked for.
+
+### What was weighed
+
+* **Running the gate in every deployment.** Chosen first, then replaced by
+  running it whenever an app sets either key: with `auto_login` its own
+  key, a deployment that wants neither needs no gate.
+* **One key for both.** A public app with no auto-login, or a gated app with
+  none, could not be expressed.
+* **Keeping the `provisional` value as an escape hatch.** Retired with the
+  concept.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty, the
+golden trees regenerated and their diffs read. `paisans validate` on
+`examples/paisans.example.yaml`: two warnings, no refusals. The rendered
+gateway configuration passed `caddy validate` in
+`ghcr.io/paisans-software/caddy:2`. The public auto-login host block, run in
+that image against a stub gate, behaved as specified: an anonymous visitor read
+the app; `/login` with no session went to the gate's sign-in with the sign-in
+breaker set; a member was sent to the OIDC route with the loop breaker set; a
+refused session came back to its own URL with the loop breaker set, then read
+the app; a member already signed into the app, or on a deep link, read it. With
+the gate unreachable, a browser holding the gate's cookie got 502 on `/`, and
+one without read the app. Not run against a live oauth2-proxy or Pocket ID.
+
+## 2026-10-12: The settings gating needs are checked on both sides
+
+Founder decisions. The design is `docs/specs/2026-10-12-gate-settings.md`.
+
+### What was decided
+
+* `validate` refuses `config-key-already-rendered`, which only render refused
+  before, by rendering the deployment with secrets generated in memory and
+  thrown away. Render keeps its own refusal.
+* Each kind records, in `internal/kinds`, the settings `gated` needs and how
+  to read them from a running copy: Mbin's private instance mode, allow list
+  and authorized fetch, WriteFreely's private mode and authorized fetch.
+  `doctor` reads every kind through that record and never branches on one.
+* `doctor` gains a `settings` section, which fails a running copy with one
+  of them off or not locked, and names `apply` as the fix.
+* `doctor --execute` removes from `paisans.yaml` a `config:` key that only
+  repeats a value gating renders. It changes no host.
+* Only settings the toolkit writes and locks on disk are in scope. Nothing
+  writes an app's database.
+
+### Why
+
+A key gating made redundant reached the operator only at render, which a
+whole apply meets after `init` and `host prepare` have run. The gate leaves
+ActivityPub, and for Mbin the API with a token, to the app, so those settings
+are part of the gate, and nothing read them from a running app. Keeping each
+kind's knowledge in its own record is what lets a new kind join without a
+branch in `doctor`. Keeping to settings locked on disk means a wrong value is
+always a file to render again, which `apply` already does and checks.
+
+### What was weighed
+
+* **A second list of the keys each template writes, in `validate`.** Whether
+  a template writes a key depends on the rest of the file (gating writes
+  Mbin's allow list), so a list would go stale where rendering cannot.
+* **Fixing an app's database from `doctor`**, through Mbin's `dbal:run-sql` or
+  a new Mbin console command. Out of scope: every setting gating needs is
+  locked on disk, so a database row cannot override it.
+* **`doctor --execute` changing a contradicting value.** That changes policy;
+  the operator edits it.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. A copy
+of a real `paisans.yaml` with `MBIN_USE_FEDERATION_ALLOW_LIST` in a gated
+Mbin's `config:` passes `validate` before this change and is refused after it,
+in 1.3 seconds. Not run against a live Mbin or WriteFreely: each read is taken
+from the fork's source (Mbin's `SettingsManager.php` at `v1.15.1+paisans`,
+WriteFreely's `cmd/writefreely/settings.go` at `v0.21.1+wisp`).
