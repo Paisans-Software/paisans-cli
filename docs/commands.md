@@ -150,6 +150,124 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
+### `paisans config`
+
+The signed copies of `paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
+every site keeps. Four subcommands, each gathering every site's versions first
+and trusting them only from the operator's own signature or a root pinned with
+`--root`.
+
+```sh
+paisans config publish                # what would be signed, with which key
+paisans config publish --execute      # sign the local files, push to every site
+paisans config publish --merge --execute   # one version on every head of a fork
+paisans config pull                   # what would be written
+paisans config pull --execute         # move the files to the sites' newest
+paisans config log                    # every version, signer, holding sites
+paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
+```
+
+* **Alone:** always, except as `apply` runs its part (below). Each is an
+  operator's decision: what to publish, when to take the sites' version, and
+  where to recover.
+* **Flags:**
+
+  | Flag | Taken by | Meaning |
+  |------|----------|---------|
+  | `--config <path>` | all | the deployment declaration, which must be named `paisans.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
+  | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
+  | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
+  | `--id <id>` | `recover` | the deployment, when a host's registry lists more than one; it must be a deployment id |
+  | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
+
+  And the flags every command shares.
+* **Hosts:** every site, over ssh with `sudo` since the stores are root's, and
+  each is reached, not only the ones named on the command line. `recover` has no
+  `paisans.yaml` to name them and so starts from `--from`.
+* **Without `--execute`:** no site is changed and no site is asked to sync with
+  its peers; it reads what each site holds now, which can be staler. Only the
+  cache in `.paisans/` beside the configuration is written.
+* **Per-operator state:** `.paisans/.gitignore` keeps `store.git/`,
+  `incoming/`, `signing-key`, `config-head` and `config-seen` out of a
+  repository the admins share, since each describes one workstation, and a
+  shared signing key would start one admin's trust from another's signature.
+  `config-root` may be committed so the admins share the pin.
+* **`--execute`:** each site first syncs with its peers, so a version only a
+  site the operator cannot log in to holds arrives through one they can.
+  `publish` signs with the key in `.paisans/signing-key`, or the one ssh-agent
+  key that belongs to an admin the base lists, and pushes to every site it
+  reaches. It refuses when its base is not the sites' newest version (including
+  a workstation with no base while the sites hold versions: run `config pull`
+  first), when the sites hold a fork and `--merge` is not given, and when no
+  site answers. `pull` moves files with no local edits to the head; over local
+  edits on an older base it refuses, shows how they differ, and writes the
+  head's files to `.paisans/incoming/` to merge by hand. When only
+  `secrets.enc.yaml` differs on both sides it merges key by key: two changes to
+  one key refuse, naming the key and never a value, and the pull takes neither
+  side's value by itself (set the key locally to the head's value and pull
+  again; to keep the local value, take the head's first, pull, then set the key
+  back with `paisans secrets set` and publish, or edit a `pocket_id_groups` key
+  with `sops`). It refuses while either side has a `paisans mesh rekey` under
+  way, naming the sites, until `mesh rekey` finishes it. `recover` refuses to
+  write over files, and with a fork writes each head to
+  `.paisans/incoming/<sha>/` and refuses to choose.
+* **Words typed at a terminal:** `partial` when fewer than a majority of sites
+  answered directly (no more than half), for `apply --execute`, `config pull`,
+  `config recover`, `config publish` of a first version and `admin register`;
+  `rollback` when the newest version is older than one this workstation has
+  seen. An accepted `rollback` re-bases `.paisans/config-seen` to the head
+  chosen once the command commits its change; a run that stops leaves it as it
+  was. `log` asks for neither: it warns and lists. A dry run says what
+  `--execute` will ask.
+* **In `apply`:** `apply` gathers before its review and refuses a fork or a base
+  older than the sites' newest version, naming `config pull`. With `--execute`
+  it publishes the version it applies and each host records it; a host whose
+  record holds a newer revision, or another version at the same revision, makes
+  `apply` ask for `rollback`. It needs the standard file names beside
+  `paisans.yaml` (a `--secrets` naming another file is refused), an admin key in
+  the ssh-agent even for a dry run, and a sudo password for every site.
+
+See *Every site keeps signed copies of the configuration* in `README.md` and
+`docs/specs/2026-10-12-config-store.md`.
+
+### `paisans admin register`
+
+Gives an admin an anchor of their own: the point on their workstation from which
+the sites' versions are trusted. An admin who has never published has signed
+nothing, so `config pull` has nothing of theirs to start from.
+
+```sh
+paisans admin register                # the key and the head it would attest
+paisans admin register --execute      # sign the attestation, record the key
+paisans admin register --key ~/.ssh/id_ed25519.pub --execute
+```
+
+* **Alone:** always, once per admin per workstation, and again if the key
+  changes.
+* **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
+  must hold its private half), `--root <sha>` (pin the first version you trust),
+  `--execute`.
+* **Hosts:** every site, as `config` does.
+* **The key:** `--key`, else the one `.paisans/signing-key` records, else the
+  one key in the ssh-agent that is listed under an admin of `paisans.yaml`. It
+  refuses when none matches, saying the key goes under your own entry in
+  `admins` and another admin publishes that; when the agent holds more than one
+  of your keys; and when it holds keys of more than one admin.
+* **What it signs:** an attestation, a version with the head's three files and
+  the head as its only parent. It signs only a head whose files equal the local
+  files, since it says "I hold this version"; otherwise it shows the difference
+  and writes nothing. With no files here and a root pinned, it attests the head
+  the pin leads to and writes its files. A head your key signed already is
+  pushed again, not attested again.
+* **`--execute`:** signs, pushes the attestation to every site it reaches, and
+  writes the key to `.paisans/signing-key`; `config publish` and `apply` sign
+  with it from then on. It asks for `partial` when fewer than a majority of
+  sites answered directly. Without it, nothing is signed or recorded, and no
+  site is changed.
+
+See *Every site keeps signed copies of the configuration* in `README.md`.
+
 ## Hosts
 
 ### `paisans host prepare`
@@ -189,6 +307,13 @@ paisans host prepare --site home-a --execute  # does it
   plan lists, and records the login and the keys once every step has
   succeeded. Without it, it probes and prints the plan and the review; a
   prepared host plans nothing.
+* **Configuration store:** installs `git`, and plans under *configuration store*
+  what the host lacks of a site's store: the bare repository at
+  `/var/lib/paisans/config/<token>.git`, the peers file, the sync script, and
+  the units `paisans-<token>-config-daemon`, `-config-sync` and
+  `-config-sync.timer`. Every site's `host prepare` is also what makes the store
+  `apply` publishes to, so `apply` refuses a version no site could take with
+  this command named.
 
 See *`host prepare` takes a blank host to an apply-able state*, *Docker is
 judged by its version, not its source* and *`apply` and `host prepare` review
@@ -291,17 +416,20 @@ See *Every volume an image declares is mounted, and `apply` checks it* in
 
 Every site, from `paisans.yaml` to a running stack: the commands in this file
 that it runs, in the order and under the conditions *`paisans apply` with no
-`--site` converges the whole deployment* in `README.md` gives. In order:
-`init` when it has work; `host prepare` on every host at once; a pull of every
-site's images on every host at once, so no install waits on a download; `dns
-init`; the founding applies, `site add`, the other sites, storage and pass
-two; `gateway move`, when a site without the gateway role still serves as
-the gateway; a `pocket id` check for an admin; and, for each app behind the
-operator's own web server, its site file written into the web server's
-`include_dir` and `web-server check`'s checks. Each `apply --site` it runs that
-covers the whole site, rather than holding apps back until their sign in
-clients exist, ends by sweeping the old images its site's stacks used (see
-*`apply` prunes the images it superseded* in `README.md`).
+`--site` converges the whole deployment* in `README.md` gives. In order: `init`
+when it has work; `host prepare` on every host at once; a pull of every site's
+images on every host at once, so no install waits on a download; `dns init`; the
+founding applies, `site add`, the other sites, storage and pass two; `gateway
+move`, when a site without the gateway role still serves as the gateway; a
+`pocket id` check for an admin; and, for each app behind the operator's own web
+server, its site file written into the web server's `include_dir` and
+`web-server check`'s checks. The version of the configuration it applies is
+published once the `host prepare` steps have made every site's store and before
+any other step changes a host (see *Every site keeps signed copies of the
+configuration* in `README.md`). Each `apply --site` it runs that covers the
+whole site, rather than holding apps back until their sign in clients exist,
+ends by sweeping the old images its site's stacks used (see *`apply` prunes the
+images it superseded* in `README.md`).
 
 * **Alone:** this is the command an operator types; everything else is the
   exception.
@@ -323,6 +451,16 @@ clients exist, ends by sweeping the old images its site's stacks used (see
   The dry run shows it, asks nothing, and ends saying what `--execute` will
   ask for. Each step records its part once it has succeeded, and the run
   records each web server's directory after its web server step.
+* **Configuration store:** before the review, every site's versions are gathered
+  (under `configuration store`) and a fork, a base older than the sites' newest
+  version, or a key no admin lists is refused, naming `config pull` or `config
+  publish --merge`. With `--execute`, it asks for `partial` when fewer than a
+  majority of sites answered directly. A dry run changes no site and starts no
+  sync. After the approval, a host whose record holds a newer revision, or
+  another version at the same revision, asks for `rollback`. `--execute` then
+  publishes the version, signed with the recorded key, after the `host prepare`
+  steps; a version that reaches no site refuses, naming `host prepare`. See
+  `paisans config`.
 * **Secrets:** each gateway's deployment record is read once, after the sudo
   passwords, and each secret or recorded name `paisans.yaml` no longer uses is
   warned about once, by key, under `secrets`, dry run or not. The `apply`
@@ -382,6 +520,13 @@ starts, restarts or recreates what changed.
   stacks. With `--execute` it is asked for, as `approve` at a terminal, before
   the claim, when anything is added or changed; the images are recorded once
   the apply has succeeded, and the directory once the web server step has.
+* **Configuration store:** gathered and checked before the review as the whole
+  apply does, with `--secrets` refused when it names a file other than the
+  `secrets.enc.yaml` beside `paisans.yaml`. `--execute` publishes the version it
+  loaded before its first change, and refuses when the site has no store, naming
+  `host prepare`; the host's record of the version is written with its other
+  parts. A step of the whole apply leaves this to the run, and refuses files
+  edited since the run published.
 * **`--execute`:** writes and acts, and an apply of the whole site ends by
   sweeping the old images of repositories its stacks render or have rendered,
   which no site of the deployment renders and no container uses (`sweep old
@@ -517,10 +662,12 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
   reaches the removed site's host not at all, so it says the site files apply
   wrote there may still be in the web server's `include_dir`.
-* **`--execute`:** runs the stages, stopping at the first gate that fails.
-  Stage 3 deletes the record of what the deployment granted on the host,
+* **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
+  3 deletes the record of what the deployment granted on the host,
   `/var/lib/paisans/granted.<token>.json`, with its registry entry, and never
-  touches the host's key allowlist.
+  touches the host's key allowlist. It deletes the host's configuration store
+  too, the repository and the files beside it; the other sites still hold every
+  version.
   With `--evict` it needs a terminal, and asks, in order: `revoked` for a
   gateway, once its DNS token is revoked at the provider and a new one set
   with `secrets set`; the site's name; `lose writes` when the leader has no

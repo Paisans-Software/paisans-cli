@@ -16,18 +16,33 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/registry"
 )
 
-// Version is the record's layout.
-const Version = 1
+// Version is the record's layout. Version 2 added the configuration part;
+// a version 1 record is read as one with no configuration part yet, and
+// written back as version 2.
+const Version = 2
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
-// all succeeded: the keys part by host prepare, the images and web server
-// parts by apply. A part that was never written is nil.
+// all succeeded: the keys part by host prepare, the images, web server and
+// configuration parts by apply. A part that was never written is nil.
 type Record struct {
 	Version   int            `json:"version"`
 	Keys      *KeysPart      `json:"keys,omitempty"`
 	Images    *ImagesPart    `json:"images,omitempty"`
 	WebServer *WebServerPart `json:"web_server,omitempty"`
+	Config    *ConfigPart    `json:"config,omitempty"`
+}
+
+// ConfigPart is the version of the configuration apply last applied: its
+// hash and revision in the store every site keeps
+// (docs/specs/2026-10-12-config-store.md). It makes the host a witness: a
+// site that deletes the newer versions and serves an old one cannot hide
+// from a host that has applied a newer one, and apply refuses to put an
+// older revision on it unless the operator types rollback.
+type ConfigPart struct {
+	Hash      string    `json:"hash"`
+	Revision  int       `json:"revision"`
+	AppliedAt time.Time `json:"applied_at"`
 }
 
 // KeysPart is the login user and the keys host prepare last made its
@@ -98,8 +113,8 @@ func Parse(content string) (Record, error) {
 	if err := dec.Decode(&rec); err != nil {
 		return Record{}, err
 	}
-	if rec.Version != Version {
-		return Record{}, fmt.Errorf("version %d, and this toolkit reads version %d", rec.Version, Version)
+	if rec.Version != 1 && rec.Version != Version {
+		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 and %d", rec.Version, Version)
 	}
 	return rec, nil
 }
@@ -277,6 +292,20 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 			out.WebServer = &WebServerPart{AppliedAt: at, ApprovedBy: approvedBy, IncludeDir: g.WebServer.IncludeDir}
 		}
 	}
+	return out
+}
+
+// WithConfig is rec with the configuration version hash, at revision,
+// recorded as applied at now. The version already recorded keeps the time
+// it was first applied, so a run that applies it again leaves the record as
+// it is.
+func (rec Record) WithConfig(hash string, revision int, now time.Time) Record {
+	out := rec
+	out.Version = Version
+	if rec.Config != nil && rec.Config.Hash == hash && rec.Config.Revision == revision {
+		return out
+	}
+	out.Config = &ConfigPart{Hash: hash, Revision: revision, AppliedAt: now.UTC().Truncate(time.Second)}
 	return out
 }
 

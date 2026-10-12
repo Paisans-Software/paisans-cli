@@ -27,6 +27,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/grant"
@@ -82,6 +83,12 @@ Usage:
   paisans doctor   [--config paisans.yaml] [--site <name>]... [--sudo]
   paisans dns init [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
+  paisans config publish [--config paisans.yaml] [--merge] [--execute]
+  paisans config pull [--config paisans.yaml] [--root <sha>] [--execute]
+  paisans config log [--config paisans.yaml] [--root <sha>]
+  paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]
+               [--config paisans.yaml] [--execute]
+  paisans admin register [--config paisans.yaml] [--key <path.pub>] [--root <sha>] [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
@@ -226,6 +233,35 @@ Commands:
              exactly a no-mail content init writes. Lists every other record init marked, with why
              it is kept, and lists the zone again to confirm each delete.
              Both write nothing without --execute.
+  config     The signed copies of paisans.yaml, secrets.enc.yaml and
+             .sops.yaml every site keeps. Each gathers every site's
+             versions first and trusts them from your own signing key or a
+             root pinned with --root. publish: sign the local files as a
+             version on the sites' newest and push it to every site;
+             --merge builds on every head of a fork. pull: move the local
+             files to the sites' newest version, or, over local edits,
+             show the difference and put its files in .paisans/incoming/.
+             log: list every version, its signer, and the sites holding
+             it. recover: onto an empty directory, gather from the --from
+             hosts and every site the trusted heads name, and write the
+             head's files, or each head's in .paisans/incoming/ with a
+             fork. With --execute, pull, recover, a publish of the first
+             version, apply and admin register ask for the word partial
+             at a terminal when no more than half the sites answered
+             directly; publish, pull, recover, apply and admin register
+             ask for rollback when the newest version is older than one
+             seen here before, and log only warns. With --execute each
+             site first syncs with its peers; without it, and in log, no
+             site is changed and only .paisans/ here is written.
+  admin      register: sign an attestation of the sites' newest version
+             with your own key, so trust starts from your signature: the
+             key in your ssh-agent listed under your entry in admins, or
+             the one --key names. Signs only a version equal to your local
+             files, or, with no files and a root pinned, the one the pin
+             leads to, and then writes its files. Records the key in
+             .paisans/signing-key, which config publish signs with from
+             then on. Changes only the sites' configuration stores, and
+             nothing without --execute.
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
@@ -264,21 +300,24 @@ Commands:
 host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
 admin create, app remove, oidc client create, secrets prune, preflight, failover
-test, doctor and init are the only commands that reach a host. Each reads it to
-plan, and changes it only with --execute; host allow and host disallow change
-only a host's key allowlist, which is the host owner's, and claim nothing; host
-deployments, preflight, doctor and init have no --execute and never change it;
-secrets prune only reads the gateways' deployment records, and its --execute
-writes the local secrets file alone. With --execute, a command first claims each
-host it writes to in /var/lib/paisans/registry.json, and refuses if another
-deployment there holds this one's token, WireGuard interface or listen port, or
-a mesh subnet overlapping this one's. apply and host prepare also refuse when
-anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; site
-remove also deletes the removed site's records there. web-server show and
-web-server check change nothing: check looks at a monitor's public hostname as
-any visitor could, and with managed_by: external both read the monitor's web
-server over ssh, show always and check when a check fails.
+test, doctor, init, config and admin register are the only commands that
+reach a host. Each reads it to plan, and changes it only with --execute; host
+allow and host disallow change only a host's key allowlist, which is the host owner's, and
+claim nothing; config and admin register claim nothing, and their --execute
+only starts each site's configuration sync and, for publish and register, adds a
+version to its store; host deployments, preflight, doctor and init have no
+--execute and never change it; secrets prune only reads the gateways' deployment
+records, and its --execute writes the local secrets file alone. With --execute,
+a command first claims each host it writes to in /var/lib/paisans/registry.json,
+and refuses if another deployment there holds this one's token, WireGuard
+interface or listen port, or a mesh subnet overlapping this one's. apply and
+host prepare also refuse when anything else on the host overlaps the mesh
+subnet. dns init and dns prune reach no host, only the DNS provider's API, and
+change it only with --execute; site remove also deletes the removed site's
+records there. web-server show and web-server check change nothing: check looks
+at a monitor's public hostname as any visitor could, and with managed_by:
+external both read the monitor's web server over ssh, show always and check when
+a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
@@ -328,6 +367,10 @@ func main() {
 		err = runMesh(os.Args[2:])
 	case "gateway":
 		err = runGateway(os.Args[2:])
+	case "config":
+		err = runConfig(os.Args[2:], os.Stdin, os.Stdout)
+	case "admin":
+		err = runAdmin(os.Args[2:], os.Stdin, os.Stdout)
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":
@@ -684,7 +727,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
 	}
 
-	cfg, err := config.Load(*configPath)
+	// The files are read once: the bytes loaded here are what is applied and
+	// what is published as the version applied.
+	cfg, paisansBytes, err := config.LoadWithBytes(*configPath)
 	if err != nil {
 		return err
 	}
@@ -701,13 +746,14 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
+	secrets, secretsBytes, err := config.LoadDeploymentSecretsWithBytes(*secretsPath, cfg.ID)
 	if err != nil {
 		return err
 	}
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	loaded := configstore.Files{Paisans: paisansBytes, Secrets: secretsBytes}
 	if err := refuseMidRekey(secrets); err != nil {
 		return err
 	}
@@ -719,6 +765,19 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if err := requireACMEToken(cfg, secrets, []string{*site}); err != nil {
 		return err
+	}
+	// The version this applies is gathered before the review, so a fork or
+	// a stale base is refused before the operator is asked anything. As a
+	// step of apply without --site the run did this once for every site.
+	var store storeVersion
+	if reviewedByRun == nil {
+		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, stdin, stdout); err != nil {
+			return err
+		}
+	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
+		// The run published one version and every step applies it: files
+		// edited since are not what the store holds.
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "paisans.yaml or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
@@ -758,6 +817,23 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
 	if err != nil {
 		return err
+	}
+	// Approved, and before the first change: the host's record is checked
+	// against the version and the version published, so the store holds
+	// what is applied even if the apply stops part way.
+	// As a step of apply without --site, the run published the version
+	// once, and this step records it. Only apply records it: host prepare
+	// and site add apply no version.
+	switch {
+	case store != nil && review != nil:
+		if err := store.check(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
+			return err
+		}
+		if review.version, err = store.publish(r, *execute, "before the first change"); err != nil {
+			return err
+		}
+	case reviewedByRun != nil && review != nil:
+		review.version = reviewedByRun.version
 	}
 	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
 		return err

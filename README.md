@@ -1301,7 +1301,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 | every service and every compose network | the Docker label `community.paisans.deployment=<id>`, the full id |
 | a firewall rule `host prepare` adds | the ufw comment `paisans-<token>: <why>` |
 | the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9` (see *Two deployments on one host never share a mesh*) |
-| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned` |
+| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, the configuration store's `/var/lib/paisans/config/<token>.git`, `.peers` and `.sync.json`, `/usr/local/lib/paisans-<token>/config-sync.sh` and the units `paisans-<token>-config-daemon.service`, `-config-sync.service` and `-config-sync.timer` |
 | a DNS record `dns init` creates | the comment `paisans-<token>: created by paisans dns init` |
 
 Code that decides whether a Docker object is this deployment's matches the
@@ -3072,8 +3072,8 @@ restore that looks complete until someone goes looking for their account.
 
 | Artifact | Holds | Without it |
 |----------|-------|------------|
-| `paisans.yaml` | topology | nothing knows what to build |
-| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted |
+| `paisans.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
+| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an admin's age key still decrypts it |
 | Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
 
@@ -3083,7 +3083,215 @@ live in the database. A community's identity provider configuration is
 particularly easy to assume is in the config when it is not.
 
 The age private keys are the fifth thing, and they must be backed up somewhere
-other than the repo they decrypt.
+other than the repo they decrypt. A copy of the first two on every site is no
+substitute: the encrypted file on a site is readable only with an age key, so
+losing every admin's key still loses every credential.
+
+The first two need no backup of their own beyond the sites, because every site
+keeps every signed version of them and `paisans config recover` writes them onto
+an empty workstation. The sites are one failure domain's worth of copies,
+though: a copy outside them, in object storage, waits for the backup design,
+which is not built.
+
+## Every site keeps signed copies of the configuration
+
+`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
+(see *Backup and restore*), so a lost workstation without a copy elsewhere loses
+the topology and every credential. Every site therefore keeps every version of
+the three files, each signed by the admin who published it, and an admin with an
+empty workstation can recover them from any host.
+`docs/specs/2026-10-12-config-store.md` is the approved specification, and
+*`paisans config`* and *`paisans admin register`* in
+[docs/commands.md](docs/commands.md) give the commands' mechanics.
+
+The copies are recovery copies now and are built to become the deployment's
+shared source of truth: every version records its parent, two versions from one
+parent are a fork, and `apply` refuses to run from files older than the sites'
+newest version. The one loss this cannot protect is every admin losing their age
+key, which is why *Rendered configuration is a build artifact* tells every
+deployment to add a second recipient to `.sops.yaml`.
+
+**A version is a signed git commit of exactly the three files.** A commit
+holding anything else is invalid. It is signed with the publishing admin's SSH
+key by git's `gpg.format=ssh`, so signing goes through the operator's ssh-agent
+and needs no new key. The signature covers the tree, and so the files, because
+nothing in the files can prove who wrote them: encrypting to an age recipient
+needs only the recipient's public key, which every stored `.sops.yaml` names, so
+anyone could write a secrets file that decrypts for every admin. A version
+carries `Paisans-Revision: <n>`, one more than its highest parent. Nothing
+decides by the commit date, because any host's clock can be wrong and anyone
+writing a copy can set it. Each version is kept under `refs/versions/<sha>`, a
+name that is its own hash, so two versions never compete for one. A store
+creates a version's ref only where it is absent and never moves or deletes one
+(see *How a site stores them*).
+
+### Trust starts from the operator's own signature, never from the sites
+
+A site keeps whatever it is sent, so every decision is made on the workstation.
+It starts from something the operator holds that nobody else can forge: the
+newest version signed by the operator's own SSH key, or a root hash the operator
+pins with `--root`. **A history found only on the sites is never trusted on its
+own, however consistent it looks**, because someone with root on those sites
+could have written it, signed with their own key and listing themselves as an
+admin. With neither an own signature nor a pin, a pull or a recovery is refused
+and asks for one.
+
+From that anchor a version is trusted when it passes three rules, each of which
+closes a forgery:
+
+| Rule | Because |
+|------|---------|
+| Shape: the tree holds exactly the three files, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
+| The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
+| Removal is final, key by key: when a trusted version drops a key a parent listed (an admin removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an admin removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real admin |
+
+The rule works key by key, not admin by admin, because rotating one of an
+admin's keys out must bar that key without barring the admin's others. Removals
+in the anchor's own history always stand, since the operator signed after them.
+When two admins each remove the other and neither removal is in the anchor's
+history, the toolkit refuses and shows both to the operator. Revision and hash
+cannot decide it, because whoever signs chooses both. A root outside the
+anchor's history is never trusted, for the same reason: only the anchor can say
+where the true history starts, so a second root written on a site is refused.
+
+**The head is the trusted version with the highest revision that no other
+trusted version builds on.** Two such versions are a fork, which stops `apply`
+until `paisans config publish --merge` resolves it.
+
+**Removing an admin who could decrypt the file** is also the operator's to
+finish by hand: take their age key out of `.sops.yaml` and re-encrypt the file
+under a new data key (`sops rotate --rm-age`) before publishing the version that
+removes them. Nothing in `paisans` checks that this was done. A version that
+only drops them from `admins` would leave every later write readable to them,
+since the file is still encrypted to their key.
+
+### An old version is made visible, not impossible
+
+A version that was really published verifies forever, so someone who controls a
+site can delete the newer ones there and serve an old one. Applying it would put
+back old secrets, undoing a `storage rotate-key`. No signature can prove a
+version is the newest, so three memories make an old one visible:
+
+| Memory | What it does | Why it is there |
+|--------|--------------|-----------------|
+| The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
+| A majority of sites | a pull, recovery, registration, the publish of a first version or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
+
+So a host attacker can roll back only the hosts they hold. What stays is a fresh
+workstation that reaches only sites the attacker controls: it can be served an
+old, genuine version, and applying it reaches only those sites.
+
+### How a site stores them
+
+`host prepare` gives each site, besides installing `git`:
+
+* a bare repository at `/var/lib/paisans/config/<token>.git`, owned by root;
+* a read-only `git daemon`, the unit `paisans-<token>-config-daemon`, bound to
+  the site's mesh address and serving only that directory. The mesh is already
+  let in whole by the firewall, and a mesh peer reads `paisans.yaml` and the
+  encrypted secrets, both of which a peer is trusted with already;
+* a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches the
+  versions each peer's mesh address serves, so a site that was down when a
+  version was published learns of it.
+
+Every store, and the workstation's own, takes versions in by one rule, whether
+from a peer's sync, a push or a gather. A fetch straight into `refs/versions/`
+would fast-forward a version's ref to a child of it, which hides the version and
+makes every later honest copy of it fail. So the fetch lands in a quarantine of
+its own, `refs/incoming/<id>/`, and each ref there named for the commit it
+points to becomes `refs/versions/<sha>` only where that ref is absent. An
+existing ref never moves, every other ref is ignored, and nothing is pruned, so
+no version is ever deleted; the quarantine refs are removed once read. A store
+also bundles only correctly named versions, so a ref planted under another name
+never travels.
+
+A site that `site remove` takes out stops being a peer, so it neither fetches
+nor serves. A version is tens of kilobytes, so thousands take a few megabytes
+and nothing is pruned.
+
+### Gathering, and why every site is asked
+
+`pull`, `recover` and `apply` gather the same way before they decide anything:
+
+1. With `--execute`, every site reached starts its sync with its peers and the
+   command waits, so a version only a site the operator cannot log in to holds
+   (Eg: a host whose allowlist leaves them out) arrives through one they can. A
+   dry run and `config log` start no sync, because a command changes a host only
+   with `--execute`; they read what each site holds now.
+2. Every site is reached over ssh, with `sudo` because the store is root's:
+   those the configuration names, or, for a recovery, those the trusted heads
+   name, not only the hosts given on the command line.
+3. The copies are combined, and only then are the rules applied and the head
+   chosen, so a site serving an old version is outvoted by the rest.
+
+### Commands
+
+```sh
+paisans admin register --execute      # sign an attestation, record your key
+paisans config publish --execute      # sign the local files, push to every site
+paisans config pull --execute         # move the files to the sites' newest
+paisans config log                    # every version, signer, holding sites
+paisans config publish --merge --execute   # one version on every head of a fork
+paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
+```
+
+* **`paisans admin register`** gives an admin who has never published an anchor
+  of their own, since they have signed nothing. It finds the key in their
+  ssh-agent that matches one listed under their entry in `admins` (or the one
+  `--key` names), gathers, and signs an attestation: a version with the head's
+  tree and the head as its only parent. It records the key in
+  `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
+  It attests only a head whose files equal the operator's local files, since an
+  attestation says "I hold this version"; otherwise it shows the difference. It
+  changes only the sites' stores, and nothing without `--execute`. With
+  `--execute` it asks for `partial` when no more than half the sites answered
+  directly, since the attestation becomes the operator's anchor.
+* **`paisans config publish`** commits the files with the base as parent, signs,
+  and pushes to every site it reaches. It refuses when its base is not the
+  sites' head, when no loaded key belongs to an admin the parent lists, and when
+  no site answers; a site that missed it gets it from its peers. A first
+  version, with no trusted head among the sites that answered, starts the
+  history, so with no more than half the sites reached directly it asks for
+  `partial`: an empty site must not start a second history silently.
+* **`paisans config pull`** moves files with no local edits to the head. Over
+  local edits on an older base it refuses, shows the difference, and with
+  `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
+  before `publish --merge`.
+* **`paisans config recover`** onto a workstation with nothing gathers from the
+  named hosts and every site the trusted heads name. It needs `--root` with the
+  hash of a version the operator trusts, kept somewhere other than the
+  workstation that was lost, because a history found only on the sites is
+  never trusted on its own. `--id` names the
+  deployment when a host's registry lists more than one. With a fork it writes
+  each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
+  head wins is for an admin to decide, never an order.
+* **`apply`** gathers before the review, so a fork or files older than the
+  sites' newest version are refused before the operator is asked anything; after
+  the approval it publishes the very bytes it loaded and applies, so the store
+  shows the declared state even when the apply stops part way, and each host
+  records the version it was given. A version that reaches no site is refused,
+  naming `host prepare` for a site with no store yet, because a version no site
+  holds is not one the hosts can be checked against.
+
+### Secrets are merged key by key
+
+Two edits of the encrypted file cannot be merged as text. When only the secrets
+file differs on both sides, `pull` decrypts the base, the local file and the
+head in memory and compares them key by key: changes to different keys merge,
+and two changes to one key are refused, naming the key and never a value. The
+pull takes neither side's value by itself. To take the head's value, set that
+key locally to it and pull again. To keep the local value, take the head's value
+first so the pull can merge the rest, pull, then set the key back to your value
+with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
+records and `secrets set` does not accept, is edited in the file with `sops`
+instead. A side with a `paisans mesh rekey` under way (a site with a next
+WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
+`mesh rekey` to finish it first on the side that holds it: a rekey's state is a
+sequence over live hosts, so combining two such states key by key could promote
+a key no host runs, and a rekey finishes in minutes. A file that cannot be
+decrypted and parsed here is refused without quoting its error, because a parse
+error can quote a value.
 
 ## Bootstrapping a site
 
@@ -3714,6 +3922,23 @@ at its next prepare, and one that loses it loses them at its next prepare. A
 monitor behind the operator's own web server opens neither: that server holds
 both, and its rules are the operator's.
 
+#### host prepare gives each site a configuration store
+
+A site cannot keep signed copies of the configuration (see *Every site keeps
+signed copies of the configuration*) until something exists on it to keep them
+in, and `apply` publishes a version before it changes anything else, so the
+store has to exist first. `host prepare` therefore installs `git` and plans,
+under *configuration store* in its plan, only what the host lacks: the bare
+repository at `/var/lib/paisans/config/<token>.git`, made only where its `HEAD`
+is absent so that a re-run never touches versions already there; the read-only
+daemon unit and the sync timer, `paisans-<token>-config-daemon` and
+`paisans-<token>-config-sync`, both named for the token so `site remove` finds
+them; and a file listing every other site's mesh address, which the sync reads.
+The repository is root's but readable by the user the daemon runs as, since a
+daemon that cannot read the store would serve nothing. A site added later gets
+the peers it lacks by a `host prepare` on the existing sites, which rewrites the
+list.
+
 #### host prepare owns its rules, and only its rules
 
 Every rule `host prepare` adds carries a ufw comment, `paisans-<token>: <why>`,
@@ -4241,6 +4466,23 @@ it:
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
+**The configuration is published once the stores exist.** The version `apply`
+applies is gathered before the review, so a fork or files older than the sites'
+newest version are refused before anything is asked (see *Every site keeps
+signed copies of the configuration*). It is published after the `host prepare`
+steps, which create every site's store, and before any other step changes a
+host: it cannot be pushed to a store that does not exist yet, and `host
+prepare`'s own changes are reviewed already. Publishing earlier than the first
+change keeps the store showing the declared state even if the run stops part
+way. A run that stops between prepare and publish has granted keys without
+publishing the version, and the next run publishes it. A version that reaches no
+site is refused, naming `host prepare`, because the hosts are checked against
+what the store holds. `apply --site` without a store refuses in the same words.
+Gathering reaches every site with `sudo` and needs the standard file names
+beside `paisans.yaml`, so a deployment with renamed files cannot use `apply`
+until they are renamed; and a dry run needs an admin key in the ssh-agent too,
+because it checks the key `--execute` would sign with.
+
 **DNS comes before any site is applied.** Each site's `wg-quick` resolves the
 `endpoint` names it dials, those of sites with no `public_address`, as the
 mesh interface starts, and one name that does
@@ -4336,7 +4578,7 @@ once the line ends, and output without a terminal never shows it:
 prepare
   ✓ vm: 1.8s
   ✓ watch: 2.0s
-  ⠹ home-b: 38s (install packages: wireguard-tools, ufw)
+  ⠹ home-b: 38s (install packages: wireguard-tools, ufw, git)
   ⠹ home-a: 38s (start docker)
 ```
 
@@ -4409,34 +4651,33 @@ out the configuration's findings, which the run showed at its start, and its
 own closing line, since the run ends on its own.
 
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
-subnet and the secrets file reads but lacks a generated secret, it generates
-the missing ones into that file, as `init` would: only what is missing, nothing
+subnet and the secrets file reads but lacks a generated secret, it generates the
+missing ones into that file, as `init` would: only what is missing, nothing
 overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
-what it wrote, never a value, and the closing line says the secrets were
-added; the later steps are then checked rather than waiting on init. A missing
-id, subnet or secrets file is still left to `init`, which `--execute` runs
-first. Every host's prepare is checked at the same time, drawn as with
-`--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog. Each install line
-is its site's steps' own dry runs together, and the storage line its step's:
-`✓` when every one is up to date, a dim `·` with `after prepare` (or
+what it wrote, never a value, and the closing line says the secrets were added;
+the later steps are then checked rather than waiting on init. A missing id,
+subnet or secrets file is still left to `init`, which `--execute` runs first.
+Every host's prepare is checked at the same time, drawn as with `--execute`. A
+prepare line names each kind of change its site's plan makes, in the order
+docker, wireguard, firewall, ssh keys, watchdog, configuration store. Each
+install line is its site's steps' own dry runs together, and the storage line
+its step's: `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is
 work, with what each step found, and `✗` when a step would refuse, with the
 refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
-work. `-v` lists each step under its line with its own status. Each pull
-line is the plan its site's apply would make: `○` with how many images it
-would pull and the free space they land in, `✓` `nothing to pull`, `✗` with
-the free space refusal `--execute` would stop at, or a dim `·` `after host
-prepare` while its site's prepare has work, since a host without Docker has no
-images to ask about:
+work. `-v` lists each step under its line with its own status. Each pull line is
+the plan its site's apply would make: `○` with how many images it would pull and
+the free space they land in, `✓` `nothing to pull`, `✗` with the free space
+refusal `--execute` would stop at, or a dim `·` `after host prepare` while its
+site's prepare has work, since a host without Docker has no images to ask about:
 
 ```
 configuration
   ✓ init: generated 4 secrets into secrets.enc.yaml (cluster.admin_password, cluster.standby_password, cluster.superuser_password and 1 more)
 
 prepare
-  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog
+  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog, configuration store
   ✓ home-b
   ✓ vm
   ✓ watch
@@ -6501,6 +6742,7 @@ deployment's is left alone and not listed:
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
+| the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 | the host's key allowlist | nothing: `/etc/paisans/ssh-allow.<user>` is the host owner's, shared by every deployment on the host | never touched. Taking a deployment off does not change what the owner allows |
 

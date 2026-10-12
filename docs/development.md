@@ -47,6 +47,19 @@ monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
 
+`config publish`, `config pull`, `config log`, `config recover` and `admin
+register` read every site's configuration store over ssh and change a host only
+with `--execute`, and then only by starting each site's sync and, for `publish`
+and `register`, adding a version to its store; they claim nothing. `apply`
+gathers and publishes through the same code. The commands are in
+`cmd/paisans/config.go` (`publish`, `pull`, `log`, `recover`),
+`cmd/paisans/config_merge.go` (the secrets merge on a pull),
+`cmd/paisans/config_apply.go` (`apply`'s gather, publish and witness check) and
+`cmd/paisans/adminregister.go`. The rules that decide which version to trust are
+`internal/configstore/trust.go`, and are written against built histories, not
+against a host, so they are tested without one. `internal/grant` holds the
+version a host last applied in `config` of its record.
+
 Each command that changes a host first claims it in the host registry,
 `/var/lib/paisans/registry.json`, and its dry run only reads that registry;
 `cmd/paisans/claim.go` is the one place that happens, and `internal/registry`
@@ -1335,6 +1348,7 @@ installed, on a workstation or anywhere else.
 | `internal/failover` | `failover test`: its checks, the switchover and its gates |
 | `internal/doctor` | `doctor`: the read commands it sends, and the findings and recovery advice made from their answers |
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
+| `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
 | `internal/render/templates` | the infrastructure templates, plus one directory per kind |
 
@@ -1609,6 +1623,20 @@ request. Until then, after an eviction, the DNS token is replaced with
 `secrets set`, OIDC client secrets with `oidc client create
 --rotate-secret`, and the apps' S3 keys with `storage rotate-key --app`, and
 the Postgres, Garage and heartbeat secrets stay as they are.
+
+The signed copies of the configuration have run only against fakes and local
+bare repositories standing in for sites: the trust rules against built
+histories, publishing and gathering through a fake transport, and the host
+prepare steps against a fake host. The shell that pushes to a store, bundles it
+for a pull, and the rendered sync script have run with a local `sh` against
+local bare repositories, with the host's paths moved into a temporary directory
+and each peer's `git://` address replaced by its directory. Nothing has been run
+against a real host, so the shell that creates the store, the daemon's reading
+of it as `nobody` (with `safe.directory` set for its one repository by
+environment) and the sync's fetch between real mesh addresses are reasoned from
+git's documentation, not observed; `git ls-remote` against a prepared host's
+daemon is the check to make first. Nor has `apply`'s publishing after the
+`host prepare` steps, or the witness refusal, run on a real deployment.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered

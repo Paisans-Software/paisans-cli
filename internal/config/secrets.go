@@ -136,10 +136,23 @@ func LoadSecrets(path string) (*Secrets, error) { return loadSecrets(path, "") }
 // loadSecrets is LoadSecrets for the deployment id, whose key decryption
 // looks for in the keystore. "" looks nowhere but where sops does.
 func loadSecrets(path, id string) (*Secrets, error) {
+	s, _, err := loadSecretsBytes(path, id)
+	return s, err
+}
+
+// loadSecretsBytes is loadSecrets, and the bytes it read.
+func loadSecretsBytes(path, id string) (*Secrets, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, readProblem(path, "Run paisans init to create it, or name the file with --secrets.", err)
+		return nil, nil, readProblem(path, "Run paisans init to create it, or name the file with --secrets.", err)
 	}
+	s, err := parseSecrets(data, path, id)
+	return s, data, err
+}
+
+// parseSecrets decrypts and decodes data, read from path.
+func parseSecrets(data []byte, path, id string) (*Secrets, error) {
+	var err error
 	plain := data
 	encrypted := looksEncrypted(data)
 	if encrypted {
@@ -176,10 +189,23 @@ func loadSecrets(path, id string) (*Secrets, error) {
 // at that deployment's services, and nothing else would notice them used
 // here. A file without an id is given this one, which its next write keeps.
 func LoadDeploymentSecrets(path, id string) (*Secrets, error) {
-	s, err := loadSecrets(path, id)
+	s, _, err := LoadDeploymentSecretsWithBytes(path, id)
+	return s, err
+}
+
+// LoadDeploymentSecretsWithBytes is LoadDeploymentSecrets, and the bytes it
+// read, as they are on disk: what apply publishes as the version it applies
+// is then exactly what it loaded.
+func LoadDeploymentSecretsWithBytes(path, id string) (*Secrets, []byte, error) {
+	s, data, err := loadSecretsBytes(path, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	s, err = deploymentSecrets(s, path, id)
+	return s, data, err
+}
+
+func deploymentSecrets(s *Secrets, path, id string) (*Secrets, error) {
 	if s.ID != "" && id != "" && s.ID != id {
 		return nil, foreignSecretsProblem(path, s.ID, id)
 	}

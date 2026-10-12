@@ -238,6 +238,20 @@ func TestExampleLoads(t *testing.T) {
 	}
 }
 
+// LoadBytes decodes as strictly as Load, from memory, and names no file.
+func TestLoadBytesIsLoadWithoutAFile(t *testing.T) {
+	cfg, err := config.LoadBytes([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Path != "" || cfg.Sites["home-a"].WatchdogMode() != config.WatchdogAuto {
+		t.Fatalf("path %q, sites %v", cfg.Path, cfg.SiteNames())
+	}
+	if _, err := config.LoadBytes([]byte(minimal + "unknown_key: 1\n")); err == nil {
+		t.Fatal("an unknown key was accepted")
+	}
+}
+
 // A site that says nothing about its watchdog gets auto, which uses whatever
 // device the host has. Making every operator write the default out would put a
 // line in every site block that nobody reads.

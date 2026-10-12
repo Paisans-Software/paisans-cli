@@ -71,7 +71,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 			}
 			continue
 		}
-		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site, o.Sudo)}
+		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site, o.Sudo), record: rec}
 		endReview(r, line, reviews[i].review, o.Execute)
 	}
 	out := map[string]*siteReview{}
@@ -131,4 +131,15 @@ func convergeRecordWebServer(r ui.Reporter, cfg *config.Config, reviews map[stri
 		}
 	}
 	return nil
+}
+
+// convergeRecords is each reviewed site's grant record, by site.
+func convergeRecords(reviews map[string]*siteReview) map[string]grant.Record {
+	out := map[string]grant.Record{}
+	for site, s := range reviews {
+		if s != nil {
+			out[site] = s.record
+		}
+	}
+	return out
 }
