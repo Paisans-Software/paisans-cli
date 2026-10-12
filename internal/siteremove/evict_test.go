@@ -474,3 +474,56 @@ func TestAPartialCutCompletesOnTheSiteThatMissedIt(t *testing.T) {
 		t.Errorf("the resumed cut touches %v, want only %s", cut, missed[0])
 	}
 }
+
+// A remaining site part way through a mesh rekey, its host and every peer
+// already on its next key, keeps that key through the cut: the cut renders
+// it with the key its host runs, not the one the secrets call current.
+func TestTheCutKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
+	w, zone := evictWorld(t, "home-b")
+	// Every host was rendered with home-c's key as it is now; the secrets
+	// say that key is the next one, as a rekey stopped after its swap
+	// leaves them.
+	c := w.secrets.Sites["home-c"]
+	next := c.WireGuardPrivateKey
+	c.WireGuardPrivateKey, c.WireGuardNextPrivateKey = "SUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUk=", next
+	w.secrets.Sites["home-c"] = c
+	nextPublic, err := render.PublicKey(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := w.mustBuild("home-b", evictOptions(zone))
+	execute(t, p)
+	for _, name := range []string{"home-a", "vm", "watch"} {
+		if !strings.Contains(w.hosts[name].runningWG(), nextPublic) {
+			t.Errorf("%s no longer runs home-c's new key", name)
+		}
+	}
+	if !strings.Contains(w.hosts["home-c"].runningWG(), "PrivateKey = "+next) {
+		t.Error("home-c no longer runs its new key")
+	}
+}
+
+// A site evicted part way through its own rekey may be listed by its next
+// key: a cut that stopped part way is completed on the site that missed it,
+// and the gate looks for either key.
+func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
+	w, zone := evictWorld(t, "home-b")
+	b := w.secrets.Sites["home-b"]
+	running := b.WireGuardPrivateKey
+	b.WireGuardPrivateKey, b.WireGuardNextPrivateKey = "SUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUk=", running
+	w.secrets.Sites["home-b"] = b
+	key, err := render.PublicKey(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.failOnce = "wg syncconf"
+	if err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone))); err == nil {
+		t.Fatal("the cut that missed a site passed")
+	}
+	execute(t, w.mustBuild("home-b", evictOptions(zone)))
+	for name, h := range w.hosts {
+		if name != "home-b" && strings.Contains(h.runningWG(), key) {
+			t.Errorf("%s still runs home-b as a peer", name)
+		}
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-stack/internal/meshkey"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
@@ -56,13 +57,15 @@ type evictState struct {
 	// claim of this deployment yet: a replacement declared in the same edit,
 	// which the eviction neither dials nor gates, and `apply` brings up.
 	joining map[string]bool
-	// key is the evicted site's WireGuard public key.
-	key string
+	// keys are the evicted site's WireGuard public keys: its current one,
+	// and its next one when a rekey of it stopped part way, since a peer may
+	// list either.
+	keys []string
 	// stillPeers is, for each remaining site, whether its running interface
-	// lists the key.
+	// lists any of the keys.
 	stillPeers map[string]bool
-	// cutDone is whether no remaining site's interface lists the key, which
-	// a run that already cut finds.
+	// cutDone is whether no remaining site's interface lists any of the
+	// keys, which a run that already cut finds.
 	cutDone bool
 	// cutRendered is the end state rendered without the joining sites, which
 	// the cut writes: it must not wait on a host or a DNS record that does not
@@ -187,11 +190,11 @@ func (p *Plan) readJoining() error {
 // the site's key on every remaining interface, the relays the remaining sites
 // need, and the gateway's DNS token.
 func (p *Plan) probeEvict() error {
-	key, err := render.PublicKey(p.secrets.Sites[p.Site].WireGuardPrivateKey)
+	keys, err := meshkey.Keys(p.secrets, p.Site)
 	if err != nil {
-		return fmt.Errorf("secrets sites.%s.wireguard_private_key: %w", p.Site, err)
+		return err
 	}
-	p.evict.key = key
+	p.evict.keys = keys
 	if err := p.refuseLostRelay(); err != nil {
 		return err
 	}
@@ -204,7 +207,7 @@ func (p *Plan) probeEvict() error {
 	p.evict.stillPeers = map[string]bool{}
 	p.evict.cutDone = true
 	for _, name := range p.liveSites() {
-		listed, err := p.listsPeer(name, key)
+		listed, err := p.listsPeer(name, keys...)
 		if err != nil {
 			return fmt.Errorf("site remove %s: %w", p.Site, err)
 		}
@@ -231,16 +234,15 @@ func (p *Plan) probeEvict() error {
 	return nil
 }
 
-// listsPeer reports whether site's running interface lists key as a peer.
-// `wg show <interface> peers` prints one public key per line (wireguard-tools,
-// wg(8)).
-func (p *Plan) listsPeer(site, key string) (bool, error) {
-	out, err := p.transports[site].Run("wg show " + p.dep().Interface() + " peers")
+// listsPeer reports whether site's running interface lists any of keys as a
+// peer.
+func (p *Plan) listsPeer(site string, keys ...string) (bool, error) {
+	peers, err := meshkey.Peers(site, p.transports[site], p.dep())
 	if err != nil {
-		return false, fmt.Errorf("%s: `wg show %s peers`: %w: %s", site, p.dep().Interface(), err, lastLines(out, 2))
+		return false, err
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == key {
+	for _, peer := range peers {
+		if contains(keys, peer) {
 			return true, nil
 		}
 	}
@@ -461,26 +463,26 @@ func (p *Plan) buildCut() (*Stage, error) {
 		return nil
 	}
 	st.gate = func() error {
-		if err := p.meshGate(p.evict.key); err != nil {
+		if err := p.meshGate(p.evict.keys...); err != nil {
 			return err
 		}
-		return p.handshakeGate(p.evict.key)
+		return p.handshakeGate(p.evict.keys...)
 	}
 	return st, nil
 }
 
 // handshakeGate passes when no remaining site's interface has a handshake
-// with key. `wg show <interface> latest-handshakes` prints a public key and
+// with any of keys. `wg show <interface> latest-handshakes` prints a public key and
 // a timestamp per peer (wireguard-tools, wg(8)), so a peer that was dropped
 // is not printed at all.
-func (p *Plan) handshakeGate(key string) error {
+func (p *Plan) handshakeGate(keys ...string) error {
 	for _, name := range p.liveSites() {
 		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " latest-handshakes")
 		if err != nil {
 			return fmt.Errorf("%s: `wg show %s latest-handshakes`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
 		}
 		for _, line := range strings.Split(out, "\n") {
-			if f := strings.Fields(line); len(f) > 0 && f[0] == key {
+			if f := strings.Fields(line); len(f) > 0 && contains(keys, f[0]) {
 				return fmt.Errorf("%s still has a handshake with %s", name, p.Site)
 			}
 		}

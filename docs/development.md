@@ -898,8 +898,10 @@ refusal, a partial cut, and resuming from each stage.
 through a `Store` the command implements over `config.LoadDeploymentSecrets`
 and `config.WriteSecrets`. README.md's *Rekeying the mesh: `mesh rekey`* has
 the design. The swap renders the configuration with the site's next key in
-place of its current one and moves only the mesh file, by scoped `apply`, on
-every peer and then the site; render never reads
+place of its current one, and every other site with the key its host runs
+(`internal/meshkey`, which `site remove` uses too, so a peer part way through
+its own rekey keeps its new key), and moves only the mesh file, by scoped
+`apply`, on every peer and then the site; render never reads
 `wireguard_next_private_key`, so `apply` and `apply --site` refuse while the
 secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
 they would put the old key back. Where a rekey stands is read

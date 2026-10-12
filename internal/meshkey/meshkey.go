@@ -1,0 +1,107 @@
+// Package meshkey is the one rule for which WireGuard key a site's mesh files
+// name while a `paisans mesh rekey` may be part way.
+//
+// The secrets file names a site's current key, and during a rekey its next
+// key beside it. The swap hands the host the next key before the file
+// promotes it, so for a while the host runs a key the file does not call
+// current. Every command that renders mesh files and writes them to a host
+// mid rekey renders that site with the key its host runs, read with `wg show`
+// as the rekey's own resume reads it: rendering the file's current key would
+// hand the old key back to every peer and cut the site's tunnels.
+package meshkey
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/render"
+)
+
+// RunningKey is the public key site's interface runs, reached through t.
+// `wg show <interface> public-key` prints it (wireguard-tools, wg(8)).
+func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string, error) {
+	out, err := t.Run("wg show " + d.Interface() + " public-key")
+	if err != nil {
+		return "", fmt.Errorf("%s: `wg show %s public-key`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// Peers is the public keys site's interface lists as peers, reached through
+// t. `wg show <interface> peers` prints one per line (wireguard-tools,
+// wg(8)).
+func Peers(site string, t apply.Transport, d deployment.Deployment) ([]string, error) {
+	out, err := t.Run("wg show " + d.Interface() + " peers")
+	if err != nil {
+		return nil, fmt.Errorf("%s: `wg show %s peers`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+	}
+	var keys []string
+	for _, line := range strings.Split(out, "\n") {
+		if key := strings.TrimSpace(line); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+// AsRunning is secrets as the mesh runs them: a copy in which every site
+// with a next key whose host already runs it has that key as its current
+// one, and the names of those sites, sorted. A site with a next key and no
+// transport keeps the key the file names, since its host is not written to.
+// The copy is for rendering; it is never written back.
+func AsRunning(secrets *config.Secrets, d deployment.Deployment, transports map[string]apply.Transport) (*config.Secrets, []string, error) {
+	if secrets == nil {
+		return nil, nil, nil
+	}
+	out := *secrets
+	out.Sites = make(map[string]config.SiteSecrets, len(secrets.Sites))
+	var swapped []string
+	for name, site := range secrets.Sites {
+		out.Sites[name] = site
+	}
+	for _, name := range secrets.RekeyPending() {
+		t, ok := transports[name]
+		if !ok {
+			continue
+		}
+		site := secrets.Sites[name]
+		next, err := render.PublicKey(site.WireGuardNextPrivateKey)
+		if err != nil {
+			return nil, nil, fmt.Errorf("secrets sites.%s.wireguard_next_private_key: %w", name, err)
+		}
+		runs, err := RunningKey(name, t, d)
+		if err != nil {
+			return nil, nil, err
+		}
+		if runs == next {
+			site.WireGuardPrivateKey = site.WireGuardNextPrivateKey
+			out.Sites[name] = site
+			swapped = append(swapped, name)
+		}
+	}
+	sort.Strings(swapped)
+	return &out, swapped, nil
+}
+
+// Keys is every public key site may be known by on a peer: its current one,
+// and its next one while a rekey is under way.
+func Keys(secrets *config.Secrets, site string) ([]string, error) {
+	s := secrets.Sites[site]
+	current, err := render.PublicKey(s.WireGuardPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("secrets sites.%s.wireguard_private_key: %w", site, err)
+	}
+	out := []string{current}
+	if s.WireGuardNextPrivateKey != "" {
+		next, err := render.PublicKey(s.WireGuardNextPrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("secrets sites.%s.wireguard_next_private_key: %w", site, err)
+		}
+		out = append(out, next)
+	}
+	return out, nil
+}

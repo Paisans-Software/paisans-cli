@@ -32,6 +32,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/meshkey"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -211,14 +212,9 @@ func refuseLostRelay(cfg *config.Config, sites []string) error {
 	return nil
 }
 
-// runningKey is the public key site's interface runs. `wg show <interface>
-// public-key` prints it (wireguard-tools, wg(8)).
+// runningKey is the public key site's interface runs.
 func (p *Plan) runningKey(site string) (string, error) {
-	out, err := p.transports[site].Run("wg show " + p.dep().Interface() + " public-key")
-	if err != nil {
-		return "", fmt.Errorf("%s: `wg show %s public-key`: %w: %s", site, p.dep().Interface(), err, strings.TrimSpace(out))
-	}
-	return strings.TrimSpace(out), nil
+	return meshkey.RunningKey(site, p.transports[site], p.dep())
 }
 
 // Show lists the plan: a section per site, each remaining stage pending.
@@ -327,15 +323,16 @@ func (p *Plan) rekey(s Site) error {
 // refused as apply refuses it, and the manifest records what was written.
 func (p *Plan) swap(site string, secrets *config.Secrets, newPublic string) error {
 	r := p.reporter()
-	swapped := *secrets
-	swapped.Sites = map[string]config.SiteSecrets{}
-	for name, s := range secrets.Sites {
-		swapped.Sites[name] = s
+	// Every other site is rendered with the key its host runs, so a peer
+	// part way through a rekey of its own keeps it (meshkey).
+	swapped, _, err := meshkey.AsRunning(secrets, p.dep(), p.transports)
+	if err != nil {
+		return err
 	}
 	s := swapped.Sites[site]
 	s.WireGuardPrivateKey = s.WireGuardNextPrivateKey
 	swapped.Sites[site] = s
-	rendered, err := render.Build(p.cfg, &swapped)
+	rendered, err := render.Build(p.cfg, swapped)
 	if err != nil {
 		return err
 	}

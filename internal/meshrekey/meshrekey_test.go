@@ -458,3 +458,29 @@ func TestARekeyLeavesASiteNotBroughtUpAlone(t *testing.T) {
 		t.Errorf("naming it: %v", err)
 	}
 }
+
+// A site's swap renders every other site with the key its host runs: a peer
+// part way through its own rekey keeps its new key on every host.
+func TestASwapKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
+	m := newMesh(t)
+	vm := m.secrets.Sites["vm"]
+	running := vm.WireGuardPrivateKey
+	vm.WireGuardPrivateKey, vm.WireGuardNextPrivateKey = "SUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUk=", running
+	m.secrets.Sites["vm"] = vm
+	a := m.secrets.Sites["home-a"]
+	a.WireGuardNextPrivateKey = "REREREREREREREREREREREREREREREREREREREREREQ="
+	m.secrets.Sites["home-a"] = a
+	p, err := m.build("home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Report = &ui.Recorder{}
+	if err := p.swap("home-a", m.secrets, publicOf(t, a.WireGuardNextPrivateKey)); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"home-a", "home-b", "watch"} {
+		if !contains(m.hosts[name].peers(), publicOf(t, running)) {
+			t.Errorf("%s no longer lists vm's new key", name)
+		}
+	}
+}

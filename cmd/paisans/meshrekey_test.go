@@ -51,7 +51,7 @@ func TestApplyRefusesMidRekey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Replace(string(data), `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=",`, `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=", wireguard_next_private_key: "RERERERERERERERERERERERERERERERERERERERERE=",`, 1)
+	text := strings.Replace(string(data), `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=",`, `home-a: { wireguard_private_key: "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA=", wireguard_next_private_key: "REREREREREREREREREREREREREREREREREREREREREQ=",`, 1)
 	if text == string(data) {
 		t.Fatal("the fixture's home-a line moved")
 	}

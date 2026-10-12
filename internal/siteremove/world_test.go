@@ -627,6 +627,16 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
+	case command == "wg show psns-f2a9 public-key":
+		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
+		if m == nil {
+			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
+		}
+		key, err := render.PublicKey(m[1])
+		if err != nil {
+			return "", err
+		}
+		return key + "\n", nil
 	case command == "wg show psns-f2a9 peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
@@ -888,13 +898,18 @@ func (w *world) failover() {
 	if w.member(w.evicted) == nil {
 		return
 	}
-	key, err := render.PublicKey(w.secrets.Sites[w.evicted].WireGuardPrivateKey)
-	if err != nil {
-		w.t.Fatal(err)
-	}
-	for name, h := range w.hosts {
-		if name != w.evicted && strings.Contains(h.runningWG(), key) {
-			return
+	for _, private := range []string{w.secrets.Sites[w.evicted].WireGuardPrivateKey, w.secrets.Sites[w.evicted].WireGuardNextPrivateKey} {
+		if private == "" {
+			continue
+		}
+		key, err := render.PublicKey(private)
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		for name, h := range w.hosts {
+			if name != w.evicted && strings.Contains(h.runningWG(), key) {
+				return
+			}
 		}
 	}
 	if w.leader() != w.evicted {

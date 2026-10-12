@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/meshkey"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -456,6 +457,13 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 		if err := p.readJoining(); err != nil {
 			return nil, err
 		}
+	}
+	// Every site the removal writes to is rendered with the key its host
+	// runs, so a site part way through a mesh rekey keeps its new key on
+	// every peer (meshkey). The site removed, when its host is not reached,
+	// keeps the keys the file holds: its peers drop it whichever they list.
+	if p.secrets, _, err = meshkey.AsRunning(secrets, p.dep(), p.transports); err != nil {
+		return nil, fmt.Errorf("site remove %s: %w", site, err)
 	}
 	for _, name := range cfg.Etcd.Members {
 		t, ok := p.transports[name]

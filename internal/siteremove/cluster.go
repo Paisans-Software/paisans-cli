@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
+	"github.com/paisans-software/paisans-stack/internal/meshkey"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
@@ -120,9 +121,9 @@ func (p *Plan) buildCluster() (*Stage, error) {
 		gates = append(gates, fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.end.Etcd.Members), ", ")))
 	}
 
-	key, err := render.PublicKey(p.secrets.Sites[p.Site].WireGuardPrivateKey)
+	keys, err := meshkey.Keys(p.secrets, p.Site)
 	if err != nil {
-		return nil, fmt.Errorf("secrets sites.%s.wireguard_private_key: %w", p.Site, err)
+		return nil, err
 	}
 	changes, proxies, err := p.planSiteChanges(st, p.end.SiteNames(), p.rendered, func(string) bool { return true }, true)
 	if err != nil {
@@ -188,7 +189,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 				return err
 			}
 		}
-		if err := p.meshGate(key); err != nil {
+		if err := p.meshGate(keys...); err != nil {
 			return err
 		}
 		if len(proxies) > 0 {
@@ -565,14 +566,14 @@ func (p *Plan) haproxyGate(sites []string) error {
 // meshGate passes when no remaining site has the removed site's key as a
 // WireGuard peer. `wg show <interface> peers` prints one public key per line
 // (wireguard-tools, wg(8)).
-func (p *Plan) meshGate(key string) error {
+func (p *Plan) meshGate(keys ...string) error {
 	for _, name := range p.liveSites() {
 		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " peers")
 		if err != nil {
 			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
 		}
 		for _, line := range strings.Split(out, "\n") {
-			if strings.TrimSpace(line) == key {
+			if contains(keys, strings.TrimSpace(line)) {
 				return fmt.Errorf("%s still has %s as a WireGuard peer", name, p.Site)
 			}
 		}
