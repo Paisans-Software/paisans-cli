@@ -9,8 +9,10 @@
 // and the drift would show up as a configuration that validates and then
 // renders a compose file with a service nobody declared.
 //
-// Every default below was checked against the registry that serves it, on
-// 2026-09-08, by requesting the manifest for that exact tag. None is recalled.
+// Each kind is one record, a Def, in its own file (kind_<name>.go). Every
+// default image in a record was checked against the registry that serves it,
+// by requesting the manifest for that exact tag, and says when. None is
+// recalled.
 package kinds
 
 import (
@@ -46,181 +48,21 @@ const PostgresService = "postgres"
 // repository (docs/specs/2026-10-11-backups.md, "Pinned Postgres").
 const WALGImage = "ghcr.io/paisans-software/postgres-walg"
 
-// catalogue is every kind and its services.
-//
-// The service lists are short because the compose templates are short. They
-// grow when a template gains a container, and that is the point of keying the
-// map on service names: a key that does not exist here is a typo, and the
-// toolkit says so rather than ignoring it.
-var catalogue = map[config.Kind][]Service{
-	config.KindElement: {
-		// No database: Element is a static client that talks to a homeserver
-		// the browser reaches directly.
-		//
-		// v1.12.27 checked against ghcr.io on 2026-09-15 by requesting the
-		// manifest for that exact tag, which resolved (200, an OCI image
-		// index). The registry's tag list was paged through in full and
-		// v1.12.27 is the newest non release candidate tag; v1.12.28-rc.1
-		// exists but is a release candidate, not a release.
-		{Name: "app", Image: "ghcr.io/element-hq/element-web:v1.12.27", Purpose: "the web client"},
-	},
-	config.KindMbin: {
-		// The paisans fork, not upstream: it carries the generic OIDC
-		// provider this kind's .env configures, which upstream does not
-		// have, and the Doctrine transport decorator the default
-		// settings.queue (postgres) needs: on an image without it,
-		// MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
-		//
-		// stack-1 is the fork's toolkit channel: the latest release a
-		// maintainer has promoted as working with what this toolkit renders
-		// (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
-		// this kind's templates: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
-		// MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
-		// route the monitor checks. Its first promotion is 1.15.0+paisans,
-		// the first release carrying all four, published as the image tag
-		// 1.15.0-paisans (linux/amd64 only, so an arm64 apps site cannot run
-		// it). The tag moves by design, so RepositoryVolumes records what the
-		// image declares.
-		{Name: "app", Image: "ghcr.io/paisans-software/mbin:stack-1", Purpose: "the application, and its messenger consumers"},
-		// The three sidecars upstream's compose.yaml runs beside it. The
-		// messenger consumers are not here: they run the application's own
-		// code, so they always take the app's image, and a key that let them
-		// diverge would only be a way to run two versions of one schema.
-		//
-		// Upstream names a floating tag for each; these are the releases
-		// those tags resolved to when checked against Docker Hub on
-		// 2026-10-06, by requesting the manifest for each tag and comparing
-		// digests. 3-management-alpine and 3.13.7-management-alpine returned
-		// the same OCI image index, as did trixie and 9.1.2-trixie, and
-		// latest and 3.2.0. RabbitMQ 3.13 is the last 3.x series and upstream
-		// still runs it; a move to 4.x is a broker upgrade to make
-		// deliberately, not a default to drift into.
-		{Name: "amqproxy", Image: "docker.io/cloudamqp/amqproxy:3.2.0", Purpose: "the AMQP connection pool in front of the broker"},
-		{Name: "rabbitmq", Image: "docker.io/library/rabbitmq:3.13.7-management-alpine", Purpose: "the message broker for federation and background work"},
-		{Name: "valkey", Image: "docker.io/valkey/valkey:9.1.2-trixie", Purpose: "the cache"},
-		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
-	},
-	config.KindOAuth2Proxy: {
-		// One instance, admitting members and admins: it runs the sign-in and
-		// answers the gateway's forward_auth for every app that sets gated
-		// or auto_login. It listens on 4180, this kind's port in
-		// internal/render/plan.go's appPort, spelled out in the compose and
-		// Caddy snippet templates too, because a Service here carries no port
-		// field and a port nobody declared is a port nobody can route to.
-		//
-		// v7.15.4 checked against quay.io on 2026-09-15 by requesting the tag
-		// through quay.io's API, which resolved (an OCI image index with ten
-		// child manifests).
-		{Name: "app", Image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4", Purpose: "the gate, admitting members, listening on 4180"},
-	},
-	config.KindOutline: {
-		{Name: "app", Image: "outlinewiki/outline:1.10.0", Purpose: "the application"},
-		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
-	},
-	config.KindPocketID: {
-		{Name: "app", Image: "ghcr.io/pocket-id/pocket-id:v2.14.0", Purpose: "the application"},
-		// Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml
-		// and published by the tag admin-reconciler-v0.1.0. Checked against
-		// ghcr.io on 2026-10-08 with an anonymous pull token, which resolved
-		// the tag to this digest: an OCI image index for linux/amd64 and
-		// linux/arm64.
-		{Name: "reconciler", Image: "ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d", Purpose: "the admin reconciler"},
-		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
-	},
-	config.KindSynapse: {
-		// Three containers, because a homeserver does not authenticate anyone
-		// any more. Synapse is a resource server, Matrix Authentication
-		// Service owns the login, and the identity provider is upstream of
-		// MAS rather than of Synapse.
-		//
-		// NOTE THE MISSING `v`. Synapse tags as vX.Y.Z and MAS tags as X.Y.Z.
-		// Checked against ghcr.io on 2026-09-15 by requesting the manifest for
-		// each: `1.24.0` resolved (200), `v1.24.0` did not (404), and neither
-		// did `1.25.0`. The registry's tag list was paged through in full and
-		// 1.24.0 is the newest release; 1.25.0-rc.0 exists but is a release
-		// candidate.
-		{Name: "app", Image: "ghcr.io/element-hq/synapse:v1.160.0", Purpose: "the homeserver, which only serves the API"},
-		{Name: "mas", Image: "ghcr.io/element-hq/matrix-authentication-service:1.24.0", Purpose: "Matrix Authentication Service, which owns the login"},
-		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
-	},
-	config.KindWriteFreely: {
-		// This kind means the writefreely-wisp fork, not upstream WriteFreely.
-		// The fork adds Postgres and S3 support upstream does not have, so the
-		// blog joins the same Patroni cluster and the same Garage node as
-		// everything else instead of a SQLite file nothing else can reach.
-		// Upstream's image has no [database] Postgres driver and no [storage]
-		// section at all, so it will reject the configuration this kind
-		// renders; do not point this kind at ghcr.io/writefreely/writefreely.
-		//
-		// stack-1 is the fork's toolkit channel: the latest release a
-		// maintainer has promoted as working with what this toolkit renders
-		// (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
-		// this kind's templates: config.ini's locked_settings, [app]
-		// authorized_fetch, the S3 storage with image_url_base, and the
-		// /healthz route the monitor checks. Its first promotion is
-		// 0.21.1+wisp, the first release carrying locked settings, published
-		// as the image tag 0.21.1-wisp. The tag moves by design, so
-		// RepositoryVolumes records what the image declares.
-		{Name: "app", Image: "ghcr.io/josephquigley/writefreely-wisp:stack-1", Purpose: "the application"},
-		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
-	},
-	config.KindUptime: {
-		// The Paisans-Software/uptime fork (josephquigley/uptime until
-		// 2026-10-07): OIDC sign in gated on a group, a seed file
-		// (SEED_FILE), TRUST_PROXY and an entrypoint that drops from root
-		// from 1.1.0-oidc.2; bulk channel actions and the SMTP lock when the
-		// seed supplies SMTP from 1.1.0-oidc.3, the first release published
-		// from the organisation; a seed entry's heartbeat_token taken as the
-		// monitor's token from 1.1.0-oidc.4, which the per site heartbeat
-		// in internal/render/heartbeat.go depends on. Its database is SQLite
-		// under /data, which is why the kind is pinned only: it has no
-		// Postgres service, so cluster-placement-without-a-cluster refuses
-		// it.
-		//
-		// NOTE THE MISSING `v`: the git tag is v1.1.0-oidc.4 and
-		// docker/metadata-action's semver pattern strips it. 1.1.0-oidc.3
-		// was checked against ghcr.io on 2026-10-07 by requesting the
-		// manifest for that exact tag anonymously (200) and run as root with
-		// a seed carrying SMTP (healthy, seed applied); 1.1.0-oidc.4 is the
-		// release carrying the heartbeat token, pinned ahead of its
-		// publication, and is to be checked the same way once published.
-		{Name: "app", Image: "ghcr.io/paisans-software/uptime:1.1.0-oidc.4", Purpose: "the monitor"},
-	},
-	config.KindInvite: {
-		// paisans-invite: member invites with the code of conduct before
-		// the account (docs/specs/2026-10-12-invite-service.md). Cluster
-		// placement only, so the PostgresService row is the cluster's role
-		// and database, never a container of its own.
-		//
-		// 0.1.0 (git tag v0.1.0, without the `v` here) was checked against
-		// ghcr.io on 2026-10-12 by requesting the manifest for that exact
-		// tag anonymously (amd64 and arm64), and inspected after a pull: it
-		// declares no VOLUME.
-		{Name: "app", Image: "ghcr.io/paisans-software/paisans-invite:0.1.0", Purpose: "the invite service"},
-		{Name: PostgresService, Purpose: "its role and database on the cluster"},
-	},
-}
-
 // SendsMail reports whether a kind reads the deployment's smtp settings. An
 // app level smtp block on any other kind is refused, because an override
-// nothing reads is ignored without a word. Pocket ID reads them because its
-// whole application configuration is rendered (see PocketIDSettings). Mbin
-// reads them as MAILER_DSN and its sender address, for its contact form and
-// the few account mails it still sends (see MbinContactEmailSetting).
-func SendsMail(kind config.Kind) bool {
-	return kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin || kind == config.KindInvite
-}
+// nothing reads is ignored without a word.
+func SendsMail(kind config.Kind) bool { return of(kind).SendsMail }
 
 // Services returns a kind's services in compose order, which is the order they
-// are declared above rather than alphabetical: `app` first is what an operator
+// are declared in the kind's record rather than alphabetical: `app` first is what an operator
 // expects to read.
 func Services(kind config.Kind) []Service {
-	return append([]Service(nil), catalogue[kind]...)
+	return append([]Service(nil), of(kind).Services...)
 }
 
 // Has reports whether a kind defines a service.
 func Has(kind config.Kind, service string) bool {
-	for _, s := range catalogue[kind] {
+	for _, s := range of(kind).Services {
 		if s.Name == service {
 			return true
 		}
@@ -232,7 +74,7 @@ func Has(kind config.Kind, service string) bool {
 // says nothing. The second result is false when the kind computes it instead
 // of shipping one.
 func DefaultImage(kind config.Kind, service string) (string, bool) {
-	for _, s := range catalogue[kind] {
+	for _, s := range of(kind).Services {
 		if s.Name == service {
 			return s.Image, s.Image != ""
 		}
@@ -258,52 +100,27 @@ func UsesPostgres(kind config.Kind) bool {
 // than on local disk. Whether one app of the kind does is InObjectStorage,
 // which also reads the app's `storage` key and whether the deployment has a
 // Garage at all.
-//
-// Synapse is deliberately absent. Its media store is a directory the
-// homeserver owns, which is also why the synapse kind is pinned to one node.
-func UsesObjectStorage(kind config.Kind) bool {
-	switch kind {
-	case config.KindMbin, config.KindOutline, config.KindWriteFreely:
-		return true
-	default:
-		return false
-	}
-}
+func UsesObjectStorage(kind config.Kind) bool { return of(kind).ObjectStorage }
 
 // ServesObjectsPublicly reports whether a kind's objects must be readable
-// without a credential.
-//
-// Mbin's are: a federating server fetching an image is a machine with no
-// account here, and a remote instance caches the URL it was given. So are
-// WriteFreely's, meaning the wisp fork: with `[storage] type = s3` the fork
-// writes images to the bucket and never reads them back to serve them. It
-// requires `[storage] image_url_base`, publishes every image URL under it, and
-// answers its own /uploads/ route with a redirect there, so the bucket has to
-// answer a reader with no credential or no image on the blog loads at all.
-//
-// Outline's are not, because its bucket holds the attachments of documents
-// that are readable only to members, and its server presigns every read it
-// issues.
+// without a credential. Each kind's record says why its answer is what it is.
 //
 // This is deliberately not a configuration key. Garage's website access is per
-// bucket and opt in, so the only way Outline's bucket becomes world readable
-// is a change to this function, which is a code change with a review rather
+// bucket and opt in, so the only way a private bucket becomes world readable
+// is a change to a kind's record, which is a code change with a review rather
 // than a line somebody edits at two in the morning.
 //
 // A kind storing objects (UsesObjectStorage) is not the same question as one
 // whose objects are fetched anonymously: a kind can keep its uploads in S3
 // while serving them through its own application route, or through
-// signatures it issues, never exposing its bucket. Outline is the second
-// case, and the fork used to be the first, before it became direct only.
-func ServesObjectsPublicly(kind config.Kind) bool {
-	return kind == config.KindMbin || kind == config.KindWriteFreely
-}
+// signatures it issues, never exposing its bucket.
+func ServesObjectsPublicly(kind config.Kind) bool { return of(kind).PublicObjects }
 
 // ServiceNames returns a kind's service names, sorted, for an error message
 // that has to list them.
 func ServiceNames(kind config.Kind) []string {
 	var out []string
-	for _, s := range catalogue[kind] {
+	for _, s := range of(kind).Services {
 		out = append(out, s.Name)
 	}
 	sort.Strings(out)
@@ -324,35 +141,12 @@ const (
 	ConfigJSON Format = "json"
 )
 
-// configFiles is where each kind's passthrough configuration lives. The file
-// names are the rendered names, relative to the stack, rather than the template
-// names: the renderer drops `.tmpl` and then `.secret`, so
-// writefreely/config.ini.secret.tmpl is `config.ini` on the host.
-//
-// Synapse and writefreely also render a `.env`, but only for their Postgres
-// container's password. The application reads homeserver.yaml and config.ini,
-// so those are where a key means anything.
-var configFiles = map[config.Kind]struct {
-	format Format
-	file   string
-}{
-	config.KindMbin:        {ConfigEnv, ".env"},
-	config.KindOutline:     {ConfigEnv, ".env"},
-	config.KindPocketID:    {ConfigEnv, ".env"},
-	config.KindOAuth2Proxy: {ConfigEnv, ".env"},
-	config.KindWriteFreely: {ConfigINI, "config.ini"},
-	config.KindSynapse:     {ConfigYAML, "homeserver.yaml"},
-	config.KindElement:     {ConfigJSON, "config.json"},
-	config.KindUptime:      {ConfigEnv, ".env"},
-	config.KindInvite:      {ConfigEnv, ".env"},
-}
-
 // ConfigFormat is the syntax of the file a kind reads its configuration from,
 // or ConfigNone when it has none.
-func ConfigFormat(kind config.Kind) Format { return configFiles[kind].format }
+func ConfigFormat(kind config.Kind) Format { return of(kind).ConfigFormat }
 
 // ConfigFile is the rendered path of that file, relative to the stack.
-func ConfigFile(kind config.Kind) string { return configFiles[kind].file }
+func ConfigFile(kind config.Kind) string { return of(kind).ConfigFile }
 
 // BucketName is the bucket an app that stores objects keeps them in: the
 // `s3_bucket` setting when one is declared, and the app's name with

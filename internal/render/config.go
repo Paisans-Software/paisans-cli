@@ -13,125 +13,46 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
-// settingOwner records that a `settings` key is the sanctioned input for a
-// value a kind's templates render. When a passthrough key collides with one of
-// these, the refusal names the setting rather than the template, because that
-// is the way to change the value that somebody will review.
+// owningSetting is the setting that owns a kind's rendered key, if any: the
+// `settings` key that is the sanctioned input for it (kinds.Def.SettingKeys).
+// When a passthrough key collides with one, the refusal names the setting
+// rather than the template, because that is the way to change the value that
+// somebody will review.
 //
-// Only keys a setting genuinely controls are here. A rendered key that merely
-// depends on a setting among other things, such as Mbin's KBIN_STORAGE_URL,
-// is not: naming a setting that only partly decides a value would send an
-// operator to the wrong place. Element's base_url and server_name are fed by
-// settings too, but they sit under "m.homeserver", which configmerge refuses
-// as an ambiguous path before any collision is found, so an entry for them
-// could never be reached.
+// Only keys a setting genuinely controls are recorded. A rendered key that
+// merely depends on a setting among other things, such as Mbin's
+// KBIN_STORAGE_URL, is not: naming a setting that only partly decides a value
+// would send an operator to the wrong place. Element's base_url and
+// server_name are fed by settings too, but they sit under "m.homeserver",
+// which configmerge refuses as an ambiguous path before any collision is
+// found, so an entry for them could never be reached.
 //
-// TestEverySettingThatOwnsAKeyReallyControlsIt renders each row with the
-// setting changed and checks the key's line changes, so a row that goes stale
-// fails a test rather than misdirecting an operator.
-type settingOwner struct {
-	Kind config.Kind
-	// Key is the passthrough key, in that kind's `config` syntax.
-	Key string
-	// File is the stack file the key is rendered into.
-	File    string
-	Setting string
-}
-
-var settingOwners = []settingOwner{
-	{config.KindElement, "brand", "config.json", "brand"},
-
-	{config.KindMbin, "MBIN_AUTHORIZED_FETCH", ".env", "authorized_fetch"},
-	{config.KindMbin, "OAUTH_OIDC_ADMIN_GROUP", ".env", "admin_group"},
-	{config.KindMbin, "OAUTH_OIDC_MEMBER_GROUP", ".env", "member_group"},
-	{config.KindMbin, "S3_BUCKET", ".env", "s3_bucket"},
-	{config.KindMbin, "S3_REGION", ".env", "s3_region"},
-
-	{config.KindOutline, "AWS_REGION", ".env", "s3_region"},
-	{config.KindOutline, "AWS_S3_FORCE_PATH_STYLE", ".env", "s3_force_path_style"},
-	{config.KindOutline, "AWS_S3_UPLOAD_BUCKET_NAME", ".env", "s3_bucket"},
-
-	{config.KindPocketID, "FILE_BACKEND", ".env", "file_backend"},
-
-	{config.KindWriteFreely, "app.authorized_fetch", "config.ini", "authorized_fetch"},
-	{config.KindWriteFreely, "app.federation", "config.ini", "federation"},
-	{config.KindWriteFreely, "app.min_username_len", "config.ini", "min_username_len"},
-	{config.KindWriteFreely, "app.private", "config.ini", "private"},
-	{config.KindWriteFreely, "app.site_name", "config.ini", "site_name"},
-	{config.KindWriteFreely, "app.theme", "config.ini", "theme"},
-	{config.KindWriteFreely, "storage.s3_bucket", "config.ini", "s3_bucket"},
-	{config.KindWriteFreely, "storage.s3_region", "config.ini", "s3_region"},
-	{config.KindWriteFreely, "uploads.max_size_mb", "config.ini", "uploads_max_size_mb"},
-}
-
-// Every Pocket ID setting in kinds.PocketIDSettings owns its variable. They
-// are taken from that table rather than listed again here, so a setting added
-// there is an owner without a second edit. signup_default_groups is not among
-// them: its variable carries recorded IDs, which the setting chooses only by
-// way of apply. validate refuses a passthrough key for it, and for every other
-// variable a setting renders, whether or not the setting is declared
-// (pocket-id-config-key-has-a-setting).
-func init() {
-	for _, s := range kinds.PocketIDSettings {
-		settingOwners = append(settingOwners, settingOwner{config.KindPocketID, s.Env, ".env", s.Key})
-	}
-}
-
-// owningSetting is the setting that owns a kind's rendered key, if any.
+// TestEverySettingThatOwnsAKeyReallyControlsIt renders each one with the
+// setting changed and checks the key's line changes, so an entry that goes
+// stale fails a test rather than misdirecting an operator.
 func owningSetting(kind config.Kind, key string) (string, bool) {
-	for _, o := range settingOwners {
-		if o.Kind == kind && o.Key == key {
+	for _, o := range kinds.SettingKeys(kind) {
+		if o.Key == key {
 			return o.Setting, true
 		}
 	}
 	return "", false
 }
 
-// templateOmission records a key a kind's template leaves out of its config
-// file on purpose, because putting it back would undo a decision the toolkit
-// made. Such a key is owned by the template exactly as a key it writes is, and
-// a passthrough key that names it is refused as config-key-already-rendered.
-//
-// Only keys the template's own comments name as deliberately absent are here,
-// so that this table records decisions rather than guesses. Synapse's header
-// says the file "deliberately declares no identity provider of its own and no
-// local password database". The six keys below are Synapse's blocks for
-// those: oidc_providers, oidc_config (its deprecated single provider form),
-// saml2_config, cas_config and jwt_config each describe a way to register or
-// log in, and password_config the local password logins. Read in
-// docs/usage/configuration/config_documentation.md at tag v1.160.0, the
-// version the kind pins, on 2026-10-04. WriteFreely's [uploads] comment says
-// "dir is deliberately absent".
-type templateOmission struct {
-	Kind config.Kind
-	// Key is in that kind's `config` syntax. It matches itself and any path
-	// beneath it, so oidc_config.enabled is caught by oidc_config.
-	Key string
-	// Why completes the refusal's "leaves <key> out of <file> on purpose: ".
-	Why string
-}
-
-const synapseIdentity = "this homeserver is a resource server and Matrix Authentication Service owns every login, so an identity provider or a password database of its own would be a second way in that bypasses the group restriction at the identity provider"
-
-var templateOmissions = []templateOmission{
-	{config.KindSynapse, "cas_config", synapseIdentity},
-	{config.KindSynapse, "jwt_config", synapseIdentity},
-	{config.KindSynapse, "oidc_config", synapseIdentity},
-	{config.KindSynapse, "oidc_providers", synapseIdentity},
-	{config.KindSynapse, "password_config", synapseIdentity},
-	{config.KindSynapse, "saml2_config", synapseIdentity},
-
-	{config.KindWriteFreely, "uploads.dir", "uploads are stored in S3 through [storage], and dir names a path on one node that only the local image store reads, so it would do nothing here and suggest that it did"},
-}
-
-// omittedOnPurpose is the omission a passthrough key falls under, if any.
-func omittedOnPurpose(kind config.Kind, key string) (templateOmission, bool) {
-	for _, o := range templateOmissions {
-		if o.Kind == kind && (key == o.Key || strings.HasPrefix(key, o.Key+".")) {
+// omittedOnPurpose is the key a kind's template leaves out of its config file
+// on purpose that a passthrough key falls under, if any
+// (kinds.Def.OmittedKeys). Such a key is owned by the template exactly as a
+// key it writes is, and a passthrough key that names it is refused as
+// config-key-already-rendered. Only keys the template's own comments name as
+// deliberately absent are recorded, so that the list records decisions rather
+// than guesses.
+func omittedOnPurpose(kind config.Kind, key string) (kinds.OmittedKey, bool) {
+	for _, o := range kinds.OmittedKeys(kind) {
+		if key == o.Key || strings.HasPrefix(key, o.Key+".") {
 			return o, true
 		}
 	}
-	return templateOmission{}, false
+	return kinds.OmittedKey{}, false
 }
 
 // mergers is the configmerge function for each format.

@@ -16,9 +16,8 @@ const DashboardLinkSetting = "sso_dashboard_link"
 // provider's dashboard tile opens, for a kind that knows a better one than
 // its front page. Every other kind gets "/".
 func DashboardPath(kind config.Kind) string {
-	switch kind {
-	case config.KindMbin:
-		return MbinDashboardPath
+	if p := of(kind).DashboardPath; p != "" {
+		return p
 	}
 	return "/"
 }

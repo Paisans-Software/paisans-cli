@@ -214,7 +214,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 			entries[key] = value
 			note(true, "apps."+name+"."+key)
 		}
-		if app.Kind == config.KindMbin {
+		if hasKey(appSecretKeys(cfg, app), oauthPrivateKey) {
 			if err := fillOAuthKeypair(name, entries, note); err != nil {
 				return result, err
 			}
@@ -228,71 +228,15 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	return result, nil
 }
 
-// appSecretKeys is what one app's stanza needs, which depends on the kind:
-// the writefreely-wisp fork has a database role like any other Postgres
-// backed kind, and only Mbin runs a message broker, a cache and an OAuth2
-// server of its own.
+// appSecretKeys is what one app's stanza needs: a database role for a
+// Postgres backed kind, the kind's own secrets (kinds.Def.AppSecrets, which
+// says why each is there), and storage keys for an app in object storage.
 func appSecretKeys(cfg *config.Config, app config.App) []string {
 	var keys []string
 	if kinds.UsesPostgres(app.Kind) {
 		keys = append(keys, "database_password")
 	}
-	if app.Kind == config.KindMbin {
-		// The broker, the cache and the Mercure hub each need one, and so do
-		// Symfony (APP_SECRET) and Mbin's own OAuth2 server for API clients
-		// (OAUTH_PASSPHRASE for its private key, OAUTH_ENCRYPTION_KEY for the
-		// tokens it issues). Upstream's .env.example_docker ships a
-		// placeholder for each of the last three, and the image bakes those
-		// placeholders in, so leaving one unset runs on a value anyone can
-		// read in upstream's repository.
-		keys = append(keys, "mercure_jwt_secret", "rabbitmq_password", "valkey_password",
-			"app_secret", "oauth_passphrase", "oauth_encryption_key",
-			oauthPrivateKey, oauthPublicKey)
-	}
-	if app.Kind == config.KindOAuth2Proxy {
-		keys = append(keys, "cookie_secret")
-	}
-	if app.Kind == config.KindPocketID {
-		// Pocket ID will not start without an ENCRYPTION_KEY of at least 16
-		// bytes (backend/internal/common/env_config.go:167-169 at tag
-		// v2.14.0). A generated password is 32 random bytes, base64 encoded.
-		// It encrypts stored secrets, so like every generated secret it is
-		// never replaced once set.
-		//
-		// static_api_key is how this toolkit administers Pocket ID without a
-		// browser: STATIC_API_KEY authenticates the X-API-Key header as a
-		// synthetic administrator (apikey/service.go:156-163 and :221-259,
-		// middleware/api_key_auth.go:38) and must be at least 16 characters
-		// (env_config.go:182-184). README, "The toolkit administers Pocket ID
-		// through its static API key", says why it is generated here.
-		keys = append(keys, "encryption_key", "static_api_key")
-		// admins_heartbeat_token is what every instance of the app pushes
-		// the admins group's health to each monitor with, and what each
-		// monitor's seed names for the app (internal/render/adminsheartbeat.go).
-		// One per app rather than per site, so that the one monitor follows
-		// whichever instance is active. The site heartbeat token's shape and
-		// rule, for the same reasons: see heartbeat_token above.
-		keys = append(keys, adminsHeartbeatToken)
-	}
-	if app.Kind == config.KindUptime {
-		// ADMIN_PASS is the break glass sign in for when the identity
-		// provider is down, which is one of the things this app watches; the
-		// fork falls back to the literal "admin" when it is unset, so it is
-		// generated rather than optional. SESSION_SECRET signs the session
-		// cookie; unset, the fork invents one per boot and every restart
-		// signs everyone out.
-		keys = append(keys, "admin_password", "session_secret")
-	}
-	if app.Kind == config.KindInvite {
-		// email_hash_key keys the hash of a declined address; session_key
-		// signs the sign-in cookie (docs/specs/2026-10-12-invite-service.md).
-		keys = append(keys, "email_hash_key", "session_key")
-	}
-	if app.Kind == config.KindSynapse {
-		// Three, because the homeserver no longer authenticates anyone and
-		// Matrix Authentication Service in front of it needs its own.
-		keys = append(keys, masEncryptionSecret, masMatrixSecret, masSigningKey)
-	}
+	keys = append(keys, kinds.AppSecrets(app.Kind)...)
 	if kinds.InObjectStorage(cfg, app) {
 		// Only for an app keeping its files in Garage: one keeping them on
 		// its own disk has no bucket for a key to open.
@@ -816,4 +760,14 @@ func OwedNames(cfg *config.Config, secrets *config.Secrets) []string {
 		out = append(out, o.Name)
 	}
 	return out
+}
+
+// hasKey reports whether keys holds key.
+func hasKey(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }

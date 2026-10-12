@@ -315,7 +315,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 			// "Website access allowed for <bucket>" and exited 0 both times.
 			//
 			// Nothing here ever revokes it. A bucket that stops being public
-			// is a change to the kinds catalogue, which is a code change with
+			// is a change to a kind's record, which is a code change with
 			// a review, and a provisioner that guessed a human meant to
 			// withdraw public access would be guessing about the one thing in
 			// this package that cannot be undone quietly.

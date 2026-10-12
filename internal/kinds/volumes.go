@@ -35,7 +35,7 @@ import (
 // Docker's containerd image store otherwise answers for the native platform,
 // and printed null for images that do declare volumes.
 var ImageVolumes = map[string][]string{
-	// Applications, the defaults in catalogue.
+	// Applications, the defaults in each kind's record.
 	"docker.io/cloudamqp/amqproxy:3.2.0":                      nil,
 	"docker.io/library/rabbitmq:3.13.7-management-alpine":     {"/var/lib/rabbitmq"},
 	"docker.io/valkey/valkey:9.1.2-trixie":                    nil,

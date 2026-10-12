@@ -596,7 +596,7 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 		Hostname: app.Hostname,
 		Pinned:   app.Placement.Mode == config.PlacementPinned,
 		Site:     app.Placement.Site,
-		Port:     appPort[app.Kind],
+		Port:     kinds.Port(app.Kind),
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),
 		Images:   p.appImages(app),
@@ -905,7 +905,7 @@ func (p *planner) upstreams(name string) []string {
 	if !ok {
 		return nil
 	}
-	return p.upstreamsOnPort(name, appPort[app.Kind])
+	return p.upstreamsOnPort(name, kinds.Port(app.Kind))
 }
 
 // elsewhere reports whether a route has exactly one upstream and it is on a
