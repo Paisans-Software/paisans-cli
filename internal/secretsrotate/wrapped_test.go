@@ -567,6 +567,17 @@ func TestSMTPPasswordSetAnewReachesEveryUser(t *testing.T) {
 	}
 }
 
+// gateSite is the one site the fixture's gate runs on. The config places the
+// gate it derives, so the test reads the placement rather than repeating it.
+func (w *wrapWorld) gateSite() string {
+	w.t.Helper()
+	gate, ok := w.cfg.Apps[config.GateApp]
+	if !ok || gate.Placement.Mode != config.PlacementPinned || gate.Placement.Site == "" {
+		w.t.Fatalf("the fixture's gate is not pinned to a site: %+v", gate)
+	}
+	return gate.Placement.Site
+}
+
 // The client secret of a kind `oidc client create` cannot build is pasted:
 // minted at Pocket ID and set in the file, it is refused while unchanged,
 // and once set anew every site running the app is applied, and only then
@@ -593,7 +604,8 @@ func TestPastedClientAppliesThenRetires(t *testing.T) {
 	if err := run.Execute(e, nil); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"apply home-a gate", "healthy home-a gate", "retire gate"}; !slices.Equal(w.log, want) {
+	site := w.gateSite()
+	if want := []string{"apply " + site + " gate", "healthy " + site + " gate", "retire gate"}; !slices.Equal(w.log, want) {
 		t.Errorf("log %v, want %v", w.log, want)
 	}
 }
@@ -612,7 +624,8 @@ func TestPastedClientWithoutRetireOnlyApplies(t *testing.T) {
 	if err := run.Execute(e, nil); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"apply home-a gate", "healthy home-a gate"}; !slices.Equal(w.log, want) {
+	site := w.gateSite()
+	if want := []string{"apply " + site + " gate", "healthy " + site + " gate"}; !slices.Equal(w.log, want) {
 		t.Errorf("log %v, want %v", w.log, want)
 	}
 }
