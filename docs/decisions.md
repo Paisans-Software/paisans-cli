@@ -1922,3 +1922,53 @@ refused session came back to its own URL with the loop breaker set, then read
 the app; a member already signed into the app, or on a deep link, read it. With
 the gate unreachable, a browser holding the gate's cookie got 502 on `/`, and
 one without read the app. Not run against a live oauth2-proxy or Pocket ID.
+
+## 2026-10-12: The settings gating needs are checked on both sides
+
+Founder decisions. The design is `docs/specs/2026-10-12-gate-settings.md`.
+
+### What was decided
+
+* `validate` refuses `config-key-already-rendered`, which only render refused
+  before, by rendering the deployment with secrets generated in memory and
+  thrown away. Render keeps its own refusal.
+* Each kind records, in `internal/kinds`, the settings `gated` needs and how
+  to read them from a running copy: Mbin's private instance mode, allow list
+  and authorized fetch, WriteFreely's private mode and authorized fetch.
+  `doctor` reads every kind through that record and never branches on one.
+* `doctor` gains a `settings` section, which fails a running copy with one
+  of them off or not locked, and names `apply` as the fix.
+* `doctor --execute` removes from `paisans.yaml` a `config:` key that only
+  repeats a value gating renders. It changes no host.
+* Only settings the toolkit writes and locks on disk are in scope. Nothing
+  writes an app's database.
+
+### Why
+
+A key gating made redundant reached the operator only at render, which a
+whole apply meets after `init` and `host prepare` have run. The gate leaves
+ActivityPub, and for Mbin the API with a token, to the app, so those settings
+are part of the gate, and nothing read them from a running app. Keeping each
+kind's knowledge in its own record is what lets a new kind join without a
+branch in `doctor`. Keeping to settings locked on disk means a wrong value is
+always a file to render again, which `apply` already does and checks.
+
+### What was weighed
+
+* **A second list of the keys each template writes, in `validate`.** Whether
+  a template writes a key depends on the rest of the file (gating writes
+  Mbin's allow list), so a list would go stale where rendering cannot.
+* **Fixing an app's database from `doctor`**, through Mbin's `dbal:run-sql` or
+  a new Mbin console command. Out of scope: every setting gating needs is
+  locked on disk, so a database row cannot override it.
+* **`doctor --execute` changing a contradicting value.** That changes policy;
+  the operator edits it.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty. A copy
+of a real `paisans.yaml` with `MBIN_USE_FEDERATION_ALLOW_LIST` in a gated
+Mbin's `config:` passes `validate` before this change and is refused after it,
+in 1.3 seconds. Not run against a live Mbin or WriteFreely: each read is taken
+from the fork's source (Mbin's `SettingsManager.php` at `v1.15.1+paisans`,
+WriteFreely's `cmd/writefreely/settings.go` at `v0.21.1+wisp`).
