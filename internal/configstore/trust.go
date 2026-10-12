@@ -1,175 +1,276 @@
 package configstore
 
 import (
+	"errors"
 	"fmt"
 	"sort"
-	"strings"
-	"time"
 )
 
 // Graph is every version the workstation holds, with a way to read each
-// version's admins and to check its digest.
+// version's admins.
 type Graph struct {
 	Versions map[string]Version
 	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans.yaml
-	Digest   func(sha string) error                      // CheckDigest of that version
+}
+
+// Anchor is what the operator holds that nobody else can forge: their own
+// signing key, a pinned root, or both.
+type Anchor struct {
+	Signer string // the operator's key fingerprint, from .paisans/signing-key; may be empty
+	Root   string // a pinned root sha; may be empty
 }
 
 // Verdict is what Judge decides about a Graph.
 type Verdict struct {
-	Valid   map[string]bool
-	Reasons map[string]string // why a version is invalid
-	Roots   []string          // valid roots
-	Heads   []string          // valid tips, highest revision first
-	Fork    bool              // more than one head
+	Trusted  map[string]bool
+	Reasons  map[string]string
+	AnchorAt string   // the version trust starts from
+	Heads    []string // highest revision first, then sha
+	Fork     bool
 }
 
-// Judge decides which versions the workstation trusts and which are the
-// heads, by the rules of the spec's "Which versions the workstation trusts".
-// The rules are applied in an order chosen so that no rule can be turned
-// against another:
+// ErrNoAnchor is returned when trust has nowhere to start. A history found
+// only on the sites, however consistent, is one someone with root on those
+// sites could have written and signed with their own key.
+var ErrNoAnchor = errors.New("no version is signed by your key and no root is pinned")
+
+// anchorError explains why there is no anchor in a particular case, and is
+// ErrNoAnchor to errors.Is.
+type anchorError struct{ msg string }
+
+func (e *anchorError) Error() string        { return e.msg }
+func (e *anchorError) Is(target error) bool { return target == ErrNoAnchor }
+
+// ConflictError is two versions outside the anchor's history whose removals
+// bar each other, directly or through a chain of such. Nothing decides between
+// them by revision or hash, since whoever signs chooses both; the operator
+// does.
+type ConflictError struct{ A, B string }
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("versions %s and %s each remove a key the other depends on, and neither is in your anchor's history; choose one by publishing on it", e.A, e.B)
+}
+
+// Judge decides which versions to trust, starting from the operator's anchor,
+// by the spec's "Which versions the workstation trusts":
 //
-//  1. Each version on its own and against its parents (rules 1 and 2), parents
-//     first. A version is valid only if every parent is.
-//  2. The root (rule 4). It is settled before any removal is counted, so a
-//     forged root that lists a real admin and then removes them cannot use
-//     rule 3 to invalidate the real root and leave itself the only one.
-//  3. Removals (rule 3), counted only from versions valid after steps 1 and 2.
-//     The removals are collected once and then applied, so two admins who
-//     remove each other on separate branches each lose their later versions,
-//     and the result does not depend on which is looked at first.
-//  4. Digests, on heads only, until no head fails. A version the operator's
-//     age key cannot decrypt, published before they were a recipient, stays
-//     valid as long as a version built on it verifies. A head that fails here
-//     still counts as a removal in step 3: its signature and admins were
-//     valid, and a removal is a fact of the signed history rather than of the
-//     secrets this operator can read.
+//   - The anchor is the operator's newest version that passes shape, or else
+//     the pinned root. With both, the signed anchor must descend from the
+//     pin. The anchor and every ancestor of it are trusted whatever their
+//     shape, because the operator signed after them.
+//   - Removals in that history always stand, and bar the versions signed by
+//     each removed key that are not ancestors of the removal.
+//   - Every other version is a candidate when it passes shape, is not a root,
+//     has only trusted or candidate parents, is signed by a key of an admin in
+//     every parent, and is not barred by the history.
+//   - A candidate's removals bar other candidates, and with them every
+//     candidate built on a barred one. A candidate nobody undecided bars is
+//     trusted and its removals stand; one barred by a trusted candidate is
+//     not trusted and removes nothing; repeat until nothing changes. What is
+//     left bars itself in a loop, and is a *ConflictError.
 //
-// Heads are ordered by revision, highest first, then by hash. Commit dates are
-// never used: they are whatever the signer's clock said.
-//
-// The only error is more than one valid root with pinnedRoot unset. A graph
-// with no versions gives an empty Verdict.
-func Judge(g Graph, pinnedRoot string) (Verdict, error) {
-	j := judgement{g: g, valid: map[string]bool{}, reasons: map[string]string{}, admins: map[string]adminsResult{}}
+// The result does not depend on map order, and Judge terminates on any graph,
+// including one with a missing parent or a cycle.
+func Judge(g Graph, a Anchor) (Verdict, error) {
+	j := &judgement{g: g, admins: map[string]adminsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
+
+	anchor, err := j.anchor(a, order)
+	if err != nil {
+		return Verdict{}, err
+	}
+	history := map[string]bool{anchor: true}
+	for sha := range j.ancestors(anchor) {
+		history[sha] = true
+	}
+
+	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, AnchorAt: anchor}
 	for _, sha := range cyclic {
-		j.invalid(sha, "its parents form a cycle")
-	}
-	for _, sha := range order {
-		if reason := j.checkOwn(sha); reason != "" {
-			j.invalid(sha, reason)
-		} else {
-			j.valid[sha] = true
-		}
+		out.Trusted[sha] = false
+		out.Reasons[sha] = "its ancestry contains a cycle (shape)"
 	}
 
-	// Rule 4.
-	var roots []string
-	for _, sha := range order {
-		if len(g.Versions[sha].Parents) == 0 && j.valid[sha] {
-			roots = append(roots, sha)
-		}
-	}
-	if pinnedRoot != "" {
-		for _, sha := range order {
-			v := g.Versions[sha]
-			if len(v.Parents) == 0 && sha != pinnedRoot {
-				j.invalid(sha, "a root other than the pinned root (rule 4)")
-			}
-		}
-	} else if len(roots) > 1 {
-		return Verdict{}, j.rootsError(roots)
-	}
-	j.propagate(order)
-
-	// Rule 3.
-	type removal struct {
-		by    string          // the removing version
-		fps   map[string]bool // every key the admin held in a parent
-		admin string
-	}
-	var removals []removal
-	for _, sha := range order {
-		if !j.valid[sha] {
+	// Bars from the anchor's history.
+	barredBy := map[string]string{} // version -> reason
+	for _, r := range order {
+		if !history[r] {
 			continue
 		}
-		own := j.adminsOf(sha).m
-		kept := map[string]bool{}
-		for _, id := range own {
-			kept[id] = true
+		for _, sha := range order {
+			if history[sha] || barredBy[sha] != "" {
+				continue
+			}
+			if reason := j.bars(r, sha); reason != "" {
+				barredBy[sha] = reason
+			}
 		}
-		gone := map[string]map[string]bool{}
-		for _, p := range g.Versions[sha].Parents {
-			for fp, id := range j.adminsOf(p).m {
-				if !kept[id] {
-					if gone[id] == nil {
-						gone[id] = map[string]bool{}
-					}
-					gone[id][fp] = true
+	}
+
+	// Candidates.
+	cand := map[string]bool{}
+	for _, sha := range order {
+		if history[sha] {
+			out.Trusted[sha] = true
+			continue
+		}
+		reason := j.extend(sha, history, cand)
+		if reason == "" {
+			reason = barredBy[sha]
+		}
+		if reason != "" {
+			out.Trusted[sha] = false
+			out.Reasons[sha] = reason
+			continue
+		}
+		cand[sha] = true
+	}
+
+	// Which candidate's removals bar which: R attacks D when R bars D or an
+	// ancestor of D.
+	attackers := map[string][]string{}
+	direct := map[string]map[string]string{} // barred -> remover -> reason
+	for _, r := range order {
+		if !cand[r] {
+			continue
+		}
+		for _, v := range order {
+			if !cand[v] {
+				continue
+			}
+			if reason := j.bars(r, v); reason != "" {
+				if direct[v] == nil {
+					direct[v] = map[string]string{}
+				}
+				direct[v][r] = reason
+			}
+		}
+	}
+	for _, d := range order {
+		if !cand[d] {
+			continue
+		}
+		for _, r := range order {
+			if !cand[r] {
+				continue
+			}
+			for v := range direct {
+				if direct[v][r] != "" && (v == d || j.ancestors(d)[v]) {
+					attackers[d] = append(attackers[d], r)
+					break
 				}
 			}
 		}
-		ids := make([]string, 0, len(gone))
-		for id := range gone {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			removals = append(removals, removal{by: sha, fps: gone[id], admin: id})
-		}
-	}
-	barred := map[string]string{}
-	for _, r := range removals {
-		anc := j.ancestors(r.by)
-		for _, sha := range order {
-			if _, done := barred[sha]; done || !j.valid[sha] || sha == r.by || anc[sha] {
-				continue
-			}
-			if r.fps[g.Versions[sha].SignerFP] {
-				barred[sha] = fmt.Sprintf("signed by %s after a version removed them (rule 3: removed in %s)", r.admin, r.by)
-			}
-		}
-	}
-	for sha, reason := range barred {
-		j.invalid(sha, reason)
-	}
-	j.propagate(order)
-
-	// Digests, on heads only.
-	checked := map[string]bool{}
-	for {
-		failed := false
-		for _, sha := range j.heads(order) {
-			if checked[sha] {
-				continue
-			}
-			checked[sha] = true
-			if err := g.Digest(sha); err != nil {
-				j.invalid(sha, fmt.Sprintf("its digest does not verify: %v", err))
-				failed = true
-			}
-		}
-		if !failed {
-			break
-		}
 	}
 
-	out := Verdict{Valid: j.valid, Reasons: j.reasons, Heads: j.heads(order)}
+	const undecided, in, outed = 0, 1, -1
+	status := map[string]int{}
+	for changed := true; changed; {
+		changed = false
+		for _, x := range order {
+			if !cand[x] || status[x] != undecided {
+				continue
+			}
+			anyIn, allOut := false, true
+			for _, r := range attackers[x] {
+				anyIn = anyIn || status[r] == in
+				allOut = allOut && status[r] == outed
+			}
+			switch {
+			case anyIn:
+				status[x], changed = outed, true
+			case allOut:
+				status[x], changed = in, true
+			}
+		}
+	}
+	if c := conflict(order, cand, status, attackers); c != nil {
+		return Verdict{}, c
+	}
+
 	for _, sha := range order {
-		if len(g.Versions[sha].Parents) == 0 && j.valid[sha] {
-			out.Roots = append(out.Roots, sha)
+		if !cand[sha] {
+			continue
+		}
+		if status[sha] == in {
+			out.Trusted[sha] = true
+			continue
+		}
+		out.Trusted[sha] = false
+		for _, r := range order {
+			if status[r] == in && direct[sha][r] != "" {
+				out.Reasons[sha] = direct[sha][r]
+				break
+			}
+		}
+		if out.Reasons[sha] == "" {
+			for _, p := range j.g.Versions[sha].Parents {
+				if !out.Trusted[p] {
+					out.Reasons[sha] = fmt.Sprintf("parent %s is not trusted (signer)", p)
+					break
+				}
+			}
 		}
 	}
-	sort.Slice(out.Heads, func(a, b int) bool {
-		va, vb := g.Versions[out.Heads[a]], g.Versions[out.Heads[b]]
-		if va.Revision != vb.Revision {
-			return va.Revision > vb.Revision
+
+	built := map[string]bool{}
+	for _, sha := range order {
+		if out.Trusted[sha] {
+			for _, p := range g.Versions[sha].Parents {
+				built[p] = true
+			}
 		}
-		return out.Heads[a] < out.Heads[b]
+	}
+	for _, sha := range order {
+		if out.Trusted[sha] && !built[sha] {
+			out.Heads = append(out.Heads, sha)
+		}
+	}
+	sort.Slice(out.Heads, func(x, y int) bool {
+		vx, vy := g.Versions[out.Heads[x]], g.Versions[out.Heads[y]]
+		if vx.Revision != vy.Revision {
+			return vx.Revision > vy.Revision
+		}
+		return out.Heads[x] < out.Heads[y]
 	})
 	out.Fork = len(out.Heads) > 1
 	return out, nil
+}
+
+// conflict names two candidates left undecided that bar each other, directly
+// or through a chain. Each undecided candidate has an undecided attacker, so
+// following them from the lowest hash must come back round.
+func conflict(order []string, cand map[string]bool, status map[string]int, attackers map[string][]string) *ConflictError {
+	var left []string
+	for _, sha := range order {
+		if cand[sha] && status[sha] == 0 {
+			left = append(left, sha)
+		}
+	}
+	if len(left) == 0 {
+		return nil
+	}
+	sort.Strings(left)
+	next := func(x string) string {
+		var rs []string
+		for _, r := range attackers[x] {
+			if status[r] == 0 {
+				rs = append(rs, r)
+			}
+		}
+		sort.Strings(rs)
+		return rs[0]
+	}
+	seen := map[string]bool{}
+	x := left[0]
+	for !seen[x] {
+		seen[x] = true
+		x = next(x)
+	}
+	a, b := x, next(x)
+	if b < a {
+		a, b = b, a
+	}
+	return &ConflictError{A: a, B: b}
 }
 
 type adminsResult struct {
@@ -178,17 +279,9 @@ type adminsResult struct {
 }
 
 type judgement struct {
-	g       Graph
-	valid   map[string]bool
-	reasons map[string]string
-	admins  map[string]adminsResult
-}
-
-func (j *judgement) invalid(sha, reason string) {
-	if j.valid[sha] || j.reasons[sha] == "" {
-		j.reasons[sha] = reason
-	}
-	j.valid[sha] = false
+	g      Graph
+	admins map[string]adminsResult
+	anc    map[string]map[string]bool
 }
 
 func (j *judgement) adminsOf(sha string) adminsResult {
@@ -198,6 +291,140 @@ func (j *judgement) adminsOf(sha string) adminsResult {
 	m, err := j.g.Admins(sha)
 	j.admins[sha] = adminsResult{m, err}
 	return j.admins[sha]
+}
+
+// anchor picks where trust starts.
+func (j *judgement) anchor(a Anchor, order []string) (string, error) {
+	signed := ""
+	if a.Signer != "" {
+		for _, sha := range order {
+			v := j.g.Versions[sha]
+			if v.SignerFP != a.Signer || j.shape(sha) != "" {
+				continue
+			}
+			if signed == "" || v.Revision > j.g.Versions[signed].Revision ||
+				(v.Revision == j.g.Versions[signed].Revision && sha < signed) {
+				signed = sha
+			}
+		}
+	}
+	if a.Root != "" && signed != "" {
+		if a.Root != signed && !j.ancestors(signed)[a.Root] {
+			return "", &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", signed, a.Root)}
+		}
+		return signed, nil
+	}
+	if signed != "" {
+		return signed, nil
+	}
+	if a.Root != "" {
+		if reason := j.goodRoot(a.Root); reason != "" {
+			return "", &anchorError{fmt.Sprintf("the pinned root %s %s, and no version is signed by your key", a.Root, reason)}
+		}
+		return a.Root, nil
+	}
+	return "", ErrNoAnchor
+}
+
+// goodRoot says why sha cannot anchor as a pinned root, or "" when it can.
+func (j *judgement) goodRoot(sha string) string {
+	v, held := j.g.Versions[sha]
+	switch {
+	case !held:
+		return "is not held"
+	case len(v.Parents) > 0:
+		return "is not a root"
+	case j.shape(sha) != "":
+		return "fails shape"
+	}
+	own := j.adminsOf(sha)
+	if own.err != nil {
+		return fmt.Sprintf("has unreadable admins: %v", own.err)
+	}
+	if _, ok := own.m[v.SignerFP]; !ok {
+		return "is not signed by an admin it lists"
+	}
+	return ""
+}
+
+// shape says why a version fails rule 1, or "" when it passes.
+func (j *judgement) shape(sha string) string {
+	v := j.g.Versions[sha]
+	if !v.TreeOK {
+		return "its tree does not hold exactly the three files (shape)"
+	}
+	if !v.Signed {
+		return "it has no good signature from a known key (shape)"
+	}
+	want := 1
+	for _, p := range v.Parents {
+		pv, held := j.g.Versions[p]
+		if !held {
+			return fmt.Sprintf("parent %s is not held (shape)", p)
+		}
+		if pv.Revision+1 > want {
+			want = pv.Revision + 1
+		}
+	}
+	if v.Revision != want {
+		return fmt.Sprintf("its revision is %d, not %d (shape)", v.Revision, want)
+	}
+	return ""
+}
+
+// extend says why a version outside the anchor's history cannot be a
+// candidate, or "" when it can. A version whose own paisans.yaml cannot be
+// read is not trusted: its admins decide its children and its removals.
+func (j *judgement) extend(sha string, history, cand map[string]bool) string {
+	if reason := j.shape(sha); reason != "" {
+		return reason
+	}
+	v := j.g.Versions[sha]
+	if len(v.Parents) == 0 {
+		return "a root outside the anchor's history (anchor)"
+	}
+	for _, p := range v.Parents {
+		if !history[p] && !cand[p] {
+			return fmt.Sprintf("parent %s is not trusted (signer)", p)
+		}
+	}
+	if own := j.adminsOf(sha); own.err != nil {
+		return fmt.Sprintf("its admins cannot be read: %v (signer)", own.err)
+	}
+	for _, p := range v.Parents {
+		pa := j.adminsOf(p)
+		if pa.err != nil {
+			return fmt.Sprintf("the admins of parent %s cannot be read: %v (signer)", p, pa.err)
+		}
+		if _, ok := pa.m[v.SignerFP]; !ok {
+			return fmt.Sprintf("signed by %s, which is not a key of an admin in parent %s (signer)", v.SignerFP, p)
+		}
+	}
+	return ""
+}
+
+// bars says why removals in r bar v, or "" when they do not: v is signed by a
+// key one of r's parents listed and r does not, and v is neither r nor an
+// ancestor of it. A version with unreadable admins is taken to remove nothing,
+// since what it lists is unknown.
+func (j *judgement) bars(r, v string) string {
+	if r == v || j.ancestors(r)[v] {
+		return ""
+	}
+	fp := j.g.Versions[v].SignerFP
+	own := j.adminsOf(r)
+	if own.err != nil {
+		return ""
+	}
+	if _, kept := own.m[fp]; kept {
+		return ""
+	}
+	for _, p := range j.g.Versions[r].Parents {
+		if id, listed := j.adminsOf(p).m[fp]; listed {
+			return fmt.Sprintf("signed by %s, a key of %s that %s removed (removal)", fp, id, r)
+		}
+	}
+	return ""
 }
 
 // topo returns the held versions with every parent before its children, ties
@@ -242,76 +469,12 @@ func (j *judgement) topo() (order, cyclic []string) {
 	return order, cyclic
 }
 
-// checkOwn applies rules 1 and 2 to one version whose parents are already
-// judged, and returns why it is invalid, or "" when it is valid. A version
-// whose own paisans.yaml cannot be read is invalid too: its admins decide
-// whether its children are, and whom it removes.
-func (j *judgement) checkOwn(sha string) string {
-	v := j.g.Versions[sha]
-	if !v.TreeOK {
-		return "its tree does not hold exactly the three files (rule 1)"
-	}
-	if !v.Signed {
-		return "it has no good signature from a known key (rule 1)"
-	}
-	want := 1
-	for _, p := range v.Parents {
-		pv, held := j.g.Versions[p]
-		if !held {
-			return fmt.Sprintf("parent %s is not held", p)
-		}
-		if pv.Revision+1 > want {
-			want = pv.Revision + 1
-		}
-	}
-	if v.Revision != want {
-		return fmt.Sprintf("its revision is %d, not %d (rule 1)", v.Revision, want)
-	}
-	for _, p := range v.Parents {
-		if !j.valid[p] {
-			return fmt.Sprintf("parent %s is not valid (rule 2)", p)
-		}
-	}
-	own := j.adminsOf(sha)
-	if own.err != nil {
-		return fmt.Sprintf("its admins cannot be read: %v (rule 2)", own.err)
-	}
-	if len(v.Parents) == 0 {
-		if _, ok := own.m[v.SignerFP]; !ok {
-			return fmt.Sprintf("signed by %s, which is not a key of an admin it lists (rule 2)", v.SignerFP)
-		}
-		return ""
-	}
-	for _, p := range v.Parents {
-		pa := j.adminsOf(p)
-		if pa.err != nil {
-			return fmt.Sprintf("the admins of parent %s cannot be read: %v (rule 2)", p, pa.err)
-		}
-		if _, ok := pa.m[v.SignerFP]; !ok {
-			return fmt.Sprintf("signed by %s, which is not a key of an admin in parent %s (rule 2)", v.SignerFP, p)
-		}
-	}
-	return ""
-}
-
-// propagate makes every version with an invalid parent invalid, in order.
-func (j *judgement) propagate(order []string) {
-	for _, sha := range order {
-		if !j.valid[sha] {
-			continue
-		}
-		for _, p := range j.g.Versions[sha].Parents {
-			if !j.valid[p] {
-				j.invalid(sha, fmt.Sprintf("parent %s is not valid (rule 2)", p))
-				break
-			}
-		}
-	}
-}
-
 // ancestors returns every held version reachable from sha through parents,
-// not counting sha itself.
+// not counting sha itself unless it is on a cycle.
 func (j *judgement) ancestors(sha string) map[string]bool {
+	if a, ok := j.anc[sha]; ok {
+		return a
+	}
 	seen := map[string]bool{}
 	stack := append([]string(nil), j.g.Versions[sha].Parents...)
 	for len(stack) > 0 {
@@ -324,35 +487,6 @@ func (j *judgement) ancestors(sha string) map[string]bool {
 		seen[p] = true
 		stack = append(stack, v.Parents...)
 	}
+	j.anc[sha] = seen
 	return seen
-}
-
-// heads returns the valid versions that no valid version builds on.
-func (j *judgement) heads(order []string) []string {
-	built := map[string]bool{}
-	for _, sha := range order {
-		if j.valid[sha] {
-			for _, p := range j.g.Versions[sha].Parents {
-				built[p] = true
-			}
-		}
-	}
-	var out []string
-	for _, sha := range order {
-		if j.valid[sha] && !built[sha] {
-			out = append(out, sha)
-		}
-	}
-	return out
-}
-
-func (j *judgement) rootsError(roots []string) error {
-	sort.Strings(roots)
-	lines := make([]string, 0, len(roots))
-	for _, sha := range roots {
-		v := j.g.Versions[sha]
-		who := j.adminsOf(sha).m[v.SignerFP]
-		lines = append(lines, fmt.Sprintf("  %s signed by %s (%s) on %s", sha, who, v.SignerFP, v.Committed.UTC().Format(time.RFC3339)))
-	}
-	return fmt.Errorf("the store holds %d valid roots; pin one with --root <hash>:\n%s", len(roots), strings.Join(lines, "\n"))
 }

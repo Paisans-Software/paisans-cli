@@ -11,22 +11,17 @@ import (
 type fake struct {
 	vs     map[string]Version
 	admins map[string]map[string]string
-	badDig map[string]bool
 }
 
 func newFake() *fake {
-	return &fake{vs: map[string]Version{}, admins: map[string]map[string]string{}, badDig: map[string]bool{}}
+	return &fake{vs: map[string]Version{}, admins: map[string]map[string]string{}}
 }
 
-func (f *fake) add(sha string, rev int, signer string, parents ...string) {
+// add records a version listing the given admins, each by the key "fp-<name>".
+func (f *fake) add(sha string, rev int, signer string, parents []string, admins ...string) {
 	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true}
-}
-
-// lists sets the admins a version's paisans.yaml names, each by its key
-// fingerprint "fp-<name>".
-func (f *fake) lists(sha string, names ...string) {
 	m := map[string]string{}
-	for _, n := range names {
+	for _, n := range admins {
 		m["fp-"+n] = n
 	}
 	f.admins[sha] = m
@@ -36,23 +31,21 @@ func (f *fake) graph() Graph {
 	return Graph{
 		Versions: f.vs,
 		Admins:   func(sha string) (map[string]string, error) { return f.admins[sha], nil },
-		Digest: func(sha string) error {
-			if f.badDig[sha] {
-				return ErrDigestMismatch
-			}
-			return nil
-		},
 	}
 }
 
-func judge(t *testing.T, f *fake, pinned string) Verdict {
+func on(parents ...string) []string { return parents }
+
+func judgeOK(t *testing.T, f *fake, a Anchor) Verdict {
 	t.Helper()
-	v, err := Judge(f.graph(), pinned)
+	v, err := Judge(f.graph(), a)
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
 	return v
 }
+
+func alice() Anchor { return Anchor{Signer: "fp-alice"} }
 
 func wantHeads(t *testing.T, v Verdict, heads ...string) {
 	t.Helper()
@@ -64,21 +57,21 @@ func wantHeads(t *testing.T, v Verdict, heads ...string) {
 	}
 }
 
-func wantInvalid(t *testing.T, v Verdict, sha, reason string) {
+func wantUntrusted(t *testing.T, v Verdict, sha, reason string) {
 	t.Helper()
-	if v.Valid[sha] {
-		t.Fatalf("%s is valid, want invalid", sha)
+	if v.Trusted[sha] {
+		t.Fatalf("%s is trusted, want untrusted", sha)
 	}
 	if !strings.Contains(v.Reasons[sha], reason) {
 		t.Fatalf("reason for %s = %q, want it to contain %q", sha, v.Reasons[sha], reason)
 	}
 }
 
-func wantValid(t *testing.T, v Verdict, shas ...string) {
+func wantTrusted(t *testing.T, v Verdict, shas ...string) {
 	t.Helper()
 	for _, s := range shas {
-		if !v.Valid[s] {
-			t.Fatalf("%s is invalid: %s", s, v.Reasons[s])
+		if !v.Trusted[s] {
+			t.Fatalf("%s is untrusted: %s", s, v.Reasons[s])
 		}
 	}
 }
@@ -86,292 +79,248 @@ func wantValid(t *testing.T, v Verdict, shas ...string) {
 // chain is v1 <- v2 <- v3, all signed by alice and listing alice.
 func chain() *fake {
 	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.add("v2", 2, "fp-alice", "v1")
-	f.add("v3", 3, "fp-alice", "v2")
-	for _, s := range []string{"v1", "v2", "v3"} {
-		f.lists(s, "alice")
-	}
+	f.add("v1", 1, "fp-alice", nil, "alice")
+	f.add("v2", 2, "fp-alice", on("v1"), "alice")
+	f.add("v3", 3, "fp-alice", on("v2"), "alice")
 	return f
 }
 
 func TestJudgeLinearChain(t *testing.T) {
-	v := judge(t, chain(), "")
-	wantValid(t, v, "v1", "v2", "v3")
+	v := judgeOK(t, chain(), alice())
+	wantTrusted(t, v, "v1", "v2", "v3")
 	wantHeads(t, v, "v3")
-	if !reflect.DeepEqual(v.Roots, []string{"v1"}) {
-		t.Fatalf("Roots = %v", v.Roots)
+	if v.AnchorAt != "v3" {
+		t.Fatalf("AnchorAt = %s", v.AnchorAt)
 	}
 }
 
-func TestJudgeEmptyGraph(t *testing.T) {
-	v := judge(t, newFake(), "")
-	if len(v.Heads) != 0 || len(v.Roots) != 0 || v.Fork {
-		t.Fatalf("empty graph gave %+v", v)
+// The signer anchor is the operator's newest version, ties to the lowest hash.
+func TestJudgeSignerAnchorIsNewest(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
+	f.admins["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
+	f.add("x3", 3, "fp-alice", on("v2"), "alice")
+	v := judgeOK(t, f, alice())
+	if v.AnchorAt != "v3" {
+		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
 	}
+	wantHeads(t, v, "v4", "x3")
 }
 
+// An attacker with root on every site writes a root signed by their own key,
+// listing themselves and the real admin's key. The operator's own signature on
+// the real chain is the anchor, so the forged chain is never trusted.
 func TestJudgeForgedRoot(t *testing.T) {
 	f := chain()
-	f.add("m1", 1, "fp-mallory")
-	f.add("m2", 2, "fp-mallory", "m1")
-	f.lists("m1", "mallory")
-	f.lists("m2", "mallory")
-	f.vs["v1"] = withDate(f.vs["v1"], time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	f.add("m1", 1, "fp-mallory", nil, "mallory", "alice")
+	f.add("m2", 2, "fp-mallory", on("m1"), "mallory")
+	v := judgeOK(t, f, alice())
+	wantUntrusted(t, v, "m1", "root")
+	wantUntrusted(t, v, "m2", "not trusted")
+	wantTrusted(t, v, "v1", "v2", "v3")
+	wantHeads(t, v, "v3")
+}
 
-	_, err := Judge(f.graph(), "")
-	if err == nil {
-		t.Fatal("two valid roots were not refused")
+func TestJudgeNoAnchor(t *testing.T) {
+	_, err := Judge(chain().graph(), Anchor{Signer: "fp-zed"})
+	if !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
-	for _, s := range []string{"v1", "m1", "fp-alice", "fp-mallory", "alice", "mallory", "2026-10-01T12:00:00Z"} {
+	_, err = Judge(chain().graph(), Anchor{})
+	if !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+}
+
+func TestJudgePinAloneAnchors(t *testing.T) {
+	v := judgeOK(t, chain(), Anchor{Root: "v1"})
+	if v.AnchorAt != "v1" {
+		t.Fatalf("AnchorAt = %s", v.AnchorAt)
+	}
+	wantTrusted(t, v, "v1", "v2", "v3")
+	wantHeads(t, v, "v3")
+}
+
+// A pin is only an anchor when it is a root that passes shape and is signed
+// by an admin it lists itself.
+func TestJudgePinMustBeAGoodRoot(t *testing.T) {
+	f := chain()
+	f.add("e1", 1, "fp-eve", nil, "alice")
+	for _, pin := range []string{"e1", "v2", "elsewhere"} {
+		if _, err := Judge(f.graph(), Anchor{Root: pin}); !errors.Is(err, ErrNoAnchor) {
+			t.Fatalf("pin %s: err = %v, want ErrNoAnchor", pin, err)
+		}
+	}
+}
+
+func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
+	f := chain()
+	f.add("m1", 1, "fp-mallory", nil, "mallory")
+	_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: "m1"})
+	if !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+	for _, s := range []string{"v3", "m1"} {
 		if !strings.Contains(err.Error(), s) {
-			t.Fatalf("error %q does not name %q", err, s)
+			t.Fatalf("error %q does not name %s", err, s)
 		}
 	}
 
-	v := judge(t, f, "v1")
-	wantValid(t, v, "v1", "v2", "v3")
-	wantInvalid(t, v, "m1", "pinned root")
-	wantInvalid(t, v, "m2", "not valid")
-	wantHeads(t, v, "v3")
-	if !reflect.DeepEqual(v.Roots, []string{"v1"}) {
-		t.Fatalf("Roots = %v", v.Roots)
+	v := judgeOK(t, f, Anchor{Signer: "fp-alice", Root: "v1"})
+	if v.AnchorAt != "v3" {
+		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
+	}
+	wantUntrusted(t, v, "m1", "root")
+}
+
+func TestJudgeEmptyGraph(t *testing.T) {
+	for _, a := range []Anchor{{Root: "v1"}, {Signer: "fp-alice"}, {}} {
+		if _, err := Judge(newFake().graph(), a); !errors.Is(err, ErrNoAnchor) {
+			t.Fatalf("anchor %+v: err = %v, want ErrNoAnchor", a, err)
+		}
 	}
 }
 
-// A forged root that lists the real admin and then removes them must not be
-// able to invalidate the real root by rule 3 and so leave itself the only
-// root: removals are judged only after the root is settled.
-func TestJudgeForgedRootCannotRemoveRealAdmin(t *testing.T) {
-	f := chain()
-	f.add("m1", 1, "fp-mallory")
-	f.add("m2", 2, "fp-mallory", "m1")
-	f.lists("m1", "mallory", "alice")
-	f.lists("m2", "mallory")
+// The review's attack: alice's a2 removes bob; bob, already removed, signs b2
+// on v1 removing alice.
+func reviewAttack(v1Signer string) *fake {
+	f := newFake()
+	f.add("v1", 1, v1Signer, nil, "op", "alice", "bob")
+	f.add("a2", 2, "fp-alice", on("v1"), "op", "alice")
+	f.add("a3", 3, "fp-alice", on("a2"), "op", "alice")
+	f.add("b2", 2, "fp-bob", on("v1"), "op", "bob")
+	return f
+}
 
-	if _, err := Judge(f.graph(), ""); err == nil {
-		t.Fatal("two valid roots were not refused")
+func TestJudgeRemovalInHistoryStands(t *testing.T) {
+	v := judgeOK(t, reviewAttack("fp-alice"), alice())
+	wantUntrusted(t, v, "b2", "removal")
+	wantTrusted(t, v, "v1", "a2", "a3")
+	wantHeads(t, v, "a3")
+}
+
+func TestJudgeMutualRemovalOutsideHistoryIsAConflict(t *testing.T) {
+	f := reviewAttack("fp-op")
+	for i := 0; i < 5; i++ {
+		_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+		var c *ConflictError
+		if !errors.As(err, &c) {
+			t.Fatalf("err = %v, want *ConflictError", err)
+		}
+		if c.A != "a2" || c.B != "b2" {
+			t.Fatalf("ConflictError = %+v, want a2 and b2", c)
+		}
+		for _, s := range []string{"a2", "b2"} {
+			if !strings.Contains(err.Error(), s) {
+				t.Fatalf("error %q does not name %s", err, s)
+			}
+		}
 	}
-	v := judge(t, f, "v1")
-	wantValid(t, v, "v1", "v2", "v3")
+}
+
+// A removal outside the anchor's history that nobody contests stands.
+func TestJudgeUncontestedRemovalOutsideHistory(t *testing.T) {
+	f := reviewAttack("fp-op")
+	f.admins["b2"] = map[string]string{"fp-op": "op", "fp-alice": "alice", "fp-bob": "bob"}
+	f.add("b3", 3, "fp-alice", on("b2"), "op", "alice", "bob")
+	v := judgeOK(t, f, Anchor{Signer: "fp-op"})
+	wantUntrusted(t, v, "b2", "removal")
+	wantUntrusted(t, v, "b3", "not trusted")
+	wantTrusted(t, v, "a2", "a3")
+	wantHeads(t, v, "a3")
+}
+
+// Removal is per key: a key rotated out of an admin who stays can no longer
+// sign on an older parent.
+func TestJudgeKeyRotation(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-old", nil)
+	f.admins["v1"] = map[string]string{"fp-old": "alice"}
+	f.add("v2", 2, "fp-old", on("v1"))
+	f.admins["v2"] = map[string]string{"fp-new": "alice"}
+	f.add("v3", 3, "fp-new", on("v2"))
+	f.admins["v3"] = map[string]string{"fp-new": "alice"}
+	f.add("x2", 2, "fp-old", on("v1"))
+	f.admins["x2"] = map[string]string{"fp-old": "alice"}
+	v := judgeOK(t, f, Anchor{Signer: "fp-new"})
+	wantUntrusted(t, v, "x2", "removal")
 	wantHeads(t, v, "v3")
+}
+
+func TestJudgeSelfRemoval(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("v2", 2, "fp-bob", on("v1"), "alice")
+	v := judgeOK(t, f, alice())
+	wantTrusted(t, v, "v1", "v2")
+	wantHeads(t, v, "v2")
+}
+
+func TestJudgeFork(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "carol")
+	f.add("v2", 2, "fp-alice", on("v1"), "alice", "carol")
+	f.add("a3", 3, "fp-alice", on("v2"), "alice", "carol")
+	f.add("c3", 3, "fp-carol", on("v2"), "alice", "carol")
+	v := judgeOK(t, f, alice())
+	if v.AnchorAt != "a3" {
+		t.Fatalf("AnchorAt = %s", v.AnchorAt)
+	}
+	wantHeads(t, v, "a3", "c3")
+
+	f.add("m4", 4, "fp-carol", on("a3", "c3"), "alice", "carol")
+	wantHeads(t, judgeOK(t, f, alice()), "m4")
 }
 
 func TestJudgeSignerNotInParentAdmins(t *testing.T) {
 	f := chain()
-	f.add("v4", 4, "fp-eve", "v3")
-	f.lists("v4", "alice", "eve")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v4", "fp-eve")
-	wantInvalid(t, v, "v4", "rule 2")
+	f.add("v4", 4, "fp-eve", on("v3"), "alice", "eve")
+	v := judgeOK(t, f, Anchor{Root: "v1"})
+	wantUntrusted(t, v, "v4", "signer")
 	wantHeads(t, v, "v3")
-}
-
-func TestJudgeRootSignerMustBeListedByIt(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-eve")
-	f.lists("v1", "alice")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v1", "rule 2")
-	wantHeads(t, v)
-}
-
-func TestJudgeRemovalIsFinal(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.lists("v1", "alice", "bob")
-	f.add("v2", 2, "fp-alice", "v1")
-	f.lists("v2", "alice")
-	f.add("v3", 2, "fp-bob", "v1")
-	f.lists("v3", "alice", "bob")
-	f.add("v4", 3, "fp-alice", "v3")
-	f.lists("v4", "alice", "bob")
-
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v3", "signed by bob after a version removed them")
-	wantInvalid(t, v, "v3", "rule 3")
-	wantInvalid(t, v, "v4", "not valid")
-	wantValid(t, v, "v1", "v2")
-	wantHeads(t, v, "v2")
-}
-
-// bob's versions from before the removal are its ancestors and stay valid.
-func TestJudgeRemovalKeepsAncestors(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.lists("v1", "alice", "bob")
-	f.add("v2", 2, "fp-bob", "v1")
-	f.lists("v2", "alice", "bob")
-	f.add("v3", 3, "fp-alice", "v2")
-	f.lists("v3", "alice")
-	v := judge(t, f, "")
-	wantValid(t, v, "v1", "v2", "v3")
-	wantHeads(t, v, "v3")
-}
-
-// An admin who signs their own removal publishes a valid version.
-func TestJudgeSelfRemoval(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.lists("v1", "alice", "bob")
-	f.add("v2", 2, "fp-bob", "v1")
-	f.lists("v2", "alice")
-	v := judge(t, f, "")
-	wantValid(t, v, "v1", "v2")
-	wantHeads(t, v, "v2")
-}
-
-// Every key the removed admin held in the parent is barred, not only one.
-func TestJudgeRemovalCoversEveryKey(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.admins["v1"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob", "fp-bob2": "bob"}
-	f.add("v2", 2, "fp-alice", "v1")
-	f.lists("v2", "alice")
-	f.add("v3", 2, "fp-bob2", "v1")
-	f.lists("v3", "alice", "bob")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v3", "signed by bob after a version removed them")
-	wantHeads(t, v, "v2")
-}
-
-// Two admins who remove each other on separate branches: each removal stands,
-// so each removes the other's later versions, and the verdict is stable.
-func TestJudgeMutualRemoval(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.lists("v1", "alice", "bob")
-	f.add("a2", 2, "fp-alice", "v1")
-	f.lists("a2", "alice")
-	f.add("b2", 2, "fp-bob", "v1")
-	f.lists("b2", "bob")
-	f.add("a3", 3, "fp-alice", "a2")
-	f.lists("a3", "alice")
-	for i := 0; i < 5; i++ {
-		v := judge(t, f, "")
-		wantInvalid(t, v, "a2", "signed by alice after a version removed them")
-		wantInvalid(t, v, "a3", "signed by alice after a version removed them")
-		wantInvalid(t, v, "b2", "signed by bob after a version removed them")
-		wantValid(t, v, "v1")
-		wantHeads(t, v, "v1")
-	}
-}
-
-func TestJudgeRealFork(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.add("v2", 2, "fp-alice", "v1")
-	f.add("va", 3, "fp-alice", "v2")
-	f.add("vc", 3, "fp-carol", "v2")
-	for _, s := range []string{"v1", "v2", "va", "vc"} {
-		f.lists(s, "alice", "carol")
-	}
-	v := judge(t, f, "")
-	wantValid(t, v, "va", "vc")
-	wantHeads(t, v, "va", "vc")
-}
-
-func TestJudgeMergeResolvesFork(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.add("v2", 2, "fp-alice", "v1")
-	f.add("va", 3, "fp-alice", "v2")
-	f.add("vc", 3, "fp-carol", "v2")
-	f.add("vm", 4, "fp-alice", "va", "vc")
-	for _, s := range []string{"v1", "v2", "va", "vc", "vm"} {
-		f.lists(s, "alice", "carol")
-	}
-	v := judge(t, f, "")
-	wantValid(t, v, "vm")
-	wantHeads(t, v, "vm")
 }
 
 // A merge's signer must be an admin in every parent, not only in one.
 func TestJudgeMergeSignerInEveryParent(t *testing.T) {
 	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.lists("v1", "alice", "carol")
-	f.add("va", 2, "fp-alice", "v1")
-	f.lists("va", "alice", "carol")
-	f.add("vc", 2, "fp-carol", "v1")
-	f.lists("vc", "alice", "carol", "dave")
-	f.add("vm", 3, "fp-dave", "va", "vc")
-	f.lists("vm", "alice", "carol", "dave")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "vm", "rule 2")
+	f.add("v1", 1, "fp-alice", nil, "alice", "carol")
+	f.add("va", 2, "fp-alice", on("v1"), "alice", "carol")
+	f.add("vc", 2, "fp-carol", on("v1"), "alice", "carol", "dave")
+	f.add("vm", 3, "fp-dave", on("va", "vc"), "alice", "carol", "dave")
+	v := judgeOK(t, f, Anchor{Root: "v1"})
+	wantUntrusted(t, v, "vm", "signer")
 	wantHeads(t, v, "va", "vc")
 }
 
-func TestJudgeHeadDigestFails(t *testing.T) {
-	f := chain()
-	f.badDig["v3"] = true
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v3", "digest")
-	wantHeads(t, v, "v2")
-
-	// An ancestor whose secrets the operator cannot decrypt stays valid when a
-	// descendant's digest verifies (Review Focus 1).
-	f = chain()
-	f.badDig["v1"] = true
-	f.badDig["v2"] = true
-	v = judge(t, f, "")
-	wantValid(t, v, "v1", "v2", "v3")
-	wantHeads(t, v, "v3")
-
-	// Every head failing walks back until one verifies.
-	f = chain()
-	f.badDig["v3"] = true
-	f.badDig["v2"] = true
-	v = judge(t, f, "")
-	wantInvalid(t, v, "v2", "digest")
-	wantHeads(t, v, "v1")
-}
-
-func TestJudgeRevisionMustFollowParent(t *testing.T) {
-	f := chain()
-	f.add("v4", 5, "fp-alice", "v3")
-	f.lists("v4", "alice")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v4", "rule 1")
-	wantHeads(t, v, "v3")
-
-	f = newFake()
-	f.add("v1", 2, "fp-alice")
-	f.lists("v1", "alice")
-	v = judge(t, f, "")
-	wantInvalid(t, v, "v1", "rule 1")
-}
-
-func TestJudgeMergeRevisionFollowsHighestParent(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice")
-	f.add("v2", 2, "fp-alice", "v1")
-	f.add("v3", 3, "fp-alice", "v2")
-	f.add("vb", 2, "fp-alice", "v1")
-	f.add("vm", 4, "fp-alice", "v3", "vb")
-	for _, s := range []string{"v1", "v2", "v3", "vb", "vm"} {
-		f.lists(s, "alice")
+func TestJudgeShape(t *testing.T) {
+	for name, mut := range map[string]func(*Version){
+		"revision": func(v *Version) { v.Revision = 5 },
+		"unsigned": func(v *Version) { v.Signed = false },
+		"tree":     func(v *Version) { v.TreeOK = false },
+	} {
+		f := chain()
+		f.add("v4", 4, "fp-alice", on("v3"), "alice")
+		x := f.vs["v4"]
+		mut(&x)
+		f.vs["v4"] = x
+		v := judgeOK(t, f, Anchor{Root: "v1"})
+		if v.Trusted["v4"] || !strings.Contains(v.Reasons["v4"], "shape") {
+			t.Fatalf("%s: v4 trusted=%v reason %q", name, v.Trusted["v4"], v.Reasons["v4"])
+		}
+		wantHeads(t, v, "v3")
 	}
-	v := judge(t, f, "")
-	wantHeads(t, v, "vm")
 }
 
-func TestJudgeUnsignedOrBadTree(t *testing.T) {
+// The anchor's history is trusted whatever its own shape: the operator signed
+// after it.
+func TestJudgeHistoryTrustedWhateverShape(t *testing.T) {
 	f := chain()
-	x := f.vs["v3"]
+	x := f.vs["v2"]
 	x.Signed = false
-	f.vs["v3"] = x
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v3", "rule 1")
-	wantHeads(t, v, "v2")
-
-	f = chain()
-	x = f.vs["v3"]
-	x.TreeOK = false
-	f.vs["v3"] = x
-	v = judge(t, f, "")
-	wantInvalid(t, v, "v3", "rule 1")
-	wantHeads(t, v, "v2")
+	f.vs["v2"] = x
+	v := judgeOK(t, f, alice())
+	wantTrusted(t, v, "v1", "v2", "v3")
+	wantHeads(t, v, "v3")
 }
 
 func withDate(v Version, t time.Time) Version {
@@ -383,78 +332,108 @@ func TestJudgeOrdersByRevisionNotDate(t *testing.T) {
 	f := chain()
 	f.vs["v2"] = withDate(f.vs["v2"], time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC))
 	f.vs["v3"] = withDate(f.vs["v3"], time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
-	v := judge(t, f, "")
-	wantHeads(t, v, "v3")
+	wantHeads(t, judgeOK(t, f, Anchor{Root: "v1"}), "v3")
 
-	// Heads of a fork order by revision, highest first, whatever their dates.
-	f = chain()
-	f.add("vx", 3, "fp-alice", "v2")
-	f.lists("vx", "alice")
-	f.add("vy", 4, "fp-alice", "vx")
-	f.lists("vy", "alice")
+	f.add("vx", 3, "fp-alice", on("v2"), "alice")
+	f.add("vy", 4, "fp-alice", on("vx"), "alice")
 	f.vs["vy"] = withDate(f.vs["vy"], time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
 	f.vs["v3"] = withDate(f.vs["v3"], time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
-	v = judge(t, f, "")
-	wantHeads(t, v, "vy", "v3")
+	wantHeads(t, judgeOK(t, f, Anchor{Root: "v1"}), "vy", "v3")
 }
 
 // A re-publish of identical content on different parents is two versions,
-// each judged on its own (Review Focus 2).
+// each judged on its own.
 func TestJudgeDuplicateTrees(t *testing.T) {
 	f := chain()
-	f.add("d1", 3, "fp-alice", "v2")
-	f.lists("d1", "alice")
-	f.add("d2", 4, "fp-alice", "v3")
-	f.lists("d2", "alice")
-	f.badDig["d1"] = true
-	v := judge(t, f, "")
-	wantInvalid(t, v, "d1", "digest")
-	wantValid(t, v, "d2")
-	wantHeads(t, v, "d2")
+	f.add("d1", 3, "fp-alice", on("v2"), "alice")
+	f.add("d2", 4, "fp-alice", on("v3"), "alice")
+	f.add("d3", 3, "fp-eve", on("v2"), "alice")
+	v := judgeOK(t, f, Anchor{Root: "v1"})
+	wantTrusted(t, v, "d1", "d2")
+	wantUntrusted(t, v, "d3", "signer")
+	wantHeads(t, v, "d2", "d1")
 }
 
 func TestJudgeMissingParent(t *testing.T) {
 	f := chain()
-	f.add("v4", 4, "fp-alice", "v3", "gone")
-	f.lists("v4", "alice")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "v4", "parent gone is not held")
+	f.add("v4", 4, "fp-alice", on("v3", "gone"), "alice")
+	v := judgeOK(t, f, Anchor{Root: "v1"})
+	wantUntrusted(t, v, "v4", "gone")
 	wantHeads(t, v, "v3")
 }
 
 // Commit ids make a cycle impossible in git, but Judge must still finish on
-// one and judge it invalid.
+// one and not trust it.
 func TestJudgeCycleTerminates(t *testing.T) {
 	f := chain()
-	f.add("c1", 4, "fp-alice", "c2")
-	f.add("c2", 5, "fp-alice", "c1")
-	f.lists("c1", "alice")
-	f.lists("c2", "alice")
-	v := judge(t, f, "")
-	wantInvalid(t, v, "c1", "cycle")
-	wantInvalid(t, v, "c2", "cycle")
+	f.add("c1", 4, "fp-alice", on("c2"), "alice")
+	f.add("c2", 5, "fp-alice", on("c1"), "alice")
+	f.add("c3", 6, "fp-alice", on("c2"), "alice")
+	v := judgeOK(t, f, alice())
+	wantUntrusted(t, v, "c1", "cycle")
+	wantUntrusted(t, v, "c2", "cycle")
+	wantUntrusted(t, v, "c3", "cycle")
 	wantHeads(t, v, "v3")
 }
 
 func TestJudgeUnreadableAdmins(t *testing.T) {
 	f := chain()
+	f.add("v4", 4, "fp-alice", on("v3"), "alice")
 	g := f.graph()
 	g.Admins = func(sha string) (map[string]string, error) {
-		if sha == "v3" {
+		if sha == "v4" {
 			return nil, errors.New("bad yaml")
 		}
 		return f.admins[sha], nil
 	}
-	v, err := Judge(g, "")
+	v, err := Judge(g, Anchor{Root: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantInvalid(t, v, "v3", "bad yaml")
-	wantHeads(t, v, "v2")
+	wantUntrusted(t, v, "v4", "bad yaml")
+	wantHeads(t, v, "v3")
 }
 
-func TestJudgePinnedRootNotHeld(t *testing.T) {
-	v := judge(t, chain(), "elsewhere")
-	wantInvalid(t, v, "v1", "pinned root")
-	wantHeads(t, v)
+// Three versions on v1, each removing the key of the next: a chain of bars
+// with no way in, so the operator decides.
+func TestJudgeConflictChain(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-op", nil, "op", "a", "b", "c")
+	f.add("ax", 2, "fp-a", on("v1"), "op", "a", "c")
+	f.add("by", 2, "fp-b", on("v1"), "op", "a", "b")
+	f.add("cz", 2, "fp-c", on("v1"), "op", "b", "c")
+	_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+	var c *ConflictError
+	if !errors.As(err, &c) {
+		t.Fatalf("err = %v, want *ConflictError", err)
+	}
+}
+
+// A removal never bars the versions it builds on.
+func TestJudgeRemovalKeepsItsAncestors(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("b2", 2, "fp-bob", on("v1"), "alice", "bob")
+	f.add("a3", 3, "fp-alice", on("b2"), "alice")
+	v := judgeOK(t, f, Anchor{Root: "v1"})
+	wantTrusted(t, v, "b2", "a3")
+	wantHeads(t, v, "a3")
+}
+
+// Among the operator's versions of equal revision the lowest hash anchors,
+// whatever order they are reached in, and one failing shape never anchors.
+func TestJudgeSignerAnchorTies(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice")
+	f.add("a2", 2, "fp-alice", on("v1"), "alice")
+	f.add("z2", 2, "fp-alice", on("v1"), "alice")
+	f.add("k3", 3, "fp-alice", on("a2"), "alice")
+	f.add("c3", 3, "fp-alice", on("z2"), "alice")
+	f.add("x4", 7, "fp-alice", on("k3"), "alice")
+	v := judgeOK(t, f, alice())
+	if v.AnchorAt != "c3" {
+		t.Fatalf("AnchorAt = %s, want c3", v.AnchorAt)
+	}
+	wantUntrusted(t, v, "x4", "shape")
+	wantHeads(t, v, "c3", "k3")
 }
