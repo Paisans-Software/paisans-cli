@@ -201,9 +201,13 @@ hash matches any more.
 
 ### The code of conduct
 
-`code_of_conduct` names a Markdown file beside `paisans.yaml`. It is mounted
-read-only and rendered on the invitee's page. Its version is the SHA-256 of its
-contents, recorded with every agreement, so an edit to the file is a new
+`code_of_conduct` holds the Markdown text itself, as a YAML block scalar in
+`paisans.yaml`, so it is versioned and synced with the rest of the configuration
+through every site's configuration store. A separate file beside `paisans.yaml`
+would not be: the store keeps `paisans.yaml`, the secrets file and `.sops.yaml`
+only. `render` writes the text to the app's data directory, the container mounts
+it read-only, and the service renders it on the invitee's page. Its version is
+the SHA-256 of the text, recorded with every agreement, so an edit is a new
 version without anyone having to number it.
 
 ### Look and feel
@@ -255,7 +259,10 @@ apps:
       application_wait_days: 14
       decline_retention_days: 183
       login_link_days: 7
-      code_of_conduct: code-of-conduct.md
+      code_of_conduct: |
+        ## Our code of conduct
+
+        Be kind. Keep what is shared here inside the community.
 ```
 
 | Setting | Takes | Default |
@@ -267,7 +274,7 @@ apps:
 | `application_wait_days` | 1 to 365 | `14` |
 | `decline_retention_days` | 1 to 3650 | `183` |
 | `login_link_days` | 1 to 31 | `7` |
-| `code_of_conduct` | a path relative to `paisans.yaml` | required |
+| `code_of_conduct` | the Markdown text (a YAML block scalar) | required |
 
 **`validate` refuses:**
 
@@ -279,7 +286,7 @@ apps:
 * that app's `email_one_time_access_as_unauthenticated` not set to `true`,
   because a member whose sign-in link expired recovers through it;
 * no `smtp:` settings;
-* a `code_of_conduct` file that does not exist;
+* a `code_of_conduct` that is missing, empty or not text;
 * any `placement` other than `cluster`;
 * a setting outside the table's range.
 

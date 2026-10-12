@@ -14,6 +14,8 @@
 
 **Where:** `paisans-stack`, a worktree `.worktrees/invite-kind` on branch `feat/invite-kind` from `develop`, one pull request into `develop`. Never `git stash`.
 
+> **Amendment, controller ruling 2026-10-12 (supersedes every mention of a code-of-conduct *file* below).** The toolkit's configuration store versions and syncs only `paisans.yaml`, the secrets file and `.sops.yaml`; configs are also loaded from it with `config.LoadBytes`, where `cfg.Path` is empty. So `code_of_conduct` holds the **Markdown text itself** (a YAML block scalar in `paisans.yaml`), not a path. Consequences: no `kinds.InviteCoCPath`; `invite-code-of-conduct-missing` refuses a missing, empty (after trimming) or non-string value; `inviteValuesFor` takes the text from the setting (no `os.ReadFile`); fixtures and the example carry the text inline (no `code-of-conduct.md` files in testdata or examples); the rendered `code-of-conduct.md` in the app's data directory and its read-only mount stay exactly as below, so the service's `INVITE_COC_PATH` is unchanged. Review Focus 2 becomes: "a code of conduct given as a path-like string is just text; nothing reads files".
+
 ## Global Constraints
 
 - Kind name `invite`; constant `config.KindInvite`.
