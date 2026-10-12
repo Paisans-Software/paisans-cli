@@ -95,3 +95,18 @@ smtp:
   security: starttls
   username: status@example.org
   from_address: status@example.org
+
+backup:
+  schedule: daily
+  at: "03:00"
+  destinations:
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: fixture-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage
+      bucket: fixture-backups
+      keep: { weekly: 4, monthly: 12 }
