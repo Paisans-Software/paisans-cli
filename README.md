@@ -3233,7 +3233,7 @@ paisans config publish --execute      # sign the local files, push to every site
 paisans config pull --execute         # move the files to the sites' newest
 paisans config log                    # every version, signer, holding sites
 paisans config publish --merge --execute   # one version on every head of a fork
-paisans config recover --from admin@203.0.113.9 --execute   # empty workstation
+paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
 ```
 
 * **`paisans admin register`** gives an admin who has never published an anchor
@@ -3259,7 +3259,10 @@ paisans config recover --from admin@203.0.113.9 --execute   # empty workstation
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
   before `publish --merge`.
 * **`paisans config recover`** onto a workstation with nothing gathers from the
-  named hosts and every site the trusted heads name. `--id` names the
+  named hosts and every site the trusted heads name. It needs `--root` with the
+  hash of a version the operator trusts, kept somewhere other than the
+  workstation that was lost, because a history found only on the sites is
+  never trusted on its own. `--id` names the
   deployment when a host's registry lists more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an admin to decide, never an order.

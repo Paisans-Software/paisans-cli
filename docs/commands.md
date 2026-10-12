@@ -164,7 +164,7 @@ paisans config publish --merge --execute   # one version on every head of a fork
 paisans config pull                   # what would be written
 paisans config pull --execute         # move the files to the sites' newest
 paisans config log                    # every version, signer, holding sites
-paisans config recover --from admin@203.0.113.9 --execute   # empty directory
+paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
 ```
 
 * **Alone:** always, except as `apply` runs its part (below). Each is an
