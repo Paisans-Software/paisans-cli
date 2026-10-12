@@ -6566,12 +6566,14 @@ to every peer and cut the site's tunnels, and a refusal costs nothing but the
 rekey's resume.
 
 **A relay's swap pauses Patroni.** A site with no dial endpoint routes
-everything it has no peer for through the first site that has one (*The
-mesh*), so two undialled sites reach each other only through that relay.
-Swapping the relay's key cuts them apart for the moment it takes, and with
-them etcd's quorum when they are most of its voters: the leader could not renew
-its key, would demote itself, and another member could be promoted, for a
-partition that heals in seconds. So around a relay's swap the cluster is put in
+everything it has no peer for through the first site that has one (*`site
+add`: a second data site, and the one hard problem*), so two undialled sites
+reach each other only through that relay. Swapping the relay's key cuts them
+apart for the moment it takes, and the relay itself with them. `validate`
+keeps two voters dialled, but etcd can still be left without a leader while
+it re-forms when several voters have no endpoint, and a Patroni leader that
+cannot renew its key then demotes itself and another member can be promoted,
+for a partition that heals in seconds. So around a relay's swap the cluster is put in
 maintenance mode with `patronictl pause --wait`, which returns once every
 member has seen it (Patroni v4.1.0, `patroni/ctl.py`); paused, Patroni keeps
 the roles it has and still reports them. The pause is read back from

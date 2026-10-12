@@ -205,8 +205,9 @@ without rekeying a site it already promoted.
 
 A relay's swap pauses Patroni. Every site with no dial endpoint routes what it
 has no peer for through the first site that has one, so swapping that relay's
-key cuts the undialled sites apart for a moment, which can cost etcd its quorum
-and, through it, let Patroni fail over for a partition that heals in seconds.
+key cuts the undialled sites apart for a moment, along with the relay, which
+can leave etcd without a leader while it re-forms and, through it, let Patroni
+fail over for a partition that heals in seconds.
 Around such a site's swap the cluster is put in maintenance mode with
 `patronictl pause --wait`, read back from `patronictl show-config`; the swap
 runs; etcd re-forms by itself once the tunnels return, and the health gate
