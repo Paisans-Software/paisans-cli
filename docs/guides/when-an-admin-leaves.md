@@ -8,7 +8,9 @@ worthless by rotating what they unlock. This guide is the order to close them
 in, for two cases: an admin who leaves on good terms, and an admin whose site
 is evicted because the others can no longer reach it.
 
-Each step says what it closes and what is still open after it. The examples
+Each step says what it closes and what is still open after it. Why each
+protection works, and the scenarios behind them, are in
+[How a deployment protects itself](how-a-deployment-protects-itself.md). The examples
 use `alice` for the admin who leaves, `home-b` for a site, and `vm` for the
 gateway. The reasoning is in `README.md`, under *Keys belong to admins, and
 sites name admins*, *The admin reconciler keeps `admins` equal to Pocket ID's
