@@ -776,7 +776,8 @@ func TestListClientPlanMarksWhatIsPresentDone(t *testing.T) {
 // The homeserver's client and the gate's are built like every other kind's:
 // apply and `oidc client create` make them, at the authentication service's
 // callback and at oauth2-proxy's, each with PKCE on, since both always send a
-// code challenge. The gate's admits members and admins, as the gate does.
+// code challenge. The gate's client admits members and admins, as the gate
+// does.
 func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
