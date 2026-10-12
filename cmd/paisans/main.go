@@ -226,9 +226,11 @@ Commands:
              it. recover: onto an empty directory, gather from the --from
              hosts and every site the newest version names, and write its
              files. pull and recover ask for the word partial at a
-             terminal when fewer than half the sites answered. Write
-             nothing without --execute, but every gather keeps what it
-             found in .paisans/store.git.
+             terminal when fewer than half the sites answered, and every
+             subcommand asks for rollback when the newest version is
+             older than one seen here before. With --execute each site
+             first syncs with its peers; without it, and in log, no site
+             is changed and only .paisans/ here is written.
   secrets    set: read one value from stdin and write it into the encrypted
              secrets file, printing only its name. For credentials issued
              elsewhere, so they never touch a terminal or an editor.
@@ -268,22 +270,22 @@ host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, storage init, storage add, storage rotate-key, app admin
 create, app remove, oidc client create, secrets prune, preflight, failover test,
 doctor, init and config are the only commands that reach a host. Each reads it
-to plan, and changes it only with --execute; config claims nothing, starts each
-site's configuration sync and reads its store at every run, and adds to that
-store only with publish --execute; host allow and host disallow change only a
-host's key allowlist, which is the host owner's, and claim nothing; host
-deployments, preflight, doctor and init have no --execute and never change it;
-secrets prune only reads the gateways' deployment records, and its --execute
-writes the local secrets file alone. With --execute, a command first claims each
-host it writes to in /var/lib/paisans/registry.json, and refuses if another
-deployment there holds this one's token, WireGuard interface or listen port, or
-a mesh subnet overlapping this one's. apply and host prepare also refuse when
-anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; site
-remove also deletes the removed site's records there. web-server show and
-web-server check change nothing: check looks at a monitor's public hostname as
-any visitor could, and with managed_by: external both read the monitor's web
-server over ssh, show always and check when a check fails.
+to plan, and changes it only with --execute; host allow and host disallow change
+only a host's key allowlist, which is the host owner's, and claim nothing;
+config claims nothing, and its --execute only starts each site's configuration
+sync and, for publish, adds a version to its store; host deployments, preflight,
+doctor and init have no --execute and never change it; secrets prune only reads
+the gateways' deployment records, and its --execute writes the local secrets
+file alone. With --execute, a command first claims each host it writes to in
+/var/lib/paisans/registry.json, and refuses if another deployment there holds
+this one's token, WireGuard interface or listen port, or a mesh subnet
+overlapping this one's. apply and host prepare also refuse when anything else on
+the host overlaps the mesh subnet. dns init and dns prune reach no host, only
+the DNS provider's API, and change it only with --execute; site remove also
+deletes the removed site's records there. web-server show and web-server check
+change nothing: check looks at a monitor's public hostname as any visitor could,
+and with managed_by: external both read the monitor's web server over ssh, show
+always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,

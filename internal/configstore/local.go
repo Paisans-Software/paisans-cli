@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ const (
 	stateDir      = ".paisans"
 	rootFile      = "config-root"
 	headFile      = "config-head"
+	seenFile      = "config-seen"
 	signingFile   = "signing-key"
 	cacheDir      = "store.git"
 	incomingDir   = "incoming"
@@ -37,7 +39,8 @@ func (l Local) state(name string) string { return filepath.Join(l.Dir, stateDir,
 
 // ensureState creates .paisans/ and its .gitignore, which keeps the cache and
 // the incoming files out of the operator's own repository: the cache is
-// rebuilt by any gather, and the incoming files are a pull's scratch.
+// this workstation's own memory of every version it has seen, and the
+// incoming files are a pull's scratch.
 func (l Local) ensureState() error {
 	if err := os.MkdirAll(filepath.Join(l.Dir, stateDir), 0o755); err != nil {
 		return err
@@ -120,6 +123,52 @@ func (l Local) Head() (string, error) { return l.readSHA(headFile) }
 
 // SetHead records sha as the version the local files started from.
 func (l Local) SetHead(sha string) error { return l.writeSHA(headFile, sha) }
+
+// Seen is the highest revision of a trusted head any gather here has seen,
+// and its hash; 0 and "" when none has.
+func (l Local) Seen() (int, string, error) {
+	v, err := l.readState(seenFile)
+	if err != nil || v == "" {
+		return 0, "", err
+	}
+	f := strings.Fields(v)
+	rev := 0
+	if len(f) == 2 {
+		rev, _ = strconv.Atoi(f[0])
+	}
+	if rev < 1 || checkSHA(f[len(f)-1]) != nil {
+		return 0, "", fmt.Errorf("%s: %q is not a revision and a commit id", l.state(seenFile), v)
+	}
+	return rev, f[1], nil
+}
+
+// raiseSeen records revision rev at sha as seen, when it is higher than what
+// is recorded. It never lowers it: that is the memory a rollback is told by.
+func (l Local) raiseSeen(rev int, sha string) error {
+	old, _, err := l.Seen()
+	if err != nil || rev <= old {
+		return err
+	}
+	if err := checkSHA(sha); err != nil {
+		return err
+	}
+	return l.writeState(seenFile, fmt.Sprintf("%d %s", rev, sha))
+}
+
+// RollbackError is a gather whose newest trusted version is older than one
+// this workstation has seen before: what a site serving an old, genuine
+// version after deleting the newer ones looks like. The Gathered returned
+// beside it is complete, for a command that the operator lets go on.
+type RollbackError struct {
+	SeenRevision int
+	SeenSHA      string
+	Revision     int
+	SHA          string
+}
+
+func (e *RollbackError) Error() string {
+	return fmt.Sprintf("the newest version the sites hold is revision %d (%s), older than revision %d (%s), which this workstation has seen before", e.Revision, e.SHA, e.SeenRevision, e.SeenSHA)
+}
 
 // SigningKey is the operator's public key line, "" when none is recorded.
 func (l Local) SigningKey() (string, error) {
@@ -252,6 +301,25 @@ func (l Local) WriteIncoming(sha string) error {
 	return writeFiles(l.Incoming(), f)
 }
 
+// IncomingFor is where one head of a fork's files go: incoming/<sha>.
+func (l Local) IncomingFor(sha string) string { return filepath.Join(l.Incoming(), sha) }
+
+// WriteIncomingFor writes the version sha's three files to IncomingFor(sha).
+func (l Local) WriteIncomingFor(sha string) error {
+	if err := checkSHA(sha); err != nil {
+		return err
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return err
+	}
+	f, err := cache.Files(sha)
+	if err != nil {
+		return err
+	}
+	return writeFiles(l.IncomingFor(sha), f)
+}
+
 // Equal reports whether two sets of the three files are byte for byte the
 // same.
 func (f Files) Equal(o Files) bool {
@@ -274,6 +342,7 @@ type Gathered struct {
 	Verdict  Verdict
 	Reached  []Reached
 	Majority bool // sites reached directly are more than half of those configured
+	Synced   bool // each site was asked to sync with its peers first
 	Versions map[string]Version
 	Holders  map[string][]string // version -> the sites whose answer held it
 	Signers  map[string]string   // version -> the admin id its key belongs to, "" when none
@@ -324,32 +393,38 @@ type (
 
 // Gather collects every version the sites hold into the cache and judges
 // them from the workstation's own anchor (Local.Anchor). Each site first
-// syncs with its peers (Pull with syncFirst). configured is how many sites
+// syncs with its peers (Pull with syncFirst), which changes the site, so
+// Gather is for a command run with --execute. configured is how many sites
 // the configuration declares, which the majority is counted against.
+//
+// A head older than the newest this workstation has seen is a
+// *RollbackError, returned with the complete Gathered; otherwise the head's
+// revision is recorded as seen.
 func Gather(l Local, sites map[string]apply.Transport, configured int, id string) (Gathered, error) {
 	a, err := l.Anchor()
 	if err != nil {
 		return Gathered{}, err
 	}
-	return gather(l, sites, configured, id, a, Pull)
+	return gather(l, sites, configured, id, a, true, Pull)
 }
 
 // GatherAnchored is Gather from the anchor a, for a command given a root to
-// pin that it has not recorded yet.
-func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor) (Gathered, error) {
-	return gather(l, sites, configured, id, a, Pull)
+// pin that it has not recorded yet, asking the sites to sync first only when
+// sync is set: a dry run reads and changes no site.
+func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, sync bool) (Gathered, error) {
+	return gather(l, sites, configured, id, a, sync, Pull)
 }
 
-func gather(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, pull PullFunc) (Gathered, error) {
+func gather(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, sync bool, pull PullFunc) (Gathered, error) {
 	cache, err := l.Cache()
 	if err != nil {
 		return Gathered{}, err
 	}
 	d := deployment.Deployment{ID: id}
-	g := Gathered{Holders: map[string][]string{}, Signers: map[string]string{}}
+	g := Gathered{Holders: map[string][]string{}, Signers: map[string]string{}, Synced: sync}
 	direct := 0
 	for _, name := range slices.Sorted(maps.Keys(sites)) {
-		bundle, report, err := pull(sites[name], d, true)
+		bundle, report, err := pull(sites[name], d, sync)
 		if err == nil && bundle != nil {
 			var heads []string
 			if heads, err = cache.bundleVersions(bundle); err == nil {
@@ -405,7 +480,19 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		return g, nil
 	}
 	g.Verdict, err = Judge(Graph{Versions: g.Versions, Admins: admins}, a)
-	return g, err
+	if err != nil || len(g.Verdict.Heads) == 0 {
+		return g, err
+	}
+	top := g.Verdict.Heads[0]
+	rev := g.Versions[top].Revision
+	seenRev, seenSHA, err := l.Seen()
+	if err != nil {
+		return g, err
+	}
+	if rev < seenRev {
+		return g, &RollbackError{SeenRevision: seenRev, SeenSHA: seenSHA, Revision: rev, SHA: top}
+	}
+	return g, l.raiseSeen(rev, top)
 }
 
 // versionConfigs reads a version's paisans.yaml, decoded as strictly as
@@ -554,8 +641,7 @@ func PublishMerge(l Local, sites map[string]apply.Transport, signingKey string, 
 }
 
 func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull PullFunc, push PushFunc) (string, []string, error) {
-	key, opts, err := config.ParseKeyLine(o.keyLine)
-	if err != nil || len(opts) > 0 {
+	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
 	f, err := l.Files()
@@ -574,7 +660,7 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 	if err != nil {
 		return "", nil, err
 	}
-	g, err := gather(l, sites, len(sites), local.ID, a, pull)
+	g, err := gather(l, sites, len(sites), local.ID, a, true, pull)
 	if err != nil {
 		return "", nil, err
 	}
@@ -589,24 +675,8 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 	if err != nil {
 		return "", nil, err
 	}
-	admins := adminReader(versionConfigs(cache))
-	if len(parents) == 0 {
-		m, err := adminKeys(local)
-		if err != nil {
-			return "", nil, err
-		}
-		if m[key.Fingerprint] == "" {
-			return "", nil, fmt.Errorf("the key %s belongs to no admin the local paisans.yaml lists; add it under your entry in admins", key.Fingerprint)
-		}
-	}
-	for _, p := range parents {
-		m, err := admins(p)
-		if err != nil {
-			return "", nil, fmt.Errorf("read the admins of %s: %w", p, err)
-		}
-		if m[key.Fingerprint] == "" {
-			return "", nil, fmt.Errorf("the key %s belongs to no admin version %s lists, so a version signed with it would not be trusted; another admin publishes the change that adds it", key.Fingerprint, p)
-		}
+	if err := CheckSigner(l, parents, local, o.keyLine); err != nil {
+		return "", nil, err
 	}
 
 	sha := ""
@@ -622,6 +692,9 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 		}
 		if sha, err = cache.Commit(f, parents, rev, o.signWith, o.now); err != nil {
 			return "", nil, fmt.Errorf("sign the version: %w", err)
+		}
+		if err := l.raiseSeen(rev, sha); err != nil {
+			return "", nil, err
 		}
 	}
 	if err := l.SetHead(sha); err != nil {
@@ -662,6 +735,41 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 		return sha, pushed, pe
 	}
 	return sha, pushed, nil
+}
+
+// CheckSigner refuses keyLine unless an admin of every parent lists it, or,
+// for the first version (no parents), an admin of the local configuration:
+// a version signed by anyone else would not be trusted.
+func CheckSigner(l Local, parents []string, local *config.Config, keyLine string) error {
+	key, opts, err := config.ParseKeyLine(keyLine)
+	if err != nil || len(opts) > 0 {
+		return fmt.Errorf("the signing key is not a bare public key line: %q", keyLine)
+	}
+	if len(parents) == 0 {
+		m, err := adminKeys(local)
+		if err != nil {
+			return err
+		}
+		if m[key.Fingerprint] == "" {
+			return fmt.Errorf("the key %s belongs to no admin the local paisans.yaml lists; add it under your entry in admins", key.Fingerprint)
+		}
+		return nil
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return err
+	}
+	admins := adminReader(versionConfigs(cache))
+	for _, p := range parents {
+		m, err := admins(p)
+		if err != nil {
+			return fmt.Errorf("read the admins of %s: %w", p, err)
+		}
+		if m[key.Fingerprint] == "" {
+			return fmt.Errorf("the key %s belongs to no admin version %s lists, so a version signed with it would not be trusted; another admin publishes the change that adds it", key.Fingerprint, p)
+		}
+	}
+	return nil
 }
 
 // Parents is what a version published from the base head builds on: the

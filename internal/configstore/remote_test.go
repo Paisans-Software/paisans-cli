@@ -40,7 +40,7 @@ func (f *fakeSite) WriteFile(p, content string, _ uint32) error {
 }
 func (f *fakeSite) Describe() string { return "fake" }
 
-var dep = deployment.Deployment{ID: "f2a9c1d4e5b6"}
+var dep = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
 
 func TestPushWritesThenVerifiesAndFetchesWithoutForce(t *testing.T) {
 	h := &fakeSite{files: map[string]string{}}
@@ -91,7 +91,7 @@ func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
 	if _, _, err := Pull(h, dep, true); err != nil {
 		t.Fatal(err)
 	}
-	if h.commands[0] != "systemctl start "+dep.Prefix()+"-config-sync.service" {
+	if h.commands[0] != "systemctl start '"+dep.Prefix()+"-config-sync.service'" {
 		t.Fatalf("commands = %q", h.commands)
 	}
 	h = &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", failSync: true}
@@ -152,5 +152,21 @@ func TestPushSurfacesAFailure(t *testing.T) {
 	h := &failingRun{fakeSite{files: map[string]string{}}}
 	if err := Push(h, dep, []byte("B")); err == nil || !strings.Contains(err.Error(), "bad bundle") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// An id that is not a deployment id never reaches a command line: a host's
+// registry is where a recovery reads it, and a host can write anything there.
+func TestPullAndPushRefuseAnIdThatIsNotOne(t *testing.T) {
+	bad := deployment.Deployment{ID: "f2a9;touch /pwned;#-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__"}
+	if _, _, err := Pull(h, bad, true); err == nil {
+		t.Fatal("pull ran with a bad id")
+	}
+	if err := Push(h, bad, []byte("B")); err == nil {
+		t.Fatal("push ran with a bad id")
+	}
+	if len(h.commands) != 0 {
+		t.Fatalf("commands reached the host: %q", h.commands)
 	}
 }

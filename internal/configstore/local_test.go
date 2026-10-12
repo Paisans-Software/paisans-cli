@@ -177,7 +177,7 @@ func TestPublishFirstCreatesTheRootAndState(t *testing.T) {
 	if err != nil || !strings.Contains(string(ignore), "store.git/") || !strings.Contains(string(ignore), "incoming/") {
 		t.Fatalf(".gitignore %q, %v", ignore, err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), fakePull)
+	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), true, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), fakePull)
+	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), true, fakePull)
 	if err != nil || g.Verdict.Heads[0] != v1 {
 		t.Fatalf("bob's gather %+v %v", g.Verdict, err)
 	}
@@ -273,7 +273,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gather(lb, all, 2, testID, mustAnchor(t, lb), fakePull); err != nil {
+	if _, err := gather(lb, all, 2, testID, mustAnchor(t, lb), true, fakePull); err != nil {
 		t.Fatal(err)
 	}
 	if err := lb.Checkout(v1); err != nil {
@@ -290,7 +290,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(la, all, 2, testID, mustAnchor(t, la), fakePull)
+	g, err := gather(la, all, 2, testID, mustAnchor(t, la), true, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err = gather(la, all, 2, testID, mustAnchor(t, la), fakePull)
+	g, err = gather(la, all, 2, testID, mustAnchor(t, la), true, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	sites["vm"].down, sites["watch"].down = true, true
-	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 4, testID, mustAnchor(t, l), fakePull)
+	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 4, testID, mustAnchor(t, l), true, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	if direct != 2 || !slices.Equal(g.Holders[sha], []string{"home-b"}) {
 		t.Fatalf("direct %d, holders %v", direct, g.Holders)
 	}
-	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 3, testID, mustAnchor(t, l), fakePull)
+	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 3, testID, mustAnchor(t, l), true, fakePull)
 	if err != nil || !g.Majority {
 		t.Fatalf("two of three: %v %v", g.Majority, err)
 	}
@@ -363,7 +363,7 @@ func TestGatherWithoutAnAnchorIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := Local{Dir: t.TempDir()}
-	if _, err := gather(empty, reach(sites, "home-a"), 1, testID, mustAnchor(t, empty), fakePull); !errors.Is(err, ErrNoAnchor) {
+	if _, err := gather(empty, reach(sites, "home-a"), 1, testID, mustAnchor(t, empty), true, fakePull); !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -388,7 +388,7 @@ func TestRecoverWritesTheFilesAndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := Local{Dir: t.TempDir()}
-	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, fakePull)
+	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, true, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,8 +489,120 @@ func TestPublishSignsThroughTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), fakePull)
+	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), true, fakePull)
 	if err != nil || !g.Verdict.Trusted[sha] || !g.Versions[sha].Signed {
 		t.Fatalf("verdict %+v %v", g.Verdict, err)
+	}
+}
+
+// The workstation remembers the newest revision it has seen. With the cache
+// gone and a site serving only an older version, gathering refuses, and
+// still returns what it found for an operator who lets it go on.
+func TestGatherRefusesARollbackTheWorkstationRemembers(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	admins := map[string]string{"alice": alice.pub}
+	sites := storeSites(t, "home-a", "home-b")
+	l := workstation(t, edit(testFiles(), "1", admins))
+	v1, _, err := alice.publish(t, l, reach(sites, "home-a", "home-b"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.WriteFiles(edit(testFiles(), "2", admins))
+	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev, sha, _ := l.Seen(); rev != 2 || sha != v2 {
+		t.Fatalf("seen %d %s after publishing", rev, sha)
+	}
+	if err := os.RemoveAll(filepath.Join(l.Dir, ".paisans", "store.git")); err != nil {
+		t.Fatal(err)
+	}
+	g, err := gather(l, reach(sites, "home-b"), 2, testID, mustAnchor(t, l), true, fakePull)
+	var rb *RollbackError
+	if !errors.As(err, &rb) || rb.Revision != 1 || rb.SHA != v1 || rb.SeenRevision != 2 || rb.SeenSHA != v2 {
+		t.Fatalf("got %v", err)
+	}
+	if len(g.Verdict.Heads) != 1 || g.Verdict.Heads[0] != v1 {
+		t.Fatalf("verdict %+v", g.Verdict)
+	}
+	if rev, _, _ := l.Seen(); rev != 2 {
+		t.Fatalf("seen lowered to %d", rev)
+	}
+	if _, _, err := alice.publish(t, l, reach(sites, "home-b"), false); !errors.As(err, &rb) {
+		t.Fatalf("publish on a rollback: %v", err)
+	}
+}
+
+// A dry run's gather does not ask a site to sync.
+func TestGatherSyncsOnlyWhenAsked(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	sites := storeSites(t, "home-a")
+	var asked []bool
+	pull := func(tr apply.Transport, d deployment.Deployment, sync bool) ([]byte, *SyncReport, error) {
+		asked = append(asked, sync)
+		return fakePull(tr, d, sync)
+	}
+	l := Local{Dir: t.TempDir()}
+	for _, sync := range []bool{false, true} {
+		g, err := gather(l, reach(sites, "home-a"), 1, testID, Anchor{}, sync, pull)
+		if err != nil || g.Synced != sync {
+			t.Fatalf("sync %v: %+v %v", sync, g, err)
+		}
+	}
+	if !slices.Equal(asked, []bool{false, true}) {
+		t.Fatalf("asked %v", asked)
+	}
+}
+
+// forge adds a chain of n versions on parent to a site's store, each signed
+// by mallory and listing mallory as an admin in its own paisans.yaml, which
+// is the history someone with root on a site can write.
+func forge(t *testing.T, s *storeSite, mallory operator, parent string, rev, n int) []string {
+	t.Helper()
+	var out []string
+	for i := range n {
+		f := edit(testFiles(), "forged", map[string]string{"alice": mallory.pub})
+		sha, err := s.repo.Commit(f, []string{parent}, rev+i, mallory.key, testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, parent = append(out, sha), sha
+	}
+	return out
+}
+
+// A version mallory signs on v1, listing herself as an admin, is not trusted
+// and not a head, and nor is a longer chain of them that would outrank the
+// real head by revision.
+func TestForgedVersionsAreNeverHeads(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice, mallory := newOperator(t), newOperator(t)
+	admins := map[string]string{"alice": alice.pub}
+	sites := storeSites(t, "home-a")
+	l := workstation(t, edit(testFiles(), "1", admins))
+	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.WriteFiles(edit(testFiles(), "2", admins))
+	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := forge(t, sites["home-a"], mallory, v1, 2, 1)
+	chain := forge(t, sites["home-a"], mallory, v1, 2, 4)
+	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), true, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range append(one, chain...) {
+		if _, held := g.Versions[m]; !held || g.Verdict.Trusted[m] || slices.Contains(g.Verdict.Heads, m) {
+			t.Errorf("forged %s: held %v trusted %v heads %v", m[:12], held, g.Verdict.Trusted[m], g.Verdict.Heads)
+		}
+	}
+	if !slices.Equal(g.Verdict.Heads, []string{v2}) || g.Versions[chain[3]].Revision != 5 {
+		t.Fatalf("heads %v", g.Verdict.Heads)
 	}
 }

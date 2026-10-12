@@ -54,11 +54,11 @@ func runConfig(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	switch args[0] {
 	case "publish":
-		return runConfigPublish(args[1:])
+		return runConfigPublish(args[1:], stdin, stdout)
 	case "pull":
 		return runConfigPull(args[1:], stdin, stdout)
 	case "log":
-		return runConfigLog(args[1:], stdout)
+		return runConfigLog(args[1:], stdin, stdout)
 	case "recover":
 		return runConfigRecover(args[1:], stdin, stdout)
 	}
@@ -116,14 +116,32 @@ func shaShape(s string) bool {
 	return strings.Trim(s, "0123456789abcdef") == ""
 }
 
+// rollbackWord is what the operator types to go on from a version older than
+// one this workstation has seen: a site that deletes the newer versions can
+// serve an old, genuine one, and applying it would put back old secrets.
+const rollbackWord = "rollback"
+
 // gatherAt gathers from sites, reporting each, and explains a missing anchor.
-func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor) (configstore.Gathered, error) {
+// With sync, which only a run with --execute passes, each site first syncs
+// with its peers; a dry run changes no site, and says so. A head older than
+// one this workstation has seen goes on only once the operator types
+// rollback at a terminal.
+func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, sync bool, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
 	names := slices.Sorted(maps.Keys(sites))
 	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
 		return configstore.Gathered{}, err
 	}
 	s := r.Step("gather the versions every site holds")
-	g, err := configstore.GatherAnchored(l, sites, configured, id, a)
+	g, err := configstore.GatherAnchored(l, sites, configured, id, a, sync)
+	var rb *configstore.RollbackError
+	if errors.As(err, &rb) {
+		s.End(ui.Warned, "older than this workstation has seen")
+		if err := confirmWord(stdin, stdout, rollbackWord, rb.Error()+". A site that deleted the newer versions can serve an old one, and applying it would put back old secrets. Go on only if you know why the newer version is gone."); err != nil {
+			return g, err
+		}
+		s = r.Step("go on from the older version")
+		err = nil
+	}
 	if err != nil {
 		s.Fail(err)
 		if errors.Is(err, configstore.ErrNoAnchor) {
@@ -136,6 +154,9 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		return g, err
 	}
 	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
+	if !sync {
+		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute starts each site's sync before reading it, so versions only its peers hold arrive too.")
+	}
 	for _, rc := range g.Reached {
 		switch {
 		case rc.Err != nil:
@@ -162,12 +183,12 @@ func describe(g configstore.Gathered, sha string) string {
 }
 
 // forkProblem is the refusal for a fork, naming each head.
-func forkProblem(g configstore.Gathered) error {
+func forkProblem(g configstore.Gathered, more ...string) error {
 	var heads []string
 	for _, h := range g.Verdict.Heads {
 		heads = append(heads, "- "+describe(g, h))
 	}
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans config publish --merge."}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans config publish --merge." + strings.Join(append([]string{""}, more...), " ")}
 }
 
 // confirmPartial asks for partial when fewer than a majority of the
@@ -239,7 +260,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	return "", &ui.Problem{Hint: "your ssh-agent holds more than one admin key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
 }
 
-func runConfigPublish(args []string) error {
+func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("config publish", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
@@ -272,7 +293,7 @@ func runConfigPublish(args []string) error {
 		if err != nil {
 			return err
 		}
-		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, false, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -285,6 +306,11 @@ func runConfigPublish(args []string) error {
 			if g.Verdict.Fork && !*merge {
 				return forkProblem(g)
 			}
+			return err
+		}
+		// The same check --execute makes, so a dry run never promises a
+		// version --execute refuses to sign.
+		if err := configstore.CheckSigner(l, parents, cfg, key); err != nil {
 			return err
 		}
 		what := "the first version"
@@ -316,6 +342,10 @@ func runConfigPublish(args []string) error {
 		}
 	case err != nil:
 		s.Fail(err)
+		var rb *configstore.RollbackError
+		if errors.As(err, &rb) {
+			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans config log shows what each site holds.", Cause: err}
+		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans config pull --root <sha>, or paisans admin register.", Cause: err}
 		}
@@ -354,7 +384,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, *execute, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -559,7 +589,7 @@ func flatKeys(data []byte) (map[string]string, error) {
 	return out, nil
 }
 
-func runConfigLog(args []string, stdout io.Writer) error {
+func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("config log", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", "paisans.yaml", configHelp)
@@ -585,7 +615,7 @@ func runConfigLog(args []string, stdout io.Writer) error {
 	r := reporter()
 	r.Section("versions of " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, false, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -668,38 +698,35 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a)
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, *execute, stdin, stdout)
 	if err != nil {
 		return err
 	}
 	if len(g.Verdict.Heads) == 0 {
 		return &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
 	}
-	// Every site the newest trusted version names is reached, not only the
-	// hosts given, so a host serving an old version is outvoted by the rest.
-	cache, err := l.Cache()
+	// Every site a trusted head names is reached, not only the hosts given,
+	// so a host serving an old version is outvoted by the rest. With a fork,
+	// every head's sites are reached.
+	sites, err := recoverSites(l, g, deploymentID)
 	if err != nil {
 		return err
 	}
-	first, err := cache.Files(g.Verdict.Heads[0])
-	if err != nil {
-		return err
-	}
-	cfg, err := config.LoadBytes(first.Paisans)
-	if err != nil {
-		return err
-	}
-	if cfg.ID != deploymentID {
-		return &ui.Problem{Hint: "the recovered version is another deployment's", Explain: fmt.Sprintf("It declares id %s, and the hosts' store is %s's.", cfg.ID, deploymentID)}
-	}
-	sites := configTransports(cfg)
-	r.Section("every site " + describe(g, g.Verdict.Heads[0]) + " names")
-	g, err = gatherAt(r, l, sites, len(sites), cfg.ID, a)
+	r.Section("every site the newest versions name")
+	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, *execute, stdin, stdout)
 	if err != nil {
 		return err
 	}
 	if g.Verdict.Fork {
-		return forkProblem(g)
+		if !*execute {
+			return forkProblem(g, "--execute writes each head's files to "+l.Incoming()+"/<sha>/.")
+		}
+		for _, h := range g.Verdict.Heads {
+			if err := l.WriteIncomingFor(h); err != nil {
+				return err
+			}
+		}
+		return forkProblem(g, "Each head's files are in "+l.Incoming()+"/<sha>/; nothing else was written.")
 	}
 	head := g.Verdict.Heads[0]
 	pin := a.Root
@@ -730,9 +757,41 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
+// recoverSites reaches every site a trusted head of g declares, by name,
+// from the newest head that declares it. Each head must be the deployment
+// being recovered.
+func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[string]apply.Transport, error) {
+	cache, err := l.Cache()
+	if err != nil {
+		return nil, err
+	}
+	sites := map[string]apply.Transport{}
+	for _, h := range g.Verdict.Heads {
+		f, err := cache.Files(h)
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := config.LoadBytes(f.Paisans)
+		if err != nil {
+			return nil, fmt.Errorf("version %s: %w", h, err)
+		}
+		if cfg.ID != id {
+			return nil, &ui.Problem{Hint: "a recovered version is another deployment's", Explain: fmt.Sprintf("Version %s declares id %s, and the hosts' store is %s's.", h, cfg.ID, id)}
+		}
+		for name, t := range configTransports(cfg) {
+			if _, ok := sites[name]; !ok {
+				sites[name] = t
+			}
+		}
+	}
+	return sites, nil
+}
+
 // recoverID is the deployment a recovery is for: id when given, else the one
 // deployment the hosts' registries name. More than one is refused, since
-// which one to recover is the operator's to say.
+// which one to recover is the operator's to say, and so is an entry that is
+// not a deployment id: whoever has root on a host can write its registry,
+// and the id becomes part of every command a recovery runs on every site.
 func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	if id != "" {
 		if !deployment.ValidID(id) {
@@ -742,13 +801,16 @@ func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	}
 	ids := map[string]bool{}
 	var errs []error
-	for name, t := range hosts {
-		reg, err := registry.Read(t)
+	for _, name := range slices.Sorted(maps.Keys(hosts)) {
+		reg, err := registry.Read(hosts[name])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
-		for found := range reg.Deployments {
+		for _, found := range slices.Sorted(maps.Keys(reg.Deployments)) {
+			if !deployment.ValidID(found) {
+				return "", &ui.Problem{Hint: name + " lists a deployment id that is not one", Explain: fmt.Sprintf("Its registry names %q, which is not a deployment id, so nothing is read from any host with it. Whoever can write that registry may not be trusted; recover from another host with --from, or name the deployment with --id.", found)}
+			}
 			ids[found] = true
 		}
 	}
@@ -760,10 +822,6 @@ func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	case 0:
 		return "", &ui.Problem{Hint: "no host named lists a deployment", Explain: "Name the deployment with --id, or another host with --from.", Cause: errors.Join(errs...)}
 	}
-	var list []string
-	for found := range ids {
-		list = append(list, found)
-	}
-	sort.Strings(list)
+	list := slices.Sorted(maps.Keys(ids))
 	return "", &ui.Problem{Hint: "the hosts list more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
 }

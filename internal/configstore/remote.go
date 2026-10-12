@@ -32,6 +32,16 @@ type SyncReport struct {
 	SyncErr string
 }
 
+// checkID refuses a deployment whose id is not one before any name derived
+// from it reaches a command line. A recovery reads the id from a host's
+// registry, which whoever has root on that host can write.
+func checkID(d deployment.Deployment) error {
+	if !deployment.ValidID(d.ID) {
+		return fmt.Errorf("%q is not a deployment id", d.ID)
+	}
+	return nil
+}
+
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // incomingPath is where a pushed bundle lands for the length of one push. It
@@ -45,6 +55,9 @@ func incomingPath(d deployment.Deployment) string {
 // verified first and fetched without a plus in the refspec and without
 // pruning, so a push can add versions and can never move or remove one.
 func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
+	if err := checkID(d); err != nil {
+		return err
+	}
 	tmp, repo := incomingPath(d), hostprep.ConfigRepo(d)
 	if err := t.WriteFile(tmp, string(bundle), 0o600); err != nil {
 		return fmt.Errorf("write the bundle to %s: %w", t.Describe(), err)
@@ -62,9 +75,12 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 // from its peers, so the answer includes what they hold; a sync that fails is
 // recorded in the report and the site's own versions are still gathered.
 func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *SyncReport, error) {
+	if err := checkID(d); err != nil {
+		return nil, nil, err
+	}
 	var syncErr string
 	if syncFirst {
-		if out, err := t.Run("systemctl start " + d.Prefix() + "-config-sync.service"); err != nil {
+		if out, err := t.Run("systemctl start " + quote(d.Prefix()+"-config-sync.service")); err != nil {
 			syncErr = strings.TrimSpace(err.Error() + " " + out)
 		}
 	}

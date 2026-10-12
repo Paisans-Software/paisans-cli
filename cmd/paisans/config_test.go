@@ -20,13 +20,18 @@ import (
 
 // storeHost answers the commands configstore.Pull runs with a fixed bundle,
 // and holds the registry a recovery reads the deployment's id from. A host
-// that is down fails everything.
+// that is down fails everything. runs, when set, logs every command run on
+// any host sharing it.
 type storeHost struct {
 	name, answer, registry string
 	down                   bool
+	runs                   *[]string
 }
 
 func (h *storeHost) Run(c string) (string, error) {
+	if h.runs != nil {
+		*h.runs = append(*h.runs, h.name+": "+c)
+	}
 	if h.down {
 		return "", errors.New("ssh: connect to host " + h.name + " port 22: Connection refused")
 	}
@@ -48,18 +53,16 @@ func (h *storeHost) ReadFile(p string) (string, bool, error) {
 func (h *storeHost) WriteFile(string, string, uint32) error { return nil }
 func (h *storeHost) Describe() string                       { return h.name }
 
-// storedVersion is a root version of the fixture deployment, signed by an
-// admin it lists, as the sites' bundle answers it, with its sha and files.
-func storedVersion(t *testing.T) (string, string, configstore.Files) {
-	t.Helper()
-	shas, answer, files := storedHistory(t, 1)
-	return shas[0], answer, files[0]
+// store is a site's store for a test: a bare repository of versions of the
+// fixture deployment, alice's key in it replaced with one the test holds.
+type store struct {
+	repo configstore.Repo
+	yaml string
 }
 
-// storedHistory is n versions of the fixture deployment, each on the one
-// before, as the sites' bundle answers them. Each differs from the last by a
-// comment in paisans.yaml.
-func storedHistory(t *testing.T, n int) ([]string, string, []configstore.Files) {
+// testKey makes an ed25519 key and returns its private key path and public
+// key line.
+func testKey(t *testing.T) (string, string) {
 	t.Helper()
 	for _, tool := range []string{"git", "ssh-keygen"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -74,6 +77,12 @@ func storedHistory(t *testing.T, n int) ([]string, string, []configstore.Files) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	return key, strings.TrimSpace(string(pub))
+}
+
+// fixtureAs is the fixture's paisans.yaml with alice's key replaced by pub.
+func fixtureAs(t *testing.T, pub string) string {
+	t.Helper()
 	body, err := os.ReadFile(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -82,30 +91,76 @@ func storedHistory(t *testing.T, n int) ([]string, string, []configstore.Files) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	yaml := strings.Replace(string(body), cfg.Admins["alice"].KeyLines()[0], strings.TrimSpace(string(pub)), 1)
+	return strings.Replace(string(body), cfg.Admins["alice"].KeyLines()[0], pub, 1)
+}
+
+func newStore(t *testing.T) store {
+	t.Helper()
 	repo, err := configstore.InitRepo(filepath.Join(t.TempDir(), "s.git"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return store{repo: repo}
+}
+
+// commit adds a version of yaml plus suffix on parents, signed with key.
+func (s store) commit(t *testing.T, yaml, suffix string, parents []string, rev int, key string) (string, configstore.Files) {
+	t.Helper()
+	f := configstore.Files{Paisans: []byte(yaml + suffix), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	sha, err := s.repo.Commit(f, parents, rev, key, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha, f
+}
+
+// answer is what Pull reads from a site holding this store.
+func (s store) answer(t *testing.T) string {
+	t.Helper()
+	b, err := s.repo.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(b) + "\n"
+}
+
+// storedVersion is a root version of the fixture deployment, signed by an
+// admin it lists, as the sites' bundle answers it, with its sha and files.
+func storedVersion(t *testing.T) (string, string, configstore.Files) {
+	t.Helper()
+	shas, answer, files := storedHistory(t, 1, 0)
+	return shas[0], answer, files[0]
+}
+
+// storedHistory is n versions of the fixture deployment, each on the one
+// before, each differing from the last by a comment in paisans.yaml, as the
+// sites' bundle answers them. With forged above 0, it also holds a chain of
+// that many versions on the root signed by mallory, whose paisans.yaml lists
+// her key as alice's: what someone with root on a site can write.
+func storedHistory(t *testing.T, n, forged int) ([]string, string, []configstore.Files) {
+	t.Helper()
+	key, pub := testKey(t)
+	s := newStore(t)
+	yaml := fixtureAs(t, pub)
 	var shas []string
 	var files []configstore.Files
 	for i := range n {
-		f := configstore.Files{Paisans: []byte(yaml + strings.Repeat("# edited\n", i)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
 		var parents []string
 		if i > 0 {
 			parents = shas[i-1:]
 		}
-		sha, err := repo.Commit(f, parents, i+1, key, time.Unix(1_800_000_000, 0))
-		if err != nil {
-			t.Fatal(err)
-		}
+		sha, f := s.commit(t, yaml, strings.Repeat("# edited\n", i), parents, i+1, key)
 		shas, files = append(shas, sha), append(files, f)
 	}
-	b, err := repo.Bundle()
-	if err != nil {
-		t.Fatal(err)
+	if forged > 0 {
+		mkey, mpub := testKey(t)
+		myaml := fixtureAs(t, mpub)
+		parent := shas[0]
+		for i := range forged {
+			parent, _ = s.commit(t, myaml, "# forged\n", []string{parent}, i+2, mkey)
+		}
 	}
-	return shas, base64.StdEncoding.EncodeToString(b) + "\n", files
+	return shas, s.answer(t), files
 }
 
 // recoverHosts makes --from reach a host holding the version, and the
@@ -239,7 +294,7 @@ func pullWorkstation(t *testing.T, answer, root, base string, f configstore.File
 // With no local edits, pull moves the files to the sites' head; a dry run
 // does not.
 func TestConfigPullMovesUneditedFiles(t *testing.T) {
-	shas, answer, files := storedHistory(t, 2)
+	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
 	var out bytes.Buffer
@@ -261,7 +316,7 @@ func TestConfigPullMovesUneditedFiles(t *testing.T) {
 // Over local edits, pull refuses, shows the difference, and with --execute
 // leaves the head's files in .paisans/incoming/ and the local ones alone.
 func TestConfigPullOverEditsRefusesAndShowsTheDifference(t *testing.T) {
-	shas, answer, files := storedHistory(t, 2)
+	shas, answer, files := storedHistory(t, 2, 0)
 	edited := files[0]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# mine\n"...)
 	edited.Secrets = []byte("a: 1\nb: 2\n")
@@ -332,5 +387,179 @@ func TestSigningKeyFor(t *testing.T) {
 	agentKeys = func() []string { return []string{alice} }
 	if _, err := signingKeyFor(l, cfg); err == nil || !strings.Contains(problemText(err), "signing key") {
 		t.Fatalf("recorded key not held: %v", err)
+	}
+}
+
+// allSitesUp makes every fixture site answer with answer, logging each
+// command to runs.
+func allSitesUp(answer string, runs *[]string) {
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: answer, runs: runs}
+	}
+}
+
+func synced(runs []string) bool {
+	for _, r := range runs {
+		if strings.Contains(r, "systemctl start") {
+			return true
+		}
+	}
+	return false
+}
+
+// A registry entry that is not a deployment id is refused, naming the host
+// and the entry, before any command reaches any host.
+func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
+	_, answer, _ := storedVersion(t)
+	recoverHosts(t, answer)
+	var runs []string
+	bad := `{"version":1,"deployments":{"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01;touch /pwned":{"token":"x","root":"/srv/paisans/x","domain":"example.org","site":"home-a","claimed_at":"2026-10-12T00:00:00Z"}}}`
+	reachDestination = func(dest config.Destination, _ bool) apply.Transport {
+		reg := ""
+		if dest.Host == "203.0.113.9" {
+			reg = bad
+		}
+		return &storeHost{name: dest.String(), answer: answer, registry: reg, runs: &runs}
+	}
+	allSitesUp(answer, &runs)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--from", "ubuntu@203.0.113.10", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, answering(t, "partial\n"), &out)
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "203.0.113.9") || !strings.Contains(text, "touch /pwned") {
+		t.Fatalf("got %v: %s", err, text)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("commands reached hosts: %q", runs)
+	}
+}
+
+// A dry run and log never ask a site to sync; pull --execute does.
+func TestConfigDryRunsDoNotSync(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	var runs []string
+	allSitesUp(answer, &runs)
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var out bytes.Buffer
+	for _, sub := range []string{"pull", "log"} {
+		if err := runConfig([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+			t.Fatalf("%s: %v", sub, err)
+		}
+	}
+	if synced(runs) || len(runs) == 0 {
+		t.Fatalf("dry runs: %q", runs)
+	}
+	if err := runConfig([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !synced(runs) {
+		t.Fatal("pull --execute did not sync")
+	}
+}
+
+// A head older than one this workstation has seen asks for rollback, and
+// without a terminal is refused with nothing written.
+func TestConfigPullAsksRollback(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	seen := "9 " + strings.Repeat("b", 40) + "\n"
+	if err := os.WriteFile(filepath.Join(l.Dir, ".paisans", "config-seen"), []byte(seen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(err.Error(), "rollback") {
+		t.Fatalf("got %v", err)
+	}
+	if got, _ := l.Files(); !got.Equal(files[0]) {
+		t.Fatal("files written")
+	}
+	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, answering(t, "rollback\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := l.Head(); h != shas[1] {
+		t.Fatalf("head %s after rollback", h)
+	}
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != seen {
+		t.Fatalf("seen lowered to %q", b)
+	}
+}
+
+// A site holding mallory's versions, longer than the real history, moves
+// nothing: pull keeps the files, and recover writes the real head's.
+func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 3)
+	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
+	var out bytes.Buffer
+	if err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.Files(); !got.Equal(files[1]) {
+		t.Fatal("pull changed the files")
+	}
+	if h, _ := l.Head(); h != shas[1] {
+		t.Fatalf("head %s", h)
+	}
+	dir := t.TempDir()
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", shas[0], "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := configstore.Local{Dir: dir}
+	if got, _ := r.Files(); !got.Equal(files[1]) {
+		t.Fatalf("recover wrote %q", got.Paisans[len(got.Paisans)-20:])
+	}
+}
+
+// A recovery that finds a fork writes each head's files to incoming/<sha>
+// with --execute and chooses neither.
+func TestConfigRecoverOnAForkWritesEachHead(t *testing.T) {
+	key, pub := testKey(t)
+	s := newStore(t)
+	yaml := fixtureAs(t, pub)
+	root, _ := s.commit(t, yaml, "", nil, 1, key)
+	a, fa := s.commit(t, yaml, "# a\n", []string{root}, 2, key)
+	b, fb := s.commit(t, yaml, "# b\n", []string{root}, 2, key)
+	answer := s.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(problemText(err), "publish --merge") {
+		t.Fatalf("got %v", err)
+	}
+	l := configstore.Local{Dir: dir}
+	if l.HasFiles() {
+		t.Fatal("a fork's recovery wrote the files")
+	}
+	for sha, want := range map[string]configstore.Files{a: fa, b: fb} {
+		got, err := (configstore.Local{Dir: l.IncomingFor(sha)}).Files()
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("incoming %s: %v", sha[:12], err)
+		}
+		if fi, err := os.Stat(filepath.Join(l.IncomingFor(sha), "secrets.enc.yaml")); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("secrets mode %v %v", fi.Mode(), err)
+		}
+	}
+}
+
+// The publish dry run refuses a key that --execute would refuse: here the
+// recorded key, which the agent holds, is no admin of the head.
+func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
+	shas, answer, files := storedHistory(t, 1, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	_, other := testKey(t)
+	if err := l.SetSigningKey(other); err != nil {
+		t.Fatal(err)
+	}
+	saved := agentKeys
+	agentKeys = func() []string { return []string{other} }
+	t.Cleanup(func() { agentKeys = saved })
+	var out bytes.Buffer
+	err := runConfig([]string{"publish", "--config", filepath.Join(l.Dir, "paisans.yaml")}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(err.Error(), "belongs to no admin") {
+		t.Fatalf("got %v", err)
 	}
 }
