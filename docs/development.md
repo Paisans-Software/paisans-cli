@@ -1551,13 +1551,16 @@ observed on a host.
 The signed copies of the configuration have run only against fakes and local
 bare repositories standing in for sites: the trust rules against built
 histories, publishing and gathering through a fake transport, and the host
-prepare steps against a fake host. Nothing has been run against a real host, so the
-shell that creates the store, the daemon's reading of it as `nobody` (with
-`safe.directory` set for its one repository by environment) and the sync's
-`git fetch` between real mesh addresses are reasoned from git's documentation,
-not observed; `git ls-remote` against a prepared host's daemon is the check to
-make first. Nor has `apply`'s publishing after the `host prepare` steps, or the
-witness refusal, run on a real deployment.
+prepare steps against a fake host. The shell that pushes to a store, bundles it
+for a pull, and the rendered sync script have run with a local `sh` against
+local bare repositories, with the host's paths moved into a temporary directory
+and each peer's `git://` address replaced by its directory. Nothing has been run
+against a real host, so the shell that creates the store, the daemon's reading
+of it as `nobody` (with `safe.directory` set for its one repository by
+environment) and the sync's fetch between real mesh addresses are reasoned from
+git's documentation, not observed; `git ls-remote` against a prepared host's
+daemon is the check to make first. Nor has `apply`'s publishing after the
+`host prepare` steps, or the witness refusal, run on a real deployment.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered

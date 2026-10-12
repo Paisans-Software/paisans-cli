@@ -2999,8 +2999,9 @@ anyone could write a secrets file that decrypts for every admin. A version
 carries `Paisans-Revision: <n>`, one more than its highest parent. Nothing
 decides by the commit date, because any host's clock can be wrong and anyone
 writing a copy can set it. Each version is kept under `refs/versions/<sha>`, a
-name that is its own hash, so two versions never compete for one and nothing is
-ever deleted.
+name that is its own hash, so two versions never compete for one. A store
+creates a version's ref only where it is absent and never moves or deletes one
+(see *How a site stores them*).
 
 ### Trust starts from the operator's own signature, never from the sites
 
@@ -3035,9 +3036,10 @@ where the true history starts, so a second root written on a site is refused.
 trusted version builds on.** Two such versions are a fork, which stops `apply`
 until `paisans config publish --merge` resolves it.
 
-**Removing an admin who could decrypt the file** also takes their age key out of
-`.sops.yaml` and re-encrypts the file under a new data key (`sops rotate
---rm-age`) before the version that removes them is published. A version that
+**Removing an admin who could decrypt the file** is also the operator's to
+finish by hand: take their age key out of `.sops.yaml` and re-encrypt the file
+under a new data key (`sops rotate --rm-age`) before publishing the version that
+removes them. Nothing in `paisans` checks that this was done. A version that
 only drops them from `admins` would leave every later write readable to them,
 since the file is still encrypted to their key.
 
@@ -3050,8 +3052,8 @@ version is the newest, so three memories make an old one visible:
 
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
-| The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
-| A majority of sites | a pull, recovery, registration or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
+| A majority of sites | a pull, recovery, registration, the publish of a first version or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
 | The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a fresh
@@ -3067,10 +3069,20 @@ old, genuine version, and applying it reaches only those sites.
   the site's mesh address and serving only that directory. The mesh is already
   let in whole by the firewall, and a mesh peer reads `paisans.yaml` and the
   encrypted secrets, both of which a peer is trusted with already;
-* a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches
-  `refs/versions/*` from each peer's mesh address without pruning, so a site
-  that was down when a version was published learns of it and nothing is ever
-  deleted.
+* a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches the
+  versions each peer's mesh address serves, so a site that was down when a
+  version was published learns of it.
+
+Every store, and the workstation's own, takes versions in by one rule, whether
+from a peer's sync, a push or a gather. A fetch straight into `refs/versions/`
+would fast-forward a version's ref to a child of it, which hides the version and
+makes every later honest copy of it fail. So the fetch lands in a quarantine of
+its own, `refs/incoming/<id>/`, and each ref there named for the commit it
+points to becomes `refs/versions/<sha>` only where that ref is absent. An
+existing ref never moves, every other ref is ignored, and nothing is pruned, so
+no version is ever deleted; the quarantine refs are removed once read. A store
+also bundles only correctly named versions, so a ref planted under another name
+never travels.
 
 A site that `site remove` takes out stops being a peer, so it neither fetches
 nor serves. A version is tens of kilobytes, so thousands take a few megabytes
@@ -3086,8 +3098,8 @@ and nothing is pruned.
    dry run and `config log` start no sync, because a command changes a host only
    with `--execute`; they read what each site holds now.
 2. Every site is reached over ssh, with `sudo` because the store is root's:
-   those the configuration names, or, for a recovery, those the first version
-   that verifies names, not only the hosts given on the command line.
+   those the configuration names, or, for a recovery, those the trusted heads
+   name, not only the hosts given on the command line.
 3. The copies are combined, and only then are the rules applied and the head
    chosen, so a site serving an old version is outvoted by the rest.
 
@@ -3110,17 +3122,22 @@ paisans config recover --from admin@203.0.113.9 --execute   # empty workstation
   `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
   It attests only a head whose files equal the operator's local files, since an
   attestation says "I hold this version"; otherwise it shows the difference. It
-  changes only the sites' stores, and nothing without `--execute`.
+  changes only the sites' stores, and nothing without `--execute`. With
+  `--execute` it asks for `partial` when no more than half the sites answered
+  directly, since the attestation becomes the operator's anchor.
 * **`paisans config publish`** commits the files with the base as parent, signs,
   and pushes to every site it reaches. It refuses when its base is not the
   sites' head, when no loaded key belongs to an admin the parent lists, and when
-  no site answers; a site that missed it gets it from its peers.
+  no site answers; a site that missed it gets it from its peers. A first
+  version, with no trusted head among the sites that answered, starts the
+  history, so with no more than half the sites reached directly it asks for
+  `partial`: an empty site must not start a second history silently.
 * **`paisans config pull`** moves files with no local edits to the head. Over
   local edits on an older base it refuses, shows the difference, and with
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
   before `publish --merge`.
 * **`paisans config recover`** onto a workstation with nothing gathers from the
-  named hosts and every site the first verified version names. `--id` names the
+  named hosts and every site the trusted heads name. `--id` names the
   deployment when a host's registry lists more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an admin to decide, never an order.

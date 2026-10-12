@@ -72,8 +72,9 @@ needs only the recipient's public key, which every stored `.sops.yaml` names, so
 anyone can write a secrets file that decrypts for every admin.
 
 Every version is stored under a ref named for its own hash,
-`refs/versions/<sha>`, so two versions never compete for a name, and nothing is
-ever deleted.
+`refs/versions/<sha>`, so two versions never compete for a name. A store creates
+a version's ref only where it is absent and never moves or deletes one (see *The
+store on a site*).
 
 ## Which versions the workstation trusts
 
@@ -109,10 +110,11 @@ that passes all of these:
 **The head** is the trusted version with the highest revision that no other
 trusted version builds on. Two such versions are a fork.
 
-**Removing an admin who could decrypt the file.** Their age key comes out of
-`.sops.yaml` and the file is re-encrypted under a new data key (`sops rotate
---rm-age`) before the version that removes them is published, so nothing written
-afterwards is readable to them.
+**Removing an admin who could decrypt the file.** The operator takes their age
+key out of `.sops.yaml` and re-encrypts the file under a new data key (`sops
+rotate --rm-age`) before publishing the version that removes them, so nothing
+written afterwards is readable to them. Nothing in `paisans` checks that this
+was done.
 
 ## `paisans admin register`
 
@@ -148,13 +150,19 @@ prove a version is the newest; these make an old one visible:
   record is a file of its own, not part of the cache (`store.git`), because the
   cache can be deleted and gathered again and the memory must survive that. A
   record nothing could lower would be a trap for an operator restoring from an
-  old backup, so an accepted `rollback` re-bases it to the head chosen. Only
-  `--execute` asks; `log` warns and lists, and a dry run reports the rollback
-  and what `--execute` will ask. A root pinned for one run with `--root` and not
-  recorded does not raise the record, so a mistaken pin cannot poison it.
-* **A majority of sites.** A pull, a recovery, `admin register` and `apply
-  --execute` report how many sites they reached directly, and with fewer than a
-  majority the operator types `partial` to go on.
+  old backup, so an accepted `rollback` re-bases it to the head chosen. A gather
+  only carries the change to the record; the command writes it once its last
+  confirmation has passed and it commits its change, so a run that stops, and
+  every dry run, leaves the record as it was. Only `--execute` asks; `log` warns
+  and lists, and a dry run reports the rollback and what `--execute` will ask.
+  A root pinned for one run with `--root` and not recorded does not raise the
+  record, so a mistaken pin cannot poison it.
+* **A majority of sites.** A pull, a recovery, `admin register`, the publish of
+  a first version and `apply --execute` report how many sites they reached
+  directly, and with fewer than a majority (no more than half) the operator
+  types `partial` to go on. A first version, with no trusted head among the
+  sites that answered, starts the history, and a workstation reaching only an
+  empty site must not start a second one silently.
 * **Hosts are witnesses.** Each host's grant record
   (docs/specs/2026-10-11-config-review.md) also holds the hash and revision of
   the version last applied to it, and `apply` refuses to apply an older revision
@@ -175,9 +183,19 @@ old, genuine version, and applying it reaches only those sites.
   site's mesh address and serving only that directory. The mesh interface is
   already let in whole by the firewall. A mesh peer reads `paisans.yaml` and the
   encrypted secrets, both of which a peer is already trusted with.
-* A timer, `paisans-<token>-config-sync`, every 15 minutes: `git fetch` of
-  `refs/versions/*` from each peer's mesh address, listed in a rendered file,
-  without `--prune`, so nothing is ever deleted.
+* A timer, `paisans-<token>-config-sync`, every 15 minutes, fetching from each
+  peer's mesh address, listed in a rendered file.
+* **One rule receives versions**, in the sync, in a push and in a gather into
+  the workstation's cache. A fetch straight into `refs/versions/` would
+  fast-forward a version's ref to a child of it, even without a plus in the
+  refspec, which hides the version and makes every later honest copy of it a
+  non-fast-forward that fails. So the fetch lands in a quarantine,
+  `refs/incoming/<id>/`, and each ref there named for the commit it points to
+  becomes `refs/versions/<sha>`, created against the null hash so only an absent
+  ref is created. An existing ref never moves, every other ref is ignored, one
+  ref that fails leaves the rest, and nothing is pruned, so no version is ever
+  deleted; the quarantine refs are removed once read. A store bundles only
+  correctly named versions, so a ref planted under another name never travels.
 * An evicted site is no longer a peer, so it neither fetches nor serves.
 * Each version is tens of kilobytes; thousands take a few megabytes, and nothing
   is pruned.
@@ -216,7 +234,7 @@ the same way before deciding anything:
    and `config log` start no sync: a command changes a host only with
    `--execute`, so they read what each site holds now, which can be staler.
 2. **Every site is reached.** The sites named in the configuration, or, for a
-   recovery, in the first version that verifies, are each reached over ssh, not
+   recovery, in the trusted heads, are each reached over ssh, not
    only the ones given on the command line. The store is root's, so each is
    reached with `sudo`, and a sudo password is asked for once, before the first
    site, as for the other commands.
@@ -237,7 +255,7 @@ could inflate it.
 | `paisans config pull` | gathers and verifies; with no local edits, moves the files to the head; with local edits on an older base, refuses, writes the head's files to `.paisans/incoming/` and shows the difference |
 | `paisans config publish --merge` | a version whose parents are every head, after the operator has merged by hand; it resolves a fork and an incoming change alike |
 | `paisans config log` | every version: revision, signer, date, and which sites hold it |
-| `paisans config recover --from <user@host>...` | onto a workstation with nothing: gathers from the named hosts and every site the first verified version names, verifies, reports how many sites answered, and writes the three files and the state files. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
+| `paisans config recover --from <user@host>...` | onto a workstation with nothing: gathers from the named hosts and every site the trusted heads name, verifies, reports how many sites answered, and writes the three files and the state files. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
 
 **Publishing in `apply`.** `apply` publishes the version it applies and refuses
 when the version reaches no site, naming `host prepare` for a site that has no

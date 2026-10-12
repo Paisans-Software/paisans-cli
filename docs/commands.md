@@ -177,7 +177,7 @@ paisans config recover --from admin@203.0.113.9 --execute   # empty directory
   | `--config <path>` | all | the deployment declaration, which must be named `paisans.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
   | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
-  | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the first verified version names is reached after it |
+  | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when a host's registry lists more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
 
@@ -186,9 +186,13 @@ paisans config recover --from admin@203.0.113.9 --execute   # empty directory
   each is reached, not only the ones named on the command line. `recover` has no
   `paisans.yaml` to name them and so starts from `--from`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
-  its peers; it reads what each site holds now, which can be staler. Only
-  `.paisans/` beside the configuration is written (the cache and the newest
-  revision seen).
+  its peers; it reads what each site holds now, which can be staler. Only the
+  cache in `.paisans/` beside the configuration is written.
+* **Per-operator state:** `.paisans/.gitignore` keeps `store.git/`,
+  `incoming/`, `signing-key`, `config-head` and `config-seen` out of a
+  repository the admins share, since each describes one workstation, and a
+  shared signing key would start one admin's trust from another's signature.
+  `config-root` may be committed so the admins share the pin.
 * **`--execute`:** each site first syncs with its peers, so a version only a
   site the operator cannot log in to holds arrives through one they can.
   `publish` signs with the key in `.paisans/signing-key`, or the one ssh-agent
@@ -207,11 +211,13 @@ paisans config recover --from admin@203.0.113.9 --execute   # empty directory
   with `sops`). `recover` refuses to write over files, and with a fork writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
-  answered directly, for `apply --execute`, `config pull`, `config recover` and
-  `admin register` (when it writes files); `rollback` when the newest version is
-  older than one this workstation has seen. An accepted `rollback` re-bases
-  `.paisans/config-seen` to the head chosen. `log` asks for neither: it warns
-  and lists. A dry run says what `--execute` will ask.
+  answered directly (no more than half), for `apply --execute`, `config pull`,
+  `config recover`, `config publish` of a first version and `admin register`;
+  `rollback` when the newest version is older than one this workstation has
+  seen. An accepted `rollback` re-bases `.paisans/config-seen` to the head
+  chosen once the command commits its change; a run that stops leaves it as it
+  was. `log` asks for neither: it warns and lists. A dry run says what
+  `--execute` will ask.
 * **In `apply`:** `apply` gathers before its review and refuses a fork or a base
   older than the sites' newest version, naming `config pull`. With `--execute`
   it publishes the version it applies and each host records it; a host whose
@@ -254,8 +260,9 @@ paisans admin register --key ~/.ssh/id_ed25519.pub --execute
   pushed again, not attested again.
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
   writes the key to `.paisans/signing-key`; `config publish` and `apply` sign
-  with it from then on. Without it, nothing is signed or recorded, and no site
-  is changed.
+  with it from then on. It asks for `partial` when fewer than a majority of
+  sites answered directly. Without it, nothing is signed or recorded, and no
+  site is changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
 

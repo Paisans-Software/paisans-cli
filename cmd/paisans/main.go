@@ -227,12 +227,14 @@ Commands:
              log: list every version, its signer, and the sites holding
              it. recover: onto an empty directory, gather from the --from
              hosts and every site the newest version names, and write its
-             files. pull and recover ask for the word partial at a
-             terminal when fewer than half the sites answered, and every
-             subcommand asks for rollback when the newest version is
-             older than one seen here before. With --execute each site
-             first syncs with its peers; without it, and in log, no site
-             is changed and only .paisans/ here is written.
+             files. With --execute, pull, recover, a publish of the first
+             version, apply and admin register ask for the word partial
+             at a terminal when no more than half the sites answered
+             directly; publish, pull and recover ask for rollback when
+             the newest version is older than one seen here before, and
+             log only warns. With --execute each site first syncs with
+             its peers; without it, and in log, no site is changed and
+             only .paisans/ here is written.
   admin      register: sign an attestation of the sites' newest version
              with your own key, so trust starts from your signature: the
              key in your ssh-agent listed under your entry in admins, or
