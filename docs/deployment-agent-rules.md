@@ -96,8 +96,8 @@ provider**, and handing each one who has not yet signed in a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
 sign into is not set up, and declaring the admin is approval for the account.
 The exception covers creating that account, marking its declared email
-verified, making it an administrator, adding it to the apps' admin groups,
-issuing the link and having the identity provider email it. Doing any of
+verified, making it an administrator, adding it to the apps' admin and
+member groups, issuing the link and having the identity provider email it. Doing any of
 these by hand, and every other change to a user, stays in the tier above.
 
 **Never without the human present**

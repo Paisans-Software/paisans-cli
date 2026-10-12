@@ -53,6 +53,12 @@ type Request struct {
 	// user is put in each, so one command makes an administrator of every
 	// such app as well as of the provider.
 	AdminGroups []string
+	// MemberGroups is every group such an app admits as its members, sorted
+	// and without duplicates, for a Declared admin only. An administrator
+	// the apps cannot admit could not reach the instance they administer: an
+	// app's member gate reads its member group, and only an existing admin of
+	// that app is exempt, which a first login is not.
+	MemberGroups []string
 
 	// LoginLink asks for a fresh one-time login link for
 	// an account that already exists. A created account always gets one,
@@ -81,6 +87,31 @@ type Request struct {
 	PublicURL string
 }
 
+// Groups is every group the user is put in: the admin groups and the member
+// groups, sorted and without duplicates.
+func (r Request) Groups() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, g := range append(append([]string(nil), r.AdminGroups...), r.MemberGroups...) {
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// GroupsPhrase names the groups the user is put in, for a plan: the admin
+// groups, then the member groups when there are any.
+func (r Request) GroupsPhrase() string {
+	out := "admin groups " + strings.Join(r.AdminGroups, ", ")
+	if len(r.MemberGroups) > 0 {
+		out += " and member groups " + strings.Join(r.MemberGroups, ", ")
+	}
+	return out
+}
+
 // State is what a probe found about one username.
 type State struct {
 	Exists   bool
@@ -89,7 +120,7 @@ type State struct {
 	// Passkey is whether the user has registered a passkey, read only for a
 	// Declared request.
 	Passkey bool
-	// MissingGroups is the part of Request.AdminGroups the user is not in,
+	// MissingGroups is the part of Request.Groups the user is not in,
 	// including any group that does not exist yet. All of them for a user
 	// that does not exist.
 	MissingGroups []string
@@ -102,7 +133,7 @@ const (
 	ActionCreate     Action = "create user"
 	ActionVerify     Action = "verify"
 	ActionGrantAdmin Action = "grant admin"
-	ActionJoinGroups Action = "add to admin groups"
+	ActionJoinGroups Action = "add to groups"
 	ActionLoginLink  Action = "issue one-time login link for"
 	ActionEmailLink  Action = "email one-time login link to"
 )
@@ -222,7 +253,7 @@ func (p *Plan) Titles() []string {
 		case ActionGrantAdmin:
 			out = append(out, "make "+p.req.Username+" an administrator")
 		case ActionJoinGroups:
-			out = append(out, "add "+p.req.Username+" to admin groups "+strings.Join(p.req.AdminGroups, ", "))
+			out = append(out, "add "+p.req.Username+" to "+p.req.GroupsPhrase())
 		case ActionLoginLink:
 			out = append(out, "issue login link for "+p.req.Username)
 		case ActionEmailLink:

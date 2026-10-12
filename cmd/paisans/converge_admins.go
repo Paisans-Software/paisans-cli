@@ -51,8 +51,10 @@ type declaredAdmin struct {
 }
 
 // adminRequest is the request apply makes for a declared admin: the admin's
-// key as the username, their email, their name split at its first space, and
-// every app's admin group. The username is fixed once the account exists:
+// key as the username, their email, their name split at its first space,
+// every app's admin group, and every app's member group, since an app whose
+// member gate does not admit its administrator refuses their first login.
+// Founder decision. The username is fixed once the account exists:
 // nobody can edit their own account (kinds.PocketIDAccountEditSetting), and
 // apply never renames one. validate holds the name to a first and a last.
 func adminRequest(cfg *config.Config, app, id string) appadmin.Request {
@@ -60,7 +62,7 @@ func adminRequest(cfg *config.Config, app, id string) appadmin.Request {
 	first, last, _ := strings.Cut(strings.TrimSpace(a.Name), " ")
 	return appadmin.Request{App: app, Username: id, Email: a.Email,
 		FirstName: first, LastName: strings.TrimSpace(last), AdminGroups: adminGroups(cfg),
-		Declared: true, LinkTTL: adminLinkTTL,
+		MemberGroups: memberGroups(cfg), Declared: true, LinkTTL: adminLinkTTL,
 		EmailLink: adminEmailOn(cfg, app),
 		PublicURL: "https://" + cfg.Apps[app].Hostname,
 	}
