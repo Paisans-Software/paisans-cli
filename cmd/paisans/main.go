@@ -537,6 +537,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseSharedGatewayMove(cfg, *site, transport); err != nil {
+		return err
+	}
 	host, err := hostGate(r, cfg, *site, transport)
 	if err != nil {
 		return err

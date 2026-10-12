@@ -487,3 +487,28 @@ func TestAnotherMovesMarkerDoesNotSkipTheWait(t *testing.T) {
 		t.Errorf("waited %s, want 5m0s", w.slept)
 	}
 }
+
+// The old gateway kept the monitor: the move finds it through DNS but must
+// not stop its Caddy, which still serves the monitor, so it is refused
+// before anything runs.
+func TestAMoveOffASiteThatKeepsTheMonitorIsRefused(t *testing.T) {
+	w := newWorld(t, func(s string) string {
+		s = strings.Replace(s, "  home-a:\n    roles: [data, apps]\n", "  home-a:\n    roles: [data, apps, monitor]\n", 1)
+		return strings.Replace(s, "placement: { pinned: watch }", "placement: { pinned: home-a }", 1)
+	})
+	_, err := w.build()
+	if err == nil || !strings.Contains(err.Error(), "keeps the monitor") {
+		t.Fatalf("want the shared-site refusal, got %v", err)
+	}
+	if len(w.hosts["home-a"].caddy) != 1 {
+		t.Error("home-a's Caddy was touched")
+	}
+	held, err := gatewaymove.HoldsRecordOrMarker(w.hosts["home-a"], w.cfg.Deployment())
+	if err != nil || !held {
+		t.Errorf("home-a holds the record: %v %v", held, err)
+	}
+	held, err = gatewaymove.HoldsRecordOrMarker(w.hosts["home-b"], w.cfg.Deployment())
+	if err != nil || held {
+		t.Errorf("home-b holds nothing: %v %v", held, err)
+	}
+}
