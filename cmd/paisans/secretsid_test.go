@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,10 +66,10 @@ func TestCommandsRefuseAnotherDeploymentsSecrets(t *testing.T) {
 			return runRender([]string{"--config", c, "--secrets", s, "--out", t.TempDir()})
 		},
 		"apply": func(c, s string) error {
-			return runApply([]string{"--config", c, "--secrets", s})
+			return runApply([]string{"--config", c, "--secrets", s}, strings.NewReader(""), io.Discard)
 		},
 		"apply --site": func(c, s string) error {
-			return runApply([]string{"--config", c, "--secrets", s, "--site", "home-a", "--ssh", "nonexistent.invalid"})
+			return runApply([]string{"--config", c, "--secrets", s, "--site", "home-a", "--ssh", "nonexistent.invalid"}, strings.NewReader(""), io.Discard)
 		},
 		"storage init": func(c, s string) error {
 			return runStorageInit([]string{"--config", c, "--secrets", s, "--site", "home-a", "--ssh", "nonexistent.invalid"})

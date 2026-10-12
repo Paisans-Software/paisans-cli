@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,7 +93,7 @@ func TestConvergeWarnsAboutAnOrphanedSecretOnce(t *testing.T) {
 		rec := recordConverge(t)
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...))
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -143,7 +144,7 @@ func TestConvergeInstallLinesDoNotRepeatTheSecretsCheck(t *testing.T) {
 	rec := withRecorder(t, true)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute", "-v"})
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute", "-v"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil {
 		t.Fatal("an apply through a failing ssh succeeded")
@@ -171,7 +172,7 @@ func TestApplySiteStillWarnsAboutAnOrphanedSecret(t *testing.T) {
 	rec := withRecorder(t, false)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"})
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil {
 		t.Fatal("an apply through a failing ssh succeeded")
