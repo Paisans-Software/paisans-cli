@@ -2023,6 +2023,8 @@ Not implemented.
 * Uptime is the only monitor. A blueprint without a health route is watched by
   a TCP check per site and a public check of `/`, with a warning. A deployment
   with no monitor stays a warning.
+* Declaring an app approves its OIDC client whatever catalog its blueprint
+  comes from, as it already does for a first party app.
 
 ### Why
 

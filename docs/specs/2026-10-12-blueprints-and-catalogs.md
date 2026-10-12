@@ -1,9 +1,7 @@
 # Blueprints and catalogs
 
-Date: 2026-10-12. Status: the decisions under *Settled* are the founder's,
-made in session on 2026-10-12. The rest is the proposed design that follows
-from them, awaiting the founder's review. Not implemented. Names marked
-*proposed* below are not yet created anywhere.
+Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12. Not
+implemented. Names marked *proposed* below are not yet created anywhere.
 
 Every application the toolkit can run is compiled into the binary today. What
 the toolkit knows about a kind is spread over about thirty files: the service
@@ -51,6 +49,11 @@ Founder decisions, 2026-10-12, in session:
   fallback check, with a warning.
 * **A deployment with no monitor stays a warning** (`no-uptime-monitor`), as
   today.
+* **Declaring an app approves its OIDC client, whatever catalog its blueprint
+  comes from.** `paisans apply` creating the client of an app declared in
+  `paisans-stack.yaml` already needs no approval of its own; a blueprint from a
+  third party catalog is covered the same way, because declaring the app and
+  pinning its catalog are the operator's choices of what to run.
 
 ## Scope
 
@@ -74,8 +77,6 @@ Out:
 * a second monitor. See *Uptime watches every blueprint*.
 * creating the core catalog repository, which is publishing and the founder's
   action.
-* the approval question for third party OIDC clients, which belongs to each
-  community's agent rules (see *Open*).
 
 ## A blueprint
 
@@ -645,11 +646,5 @@ A step does not start until the one before it has merged.
 
 ## Open
 
-* **Approval for a third party blueprint's OIDC client.** A community's agent
-  rules may treat declaring an app as approval for its OIDC client. Those rules
-  were written when every blueprint was first party. Whether declaring a
-  catalog blueprint carries the same approval is for each community's rules to
-  say; this toolkit's `docs/deployment-agent-rules.md` is not changed by this
-  spec.
 * **The core catalog's repository name** and its release key are created when
   step 3 starts.
