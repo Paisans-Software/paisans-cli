@@ -137,8 +137,15 @@ apps:
       brand: {{q $.Name}}
 {{- end}}
 {{- if eq .Kind "uptime"}}
+{{- if $.MonitorBesideGateway}}
+    # The uptime monitor, beside the gateway: it checks every app and every
+    # other machine, but cannot report this machine failing. A small machine
+    # of its own with roles: [monitor] would. Its checks are generated from
+    # this file.
+{{- else}}
     # The uptime monitor, on a machine of its own so it does not go dark with
     # the gateway it reports on. Its checks are generated from this file.
+{{- end}}
     settings:
       # Only members of this group may sign in.
       admin_group: admins

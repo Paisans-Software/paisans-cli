@@ -66,6 +66,17 @@ func roleLine(cfg *config.Config, site string) string {
 	return "roles: " + strings.Join(roles, ", ")
 }
 
+// monitorElsewhere reports whether a site other than site holds the monitor
+// role, and so serves its own hostname rather than through site's gateway.
+func monitorElsewhere(cfg *config.Config, site string) bool {
+	for _, m := range cfg.MonitorSites() {
+		if m != site {
+			return true
+		}
+	}
+	return false
+}
+
 // losses is what a site's absence takes away, from its roles and its place
 // in the configuration rather than from its roles alone: a data site that is
 // not in etcd.members holds no etcd vote, and a gateway that is not the only
@@ -75,7 +86,7 @@ func losses(cfg *config.Config, site string) string {
 	var lost []string
 	if declared.Has(config.RoleGateway) {
 		switch {
-		case len(cfg.GatewaySites()) == 1 && len(cfg.MonitorSites()) > 0 && !declared.Has(config.RoleMonitor):
+		case len(cfg.GatewaySites()) == 1 && monitorElsewhere(cfg, site):
 			lost = append(lost, "its gateway, which every public hostname but the monitor's goes through")
 		case len(cfg.GatewaySites()) == 1:
 			lost = append(lost, "its gateway, which every public hostname goes through")

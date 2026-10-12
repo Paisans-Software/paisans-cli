@@ -8,11 +8,12 @@ import (
 )
 
 // ServedBy is the monitor site that serves an app, when the app is pinned to
-// a site holding the monitor role. Such an app is left out of the gateway's
-// routing and served from the monitor itself, by the toolkit's Caddy there or
-// by the operator's own web server: a monitor reached only through the
-// gateway goes dark at exactly the moment it is needed. Every other app is
-// the gateway's, and ServedBy returns false for it.
+// a site holding the monitor role. Such an app is left out of every other
+// gateway's routing and served from the monitor itself, by the toolkit's
+// Caddy there or by the operator's own web server: a monitor reached only
+// through another machine's gateway goes dark at exactly the moment it is
+// needed. A monitor beside the gateway is served by that gateway's Caddy.
+// Every other app is the gateway's, and ServedBy returns false for it.
 func ServedBy(cfg *config.Config, app string) (string, bool) {
 	a, ok := cfg.Apps[app]
 	if !ok || a.Placement.Mode != config.PlacementPinned {

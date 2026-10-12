@@ -339,3 +339,56 @@ func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
 		}
 	}
 }
+
+// Answering the machines again keeps the status page beside the gateway only
+// while there is exactly one gateway with a public address and no machine
+// already holds the monitor role.
+func TestAnsweringTheMachinesAgainSettlesTheMonitorOnTheGateway(t *testing.T) {
+	gw := func(name string) Site {
+		return Site{Name: name, Roles: []config.Role{config.RoleGateway}, PublicAddress: "203.0.113.10"}
+	}
+	home := Site{Name: "home", Roles: []config.Role{config.RoleData, config.RoleApps}}
+	watch := Site{Name: "watch", Roles: []config.Role{config.RoleMonitor}, PublicAddress: "203.0.113.20"}
+	for _, tc := range []struct {
+		name  string
+		sites []Site
+		keep  bool
+	}{
+		{"one gateway", []Site{home, gw("edge")}, true},
+		{"two gateways", []Site{gw("a"), gw("b")}, false},
+		{"no public gateway", []Site{home, {Name: "edge", Roles: []config.Role{config.RoleGateway}}}, false},
+		{"a monitor declared", []Site{home, gw("edge"), watch}, false},
+	} {
+		w := NewWizard(NewPrompter(strings.NewReader(""), &strings.Builder{}))
+		w.Answers.Sites, w.Answers.MonitorOnGateway = tc.sites, true
+		w.settleMonitor()
+		if w.Answers.MonitorOnGateway != tc.keep {
+			t.Errorf("%s: MonitorOnGateway = %v, want %v", tc.name, w.Answers.MonitorOnGateway, tc.keep)
+		}
+	}
+}
+
+// Answering the machines or the apps again, Enter at every question, keeps
+// the status page beside the gateway: "Where it runs" defaults to it.
+func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines, "", "n", "n", "n", "n", "", "", "2")
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, s := range []Section{SectionSites, SectionApps} {
+		var again strings.Builder
+		w.p = NewPrompter(strings.NewReader(strings.Repeat("\n", 40)), &again)
+		if err := w.Ask(s); err != nil {
+			t.Fatalf("%s: %v\n%s", s, err, again.String())
+		}
+		if !w.Answers.MonitorOnGateway || w.Answers.Monitor != nil {
+			t.Errorf("answering %s again moved the status page: %+v", s, w.Answers)
+		}
+	}
+}
