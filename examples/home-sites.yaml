@@ -121,6 +121,27 @@ storage:
     replication: 2
     capacity: 100G
 
+backup:
+  # Leave this out, or write `enabled: false`, and nothing is backed up;
+  # validate and apply say so on every run. See paisans.example.yaml for what
+  # each key means. Credentials go in with `paisans secrets set
+  # backup.destinations.<name>.access_key_id` and `.secret_access_key`.
+  schedule: daily
+  at: "03:00"                   # UTC
+  destinations:
+    # The first is the primary, and takes Postgres's write ahead log.
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    # A second provider, so one account or one region is not every backup.
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: example-backups
+      keep: { weekly: 4, monthly: 12 }
+
 apps:
   talk:
     kind: mbin
