@@ -134,11 +134,16 @@ The flow is one configuration edit and two commands:
 
 1. In one edit of `paisans.yaml`: the new site declared, with the roles it
    takes over; any app pinned to the evicted site pinned to the new one.
-2. `paisans site remove <old> --evict --execute`. The end state includes the
-   new site, so the remaining sites' mesh files list it as a peer already, and
-   its secrets are generated first if they are missing.
-3. `paisans apply`, which prepares the new host, applies it and creates its DNS
-   records, as for any site added to the configuration.
+2. `paisans site remove <old> --evict --execute`. The new site's secrets are
+   generated first if they are missing, so the end state can be rendered with
+   it, but the cut is rendered without it: the remaining sites' mesh files do
+   not list it yet. Its host is not prepared and its endpoint name may not
+   resolve, and `apply` stops before `wg syncconf` while a peer's endpoint does
+   not resolve, so listing it would make the cut wait on a host that does not
+   exist yet. The eviction neither reaches its host nor gates on it.
+3. `paisans apply`, which prepares the new host, applies it, creates its DNS
+   records and adds it as a peer on every remaining site, as for any site
+   added to the configuration.
 
 Evicting first means `site add` never has to wait for a site that will not
 answer, and the old host is out of the mesh before the new one joins it. What
