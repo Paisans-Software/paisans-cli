@@ -17,11 +17,9 @@ list commands.
 
 Out:
 
-* **Renaming the example's monitor site.** `examples/paisans.example.yaml`
-  names it `watch`, with its app at `status.example.org`, where the wizard's
-  defaults are `health` and `health.example.org`. The example is the fixture
-  most of the test suite and the render golden tree load, so the rename is its
-  own change, made once on its own branch.
+* **Renaming the example's monitor site.** The example's monitor site is
+  renamed to `health`, at `health.example.org`, to match the wizard's
+  defaults, in a change of its own.
 
 * **Editing an existing file.** `create` writes a file that does not exist and
   refuses one that does. Adding a site, an app or an admin later is an edit to
