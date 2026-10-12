@@ -479,3 +479,22 @@ func TestConvergeEndsWithDeploymentComplete(t *testing.T) {
 		t.Errorf("output:\n%s", out)
 	}
 }
+
+// The closing notes name only what the operator supplies. A sign in client
+// is owed until apply creates and records it, so it is not one of them.
+func TestConvergeLeftNamesNoSignInClient(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	convergeLeft(rec, cfg, secretsPath, configPath)
+	lines := rec.Lines()
+	if !strings.Contains(lines, "external.acme_dns_token is owed") {
+		t.Errorf("the DNS token was not named:\n%s", lines)
+	}
+	if strings.Contains(lines, "oidc_clients.") {
+		t.Errorf("a sign in client was named as something only the operator can provide:\n%s", lines)
+	}
+}
