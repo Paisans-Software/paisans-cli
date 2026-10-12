@@ -96,22 +96,17 @@ var catalogue = map[config.Kind][]Service{
 		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
 	},
 	config.KindOAuth2Proxy: {
-		// Two instances, deliberately: one gates visitors who have
-		// authenticated, one gates members. Which applications sit behind
-		// which is the community's access policy, declared per app.
-		//
-		// Ports are fixed here rather than derived: provisional runs on 4180,
-		// this kind's primary port in internal/render/plan.go's appPort, and
-		// members runs on the next port up, 4181. Both are spelled out in the
-		// compose and Caddy snippet templates too, because a Service here
-		// carries no port field and a port nobody declared is a port nobody
-		// can route to.
+		// One instance, admitting members only: it runs the sign-in and
+		// answers the gateway's forward_auth for every app that sets gated
+		// or auto_login. It listens on 4180, this kind's port in
+		// internal/render/plan.go's appPort, spelled out in the compose and
+		// Caddy snippet templates too, because a Service here carries no port
+		// field and a port nobody declared is a port nobody can route to.
 		//
 		// v7.15.4 checked against quay.io on 2026-09-15 by requesting the tag
 		// through quay.io's API, which resolved (an OCI image index with ten
 		// child manifests).
-		{Name: "provisional", Image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4", Purpose: "the gate for anyone signed in, listening on 4180"},
-		{Name: "members", Image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4", Purpose: "the gate for members, listening on 4181"},
+		{Name: "app", Image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4", Purpose: "the gate, admitting members, listening on 4180"},
 	},
 	config.KindOutline: {
 		{Name: "app", Image: "outlinewiki/outline:1.10.0", Purpose: "the application"},

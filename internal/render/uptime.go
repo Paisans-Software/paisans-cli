@@ -101,7 +101,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		// app still refuses an unsigned ActivityPub read, which an admin can
 		// turn off in the app with nothing in this configuration to say so.
 		// See docs/specs/2026-10-08-visibility-gate.md.
-		gated := app.Gate() != ""
+		gated := app.Gated
 		if !gated || health.Path != "/" {
 			monitors = append(monitors, seedMonitor{
 				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",

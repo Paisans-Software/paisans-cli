@@ -1076,25 +1076,23 @@ func TestAnAppCanHoldSeveralHostnames(t *testing.T) {
 	}
 }
 
-// The gate is two instances, not one: a visitor who has authenticated is not
-// yet a member, and the two are allowed to reach different applications.
-func TestTheAuthGateRendersBothInstances(t *testing.T) {
+// The gate is one instance on the gateway. No file declares it: the fixture's
+// gated talk brings it in.
+func TestTheAuthGateRendersOneInstanceOnTheGateway(t *testing.T) {
 	files := map[string]render.File{}
 	for _, f := range build(t).Files {
 		files[f.Path] = f
 	}
 
-	compose, ok := files["home-a/srv/paisans/f2a9/gate/compose.yaml"]
+	compose, ok := files["vm/srv/paisans/f2a9/gate/compose.yaml"]
 	if !ok {
-		t.Fatal("the gate was not rendered")
+		t.Fatal("the gate was not rendered on the gateway")
 	}
-	for _, service := range []string{"provisional:", "members:"} {
-		if !strings.Contains(compose.Content, service) {
-			t.Errorf("the gate is missing its %s instance:\n%s", service, compose.Content)
-		}
+	if strings.Count(compose.Content, "image: ") != 1 {
+		t.Errorf("the gate is not one instance:\n%s", compose.Content)
 	}
 
-	env, ok := files["home-a/srv/paisans/f2a9/gate/.env"]
+	env, ok := files["vm/srv/paisans/f2a9/gate/.env"]
 	if !ok {
 		t.Fatal("the gate rendered no environment")
 	}
@@ -1106,7 +1104,7 @@ func TestTheAuthGateRendersBothInstances(t *testing.T) {
 	}
 }
 
-// gate_provisional and gate_member are named snippets, not a hostname's
+// gate, gate_autologin and gate_signin are named snippets, not a hostname's
 // routing: nothing imports this file by path, and they must be defined before
 // anything can import them by name.
 func TestTheAuthGateShipsNamedSnippets(t *testing.T) {
@@ -1119,7 +1117,7 @@ func TestTheAuthGateShipsNamedSnippets(t *testing.T) {
 	if !ok {
 		t.Fatal("the gate's named snippets were not rendered onto the gateway")
 	}
-	for _, name := range []string{"(gate_provisional)", "(gate_member)"} {
+	for _, name := range []string{"(gate)", "(gate_autologin)", "(gate_signin)"} {
 		if !strings.Contains(gates.Content, name) {
 			t.Errorf("the gate's snippet file does not define %s:\n%s", name, gates.Content)
 		}
@@ -1143,8 +1141,8 @@ func TestTheGateIsDeclaredPerApp(t *testing.T) {
 	}
 	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"].Content
 
-	// talk sits behind the member gate in the fixture.
-	if !strings.Contains(caddyfile, "import gate_member") {
+	// talk sits behind the gate in the fixture.
+	if !strings.Contains(hostBlock(t, caddyfile, "talk.example.org"), "import gate\n") {
 		t.Errorf("a gated app's host block does not import its gate:\n%s", caddyfile)
 	}
 
@@ -1152,7 +1150,7 @@ func TestTheGateIsDeclaredPerApp(t *testing.T) {
 	// passkey prompt, so chat and its apex must never be gated.
 	for _, hostname := range []string{"chat.example.org", "example.org"} {
 		block := hostBlock(t, caddyfile, hostname)
-		if strings.Contains(block, "import gate_") {
+		if strings.Contains(block, "import gate") {
 			t.Errorf("%s is gated, which breaks every Matrix client:\n%s", hostname, block)
 		}
 	}
@@ -1438,7 +1436,7 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 		block := hostBlock(t, caddyfile, host)
 		// talk is gated members in the fixture, which is what makes this
 		// assertion able to fail: its media hostname must not inherit it.
-		if strings.Contains(block, "import gate_") {
+		if strings.Contains(block, "import gate") {
 			t.Errorf("%s must never be gated: a federating server fetching an image is a machine, and Outline's URLs carry their own signature:\n%s", host, block)
 		}
 		if !strings.Contains(block, "import /etc/caddy/snippets/"+app+"-media.caddy") {
@@ -1448,7 +1446,7 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 			t.Errorf("no media snippet rendered for %s", app)
 		}
 	}
-	if !strings.Contains(hostBlock(t, caddyfile, "talk.example.org"), "import gate_member") {
+	if !strings.Contains(hostBlock(t, caddyfile, "talk.example.org"), "import gate\n") {
 		t.Error("the fixture gates talk itself, and that gate must stay on the app's own hostname")
 	}
 
@@ -1878,10 +1876,10 @@ func TestACollisionNamesTheSettingThatOwnsTheValue(t *testing.T) {
 
 // Compose gives `environment:` precedence over `env_file`, so an env key the
 // stack's compose.yaml already sets would land in .env and be silently
-// shadowed. The gate's members instance sets its group under environment:,
-// which is exactly where an operator reaching for this would collide.
+// shadowed. The gate sets its group under environment:, which is exactly
+// where an operator reaching for this would collide.
 func TestAnEnvKeyComposeAlreadySetsIsRefused(t *testing.T) {
-	gate := planFiles(build(t))["home-a/srv/paisans/f2a9/gate/compose.yaml"]
+	gate := planFiles(build(t))["vm/srv/paisans/f2a9/gate/compose.yaml"]
 	if !strings.Contains(gate, "OAUTH2_PROXY_ALLOWED_GROUPS:") {
 		t.Fatalf("the gate's compose.yaml no longer sets the group under environment:, so this test would check nothing:\n%s", gate)
 	}
@@ -1891,7 +1889,7 @@ func TestAnEnvKeyComposeAlreadySetsIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a key compose.yaml sets under environment: must stop the build, or the .env value is silently shadowed")
 	}
-	for _, want := range []string{"config-key-already-rendered", "apps.gate.config.OAUTH2_PROXY_ALLOWED_GROUPS", "compose.yaml", "apps.gate.settings.members_group"} {
+	for _, want := range []string{"config-key-already-rendered", "apps.gate.config.OAUTH2_PROXY_ALLOWED_GROUPS", "compose.yaml"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error should name %q, got: %v", want, err)
 		}
@@ -2805,12 +2803,12 @@ func TestRoutesBoundTheWaitOnAnotherMachine(t *testing.T) {
 // the order docs/specs/2026-10-08-visibility-gate.md sets: ActivityPub reads
 // with their answers filtered, deliveries on the inboxes only, auto-login,
 // open paths, token paths with a bearer token, and then the gate. A public
-// host block carries none of it.
+// host block without auto-login carries none of it.
 func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	cfg := fixture(t)
 	for _, name := range []string{"docs", "blog"} {
 		app := cfg.Apps[name]
-		app.VisibilityGate = config.GateMember
+		app.Gated = true
 		cfg.Apps[name] = app
 	}
 	caddyfile := planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
@@ -2827,11 +2825,11 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 		"@autologin_0 {",
 		"not header Cookie *PHPSESSID*",
 		"not header Cookie *talk_autologin*",
-		"redir * /oauth/oidc/connect 302",
+		"import gate_autologin /oauth/oidc/connect talk_autologin",
 		"@open path /oauth/* ",
 		"/api/client /api/info /api/instance",
 		"path /api/*\n\t\theader Authorization \"Bearer *\"",
-		"import gate_member\n",
+		"import gate\n",
 	}
 	at := 0
 	for _, want := range order {
@@ -2843,7 +2841,7 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	}
 
 	docs := hostBlock(t, caddyfile, "docs.example.org")
-	for _, want := range []string{"path /api/* /mcp", `header Authorization "Bearer *"`, "/_health", "/auth/oidc.callback", "import gate_member"} {
+	for _, want := range []string{"path /api/* /mcp", `header Authorization "Bearer *"`, "/_health", "/auth/oidc.callback", "import gate\n"} {
 		if !strings.Contains(docs, want) {
 			t.Errorf("docs' gated host block lacks %q:\n%s", want, docs)
 		}
@@ -2855,45 +2853,76 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	}
 
 	blog := hostBlock(t, caddyfile, "blog.example.org")
-	for _, want := range []string{"path /api/collections/*/inbox", "@autologin_1 {", "not header Cookie *wfu*", "redir * /oauth/generic 302"} {
+	for _, want := range []string{"path /api/collections/*/inbox", "@autologin_1 {", "not header Cookie *wfu*", "import gate_autologin /oauth/generic blog_autologin", "import gate\n"} {
 		if !strings.Contains(blog, want) {
 			t.Errorf("blog's gated host block lacks %q:\n%s", want, blog)
 		}
 	}
+	// A gated app's sign-in page is behind the gate already, so it needs no
+	// detour through the gate's sign-in.
+	if strings.Contains(blog, "@gate_signin") {
+		t.Errorf("a gated host block sends its sign-in page through the gate's sign-in:\n%s", blog)
+	}
 
 	web := hostBlock(t, caddyfile, "web.example.org")
-	if strings.Contains(web, "handle") || strings.Contains(web, "import gate_") {
+	if strings.Contains(web, "handle") || strings.Contains(web, "import gate") {
 		t.Errorf("a public host block carries gate handling:\n%s", web)
 	}
-}
 
-// The pending page names the community without letting the name inject
-// anything: HTML escaped, and braces as entities, because Caddy expands a
-// {placeholder} in a response body.
-func TestThePendingPageEscapesTheCommunityName(t *testing.T) {
-	cfg := fixture(t)
-	cfg.Community.Name = `<b>{env.ACME_DNS_TOKEN}</b>`
-	gate := planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]
-	if !strings.Contains(gate, "@pending path /pending") {
-		t.Fatalf("the gate's hostname serves no pending page:\n%s", gate)
-	}
-	if strings.Contains(gate, "{env.") || strings.Contains(gate, "<b>") {
-		t.Errorf("the community name reached the page unescaped:\n%s", gate)
-	}
-	if !strings.Contains(gate, "&lt;b&gt;&#123;env.ACME_DNS_TOKEN&#125;&lt;/b&gt;") {
-		t.Errorf("the community name is not on the page, escaped:\n%s", gate)
+	talkApp := cfg.Apps["talk"]
+	talkApp.AutoLogin = false
+	cfg.Apps["talk"] = talkApp
+	talk = hostBlock(t, planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "talk.example.org")
+	if strings.Contains(talk, "@autologin") || !strings.Contains(talk, "import gate\n") {
+		t.Errorf("gated without auto_login should carry the gate and no auto-login:\n%s", talk)
 	}
 }
 
-// gate_member turns the gate's answers into pages a person can act on: sign
-// in for no session, the pending page for a session that is not a member's.
+// A public app with auto-login stays public: the gate's session is checked
+// only on the auto-login paths, and a visitor on its sign-in page with no
+// session signs in at the gate first. Nothing else meets the gate.
+func TestAPublicHostBlockWithAutoLoginStaysPublic(t *testing.T) {
+	caddyfile := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	blog := hostBlock(t, caddyfile, "blog.example.org")
+	order := []string{
+		"request_header -X-Auth-Request-*",
+		"@autologin_0 {",
+		"path /login",
+		"header Cookie *_oauth2_proxy*",
+		"not header Cookie *blog_autologin*",
+		"import gate_autologin /oauth/generic blog_autologin",
+		"@autologin_1 {",
+		"not header Cookie *wfu*",
+		"@gate_signin {",
+		"path /login",
+		"not header Cookie *_oauth2_proxy*",
+		"not header Cookie *blog_gatesignin*",
+		"import gate_signin blog_gatesignin",
+		"handle {\n\t\timport /etc/caddy/snippets/blog.caddy",
+	}
+	at := 0
+	for _, want := range order {
+		i := strings.Index(blog[at:], want)
+		if i < 0 {
+			t.Fatalf("blog's public host block lacks %q after position %d:\n%s", want, at, blog)
+		}
+		at += i + len(want)
+	}
+	for _, refused := range []string{"import gate\n", "@activitypub", "@open", "@token"} {
+		if strings.Contains(blog, refused) {
+			t.Errorf("a public host block with auto-login carries %q:\n%s", refused, blog)
+		}
+	}
+}
+
+// The gate turns a request with no session into a redirect a person can
+// follow, carrying the marker the monitor looks for.
 func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
 	gates := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"]
 	for _, want := range []string{
 		`header Location "https://gate.example.org/oauth2/start?rd=`,
-		"@gate_pending status 403",
-		`header Location "https://gate.example.org/pending?rd=`,
 		`respond "` + render.GateMarker + `" 302`,
+		`redir "https://gate.example.org/oauth2/start?rd=`,
 	} {
 		if !strings.Contains(gates, want) {
 			t.Errorf("the gate snippets lack %q:\n%s", want, gates)
@@ -2919,16 +2948,6 @@ func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
 		if !regexp.MustCompile(`(?m)^\t\{block\}$`).Match(body) {
 			t.Errorf("%s federates and can be gated, but its snippet has no {block} inside reverse_proxy for the ActivityPub filter", kind)
 		}
-	}
-}
-
-// A community name cannot end the pending page's heredoc early.
-func TestThePendingPageHoldsTheNameOnOneLine(t *testing.T) {
-	cfg := fixture(t)
-	cfg.Community.Name = "Fixture\nHTML 200\n}"
-	gate := planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]
-	if n := len(regexp.MustCompile(`(?m)^\s*HTML 200$`).FindAllString(gate, -1)); n != 1 {
-		t.Errorf("a newline in the community name reached the page:\n%s", gate)
 	}
 }
 

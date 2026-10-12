@@ -1858,3 +1858,67 @@ regenerated and its diff read. `TestMbinOpensItsAPIToATokenOnly` fails with
 the gate record reverted and passes with it. Not run against a live Mbin or a
 mobile app: which routes a given app calls before sign-in is read from Mbin's
 access rules, not observed.
+
+## 2026-10-12: The gate is two booleans on the app, and the toolkit runs it
+
+Founder decisions, in session. The design is the amended
+`docs/specs/2026-10-08-visibility-gate.md`.
+
+### What was decided
+
+* **Two per-app booleans, `gated` and `auto_login`**, both default false,
+  replace `visibility_gate: public | member | provisional`. `gated: true` is
+  the member gate. `auto_login: true` skips the app's own sign-in button for
+  a member the gate has signed in, on a gated app or a public one.
+* **The provisional concept is retired.** No gate admits a signed-in
+  non-member, so the gate is one oauth2-proxy instance with
+  `OAUTH2_PROXY_ALLOWED_GROUPS=members`, and the second instance, the 403
+  redirect and the `/pending` page are gone.
+* **The gate is never declared.** When any app sets either key, `config.Load`
+  derives an app named `gate` at `gate.<community.domain>`, pinned to the
+  first gateway site. A declared `oauth2-proxy` app is refused.
+* **A public app can take auto-login.** Its auto-login paths check the gate's
+  session with `forward_auth` before redirecting, and its sign-in page, with
+  no gate session, signs in at the gate first and comes back holding one.
+* **`validate` refuses** `auto_login` on a kind with no auto-login rule
+  (`auto-login-without-a-rule`) and either key on an app whose hostname is
+  outside the community's domain (`uses-gate-outside-the-domain`). The gate
+  rules are renamed for the key: `gated-on-ungateable-kind`,
+  `gated-without-signed-fetch`.
+
+### Why
+
+The gate took a declared app with a hostname and a placement, plus a
+three-valued key on each app, to say one thing: whether members only may read
+an app. The founder asked for a boolean. With the provisional group retired,
+the two-instance split had nothing left to separate. Deriving the gate on the
+gateway keeps it beside the edge it serves, so it is down only when the
+gateway is. Auto-login on a public app gives single sign-on to apps that stay
+readable by anyone; it checks the session rather than trusting the cookie's
+name because, with no gate behind it, a stale or forged cookie would otherwise
+push a visitor into a sign-in they never asked for.
+
+### What was weighed
+
+* **Running the gate in every deployment.** Chosen first, then replaced by
+  running it whenever an app sets either key: with `auto_login` its own
+  key, a deployment that wants neither needs no gate.
+* **One key for both.** A public app with no auto-login, or a gated app with
+  none, could not be expressed.
+* **Keeping the `provisional` value as an escape hatch.** Retired with the
+  concept.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l .` empty, the
+golden trees regenerated and their diffs read. `paisans validate` on
+`examples/paisans.example.yaml`: two warnings, no refusals. The rendered
+gateway configuration passed `caddy validate` in
+`ghcr.io/paisans-software/caddy:2`. The public auto-login host block, run in
+that image against a stub gate, behaved as specified: an anonymous visitor read
+the app; `/login` with no session went to the gate's sign-in with the sign-in
+breaker set; a member was sent to the OIDC route with the loop breaker set; a
+refused session came back to its own URL with the loop breaker set, then read
+the app; a member already signed into the app, or on a deep link, read it. With
+the gate unreachable, a browser holding the gate's cookie got 502 on `/`, and
+one without read the app. Not run against a live oauth2-proxy or Pocket ID.

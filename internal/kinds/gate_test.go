@@ -140,3 +140,14 @@ func TestMbinOpensItsAPIToATokenOnly(t *testing.T) {
 		t.Errorf("mbin opens %v of its API, want exactly %v", api, want)
 	}
 }
+
+// A kind with auto-login names the sign-in page a public app sends through the
+// gate's sign-in, and a kind without has none, since nothing would fire after.
+func TestAutoLoginNamesTheSignInPage(t *testing.T) {
+	for _, kind := range config.Kinds() {
+		spec := kinds.GateFor(kind)
+		if (len(spec.AutoLogin) > 0) != (spec.SignInPath != "") {
+			t.Errorf("%s: %d auto-login rules, sign-in page %q", kind, len(spec.AutoLogin), spec.SignInPath)
+		}
+	}
+}

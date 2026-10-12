@@ -39,8 +39,15 @@ type GateSpec struct {
 	TokenPaths []string
 
 	// AutoLogin skips the app's own "Log in with" button for someone the gate
-	// already let through.
+	// already let through. An app takes it only with auto_login: true.
 	AutoLogin []AutoLoginRule
+
+	// SignInPath is the app's own sign-in page. On a public app with
+	// auto_login, a visit there with no gate session goes through the gate's
+	// sign-in first and comes back with one, so auto-login can fire: the
+	// app's own "Log in" link becomes the community's sign-in. Empty for a
+	// kind with no auto-login.
+	SignInPath string
 
 	// SignedFetch is how a federating kind refuses an unsigned ActivityPub
 	// read. Nil for a kind that does not federate, or that cannot refuse one,
@@ -133,6 +140,9 @@ var gates = map[config.Kind]GateSpec{
 			// defaults (framework.yaml:26-31, security.yaml:59-66).
 			AbsentCookies: []string{"PHPSESSID", "REMEMBERME"},
 		}},
+		// The sign-in page Symfony sends an unauthenticated visitor to
+		// (security.yaml:90 at v1.15.0+paisans).
+		SignInPath: "/login",
 		// MBIN_AUTHORIZED_FETCH, on unless settings.authorized_fetch turns it
 		// off, and MBIN_USE_FEDERATION_ALLOW_LIST when gated, both named in
 		// MBIN_LOCKED_SETTINGS, so an admin cannot turn either off. The
@@ -180,6 +190,8 @@ var gates = map[config.Kind]GateSpec{
 			// only its absence means anything: a first visit.
 			{Paths: []string{"/"}, Target: "/oauth/generic", AbsentCookies: []string{"wfu"}},
 		},
+		// The sign-in page, the one the rule above sends to /oauth/generic.
+		SignInPath: "/login",
 		// authorized_fetch requires a valid signature on every ActivityPub
 		// read and inbox delivery, public or private, and leaves only
 		// discovery and the instance actor open (authorized_fetch.go:35-50 at
@@ -228,7 +240,8 @@ var gates = map[config.Kind]GateSpec{
 	// A Matrix client is not a browser and will not follow a redirect to a
 	// passkey prompt, and neither will a federating server.
 	config.KindSynapse: {Gateable: false},
-	// The sign-in flow itself: gating it would gate the login.
+	// The sign-in flow itself: gating it would gate the login. The gate is
+	// never declared, so the second can only be reached through a test.
 	config.KindPocketID:    {Gateable: false},
 	config.KindOAuth2Proxy: {Gateable: false},
 	// The monitor is what an admin opens when the sites it watches are down.

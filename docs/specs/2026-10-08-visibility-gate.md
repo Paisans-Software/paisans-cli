@@ -2,7 +2,10 @@
 
 Status: approved in session on 2026-10-08, implemented on
 `feat/visibility-gate`. Founder decisions throughout; the federation part is
-called out where it lands, and recorded in `docs/decisions.md`.
+called out where it lands, and recorded in `docs/decisions.md`. Amended
+2026-10-12, founder decision: the key became two booleans, `gated` and
+`auto_login`; the gate is derived rather than declared, and is one instance
+admitting members; a public app can take auto-login.
 
 An app can be made readable only by people signed in to the community. Mbin
 and WriteFreely both serve every page to anonymous visitors and Mbin has no
@@ -11,8 +14,7 @@ them at Caddy and derives everything else the app needs from its kind.
 
 Four parts:
 
-1. **The key**, `visibility_gate: public | member | provisional`, replacing
-   `gate:`.
+1. **The keys**, `gated` and `auto_login`, two booleans on the app.
 2. **The gate covers everything** on a gated hostname except the classes that
    carry their own authentication, which the app verifies.
 3. **Each kind declares what it needs around the gate** in `internal/kinds`:
@@ -25,28 +27,56 @@ Four parts:
 Two dependencies live in other repositories: a status-only health route in
 the Mbin fork and in the WriteFreely fork. See *Fork health routes*.
 
-## The key
+## The keys
 
 ```yaml
 apps:
   talk:
     kind: mbin
     hostname: talk.example.org
-    visibility_gate: member
+    gated: true
+    auto_login: true
+  blog:
+    kind: writefreely
+    hostname: blog.example.org
+    auto_login: true
 ```
 
-| Value | Who reads the app | Gate instance |
-|---|---|---|
-| `public` | anyone | none |
-| `member` | a signed-in member of the community | `members`, which carries the group restriction |
-| `provisional` | anyone signed in, member or not | `provisional`, which admits every signed-in user |
+| `gated` | `auto_login` | Someone with no session | A member the gate has signed in |
+|---|---|---|---|
+| `false` | `false` | reads the app | reads the app |
+| `true` | `false` | is sent to sign in | is let through, and meets the app's own sign-in button |
+| `false` | `true` | reads the app; its sign-in page signs in at the gate first | is signed straight into the app |
+| `true` | `true` | is sent to sign in | is let through and signed straight into the app |
 
-Absent means `public`. The `gate:` key is not read: `KnownFields` refuses it as
-an unknown key, and a deployment is redeployed rather than converted.
+Both default to `false`. The keys they replaced, `gate:` and
+`visibility_gate:`, are not read: `KnownFields` refuses each as an unknown
+key, and a deployment is redeployed rather than converted.
 
-`provisional` is accepted on any gateable kind and warned about
-(`visibility-gate-provisional`), because it admits every signed-in visitor,
-including people who have not been accepted into the community.
+## The gate app
+
+Nobody declares the gate. When any app sets `gated` or `auto_login`,
+`config.Load` adds an app named `gate`, of kind `oauth2-proxy`, at
+`gate.<community.domain>`, pinned to the first gateway site, marked `Derived`
+(`deriveGate`). From there it is an app like any other: its client at Pocket
+ID, its cookie secret, its DNS record, its monitor check and its stack are
+made the way every app's are.
+
+It is one container on 4180 with `OAUTH2_PROXY_ALLOWED_GROUPS=members`. It
+runs the sign-in and answers the gateway's `forward_auth`, and it fails
+closed: a session outside `members` gets oauth2-proxy's 403. Its session
+cookie, `_oauth2_proxy`, is scoped to `.<community.domain>`, so one sign-in
+covers every app under the domain.
+
+Refused:
+
+* an app of kind `oauth2-proxy` in the file;
+* an app named `gate`, or no gateway site, while an app uses the gate;
+* `gated` or `auto_login` on an app with a hostname outside the community's
+  domain (`uses-gate-outside-the-domain`), because the gate's cookie never
+  reaches it;
+* an app using the gate whose member group is not `members`
+  (`oidc-member-group-disagrees-with-gate`).
 
 ## What reaches the app without a gate session
 
@@ -57,13 +87,13 @@ only when it is one of these, matched in this order:
 |---|---|---|
 | ActivityPub read | `GET` whose `Accept` names `application/activity+json` or `application/ld+json` | the app, by signed fetch; Caddy filters the answer |
 | ActivityPub delivery | `POST` whose `Content-Type` names either, on the kind's `InboxPaths` | the app, which verifies the delivery's signature (WriteFreely by `authorized_fetch`, on by default from the `stack-1` images) |
-| Auto-login | see *Auto-login* | the gate, whose session it requires |
+| Auto-login | see *Auto-login*, only with `auto_login: true` | the gate, which checks the session |
 | Open paths | the kind's `OpenPaths` | nothing; these hold no private content |
 | Token paths | the kind's `TokenPaths` **and** `Authorization: Bearer` | the app, which refuses a token it did not issue |
 
 Everything else goes to the gate: `curl`, a JSON request with no token, a
 request asking for `*/*`, a `HEAD`. With no session the gate redirects to sign
-in; with a session that is not a member's, to the pending page. The redirect
+in; a session that is not a member's gets oauth2-proxy's 403. The redirect
 carries no body from the app.
 
 Each class is its own `handle` with a named matcher, and Caddy keeps those in
@@ -129,6 +159,7 @@ type GateSpec struct {
 	InboxPaths  []string
 	TokenPaths  []string
 	AutoLogin   []AutoLoginRule
+	SignInPath  string
 	SignedFetch *SignedFetch
 }
 ```
@@ -140,7 +171,7 @@ monitor is what an admin opens when the sites the gate signs in through are
 down, so a gated monitor is unreadable at exactly the moment it exists for
 and its break glass password sign-in would sit behind the sign-in it is the
 fallback for. A gate on any of them is refused
-(`visibility-gate-on-ungateable-kind`). Every kind has a record, and a test
+(`gated-on-ungateable-kind`). Every kind has a record, and a test
 fails for a kind without one.
 
 The kind's health route is added to its open paths when it is a dedicated
@@ -192,47 +223,59 @@ API is a token path.
 
 ## Auto-login
 
-A member who has passed the gate holds a Pocket ID session, so the app's own
-sign-in completes without a prompt. Each rule redirects a request on its paths
-to the app's OIDC start route when:
+A member the gate has signed in holds a Pocket ID session, so the app's own
+sign-in completes without a prompt. With `auto_login: true`, each of the kind's
+rules sends a request on its paths to the app's OIDC start route when:
 
 * it is a `GET` or `HEAD` asking for `text/html` with no `Authorization`;
-* the gate's session cookie, `_oauth2_proxy`, is present, so an anonymous
-  visitor still meets the gate;
+* the gate's session cookie, `_oauth2_proxy`, is present;
 * none of the rule's absent cookies is present, which is how the kind says
   "already signed in here";
-* the loop breaker, `<app>_autologin`, is absent.
+* the loop breaker, `<app>_autologin`, is absent;
+* and the gate, asked with `forward_auth`, answers 2xx for that session.
 
-The redirect sets `<app>_autologin` for two minutes. It is not optional: an
-app's Pocket ID client can refuse a user the gate admitted, and without it that
-user would bounce between the app's sign-in page and its OIDC route forever.
+When the gate refuses the session, the request is sent back to the URL it
+asked for with the loop breaker set, so it reaches the app as it would have
+for two minutes. The redirect to the OIDC route sets the loop breaker too. It
+is not optional: an app's Pocket ID client can refuse a member the gate
+admitted, and without it that member would bounce between the app's sign-in
+page and its OIDC route forever.
 
 Rules fire on `/` and the sign-in page only. Neither Mbin's nor WriteFreely's
 OIDC start route takes a destination (OidcController.php:14-20, oauth.go:135-
 166), so a deep link sent through one would land on the front page.
+`auto_login: true` on a kind with no rules is refused
+(`auto-login-without-a-rule`); Outline has none because its sign-in screen
+redirects itself when OIDC is its only provider (Login.tsx:79-93).
+
+### On a public app
+
+Nobody passes the gate on a public app, so a visitor holds the gate's session
+only if they signed in somewhere gated. So a public app with auto-login also
+sends a visit to its sign-in page (`GateSpec.SignInPath`, `/login` for both
+kinds) with no gate session through the gate's `/oauth2/start`, back to the
+same page, setting `<app>_gatesignin` for two minutes so a visitor who abandons
+the sign-in is not sent there again at once. They come back holding the
+session, and auto-login fires: the app's own "Log in" link is the community's
+sign-in. Nothing else on a public app meets the gate.
+
+A gated app's sign-in page gets no such redirect: everything else on it already
+needs the gate's session, and Mbin's `/login` ends a native app's WebView
+sign-in, which holds no gate session.
 
 ## The gate snippets
 
-`gate_member` and `gate_provisional` strip `X-Auth-Request-*`, `forward_auth`
-to their instance and copy the verified identity headers back. They answer a
-person with a page rather than oauth2-proxy's raw status:
+The gate's file defines three named snippets, imported at the top of the
+gateway's `Caddyfile`:
 
-* **401**, no session: redirect to `https://<gate hostname>/oauth2/start?rd=`
-  the original URL.
-* **403**, signed in but not a member (`gate_member` only): redirect to
-  `https://<gate hostname>/pending?rd=` the original URL.
-
-Both redirects carry a fixed body, `render.GateMarker`, so the monitor can tell
-the gate's redirect from an app's own.
-
-### The pending page
-
-The gate app's hostname serves `/pending`, a static page: the community's name
-and a sentence saying the account is signed in but not yet a member, and that
-approval can take up to an hour to arrive (the session's groups refresh with
-its cookie). It never echoes `rd` or any other part of the request, because
-Caddy placeholders are not HTML escaped, and it escapes braces in the
-community's name, because Caddy expands a `{placeholder}` in a response body.
+* `gate`, the final `handle` of a gated host block. It strips
+  `X-Auth-Request-*`, `forward_auth`s to the gate and copies the verified
+  identity headers back. A **401**, no session, becomes a redirect to
+  `https://<gate hostname>/oauth2/start?rd=` the original URL, carrying a
+  fixed body, `render.GateMarker`, so the monitor can tell the gate's redirect
+  from an app's own. A **403** is oauth2-proxy's own.
+* `gate_autologin <target> <loop breaker>`, the auto-login handle above.
+* `gate_signin <loop breaker>`, a public app's sign-in redirect above.
 
 ## Signed fetch
 
@@ -240,7 +283,7 @@ community's name, because Caddy expands a `{placeholder}` in a response body.
 that federates refuses every unsigned ActivityPub read, and reads only from
 instances on its allow list. An empty allow list federates with nobody until an
 admin adds a peer. A gated federating app whose kind records no way to refuse
-an unsigned read is refused (`visibility-gate-without-signed-fetch`).
+an unsigned read is refused (`gated-without-signed-fetch`).
 
 * **Mbin.** The toolkit renders `MBIN_AUTHORIZED_FETCH=true` and
   `MBIN_USE_FEDERATION_ALLOW_LIST=true` when the app is gated. Mbin reads them
@@ -262,7 +305,7 @@ true), and every setting the templates render is locked. Mbin renders
 `MBIN_AUTHORIZED_FETCH` always; WriteFreely renders `[app] authorized_fetch`
 and names it in `config.ini`'s `locked_settings`. A gated app with
 `authorized_fetch: false` is refused by the same rule,
-`visibility-gate-without-signed-fetch`. WriteFreely's signed fetch record is
+`gated-without-signed-fetch`. WriteFreely's signed fetch record is
 now `app.authorized_fetch` and `app.private` together: authorized fetch
 requires a signature on every read and delivery, and private mode is what
 admits a signer only through the allowlist (with no allowlist,
@@ -383,11 +426,12 @@ it, and until then is a known limit below.
   a token still needs `/oauth/authorize`, which needs a session and stays
   behind the gate. It is open because an MCP client registers itself before
   it can sign in.
-* **Auto-login checks the gate cookie's name, not its validity**, because it
-  runs before the gate. A forged cookie sends a visitor to the app's OIDC start
-  route, an open path anyway, and every request after that still goes through
-  the gate. A signed-in non-member sent there meets the app's own Pocket ID
-  client, which may refuse them, rather than the pending page.
+* **While the gate is down, auto-login paths answer the edge's error** to a
+  browser holding the gate's session: `forward_auth` cannot reach the gate,
+  so the front page and sign-in page of an app with auto-login fail for that
+  browser, public app included. Every other page, and every visitor without
+  the session, is served as before. The gate runs on the gateway, so this is
+  mostly the gateway's own outage.
 * **`rd` is not URL encoded**, because Caddy has no placeholder that encodes
   one: a deep link with more than one query parameter loses the extras on the
   visit that crosses sign-in.

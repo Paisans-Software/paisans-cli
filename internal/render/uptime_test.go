@@ -168,12 +168,12 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 	}
 
 	docs := cfg.Apps["docs"]
-	docs.VisibilityGate = config.GatePublic
+	docs.Gated = false
 	cfg.Apps["docs"] = docs
 	if _, ok := byName(renderSeed(t, cfg, secrets))["docs — gate"]; ok {
-		t.Error("visibility_gate: public is no gate, yet outline has a gate check")
+		t.Error("gated: false is no gate, yet outline has a gate check")
 	}
-	docs.VisibilityGate = config.GateProvisional
+	docs.Gated = true
 	cfg.Apps["docs"] = docs
 	gated := byName(renderSeed(t, cfg, secrets))
 	if got := gated["docs — public"]["expected_status"]; got != "200" {
@@ -196,7 +196,7 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 func TestAGatedWriteFreelyIsProvedByItsOutbox(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	blog := cfg.Apps["blog"]
-	blog.VisibilityGate = config.GateMember
+	blog.Gated = true
 	cfg.Apps["blog"] = blog
 	monitors := byName(renderSeed(t, cfg, secrets))
 	signed := monitors["blog — signed fetch"]
@@ -218,7 +218,7 @@ func TestAGatedWriteFreelyIsProvedByItsOutbox(t *testing.T) {
 func TestAnUngatedMbinHasNoPrivateAPICheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	talk := cfg.Apps["talk"]
-	talk.VisibilityGate = config.GatePublic
+	talk.Gated = false
 	cfg.Apps["talk"] = talk
 	for name := range byName(renderSeed(t, cfg, secrets)) {
 		if strings.Contains(name, "private API") {

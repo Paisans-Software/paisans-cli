@@ -53,7 +53,7 @@ func TestRefusals(t *testing.T) {
 			edits: []func(string) string{replace("members: [home-a, home-b, home-c, vm]", "members: [home-a, home-b, vm]")},
 			want:  "two etcd voters", hint: "the configuration without home-b would be refused"},
 		{name: "the first Garage site", site: "home-a",
-			edits: []func(string) string{replace("placement: { pinned: home-a }\n    # An ini", "placement: { pinned: watch }\n    # An ini"), replace("placement: { pinned: home-a }\n    settings:\n      homeserver", "placement: { pinned: watch }\n    settings:\n      homeserver"), replace("placement: { pinned: home-a }\n  status", "placement: { pinned: watch }\n  status")},
+			edits: []func(string) string{replace("placement: { pinned: home-a }\n    # An ini", "placement: { pinned: watch }\n    # An ini"), replace("placement: { pinned: home-a }\n    settings:\n      homeserver", "placement: { pinned: watch }\n    settings:\n      homeserver")},
 			want:  "first in storage.garage.sites", hint: "home-a is first in storage.garage.sites"},
 		{name: "--host-gone with --delete-data", site: "home-b", opts: siteremove.Options{HostGone: true, DeleteData: true}, want: "Drop one of them", hint: "--host-gone and --delete-data cannot be used together"},
 		{name: "an unhealthy etcd member", site: "home-b", world: func(w *world) { w.etcdDown["home-c"] = true }, want: "home-c's etcd is unhealthy"},

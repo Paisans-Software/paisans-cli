@@ -81,7 +81,10 @@ apps:
     kind: mbin
     hostname: talk.example.org
     placement: cluster
-    visibility_gate: member
+    # Behind the gate, with auto-login: a member the gate signed in goes
+    # straight into Mbin.
+    gated: true
+    auto_login: true
     settings:
       # Where the contact form sends to, so the golden .env shows it apart
       # from the sender the smtp block below gives.
@@ -118,7 +121,6 @@ apps:
     hostnames:
       wellknown: example.org
     placement: { pinned: vm }
-    visibility_gate: public
     images:
       postgres: postgres:17-trixie
     # A yaml key in homeserver.yaml. Not url_preview_enabled: Synapse
@@ -130,6 +132,9 @@ apps:
   blog:
     kind: writefreely
     hostname: blog.example.org
+    # Public, with auto-login: anyone reads the blog, and a member the gate
+    # signed in is signed into it too.
+    auto_login: true
     # Pinned as an ordinary choice, not a forced one: the writefreely-wisp
     # fork this kind means supports Postgres and S3, so it could join the
     # cluster instead.
@@ -150,12 +155,6 @@ apps:
     # Not show_labs_settings, which the template already writes.
     config:
       default_theme: dark
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    # Pinned for the same reason. oauth2-proxy holds its sessions in a cookie
-    # rather than in the database, so cluster placement is refused here too.
-    placement: { pinned: home-a }
   status:
     kind: uptime
     hostname: status.example.org

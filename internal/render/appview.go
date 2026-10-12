@@ -55,14 +55,9 @@ type appValues struct {
 	// COOKIE_DOMAINS.
 	Domain string
 
-	// Gate is the app's visibility gate instance, member or provisional, or
-	// empty when it is public. A gated app that federates turns on its
+	// Gated is the app's gated key. A gated app that federates turns on its
 	// kind's signed fetch, because the gate leaves ActivityPub to the app.
-	Gate string
-
-	// CommunityName is community.name, for the few pages the toolkit itself
-	// serves to people (Eg: the gate's pending page).
-	CommunityName string
+	Gated bool
 
 	// TrustedProxies is the mesh subnet, never a host address, so the gateway
 	// role can move without rewriting every application's configuration.
@@ -140,13 +135,6 @@ type appValues struct {
 	// connection the gateway already had open to it would otherwise wait for
 	// TCP to give up.
 	UpstreamElsewhere bool
-
-	// GateMembersPort and GateMembersUpstreams describe the oauth2-proxy
-	// kind's second instance, the one enforcing "members". They are populated
-	// only for that kind: every other kind's template set has one service on
-	// one port, already covered by Upstreams and App.Port, and needs neither.
-	GateMembersPort      int
-	GateMembersUpstreams []string
 
 	// MASPort, MASUpstreams, MASDBName and MASUpstreamProviderID describe the
 	// synapse kind's second container, Matrix Authentication Service. They are
@@ -401,8 +389,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		Hostname:        planned.Hostname,
 		PublicURL:       "https://" + planned.Hostname,
 		Domain:          p.cfg.Community.Domain,
-		CommunityName:   p.cfg.Community.Name,
-		Gate:            app.Gate(),
+		Gated:           app.Gated,
 		TrustedProxies:  p.mesh,
 		DBHost:          dbHost,
 		DBPort:          dbPort,
@@ -442,10 +429,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		// The Caddy in front of a monitor's app is on the monitor itself, so
 		// the app cannot die while its edge stays up.
 		v.UpstreamElsewhere = false
-	}
-	if planned.Kind == config.KindOAuth2Proxy {
-		v.GateMembersPort = gateMembersPort
-		v.GateMembersUpstreams = p.upstreamsOnPort(planned.Name, gateMembersPort)
 	}
 	if kinds.SendsMail(planned.Kind) {
 		v.SMTP = p.smtpFor(planned.Name)
