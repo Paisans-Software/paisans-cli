@@ -339,3 +339,31 @@ func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
 		}
 	}
 }
+
+// Answering the machines again keeps the status page beside the gateway only
+// while there is exactly one gateway with a public address and no machine
+// already holds the monitor role.
+func TestAnsweringTheMachinesAgainSettlesTheMonitorOnTheGateway(t *testing.T) {
+	gw := func(name string) Site {
+		return Site{Name: name, Roles: []config.Role{config.RoleGateway}, PublicAddress: "203.0.113.10"}
+	}
+	home := Site{Name: "home", Roles: []config.Role{config.RoleData, config.RoleApps}}
+	watch := Site{Name: "watch", Roles: []config.Role{config.RoleMonitor}, PublicAddress: "203.0.113.20"}
+	for _, tc := range []struct {
+		name  string
+		sites []Site
+		keep  bool
+	}{
+		{"one gateway", []Site{home, gw("edge")}, true},
+		{"two gateways", []Site{gw("a"), gw("b")}, false},
+		{"no public gateway", []Site{home, {Name: "edge", Roles: []config.Role{config.RoleGateway}}}, false},
+		{"a monitor declared", []Site{home, gw("edge"), watch}, false},
+	} {
+		w := NewWizard(NewPrompter(strings.NewReader(""), &strings.Builder{}))
+		w.Answers.Sites, w.Answers.MonitorOnGateway = tc.sites, true
+		w.settleMonitor()
+		if w.Answers.MonitorOnGateway != tc.keep {
+			t.Errorf("%s: MonitorOnGateway = %v, want %v", tc.name, w.Answers.MonitorOnGateway, tc.keep)
+		}
+	}
+}
