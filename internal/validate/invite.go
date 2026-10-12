@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -38,6 +39,12 @@ func (c *checker) inviteIdentityApp() {
 			c.refuse("invite-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
 				"identity_app must name a pocket-id app",
 				"is %q, which is not a pocket-id app in this configuration. The invite service creates each approved member's account at the pocket-id app named here, and signs members in through it.", idp)
+			continue
+		}
+		if n := len(c.pocketIDApps()); n > 1 {
+			c.refuse("invite-one-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
+				"an invite app needs exactly one pocket-id app",
+				"is %q, but this configuration has %d pocket-id apps. The invite service's OIDC client is created at the deployment's pocket-id app, while its issuer and API key come from identity_app; with more than one, the two could be different identity providers. Declare one pocket-id app.", idp, n)
 			continue
 		}
 		s := app.Settings
@@ -102,6 +109,21 @@ func (c *checker) inviteSettingInvalid() {
 				c.refuse("invite-setting-invalid", fmt.Sprintf("apps.%s.settings.require_approval", name),
 					"invite setting out of range", "is %v. It must be true or false, unquoted.", v)
 			}
+		}
+	}
+}
+
+// inviteSettingUnknown warns about an invite setting the kind does not read,
+// which renders nothing and is most likely a misspelling.
+func (c *checker) inviteSettingUnknown() {
+	for _, name := range c.inviteApps() {
+		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
+			if _, ranged := kinds.InviteSettingRanges[key]; ranged || slices.Contains(kinds.InviteOtherSettings, key) {
+				continue
+			}
+			c.warn("invite-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
+				"invite setting is not read by the toolkit",
+				"is not a setting the invite kind reads, so it renders nothing. The settings are listed in README.md, \"Invites\".")
 		}
 	}
 }

@@ -10,6 +10,11 @@ var InviteSettingRanges = map[string][2]int{
 	"login_link_days":        {1, 31},
 }
 
+// InviteOtherSettings are the invite settings that are not whole numbers.
+var InviteOtherSettings = []string{
+	"identity_app", "require_approval", "code_of_conduct", "member_group", "admin_group",
+}
+
 // InviteSettingDefaults are what the service is told when a setting is unset.
 var InviteSettingDefaults = map[string]string{
 	"invite_quota": "3", "require_approval": "true", "invite_lifetime_days": "14",

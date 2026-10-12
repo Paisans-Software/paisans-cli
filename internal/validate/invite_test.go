@@ -86,3 +86,23 @@ func TestInviteSettingRanges(t *testing.T) {
 		}
 	}
 }
+
+// A misspelt invite setting renders nothing, so it is said; the known ones are not.
+func TestAnUnknownInviteSettingIsWarnedAbout(t *testing.T) {
+	r := withInviteSetting(t, "invite_qouta", 3)
+	if got := findings(r, "invite-setting-unknown"); len(got) != 1 || got[0] != "WARN apps.invite.settings.invite_qouta" {
+		t.Errorf("got %v", got)
+	}
+	if r := validate.Check(load(t, "valid")); r.Has("invite-setting-unknown") {
+		t.Errorf("the valid fixture was warned: %v", r.Findings)
+	}
+}
+
+// The invite app's client is created at the deployment's one pocket-id app,
+// so a second pocket-id app is refused.
+func TestAnInviteAppWithTwoPocketIDAppsIsRefused(t *testing.T) {
+	r := validate.Check(load(t, "invite-one-identity-app"))
+	if got := findings(r, "invite-one-identity-app"); len(got) != 1 || got[0] != "REFUSE apps.invite.settings.identity_app" {
+		t.Errorf("got %v", got)
+	}
+}

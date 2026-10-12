@@ -171,21 +171,11 @@ func TestInviteCoCIsWorldReadable(t *testing.T) {
 	}
 }
 
-// The issuer, the API and its key all belong to the app identity_app names,
-// even when another pocket-id app comes first in the configuration.
+// The issuer, the API and its key all belong to the app identity_app names.
+// A second pocket-id app is refused by validate (invite-one-identity-app), so
+// the deployment has exactly one for the values to come from.
 func TestInviteReadsItsNamedIdentityApp(t *testing.T) {
-	files := buildInvite(t, func(cfg *config.Config, secrets *config.Secrets) {
-		other := cfg.Apps["auth"]
-		other.Hostname = "aardvark.example.org"
-		cfg.Apps["aardvark"] = other
-		secrets.Apps["aardvark"] = map[string]any{
-			"database_password": "fixture-not-a-secret-aardvark-db",
-			"encryption_key":    "fixture-not-a-secret-aardvark-encryption",
-			"static_api_key":    "fixture-not-a-secret-aardvark-static-api",
-			// Every Pocket ID pushes to the fixture's monitor.
-			"admins_heartbeat_token": "8888888888888888888888888888abcd",
-		}
-	})
+	files := buildInvite(t, nil)
 	env := files[inviteEnvA]
 	key := envValue(files[authEnvA], "STATIC_API_KEY")
 	if key == "" || envValue(env, "INVITE_IDP_API_KEY") != key {

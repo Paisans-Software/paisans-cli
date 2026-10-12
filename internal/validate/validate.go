@@ -189,6 +189,7 @@ func Check(cfg *config.Config) Result {
 	c.inviteWithoutSMTP()
 	c.inviteCodeOfConduct()
 	c.inviteSettingInvalid()
+	c.inviteSettingUnknown()
 
 	c.evenVoters()
 	c.oneVoterNoFailover()

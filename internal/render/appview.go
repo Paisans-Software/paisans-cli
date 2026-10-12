@@ -529,7 +529,9 @@ func (p *planner) oidcFor(planned plannedApp) oidcValues {
 	case config.KindMbin:
 		redirect = kinds.MbinRedirectURI(planned.Hostname)
 	case config.KindInvite:
-		redirect = "https://" + planned.Hostname + "/auth/callback"
+		if spec, ok := kinds.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
+			redirect = spec.CallbackURL
+		}
 	}
 	return oidcValues{
 		Present:      true,

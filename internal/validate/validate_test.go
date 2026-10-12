@@ -38,6 +38,8 @@ func TestRulesFire(t *testing.T) {
 		{"invite-without-smtp", "invite-without-smtp", validate.Refuse},
 		{"invite-code-of-conduct-missing", "invite-code-of-conduct-missing", validate.Refuse},
 		{"invite-setting-invalid", "invite-setting-invalid", validate.Refuse},
+		{"invite-one-identity-app", "invite-one-identity-app", validate.Refuse},
+		{"invite-setting-unknown", "invite-setting-unknown", validate.Warn},
 		{"two-etcd-voters", "two-etcd-voters", validate.Refuse},
 		{"undeclared-site", "undeclared-site", validate.Refuse},
 		{"invalid-placement", "invalid-placement", validate.Refuse},

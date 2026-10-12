@@ -583,10 +583,14 @@ keys nobody made.
 | `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `invite-recovery-disabled` |
 
 Also refused: an `identity_app` that is missing or not a `pocket-id` app
-(`invite-identity-app`), no SMTP host and sender for the app
+(`invite-identity-app`), a deployment with more than one `pocket-id` app
+while it has an invite app (`invite-one-identity-app`: the invite app's OIDC
+client is created at the one Pocket ID, its issuer and key come from
+`identity_app`), no SMTP host and sender for the app
 (`invite-without-smtp`), a `code_of_conduct` that is missing, empty or not text
 (`invite-code-of-conduct-missing`), and a setting out of range
-(`invite-setting-invalid`). The service sends its own notices (an application
+(`invite-setting-invalid`). A setting the kind does not read is a warning
+(`invite-setting-unknown`), since it renders nothing. The service sends its own notices (an application
 waiting, an invitee's outcome) through the deployment's `smtp:` block, which
 the app's own `smtp:` fields may override; the sign-in link is Pocket ID's
 mail.
