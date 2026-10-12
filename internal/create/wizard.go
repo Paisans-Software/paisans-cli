@@ -368,8 +368,8 @@ func (w *Wizard) apps() error {
 				w.p.Say("Who can see the %s?", spec.what)
 				w.p.Say("  yes: members only. Anyone else is sent to sign in first;")
 				w.p.Say("       other communities still federate with it.")
-				w.p.Say("  no:  any public person or bot that can reach it will be able to read")
-				w.p.Say("       whatever content isn't protected/hidden behind a login.")
+				w.p.Say("  no:  public. Anyone, including search engines and bots, can read what")
+				w.p.Say("       the app shows to visitors who are not signed in.")
 				if app.MembersOnly, err = w.p.YesNo("Members only?", def); err != nil {
 					return err
 				}
