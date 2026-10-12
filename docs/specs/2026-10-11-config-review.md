@@ -76,7 +76,12 @@ configuration and the render, never from the host.
 | `login` | `ssh.user` | the site's `ssh` section |
 | `keys` | one entry per key: admin name, fingerprint (SHA256), the key's comment | every admin in the site's `ssh.keys`, each of their keys |
 | `images` | one entry per running service: stack, service, image reference as the compose file writes it | every `compose.yaml` the render writes for the site, infrastructure and apps, including a Caddy reference pinned to a digest |
-| `web_server` | the include directory and the reload command | `web_server`, on a site whose routes the operator's web server serves |
+| `web_server` | the include directory | `web_server.include_dir`, on a site whose routes the operator's web server serves |
+
+The include directory is where root writes files the operator's web server
+reads. How that server is reloaded is found by apply from the server it
+detects on the host, so paisans.yaml does not choose it, and it is not part of
+a grant computed from the configuration.
 
 A key is the same key when its fingerprint is; a change of comment or of the
 admin it is listed under is a change of that key's entry. An image is the same
@@ -94,7 +99,7 @@ grant as last applied, plus when.
   "version": 1,
   "keys":   {"applied_at": "2026-10-11T23:10:04Z", "login": "ubuntu", "entries": [ … ]},
   "images": {"applied_at": "2026-10-11T23:12:40Z", "entries": [ … ]},
-  "web_server": {"applied_at": "…", "include_dir": "/srv/caddy.d", "reload": "…"}
+  "web_server": {"applied_at": "…", "include_dir": "/srv/caddy.d"}
 }
 ```
 
@@ -118,7 +123,9 @@ reviewed once. That is the record being made, not a migration.
 ## The review
 
 Built for every site the command touches, after the plan and before the first
-change. Each entry of the grant is compared with the record:
+change. With `--execute` the first change is the registry claim, which comes
+before the plan, so there the review is shown, and asked for, before the
+claim. Each entry of the grant is compared with the record:
 
 | Compared with the record | Shown as | Needs approval |
 |---|---|---|
