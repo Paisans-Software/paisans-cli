@@ -225,7 +225,7 @@ type runReview struct {
 	// approvedBy is who approved it, as approver says.
 	approvedBy string
 	// version is the configuration version the run published, which each
-	// step records with what it applied; nil in a dry run.
+	// apply step records with what it applied; nil in a dry run.
 	version *appliedVersion
 }
 
@@ -262,7 +262,6 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run paisans apply --execute again to review them.",
 			}
 		}
-		s.version = run.version
 		return s, run.approvedBy, nil
 	}
 	if !execute {

@@ -788,10 +788,16 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Approved, and before the first change: the host's record is checked
 	// against the version and the version published, so the store holds
 	// what is applied even if the apply stops part way.
-	if store != nil && review != nil {
+	// As a step of apply without --site, the run published the version
+	// once, and this step records it. Only apply records it: host prepare
+	// and site add apply no version.
+	switch {
+	case store != nil && review != nil:
 		if review.version, err = store.land(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
 			return err
 		}
+	case reviewedByRun != nil && review != nil:
+		review.version = reviewedByRun.version
 	}
 	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
 		return err

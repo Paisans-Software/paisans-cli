@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/grant"
@@ -24,6 +25,7 @@ type applyStoreFixture struct {
 	shas    []string
 	files   []configstore.Files
 	runs    *[]string
+	answer  string
 }
 
 // newApplyStore makes n versions of the fixture's files, each on the one
@@ -61,6 +63,7 @@ func newApplyStore(t *testing.T, n int) *applyStoreFixture {
 	t.Cleanup(func() {
 		configSiteTransport, applyStore, agentKeys, configSignWith = saved, savedStore, savedKeys, savedSign
 	})
+	f.answer = answer
 	allSitesUp(answer, f.runs)
 	applyStore = gatherForApply
 	agentKeys = func() []string { return []string{pub} }
@@ -208,13 +211,12 @@ func TestApplyOnTheHeadPublishesNothingNew(t *testing.T) {
 }
 
 // What a host's grant record holds once its apply has succeeded: what was
-// granted and the version applied, the version as a step of apply without
-// --site has it from the run.
+// granted and the version applied.
 func TestTheRecordHoldsTheVersionApplied(t *testing.T) {
 	cfg := fixture(t)
 	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 	g, _ := grant.For(cfg, nil, "home-a")
-	s, err := reviewSite(cfg.Deployment(), "home-a", g, grant.PrepareScope, nil)
+	s, err := reviewSite(cfg.Deployment(), "home-a", g, grant.ApplyScope(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,16 +226,142 @@ func TestTheRecordHoldsTheVersionApplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hosts["home-a"].record(t)
-	if got.Config == nil || got.Config.Hash != v.sha || got.Config.Revision != 4 || !got.Config.AppliedAt.Equal(time.Date(2026, 10, 11, 23, 10, 4, 0, time.UTC)) || got.Keys == nil {
+	if got.Config == nil || got.Config.Hash != v.sha || got.Config.Revision != 4 || !got.Config.AppliedAt.Equal(time.Date(2026, 10, 11, 23, 10, 4, 0, time.UTC)) || got.Images == nil {
 		t.Errorf("record %+v", got.Config)
 	}
+}
 
+// host prepare, as a step of apply without --site, records its keys and
+// no configuration version: it applies none.
+func TestAPrepareStepRecordsNoVersion(t *testing.T) {
+	cfg := fixture(t)
+	loggingSSH(t, "")
+	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
+	g, _ := grant.For(cfg, nil, "home-a")
 	saved := reviewedByRun
 	t.Cleanup(func() { reviewedByRun = saved })
-	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-a": grant.Compare("home-a", g, got, grant.PrepareScope)}, version: v}
-	step, _, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x")
-	if err != nil || step.version != v {
-		t.Errorf("the step does not record the run's version: %v %+v", err, step)
+	reviewedByRun = &runReview{
+		approved: map[string]grant.Review{"home-a": grant.Compare("home-a", g, grant.Record{}, grant.PrepareScope)},
+		version:  &appliedVersion{sha: strings.Repeat("d", 40), revision: 4},
+	}
+	if rec, err := prepare(t, noTerminalStdin(), io.Discard, "--execute"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	got := hosts["home-a"].record(t)
+	if got.Keys == nil || got.Config != nil {
+		t.Errorf("keys %+v, config %+v", got.Keys, got.Config)
+	}
+}
+
+// A host whose record holds another version at the revision being applied
+// is refused like one holding a newer revision, unless the operator types
+// rollback; a version not yet published differs from any a record holds.
+func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	other := strings.Repeat("e", 40)
+	part := &grant.ConfigPart{Hash: other, Revision: 1}
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, part))
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "vm holds revision 1 ("+other+"), another version at the same revision") || !strings.Contains(text, "rollback") {
+		t.Fatalf("got %v", text)
+	}
+	if claimed(logged(t, log)) || f.pushed() {
+		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	}
+
+	log = loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, part))
+	var out bytes.Buffer
+	captureStdout(t, func() {
+		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
+	})
+	if !strings.Contains(out.String(), "Type rollback to go on: ") || !claimed(logged(t, log)) {
+		t.Errorf("not asked, or not applied: %q", out.String())
+	}
+
+	// The same version is not another one.
+	log = loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	if !claimed(logged(t, log)) {
+		t.Error("the version a host holds was refused")
+	}
+
+	// A new version at revision 2 is another version than any revision 2
+	// a host holds.
+	edited := f.files[0]
+	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
+	if err := f.l.WriteFiles(edited); err != nil {
+		t.Fatal(err)
+	}
+	log = loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: other, Revision: 2}))
+	err = f.applySite(t, noTerminalStdin(), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "vm holds revision 2 ("+other+"), another version at the same revision") || claimed(logged(t, log)) {
+		t.Errorf("a new version over another revision 2: %v", text)
+	}
+}
+
+// A version no site takes stops the apply before the first change; one
+// some sites took goes on, naming those that did not.
+func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	refuse := func(all bool) {
+		configSiteTransport = func(name string, _ config.Site) apply.Transport {
+			return &storeHost{name: name, answer: f.answer, runs: f.runs, noPush: all || name == "watch"}
+		}
+	}
+	refuse(true)
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	if err == nil || !strings.Contains(problemText(err), "no site took the version") || claimed(logged(t, log)) {
+		t.Fatalf("got %v, claimed %v", problemText(err), claimed(logged(t, log)))
+	}
+
+	refuse(false)
+	log = loggingSSH(t, "")
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	if !claimed(logged(t, log)) || !rec.Has("warn", "watch did not take the version") {
+		t.Errorf("claimed %v\n%s", claimed(logged(t, log)), rec.Lines())
+	}
+}
+
+// The files read before the review are the ones published: an edit made
+// while the operator was asked is not.
+func TestApplyPublishesTheFilesItRead(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	read := f.files[0]
+	read.Paisans = append(append([]byte{}, read.Paisans...), "# read\n"...)
+	if err := f.l.WriteFiles(read); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(f.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := gatherForApply(ui.Discard, f.cfgPath, "", cfg, true, noTerminalStdin(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := read
+	later.Paisans = append(append([]byte{}, read.Paisans...), "# edited while asked\n"...)
+	if err := f.l.WriteFiles(later); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := v.land(ui.Discard, nil, true, noTerminalStdin(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := f.l.Cache()
+	got, err := cache.Files(applied.sha)
+	if err != nil || !got.Equal(read) {
+		t.Errorf("published %q, %v", got.Paisans[len(got.Paisans)-40:], err)
 	}
 }
 
@@ -250,7 +378,7 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	fakeGrants(t, grantedWith(t, f, part))
 	err := f.applySite(t, noTerminalStdin(), "--execute")
 	text := problemText(err)
-	for _, want := range []string{"vm last applied revision 5 (" + newer + ")", "revision 1, " + f.shas[0][:12], "rollback"} {
+	for _, want := range []string{"vm holds revision 5 (" + newer + "), applied 2026-10-01 00:00 UTC, newer than the one you are applying", "revision 1, " + f.shas[0][:12], "rollback"} {
 		if err == nil || !strings.Contains(text, want) {
 			t.Errorf("refusal lacks %q: %v", want, text)
 		}
@@ -340,7 +468,7 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	}
 	rec = recordConverge(t)
 	err = converge(noTerminalStdin())
-	if err == nil || !strings.Contains(problemText(err), "vm last applied revision 9") || len(*ran) != 0 || f.pushed() {
+	if err == nil || !strings.Contains(problemText(err), "vm holds revision 9") || len(*ran) != 0 || f.pushed() {
 		t.Fatalf("witness: %v, ran %q, pushed %v\n%s", err, *ran, f.pushed(), rec.Lines())
 	}
 

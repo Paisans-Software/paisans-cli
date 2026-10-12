@@ -21,10 +21,11 @@ import (
 // storeHost answers the commands configstore.Pull runs with a fixed bundle,
 // and holds the registry a recovery reads the deployment's id from. A host
 // that is down fails everything. runs, when set, logs every command run on
-// any host sharing it.
+// any host sharing it. A host with noPush answers but refuses a pushed
+// bundle.
 type storeHost struct {
 	name, answer, registry string
-	down                   bool
+	down, noPush           bool
 	runs                   *[]string
 }
 
@@ -37,6 +38,9 @@ func (h *storeHost) Run(c string) (string, error) {
 	}
 	if strings.Contains(c, "bundle create") {
 		return h.answer, nil
+	}
+	if h.noPush && strings.Contains(c, "bundle verify") {
+		return "fatal: repository not found", errors.New("exit status 128")
 	}
 	return "", nil
 }

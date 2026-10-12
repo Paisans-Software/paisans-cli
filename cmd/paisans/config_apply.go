@@ -58,6 +58,7 @@ type gathered struct {
 	g        configstore.Gathered
 	sites    map[string]apply.Transport
 	key      string
+	files    configstore.Files
 	parents  []string
 	same     string
 	revision int
@@ -122,7 +123,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, cfg *config.C
 	} else if !g.Majority {
 		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
 	}
-	v := &gathered{l: l, g: g, sites: sites, key: key, parents: parents, revision: 1}
+	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1}
 	if len(parents) == 1 {
 		cache, err := l.Cache()
 		if err != nil {
@@ -165,7 +166,7 @@ func (v *gathered) what() string {
 }
 
 func (v *gathered) land(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) (*appliedVersion, error) {
-	if err := witness(r, records, v.revision, v.what(), execute, stdin, stdout); err != nil {
+	if err := witness(r, records, v.revision, v.same, v.what(), execute, stdin, stdout); err != nil {
 		return nil, err
 	}
 	k, _, _ := config.ParseKeyLine(v.key)
@@ -178,18 +179,23 @@ func (v *gathered) land(r ui.Reporter, records map[string]grant.Record, execute 
 		return nil, nil
 	}
 	s := r.Step("publish " + v.what())
-	sha, pushed, err := configstore.PublishFrom(v.l, v.g, v.sites, v.key, configSignWith(v.key), false, configNow())
+	// The files read before the review are published, not the files on
+	// disk now: those are what this run applies, whatever was edited while
+	// the operator was asked.
+	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
 	var pe *configstore.PushError
 	switch {
+	case errors.As(err, &pe) && len(pushed) == 0:
+		// A version no site holds is not in the store the hosts are
+		// witnessed against, so nothing is applied. It is in the
+		// workstation's store and recorded as the head, so the next apply
+		// or publish pushes it again rather than making another.
+		s.Fail(err)
+		return nil, &ui.Problem{Hint: "no site took the version to apply", Explain: errLine(err) + ". Nothing was applied. The version is kept here, and the next paisans apply or paisans config publish pushes it again.", Cause: err}
 	case errors.As(err, &pe):
-		// The version is in the workstation's store and recorded as the
-		// head, so the next apply or publish pushes it again; a site that
-		// missed it also gets it from its peers' sync.
-		took := "no site"
-		if len(pushed) > 0 {
-			took = strings.Join(pushed, ", ")
-		}
-		s.End(ui.Warned, fmt.Sprintf("%s reached %s", sha[:12], took))
+		// A site that missed it gets it from its peers' sync, or from the
+		// next apply or publish, which pushes it again.
+		s.End(ui.Warned, fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
 		for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {
 			r.Warn(site+" did not take the version", fmt.Sprintf("%v. It gets the version from its peers' sync, or from the next apply or publish.", pe.Failed[site]))
 		}
@@ -203,32 +209,41 @@ func (v *gathered) land(r ui.Reporter, records map[string]grant.Record, execute 
 }
 
 // witness refuses to put revision on a host whose grant record holds a newer
-// one, unless the operator types rollback at a terminal: the host has had a
-// version the sites no longer serve, which is what a site that deleted the
-// newer versions looks like. what names the version being applied. A dry
-// run reports it, and says --execute asks.
-func witness(r ui.Reporter, records map[string]grant.Record, revision int, what string, execute bool, stdin io.Reader, stdout io.Writer) error {
-	var newer []string
+// one, or another version at the same revision, unless the operator types
+// rollback at a terminal: the host has had a version the sites no longer
+// serve, which is what a site that deleted the newer versions looks like.
+// hash is the version being applied, "" for one not yet published, which
+// no record can hold; what names it. A dry run reports it, and says
+// --execute asks.
+func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash, what string, execute bool, stdin io.Reader, stdout io.Writer) error {
+	var other []string
 	for _, site := range slices.Sorted(maps.Keys(records)) {
 		c := records[site].Config
-		if c != nil && c.Revision > revision {
-			line := fmt.Sprintf("%s last applied revision %d (%s)", site, c.Revision, c.Hash)
-			if !c.AppliedAt.IsZero() {
-				line += ", on " + c.AppliedAt.UTC().Format("2006-01-02 15:04 MST")
-			}
-			newer = append(newer, line)
+		if c == nil || c.Revision < revision || (c.Revision == revision && c.Hash == hash) {
+			continue
 		}
+		line := fmt.Sprintf("%s holds revision %d (%s)", site, c.Revision, c.Hash)
+		if !c.AppliedAt.IsZero() {
+			line += ", applied " + c.AppliedAt.UTC().Format("2006-01-02 15:04 MST")
+		}
+		if c.Revision == revision {
+			line += ", another version at the same revision"
+		} else {
+			line += ", newer than the one you are applying"
+		}
+		other = append(other, line)
 	}
-	if len(newer) == 0 {
+	if len(other) == 0 {
 		return nil
 	}
-	why := "This apply puts " + what + " on hosts that have had a newer one:\n" + strings.Join(newer, "\n") + "\nA site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
+	hint := "a host holds another version than the one you are applying"
+	why := "This apply puts " + what + " on hosts whose record holds another version:\n" + strings.Join(other, "\n") + "\nA site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
 	if !execute {
-		r.Warn("a host has applied a newer version than this one", why+" --execute asks for "+rollbackWord+".")
+		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
 		return nil
 	}
-	if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the newer version is gone."); err != nil {
-		return &ui.Problem{Hint: "a host has applied a newer version than this one", Explain: why + "\n" + sentence(err.Error())}
+	if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the host's version is gone from the sites."); err != nil {
+		return &ui.Problem{Hint: hint, Explain: why + "\n" + sentence(err.Error())}
 	}
 	return nil
 }

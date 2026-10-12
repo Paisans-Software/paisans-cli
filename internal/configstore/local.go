@@ -695,13 +695,25 @@ func PublishFrom(l Local, g Gathered, sites map[string]apply.Transport, keyLine,
 	return publishFrom(l, g, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
 }
 
+// PublishFiles is PublishFrom with the files to publish given, read by the
+// caller, rather than read from disk now: a command that applies the files
+// it read earlier publishes exactly those, whatever is on disk by the time
+// it publishes.
+func PublishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport, keyLine, signWith string, merge bool, now time.Time) (string, []string, error) {
+	return publishFiles(l, g, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
+}
+
 func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
-	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
-		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
-	}
 	f, err := l.Files()
 	if err != nil {
 		return "", nil, fmt.Errorf("read the files to publish: %w", err)
+	}
+	return publishFiles(l, g, f, sites, o, push)
+}
+
+func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
+		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
 	local, err := config.LoadBytes(f.Paisans)
 	if err != nil {
