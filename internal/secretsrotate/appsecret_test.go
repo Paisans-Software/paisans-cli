@@ -200,7 +200,7 @@ func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 
 func TestAppSelfCosts(t *testing.T) {
 	for key, signsOut := range map[string]bool{
-		"app_secret": true, "cookie_secret": true, "session_secret": true,
+		"app_secret": true, "cookie_secret": true, "session_secret": true, "session_key": true,
 		"mas_signing_key": true, "mas_matrix_secret": true,
 		"mercure_jwt_secret": false, "valkey_password": false, "static_api_key": false,
 	} {
@@ -213,7 +213,7 @@ func TestAppSelfCosts(t *testing.T) {
 			t.Errorf("%s: Downtime %q, want a restart of the Mbin stack", key, d)
 		}
 	}
-	for _, key := range []string{"app_secret", "cookie_secret", "session_secret", "mas_signing_key", "mas_matrix_secret", "static_api_key"} {
+	for _, key := range []string{"app_secret", "cookie_secret", "session_secret", "session_key", "mas_signing_key", "mas_matrix_secret", "static_api_key"} {
 		if d := AppSelfCost(key).Downtime; d != "" {
 			t.Errorf("%s: Downtime %q, want none", key, d)
 		}
@@ -263,6 +263,49 @@ func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
 	}
 	if !slices.Equal(w.log, []string{"apply home-b chat mas_signing_key", "healthy home-b"}) {
 		t.Fatalf("log %v", w.log)
+	}
+}
+
+// Pocket ID's static_api_key is in every invite .env whose identity_app
+// names it, so rotating it hands the next key to those invite stacks too:
+// beside Pocket ID on a site running both, after it, and in a step of its
+// own on a site running only the invite app. An invite app naming another
+// identity app is left alone.
+func TestStaticAPIKeyReachesTheInviteAppsThatNameIt(t *testing.T) {
+	w := newSelfWorld(t)
+	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+		Settings: map[string]any{"identity_app": "id"}}
+	w.cfg.Apps["elsewhere"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+		Settings: map[string]any{"identity_app": "other-id"}}
+	e := w.env()
+	got := usesOf(e, AppSelf("id", "static_api_key", AppSelfCost("static_api_key")))
+	if want := []string{"home-a:id,invite", "home-b:invite"}; !slices.Equal(got, want) {
+		t.Fatalf("users %v, want %v", got, want)
+	}
+	// Another app's key is its own stack's alone, invite apps or none.
+	if got := usesOf(e, AppSelf("forum", "app_secret", Cost{})); !slices.Equal(got, []string{"home-a:forum", "home-b:forum"}) {
+		t.Fatalf("app_secret users %v", got)
+	}
+}
+
+// The invite service's session_key is checked by the service itself, and
+// rotating it signs members out of it.
+func TestInviteSessionKeyIsAnAppSelfSecret(t *testing.T) {
+	w := newSelfWorld(t)
+	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
+	if kind, ok := AppSelfKind("session_key"); !ok || kind != config.KindInvite {
+		t.Fatalf("session_key is %v %v, want the invite kind's", kind, ok)
+	}
+	r := AppSelf("invite", "session_key", AppSelfCost("session_key"))
+	e := w.env()
+	if err := r.(Prechecker).Precheck(e); err != nil {
+		t.Fatal(err)
+	}
+	if !r.Cost().SignsOut {
+		t.Error("rotating the invite session key does not sign anyone out")
+	}
+	if got := usesOf(e, r); !slices.Equal(got, []string{"home-a:invite", "home-b:invite"}) {
+		t.Fatalf("users %v", got)
 	}
 }
 

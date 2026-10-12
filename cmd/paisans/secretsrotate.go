@@ -38,6 +38,12 @@ const replacedEarlier = "replaced earlier, hosts already run it: the value the s
 // Scope).
 const encryptsStoredData = "it encrypts data already stored, so changing it makes that data unreadable, and neither Pocket ID nor Matrix Authentication Service offers a re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
 
+// forgetsDeclines is why the invite service's email_hash_key is kept: the
+// service stores only the keyed hash of a declined address
+// (docs/specs/2026-10-12-invite-service.md, Declining), so a new key matches
+// none of them.
+const forgetsDeclines = "rotating it forgets every declined address"
+
 // wireguardKept is why secrets rotate leaves the WireGuard keys alone.
 const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, which moves it without dropping a tunnel"
 
@@ -515,6 +521,8 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.MbinOAuth(app), nil
 		case "encryption_key", "mas_encryption_secret":
 			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, encryptsStoredData)
+		case "email_hash_key":
+			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, forgetsDeclines)
 		case "oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key":
 			return nil, fmt.Errorf("secrets rotate: %s encrypts or opens Mbin's OAuth2 keypair, and is rotated with the rest of it: name apps.%s.oauth", path, app)
 		case "s3_access_key_id", "s3_secret_access_key":
@@ -616,6 +624,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	self("app_secret")
 	self("cookie_secret")
 	self("session_secret")
+	self("session_key")
 	self("mas_signing_key")
 	self("mas_matrix_secret")
 	for _, app := range cfg.AppNames() {
@@ -670,6 +679,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, app := range appsOf(config.KindSynapse) {
 		if path := "apps." + app + ".mas_encryption_secret"; has(path) {
 			kept = append(kept, keptSecret{path, encryptsStoredData})
+		}
+	}
+	for _, app := range appsOf(config.KindInvite) {
+		if path := "apps." + app + ".email_hash_key"; has(path) {
+			kept = append(kept, keptSecret{path, forgetsDeclines})
 		}
 	}
 	for _, path := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {

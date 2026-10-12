@@ -60,10 +60,11 @@ const (
 	KindSynapse     Kind = "synapse"
 	KindWriteFreely Kind = "writefreely"
 	KindUptime      Kind = "uptime"
+	KindInvite      Kind = "invite"
 )
 
 var knownKinds = map[Kind]bool{
-	KindElement: true, KindMbin: true, KindOAuth2Proxy: true, KindOutline: true, KindPocketID: true, KindSynapse: true, KindWriteFreely: true, KindUptime: true,
+	KindElement: true, KindMbin: true, KindOAuth2Proxy: true, KindOutline: true, KindPocketID: true, KindSynapse: true, KindWriteFreely: true, KindUptime: true, KindInvite: true,
 }
 
 // Kinds returns every kind this toolkit knows, sorted. It exists so that a

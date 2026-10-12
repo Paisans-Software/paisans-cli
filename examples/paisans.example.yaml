@@ -324,7 +324,9 @@ apps:
       # configuration is rendered from paisans.yaml".
       app_name: Example ID       # also the sender name on its mail
       session_duration: 10080    # minutes
-      allow_user_signups: withToken
+      # New accounts come only from invites (the invite app below), so
+      # Pocket ID's own signup links stay off.
+      allow_user_signups: disabled
       # By name. apply finds or creates each group at the running Pocket ID
       # and records its ID under pocket_id_groups in the secrets. members is
       # the group the gate and every member facing app admit.
@@ -427,7 +429,27 @@ apps:
     # smtp:
     #   from_name: Example Status
 
-# How apps that send mail send it: the uptime monitor's alerts, Pocket ID's
+  # Members bring new people in. The invitee agrees to the code of conduct
+  # below and chooses their details before any account exists; with
+  # require_approval an admin approves first. See "Invites" in the README.
+  invite:
+    kind: invite
+    hostname: invite.example.org
+    placement: cluster
+    settings:
+      identity_app: auth
+      invite_quota: 3
+      require_approval: true
+      # Replace this with the community's own code of conduct. Its SHA-256 is
+      # the version each person agrees to, so an edit is a new version.
+      code_of_conduct: |
+        ## Code of conduct
+
+        This is an example. Replace it with the community's own code of
+        conduct before inviting anyone.
+
+# How apps that send mail send it: the uptime monitor's alerts, the invite
+# service's notices to admins and invitees, Pocket ID's
 # login codes and notices, which go out under its app_name rather than
 # from_name, and Mbin's contact form and account mails, which go out under its
 # hostname rather than from_name.

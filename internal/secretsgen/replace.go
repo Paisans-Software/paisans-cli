@@ -44,7 +44,8 @@ func Replacement(path string, s *config.Secrets) (string, error) {
 		switch last {
 		case "database_password", "app_secret", "cookie_secret", "session_secret",
 			"admin_password", "static_api_key", "rabbitmq_password", "valkey_password",
-			"mercure_jwt_secret", "oauth_passphrase", "oauth_encryption_key", masMatrixSecret:
+			"mercure_jwt_secret", "oauth_passphrase", "oauth_encryption_key", masMatrixSecret,
+			"email_hash_key", "session_key":
 			gen = password
 		case masSigningKey:
 			gen = rsaPrivateKeyPEM

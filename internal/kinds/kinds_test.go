@@ -134,6 +134,7 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 		config.KindSynapse:     {kinds.ConfigYAML, "homeserver.yaml"},
 		config.KindElement:     {kinds.ConfigJSON, "config.json"},
 		config.KindUptime:      {kinds.ConfigEnv, ".env"},
+		config.KindInvite:      {kinds.ConfigEnv, ".env"},
 	}
 	for _, kind := range config.Kinds() {
 		want, known := cases[kind]
@@ -169,5 +170,24 @@ func TestTheForksDefaultToStackOne(t *testing.T) {
 				t.Errorf("%s %s names a channel, %s", kind, service.Name, service.Image)
 			}
 		}
+	}
+}
+
+func TestInviteKind(t *testing.T) {
+	if !kinds.UsesPostgres(config.KindInvite) {
+		t.Fatal("invite keeps its state in Postgres")
+	}
+	if !kinds.SendsMail(config.KindInvite) {
+		t.Fatal("invite sends mail")
+	}
+	spec, ok := kinds.OIDCClient(config.KindInvite, "invite.example.org", "invite")
+	if !ok || spec.CallbackURL != "https://invite.example.org/auth/callback" || !spec.PKCE || !spec.ReadsGroups {
+		t.Fatalf("%+v", spec)
+	}
+	if spec.DefaultMemberGroup != kinds.MembersGroup || spec.DefaultAdminGroup != kinds.AdminsGroup {
+		t.Fatalf("%+v", spec)
+	}
+	if kinds.GateFor(config.KindInvite).Gateable {
+		t.Fatal("invitees are not members; the gate must never sit in front of invite")
 	}
 }

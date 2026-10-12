@@ -67,6 +67,10 @@ var requiredAppSecrets = map[config.Kind][]struct{ Key, Why string }{
 		{"admin_password", "the monitor falls back to the password `admin` when ADMIN_PASS is unset"},
 		{"session_secret", "without it every restart signs every admin out"},
 	},
+	config.KindInvite: {
+		{"email_hash_key", "paisans-invite refuses to start without INVITE_EMAIL_HASH_KEY"},
+		{"session_key", "paisans-invite refuses to start without INVITE_SESSION_KEY"},
+	},
 	config.KindPocketID: {
 		// env_config.go:167-169 at tag v2.14.0.
 		{"encryption_key", "Pocket ID refuses to start without an ENCRYPTION_KEY of at least 16 bytes"},

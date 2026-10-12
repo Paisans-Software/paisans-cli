@@ -163,6 +163,10 @@ type appValues struct {
 	// deployment (uptime.go). Populated only for that kind.
 	UptimeSeed string
 
+	// Invite is the invite kind's identity provider, settings and code of
+	// conduct (invite.go). Populated only for that kind.
+	Invite inviteValues
+
 	// AdminsHeartbeat is true for a Pocket ID app in a deployment with a
 	// monitor, whose stack then runs the admins heartbeat pusher on
 	// HeartbeatImage (adminsheartbeat.go).
@@ -449,6 +453,13 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.UptimeSeed = seed
 	}
+	if planned.Kind == config.KindInvite {
+		invite, err := p.inviteValuesFor(planned.Name)
+		if err != nil {
+			return appValues{}, err
+		}
+		v.Invite = invite
+	}
 	if planned.Kind == config.KindSynapse {
 		v.MASPort = masPort
 		v.MASUpstreams = p.upstreamsOnPort(planned.Name, masPort)
@@ -517,6 +528,10 @@ func (p *planner) oidcFor(planned plannedApp) oidcValues {
 		redirect = kinds.MASRedirectURI(planned.Hostname, planned.Name)
 	case config.KindMbin:
 		redirect = kinds.MbinRedirectURI(planned.Hostname)
+	case config.KindInvite:
+		if spec, ok := kinds.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
+			redirect = spec.CallbackURL
+		}
 	}
 	return oidcValues{
 		Present:      true,

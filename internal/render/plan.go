@@ -62,6 +62,11 @@ var appPort = map[config.Kind]int{
 	// Not the fork's default 3000: Outline publishes 3000, and two apps on
 	// one site publish on the same mesh address.
 	config.KindUptime: 3001,
+	// Not the service's default 8080: Mbin publishes 8080, and both are
+	// clustered, so they share every apps site's mesh address. The service
+	// reads its port from INVITE_LISTEN_ADDR, which this toolkit renders, and
+	// its image's health check probes the same variable.
+	config.KindInvite: 8082,
 }
 
 // AppPort is the port a kind listens on, which is also the port it publishes
