@@ -124,8 +124,8 @@ func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 }
 
 // The homeserver's client belongs to its authentication service: it returns
-// to that service's callback for the app's upstream provider, sends a code
-// challenge because Pocket ID's discovery advertises S256, and is restricted
+// to that service's callback for the app's upstream provider, always sends a
+// code challenge because mas.yaml sets pkce_method: always, and is restricted
 // to the member group and admins, which is the whole control, since the
 // service reads no groups claim. It has no dashboard tile.
 func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
@@ -137,7 +137,7 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 		t.Errorf("callback %s, want the authentication service's", spec.CallbackURL)
 	}
 	if !spec.PKCE {
-		t.Error("MAS sends a code challenge whenever discovery advertises S256, so PKCE must be on")
+		t.Error("mas.yaml has MAS always send a code challenge, so PKCE must be on")
 	}
 	if spec.ReadsGroups {
 		t.Error("MAS requests no groups claim, so the spec must not say it reads one")

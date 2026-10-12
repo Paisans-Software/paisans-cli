@@ -158,13 +158,11 @@ func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 		// The relying party is the homeserver's authentication service, MAS
 		// at tag v1.24.0, so the callback is its upstream provider's,
 		// MASRedirectURI (crates/router/src/endpoints.rs:742-762). PKCE is on:
-		// mas.yaml sets no pkce_method or discovery_mode, so both take their
-		// defaults, auto and oidc (crates/config/src/sections/
-		// upstream_oauth2.rs:401-429), and auto takes the methods Pocket ID's
-		// discovery advertises (crates/handlers/src/upstream_oauth2/
-		// cache.rs:129-139), which include S256
-		// (backend/internal/controller/well_known_controller.go:117 at Pocket
-		// ID v2.14.0), and then always sends an S256 challenge
+		// mas.yaml sets pkce_method: always, the S256 mode
+		// (crates/config/src/sections/upstream_oauth2.rs:420-436,
+		// crates/cli/src/sync.rs:289-298), whose methods are S256 alone
+		// (crates/handlers/src/upstream_oauth2/cache.rs:137), so every sign
+		// in sends an S256 challenge
 		// (crates/oidc-client/src/requests/authorization_code.rs:242-256).
 		// mas.yaml requests no groups scope and imports no groups claim, so
 		// the restriction at Pocket ID is the whole control. No launch URL:
