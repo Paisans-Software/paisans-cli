@@ -3883,6 +3883,75 @@ keys is refused. The key the current connection used is not removed either, by
 construction: the transport offers only listed keys, so the session's key is a
 listed one, unless `--ssh` or the operator's own `IdentityFile` chose another.
 
+**The host's owner may bound which keys it adds.** `paisans.yaml` is one file
+every admin of a deployment edits, and whoever runs `host prepare` runs it with
+their own access, so any admin can get a key of theirs made an authorized key
+of `ssh.user` through someone else's run. That user has `sudo` and is in the
+`docker` group, so the key is root on the host. The review (see *`apply` and
+`host prepare` review what `paisans.yaml` grants*) is the operator's check on
+that; this one is the host owner's, who may not be the one running the
+command. `/etc/paisans/ssh-allow.<user>`, root's and 0644, one per login user
+and shared by every deployment on the host, lists the fingerprints `host
+prepare` may add there, one per line, with `#` starting a comment:
+
+```
+# Keys host prepare may add to ubuntu's authorized_keys, one per line.
+SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA bob bob@example.org
+SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
+```
+
+It holds fingerprints, not admin names, because a name is whatever
+`paisans.yaml` says it is: replacing the key under `admins.alice.keys` must not
+carry Alice's permission to the new key. A line is the fingerprint, then any
+run of spaces or tabs, then a comment; it is read that way both when `host
+prepare` plans and when its append checks the list on the host, so the two
+never disagree. A line that is not a fingerprint allows nothing, so a mistyped
+line can only refuse a key.
+
+**No file, every key allowed.** A host behaves as it did before until its
+owner makes a list. Founder decision. An empty file allows no key.
+
+**With a file, `host prepare` refuses to append a key it does not list**, as a
+refusal in the plan, before any step runs, naming the key, its admin and the
+`host allow` that would allow it, whoever runs the command. Nothing else the
+list touches is refused:
+
+| Plan step | With the key not on the list |
+|---|---|
+| `authorize ssh key` (append) | **refused** |
+| `share ssh key`, `rename ssh key` | allowed: the key is already in `authorized_keys`, so nothing new can log in |
+| `release ssh key`, `forget ssh key`, `remove ssh key` | allowed: they only take away |
+
+The append checks the list again under the authorized keys lock as it runs,
+so a list made between the plan and the run still holds; so does a share
+that finds the line gone and appends it. A key already in `authorized_keys`
+keeps working whatever the list says: the list decides what `host prepare` may
+add, not who may log in now. Taking a key away is still removing it from
+`ssh.keys` and preparing again, or deleting it by hand.
+
+`paisans host allow <site> <admin>...` adds an admin's keys. It shows every
+fingerprint with its comment, and the list as it would be, so the owner checks
+each against the admin, out of band when unsure, before it is what the list
+holds. A list that does not exist yet is made holding also every key some
+deployment's sidecar already claims for the user, listed apart, so that making
+a list refuses no access the host already has. `paisans host disallow <site>
+<admin|fingerprint>...` takes lines off; it removes no key from
+`authorized_keys`, and says so. Taking the last line leaves an empty list,
+which allows nothing, rather than no file, which would allow everything; going
+back to no list is deleting the file by hand. Both are the owner's: they claim
+nothing in the registry and touch nothing of a deployment's, and `--execute`
+asks for the site's name at a terminal, since writing the list is granting or
+withdrawing access and is never scripted. `host disallow` asks as `host allow`
+does, because taking lines off can empty the list, which blocks every key
+`host prepare` would add later. The list is written under the same
+lock as `authorized_keys`, by a temporary file and a rename, and only over the
+list that was read. The file is the owner's, so both keep every line they do
+not change as it was written, comments included, and refuse a list holding a
+line they cannot read, naming it, rather than keep or drop a line whose
+meaning they do not know; the owner fixes it by hand. How to run them is under *`paisans host allow`* and
+*`paisans host disallow`* in [docs/commands.md](docs/commands.md); `doctor`
+reports each host's list.
+
 #### The watchdog
 
 On a data site, `host prepare` gives Patroni the device the site's `watchdog`
@@ -3905,6 +3974,119 @@ against a fake transport. `ufw show added` was observed on Ubuntu 24.04 for
 uncommented rules; the commented form, adoption and removal are written from
 ufw's source, not observed, as are `systemctl show -p RuntimeWatchdogUSec` and
 `dpkg-query`. The first real run of each should be read rather than trusted.
+
+### `apply` and `host prepare` review what `paisans.yaml` grants
+
+`paisans.yaml` is one file every admin of a deployment edits and commits, and
+whoever runs `apply` runs it with their own access. So any admin can grant
+themselves a host through someone else's run: by adding their name to a
+site's `ssh.keys`, or replacing the key under an admin it already names, which
+makes `host prepare` install their key for a user that is root on the host; or
+by pointing `apps.<name>.images` at an image they control, which `apply` pulls
+and runs with whatever the template mounts. A plan line saying `○ authorize
+ssh key` is easy to miss, and with `--execute` it is not shown at all. So both
+commands show what changes and ask before it does.
+`docs/specs/2026-10-11-config-review.md` is the approved specification.
+
+**The grant** is the part of the configuration that decides who may log in to
+a host and what code runs on it. It is computed from the configuration and the
+render, never from the host, so nothing on the host chooses what is reviewed:
+
+| Part | Holds | Comes from |
+|---|---|---|
+| login | `ssh.user` | the site's `ssh` section |
+| keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
+| images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
+| web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
+
+A key is the same key when its fingerprint is, so a new comment or a new admin
+for it is a change of that key. An image is the same when its reference is,
+which is why `validate` refuses a floating tag for an app. An app's settings,
+`config` and `smtp` are not reviewed: they configure an image the review
+already covers, and choose no code. A field added later that does choose code
+(a command, a hook, a mount) joins the review in the same change.
+
+**The review prints only what it can show.** A key comment, an admin's name or
+email, or an image reference holding a control character (Eg: ESC, DEL, or a
+C1 control such as CSI) is refused when the file is loaded, naming the field.
+A terminal reads those characters as commands, so a comment carrying one could
+move the cursor and redraw a review line, Eg: dress a `+ key` up as another
+admin's `~ key`. A host file is not loaded through that check, so as a second
+line, everything the review, `host allow`, `host disallow` and `doctor` print
+from the configuration or from a host shows such a character as an escape
+(Eg: `\x1b`), never raw.
+
+**Each host records the grant last applied**, in
+`/var/lib/paisans/granted.<token>.json`, root's and 0644. It holds
+fingerprints and image references, nothing secret, so it is readable without
+`sudo`; only root writes it, so the login user alone cannot rewrite the
+baseline. Each part is written by the command that applies it, once that
+command's steps for the site have all succeeded: the login and keys by `host
+prepare`, the images and the web server's directory by `apply`. A run that
+fails part way writes nothing, and the next run reviews the same changes again.
+It is written under `/var/lib/paisans/registry.lock`, by a temporary file and
+a rename, and only over the file that was read, so two commands writing
+different parts lose neither. A host with no record, which is every host of a
+deployment built before it existed, has an empty baseline: every entry is new
+and is reviewed once. That is the record being made, not a migration. A record
+this toolkit cannot read is not rewritten; deleting it by hand makes the next
+run review everything again. `site remove` deletes it with the registry entry.
+
+**The review** compares each entry of the grant with the record:
+
+| Compared with the record | Shown as | Needs approval |
+|---|---|---|
+| in both, the same | not shown | no |
+| in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
+| in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
+| in the record only | `- key SHA256:… (carol, carol@desk)` | no |
+
+A removal is shown and not approved, because it only takes away. The review
+is one line per site, pending when anything needs approval, with every change
+under it at every verbosity, with `--execute` as well as without: the login and
+the keys first, then the images stack by stack, then the web server, so a long
+list stays readable. A host with no record of the parts a review covers says
+`first review` on its line, and that every entry is new because there is no
+record yet: the first `--execute` on such a host asks once for the whole list,
+which is the record being made, and later runs show only what changes.
+`host prepare` reviews the login and the keys; `apply --site` the images and
+the web server's directory, narrowed to the named stacks by `--only`; `site
+add` the new site's images, since its stage 4 applies that site's whole
+render, recording them once that stage's gate has passed; `apply` with no
+`--site` every part of every site, since it runs them all.
+
+**The dry run shows the review and asks nothing.** It ends with what
+`--execute` will ask for.
+
+**`--execute` asks once.** When anything needs approval, the command asks the
+operator to type `approve` at a terminal, through the same prompt `site remove
+--delete-data` uses, before its first change: the registry claim, which comes
+before the plan, so that an operator who does not approve leaves the host
+exactly as it was. Anything else, or end of input, stops the command with
+nothing changed. `apply` with no `--site` asks once for every site, at the
+point where it settles `sudo` passwords, before its first step; each step it
+runs then checks that it applies what was approved, and refuses anything that
+changed since, rather than asking again. An `init` it runs comes first, since
+it changes no host and the images are rendered from the secrets it generates.
+
+**No terminal, no approval.** When something needs approval and standard input
+is not a terminal, the command is refused before any host changes, saying to
+run it at a terminal. No flag answers the question: a flag that could would be
+in every script within a week, and approving is the control.
+
+**Nothing to approve, nothing asked.** A run that adds or changes no key and no
+image behaves as it always has, terminal or not, so routine applies stay
+scriptable.
+
+**Who approved.** When exactly one admin's key in `paisans.yaml` is loaded in
+the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
+`approved_by: <admin>`; otherwise it records no name. It is a label for the
+next reader, not a check: anyone can load any key they hold. Who wrote a change
+is the repository's history, which the toolkit cannot see.
+
+The review is the operator's check. The host's owner, who may not be the one
+running the command, bounds which keys `host prepare` may add at all with an
+allowlist on the host (see *host prepare manages the login user's authorized keys*).
 
 ### Where WireGuard keys are generated
 
@@ -4074,7 +4256,13 @@ the first install, the resume after a failure, and every later change. Each
 step is the command an operator would type, so it plans, gates, claims and
 refuses as that command does, and the sudo password each host asks for is
 asked once for the run, every one of them before the first step (see *A sudo
-that wants a password is asked for once, on a terminal*). `-v` reaches every step, and `--keep-images` and
+that wants a password is asked for once, on a terminal*). Then, before the
+first step that changes a host, it shows one review of what `paisans.yaml`
+grants on every site, and asks once when anything is added or changed (see
+*`apply` and `host prepare` review what `paisans.yaml` grants*); each step then
+applies what was approved, and refuses anything that changed since. An `init`
+with work to do runs ahead of the review: it writes only local files, and the
+images reviewed are rendered from the secrets it generates. `-v` reaches every step, and `--keep-images` and
 `--min-free` each `apply`; `--ssh`, `--overwrite`, `--only` and `--recreate`
 are about one site, and are refused without `--site`. A stop names its step and how
 to carry on: usually by running it again, but a DNS record pointing elsewhere
@@ -6292,6 +6480,8 @@ deployment's is left alone and not listed:
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
+| the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
+| the host's key allowlist | nothing: `/etc/paisans/ssh-allow.<user>` is the host owner's, shared by every deployment on the host | never touched. Taking a deployment off does not change what the owner allows |
 
 The check that nothing of this deployment's is left comes last, after the
 registry entry.
@@ -6687,6 +6877,7 @@ that the first `FAIL` is usually the cause of those after it:
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| SSH allowlist | `/etc/paisans/ssh-allow.<user>` on every site that answered (see *host prepare manages the login user's authorized keys*) | never. No list is `info`, since every key is then allowed; a list says how many keys it holds, and each key `ssh.keys` names that it does not hold and that is not in the login user's `authorized_keys` yet is a `WARN`, as the refusal the next `host prepare` would give when it appends that key, with the `host allow` that allows it. A key already in `authorized_keys` is never appended, so it is no warning; where `authorized_keys` could not be read, every key the list lacks is reported, as the refusal host prepare would give if it had to add it. Nothing is broken now, so it is never a `FAIL` |
 
 The health check names each member rather than using `--cluster`, because
 `--cluster` first asks the cluster for its member list (etcd v3.5.16,

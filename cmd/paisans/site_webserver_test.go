@@ -219,7 +219,7 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 			reporterOverride = checkReporter{rec, rec, &[]checkReport{}}
 		}
 		captureStdout(t, func() {
-			runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", tc.site})
+			runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", tc.site}, strings.NewReader(""), io.Discard)
 		})
 		reporterOverride = saved
 		got := lines(inSection(rec, "web server"))

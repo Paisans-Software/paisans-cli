@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/ownership"
@@ -219,6 +220,26 @@ func gatherDoctor(cfg *config.Config, sites []string, transports map[string]appl
 			continue
 		}
 		in.Leftovers = append(in.Leftovers, gatherLeftovers(cfg, name, transports[name]))
+	}
+
+	for _, name := range sites {
+		if !reached[name] {
+			continue
+		}
+		p := doctor.AllowlistProbe{Site: name}
+		content, found, err := transports[name].ReadFile(hostprep.AllowPath(cfg.Sites[name].SSH.User))
+		if err != nil {
+			p.Err = err.Error()
+		}
+		p.Found, p.Content = found, content
+		// Only a key host prepare would append is refused, so the warning
+		// needs to know which keys authorized_keys holds already.
+		if found {
+			if fps, err := hostprep.AuthorizedFingerprints(transports[name], cfg.Sites[name].SSH.User); err == nil {
+				p.KeysRead, p.Authorized = true, fps
+			}
+		}
+		in.Allowlists = append(in.Allowlists, p)
 	}
 
 	for _, name := range sites {

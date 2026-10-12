@@ -50,6 +50,15 @@ holds this one's token, WireGuard interface or listen port, or an overlapping
 mesh subnet (see *A deployment has an id, and a host knows every deployment on
 it* in `README.md`).
 
+With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first show what
+`paisans.yaml` grants on each host they reach that the host has not had (a key
+that may log in, an image that runs, the directory the operator's web server
+reads), and, when anything is added or changed, ask for the word `approve` at
+a terminal before that claim. Without a terminal they refuse, before any host
+changes; no flag answers the question. A run that adds or changes nothing asks
+nothing. Their dry runs show the same review and ask nothing (see *`apply` and
+`host prepare` review what `paisans.yaml` grants* in `README.md`).
+
 A command exits 0 when it did what it was asked, including when it ends on a
 warning (`!`, `WARN` off a terminal), 1 when it stopped on a failure or a
 refusal, and 2 when its command line cannot run. `storage add`
@@ -167,11 +176,23 @@ paisans host prepare --site home-a --execute  # does it
   Installed from Docker's own apt repository where it is absent. Where it is
   there and `docker compose` does not work, the packages in the way are named
   and refused, never removed.
-* **`--execute`:** installs and configures what the plan lists. Without it, it
-  probes and prints the plan; a prepared host plans nothing.
+* **Review:** the login user and the keys, against what the host last
+  recorded in `/var/lib/paisans/granted.<token>.json`: each key added or
+  changed is a `+` or `~` line under `review what paisans.yaml grants`, each
+  removed one a `-` line, at every verbosity.
+* **Allowlist:** with `/etc/paisans/ssh-allow.<user>` on the host, a key to
+  add that it does not list is a refusal in the plan, naming the key, its
+  admin and the `host allow` that allows it; sharing, renaming and removing
+  keys are never refused. Without the file every key is allowed.
+* **`--execute`:** asks for `approve` at a terminal when the review adds or
+  changes anything, before the claim; then installs and configures what the
+  plan lists, and records the login and the keys once every step has
+  succeeded. Without it, it probes and prints the plan and the review; a
+  prepared host plans nothing.
 
-See *`host prepare` takes a blank host to an apply-able state* and *Docker is
-judged by its version, not its source* in `README.md`.
+See *`host prepare` takes a blank host to an apply-able state*, *Docker is
+judged by its version, not its source* and *`apply` and `host prepare` review
+what `paisans.yaml` grants* in `README.md`.
 
 ### `paisans host deployments`
 
@@ -190,6 +211,63 @@ paisans host deployments --ssh admin@203.0.113.9   # read only
 * **`--execute`:** not taken.
 
 See *`--id` cleans a host when `paisans.yaml` is lost* in `README.md`.
+
+### `paisans host allow`
+
+Adds each named admin's key fingerprints to the site's host's key allowlist,
+`/etc/paisans/ssh-allow.<user>`: the keys `host prepare` may add to the login
+user's `authorized_keys` there, whoever runs it.
+
+```sh
+paisans host allow home-a bob             # the fingerprints, and the list as it would be
+paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
+```
+
+* **Alone:** always; the whole apply never runs it. It is the host owner's
+  command, run once they have checked each fingerprint it shows with its
+  admin.
+* **Flags:** the site and one or more admins, by their name in `admins`, as
+  arguments; `--config`, `--ssh`, `--execute`, `--sudo`. It reads no secrets.
+* **Hosts:** the one site's. It claims nothing in the registry and touches
+  nothing of a deployment's: the list is the host's.
+* **New list:** when the file does not exist yet, it is made holding also
+  every key some deployment's sidecar already claims for the user, listed
+  apart as `keep`, so that making a list refuses no access the host already
+  has.
+* **Existing list:** every line it does not change is kept as written,
+  comments included, and the new keys are added at its end. A line that is
+  neither a comment nor a fingerprint is refused, naming it, and nothing is
+  written until the owner fixes it by hand.
+* **`--execute`:** asks for the site's name at a terminal, never answered by a
+  flag, and refuses without one; then writes the list under
+  `/etc/paisans/authorized_keys.lock`, by a temporary file and a rename, only
+  over the list it read. Without it, it prints each fingerprint with its
+  comment and the file as it would be.
+
+### `paisans host disallow`
+
+Takes lines off the site's host's key allowlist, by admin or by fingerprint.
+
+```sh
+paisans host disallow home-a bob                                                      # what it would take off
+paisans host disallow home-a SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA --execute  # asks for "home-a"
+```
+
+* **Alone:** always; the whole apply never runs it.
+* **Flags:** the site and one or more admins or `SHA256:` fingerprints as
+  arguments; `--config`, `--ssh`, `--execute`, `--sudo`.
+* **Hosts:** the one site's, as `host allow`.
+* **Keys already authorized:** it removes no key from `authorized_keys`, and
+  says so with what does: the admin out of `ssh.keys` and `host prepare
+  --execute`, or the line deleted by hand.
+* **The last line:** taking it leaves an empty list, which allows no key, and
+  it says so. To allow every key again, the owner deletes the file by hand.
+  With no list at all there is nothing to take off, and nothing is written.
+* **The rest of the list:** kept as written, comments included; a line it
+  cannot read is refused, as by `host allow`.
+* **`--execute`:** as `host allow`.
+
+See *host prepare manages the login user's authorized keys* in `README.md`.
 
 ### `paisans prune`
 
@@ -235,6 +313,16 @@ clients exist, ends by sweeping the old images its site's stacks used (see
 * **Hosts:** every site, and each app behind the operator's own web server
   from this machine, as a visitor would. Every host's sudo password is asked
   for before the first step.
+* **Review:** after the sudo passwords and before the first step that
+  changes a host (an `init` with work runs first: it writes only local
+  files), one review of what `paisans.yaml` grants on every site, under `review`, a line per site
+  with each change under it: keys, images and the web server's directory.
+  With `--execute`, when anything is added or changed, it asks once for
+  `approve` at a terminal, for every site, and refuses without one; each step
+  then applies what was approved, and refuses anything that changed since.
+  The dry run shows it, asks nothing, and ends saying what `--execute` will
+  ask for. Each step records its part once it has succeeded, and the run
+  records each web server's directory after its web server step.
 * **Secrets:** each gateway's deployment record is read once, after the sudo
   passwords, and each secret or recorded name `paisans.yaml` no longer uses is
   warned about once, by key, under `secrets`, dry run or not. The `apply`
@@ -288,6 +376,12 @@ starts, restarts or recreates what changed.
   deployment record as the ssh user, without sudo, since the record holds
   only names and is world readable, so applying a site that is not a gateway
   asks for no gateway's sudo password.
+* **Review:** the images every rendered `compose.yaml` of the site runs, and
+  the web server's `include_dir`, against what the host last recorded, under
+  `review what paisans.yaml grants`; `--only` narrows the images to its
+  stacks. With `--execute` it is asked for, as `approve` at a terminal, before
+  the claim, when anything is added or changed; the images are recorded once
+  the apply has succeeded, and the directory once the web server step has.
 * **`--execute`:** writes and acts, and an apply of the whole site ends by
   sweeping the old images of repositories its stacks render or have rendered,
   which no site of the deployment renders and no container uses (`sweep old
@@ -338,6 +432,12 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   `--secrets`, `--execute`, `--sudo`. No `--ssh`, since it reaches several
   hosts.
 * **Hosts:** every site.
+* **Review:** stage 4 applies the new site's whole render, so `site add`
+  reviews the new site's images as `apply --site` does: shown under `review
+  what paisans.yaml grants` before the stages, asked for as `approve` at a
+  terminal with `--execute`, refused without one, and recorded once stage 4's
+  gate has passed. As a step of the whole apply it asks nothing and refuses
+  an image the run's review did not approve.
 * **`--execute`:** runs the stages, stopping at the first gate that fails; a
   re-run plans only what differs and resumes.
 
@@ -404,6 +504,9 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   reaches the removed site's host not at all, so it says the site files apply
   wrote there may still be in the web server's `include_dir`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails.
+  Stage 3 deletes the record of what the deployment granted on the host,
+  `/var/lib/paisans/granted.<token>.json`, with its registry entry, and never
+  touches the host's key allowlist.
 
 See *`site remove` takes a site out* in `README.md`.
 
@@ -426,7 +529,9 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
 that are down, the settings a gated app must enforce, Pocket ID's active
-instance, clocks, and what is left over.
+instance, clocks, what is left over, and each host's key allowlist, with each
+key `ssh.keys` names that it does not hold and that the next `host prepare`
+would add, since one already in `authorized_keys` is never added again.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,

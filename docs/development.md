@@ -27,7 +27,13 @@ only local files, and reads every site over ssh to settle the mesh subnet.
 create` reach a machine, and each changes
 it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
-host `--ssh` names, with no `paisans.yaml`, and changes nothing. `secrets
+host `--ssh` names, with no `paisans.yaml`, and changes nothing. `host allow`
+and `host disallow` change only a site's host's key allowlist,
+`/etc/paisans/ssh-allow.<user>`, which is the host owner's, so they claim
+nothing; with `--execute` they ask for the site's name at a terminal.
+`internal/hostprep/allow.go` holds the list's format, the refusal `host
+prepare` gives a key it lacks, and the locked write; `cmd/paisans/hostallow.go`
+the commands. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
@@ -70,12 +76,27 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 (`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
+`apply`, `apply --site`, `host prepare` and `site add` review what
+`paisans.yaml` grants before their first change. `internal/grant` computes a site's grant from the
+configuration and the render (the login user, every key of the admins
+`ssh.keys` names, every rendered service's image, and the web server's
+`include_dir`), compares it with the host's record,
+`/var/lib/paisans/granted.<token>.json`, and writes that record under the
+registry's lock. `cmd/paisans/review.go` shows the review and asks for
+`approve` through `confirmWord`, refusing without a terminal;
+`cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
+every site, which its steps check against rather than asking again. README.md
+"`apply` and `host prepare` review what `paisans.yaml` grants" has the
+reasoning.
+
 ```
 paisans validate --config examples/paisans.example.yaml
 paisans init     --config examples/paisans.example.yaml
 paisans render   --config examples/paisans.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
 paisans host prepare --site home-a        # the host check, then what a blank host lacks
+paisans host allow home-a bob             # bob's fingerprints, and home-a's allowlist as it would be
+paisans host disallow home-a bob          # what it would take off home-a's allowlist
 paisans apply    --site home-a            # shows what would change
 paisans apply    --site home-a --execute  # does it
 paisans prune    --site home-a            # lists dangling volumes, and which go
@@ -1484,6 +1505,15 @@ before.
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
+* **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
+  `approve` at a terminal when what `paisans.yaml` grants adds or changes
+  something, and refuse without one, before the claim. A flag that answered
+  it would end up in every script, and approving is the control. Tests in
+  `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
+  through a pipe.
+* **host prepare never appends a key the host's allowlist lacks**, checked in
+  the plan and again under the lock as the append runs. Tests in
+  `internal/hostprep/allow_test.go` run the append against real files.
 * **The SSH allow follows `ssh.port` and is never removed**, including the
   allow for a port the site used before. A test moves the port and asserts the
   old allow is kept and noted.
@@ -1501,6 +1531,10 @@ takes the narrowest action that makes the rest live. `site add` has never been
 run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
 the same way.
+Nor have the review of what `paisans.yaml` grants, its record on each host,
+the allowlist's refusal in `host prepare`, and `host allow` and `host
+disallow`: the shell they send is run against local files in the tests, not
+observed on a host.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -73,7 +74,7 @@ func convergeSudo(t *testing.T, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=true"}, extra...))
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=true"}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
@@ -83,7 +84,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		hostcheck.CgroupPrefix,
 	}
 	exact = append(exact, hostcheck.ReadCommands()...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path, "read "+hostprep.AllowPath("ubuntu"))
 	// Each gated app's settings read, which kinds.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
