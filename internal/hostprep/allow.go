@@ -69,9 +69,9 @@ func Allows(lines []AllowLine, fingerprint string) bool {
 // is and how it is changed.
 func EncodeAllow(user string, lines []AllowLine) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Keys host prepare may add to %s's authorized_keys, one fingerprint per line.\n", user)
-	b.WriteString("# Changed with paisans host allow and paisans host disallow. An empty list allows\n")
-	b.WriteString("# no key; deleting this file allows every key.\n")
+	fmt.Fprintf(&b, "# Keys host prepare may add to %s's authorized_keys, one per line.\n", user)
+	b.WriteString("# Changed with paisans host allow and host disallow. An empty list\n")
+	b.WriteString("# allows no key; deleting this file allows every key.\n")
 	for _, l := range lines {
 		b.WriteString(l.Fingerprint)
 		if l.Comment != "" {
@@ -144,4 +144,47 @@ func Refusal(plan *Plan) error {
 		Explain: strings.Join(lines, "\n") + fmt.Sprintf("\n%s lists the keys host prepare may add for %s, and these are not on it, whoever runs this. The host's owner allows them, after checking each fingerprint with its admin, with: paisans host allow %s %s. Nothing was changed.",
 			AllowPath(first.User), first.User, first.Site, strings.Join(admins, " ")),
 	}
+}
+
+// Reader is what reading a host's lists needs.
+type Reader interface {
+	Run(command string) (string, error)
+	ReadFile(path string) (content string, found bool, err error)
+}
+
+var claimedFingerprint = regexp.MustCompile(`SHA256:[A-Za-z0-9+/]{43}`)
+
+// ClaimedKeys is every key some deployment's sidecar claims in user's
+// authorized_keys, each once, with the deployment and the name the sidecar
+// gives it as its comment. A sidecar claims a key when its fingerprint
+// appears anywhere in it, as planAuthorizedKeys reads them, so a format
+// this version does not parse still counts.
+func ClaimedKeys(t Reader, user string) ([]AllowLine, error) {
+	listing, err := t.Run(fmt.Sprintf(`for f in %s; do [ -f "$f" ] && echo "$f"; done; true`, OwnedKeysGlob(user)))
+	if err != nil {
+		return nil, err
+	}
+	var out []AllowLine
+	for _, path := range strings.Fields(listing) {
+		content, _, err := t.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		owner := strings.TrimSuffix(strings.TrimPrefix(path, ownedDir+"/authorized_keys."+user+"."), ".owned")
+		names := map[string]string{}
+		for _, e := range parseOwned(content) {
+			names[e.fingerprint] = e.name
+		}
+		for _, fp := range claimedFingerprint.FindAllString(content, -1) {
+			if Allows(out, fp) {
+				continue
+			}
+			comment := "claimed by " + owner
+			if names[fp] != "" {
+				comment += " for " + names[fp]
+			}
+			out = append(out, AllowLine{Fingerprint: fp, Comment: comment})
+		}
+	}
+	return out, nil
 }

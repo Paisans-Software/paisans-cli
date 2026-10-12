@@ -49,6 +49,10 @@ Usage:
   paisans host prepare --site <name> [--config paisans.yaml] [--ssh <destination>]
                [--execute]
   paisans host deployments --ssh <user@host[:port]> [--sudo=false]
+  paisans host allow <site> <admin>... [--config paisans.yaml] [--ssh <destination>]
+               [--execute]
+  paisans host disallow <site> <admin|fingerprint>... [--config paisans.yaml]
+               [--ssh <destination>] [--execute]
   paisans apply    [--config paisans.yaml] [--secrets secrets.enc.yaml]
                    [--min-free <size>] [--keep-images] [--execute]
                    every site, from paisans.yaml to a running stack, in order
@@ -105,6 +109,13 @@ Commands:
              Caddy kept for /srv/caddy.d), and any deployment directory or
              labelled compose project no registry entry names. Needs no
              paisans.yaml; changes nothing.
+             allow: add each admin's key fingerprints to the site's host's
+             key allowlist, /etc/paisans/ssh-allow.<user>, the keys host
+             prepare may add there; a new list also holds every key a
+             deployment already claims. disallow: take keys off it, by
+             admin or fingerprint; a key already authorized keeps working.
+             Both are the host owner's: --execute asks for the site's name
+             at a terminal. Write nothing without --execute.
   apply      Without --site: take every site from paisans.yaml to a running
              stack, running init, host prepare, apply, site add, storage
              and dns init in the order the deployment needs. With --site:
@@ -112,7 +123,11 @@ Commands:
              host and show what would change. Changes nothing on a
              host without --execute; without --site, the dry run may add
              missing generated secrets to the local secrets file, and
-             says so when it does.
+             says so when it does. Both, and host prepare, review the keys
+             and images paisans.yaml grants against what each host last
+             applied; --execute asks for the word approve at a terminal
+             when anything is added or changed, and asks nothing when
+             nothing is.
   site       add: join a new data site to the running cluster in eight gated
              stages: preflight, mesh, etcd (learners, then promoted), the
              Patroni replica, synchronous mode, HAProxy, each existing
@@ -229,23 +244,24 @@ Commands:
              any FAIL. With the toolkit's own Caddy in front (managed_by:
              paisans), only the first two apply.
 
-host prepare, host deployments, apply, prune, site add, site remove, storage
-init, storage add, storage rotate-key, app admin create, app remove, oidc
-client create, secrets prune, preflight, failover test, doctor and init are the
-only commands that reach a host.
-Each reads it to plan, and changes it only with --execute; host deployments,
-preflight, doctor and init have no --execute and never change it; secrets
-prune only reads the gateways' deployment records, and its --execute writes
-the local secrets file alone. With --execute, a command first
-claims each host it writes to in /var/lib/paisans/registry.json, and refuses if
-another deployment there holds this one's token, WireGuard interface or listen
-port, or a mesh subnet overlapping this one's. apply and host prepare also
-refuse when anything else on the host overlaps the mesh subnet. dns init and dns
-prune reach no host, only the DNS provider's API, and change it only with
---execute; site remove also deletes the removed site's records there. web-server
-show and web-server check change nothing: check looks at a monitor's public
-hostname as any visitor could, and with managed_by: external both read the
-monitor's web server over ssh, show always and check when a check fails.
+host prepare, host deployments, host allow, host disallow, apply, prune, site
+add, site remove, storage init, storage add, storage rotate-key, app admin
+create, app remove, oidc client create, secrets prune, preflight, failover test,
+doctor and init are the only commands that reach a host. Each reads it to plan,
+and changes it only with --execute; host allow and host disallow change only a
+host's key allowlist, which is the host owner's, and claim nothing; host
+deployments, preflight, doctor and init have no --execute and never change it;
+secrets prune only reads the gateways' deployment records, and its --execute
+writes the local secrets file alone. With --execute, a command first claims each
+host it writes to in /var/lib/paisans/registry.json, and refuses if another
+deployment there holds this one's token, WireGuard interface or listen port, or
+a mesh subnet overlapping this one's. apply and host prepare also refuse when
+anything else on the host overlaps the mesh subnet. dns init and dns prune reach
+no host, only the DNS provider's API, and change it only with --execute; site
+remove also deletes the removed site's records there. web-server show and
+web-server check change nothing: check looks at a monitor's public hostname as
+any visitor could, and with managed_by: external both read the monitor's web
+server over ssh, show always and check when a check fails.
 Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
@@ -275,8 +291,12 @@ func main() {
 			err = runHostPrepare(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "deployments":
 			err = runHostDeployments(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "allow":
+			err = runHostAllow(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "disallow":
+			err = runHostDisallow(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(usageError(os.Stderr, "host takes one subcommand, prepare or deployments"))
+			os.Exit(usageError(os.Stderr, "host takes one subcommand, prepare, deployments, allow or disallow"))
 		}
 	case "site":
 		switch {

@@ -200,3 +200,70 @@ func runFails(t *testing.T, dir, command string, files map[string]string, want s
 		t.Errorf("want a failure saying %q, got %v: %s", want, err, out)
 	}
 }
+
+// The list is written under the lock, through a temporary file renamed into
+// place, 0644, and only over the list that was read: run against real files,
+// a list written meanwhile is refused rather than overwritten.
+func TestWriteAllowReplacesOnlyWhatWasRead(t *testing.T) {
+	was := allowing(keyAlice)
+	next := hostprep.EncodeAllow("ubuntu", hostprep.ParseAllow(allowing(keyAlice, keyBob)))
+	for name, c := range map[string]struct {
+		found   bool
+		on      string
+		refused bool
+	}{
+		"new":               {found: false, on: ""},
+		"as read":           {found: true, on: was},
+		"written meanwhile": {found: true, on: allowing(keyCarol), refused: true},
+		"created meanwhile": {found: false, on: allowing(keyCarol), refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			files := map[string]string{"/etc/authorized_keys.lock": ""}
+			if c.on != "" {
+				files["/etc/ssh-allow.ubuntu"] = c.on
+			}
+			command := hostprep.WriteAllowCommand("ubuntu", c.found, was, next)
+			if c.refused {
+				runFails(t, dir, command, files, hostprep.AllowChangedMarker)
+				got, _ := os.ReadFile(dir + "/etc/ssh-allow.ubuntu")
+				if string(got) != c.on {
+					t.Errorf("overwritten:\n%s", got)
+				}
+				return
+			}
+			run(t, dir, command, files)
+			got, err := os.ReadFile(dir + "/etc/ssh-allow.ubuntu")
+			if err != nil || string(got) != next {
+				t.Errorf("list %v:\n%s", err, got)
+			}
+			if info, _ := os.Stat(dir + "/etc/ssh-allow.ubuntu"); info.Mode().Perm() != 0o644 {
+				t.Errorf("mode %v", info.Mode())
+			}
+		})
+	}
+}
+
+// A new list's seed: every key any deployment's sidecar for the user
+// claims, once, and none of another user's.
+func TestClaimedKeys(t *testing.T) {
+	host := preparedHost(false)
+	host.files[theirKeys] = "added " + fingerprint(keyBob) + " bob\n" + fingerprint(keyCarol) + " carol@example.org\n"
+	host.files["/etc/paisans/authorized_keys.root.paisans-0c1d.owned"] = "added " + fingerprint(keyCloud) + " cloud\n"
+	got, err := hostprep.ClaimedKeys(host, "ubuntu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fps []string
+	for _, l := range got {
+		fps = append(fps, l.Fingerprint)
+	}
+	for _, want := range []string{fingerprint(keyAlice), fingerprint(keyBob), fingerprint(keyCarol)} {
+		if !hostprep.Allows(got, want) {
+			t.Errorf("%s not seeded: %v", want, fps)
+		}
+	}
+	if hostprep.Allows(got, fingerprint(keyCloud)) || len(got) != 3 {
+		t.Errorf("seeded %v", got)
+	}
+}
