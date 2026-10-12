@@ -88,7 +88,9 @@ cannot run without its client, and approval to run the apply is approval for the
 clients it creates, whether a person or an agent runs it. The gate, which no
 file declares but the toolkit runs whenever an app sets `gated` or
 `auto_login`, is covered the same way: setting either key is the approval for
-the gate's client. The exception covers
+the gate's client. It holds whoever wrote the app's blueprint: an app whose
+blueprint comes from a third party catalog is approved by being declared, the
+same as one from the toolkit's own. The exception covers
 creating a missing client, and restricting it to the app's group, only. Rotating
 a client's secret, deleting a client, and every change to groups or users stay
 in the tier above, and `apply` never replaces a client it has already recorded.

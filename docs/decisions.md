@@ -1998,3 +1998,61 @@ from its client spec keeps the two sides from naming different groups.
 oauth2-proxy `v7.15.4` reads `OAUTH2_PROXY_ALLOWED_GROUPS` through viper, which
 splits a string on commas into a list (`pkg/apis/options/load.go:27-55`; viper
 `v1.21.0`, `viper.go:977-1022`), read from source. Not run against a live gate.
+
+## 2026-10-12: Applications are blueprints, read from signed catalogs
+
+Founder decision. Design: `docs/specs/2026-10-12-blueprints-and-catalogs.md`.
+Not implemented.
+
+### What was decided
+
+* An application is a blueprint: a `blueprint.yaml` and its templates. The
+  logic a blueprint cannot declare stays in the binary as capabilities,
+  helpers and in-app actions, named for their mechanism, and any blueprint may
+  use them, third party ones included.
+* Blueprints come from catalogs, git repositories a deployment declares by URL
+  and pins to a signed tag. With none declared, the core catalog at a URL
+  compiled into the binary is used, and it is used alongside any that are
+  declared.
+* The nouns are blueprint and catalog; an app's `kind:` key becomes
+  `blueprint:`.
+* `when` conditions and `checks` are CEL expressions.
+* `pocket-id`, the gate, `invite` and `uptime` are reserved: built into the
+  binary, never read from a catalog, and no catalog blueprint may take their
+  names or their capabilities.
+* Uptime is the only monitor. A blueprint without a health route is watched by
+  a TCP check per site and a public check of `/`, with a warning. A deployment
+  with no monitor stays a warning.
+* Declaring an app approves its OIDC client whatever catalog its blueprint
+  comes from, as it already does for a first party app.
+
+### Why
+
+Every application compiled into the binary means every new one waits for a
+toolkit release. Declaring what the toolkit already keeps per kind in Go maps
+and switches lets anyone publish an application while the writes that matter,
+to Pocket ID, the cluster and Garage, stay the toolkit's own code. The reserved
+four are the identity provider and the services that write to it, are derived
+from the whole deployment, or watch it, so a catalog that could replace one
+could take over sign in or blind the deployment to its own failures. Signed tags
+and a snapshot in the configuration store keep what a deployment renders fixed,
+reviewable and recoverable without the catalog.
+
+### What was weighed
+
+* **Executable plugins over a stdin and JSON protocol.** Arbitrary code would
+  run on the workstation that holds the operator's credentials. Not needed
+  while capabilities, helpers and in-app actions cover the first party
+  applications.
+* **Following a catalog's branch head, as Homebrew taps do.** Two admins a week
+  apart would render different files from the same configuration.
+* **Opening the monitor to other software** through a published monitoring
+  plan and per monitor adapters. Founder decision: too complicated; uptime
+  stays the only monitor.
+* **Refusing a blueprint without a health route.** Leaving an app unwatched is
+  worse than a weaker check, so the fallback checks it and warns.
+
+### What was run
+
+Nothing: a design. The uptime fork's TCP monitor type was read from its source
+(`src/lib/sitePayload.js:18,127-134` at `b730e9b`).
