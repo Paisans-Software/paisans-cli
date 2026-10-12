@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -178,12 +179,12 @@ func TestMissingSecretsFileIsAProblem(t *testing.T) {
 // newer toolkit wrote it.
 func TestSecretsVersionIsAProblem(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
-	if err := os.WriteFile(path, []byte("version: 2\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("version: 3\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := config.LoadSecrets(path)
 	var p *ui.Problem
-	if !errors.As(err, &p) || !strings.Contains(p.Hint, "version 2") || !strings.Contains(p.Explain, "newer toolkit") {
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, "version 3") || !strings.Contains(p.Explain, "newer toolkit") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -226,7 +227,7 @@ func TestWrittenSecretsStartWithVersionAndID(t *testing.T) {
 			body = append(body, line)
 		}
 	}
-	if len(body) < 2 || body[0] != "version: 1" || body[1] != "id: "+exampleDeploymentID {
+	if len(body) < 2 || body[0] != fmt.Sprintf("version: %d", config.SecretsVersion) || body[1] != "id: "+exampleDeploymentID {
 		t.Errorf("the file does not start with version and id:\n%s", data)
 	}
 }
@@ -526,5 +527,66 @@ func TestLoadSecretsNotesUnknownKeys(t *testing.T) {
 		if s.UnknownKeys != want {
 			t.Errorf("%q: UnknownKeys %t", body, s.UnknownKeys)
 		}
+	}
+}
+
+// The backup section holds two generated keys and each destination's pasted
+// credentials, and nothing else.
+func TestBackupSecretsGetAndSet(t *testing.T) {
+	s := &config.Secrets{}
+	for key, value := range map[string]string{
+		"backup.restic_password":                   "r",
+		"backup.walg_libsodium_key":                "w",
+		"backup.destinations.b2.access_key_id":     "id",
+		"backup.destinations.b2.secret_access_key": "secret",
+	} {
+		if err := s.Set(key, value); err != nil {
+			t.Fatalf("Set(%s): %v", key, err)
+		}
+		if got, ok := s.Get(key); !ok || got != value {
+			t.Fatalf("Get(%s) = %q, %v", key, got, ok)
+		}
+	}
+	for _, bad := range []string{"backup.nothing", "backup.destinations.b2.password", "backup.destinations.b2", "backup.destinations.B2.access_key_id"} {
+		if err := s.Set(bad, "x"); err == nil {
+			t.Errorf("Set(%s) accepted a key nothing reads", bad)
+		}
+	}
+}
+
+// Version 2 is the first format with a backup section, whose two keys
+// nothing can regenerate. A toolkit that reads only version 1 would drop the
+// section on its next write, so a version 1 file this toolkit writes is
+// written as version 2, which that toolkit refuses.
+func TestAVersion1FileIsWrittenAsVersion2(t *testing.T) {
+	if config.SecretsVersion != 2 {
+		t.Fatalf("SecretsVersion is %d", config.SecretsVersion)
+	}
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\ncluster:\n  admin_password: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadSecrets(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Backup.ResticPassword = "r"
+	if err := config.WriteSecrets(path, s, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\nversion: 2\n") {
+		t.Errorf("written as:\n%s", data)
+	}
+
+	// The same holds for a value built in memory at version 1.
+	if err := config.WriteSecrets(path, &config.Secrets{Version: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "\nversion: 2\n") {
+		t.Errorf("an in-memory version 1 was written as:\n%s", data)
 	}
 }

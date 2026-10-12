@@ -132,7 +132,8 @@ See *Three kinds of secret* in `README.md`.
 
 Lists the secrets that name something `paisans.yaml` no longer declares, by key
 and never by value: a removed site's WireGuard key, a removed app's passwords
-and sign in client, a Pocket ID group nothing names.
+and sign in client, a Pocket ID group nothing names, a removed backup
+destination's credentials.
 
 ```sh
 paisans secrets prune             # lists them

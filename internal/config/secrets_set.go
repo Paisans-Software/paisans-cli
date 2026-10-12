@@ -28,6 +28,14 @@ func (s *Secrets) Get(key string) (string, bool) {
 			"admin_token": s.Storage.Garage.AdminToken,
 			"rpc_secret":  s.Storage.Garage.RPCSecret,
 		}[parts[2]]
+	case len(parts) == 2 && parts[0] == "backup":
+		value = map[string]string{
+			"restic_password":    s.Backup.ResticPassword,
+			"walg_libsodium_key": s.Backup.WALGLibsodiumKey,
+		}[parts[1]]
+	case len(parts) == 4 && parts[0] == "backup" && parts[1] == "destinations":
+		d := s.Backup.Destinations[parts[2]]
+		value = map[string]string{"access_key_id": d.AccessKeyID, "secret_access_key": d.SecretAccessKey}[parts[3]]
 	case len(parts) == 3 && parts[0] == "sites":
 		value = map[string]string{
 			"wireguard_private_key": s.Sites[parts[1]].WireGuardPrivateKey,
@@ -75,6 +83,29 @@ func (s *Secrets) Set(key, value string) error {
 		default:
 			return fmt.Errorf("%s: Garage has no secret named %q", key, parts[2])
 		}
+	case len(parts) == 2 && parts[0] == "backup":
+		switch parts[1] {
+		case "restic_password":
+			s.Backup.ResticPassword = value
+		case "walg_libsodium_key":
+			s.Backup.WALGLibsodiumKey = value
+		default:
+			return fmt.Errorf("%s: backups have no secret named %q", key, parts[1])
+		}
+	case len(parts) == 4 && parts[0] == "backup" && parts[1] == "destinations" && secretName.MatchString(parts[2]):
+		if s.Backup.Destinations == nil {
+			s.Backup.Destinations = map[string]DestinationSecrets{}
+		}
+		d := s.Backup.Destinations[parts[2]]
+		switch parts[3] {
+		case "access_key_id":
+			d.AccessKeyID = value
+		case "secret_access_key":
+			d.SecretAccessKey = value
+		default:
+			return fmt.Errorf("%s: a backup destination has access_key_id and secret_access_key, not %q", key, parts[3])
+		}
+		s.Backup.Destinations[parts[2]] = d
 	case len(parts) == 3 && parts[0] == "sites" && (parts[2] == "wireguard_private_key" || parts[2] == "heartbeat_token"):
 		if s.Sites == nil {
 			s.Sites = map[string]SiteSecrets{}
@@ -121,7 +152,7 @@ func (s *Secrets) Set(key, value string) error {
 		}
 		s.PocketIDGroups[strings.Join(parts[1:], ".")] = value
 	default:
-		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, sites.<site>, apps.<app>, external, oidc_clients.<app> and pocket_id_groups", key)
+		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, backup, backup.destinations.<name>, sites.<site>, apps.<app>, external, oidc_clients.<app> and pocket_id_groups", key)
 	}
 	return nil
 }

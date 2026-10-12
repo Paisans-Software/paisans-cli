@@ -22,7 +22,13 @@ import (
 // SecretsVersion is the format of the secrets file this toolkit reads and
 // writes. It is the file's own, and changes independently of paisans.yaml's
 // version.
-const SecretsVersion = 1
+//
+// Version 2 adds the backup section. Its restic password and WAL-G key
+// decrypt every backup taken, and nothing can regenerate them, so a toolkit
+// that reads only version 1, and would drop the section on its next write,
+// must refuse the file instead. Version 1 is read as it is, and every write
+// is at this version.
+const SecretsVersion = 2
 
 // Secrets is the decrypted content of secrets.enc.yaml. Nothing here is ever
 // written back out except into a rendered artifact.
@@ -42,6 +48,7 @@ type Secrets struct {
 	ID          string                    `yaml:"id,omitempty"`
 	Cluster     ClusterSecrets            `yaml:"cluster"`
 	Storage     StorageSecrets            `yaml:"storage"`
+	Backup      BackupSecrets             `yaml:"backup,omitempty"`
 	Sites       map[string]SiteSecrets    `yaml:"sites"`
 	Apps        map[string]map[string]any `yaml:"apps"`
 	External    map[string]string         `yaml:"external"`
@@ -100,6 +107,25 @@ type StorageSecrets struct {
 type GarageSecrets struct {
 	AdminToken string `yaml:"admin_token"`
 	RPCSecret  string `yaml:"rpc_secret"`
+}
+
+// BackupSecrets is what backups need beyond paisans.yaml's backup section:
+// two keys generated at init and never seen, and each destination's
+// credentials, which its provider issues and an operator pastes.
+type BackupSecrets struct {
+	// ResticPassword opens the restic repository in every destination.
+	ResticPassword string `yaml:"restic_password,omitempty"`
+	// WALGLibsodiumKey encrypts every object WAL-G writes, 32 bytes as hex.
+	WALGLibsodiumKey string `yaml:"walg_libsodium_key,omitempty"`
+	// Destinations is keyed by the destination's name in paisans.yaml.
+	Destinations map[string]DestinationSecrets `yaml:"destinations,omitempty"`
+}
+
+// DestinationSecrets is the S3 key a destination's provider issued for its
+// bucket.
+type DestinationSecrets struct {
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
 }
 
 type SiteSecrets struct {

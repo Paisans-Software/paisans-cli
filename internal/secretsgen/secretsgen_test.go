@@ -4,9 +4,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -778,5 +780,78 @@ func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
 	secrets.Apps["blog"]["s3_access_key_id"] = "not-a-garage-key"
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		t.Errorf("a key on a local storage app was checked: %v", err)
+	}
+}
+
+// Backups that are on get the restic password and WAL-G's key generated, and
+// owe each destination's credentials.
+func TestBackupSecretsAreGeneratedAndOwed(t *testing.T) {
+	cfg := load(t)
+	secrets := &config.Secrets{}
+	result, err := secretsgen.Fill(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secrets.Backup.ResticPassword) < 32 {
+		t.Errorf("restic_password %d characters", len(secrets.Backup.ResticPassword))
+	}
+	if k, err := hex.DecodeString(secrets.Backup.WALGLibsodiumKey); err != nil || len(k) != 32 {
+		t.Errorf("walg_libsodium_key is not 32 bytes of hex: %v", err)
+	}
+	for _, want := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {
+		if !slices.Contains(result.Generated, want) {
+			t.Errorf("%s is not reported generated: %v", want, result.Generated)
+		}
+	}
+	owed := strings.Join(secretsgen.OwedNames(cfg, secrets), " ")
+	for _, want := range []string{
+		"backup.destinations.offsite.access_key_id", "backup.destinations.offsite.secret_access_key",
+		"backup.destinations.home.access_key_id", "backup.destinations.home.secret_access_key",
+	} {
+		if !strings.Contains(owed, want) {
+			t.Errorf("%s is not owed: %s", want, owed)
+		}
+	}
+
+	// A second run keeps both keys, and a destination with its credentials
+	// is owed nothing.
+	restic, walg := secrets.Backup.ResticPassword, secrets.Backup.WALGLibsodiumKey
+	secrets.Backup.Destinations = map[string]config.DestinationSecrets{"offsite": {AccessKeyID: "a", SecretAccessKey: "b"}}
+	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+		t.Fatal(err)
+	}
+	if secrets.Backup.ResticPassword != restic || secrets.Backup.WALGLibsodiumKey != walg {
+		t.Error("a second run replaced a backup key")
+	}
+	if owed := strings.Join(secretsgen.OwedNames(cfg, secrets), " "); strings.Contains(owed, "offsite") || !strings.Contains(owed, "backup.destinations.home.") {
+		t.Errorf("owed after offsite's credentials were set: %s", owed)
+	}
+}
+
+// Backups off, by `enabled: false` or by no section, generate and owe
+// nothing for them.
+func TestNoBackupSecretsWhenBackupsAreOff(t *testing.T) {
+	for _, name := range []string{"enabled false", "no section"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := load(t)
+			if name == "no section" {
+				cfg.Backup = nil
+			} else {
+				no := false
+				cfg.Backup.Enabled = &no
+			}
+			secrets := &config.Secrets{}
+			if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+				t.Fatal(err)
+			}
+			if secrets.Backup.ResticPassword != "" || secrets.Backup.WALGLibsodiumKey != "" {
+				t.Error("backups off still generated backup secrets")
+			}
+			for _, owed := range secretsgen.OwedNames(cfg, secrets) {
+				if strings.HasPrefix(owed, "backup.") {
+					t.Errorf("backups off still owes %s", owed)
+				}
+			}
+		})
 	}
 }

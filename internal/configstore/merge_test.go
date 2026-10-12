@@ -352,3 +352,38 @@ func TestMergeRefusesWhileTheirsHasARotateRemaining(t *testing.T) {
 		t.Errorf("the refusal blames the local side or offers --restart: %v", err)
 	}
 }
+
+// The backup keys and each destination's credentials merge like any other
+// secret: a destination one side takes out leaves no empty entry, and one
+// side's change to one field of a destination keeps the other field.
+func TestMergeBackupSecrets(t *testing.T) {
+	base := secretsWith("backup.restic_password", "r",
+		"backup.destinations.old.access_key_id", "old-id", "backup.destinations.old.secret_access_key", "old-secret",
+		"backup.destinations.b2.access_key_id", "b2-id", "backup.destinations.b2.secret_access_key", "b2-secret")
+	// Ours takes old out, replaces b2's secret, and adds the WAL-G key.
+	ours := secretsWith("backup.restic_password", "r", "backup.walg_libsodium_key", "w",
+		"backup.destinations.b2.access_key_id", "b2-id", "backup.destinations.b2.secret_access_key", "b2-next")
+	// Theirs adds a destination and leaves the rest alone.
+	theirs := secretsWith("backup.restic_password", "r",
+		"backup.destinations.old.access_key_id", "old-id", "backup.destinations.old.secret_access_key", "old-secret",
+		"backup.destinations.b2.access_key_id", "b2-id", "backup.destinations.b2.secret_access_key", "b2-secret",
+		"backup.destinations.new.access_key_id", "new-id", "backup.destinations.new.secret_access_key", "new-secret")
+	m, conflicts := mustMerge(t, base, ours, theirs)
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	want := map[string]string{
+		"backup.restic_password": "r", "backup.walg_libsodium_key": "w",
+		"backup.destinations.b2.access_key_id": "b2-id", "backup.destinations.b2.secret_access_key": "b2-next",
+		"backup.destinations.new.access_key_id": "new-id", "backup.destinations.new.secret_access_key": "new-secret",
+	}
+	if got := flatten(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged %v, want %v", got, want)
+	}
+	if _, ok := m.Backup.Destinations["old"]; ok {
+		t.Error("a destination removed on one side left an empty entry")
+	}
+	if theirs.Backup.Destinations["b2"].SecretAccessKey != "b2-secret" || len(theirs.Backup.Destinations) != 3 {
+		t.Error("the merge wrote into its input")
+	}
+}
