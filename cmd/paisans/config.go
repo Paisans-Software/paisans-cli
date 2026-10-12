@@ -77,8 +77,8 @@ const configHelp = "path to the deployment declaration; the store's state is kep
 // files of a version have fixed names, so the configuration must be named
 // paisans.yaml for the files on disk to be the ones a version holds.
 func workstationOf(path string) (configstore.Local, error) {
-	if filepath.Base(path) != "paisans.yaml" {
-		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called paisans.yaml", Explain: "A stored version holds paisans.yaml, secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
+	if filepath.Base(path) != config.FileName {
+		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called " + config.FileName, Explain: "A stored version holds " + config.FileName + ", secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
 	}
 	return configstore.Local{Dir: filepath.Dir(path)}, nil
 }
@@ -328,7 +328,7 @@ func adminsHolding(cfg *config.Config, held []string) map[string][]string {
 func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("config publish", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", configHelp)
+	configPath := fs.String("config", config.FileName, configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
 	execute := fs.Bool("execute", false, "sign the version and push it to the sites")
 	if err := fs.Parse(args); err != nil {
@@ -441,7 +441,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("config pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", configHelp)
+	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
 	if err := fs.Parse(args); err != nil {
@@ -582,7 +582,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 // showDifference prints how the local files differ from the head's:
 // paisans.yaml as a diff, the secrets by key name only, never a value.
 func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
-	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/paisans.yaml", "head/paisans.yaml")
+	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/"+config.FileName, "head/"+config.FileName)
 	if err != nil {
 		return err
 	}
@@ -619,7 +619,7 @@ func unifiedDiff(a, b []byte, nameA, nameB string) (string, error) {
 	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
-		return "", fmt.Errorf("diff paisans.yaml: %w", err)
+		return "", fmt.Errorf("diff "+config.FileName+": %w", err)
 	}
 	s := strings.ReplaceAll(string(out), pa, nameA)
 	return strings.ReplaceAll(s, pb, nameB), nil
@@ -697,7 +697,7 @@ func flatKeys(data []byte) (map[string]string, error) {
 func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("config log", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", configHelp)
+	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "judge from this root, as if pinned, without recording it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -763,7 +763,7 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("config recover", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", configHelp)
+	configPath := fs.String("config", config.FileName, configHelp)
 	var from pathList
 	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] (repeatable)")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")

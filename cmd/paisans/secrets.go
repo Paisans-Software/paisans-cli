@@ -65,10 +65,10 @@ func hasSecrets(s *config.Secrets, key string) bool {
 func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets prune", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually remove them and write the file")
-	withoutRecord := fs.Bool("without-record", false, "trust paisans.yaml alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")
+	withoutRecord := fs.Bool("without-record", false, "trust "+config.FileName+" alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")
 	sudo := fs.Bool("sudo", true, "read a gateway's deployment record through sudo when the ssh user may not read it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -88,14 +88,14 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	var deployed *deployrecord.Record
 	if !*withoutRecord {
 		if len(cfg.GatewaySites()) == 0 {
-			return fmt.Errorf("secrets prune: %s declares no gateway, so there is no deployment record to read. Pass --without-record to trust paisans.yaml alone. Nothing was changed", *configPath)
+			return fmt.Errorf("secrets prune: %s declares no gateway, so there is no deployment record to read. Pass --without-record to trust "+config.FileName+" alone. Nothing was changed", *configPath)
 		}
 		rec, missing := readDeploymentRecord(r, cfg, func(gw string, elevated bool) registry.Runner {
 			return registryHost(gw, cfg.Sites[gw], "", elevated && *sudo)
 		})
 		if len(missing) > 0 {
 			gw := sortedKeys(missing)[0]
-			return fmt.Errorf("secrets prune: the deployment record on %s could not be read (%v), so nothing says whether what paisans.yaml no longer declares was removed or is still running. Apply the gateway first, or pass --without-record to trust paisans.yaml alone. Nothing was changed", gw, missing[gw])
+			return fmt.Errorf("secrets prune: the deployment record on %s could not be read (%v), so nothing says whether what "+config.FileName+" no longer declares was removed or is still running. Apply the gateway first, or pass --without-record to trust "+config.FileName+" alone. Nothing was changed", gw, missing[gw])
 		}
 		deployed = &rec
 	}
@@ -108,7 +108,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	orphans := secretsgen.Orphans(cfg, secrets, deployed)
 	if len(orphans) == 0 {
-		r.Result("%s names nothing paisans.yaml does not declare. Nothing to prune.", *secretsPath)
+		r.Result("%s names nothing "+config.FileName+" does not declare. Nothing to prune.", *secretsPath)
 		return nil
 	}
 	for _, o := range orphans {
@@ -130,7 +130,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("secrets prune: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", *secretsPath, config.SOPSConfigName)
 	}
 	if *withoutRecord {
-		if err := confirmWord(stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting paisans.yaml alone.", len(orphans)))); err != nil {
+		if err := confirmWord(stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting "+config.FileName+" alone.", len(orphans)))); err != nil {
 			return fmt.Errorf("secrets prune: %w", err)
 		}
 	}
@@ -141,7 +141,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	s.Done(fmt.Sprintf("%d removed", len(orphans)))
-	r.Result("%s no longer names anything paisans.yaml does not declare.", *secretsPath)
+	r.Result("%s no longer names anything "+config.FileName+" does not declare.", *secretsPath)
 	if len(recipients) == 0 {
 		warnUnencrypted(r, *secretsPath)
 	}
@@ -166,7 +166,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 func runSecretsSet(args []string, stdin io.Reader) error {
 	fs := newFlagSet("secrets set", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	if len(args) > 0 && isHelpWord(args[0]) {
 		return fs.Parse(args[:1])

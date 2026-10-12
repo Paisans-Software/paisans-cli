@@ -814,7 +814,7 @@ func CheckSigner(l Local, parents []string, local *config.Config, keyLine string
 			return err
 		}
 		if m[key.Fingerprint] == "" {
-			return fmt.Errorf("the key %s belongs to no admin the local paisans.yaml lists; add it under your entry in admins", key.Fingerprint)
+			return fmt.Errorf("the key %s belongs to no admin the local "+config.FileName+" lists; add it under your entry in admins", key.Fingerprint)
 		}
 		return nil
 	}

@@ -45,15 +45,15 @@ var dnsProviderFor = dns.For
 func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("site remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	hostGone := fs.Bool("host-gone", false, "the site's host is never coming back: run every stage but cleaning it, and reach it not at all")
 	deleteData := fs.Bool("delete-data", false, "also delete this deployment's data on the host (its directory and named volumes); asks for the site's name at a terminal")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv, /etc and Docker are root's")
-	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither paisans.yaml nor the secrets file edited")
+	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither "+config.FileName+" nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
-	idFlag := fs.String("id", "", "with --force and --ssh, and no paisans.yaml: the deployment to clean off the host, by its full id or its token, as `paisans host deployments` lists it")
+	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as `paisans host deployments` lists it")
 	evict := fs.Bool("evict", false, "the site's host still runs and nobody else can reach it: cut it out of the mesh first, then take it out of the cluster without reaching its host; asks for the site's name at a terminal")
 	var site string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -381,7 +381,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case site != "":
 		return &ui.Problem{Hint: "--id takes no site", Explain: "The host's registry entry names the site, so drop " + site + "."}
 	case a.config:
-		return &ui.Problem{Hint: "--id takes no --config", Explain: "--id reads no paisans.yaml, and a configuration names its own id. Drop --config, or --id."}
+		return &ui.Problem{Hint: "--id takes no --config", Explain: "--id reads no " + config.FileName + ", and a configuration names its own id. Drop --config, or --id."}
 	case a.secrets:
 		return &ui.Problem{Hint: "--id takes no --secrets", Explain: "--id reads no secrets file. Drop --secrets."}
 	case a.hostGone:

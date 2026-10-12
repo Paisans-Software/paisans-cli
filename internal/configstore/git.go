@@ -3,6 +3,7 @@ package configstore
 import (
 	"bytes"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"io"
 	"os"
 	"os/exec"
@@ -17,7 +18,7 @@ import (
 // mktree requires.
 const (
 	nameSOPS    = ".sops.yaml"
-	namePaisans = "paisans.yaml"
+	namePaisans = config.FileName
 	nameSecrets = "secrets.enc.yaml"
 )
 

@@ -149,7 +149,7 @@ func recordApplied(r ui.Reporter, cfg *config.Config, site string, hosts func(st
 	res, err := deployrecord.Update(gatewayHosts(cfg, hosts), cfg.Deployment(), deployrecord.Adding(deployrecord.FromConfig(cfg)), time.Now())
 	if errors.Is(err, deployrecord.ErrMalformed) {
 		s.Fail(err)
-		return fmt.Errorf("%w. The apply itself finished. What the record held cannot be read, so it is not rewritten: delete it on that gateway with `sudo rm %s`, then apply %s again, which writes it from paisans.yaml", err, deployrecord.Path(cfg.Deployment()), site)
+		return fmt.Errorf("%w. The apply itself finished. What the record held cannot be read, so it is not rewritten: delete it on that gateway with `sudo rm %s`, then apply %s again, which writes it from "+config.FileName, err, deployrecord.Path(cfg.Deployment()), site)
 	}
 	if err != nil {
 		s.Fail(err)

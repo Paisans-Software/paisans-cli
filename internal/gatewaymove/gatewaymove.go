@@ -146,7 +146,7 @@ func refuse(hint, explain string) error { return &ui.Problem{Hint: hint, Explain
 func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]apply.Transport, o Options) (*Plan, error) {
 	gateways := cfg.GatewaySites()
 	if len(gateways) != 1 {
-		return nil, refuse(fmt.Sprintf("%d sites hold the gateway role", len(gateways)), "A move goes to exactly one gateway, the one site paisans.yaml gives the role; the gateway it leaves is found from what that site still runs, so it is never declared as well. Give the role to one site.")
+		return nil, refuse(fmt.Sprintf("%d sites hold the gateway role", len(gateways)), "A move goes to exactly one gateway, the one site "+config.FileName+" gives the role; the gateway it leaves is found from what that site still runs, so it is never declared as well. Give the role to one site.")
 	}
 	to := gateways[0]
 	if cfg.Sites[to].PublicAddress == "" {

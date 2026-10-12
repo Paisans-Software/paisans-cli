@@ -33,7 +33,7 @@ import (
 func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("site add", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and /etc are not the deploy user's")
@@ -126,7 +126,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	// every site.
 	pending := 0
 	if review != nil && !*execute {
-		showReview(r, "review what paisans.yaml grants", review.review, false)
+		showReview(r, "review what "+config.FileName+" grants", review.review, false)
 		pending = review.review.Pending()
 	}
 	// Site add writes to every site: the mesh, HAProxy and etcd change on

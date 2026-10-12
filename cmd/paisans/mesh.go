@@ -218,7 +218,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 func conflictAdvice(c registry.Conflict) string {
 	for _, clash := range c.Clashes {
 		if strings.HasPrefix(clash, "WireGuard listen port") {
-			return "Give that site's endpoint another port in paisans.yaml, and forward it where the host is behind NAT"
+			return "Give that site's endpoint another port in " + config.FileName + ", and forward it where the host is behind NAT"
 		}
 	}
 	return "Use another host for that site"

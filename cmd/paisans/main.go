@@ -187,7 +187,7 @@ func reportError(w io.Writer, err error, verbose bool) int {
 func runValidate(args []string) error {
 	fs := newFlagSet("validate", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func runValidate(args []string) error {
 func runInit(args []string) error {
 	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
 	sudo := fs.Bool("sudo", true, "read each site through sudo, since the host registry is root's")
@@ -363,7 +363,7 @@ func reportOwed(r ui.Reporter, filled secretsgen.Result) {
 func runRender(args []string) error {
 	fs := newFlagSet("render", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the sops encrypted secrets (default: secrets.enc.yaml beside the config)")
 	out := fs.String("out", "", "directory to write artifacts into")
 	if err := fs.Parse(args); err != nil {
@@ -428,7 +428,7 @@ func runRender(args []string) error {
 func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	site := fs.String("site", "", "the site to apply, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
@@ -515,7 +515,7 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
 		// The run published one version and every step applies it: files
 		// edited since are not what the store holds.
-		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "paisans.yaml or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
@@ -693,7 +693,7 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		// run shows one for every site.
 		pending := 0
 		if review != nil {
-			showReview(r, "review what paisans.yaml grants", review.review, false)
+			showReview(r, "review what "+config.FileName+" grants", review.review, false)
 			pending = review.review.Pending()
 		}
 		// As a step of apply without --site, the web server is the run's,
@@ -957,7 +957,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 func runStorageInit(args []string) error {
 	fs := newFlagSet("storage init", flag.ExitOnError)
 	reporter := commonFlags(fs)
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	site := fs.String("site", "", "the site to provision, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
@@ -1060,7 +1060,7 @@ type hostPrepareOptions struct {
 // hostPrepareFlags registers host prepare's own flags on fs.
 func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	o := &hostPrepareOptions{}
-	fs.StringVar(&o.config, "config", "paisans.yaml", "path to the deployment declaration")
+	fs.StringVar(&o.config, "config", config.FileName, "path to the deployment declaration")
 	fs.StringVar(&o.site, "site", "", "the site to prepare, by the name it has in the configuration")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	fs.BoolVar(&o.execute, "execute", false, "actually install and configure what is missing")
@@ -1182,7 +1182,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		// apply shows one for every site.
 		pending := 0
 		if review != nil {
-			showReview(r, "review what paisans.yaml grants", review.review, false)
+			showReview(r, "review what "+config.FileName+" grants", review.review, false)
 			pending = review.review.Pending()
 		}
 		refusal := hostprep.Refusal(plan)
@@ -1317,7 +1317,7 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	for _, add := range extra {
 		add(fs)
 	}
-	configPath := fs.String("config", "paisans.yaml", "path to the deployment declaration")
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, executeHelp)
 	if err := parseFlags(fs, args); err != nil {

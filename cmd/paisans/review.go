@@ -171,13 +171,13 @@ func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []
 	}
 	if !stdinIsTerminal(stdin) {
 		return &ui.Problem{
-			Hint:    "what paisans.yaml grants changed, and stdin is not a terminal",
+			Hint:    "what " + config.FileName + " grants changed, and stdin is not a terminal",
 			Explain: fmt.Sprintf("The review above adds or changes what may log in or run on a host (%s), which only an operator at a terminal approves, and no flag answers it. Run %s from an interactive shell. Nothing was changed.", grant.Summary(reviews), command),
 		}
 	}
 	resume := ui.Hold(r)
 	defer resume()
-	what := fmt.Sprintf("The review above is what paisans.yaml grants that this host, or these hosts, did not have: %s. Check each key with its admin and each image with whoever chose it before you approve.", grant.Summary(reviews))
+	what := fmt.Sprintf("The review above is what "+config.FileName+" grants that this host, or these hosts, did not have: %s. Check each key with its admin and each image with whoever chose it before you approve.", grant.Summary(reviews))
 	if err := confirmWord(stdin, stdout, approveWord, what); err != nil {
 		return &ui.Problem{Hint: "not approved", Explain: sentence(err.Error())}
 	}
@@ -258,7 +258,7 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 				lines = append(lines, c.Line())
 			}
 			return nil, "", &ui.Problem{
-				Hint:    "what paisans.yaml grants on " + site + " changed after it was approved",
+				Hint:    "what " + config.FileName + " grants on " + site + " changed after it was approved",
 				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run paisans apply --execute again to review them.",
 			}
 		}
@@ -267,7 +267,7 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 	if !execute {
 		return s, "", nil
 	}
-	showReview(r, "review what paisans.yaml grants", s.review, true)
+	showReview(r, "review what "+config.FileName+" grants", s.review, true)
 	if err := approveReviews(r, stdin, stdout, []grant.Review{s.review}, command); err != nil {
 		return nil, "", err
 	}
