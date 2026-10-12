@@ -220,7 +220,6 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 		for _, r := range ss.roles {
 			w.p.Say("  - %s", roleWhat[r])
 		}
-		w.p.Say("Give it a short name: paisans.yaml and every command call it by this.")
 		name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
 		if err != nil {
 			return nil, err

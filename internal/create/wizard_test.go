@@ -121,9 +121,9 @@ func TestOneMachineDoesNotOfferChat(t *testing.T) {
 	}
 }
 
-// A named shape's machine is introduced by what it does and what its name is
-// for, so the name prompt does not read as a question about its roles.
-func TestNamedShapeSaysWhatEachMachineDoesAndWhatItsNameIsFor(t *testing.T) {
+// A named shape's machine is introduced by what it does, so the name prompt
+// does not read as a question about its roles.
+func TestNamedShapeSaysWhatEachMachineDoes(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
@@ -137,7 +137,6 @@ func TestNamedShapeSaysWhatEachMachineDoesAndWhatItsNameIsFor(t *testing.T) {
 	for _, want := range []string{
 		"Machine 1 of 3. It:",
 		"Machine 3 of 3. It:",
-		"Give it a short name: paisans.yaml and every command call it by this.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
