@@ -96,13 +96,19 @@ grant as last applied, plus when.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "keys":   {"applied_at": "2026-10-11T23:10:04Z", "login": "ubuntu", "entries": [ … ]},
   "images": {"applied_at": "2026-10-11T23:12:40Z", "entries": [ … ]},
-  "web_server": {"applied_at": "…", "include_dir": "/srv/caddy.d"}
+  "web_server": {"applied_at": "…", "include_dir": "/srv/caddy.d"},
+  "config": {"hash": "…", "revision": 7, "applied_at": "2026-10-12T09:41:15Z"}
 }
 ```
 
+* **`config` is the signed configuration version last applied**, its hash and
+  revision (docs/specs/2026-10-12-config-store.md, *Rollback*), written by
+  `apply` with the other parts. A record of version 1 has no `config` part and
+  is read as one that has had no version applied; it is written back as
+  version 2.
 * **Readable by anyone, written by root.** It holds fingerprints and image
   references, nothing secret, so a plan reads it without `sudo`. Only root
   writes it, so the login user alone cannot rewrite the baseline.
