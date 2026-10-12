@@ -249,3 +249,46 @@ func TestSectionFor(t *testing.T) {
 		}
 	}
 }
+
+func TestSlug(t *testing.T) {
+	for in, want := range map[string]string{
+		"Paisans Staging Single": "paisans-staging-single",
+		"Paisans Community":      "paisans-community",
+		"example.org":            "example-org",
+		"  Café & Friends!  ":    "caf-friends",
+		"42 Club":                "club",
+		"A Very Long Community Name That Goes On On": "a-very-long-community-name-that",
+		"!!!": "",
+	} {
+		got := slug(in)
+		if got != want {
+			t.Errorf("slug(%q) = %q, want %q", in, got, want)
+		}
+		if got != "" && checkSiteName(got) != nil {
+			t.Errorf("slug(%q) = %q is not a valid site name", in, got)
+		}
+	}
+}
+
+// One machine's name defaults to the community's slug, then the domain's,
+// since the one machine is the whole deployment.
+func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"Paisans Staging Single", "paisans-staging-single"},
+		{"!!!", "example-org"},
+	} {
+		var lines []string
+		lines = append(lines, tc.name, "example.org", "")
+		lines = append(lines, adminAnswers...)
+		lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+		lines = append(lines, appAnswers(false)...)
+		lines = append(lines, mailAnswers...)
+		w, out, err := run(t, script(lines...))
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Name ["+tc.want+"]") || w.Answers.Sites[0].Name != tc.want {
+			t.Errorf("community %q: site = %q, want %q", tc.name, w.Answers.Sites[0].Name, tc.want)
+		}
+	}
+}

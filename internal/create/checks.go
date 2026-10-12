@@ -179,6 +179,31 @@ func roleList(roles []config.Role) string {
 	return strings.Join(out, ", ")
 }
 
+// slug makes a site name of s: lowercase ASCII letters and digits, every
+// other run of characters one hyphen, starting with a letter and cut to a
+// site name's length. It is empty when s holds no letter.
+func slug(s string) string {
+	var b strings.Builder
+	hyphen := false
+	for _, c := range strings.ToLower(s) {
+		switch {
+		case c >= 'a' && c <= 'z', b.Len() > 0 && c >= '0' && c <= '9':
+			if hyphen {
+				b.WriteByte('-')
+			}
+			b.WriteRune(c)
+			hyphen = false
+		case b.Len() > 0:
+			hyphen = true
+		}
+	}
+	out := b.String()
+	if len(out) > 31 {
+		out = strings.TrimRight(out[:31], "-")
+	}
+	return out
+}
+
 // notIn refuses an answer already taken, Eg: a second site of one name.
 func notIn(taken []string, what string, check func(string) error) func(string) error {
 	return func(s string) error {

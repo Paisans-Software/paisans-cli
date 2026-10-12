@@ -1,6 +1,7 @@
 package create
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -213,6 +214,12 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 	var sites []Site
 	for i, ss := range shapes[shape].sites {
 		d := Site{Name: ss.name, SSHUser: "ubuntu"}
+		if shape == ShapeOneMachine {
+			// The one machine is the whole deployment, so it is named for it.
+			if n := cmp.Or(slug(w.Answers.Name), slug(w.Answers.Domain)); n != "" {
+				d.Name = n
+			}
+		}
 		if i < len(prev) {
 			d = prev[i]
 		}
