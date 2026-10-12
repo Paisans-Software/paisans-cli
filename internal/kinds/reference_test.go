@@ -92,3 +92,20 @@ func TestPostgresHasNoFixedDefault(t *testing.T) {
 		t.Fatal("postgres is not a declarable service, so a pinned app could not choose its database image")
 	}
 }
+
+// A channel is a tag of the form stack-<N>, with or without a digest beside
+// it; anything else follows none.
+func TestChannel(t *testing.T) {
+	for ref, want := range map[string]string{
+		"ghcr.io/paisans-software/mbin:stack-1":                  "stack-1",
+		"ghcr.io/paisans-software/mbin:stack-12@sha256:0123abcd": "stack-12",
+		"ghcr.io/paisans-software/mbin:1.15.0-paisans":           "",
+		"ghcr.io/paisans-software/mbin:stack-one":                "",
+		"ghcr.io/paisans-software/mbin@sha256:0123abcd":          "",
+		"localhost:5000/mbin":                                    "",
+	} {
+		if got := kinds.Channel(ref); got != want {
+			t.Errorf("Channel(%s) = %q, want %q", ref, got, want)
+		}
+	}
+}

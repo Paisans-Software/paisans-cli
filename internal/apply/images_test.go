@@ -448,7 +448,7 @@ func TestDisagreeingSitesRefuse(t *testing.T) {
 	if err == nil {
 		t.Fatal("sites running two builds of one app were planned")
 	}
-	for _, want := range []string{"home-a runs ", "@" + buildA + ";", "home-b runs ", "@" + buildB, "without --site"} {
+	for _, want := range []string{"`home-a` runs `", "@" + buildA + "`;", "`home-b` runs `", "@" + buildB + "`", "without --site"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q:\n%v", want, err)
 		}

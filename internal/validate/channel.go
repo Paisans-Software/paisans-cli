@@ -2,29 +2,14 @@ package validate
 
 import (
 	"fmt"
-	"regexp"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
-// channelTag is a toolkit channel: stack-<N>, the latest release of a fork
-// promoted for the toolkit's template contract N.
-var channelTag = regexp.MustCompile(`^stack-([0-9]+)$`)
-
 // channelOf is the channel a reference follows (Eg: stack-1), empty when its
-// tag is not one. A digest beside the tag does not change which channel the
-// tag names.
-func channelOf(ref string) string {
-	parsed := kinds.ParseReference(ref)
-	if parsed.Digest != "" {
-		parsed = kinds.ParseReference(parsed.Name)
-	}
-	if channelTag.MatchString(parsed.Tag) {
-		return parsed.Tag
-	}
-	return ""
-}
+// tag is not one. See kinds.Channel.
+func channelOf(ref string) string { return kinds.Channel(ref) }
 
 // kindDefault is the image a kind's service runs when the configuration
 // names none. A test replaces it.
