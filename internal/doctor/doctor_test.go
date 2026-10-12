@@ -627,3 +627,15 @@ func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
 		t.Errorf("vm's loss excepts the monitor it runs: %s", got)
 	}
 }
+
+// A gateway that runs a monitor, beside a second monitor serving its own
+// hostname, does not take that hostname with it.
+func TestASharedGatewaysLossExceptsAnotherMonitor(t *testing.T) {
+	cfg := fixture(t)
+	vm := cfg.Sites["vm"]
+	vm.Roles = append(vm.Roles, config.RoleMonitor)
+	cfg.Sites["vm"] = vm
+	if got := losses(cfg, "vm"); !strings.Contains(got, "every public hostname but the monitor's goes through") {
+		t.Errorf("vm's loss does not except watch's monitor: %s", got)
+	}
+}
