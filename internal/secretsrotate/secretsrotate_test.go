@@ -727,3 +727,41 @@ func TestRestartRefusedWhilePending(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// pendingAtWhole is a rotation with its own staging that records whether any
+// rotation was pending in the secrets file when it ran.
+type pendingAtWhole struct {
+	*rot
+	ran     bool
+	pending []string
+}
+
+func (h *pendingAtWhole) RunWhole(e secretsrotate.Env) error {
+	s, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	h.ran, h.pending = true, s.RotationPending()
+	return nil
+}
+
+// The commands a rotation with its own staging runs (storage rotate-key, oidc
+// client create) refuse while a rotation is pending, as every command that
+// renders does; they run inside secrets rotate because every rotation before
+// them in the run is promoted first, so none is pending when they start.
+func TestWholeRunsWithNothingPending(t *testing.T) {
+	const cs = "oidc_clients.outline.client_secret"
+	w := newWorld(t, map[string]string{pw: "old", cs: "c"})
+	w.secrets.Rotations = map[string]string{pw: "pw-next"}
+	h := &pendingAtWhole{rot: newRot(w, cs, "a")}
+	run, err := secretsrotate.PlanAll(w.env(pw), []secretsrotate.Rotator{newRot(w, pw, "a"), h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(w.env(pw), noConfirm); err != nil {
+		t.Fatal(err)
+	}
+	if !h.ran || len(h.pending) != 0 {
+		t.Fatalf("ran %v, pending when it ran: %v", h.ran, h.pending)
+	}
+}

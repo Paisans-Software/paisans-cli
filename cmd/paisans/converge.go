@@ -536,7 +536,7 @@ func readConvergeState(configPath, secretsPath string) (*config.Config, converge
 		return nil, st, fmt.Errorf("apply: %w", err)
 	} else if err := refuseMidRekey(secrets); err != nil {
 		return nil, st, err
-	} else if err := refuseMidRotation(secrets); err != nil {
+	} else if err := refuseMidRotation(secrets, "apply"); err != nil {
 		return nil, st, err
 	} else if filled, err := secretsgen.Fill(cfg, secrets); err != nil {
 		return nil, st, fmt.Errorf("apply: generating the secrets %s lacks: %w", secretsPath, err)

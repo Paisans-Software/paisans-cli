@@ -709,7 +709,7 @@ func runApply(args []string) error {
 	if err := refuseMidRekey(secrets); err != nil {
 		return err
 	}
-	if err := refuseMidRotation(secrets); err != nil {
+	if err := refuseMidRotation(secrets, "apply"); err != nil {
 		return err
 	}
 	// apply does not call secretsgen.Fill either, and this is the path that

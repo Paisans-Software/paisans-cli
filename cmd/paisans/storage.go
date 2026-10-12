@@ -59,6 +59,9 @@ func runStorageAdd(args []string) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRotation(secrets, "storage add"); err != nil {
+		return err
+	}
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
 	}

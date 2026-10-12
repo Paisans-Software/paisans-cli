@@ -58,6 +58,9 @@ func runStorageRotateKey(args []string) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
+	if err := refuseMidRotation(secrets, "storage rotate-key"); err != nil {
+		return err
+	}
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
 	}

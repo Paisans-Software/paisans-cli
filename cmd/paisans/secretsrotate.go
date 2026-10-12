@@ -745,20 +745,27 @@ func refuseRotateMidRekey(secrets *config.Secrets) error {
 	}
 }
 
-// refuseMidRotation refuses a command that renders the deployment while a
-// secret's rotation is unfinished. Its next value may already be what the
-// side that checks it accepts, and some of its users may present it; apply
-// renders the current value, the old one, and would hand it back to those
-// users, which the checking side may no longer accept. Finishing the
-// rotation promotes the next value, after which apply renders what the hosts
-// run.
-func refuseMidRotation(secrets *config.Secrets) error {
+// refuseMidRotation refuses command, one that renders the deployment from
+// the secrets file and reaches a host, while a secret's rotation is
+// unfinished. Its next value may already be what the side that checks it
+// accepts, and some of its users may present it; command renders the current
+// value, the old one, and would hand it back to those users, which the
+// checking side may no longer accept. Finishing the rotation promotes the
+// next value, after which command renders what the hosts run. The commands
+// secrets rotate itself runs in its place in the order (storage rotate-key,
+// oidc client create) run when no rotation is pending: each rotation before
+// them is promoted before the next starts.
+func refuseMidRotation(secrets *config.Secrets, command string) error {
 	pending := secrets.RotationPending()
 	if len(pending) == 0 {
 		return nil
 	}
 	return &ui.Problem{
 		Hint:    "a secret's rotation is unfinished",
-		Explain: fmt.Sprintf("The secrets file holds a next value for %s, so a secrets rotate stopped part way. Some hosts may already check or present that value, and apply renders the old one. Finish the rotation first: paisans secrets rotate %s --execute (or --all --execute, when the run was --all), then apply. Nothing was changed.", strings.Join(pending, ", "), strings.Join(pending, " ")),
+		Explain: fmt.Sprintf("The secrets file holds a next value for %s, so a secrets rotate stopped part way. Some hosts may already check or present that value, and %s renders the old one. Finish the rotation first: paisans secrets rotate %s --execute (or --all --execute, when the run was --all), then %s. %s Nothing was changed.", strings.Join(pending, ", "), command, strings.Join(pending, " "), command, cannotFinish),
 	}
 }
+
+// cannotFinish is where a refusal over a rotation that cannot finish sends
+// the operator.
+const cannotFinish = secretsrotate.CannotFinish

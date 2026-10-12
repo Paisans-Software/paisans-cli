@@ -58,6 +58,11 @@ type Env struct {
 	Now     func() time.Time
 }
 
+// CannotFinish is what every refusal over a pending rotation that cannot
+// finish ends with: the section that says how to end it by hand, and what to
+// check on the hosts first.
+const CannotFinish = `A rotation that cannot finish, Eg: of a secret whose app was removed, is ended by hand, after a look at which value the hosts accept: README.md, "A rotation that cannot finish".`
+
 // Stage is where one secret's rotation stands.
 type Stage int
 

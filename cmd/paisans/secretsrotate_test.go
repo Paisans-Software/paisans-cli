@@ -785,3 +785,42 @@ func TestSecretsRotateRestartRefusedWhilePending(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Every command that renders from the secrets file and reaches a host
+// refuses while a rotation is pending, before any host is reached, naming
+// the command that finishes it: each would render the old value and hand it
+// back to hosts that may already run the next one. site remove refuses the
+// same way, after its own refusals, which the fixture trips first.
+func TestRenderingCommandsRefuseMidRotation(t *testing.T) {
+	const pending = "cluster.standby_password"
+	for name, run := range map[string]func(configPath, secretsPath string) error{
+		"site add": func(c, s string) error {
+			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s, "--sudo=false"})
+		},
+		"storage add": func(c, s string) error {
+			return runStorageAdd([]string{"--config", c, "--secrets", s, "--sudo=false"})
+		},
+		"storage rotate-key": func(c, s string) error {
+			return runStorageRotateKey([]string{"--app", "talk", "--config", c, "--secrets", s, "--sudo=false"})
+		},
+		"app remove": func(c, s string) error {
+			return runAppRemove([]string{"retired", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+		},
+		"mesh rekey": func(c, s string) error {
+			return runMeshRekey([]string{"home-a", "--config", c, "--secrets", s, "--sudo=false"})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			configPath, secretsPath := rotateDeployment(t, withRotation(pending))
+			log := failingSSH(t)
+			var err error
+			captureStdout(t, func() { err = run(configPath, secretsPath) })
+			if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate "+pending) || !strings.Contains(err.Error(), name) {
+				t.Errorf("err = %v", err)
+			}
+			if reached, _ := os.ReadFile(log); len(reached) > 0 {
+				t.Errorf("a refused %s reached a host:\n%s", name, reached)
+			}
+		})
+	}
+}
