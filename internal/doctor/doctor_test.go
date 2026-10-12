@@ -534,3 +534,38 @@ func TestUnreachableLineNamesTheHostOnce(t *testing.T) {
 		}
 	}
 }
+
+// The allowlist: no list is information, a list says how many keys it holds,
+// and each key ssh.keys names that it lacks is the refusal the next host
+// prepare would give, as a warning naming the command that allows it.
+func TestAllowlist(t *testing.T) {
+	cfg := fixture(t)
+	keys, _ := cfg.Sites["home-a"].SSH.AuthorizedKeys()
+	if len(keys) == 0 {
+		t.Fatal("the fixture's home-a lists no key")
+	}
+	alice := keys[0].Fingerprint
+	got := Allowlist(cfg, []AllowlistProbe{
+		{Site: "home-a"},
+		{Site: "home-b", Found: true, Content: "# owner's\n" + alice + " alice\n"},
+		{Site: "vm", Found: true, Content: "# empty\n"},
+		{Site: "watch", Err: "ssh: connection refused"},
+	})
+	var lines []string
+	for _, f := range got {
+		lines = append(lines, f.Level.String()+" "+f.Line)
+	}
+	want := []string{
+		"info home-a: no list for ubuntu; host prepare adds any key ssh.keys names",
+		"ok home-b: ubuntu's list holds 1 key",
+		"ok vm: ubuntu's list holds 0 keys",
+		"WARN vm: " + alice + " (alice) is not on ubuntu's list",
+		"skip watch: could not read /etc/paisans/ssh-allow.ubuntu",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	if more := strings.Join(got[3].More, " "); !strings.Contains(more, "paisans host allow vm alice") {
+		t.Errorf("no command to allow it: %s", more)
+	}
+}

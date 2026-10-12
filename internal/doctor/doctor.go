@@ -67,9 +67,10 @@ const (
 	SectionPocketID   = "pocket-id"
 	SectionClocks     = "clocks"
 	SectionLeftovers  = "leftovers"
+	SectionAllowlist  = "ssh allowlist"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionPocketID, SectionClocks, SectionLeftovers}
+var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -198,6 +199,7 @@ type Input struct {
 	Standby    []StandbyProbe
 	Clocks     []ClockSample
 	Leftovers  []LeftoverProbe
+	Allowlists []AllowlistProbe
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -244,6 +246,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
+	findings = append(findings, Allowlist(cfg, in.Allowlists)...)
 	return Report{Sites: len(in.Sites), Reached: len(reached), Findings: findings}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		hostcheck.CgroupPrefix,
 	}
 	exact = append(exact, hostcheck.ReadCommands()...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path, "read "+hostprep.AllowPath("ubuntu"))
 	return exact, prefixes
 }
 
