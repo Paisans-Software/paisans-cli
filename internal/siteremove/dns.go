@@ -84,6 +84,9 @@ func (p *Plan) buildDNS(before, after *config.Config) (*Stage, error) {
 	plan := func() (*dns.PrunePlan, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 		defer cancel()
+		if p.Evict {
+			return dns.BuildSiteEviction(ctx, provider, before, p.Site, after)
+		}
 		return dns.BuildSiteRemoval(ctx, provider, before, p.Site, after)
 	}
 	// A provider that cannot be read skips the stage rather than refusing

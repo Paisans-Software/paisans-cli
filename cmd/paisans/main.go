@@ -63,9 +63,13 @@ Usage:
                [--execute]
   paisans site remove <site> [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]
+  paisans site remove <site> --evict [--config paisans.yaml] [--secrets secrets.enc.yaml]
+               [--execute]
   paisans site remove --force --ssh <user@host[:port]> --id <id or token>
                [--delete-data] [--sudo=false] [--execute]
   paisans gateway move [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
+  paisans mesh rekey <site>... | --all [--config paisans.yaml] [--secrets secrets.enc.yaml]
+               [--execute]
   paisans storage init --site <name> [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--ssh <destination>] [--execute]
   paisans storage add [--config paisans.yaml] [--secrets secrets.enc.yaml]
@@ -157,6 +161,19 @@ Commands:
              names, as --force does, from the registry entry alone.
              DNS is not modified. --execute asks for the site's name at
              a terminal.
+             remove --evict: take out a site whose host still runs and
+             that nobody else can reach, never reaching that host: the
+             mesh cut first on every remaining site, then its DNS records,
+             Patroni's own failover, its etcd member, its Garage node
+             skipped as dead, then the rest as remove does. Generates the
+             secrets of a replacement declared in the same edit, which
+             apply then brings up. --execute asks for the site's name, and
+             for revoked, lose writes or lose objects when they apply.
+  mesh       rekey: replace sites' WireGuard keys, one site at a time: a
+             next key in the secrets, every peer's mesh file and then the
+             site's own synced with it, a handshake under it from every
+             peer, etcd and Patroni healthy, then the key promoted. A
+             stopped run resumes. Writes nothing without --execute.
   gateway    move: move the gateway role to the site paisans.yaml gives it,
              from the site that still serves as the gateway, in gated
              stages: carry the deployment record, check the new gateway
@@ -245,11 +262,11 @@ Commands:
              paisans), only the first two apply.
 
 host prepare, host deployments, host allow, host disallow, apply, prune, site
-add, site remove, storage init, storage add, storage rotate-key, app admin
-create, app remove, oidc client create, secrets prune, preflight, failover test,
-doctor and init are the only commands that reach a host. Each reads it to plan,
-and changes it only with --execute; host allow and host disallow change only a
-host's key allowlist, which is the host owner's, and claim nothing; host
+add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
+admin create, app remove, oidc client create, secrets prune, preflight, failover
+test, doctor and init are the only commands that reach a host. Each reads it to
+plan, and changes it only with --execute; host allow and host disallow change
+only a host's key allowlist, which is the host owner's, and claim nothing; host
 deployments, preflight, doctor and init have no --execute and never change it;
 secrets prune only reads the gateways' deployment records, and its --execute
 writes the local secrets file alone. With --execute, a command first claims each
@@ -307,6 +324,8 @@ func main() {
 		default:
 			os.Exit(usageError(os.Stderr, "site takes one subcommand, add or remove"))
 		}
+	case "mesh":
+		err = runMesh(os.Args[2:])
 	case "gateway":
 		err = runGateway(os.Args[2:])
 	case "secrets":
@@ -688,6 +707,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
+	}
+	if err := refuseMidRekey(secrets); err != nil {
+		return err
 	}
 	// apply does not call secretsgen.Fill either, and this is the path that
 	// actually reaches a host: a malformed key has to stop here, not just

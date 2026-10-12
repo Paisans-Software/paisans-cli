@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -50,6 +54,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither paisans.yaml nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
 	idFlag := fs.String("id", "", "with --force and --ssh, and no paisans.yaml: the deployment to clean off the host, by its full id or its token, as `paisans host deployments` lists it")
+	evict := fs.Bool("evict", false, "the site's host still runs and nobody else can reach it: cut it out of the mesh first, then take it out of the cluster without reaching its host; asks for the site's name at a terminal")
 	var site string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		site, args = args[0], args[1:]
@@ -65,7 +70,16 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port]]]"}
+		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone | --evict] [--delete-data] [--force [--ssh user@host[:port]]]"}
+	}
+	if *evict {
+		switch {
+		case *force || *idFlag != "" || *sshFlag != "":
+			return &ui.Problem{Hint: "--evict cleans no host", Explain: "--evict never reaches the evicted site's host, and --force, --ssh and --id name a host to clean. Drop them."}
+		case *deleteData:
+			return &ui.Problem{Hint: "--evict and --delete-data cannot be used together", Explain: "--delete-data deletes data on the host, and --evict never reaches it. Drop --delete-data."}
+		}
+		*hostGone = true
 	}
 	if *idFlag != "" {
 		set := map[string]bool{}
@@ -96,12 +110,33 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *execute && *deleteData && !stdinIsTerminal(stdin) {
 		return noTerminal("--delete-data deletes member data, which nothing brings back")
 	}
-	opts := siteremove.Options{HostGone: *hostGone, DeleteData: *deleteData, ConfigPath: *configPath, DNSProvider: dnsProviderFor}
+	if *execute && *evict && !stdinIsTerminal(stdin) {
+		return noTerminal("An eviction is not undone by running it again")
+	}
+	opts := siteremove.Options{HostGone: *hostGone, DeleteData: *deleteData, ConfigPath: *configPath, DNSProvider: dnsProviderFor, Evict: *evict}
 	if err := siteremove.Refusal(cfg, site, opts); err != nil {
 		return err
 	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	// One reader for every answer an eviction asks for, so none is read
+	// ahead and lost between questions.
+	term := &terminal{stdin: stdin, out: stdout}
+	// A gateway's DNS token is revoked and replaced while `revoked` waits,
+	// with `secrets set`, which writes the secrets file. So it is asked
+	// before the file is read: the token checked and every secret written
+	// back are the ones the operator has just set.
+	asked := false
+	if *execute && *evict && cfg.Sites[site].Has(config.RoleGateway) {
+		if err := term.ask([]question{revokedQuestion(cfg, site)}); err != nil {
+			return err
+		}
+		asked = true
+	}
+	loaded, err := os.ReadFile(*secretsPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
 	if err != nil {
@@ -112,6 +147,16 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
+	}
+	// A replacement declared in the same edit has no secrets yet. They are
+	// generated here, on the workstation, by the same code init runs, so the
+	// remaining sites can be rendered with it; they are written only once the
+	// eviction is confirmed.
+	var filled secretsgen.Result
+	if *evict {
+		if filled, err = secretsgen.Fill(cfg, secrets); err != nil {
+			return err
+		}
 	}
 	if err := requireACMEToken(cfg, secrets, cfg.SiteNames()); err != nil {
 		return err
@@ -131,9 +176,20 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := settleSudo(r, claim, func(name string) apply.Transport { return transports[name] }); err != nil {
 		return err
 	}
+	// A site declared for the first time is neither checked nor claimed: the
+	// eviction leaves its host to the apply that brings it up, and a claim
+	// would make it look prepared.
+	monitors := cfg.MonitorSites()
+	if *evict {
+		joining, err := siteremove.JoiningSites(cfg, secrets, site, transports)
+		if err != nil {
+			return err
+		}
+		claim, monitors = withoutNames(claim, joining), withoutNames(monitors, joining)
+	}
 	// The monitor's stack is applied last, with the site out of its seed,
 	// so each monitor site is host checked as apply would check it.
-	if _, err := gateSites(r, cfg, cfg.MonitorSites(), func(site string) hostcheck.Transport { return transports[site] }); err != nil {
+	if _, err := gateSites(r, cfg, monitors, func(site string) hostcheck.Transport { return transports[site] }); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read every site", func() (*siteremove.Plan, error) {
@@ -150,6 +206,13 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := claimSites(r, cfg, *execute, *sudo, claim...); err != nil {
 		return err
 	}
+	if filled.Changed() {
+		verb := "would be generated"
+		if *execute {
+			verb = "are generated before the eviction starts"
+		}
+		r.Note("secrets: "+strings.Join(filled.Generated, ", ")+" "+verb, "The configuration declares them and the secrets file does not hold them yet; paisans init generates them the same way")
+	}
 	if !*execute {
 		reportRemains(r, plan.Remains())
 		r.Result("Nothing changed. Re-run with --execute to apply.")
@@ -158,6 +221,22 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *deleteData {
 		if err := confirmSite(stdin, stdout, site); err != nil {
 			return err
+		}
+	}
+	if *evict {
+		var questions []question
+		for _, q := range evictionQuestions(cfg, site, plan) {
+			if !asked || q.word != "revoked" {
+				questions = append(questions, q)
+			}
+		}
+		if err := term.ask(questions); err != nil {
+			return err
+		}
+		if filled.Changed() {
+			if err := writeFilled(r, *secretsPath, loaded, secrets, filled); err != nil {
+				return err
+			}
 		}
 	}
 	plan.Report = r
@@ -419,6 +498,126 @@ func confirmSite(stdin io.Reader, stdout io.Writer, site string) error {
 func confirmSiteFor(stdin io.Reader, stdout io.Writer, site, what string) error {
 	if err := confirmWord(stdin, stdout, site, what); err != nil {
 		return fmt.Errorf("site remove: %w", err)
+	}
+	return nil
+}
+
+// withoutNames is list without any of names.
+func withoutNames(list, names []string) []string {
+	drop := map[string]bool{}
+	for _, n := range names {
+		drop[n] = true
+	}
+	var out []string
+	for _, n := range list {
+		if !drop[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// question is one word an operator types at the terminal, and what it
+// agrees to.
+type question struct {
+	word, what string
+}
+
+// evictionQuestions are the words an eviction asks for, in order: revoked,
+// for a gateway, whose DNS token can change the community's records from
+// anywhere; the site's name, since an eviction is not undone by running it
+// again; lose writes, for a leader with no streaming Sync Standby; and lose
+// objects, for a Garage node whose objects nothing else holds.
+func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) []question {
+	var out []question
+	if plan.Gateway() {
+		out = append(out, revokedQuestion(cfg, site))
+	}
+	out = append(out, question{site, fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. An eviction is not undone by running it again.", site)})
+	if text := plan.LoseWritesText(); text != "" {
+		out = append(out, question{"lose writes", text})
+	}
+	if plan.LoseObjects() {
+		out = append(out, question{"lose objects", fmt.Sprintf("Skipping %s's Garage node loses the objects only it held: storage.garage.replication is %d, and the nodes that remain hold no other copy of them.", site, cfg.Storage.Garage.Replication)})
+	}
+	return out
+}
+
+// revokedQuestion is `revoked`, asked when the evicted site holds the
+// gateway.
+func revokedQuestion(cfg *config.Config, site string) question {
+	provider := cfg.ACME.Provider
+	if provider == "" {
+		provider = "the DNS provider"
+	}
+	return question{"revoked", fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before going on. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
+}
+
+// terminal is where an eviction's questions are asked: one reader for all of
+// them, however many times it asks.
+type terminal struct {
+	stdin io.Reader
+	in    *bufio.Reader
+	out   io.Writer
+}
+
+// confirmEviction asks each question in turn, from one reader so that no
+// answer is read ahead and lost, and refuses at the first wrong answer.
+// There is no flag to answer any of them.
+func confirmEviction(stdin io.Reader, stdout io.Writer, questions []question) error {
+	return (&terminal{stdin: stdin, out: stdout}).ask(questions)
+}
+
+func (t *terminal) ask(questions []question) error {
+	if !stdinIsTerminal(t.stdin) {
+		return noTerminal("An eviction is not undone by running it again")
+	}
+	if t.in == nil {
+		t.in = bufio.NewReader(t.stdin)
+	}
+	in, stdout := t.in, t.out
+	for _, q := range questions {
+		fmt.Fprintf(stdout, "\n%s\nType %s to go on: ", strings.Join(ui.Wrap(q.what, 80), "\n"), q.word)
+		answer, err := in.ReadString('\n')
+		if err != nil && answer == "" {
+			return fmt.Errorf("site remove: no answer read. Nothing was changed")
+		}
+		if strings.TrimSpace(answer) != q.word {
+			return fmt.Errorf("site remove: %q is not %s. Nothing was changed", strings.TrimSpace(answer), q.word)
+		}
+	}
+	return nil
+}
+
+// writeFilled writes the secrets init's generation filled in, encrypted to
+// the recipients beside the file, before the eviction renders anything from
+// them. The whole file is written back from what was read, so a file that
+// changed since, loaded as its bytes then, is refused rather than
+// overwritten: the change would be lost, and the plan was rendered without
+// it.
+func writeFilled(r ui.Reporter, path string, loaded []byte, secrets *config.Secrets, filled secretsgen.Result) error {
+	now, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if !bytes.Equal(now, loaded) {
+		return fmt.Errorf("site remove: %s changed after it was read, so writing the generated secrets back would lose that change, and the plan was made without it. Nothing was written or changed: run site remove --evict again, which reads it afresh", path)
+	}
+	recipients, err := config.Recipients(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if secrets.Encrypted && len(recipients) == 0 {
+		return fmt.Errorf("site remove: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written or changed", path, config.SOPSConfigName)
+	}
+	s := r.Step("generate secrets")
+	if err := config.WriteSecrets(path, secrets, recipients); err != nil {
+		s.Fail(err)
+		return err
+	}
+	s.Done(strings.Join(filled.Generated, ", "))
+	if len(recipients) == 0 {
+		warnUnencrypted(r, path)
 	}
 	return nil
 }

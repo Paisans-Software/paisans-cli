@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/getsops/sops/v3"
@@ -53,6 +54,11 @@ type Secrets struct {
 	// it is state the toolkit wrote about a live instance, which is what
 	// this file holds beside the credentials.
 	PocketIDGroups map[string]string `yaml:"pocket_id_groups,omitempty"`
+	// MeshRekeyRemaining is the sites a `paisans mesh rekey --all` run has
+	// left, in order, set only while one is under way: written before the
+	// first site's rekey, and each site taken off as its key is promoted, so
+	// that a stopped run resumes without rekeying a site it finished.
+	MeshRekeyRemaining []string `yaml:"mesh_rekey_remaining,omitempty"`
 
 	// Path is where these were read from, for error messages.
 	Path string `yaml:"-"`
@@ -86,10 +92,30 @@ type GarageSecrets struct {
 
 type SiteSecrets struct {
 	WireGuardPrivateKey string `yaml:"wireguard_private_key"`
+	// WireGuardNextPrivateKey is the key `paisans mesh rekey` is moving the
+	// site to, set only while a rekey is under way: it is written before any
+	// host is handed it, so a run that stops part way finds it and resumes,
+	// and it becomes WireGuardPrivateKey once every peer has a handshake with
+	// the site under it. Render never reads it. README, "Rekeying the mesh".
+	WireGuardNextPrivateKey string `yaml:"wireguard_next_private_key,omitempty"`
 	// HeartbeatToken is what the site's host pushes to every monitor with,
 	// and what each monitor's seed names for the site: 32 lowercase hex
 	// characters, generated at init. README, "Monitoring".
 	HeartbeatToken string `yaml:"heartbeat_token"`
+}
+
+// RekeyPending is every site with a next WireGuard key, sorted: a `paisans
+// mesh rekey` that has not finished. Its host may already run the next key,
+// and the file names the old one as current until the rekey promotes it.
+func (s *Secrets) RekeyPending() []string {
+	var out []string
+	for name, site := range s.Sites {
+		if site.WireGuardNextPrivateKey != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type OIDCClient struct {
