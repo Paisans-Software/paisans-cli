@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func TestRunSiteAddArguments(t *testing.T) {
 		{[]string{"home-b", "--config", "/nonexistent/paisans.yaml"}, "nonexistent"},
 		{[]string{"--config", "/nonexistent/paisans.yaml", "home-b"}, "nonexistent"},
 	} {
-		err := runSiteAdd(tc.args)
+		err := runSiteAdd(tc.args, strings.NewReader(""), io.Discard)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v: want an error containing %q, got %v", tc.args, tc.want, err)
 		}

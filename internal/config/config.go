@@ -471,14 +471,24 @@ type App struct {
 	// it here only chooses another name. See kinds.MediaHostname.
 	Hostnames map[string]string `yaml:"hostnames"`
 
-	// VisibilityGate is who may read the app through the gateway: public,
-	// member or provisional. Empty means public. Read it through Gate.
+	// Gated puts the app behind the gate: every request on its hostnames
+	// meets the community's sign-in, and only members get through, except
+	// the paths that carry their own authentication, which the kind names.
 	//
 	// It is declared rather than inferred because it is access policy. It is
 	// also the setting most likely to be wrong in a way nothing notices: a
 	// gated Matrix hostname authenticates a browser and breaks every client,
 	// because a client will not follow a redirect to a passkey prompt.
-	VisibilityGate string `yaml:"visibility_gate"`
+	Gated bool `yaml:"gated"`
+
+	// AutoLogin skips the app's own "Log in with" button for a member the
+	// gate has already signed in, on a gated app or a public one. Only kinds
+	// with an auto-login rule take it.
+	AutoLogin bool `yaml:"auto_login"`
+
+	// Derived marks the gate app, which no file declares: Load adds it when
+	// any app sets gated or auto_login. See deriveGate.
+	Derived bool `yaml:"-"`
 
 	// SMTP overrides the deployment's smtp block for this app, field by
 	// field: a field left out is inherited. Only kinds that send mail read
@@ -505,21 +515,51 @@ const (
 	StorageS3    = "s3"
 )
 
-// The values of visibility_gate. Public is also what an absent key means.
-const (
-	GatePublic      = "public"
-	GateMember      = "member"
-	GateProvisional = "provisional"
-)
+// UsesGate reports whether the app needs the gate at all.
+func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 
-// Gate is the gate instance in front of the app: member, provisional, or
-// empty when the app is public. An absent key and an explicit public mean
-// the same thing, so callers never compare against both.
-func (a App) Gate() string {
-	if a.VisibilityGate == GatePublic {
-		return ""
+// GateApp is the name of the gate app Load derives. It is the toolkit's, so a
+// file declaring an app of that name while the gate is needed is refused.
+const GateApp = "gate"
+
+// GateHostname is the gate's hostname: the one name the identity provider's
+// callback is registered against, under the community's domain so the
+// session cookie the gate writes covers every app.
+func (c *Config) GateHostname() string { return "gate." + c.Community.Domain }
+
+// NeedsGate reports whether any app sets gated or auto_login, which is when
+// the deployment runs the gate.
+func (c *Config) NeedsGate() bool {
+	for _, app := range c.Apps {
+		if !app.Derived && app.UsesGate() {
+			return true
+		}
 	}
-	return a.VisibilityGate
+	return false
+}
+
+// deriveGate adds the gate app when an app needs it: one oauth2-proxy at
+// GateHostname, pinned to the first gateway site. The gate holds no data, so
+// it sits with the edge it serves: it is down only when the gateway is, and
+// that takes every app with it anyway. It does nothing when the name is
+// already taken or no site is a gateway; structural refuses both.
+func (c *Config) deriveGate() {
+	if !c.NeedsGate() {
+		return
+	}
+	if _, taken := c.Apps[GateApp]; taken {
+		return
+	}
+	gateways := c.GatewaySites()
+	if len(gateways) == 0 {
+		return
+	}
+	c.Apps[GateApp] = App{
+		Kind:      KindOAuth2Proxy,
+		Hostname:  c.GateHostname(),
+		Placement: Placement{Mode: PlacementPinned, Site: gateways[0]},
+		Derived:   true,
+	}
 }
 
 // SMTP is how an app sends mail. The deployment's block is the default for
@@ -684,11 +724,38 @@ func Load(path string) (*Config, error) { return load(path, false) }
 // every address a host binds is in that subnet.
 func LoadForInit(path string) (*Config, error) { return load(path, true) }
 
+// LoadBytes is Load for a configuration held in memory, as a version in the
+// configuration store holds it: the same strict decode and structural check,
+// with no file behind it, so its Path is empty.
+func LoadBytes(data []byte) (*Config, error) {
+	cfg, err := parse(data, "paisans.yaml", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Path = ""
+	return cfg, nil
+}
+
 func load(path string, noSubnet bool) (*Config, error) {
+	cfg, _, err := loadBytes(path, noSubnet)
+	return cfg, err
+}
+
+// LoadWithBytes is Load, and the bytes it read: what apply publishes as the
+// version it applies is then exactly what it loaded.
+func LoadWithBytes(path string) (*Config, []byte, error) { return loadBytes(path, false) }
+
+func loadBytes(path string, noSubnet bool) (*Config, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, readProblem(path, "Run paisans from the directory that holds paisans.yaml, or name the file with --config.", err)
+		return nil, nil, readProblem(path, "Run paisans from the directory that holds paisans.yaml, or name the file with --config.", err)
 	}
+	cfg, err := parse(data, path, noSubnet)
+	return cfg, data, err
+}
+
+// parse decodes and checks data, naming it path in every problem.
+func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 	dec := yaml.NewDecoder(newReader(data))
 	dec.KnownFields(true)
 	var cfg Config
@@ -701,6 +768,7 @@ func load(path string, noSubnet bool) (*Config, error) {
 		return nil, parseProblem(path, "a configuration", err)
 	}
 	cfg.deriveLists(written)
+	cfg.deriveGate()
 	cfg.resolveKeys()
 	if cfg.Storage.Garage.Capacity == "" {
 		cfg.Storage.Garage.Capacity = "100G"
@@ -966,7 +1034,9 @@ func (c *Config) structural(noSubnet bool) error {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
 		}
 		for _, service := range sortedKeys(app.Images) {
-			if strings.TrimSpace(app.Images[service]) == "" {
+			if r, ok := ControlRune(app.Images[service]); ok {
+				add("apps.%s.images.%s %s", name, service, controlProblem(r))
+			} else if strings.TrimSpace(app.Images[service]) == "" {
 				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this kind ships.", name, service)
 			}
 		}
@@ -981,15 +1051,21 @@ func (c *Config) structural(noSubnet bool) error {
 		if app.SMTP != nil {
 			problems = append(problems, smtpProblems("apps."+name+".smtp", *app.SMTP)...)
 		}
-		switch app.VisibilityGate {
-		case "", GatePublic, GateMember, GateProvisional:
-		default:
-			add("apps.%s.visibility_gate: unknown value %q. Valid values are public, member and provisional.", name, app.VisibilityGate)
+		if app.Kind == KindOAuth2Proxy && !app.Derived {
+			add("apps.%s.kind: oauth2-proxy is the gate, which the toolkit runs itself whenever an app sets gated or auto_login. Remove this app, and set gated: true or auto_login: true on the apps it was for.", name)
 		}
 		switch app.Storage {
 		case "", StorageLocal, StorageS3:
 		default:
 			add("apps.%s.storage: unknown value %q. Valid values are local and s3, or leave it out for s3 when the deployment runs Garage and local when it does not.", name, app.Storage)
+		}
+	}
+	if c.NeedsGate() {
+		if app, ok := c.Apps[GateApp]; ok && !app.Derived {
+			add("apps.%s: the name is the gate's. An app sets gated or auto_login, so the toolkit runs the gate as an app of that name. Rename this app.", GateApp)
+		}
+		if len(c.GatewaySites()) == 0 {
+			add("apps: an app sets gated or auto_login, and no site holds the gateway role. The gate runs on the gateway, beside the Caddy that sends every request to it.")
 		}
 	}
 	problems = append(problems, smtpProblems("smtp", c.SMTP)...)
@@ -998,6 +1074,9 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if !c.Cluster.SitesDerived && len(c.Cluster.Sites) == 0 {
 		add("cluster.sites: empty. Remove the key, and the cluster is derived from the roles (every data site), or list the data sites.")
+	}
+	if r, ok := ControlRune(c.ACME.Image); ok {
+		add("acme.image %s", controlProblem(r))
 	}
 	if c.ACME.Provider == "" && len(c.CaddySites()) > 0 {
 		// The providers are deliberately not listed here. This package does not

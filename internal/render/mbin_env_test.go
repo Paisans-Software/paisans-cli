@@ -155,12 +155,12 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		lockable[name] = true
 	}
 	for _, c := range []struct {
-		gate  string
+		gate  bool
 		fetch any
-	}{{config.GateMember, nil}, {"", nil}, {"", false}, {"", true}} {
+	}{{true, nil}, {false, nil}, {false, false}, {false, true}} {
 		gate := c.gate
 		env := renderTalk(t, fixtureSMTP, nil, func(a *config.App) {
-			a.VisibilityGate = gate
+			a.Gated = gate
 			a.Config = nil
 			if c.fetch != nil {
 				settings := map[string]any{}
@@ -176,7 +176,7 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 			wantFetch = "false"
 		}
 		if got := envValue(env, "MBIN_AUTHORIZED_FETCH"); got != wantFetch {
-			t.Errorf("gate %q, authorized_fetch %v: MBIN_AUTHORIZED_FETCH = %q, want %s", gate, c.fetch, got, wantFetch)
+			t.Errorf("gated %v, authorized_fetch %v: MBIN_AUTHORIZED_FETCH = %q, want %s", gate, c.fetch, got, wantFetch)
 		}
 		rendered := map[string]bool{}
 		var want []string
@@ -194,24 +194,24 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		locked := strings.Split(envValue(env, "MBIN_LOCKED_SETTINGS"), ",")
 		for _, name := range locked {
 			if !rendered[name] {
-				t.Errorf("gate %q: %s is locked but the .env does not set it", gate, name)
+				t.Errorf("gated %v: %s is locked but the .env does not set it", gate, name)
 			}
 			if !lockable[name] {
-				t.Errorf("gate %q: %s is locked but the fork cannot lock it, so Mbin would refuse every request", gate, name)
+				t.Errorf("gated %v: %s is locked but the fork cannot lock it, so Mbin would refuse every request", gate, name)
 			}
 		}
 		sort.Strings(locked)
 		sort.Strings(want)
 		if strings.Join(locked, ",") != strings.Join(want, ",") {
-			t.Errorf("gate %q: locked %v, want every rendered database setting %v", gate, locked, want)
+			t.Errorf("gated %v: locked %v, want every rendered database setting %v", gate, locked, want)
 		}
-		if gated := rendered["MBIN_PRIVATE_INSTANCE"]; gated != (gate != "") {
-			t.Errorf("gate %q: MBIN_PRIVATE_INSTANCE rendered = %v", gate, gated)
+		if gated := rendered["MBIN_PRIVATE_INSTANCE"]; gated != gate {
+			t.Errorf("gated %v: MBIN_PRIVATE_INSTANCE rendered = %v", gate, gated)
 		}
 		// The fixture's talk has a Pocket ID client, so sign in is the
 		// provider's alone and password registration is closed.
 		if got := envValue(env, "SSO_ONLY_MODE"); got != "true" {
-			t.Errorf("gate %q: SSO_ONLY_MODE = %q, want true", gate, got)
+			t.Errorf("gated %v: SSO_ONLY_MODE = %q, want true", gate, got)
 		}
 	}
 }

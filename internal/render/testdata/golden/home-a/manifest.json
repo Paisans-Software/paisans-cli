@@ -12,8 +12,18 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env",
+      "sha256": "bf79dbf67d17744731c397959b5f40b286183d9d10e3ff91c44657db3464eac4",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/auth/admins-heartbeat/push.sh",
+      "sha256": "3bdaa4526c33129dba05da6e537d01f2af56def6fe8e3eca300eac1715d3c9b4",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "ee806e24fe9b11df02e675be20c62d8e07061faa58f805604dff1c6ea7d4377e",
+      "sha256": "947c776a7424651919473e683c880670904ed3dc8b8834975691659596b8d259",
       "mode": "0644"
     },
     {
@@ -44,16 +54,6 @@
     {
       "path": "srv/paisans/f2a9/docs/compose.yaml",
       "sha256": "9fb68b51d3ba2dbf1cbfac11f218a8a512cf65f4b78330bd2ec4f564aea810d2",
-      "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/gate/.env",
-      "sha256": "5f0957e93d398ac4f6b7a149db4ba74d3eb0499f8c614779759e187ef74d63b8",
-      "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/gate/compose.yaml",
-      "sha256": "9beab90dc283648617b30ed818fbba077a388aa957d581065023af9dc9e0dbd1",
       "mode": "0644"
     },
     {

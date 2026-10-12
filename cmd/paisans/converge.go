@@ -357,9 +357,9 @@ func runStep(args []string) error {
 	case args[0] == "host" && args[1] == "prepare":
 		return runHostPrepare(args[2:])
 	case args[0] == "apply":
-		return runApply(args[1:])
+		return runApply(args[1:], os.Stdin, os.Stdout)
 	case args[0] == "site" && args[1] == "add":
-		return runSiteAdd(args[2:])
+		return runSiteAdd(args[2:], os.Stdin, os.Stdout)
 	case args[0] == "storage" && args[1] == "init":
 		return runStorageInit(args[2:])
 	case args[0] == "storage" && args[1] == "add":
@@ -466,6 +466,10 @@ type convergeOptions struct {
 	// KeepImages and MinFree are apply's, so each apply step takes them.
 	KeepImages bool
 	MinFree    string
+	// stdin and stdout are where the run's review asks for approval. No
+	// step is handed them: the run asks once for every site.
+	stdin  io.Reader
+	stdout io.Writer
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
@@ -648,6 +652,11 @@ func missingID(path string) bool {
 // again and carries on. See docs/specs/2026-10-09-apply-converge.md.
 func runConverge(r ui.Reporter, o convergeOptions) error {
 	defer planEverySite()()
+	// The run reviews every site itself; its steps check what it approved
+	// rather than asking again. See converge_review.go.
+	savedReview := reviewedByRun
+	reviewedByRun = &runReview{}
+	defer func() { reviewedByRun = savedReview }()
 	configPath, secretsPath, execute, sudo := o.Config, o.Secrets, o.Execute, o.Sudo
 	cfg, st, err := convergeRead(configPath, secretsPath)
 	if err != nil {
@@ -757,13 +766,34 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	steps := convergePlan(cfg, st)
+	// The version the run applies is gathered once, before the review, so
+	// a fork or a stale base is refused before the operator is asked
+	// anything; its steps do not gather again.
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.stdin, o.stdout)
+	if err != nil {
+		return err
+	}
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's admin problem is shown on its line; it stops nothing.
 		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
 		convergeWebServerPending(r, cfg, webServerScope{})
+		// The review ends the plan, with what --execute asks approval for.
+		// A site it could not read is shown on its line; it stops nothing.
+		reviews, pending, _ := convergeReview(r, cfg, o)
+		// What --execute checks every host's record against before its
+		// first step, and publishes once host prepare has made the stores.
+		if err := store.check(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
+			return err
+		}
+		if _, err := store.publish(r, false, publishWhen); err != nil {
+			return err
+		}
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
+		if pending > 0 {
+			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above before its first step. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
+		}
 		if len(generated) > 0 {
 			r.Result("Nothing changed on the servers. Added %s to %s. %s", plural(len(generated), "generated secret"), filepath.Base(convergeSecretsPath(configPath, secretsPath)), next)
 			return nil
@@ -771,7 +801,27 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		r.Result("Nothing changed. %s", next)
 		return nil
 	}
-	if err := convergeExecute(r, cfg, steps, o); err != nil {
+	// One review for every site, asked once, before the first step that
+	// changes a host. init, which may have run above, writes only local
+	// files, and the images are rendered from the secrets it generates.
+	reviews, _, err := convergeReview(r, cfg, o)
+	if err != nil {
+		return err
+	}
+	// Approved, and before the first step: every host's record is checked
+	// against the version, which only reads. The version is published once
+	// for the run, after the host prepare steps, which make every site's
+	// store, and before any other step changes a host, so the store holds
+	// what is applied even if the run stops part way. Each apply step
+	// records it, and refuses files that are not it.
+	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
+		return err
+	}
+	publish := func() (err error) {
+		reviewedByRun.version, err = store.publish(r, true, publishWhen)
+		return err
+	}
+	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
 	// Each step pointed the retries and holds at its own reporter; the
@@ -785,6 +835,11 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
 	end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{})
+	if end == nil {
+		if err := convergeRecordWebServer(r, cfg, reviews); err != nil {
+			return err
+		}
+	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if end != nil || adminErr != nil {
 		return webServerEnd(end, broken, adminErr)
@@ -1166,9 +1221,19 @@ const resumeAdvice = "Run paisans apply --execute again to resume."
 // at; and an install line per site and one for storage, each spinning while
 // one of its steps runs. It stops at the first failure, so a DNS conflict
 // stops the run before any site is applied.
-func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
+//
+// publish is called once, after the prepare steps and before the first
+// other step that runs, or at the end when none does.
+func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions, publish func() error) error {
+	published := false
 	for i := 0; i < len(steps); {
 		s := steps[i]
+		if !published && s.Stage != stageInit && s.Stage != stagePrepare {
+			published = true
+			if err := publish(); err != nil {
+				return err
+			}
+		}
 		switch {
 		case s.Stage == stageInit:
 			i++
@@ -1204,8 +1269,15 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			i++
 		}
 	}
+	if !published {
+		return publish()
+	}
 	return nil
 }
+
+// publishWhen is when apply without --site publishes the version it
+// applies, as its plan says.
+const publishWhen = "after host prepare, which makes every site's store, and before any other step"
 
 // convergePrepareAll runs steps, the prepare lines', every host at once,
 // each on its own line, which ends with its host. A host that fails stops

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"regexp"
 	"slices"
 	"strings"
@@ -322,7 +323,19 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 // runs share nothing unguarded.
 func TestRealHostPreparesRunTogether(t *testing.T) {
 	quietSSH(t)
+	// As apply with no --site runs them: after its review, which approved
+	// every site's keys.
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	cfg := fixture(t)
+	approved := map[string]grant.Review{}
+	for _, site := range preparedSites {
+		g, _ := grant.For(cfg, nil, site)
+		approved[site] = grant.Compare(site, g, grant.Record{}, grant.PrepareScope)
+	}
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
 	for _, execute := range []bool{false, true} {
+		reviewedByRun = &runReview{approved: approved}
 		var b strings.Builder
 		r := ui.NewPlain(&lockedWriter{w: &b}, true)
 		routeRetries(r)

@@ -220,22 +220,63 @@ files goes with it. The secrets file holds every credential of the deployment,
 and without it every secret must be generated again and every client created
 again.
 
-**Protects, today.** Nothing in the toolkit. Keep the files in a repository with
-more than one copy, and keep each admin's age key backed up somewhere other
-than that repository.
+**Protects.** Every site keeps every version of `paisans.yaml`,
+`secrets.enc.yaml` and `.sops.yaml`, each a git commit of exactly those three
+files signed with the SSH key of the admin who published it. `paisans config
+publish` pushes a version to every site, and `apply --execute` publishes the
+version it applies, so the copies follow what was actually run. Each site
+fetches from its peers over the mesh every 15 minutes, so one that was down
+catches up. A version is tens of kilobytes and nothing is pruned.
 
-**Designed, not built: every site keeps signed copies.** Each `apply` would
-publish the version it applied to every site, signed with the admin's SSH key,
-and the sites would share versions with each other over the mesh. The sites
-only store; the workstation decides what to trust:
+The sites only store; the workstation decides what to trust, because someone
+with root on a site can write anything there:
 
-* a version counts only when signed by an admin listed in the version before
-  it, and an admin's signature stops counting once a version removes them;
-* every version records the hashes of its `paisans.yaml` and `.sops.yaml`
-  inside its encrypted secrets, so someone who cannot decrypt the file cannot
-  forge a version, even with root on every site that answers;
-* a version older than what a host records having applied is refused there, so
-  a stolen host cannot roll the others back to old secrets.
+* **Trust starts from something only the operator holds:** the newest version
+  signed by their own SSH key, or a root hash they pin with `--root`. A history
+  found only on the sites is never trusted, however consistent, because whoever
+  holds those sites could have written it and listed themselves as an admin. An
+  admin who has never published gets an anchor of their own with `paisans admin
+  register`, which signs the version they already hold.
+* **A version counts only when signed by an admin listed in its parent.**
+  Someone who is not an admin cannot extend the history, however many sites
+  they control.
+* **Removal is final.** Once a trusted version drops an admin's key, nothing
+  later signed by that key is trusted, so an admin removed for cause cannot
+  publish a version that undoes it.
+
+A version that was really published stays valid forever, so someone holding a
+site can hide the newer ones and serve an old one, whose secrets an apply would
+put back. No signature can prove a version is the newest, so three memories make
+an old one visible instead:
+
+* **The workstation** remembers the newest revision it has seen, and refuses an
+  older head until the operator types `rollback`.
+* **A majority of sites.** `config pull`, `config recover`, `admin register`,
+  the publish of a first version and `apply --execute` count the sites they
+  reached directly over ssh, and ask for `partial` when that is no more than
+  half. A lying site can hide newer versions only from a workstation that
+  reaches no honest one.
+* **The hosts.** Each host records the version last applied to it, and `apply`
+  asks for `rollback` before giving it an older one.
+
+When the workstation is gone, `paisans config recover --from <user@host>
+--root <sha> --execute` in an empty directory gathers from the hosts named and
+then every site the trusted heads name, and writes the three files. The root is
+the hash of a version the operator trusts, as `paisans config log` prints it;
+an empty workstation holds no signature of its own, so keep that hash
+somewhere other than the workstation, or commit `.paisans/config-root`, which
+the admins may share. When the sites hold two heads, `recover` writes each to
+`.paisans/incoming/<sha>/` and leaves the choice to an admin.
+
+**Does not protect.** A fresh workstation that reaches only sites an attacker
+holds can be served an old, genuine version, and applying it reaches only those
+sites. Nothing checks that a removed admin's age key was taken out of the
+secrets file: that is the operator's step (see *A former recipient still has
+the secrets file*).
+
+**You do.** Keep the files in a repository with more than one copy anyway, keep
+each admin's age key backed up somewhere other than that repository, and keep a
+trusted root hash where a lost workstation does not take it.
 
 What no design can protect is losing every admin's age key. That is total loss:
 add a second recipient, another admin or an offline backup key, as soon as the
@@ -243,7 +284,6 @@ deployment exists.
 
 ## Not built yet
 
-* **Signed copies on every site**, above.
 * **A record of who owns which site.** Without it, nothing warns when one
   admin's hosts hold a majority of etcd's voters, which would let that admin
   block an eviction.

@@ -1,6 +1,7 @@
 package siteadd_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -240,6 +241,44 @@ func TestARisingLagStopsAtTheReplicaAndResumes(t *testing.T) {
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Replicated runs once stage 4's gate has passed, and only then: a replica
+// that has not caught up records nothing, and the run that resumes there
+// records it. A Replicated that fails stops the join at stage 4.
+func TestReplicatedRunsOnceStage4Passes(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.lags = []float64{5, 6, 7}
+	p := build(t, w)
+	var at []string
+	p.Replicated = func() error {
+		at = append(at, w.hosts["home-b"].files["/srv/paisans/f2a9/infra/compose.yaml"])
+		return nil
+	}
+	if err := siteadd.Execute(p); err == nil || len(at) != 0 {
+		t.Fatalf("err %v, Replicated ran %d time(s) on a failed gate", err, len(at))
+	}
+	w.lags = []float64{9, 4, 0}
+	p = build(t, w)
+	p.Replicated = func() error { at = append(at, "resumed"); return nil }
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if len(at) != 1 {
+		t.Errorf("Replicated ran %d time(s), want once", len(at))
+	}
+
+	w = newWorld(t)
+	p = build(t, w)
+	p.Replicated = func() error { return errors.New("record refused") }
+	err := siteadd.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "stage 4") || !strings.Contains(err.Error(), "record refused") {
+		t.Errorf("want a stage 4 stop naming the cause, got %v", err)
+	}
+	if w.syncMode {
+		t.Error("stage 5 ran after Replicated failed")
 	}
 }
 

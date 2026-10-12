@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,9 +13,12 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
 	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
 // doctorHost answers doctor's read commands from a table, records every
@@ -79,7 +84,20 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		hostcheck.CgroupPrefix,
 	}
 	exact = append(exact, hostcheck.ReadCommands()...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path, "read "+hostprep.AllowPath("ubuntu"))
+	// Each gated app's settings read, which kinds.LiveSettings promises
+	// prints only the named settings.
+	for _, name := range cfg.AppNames() {
+		app := cfg.Apps[name]
+		live, ok := kinds.LiveSettingsFor(app.Kind)
+		var names []string
+		for _, s := range kinds.GateSettingsFor(app) {
+			names = append(names, s.Name)
+		}
+		if ok && len(names) > 0 {
+			exact = append(exact, doctor.SettingsCommand(cfg.Deployment(), name, live.Service(), live.ReadCommand(names)))
+		}
+	}
 	return exact, prefixes
 }
 
@@ -331,5 +349,60 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 	}
 	if len(writes) > 0 {
 		t.Errorf("doctor wrote: %v", writes)
+	}
+}
+
+// doctor --execute takes out a config: key that repeats a value gating
+// renders, and leaves one that contradicts it; validate then refuses only the
+// contradiction, and says doctor removes the repeat while it is there.
+func TestDoctorExecuteRemovesOnlyRedundantGateConfig(t *testing.T) {
+	data, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const anchor = "      KBIN_META_TITLE: A place to talk\n"
+	if !strings.Contains(string(data), anchor) {
+		t.Fatal("the fixture's talk config moved; update this test")
+	}
+	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	body := strings.Replace(string(data), anchor, anchor+"      # Before gating wrote it.\n      MBIN_USE_FEDERATION_ALLOW_LIST: true\n      MBIN_PRIVATE_INSTANCE: false\n", 1)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range validate.Check(before).Refusals() {
+		if f.Key == "apps.talk.config.MBIN_USE_FEDERATION_ALLOW_LIST" && !strings.Contains(f.Message, "paisans doctor --execute") {
+			t.Errorf("the refusal of the repeat does not name doctor --execute: %s", f.Message)
+		}
+		if f.Key == "apps.talk.config.MBIN_PRIVATE_INSTANCE" && strings.Contains(f.Message, "doctor --execute") {
+			t.Errorf("the refusal of the contradiction offers doctor --execute, which would not touch it: %s", f.Message)
+		}
+	}
+
+	if err := removeRedundantGateConfig(stdoutReporter(), path); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(body, "      # Before gating wrote it.\n      MBIN_USE_FEDERATION_ALLOW_LIST: true\n", "", 1)
+	if string(after) != want {
+		t.Errorf("doctor --execute changed more than the one key:\n%s", after)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refused []string
+	for _, f := range validate.Check(cfg).Refusals() {
+		refused = append(refused, f.Key)
+	}
+	if strings.Join(refused, ",") != "apps.talk.config.MBIN_PRIVATE_INSTANCE" {
+		t.Errorf("after doctor --execute, refused %v, want only the contradiction", refused)
 	}
 }

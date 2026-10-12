@@ -125,7 +125,7 @@ func freshHost() *fakeHost {
 	return keysPrepared(&fakeHost{
 		files: map[string]string{"/etc/os-release": ubuntu2404},
 		responses: map[string]string{
-			probePackages: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\nkeyring absent\narch amd64\n",
+			probePackages: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n",
 			probeWatchdog: "device absent\nsystemd 0\ndaemon absent\n",
 			probeDocker:   "enabled \nactive \n",
 			probeUnit:     "enabled \nactive \n",
@@ -168,7 +168,11 @@ func preparedHost(gateway bool) *fakeHost {
 	if gateway {
 		firewall += owned("allow 51820/udp", "allow 80/tcp", "allow 443/tcp")
 	}
-	return keysPrepared(&fakeHost{
+	site := "home-a"
+	if gateway {
+		site = "vm"
+	}
+	return configStored(site, keysPrepared(&fakeHost{
 		files: map[string]string{
 			"/etc/os-release":                        ubuntu2404,
 			"/etc/default/ufw":                       "IPV6=yes\nDEFAULT_INPUT_POLICY=\"DROP\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n",
@@ -176,13 +180,45 @@ func preparedHost(gateway bool) *fakeHost {
 			dockerDropIn:                             dockerAfterWireGuard,
 		},
 		responses: map[string]string{
-			probePackages: "compose present\npkg docker-ce install ok installed\npkg wireguard-tools install ok installed\npkg ufw install ok installed\nkeyring present\narch amd64\n",
+			probePackages: "compose present\npkg docker-ce install ok installed\npkg wireguard-tools install ok installed\npkg ufw install ok installed\npkg git install ok installed\nkeyring present\narch amd64\n",
 			probeWatchdog: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\n",
 			probeDocker:   "enabled enabled\nactive active\n",
 			probeUnit:     "enabled \nactive \n",
 			probeFirewall: firewall,
 		},
-	})
+	}))
+}
+
+// configStored gives a host the configuration store host prepare leaves on
+// it for site: the repository, the files, and the units running.
+func configStored(site string, h *fakeHost) *fakeHost {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		panic(err)
+	}
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		panic(err)
+	}
+	var peers []string
+	for _, name := range cfg.SiteNames() {
+		if name != site {
+			peers = append(peers, cfg.Sites[name].Address)
+		}
+	}
+	section, err := profile.ConfigStore(&fakeHost{files: map[string]string{}, responses: map[string]string{}}, cfg.Deployment(), cfg.Sites[site], peers)
+	if err != nil {
+		panic(err)
+	}
+	for _, s := range section.Steps {
+		if s.File != nil {
+			h.files[s.File.Path] = s.File.Content
+		}
+	}
+	h.files["/var/lib/paisans/config/f2a9.git/HEAD"] = "ref: refs/heads/main\n"
+	h.responses["is-enabled paisans-f2a9-config-daemon.service"] = "enabled enabled\nactive active\n"
+	h.responses["is-enabled paisans-f2a9-config-sync.timer"] = "enabled enabled\nactive active\n"
+	return h
 }
 
 // owned is how `ufw show added` prints rules host prepare added, as probe
@@ -279,7 +315,7 @@ func TestAFreshDataSitePlansEveryStep(t *testing.T) {
 	for _, want := range []string{
 		"docker: add Docker's apt signing key at /etc/apt/keyrings/docker.asc",
 		"docker: add Docker's apt repository for noble/amd64 at /etc/apt/sources.list.d/docker.sources",
-		"packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin wireguard-tools ufw",
+		"packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin wireguard-tools ufw git",
 		"service: enable and start docker",
 		"watchdog: load softdog now",
 		"watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)",
@@ -370,8 +406,8 @@ func TestExecuteRunsEveryStepInOrder(t *testing.T) {
 	if err := hostprep.Execute(plan, host, ui.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(host.written) != 3 {
-		t.Errorf("want the apt source, the docker drop-in and the unit written, got %v", host.written)
+	if len(host.written) != 8 {
+		t.Errorf("want the apt source, the docker drop-in, the unit and the five files of the configuration store written, got %v", host.written)
 	}
 	if last := host.ran[len(host.ran)-1]; last != "ufw --force enable" {
 		t.Errorf("enabling the firewall is the last thing run, got %q", last)
@@ -733,7 +769,7 @@ func TestDistroDockerWithComposeIsLeftAlone(t *testing.T) {
 // config-files", which is not installed.
 func TestARemovedPackageIsNotInstalled(t *testing.T) {
 	host := preparedHost(false)
-	host.responses[probePackages] = "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\n"
+	host.responses[probePackages] = "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\npkg git install ok installed\n"
 	plan, err := hostprep.Build("home-a", fixture(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -847,7 +883,7 @@ func TestAnotherDeploymentsRuleIsForeign(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = []config.Role{config.RoleWitness}
 	cfg.Sites["vm"] = vm
-	host := preparedHost(false)
+	host := configStored("vm", preparedHost(false))
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
 		owned("allow 22/tcp", "allow 51820/udp", "allow in on psns-f2a9") +
 		"rule allow 80/tcp comment 'paisans-0c1d: the gateway'\n" +
@@ -868,7 +904,7 @@ func TestAForeignRuleIsNeverTouched(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = []config.Role{config.RoleWitness}
 	cfg.Sites["vm"] = vm
-	host := preparedHost(false)
+	host := configStored("vm", preparedHost(false))
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
 		owned("allow 22/tcp", "allow 51820/udp", "allow in on psns-f2a9") +
 		"rule allow 80/tcp\n" + // uncommented, and no longer derived
@@ -1518,9 +1554,9 @@ func TestContainerRulesLetTheMonitorReachLocalApps(t *testing.T) {
 		}
 	}
 	// home-a runs the clustered mbin (8080), outline (3000) and pocket-id
-	// (1411), and the pinned writefreely (8081) and oauth2-proxy (4180).
-	// 3001 is absent: the monitor does not check itself.
-	if want := "1411,3000,4180,8080,8081"; strings.Join(got, ",") != want {
+	// (1411), and the pinned writefreely (8081). 3001 is absent: the monitor
+	// does not check itself.
+	if want := "1411,3000,8080,8081"; strings.Join(got, ",") != want {
 		t.Fatalf("got %v, want %s", got, want)
 	}
 	for _, r := range hostprep.ContainerRules(cfg, "home-b") {
@@ -1603,7 +1639,7 @@ func TestASharedHostNeverSetsTheFirewallsDefaults(t *testing.T) {
 func TestSnapDockerIsRefusedNotRemoved(t *testing.T) {
 	for _, compose := range []string{"compose present", "compose absent"} {
 		host := freshHost()
-		host.responses[probePackages] = compose + "\nsnap docker\npkg ufw install ok installed\nkeyring absent\narch amd64\n"
+		host.responses[probePackages] = compose + "\nsnap docker\npkg ufw install ok installed\npkg git install ok installed\nkeyring absent\narch amd64\n"
 		_, err := hostprep.Build("home-a", fixture(t), host)
 		if err == nil || !strings.Contains(err.Error(), "snap") || !strings.Contains(err.Error(), "snap remove docker") {
 			t.Errorf("%s: got %v", compose, err)
@@ -1665,6 +1701,10 @@ func expectedKind(title string) (family, kind string) {
 		return "enable <module> at boot", hostprep.KindWatchdog
 	case strings.HasPrefix(title, "load "):
 		return "load <module>", hostprep.KindWatchdog
+	case title == "create the configuration repository", title == "start the configuration store":
+		return title, hostprep.KindConfigStore
+	case strings.HasSuffix(title, ".peers"), title == "write config-sync.sh", strings.HasPrefix(title, "write paisans-f2a9-config-"):
+		return "write <configuration store file>", hostprep.KindConfigStore
 	}
 	return title, ""
 }
@@ -1768,6 +1808,7 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 	for _, family := range []string{
 		"add docker apt key", "add docker apt repo", "install packages: <packages>", "start docker", "start docker after mesh",
 		"load <module>", "load <module> at boot", "enable <module> at boot",
+		"create the configuration repository", "write <configuration store file>", "start the configuration store",
 		"allow <rule>", "adopt rule <rule>", "remove ufw rule <rule>", "deny incoming", "allow outgoing", "enable ufw",
 		"create authorized_keys", "authorize ssh key", "rename ssh key", "share ssh key", "forget ssh key", "release ssh key", "remove ssh key",
 	} {
@@ -1786,10 +1827,10 @@ func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
 		want  []string
 		title string
 	}{
-		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall"},
-			title: "install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, wireguard-tools, ufw"},
-		"wireguard": {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\n", want: []string{"wireguard"}, title: "install packages: wireguard-tools"},
-		"ufw":       {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\n", want: []string{"firewall"}, title: "install packages: ufw"},
+		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall", "configuration store"},
+			title: "install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, wireguard-tools, ufw, git"},
+		"wireguard": {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\npkg git install ok installed\n", want: []string{"wireguard"}, title: "install packages: wireguard-tools"},
+		"ufw":       {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\npkg git install ok installed\n", want: []string{"firewall"}, title: "install packages: ufw"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			host := preparedHost(false)
@@ -1824,7 +1865,7 @@ func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(plan.Kinds(), ", "); got != "docker, wireguard, firewall, watchdog" {
+	if got := strings.Join(plan.Kinds(), ", "); got != "docker, wireguard, firewall, watchdog, configuration store" {
 		t.Errorf("a fresh data site's kinds are %q", got)
 	}
 	shuffled := &hostprep.Plan{Section: hostprep.Section{Steps: []hostprep.Step{

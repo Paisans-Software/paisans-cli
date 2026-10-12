@@ -27,7 +27,13 @@ only local files, and reads every site over ssh to settle the mesh subnet.
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
-host `--ssh` names, with no `paisans.yaml`, and changes nothing. `secrets
+host `--ssh` names, with no `paisans.yaml`, and changes nothing. `host allow`
+and `host disallow` change only a site's host's key allowlist,
+`/etc/paisans/ssh-allow.<user>`, which is the host owner's, so they claim
+nothing; with `--execute` they ask for the site's name at a terminal.
+`internal/hostprep/allow.go` holds the list's format, the refusal `host
+prepare` gives a key it lacks, and the locked write; `cmd/paisans/hostallow.go`
+the commands. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
@@ -42,6 +48,19 @@ and a secret's next and promoted value with the secrets a `secrets rotate
 monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
+
+`config publish`, `config pull`, `config log`, `config recover` and `admin
+register` read every site's configuration store over ssh and change a host only
+with `--execute`, and then only by starting each site's sync and, for `publish`
+and `register`, adding a version to its store; they claim nothing. `apply`
+gathers and publishes through the same code. The commands are in
+`cmd/paisans/config.go` (`publish`, `pull`, `log`, `recover`),
+`cmd/paisans/config_merge.go` (the secrets merge on a pull),
+`cmd/paisans/config_apply.go` (`apply`'s gather, publish and witness check) and
+`cmd/paisans/adminregister.go`. The rules that decide which version to trust are
+`internal/configstore/trust.go`, and are written against built histories, not
+against a host, so they are tested without one. `internal/grant` holds the
+version a host last applied in `config` of its record.
 
 Each command that changes a host first claims it in the host registry,
 `/var/lib/paisans/registry.json`, and its dry run only reads that registry;
@@ -74,12 +93,27 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 (`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
+`apply`, `apply --site`, `host prepare` and `site add` review what
+`paisans.yaml` grants before their first change. `internal/grant` computes a site's grant from the
+configuration and the render (the login user, every key of the admins
+`ssh.keys` names, every rendered service's image, and the web server's
+`include_dir`), compares it with the host's record,
+`/var/lib/paisans/granted.<token>.json`, and writes that record under the
+registry's lock. `cmd/paisans/review.go` shows the review and asks for
+`approve` through `confirmWord`, refusing without a terminal;
+`cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
+every site, which its steps check against rather than asking again. README.md
+"`apply` and `host prepare` review what `paisans.yaml` grants" has the
+reasoning.
+
 ```
 paisans validate --config examples/paisans.example.yaml
 paisans init     --config examples/paisans.example.yaml
 paisans render   --config examples/paisans.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
 paisans host prepare --site home-a        # the host check, then what a blank host lacks
+paisans host allow home-a bob             # bob's fingerprints, and home-a's allowlist as it would be
+paisans host disallow home-a bob          # what it would take off home-a's allowlist
 paisans apply    --site home-a            # shows what would change
 paisans apply    --site home-a --execute  # does it
 paisans prune    --site home-a            # lists dangling volumes, and which go
@@ -1360,6 +1394,7 @@ installed, on a workstation or anywhere else.
 | `internal/failover` | `failover test`: its checks, the switchover and its gates |
 | `internal/doctor` | `doctor`: the read commands it sends, and the findings and recovery advice made from their answers |
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
+| `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
 | `internal/render/templates` | the infrastructure templates, plus one directory per kind |
 
@@ -1414,13 +1449,15 @@ objects has `media`, and it is the one role that exists without being
 declared: `kinds.MediaHostname` derives `<label>-media.<domain>` from the
 app's own hostname, and `hostnames.media` only overrides it. It is also the one
 route the app's gate does not follow, because a media hostname is never gated.
-`visibility_gate` works the other way: `member` or `provisional` names which of
-the `oauth2-proxy` kind's two named snippets, `gate_member` or
-`gate_provisional`, the app's host block in the gateway `Caddyfile` imports
-ahead of the app's own snippet. `internal/render/site.go`'s
-`renderGateSnippets` renders those named snippets onto the gateway once per
-`oauth2-proxy` app declared, and the `Caddyfile` imports them at its top level,
-however many host blocks go on to import them by name. Both are read in
+`gated` and `auto_login` work the other way. `config.Load` derives the gate
+itself, an `oauth2-proxy` app named `gate` that no file declares
+(`deriveGate`), whenever an app sets either, and the app's host block in the
+gateway `Caddyfile` imports the gate's named snippets: `gate` ahead of the
+app's own snippet when gated, `gate_autologin` on the auto-login paths, and
+`gate_signin` on a public app's sign-in page. `internal/render/site.go`'s
+`renderGateSnippets` renders those named snippets onto the gateway, and the
+`Caddyfile` imports them at its top level, however many host blocks go on to
+import them by name. Both are read in
 `internal/render/appview.go`'s `values`, the same function that assembles
 everything else a template set is given, so a snippet template sees them as
 ordinary fields rather than as a special case.
@@ -1588,6 +1625,15 @@ before.
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
+* **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
+  `approve` at a terminal when what `paisans.yaml` grants adds or changes
+  something, and refuse without one, before the claim. A flag that answered
+  it would end up in every script, and approving is the control. Tests in
+  `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
+  through a pipe.
+* **host prepare never appends a key the host's allowlist lacks**, checked in
+  the plan and again under the lock as the append runs. Tests in
+  `internal/hostprep/allow_test.go` run the append against real files.
 * **The SSH allow follows `ssh.port` and is never removed**, including the
   allow for a port the site used before. A test moves the port and asserts the
   old allow is kept and noted.
@@ -1605,7 +1651,11 @@ pushes files, brings up the mesh interface, creates clustered apps' roles and da
 takes the narrowest action that makes the rest live. `site add` has never been
 run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
-the same way, nor `site remove --evict` and `mesh rekey`: Patroni's failover
+the same way.
+Nor have the review of what `paisans.yaml` grants, its record on each host,
+the allowlist's refusal in `host prepare`, and `host allow` and `host
+disallow`: the shell they send is run against local files in the tests, not
+observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover
 once its leader is cut off, `garage layout skip-dead-nodes` on a node that
 is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
 --wait` and `resume --wait` around a relay's swap, with the pause read back as
@@ -1619,6 +1669,20 @@ password, `rabbitmqctl change_password` in Mbin's broker, every Garage node
 restarted together for `rpc_secret`, and whether each app ends the sessions
 the plan says it does are read from upstream source and documentation, cited
 in `internal/secretsrotate`, and have run only against fakes.
+
+The signed copies of the configuration have run only against fakes and local
+bare repositories standing in for sites: the trust rules against built
+histories, publishing and gathering through a fake transport, and the host
+prepare steps against a fake host. The shell that pushes to a store, bundles it
+for a pull, and the rendered sync script have run with a local `sh` against
+local bare repositories, with the host's paths moved into a temporary directory
+and each peer's `git://` address replaced by its directory. Nothing has been run
+against a real host, so the shell that creates the store, the daemon's reading
+of it as `nobody` (with `safe.directory` set for its one repository by
+environment) and the sync's fetch between real mesh addresses are reasoned from
+git's documentation, not observed; `git ls-remote` against a prepared host's
+daemon is the check to make first. Nor has `apply`'s publishing after the
+`host prepare` steps, or the witness refusal, run on a real deployment.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered

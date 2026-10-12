@@ -210,19 +210,24 @@ apps:
     kind: mbin
     hostname: talk.example.org
     placement: cluster
-    # visibility_gate is access policy, and access policy belongs in
-    # configuration, not in a hand edited Caddy include somebody has to
-    # remember exists. member sends anyone signed in who is not yet a member
-    # of the community to the gate's pending page, which is what makes this
-    # app member only. Federation still works: ActivityPub goes to Mbin, which
-    # checks every signature, and this turns its allow list and private
-    # instance mode on. The gate app itself is declared below.
-    visibility_gate: member
+    # gated is access policy, and access policy belongs in configuration, not
+    # in a hand edited Caddy include somebody has to remember exists. It puts
+    # the app behind the gate, which admits members only. Federation still
+    # works: ActivityPub goes to Mbin, which checks every signature, and this
+    # turns its allow list and private instance mode on. Mbin's mobile apps
+    # work too, on the token their sign-in earns. Nobody declares the gate:
+    # the toolkit runs it at gate.example.org, on the gateway, whenever an
+    # app sets gated or auto_login.
+    gated: true
+    # auto_login skips Mbin's own "Log in with" button for a member the gate
+    # has already signed in.
+    auto_login: true
     # Its client at Pocket ID is restricted to settings.member_group and
     # settings.admin_group, defaulting to members and admins, and Mbin reads
     # the same two names from the groups claim: the admin group's members
-    # become administrators. member_group must be the gate's members_group,
-    # which validate checks. Both are left at their defaults here.
+    # become administrators. An app using the gate must leave member_group at
+    # members, the group the gate admits, which validate checks. Both are left
+    # at their defaults here.
     settings:
       # Where Mbin's contact form sends each message, and the address its
       # /api/info publishes. Optional: without it the contact form sends to
@@ -287,28 +292,14 @@ apps:
       session_duration: 10080    # minutes
       allow_user_signups: withToken
       # By name. apply finds or creates each group at the running Pocket ID
-      # and records its ID under pocket_id_groups in the secrets.
-      signup_default_groups: [provisional]
+      # and records its ID under pocket_id_groups in the secrets. members is
+      # the group the gate and every member facing app admit.
+      signup_default_groups: [members]
       email_one_time_access_as_unauthenticated: true
       # Always false, and validate refuses true. A username is the identity
       # other apps know a person by, such as their fediverse handle in Mbin,
       # and those apps do not follow a rename.
       allow_own_account_edit: false
-
-  gate:
-    kind: oauth2-proxy
-    hostname: gate.example.org
-    # Pinned, like every kind that keeps its data outside the cluster: this
-    # one keeps none at all, being a session cookie and nothing durable, but
-    # it is still refused `cluster` placement because there is no database
-    # for it to join. A home rather than the witness, so this example
-    # demonstrates only the one deliberate warning below, on chat.
-    placement: { pinned: home-a }
-    # The gate itself: one kind, two containers. provisional owns the login
-    # flow and admits anyone signed in; members carries the group restriction
-    # and enforces it. Which applications sit behind which instance is each
-    # app's own visibility_gate setting, declared where that app is declared,
-    # not here.
 
   chat:
     kind: synapse
@@ -358,6 +349,10 @@ apps:
     # pinned app may do, and gives it no bucket and no media hostname. See
     # README, "A pinned app may keep its files on its own disk".
     # storage: local
+    # Public, so anyone reads the blog, with auto-login: a member the gate has
+    # signed in is signed into the blog too, and its "Log in" link signs in at
+    # the gate first, so one sign-in covers every app.
+    auto_login: true
     settings:
       # WriteFreely reads config.ini rather than an environment, and this is
       # what the [app] section is rendered from. A rendered file carrying a

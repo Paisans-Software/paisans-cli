@@ -82,9 +82,10 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
 		if app.Kind == config.KindUptime {
-			// A monitor cannot report its own death, and a direct check of
-			// its own container can only ever pass. Its public URL, and
-			// every other monitor's, is checked below, after every other app.
+			// A monitor does not watch itself: down, it cannot report that,
+			// and a direct check of its own container can only ever pass.
+			// Every other monitor's public URL is checked below, after every
+			// other app.
 			continue
 		}
 		health, ok := kinds.HealthFor(app.Kind)
@@ -100,7 +101,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		// app still refuses an unsigned ActivityPub read, which an admin can
 		// turn off in the app with nothing in this configuration to say so.
 		// See docs/specs/2026-10-08-visibility-gate.md.
-		gated := app.Gate() != ""
+		gated := app.Gated
 		if !gated || health.Path != "/" {
 			monitors = append(monitors, seedMonitor{
 				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
@@ -155,48 +156,51 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				})
 			}
 			if app.Kind == config.KindPocketID {
-				// The admin reconciler beside each instance: 503 while admins
-				// has fewer than two members (docs/specs/2026-10-08-admin-reconciler.md).
-				// The gateway does not route it, so there is no public check.
+				// The admin reconciler service beside each instance, which
+				// /livez answers 200 while its pass loop runs, standby or
+				// not, and 503 once it is stale
+				// (docs/specs/2026-10-08-admin-reconciler.md). It is that
+				// site's service alone: the admins group's health, which
+				// only the active instance knows, is the admins heartbeat
+				// below. The gateway does not route the reconciler, so
+				// there is no public check.
 				monitors = append(monitors, seedMonitor{
 					Name: fmt.Sprintf("%s — admin reconciler (%s)", name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-					URL:            fmt.Sprintf("http://%s:%d/healthz", p.sites[site].Address, reconcilerPort),
+					URL:            fmt.Sprintf("http://%s:%d/livez", p.sites[site].Address, reconcilerPort),
 					ExpectedStatus: "200", FollowRedirects: &noRedirects,
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 				})
 			}
 		}
 	}
-	// The monitor's own public URL. The process is alive whenever it can run
-	// this, so what it proves is the path in front of it: DNS, the web
-	// server and the certificate, whose expiry the fork warns about 14 days
-	// ahead. Behind an operator's own web server it is the only thing that
-	// notices a renewal that silently stopped.
-	//
-	// The public URL of every monitor on another monitor site follows,
-	// checked the same way and in AppNames order. A monitor cannot report its
-	// own death or its host's, so a monitor on a separate site is what
-	// notices either: this check covers the other monitor and the path in
-	// front of it, and the ping of its site, seeded below, covers its host.
-	// A monitor on this same site dies with this host, so checking it would
-	// add nothing about losing the host, and it is left out.
+	// The public URL of every monitor on another monitor site, in AppNames
+	// order, and never this monitor's own. A monitor cannot report its own
+	// death or its host's, so a monitor on a separate site is what notices
+	// either: this check covers the other monitor and the path in front of it,
+	// and the ping of its site, seeded below, covers its host. The path in
+	// front of this monitor is still exercised from outside it: every other
+	// site's heartbeat is pushed to its public hostname (heartbeat.go), so
+	// broken DNS, web server or certificate there leaves every heartbeat
+	// stale. A monitor on this same site dies with this host, so checking it
+	// would add nothing about losing the host, and it is left out.
 	if health, ok := kinds.HealthFor(config.KindUptime); ok {
-		uptimeCheck := func(name string) seedMonitor {
-			return seedMonitor{
-				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
-				URL: "https://" + p.cfg.Apps[name].Hostname + health.Path, ExpectedStatus: health.Expect,
-				FollowRedirects: &noRedirects,
-				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
-			}
-		}
-		monitors = append(monitors, uptimeCheck(self))
 		for _, name := range p.cfg.AppNames() {
 			other := p.cfg.Apps[name]
-			if other.Kind == config.KindUptime && other.Placement.Site != monitorSite {
-				monitors = append(monitors, uptimeCheck(name))
+			if name == self || other.Kind != config.KindUptime || other.Placement.Site == monitorSite {
+				continue
 			}
+			monitors = append(monitors, seedMonitor{
+				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
+				URL: "https://" + other.Hostname + health.Path, ExpectedStatus: health.Expect,
+				FollowRedirects: &noRedirects,
+				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+			})
 		}
 	}
+	// No ping and no heartbeat for this monitor's own site: a ping from the
+	// host to itself, and a push from the host to the monitor running on it,
+	// can only ever succeed. Every other app on this site keeps its checks
+	// above.
 	for _, site := range p.order {
 		if site == monitorSite {
 			continue
@@ -222,6 +226,26 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		}
 		monitors = append(monitors, seedMonitor{
 			Name: heartbeatName(site), MonitorType: "heartbeat",
+			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
+			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+		})
+	}
+
+	// One admins heartbeat per Pocket ID app, pushed by whichever of its
+	// instances is active (adminsheartbeat.go), with the app's own token
+	// and the site heartbeat's schedule, grace and threshold. Seeded by
+	// every monitor, wherever the app runs: every instance pushes to every
+	// monitor.
+	for _, name := range p.cfg.AppNames() {
+		if p.cfg.Apps[name].Kind != config.KindPocketID {
+			continue
+		}
+		token, err := p.adminsHeartbeatToken(name)
+		if err != nil {
+			return "", err
+		}
+		monitors = append(monitors, seedMonitor{
+			Name: adminsHeartbeatName(name), MonitorType: "heartbeat",
 			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})

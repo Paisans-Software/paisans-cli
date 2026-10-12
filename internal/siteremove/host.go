@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/appremove"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -52,11 +53,17 @@ type hostPlan struct {
 	root       dirState
 	// record is whether the host holds this deployment's record, a gateway's.
 	record bool
+	// granted is whether the host holds the record of what this deployment
+	// last granted there, which goes with the registry entry.
+	granted bool
 	// deleteRoot is --delete-data with no edited file under the root.
 	deleteRoot bool
 	// caddy is the gateway's Caddy kept for the host owner's sites, nil
 	// when it goes like everything else.
 	caddy *caddyPlan
+	// store is what the host holds of the deployment's configuration store:
+	// the repository, the peers file, the sync log and the script directory.
+	store []storeRoot
 	// verified is set once the run has checked the host.
 	verified bool
 }
@@ -67,6 +74,28 @@ type dirState struct {
 	bytes   int64
 	files   int
 	entries []string
+}
+
+// storeRoot is one path of the configuration store, and the file that shows
+// it is there. A directory goes with everything in it.
+type storeRoot struct {
+	path, probe string
+	dir         bool
+}
+
+// storeRoots are the paths host prepare gives the configuration store, each
+// probed by one file that is in it. A directory is probed by the file inside
+// it that prepare always writes, so a path is listed only when it is there.
+func (p *Plan) storeRoots() []storeRoot {
+	d := p.dep()
+	return []storeRoot{
+		{hostprep.ConfigRepo(d), hostprep.ConfigRepo(d) + "/HEAD", true},
+		{hostprep.ConfigPeers(d), hostprep.ConfigPeers(d), false},
+		{hostprep.ConfigSyncLog(d), hostprep.ConfigSyncLog(d), false},
+		{hostprep.ConfigSyncLog(d) + ".tmp", hostprep.ConfigSyncLog(d) + ".tmp", false},
+		{hostprep.ConfigIncoming(d), hostprep.ConfigIncoming(d), false},
+		{hostprep.ConfigScriptDir(d), hostprep.ConfigScriptDir(d) + "/config-sync.sh", true},
+	}
 }
 
 // unitsCommand lists every unit and drop-in named for this deployment's
@@ -340,6 +369,19 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if _, hp.record, err = t.ReadFile(deployrecord.Path(d)); err != nil {
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, deployrecord.Path(d), err)
 	}
+	if _, hp.granted, err = t.ReadFile(grant.Path(d)); err != nil {
+		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, grant.Path(d), err)
+	}
+
+	for _, r := range p.storeRoots() {
+		_, found, err := t.ReadFile(r.probe)
+		if err != nil {
+			return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, r.probe, err)
+		}
+		if found {
+			hp.store = append(hp.store, r)
+		}
+	}
 
 	out, err := t.Run(p.unitsCommand())
 	if err != nil {
@@ -545,6 +587,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	for _, u := range hp.dropins {
 		add("remove", "remove units", "drop-in %s", u)
 	}
+	for _, r := range hp.store {
+		add("delete", "delete the configuration store", "%s, part of this deployment's configuration store", r.path)
+	}
 	for _, r := range hp.rules {
 		add("delete", "delete ufw rules", "ufw rule `%s`", r)
 	}
@@ -558,6 +603,9 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("delete", "delete "+d.Root(), "%s and everything in it: %d file(s), %d bytes", d.Root(), hp.root.files, hp.root.bytes)
 	case hp.root.exists:
 		add("remove", "remove empty directories", "the empty directories under %s", d.Root())
+	}
+	if hp.granted {
+		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
 	}
 	if hp.registry {
 		add("remove", "remove registry entry", "deployment %s from %s", d.ID, registry.Path)
@@ -676,6 +724,17 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
+	// After the units: the daemon and the sync have stopped using them.
+	for _, r := range hp.store {
+		p.work("delete the configuration store")
+		command := "rm -f -- " + quote(r.path)
+		if r.dir {
+			command = "rm -rf -- " + quote(r.path)
+		}
+		if err := run("deleting "+r.path, command); err != nil {
+			return err
+		}
+	}
 	if len(hp.rules) > 0 {
 		p.work("delete ufw rules")
 		out, err := t.Run(hostprep.AddedRulesProbe)
@@ -710,6 +769,15 @@ func (p *Plan) runHost() error {
 			p.work("remove empty directories")
 		}
 		if err := run("removing "+d.Root(), appremove.DirCommandFor(d.Root(), hp.deleteRoot)); err != nil {
+			return err
+		}
+	}
+	// The grant record goes with the registry entry: a later deployment
+	// with this token would otherwise be reviewed against a baseline it
+	// never applied.
+	if hp.granted {
+		p.work("delete the grant record")
+		if err := run("deleting the grant record", grant.RemoveCommand(d)); err != nil {
 			return err
 		}
 	}
@@ -772,6 +840,15 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 	if inv.Manifest && cp == nil {
 		left = append(left, d.Manifest())
 	}
+	for _, r := range p.storeRoots() {
+		_, found, err := t.ReadFile(r.probe)
+		if err != nil {
+			return err
+		}
+		if found {
+			left = append(left, r.path)
+		}
+	}
 	out, err := t.Run(p.unitsCommand())
 	if err != nil {
 		return err
@@ -817,6 +894,6 @@ func (p *Plan) hostGoneLeft() string {
 	if in := p.cfg.Sites[p.Site].WebServer; in != nil && in.IncludeDir.Path != "" {
 		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
 	}
-	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, ufw rules commented %s:, the keys %s lists and that record, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardConf(), d.Prefix(), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSH.User), registry.Path) + web
+	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, its configuration store (%s, %s, %s, %s and %s), ufw rules commented %s:, the keys %s lists and that record, %s, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
+		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardConf(), d.Prefix(), hostprep.ConfigRepo(d), hostprep.ConfigPeers(d), hostprep.ConfigSyncLog(d), hostprep.ConfigIncoming(d), hostprep.ConfigScriptDir(d), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSH.User), grant.Path(d), registry.Path) + web
 }

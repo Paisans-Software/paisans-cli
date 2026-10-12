@@ -85,9 +85,12 @@ const (
 	KindFirewall  = "firewall"
 	KindSSHKeys   = "ssh keys"
 	KindWatchdog  = "watchdog"
+	// KindConfigStore is the repository of configuration versions, its
+	// daemon and its sync, and the git that serves them.
+	KindConfigStore = "configuration store"
 )
 
-var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog}
+var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog, KindConfigStore}
 
 // Kinds is each kind of change the plan's steps make, once: those named
 // above in their order, then any other in the order its first step runs.
@@ -123,6 +126,9 @@ type Section struct {
 	// Warnings are reported whether or not anything is planned, because a
 	// prepared host that runs on softdog is still running on softdog.
 	Warnings []Warning
+	// Refused are keys to add that the host's allowlist does not hold. Any
+	// one refuses the whole plan, before a step runs (see Refusal).
+	Refused []KeyRefusal
 }
 
 // Warning is a problem that leaves the host working but not as declared, or
@@ -139,6 +145,7 @@ func (s *Section) add(other Section) {
 	s.Present = append(s.Present, other.Present...)
 	s.Foreign = append(s.Foreign, other.Foreign...)
 	s.Warnings = append(s.Warnings, other.Warnings...)
+	s.Refused = append(s.Refused, other.Refused...)
 }
 
 // Plan is what Build found on one site's host.
@@ -201,6 +208,10 @@ type Profile interface {
 	// WatchdogModule plans loading a kernel module now, unless loaded says
 	// it already is, and loading it at every boot.
 	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error)
+	// ConfigStore plans the deployment's repository of configuration
+	// versions, the daemon that serves it to the mesh and the timer that
+	// fetches from peers, the addresses of which are given.
+	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string) (Section, error)
 	// Firewall plans the given inbound rules and, when hostWide, a default
 	// deny for everything else and enabling the firewall. The SSH rule must
 	// be in place before the firewall is enabled, and enabling must not
@@ -262,11 +273,12 @@ type options struct {
 func Shared() Option { return func(o *options) { o.shared = true } }
 
 // Build probes the site's host and returns only what is missing, in the order
-// it must run: packages, then services, then the watchdog, then the login
-// user's authorized keys, then the firewall, then removing authorized keys
-// no longer listed. The firewall follows the packages because the package
-// step may be what installs it; key removals are last so that nothing is
-// taken away before every listed key is in place.
+// it must run: packages, then services, then the watchdog, then the
+// configuration store, then the login user's authorized keys, then the
+// firewall, then removing authorized keys no longer listed. The firewall
+// follows the packages because the package step may be what installs it; key
+// removals are last so that nothing is taken away before every listed key is in
+// place.
 func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan, error) {
 	var o options
 	for _, opt := range opts {
@@ -311,7 +323,13 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(watchdog)
 
-	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSH)
+	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site))
+	if err != nil {
+		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
+	}
+	plan.add(store)
+
+	keys, keyRemovals, err := planAuthorizedKeys(t, d, site, declared.SSH)
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}
@@ -360,6 +378,10 @@ func (p *Plan) Show(r ui.Reporter) {
 		s.Detail("%s", step.Describe)
 		s.End(ui.Pending, "")
 	}
+	if err := Refusal(p); err != nil {
+		hint, explain := ui.Describe(err)
+		r.Refuse(hint, explain)
+	}
 	if r.Verbose() {
 		for _, present := range p.Present {
 			r.Step(present).End(ui.OK, "")
@@ -380,11 +402,14 @@ func (p *Plan) Warn(r ui.Reporter) {
 	}
 }
 
-// Execute runs each step in order and stops at the first failure, naming the
-// step, so an operator knows where a half finished run left the host. Every
+// Execute refuses a plan Refusal refuses, before any step, and otherwise
+// runs each step in order and stops at the first failure, naming the step, so an operator knows where a half finished run left the host. Every
 // step is planned from a probe, so re-running Build after fixing the cause
 // plans only what is still missing.
 func Execute(plan *Plan, t Transport, r ui.Reporter) error {
+	if err := Refusal(plan); err != nil {
+		return err
+	}
 	for _, step := range plan.Steps {
 		s := r.Step(step.Title)
 		s.Detail("%s", step.Describe)

@@ -83,7 +83,6 @@ apps:
     # On vm: a homeserver on a data site collides with Patroni's API on
     # 8008, which is a different refusal.
     placement: { pinned: vm }
-    visibility_gate: public
   blog:
     kind: writefreely
     hostname: example.org

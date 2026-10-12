@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
@@ -34,6 +35,12 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
+	// Default is whether the configuration names no image for any of
+	// Services, so the image is the kind's default (acme.Published, or the
+	// provider's, for the gateway). apply's advice for a tag the registry does
+	// not have depends on it: a default naming a channel the fork has not
+	// promoted to yet is pinned differently from a tag the operator wrote.
+	Default bool
 }
 
 // Setting is the configuration key that decides Image, for a message that
@@ -55,7 +62,8 @@ func (c ComposeImage) Setting() string {
 // by the kind's default or an apps.<name>.images entry, and by acme.image.
 // The rest of the infrastructure stack (etcd, Spilo, HAProxy, Garage, the
 // heartbeat) is the toolkit's own, rendered at exact versions, and is not
-// listed.
+// listed; nor is the admins heartbeat in a Pocket ID stack, which runs the
+// heartbeat's image and is no service of the kind's.
 //
 // It reads the compose files as rendered rather than the templates' inputs,
 // so the count of lines is what the file holds, which is what apply checks
@@ -80,12 +88,14 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		named := map[string][]string{}
 		app := ""
+		var declared config.App
 		if stack == "infra" {
 			if image := strings.TrimSpace(services["caddy"].Image); image != "" {
 				named[image] = []string{"caddy"}
 			}
 		} else {
-			declared, isApp := p.cfg.Apps[stack]
+			var isApp bool
+			declared, isApp = p.cfg.Apps[stack]
 			if !isApp {
 				continue
 			}
@@ -98,8 +108,20 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		for image, n := range lines {
 			names := named[image]
+			if app != "" && len(names) == 0 {
+				continue
+			}
 			sort.Strings(names)
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n})
+			def := true
+			if app == "" {
+				def = p.cfg.ACME.Image == ""
+			}
+			for _, service := range names {
+				if app != "" && declared.Images[service] != "" {
+					def = false
+				}
+			}
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Default: def})
 		}
 	}
 	for site := range out {

@@ -54,7 +54,8 @@ services:
   # administrators in the admins group, and fails /healthz while that group
   # has fewer than two members. It reaches Pocket ID as `app` on this stack's
   # own network with the STATIC_API_KEY above, so the key goes nowhere it was
-  # not already. Beside a standby it reads the marker and does nothing.
+  # not already. Beside a standby it reads the marker and does nothing, and
+  # its /healthz says standby.
   reconciler:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -62,13 +63,32 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    # The mesh address only, for the uptime monitor's check.
+    # The mesh address only, for the uptime monitor's check of /livez.
     ports:
       - "10.44.0.1:1412:1412"
     volumes:
       - /srv/paisans/f2a9/auth/run:/paisans/run:ro
     depends_on:
       - app
+
+  # The admins heartbeat (internal/render/adminsheartbeat.go): once a minute it
+  # asks the reconciler's /healthz over this stack's network and pushes the
+  # admins group's health to every monitor's public hostname, from the active
+  # instance only. The URLs carry a token and stay in
+  # admins-heartbeat/heartbeat.env, which is 0600; it never reads .env, which
+  # holds the static API key. It dials out and listens for nothing.
+  admins-heartbeat:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: docker.io/curlimages/curl:8.11.1
+    restart: unless-stopped
+    env_file:
+      - admins-heartbeat/heartbeat.env
+    entrypoint: ["/bin/sh", "/push.sh"]
+    volumes:
+      - /srv/paisans/f2a9/auth/admins-heartbeat/push.sh:/push.sh:ro
+    depends_on:
+      - reconciler
 
 # Every network carries the deployment label too, so that what owns it is
 # read from the label rather than guessed from its name.

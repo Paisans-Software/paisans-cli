@@ -53,6 +53,31 @@ repository's history, still opens with their key, and holds every value as it
 was then. Re-encrypting closes the values written from now on; only rotating a
 secret makes their copy of it worthless.
 
+## Every version is signed, and a removal is final
+
+`paisans apply --execute` publishes the files it applies to every site as a
+signed version, and `paisans config publish` does the same without applying.
+The version that drops the admin from `admins` is the one that removes them:
+from then on a version signed by any key of theirs is not trusted, so they
+cannot publish one that puts them back (README, *Trust starts from the
+operator's own signature, never from the sites*). Until then their signature
+still counts.
+
+**Each remaining admin runs `paisans admin register` first**, on a workstation
+that has never published or registered, before the first step of either case
+below:
+
+```sh
+paisans admin register             # which key, and the version it would sign
+paisans admin register --execute
+```
+
+A workstation with neither its own signature nor a pinned root trusts nothing
+the sites hold, so `apply` and `config pull` refuse there. Registering signs the
+version the admin already holds, so trust starts from their own key and not from
+any history the leaving admin could have written. It signs only a version equal
+to the local files, which is why it comes before the edit in step 1.
+
 ## An admin who leaves on good terms
 
 The admin hands over, and the others trust that they keep nothing and use
@@ -61,17 +86,36 @@ community's decision.
 
 1. **Take them out of `paisans.yaml`.** Delete their entry under `admins`,
    and their name from every site's `ssh.keys`. Taking the admin out of
-   `admins` changes nothing at Pocket ID; steps 2 and 3 do the rest.
-   Closes nothing yet. Open: everything.
+   `admins` changes nothing at Pocket ID; steps 3 and 4 do the rest.
+   Nothing is published yet. Closes nothing yet. Open: everything.
 
-2. **Prepare every site that named them.**
+2. **If they were a recipient of the secrets file, re-encrypt it without
+   them, before anything publishes.** Delete their age public key from
+   `.sops.yaml`, then:
+
+   ```sh
+   sops rotate --in-place --rm-age age1... secrets.enc.yaml
+   ```
+
+   Commit both files. This comes before any `apply --execute` or `config
+   publish`, since each publishes the files to every site as a version, and
+   the one that drops them from `admins` would otherwise carry a secrets file
+   still encrypted to them. Until this runs they hold the file's data key, so
+   every value written to it, and every version published from it, opens with
+   what they already have. Closes: every value written to the file from now
+   on. Open: every value they could decrypt until now, in this file and in
+   every older copy.
+
+3. **Prepare every site that named them.**
 
    ```sh
    paisans host prepare --site home-a           # shows the keys it would delete
    paisans host prepare --site home-a --execute
    ```
 
-   One site at a time, or `paisans apply`, which prepares every site.
+   One site at a time, or `paisans apply`, which prepares every site and,
+   with `--execute`, publishes the version that removes them: from then on
+   their signature stops counting.
    Closes: ssh with every key `host prepare` added for them. Open: a key of
    theirs that was in `authorized_keys` before `host prepare` first ran is
    never recorded and never removed, because nothing on the host says
@@ -80,7 +124,7 @@ community's decision.
    host, and delete such a line by hand. An account of their own on a host,
    or a key on another user, is outside the toolkit too.
 
-3. **Take away their Pocket ID administrator.** In Pocket ID's admin page,
+4. **Take away their Pocket ID administrator.** In Pocket ID's admin page,
    remove the admin flag from their account, or disable the account if they
    should not sign in at all. The admin reconciler takes them out of the
    `admins` group at its next pass, within two hours, or at once when its
@@ -88,17 +132,6 @@ community's decision.
    them as an administrator. Closes: administration of Pocket ID and of every
    app. Open: sessions they already hold in each app, until those expire or
    step 5 ends them.
-
-4. **If they were a recipient of the secrets file, re-encrypt it without
-   them.** Delete their age public key from `.sops.yaml`, then:
-
-   ```sh
-   sops rotate --in-place --rm-age age1... secrets.enc.yaml
-   ```
-
-   Commit both files. Closes: every value written to the file from now on.
-   Open: every value they could decrypt until now, in this file and in
-   every older copy.
 
 5. **Rotate what the trust calls for.** On full trust, nothing more. Short of
    it, in this order:
@@ -188,7 +221,10 @@ included, and refuses while one does not answer.
 
    This comes before the new token is set and before the replacement is
    declared, so that neither the new token nor any secret generated for the
-   new site is ever encrypted to them. Closes: every value written from now
+   new site is ever encrypted to them. It comes before the `apply --execute`
+   of step 7 for the same reason: that apply publishes the files to every
+   site as the version that removes them, and until this runs they hold the
+   file's data key, which would open it. Closes: every value written from now
    on. Open: every value they could decrypt until now, including every other
    site's WireGuard private key, until step 6, and every older copy of the
    file.
@@ -262,11 +298,14 @@ included, and refuses while one does not answer.
    grants on the new host, which has no record yet, and asks for `approve` at
    the terminal (`docs/specs/2026-10-11-config-review.md`; `host allow`
    writes `/etc/paisans/ssh-allow.<user>` there). A replacement data site is
-   joined by that apply's `site add`. Closes: the outage of step 5, and their
-   ssh keys on every remaining site. Open: a key of theirs on a remaining
-   host that `host prepare` never recorded (see step 2 of the first case).
+   joined by that apply's `site add`. It also publishes the version that
+   takes them out of `admins`, so from then on a version signed by any key of
+   theirs is not trusted. Closes: the outage of step 5, their ssh keys on
+   every remaining site, and their signature on the configuration. Open: a
+   key of theirs on a remaining host that `host prepare` never recorded (see
+   step 3 of the first case).
 
-8. **Take away their Pocket ID administrator**, as in step 3 of the first
+8. **Take away their Pocket ID administrator**, as in step 4 of the first
    case. Closes: their administration of Pocket ID and every app.
 
 9. **Revoke the old gateway's certificates.** The evicted host keeps the

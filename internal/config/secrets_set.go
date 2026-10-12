@@ -40,6 +40,8 @@ func (s *Secrets) Get(key string) (string, bool) {
 	case len(parts) == 3 && parts[0] == "oidc_clients":
 		client := s.OIDCClients[parts[1]]
 		value = map[string]string{"client_id": client.ClientID, "client_secret": client.ClientSecret}[parts[2]]
+	case len(parts) >= 2 && parts[0] == "pocket_id_groups":
+		value = s.PocketIDGroups[strings.Join(parts[1:], ".")]
 	}
 	return value, value != ""
 }
@@ -111,8 +113,15 @@ func (s *Secrets) Set(key, value string) error {
 			return fmt.Errorf("%s: an OIDC client has client_id and client_secret, not %q", key, parts[2])
 		}
 		s.OIDCClients[parts[1]] = client
+	case len(parts) >= 2 && parts[0] == "pocket_id_groups":
+		// A group's name is whatever Pocket ID calls it, dots included, so the
+		// name is everything after the first segment.
+		if s.PocketIDGroups == nil {
+			s.PocketIDGroups = map[string]string{}
+		}
+		s.PocketIDGroups[strings.Join(parts[1:], ".")] = value
 	default:
-		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, sites.<site>, apps.<app>, external and oidc_clients.<app>", key)
+		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, sites.<site>, apps.<app>, external, oidc_clients.<app> and pocket_id_groups", key)
 	}
 	return nil
 }

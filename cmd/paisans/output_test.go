@@ -270,7 +270,7 @@ func fixtureRuns(t *testing.T) map[string]string {
 		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a", "--sudo=false"},
 	} {
 		run := map[string]func([]string) error{
-			"host prepare": runHostPrepare, "site add": runSiteAdd, "storage add": runStorageAdd, "prune": runPrune,
+			"host prepare": runHostPrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,
 		}[args[0]]
 		runs[name] = runDefault(t, name, func() error { return run(args[1:]) })
 	}

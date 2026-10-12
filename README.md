@@ -901,17 +901,28 @@ from this configuration and the fork reconciles it at every start:
   A ping alone reports every one of those the same way. Founder decision;
   the design is the amendment of 2026-10-09 in
   `docs/specs/2026-10-07-uptime-monitoring.md`.
-* every site Pocket ID runs on gets a check on its **admin reconciler**, which
-  fails while the `admins` group has fewer than two members (see *The admin
-  reconciler keeps `admins` equal to Pocket ID's administrators*).
-* the monitor checks no container of its own, which could only ever pass,
-  but it does check its own public URL, `https://<hostname>/healthz`: it is
-  alive whenever it can run that check, so what the check proves is the path
-  in front of it, DNS, the web server and the certificate. Behind an
-  operator's web server it is the only thing that notices a renewal that
-  silently stopped.
-* every `uptime` app pinned to a different `monitor` site gets the same
-  check of its public URL, `https://<hostname>/healthz` expecting 200. A
+* every site Pocket ID runs on gets a check on its **admin reconciler**
+  service, `<app> — admin reconciler (<site>)`, which asks `/livez` and
+  expects 200: that site's reconciler is running its passes, standby or not.
+  It says nothing about the `admins` group, which only the active instance
+  knows.
+* every Pocket ID app gets one **admins heartbeat**,
+  `<app> — admin continuity`: a push monitor its active instance feeds from
+  the reconciler's `/healthz`, so it fails while the `admins` group has
+  fewer than two members (see *The admin reconciler keeps `admins` equal to
+  Pocket ID's administrators*), and follows whichever site is active across
+  a failover with one history (below).
+* the monitor does not watch itself: its seed has no public or direct check
+  of its own app, and no ping or heartbeat of its own site. A monitor that is
+  down cannot report it, and a check from the monitor to its own host can only
+  pass. Every other app on the monitor's site is checked like any other. The
+  path in front of the monitor, DNS, the web server and the certificate, is
+  still exercised from outside it: every other site pushes its heartbeat to
+  the monitor's public hostname, so a failure there leaves every heartbeat
+  stale at once.
+* every other `uptime` app pinned to a different `monitor` site gets a
+  check of its public URL, `https://<hostname>/healthz` expecting 200, which
+  also carries the fork's 14 day certificate warning for that hostname. A
   monitor cannot report its own death, so a monitor on a separate site is
   what notices one that died, and the ping of its site, above, says whether
   it was the host. A monitor on the same site is not checked: it shares the
@@ -979,6 +990,27 @@ needs a second, so it is a warning rather than a refusal. Every one of these
 commands therefore has to reach the monitor's host, and host checks it as
 `apply` would.
 
+**The admins heartbeat is a service beside the reconciler.** Each Pocket ID
+stack, on every site the app runs on, runs `admins-heartbeat`: the
+heartbeat's curl image around a rendered `admins-heartbeat/push.sh` that once
+a minute asks the reconciler's `/healthz` over the stack's own network. A
+standby answers 200 `standby`, and nothing is pushed. The active instance
+answers 200 with the group healthy, pushed as success to
+`https://<monitor hostname>/ping/<token>`, or 503 with one line saying what is
+wrong, pushed to `.../ping/<token>/fail` with that line as a plain text body.
+No answer, or any other status, pushes nothing. Every instance pushes to the
+same token, `apps.<app>.admins_heartbeat_token`, generated at `init` (and by
+`apply`'s dry run, with the other generated secrets) in the site heartbeat
+token's shape and refused by `render` the same way, so the one monitor hears
+whichever instance is active, and silence past the grace means no instance is.
+It pushes to every monitor, the one on its own site included: what it carries
+is the group's health, not the site's reachability, and the active instance
+may be the one beside a monitor. The interval, grace and threshold are the
+site heartbeat's, and a deployment with no monitor renders no pusher. The
+fork keeps the body with the ping and shows its first line in the monitor's
+recent pings; the incident and the alert say only that the heartbeat
+reported a failure.
+
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
 never touched. An admin who ticks **Attach to new managed monitors** on their
@@ -1011,8 +1043,8 @@ break glass: Pocket ID is one of the things being watched, and a monitor you
 cannot open while it is down is no use. To use it, open
 `https://<hostname>/login?local=1` and sign in as `admin` with
 `apps.<app>.admin_password` from the secrets file, which `init` generates
-(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the visibility gate
-(`visibility-gate-on-ungateable-kind`): the gate signs in through Pocket ID,
+(the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the gate
+(`gated-on-ungateable-kind`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 
 **It starts as root and drops.** `apply` writes the seed through `sudo`, so it
@@ -1269,7 +1301,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 | every service and every compose network | the Docker label `community.paisans.deployment=<id>`, the full id |
 | a firewall rule `host prepare` adds | the ufw comment `paisans-<token>: <why>` |
 | the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9` (see *Two deployments on one host never share a mesh*) |
-| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned` |
+| `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, the configuration store's `/var/lib/paisans/config/<token>.git`, `.peers` and `.sync.json`, `/usr/local/lib/paisans-<token>/config-sync.sh` and the units `paisans-<token>-config-daemon.service`, `-config-sync.service` and `-config-sync.timer` |
 | a DNS record `dns init` creates | the comment `paisans-<token>: created by paisans dns init` |
 
 Code that decides whether a Docker object is this deployment's matches the
@@ -1814,7 +1846,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
@@ -2508,20 +2540,30 @@ apps:
   talk:
     kind: mbin
     hostname: talk.example.org
-    visibility_gate: member
+    gated: true
+    auto_login: true
+  blog:
+    kind: writefreely
+    hostname: blog.example.org
+    auto_login: true
   chat:
     kind: synapse
     hostname: matrix.example.org
-    visibility_gate: public
+    gated: false
 ```
 
-`visibility_gate` is `public`, `member` or `provisional`, and it is declared on
-the app rather than implied by which Caddy snippet somebody remembered to
-import. It is access policy, and access policy belongs in the configuration,
-not in a hand edited include. `member` admits a signed-in member of the
-community; `provisional` admits anyone signed in, member or not, and is warned
-about (`visibility-gate-provisional`) because it reads as protected while
-admitting anyone who made an account.
+Two booleans, both declared on the app rather than implied by which Caddy
+snippet somebody remembered to import, because they are access policy, and
+access policy belongs in the configuration, not in a hand edited include.
+
+| `gated` | `auto_login` | Someone with no session | A member the gate has signed in |
+|---|---|---|---|
+| `false` | `false` | reads the app as it is | reads the app as it is |
+| `true` | `false` | is sent to sign in | is let through, and meets the app's own sign-in button |
+| `false` | `true` | reads the app as it is; its sign-in page signs in at the gate first | is signed straight into the app |
+| `true` | `true` | is sent to sign in | is let through and signed straight into the app |
+
+`gated: true` admits members only. Both default to `false`.
 
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
@@ -2536,8 +2578,8 @@ gate covers everything, and four classes go to the app without it:
 | Token paths | the kind's token paths **and** `Authorization: Bearer` | the app, which refuses a token it did not issue |
 
 Everything else is redirected to sign in when there is no session, `curl`
-included, and to the gate's `/pending` page when the session belongs to
-someone who is not yet a member. Every hostname, gated or not, strips
+included, and refused with the gate's own 403 when the session belongs to
+someone who is not a member. Every hostname, gated or not, strips
 `X-Auth-Request-*` from the inbound request before anything else sees it:
 those headers are only ever the gate's verified answer, and an app that
 trusted one on an ungated hostname would be trusting whoever sent the
@@ -2546,6 +2588,9 @@ about that application, so it lives in `internal/kinds` beside the rest, read
 off the pinned tag's source with a citation for each. A token path is recorded
 only once the kind's source shows a token that reads content cannot be had
 without a member's sign-in; until then a native app's API calls meet the gate.
+Mbin's `/api/*` is one, because a gated Mbin runs as a private instance,
+which refuses any API request without a signed in user, so its mobile apps
+work behind the gate.
 
 **Anyone can send an ActivityPub header, so a gated app that federates must
 refuse an unsigned read.** Caddy cannot verify an HTTP signature without a
@@ -2553,27 +2598,44 @@ plugin, and the gateway runs no plugin whose failure to build would stop the
 identity provider loading, so the app is where the check lives. That is
 authorized fetch, on by default for Mbin and WriteFreely (see *Mbin and
 WriteFreely lock what the toolkit renders*). A gated federating app that would
-not refuse an unsigned read is refused (`visibility-gate-without-signed-fetch`):
+not refuse an unsigned read is refused (`gated-without-signed-fetch`):
 one whose kind records no way to, one with `settings.authorized_fetch: false`,
 and a WriteFreely with `private: false`, since only private mode makes a blog
 read from its allowlist alone. The monitor proves the setting is still on (see
 *Monitoring*). Reading only from instances on an allow list is a federation
 policy choice, and it is the founder's.
 
-**Auto-login is derived from the kind.** Someone the gate let through already
-holds a session at the identity provider, so the app's own "Log in with"
-button is one pointless click. Where a kind records its sign-in route and the
-cookies that mean "already signed in", a request for its front page or its
-sign-in page goes straight into that route, once every two minutes per browser
-so a user the app's own client refuses is not redirected forever. It never
-fires on a deep link: neither Mbin's nor WriteFreely's sign-in route takes a
-destination, and a deep link sent through one would land on the front page.
+**Auto-login is declared on the app and described by the kind.** A member the
+gate has signed in already holds a session at the identity provider, so the
+app's own "Log in with" button is one pointless click. Where a kind records its
+sign-in route and the cookies that mean "already signed in", a request for its
+front page or its sign-in page, from a browser holding the gate's session
+cookie, is checked with the gate and, for a member, sent straight into that
+route. Someone the gate refuses is sent back to the page they asked for and
+sees the app as they would have. Either way it happens once every two minutes
+per browser, so a member the app's own client refuses is not redirected
+forever. It never fires on a deep link: neither Mbin's nor WriteFreely's
+sign-in route takes a destination, and a deep link sent through one would land
+on the front page. `auto_login: true` on a kind with no such route is refused
+(`auto-login-without-a-rule`), because it would do nothing; Outline needs none,
+since its sign-in screen redirects itself when OIDC is its only provider.
+
+**On a public app, the sign-in page signs in at the gate.** Nobody passes the
+gate on a public app, so a visitor there would only hold the gate's session if
+they had signed in somewhere gated. Instead, a visit to the app's sign-in page
+with no gate session goes through the gate's sign-in and comes back holding
+one, so auto-login fires: the app's own "Log in" link becomes the community's
+sign-in, and one sign-in covers every app. Nothing else on a public app meets
+the gate. While the gate is down, a browser holding its session meets the
+edge's error on a public app's front page and sign-in page, the two paths
+auto-login checks; every other page, and every visitor without that session,
+reads the app as before.
 
 **The gate is enforced at the gateway, and only there. An app's published host
 port is not behind it.** The gate renders as `forward_auth` inside the
 gateway's Caddy site block, so it covers requests that arrive through the
 gateway's hostname. It does not cover the port the app's own compose file
-publishes: `talk` above is `visibility_gate: member`, and its stack publishes port 8080,
+publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
@@ -2592,7 +2654,7 @@ that kind serves can be gated.
 
 What remains the operator's is the mesh itself. A port on the mesh address is
 reachable from every mesh peer, so a compromised peer reaches the app ungated.
-`visibility_gate: member` is not protection against that, and nothing in this file
+`gated: true` is not protection against that, and nothing in this file
 claims it is. It also means the mesh interface has to be up before the app stacks start,
 because Docker cannot publish on an address the host does not have yet; that
 is the ordering that step 4 under *`init`, one site, no mesh* already requires.
@@ -2620,22 +2682,21 @@ Some combinations are refused by this today, and a homeserver pinned to a data
 site is the one worth knowing: Synapse's 8008 is the Patroni API's, and MAS's
 8009 is bg_mon's.
 
-**Leaving `visibility_gate` out of an app's stanza means the same thing as
-`visibility_gate: public`: ungated, reachable by anyone who can resolve the
-hostname.** That default has to be stated here, not only in a doc comment,
-because it is the one setting where forgetting it is indistinguishable from
-choosing it: an app with no `visibility_gate` key renders exactly like an app
-that explicitly opted out, and nothing at render time flags the absence as a
-decision skipped rather than made.
+**Leaving `gated` out of an app's stanza means the same thing as
+`gated: false`: ungated, reachable by anyone who can resolve the hostname.**
+That default has to be stated here, not only in a doc comment, because it is
+the one setting where forgetting it is indistinguishable from choosing it: an
+app with no `gated` key renders exactly like an app that explicitly opted out,
+and nothing at render time flags the absence as a decision skipped rather than
+made.
 
 **A gate on a kind that cannot sit behind one is refused**
-(`visibility-gate-on-ungateable-kind`), which is the rule below enforced rather
+(`gated-on-ungateable-kind`), which is the rule below enforced rather
 than merely stated. The case that makes this load bearing is a negative one. A
 Matrix hostname must never be gated: a Matrix client is not a browser and will
 not follow a redirect to a passkey prompt, so gating a homeserver's API or its
 `.well-known` apex breaks federation and every client's login, not just one
-member's. Pocket ID and the gate itself are the sign-in flow, so gating either
-gates the login. The monitor is what an admin opens when the sites it watches
+member's. Pocket ID is the sign-in flow, so gating it gates the login. The monitor is what an admin opens when the sites it watches
 are down, and the gate signs in at the identity provider on those sites, so a
 gated monitor is unreadable at exactly the moment it exists for, and its break
 glass password sign-in (see *Monitoring*) would sit behind the sign-in
@@ -2643,14 +2704,58 @@ it is the fallback for; its own OIDC client already admits only
 `settings.admin_group`, so the gate would add no access control, only a
 dependency. Leaving gating to a hand edited include means that failure
 shows up as clients mysteriously unable to log in, with nothing in the
-configuration saying why. A declared `visibility_gate: public` makes the
-absence of a gate a fact about the app that a reviewer can see, rather than an
-inference from what nobody wrote.
+configuration saying why. A declared `gated: false` makes the absence of a
+gate a fact about the app that a reviewer can see, rather than an inference
+from what nobody wrote.
 
-Declaring a gate when no `oauth2-proxy` app exists is refused, for the same
-reason an unknown hostname role is: the import would name a snippet nothing
-renders, and Caddy fails to load its entire configuration over one missing
-import, taking every hostname down rather than one.
+**Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
+toolkit runs it as an app named `gate`, of kind `oauth2-proxy`, at
+`gate.<community.domain>`, pinned to the gateway site. It holds no data, being
+a session cookie and nothing durable, so it sits with the edge it serves: it is
+down only when the gateway is, and that takes every app with it anyway. It is
+one container admitting the `members` group, which fails closed: a session
+outside the group is refused, never waved through. Everything an app gets, it
+gets too: a client at the identity provider, a generated cookie secret, a DNS
+record from `dns init` and a check on the monitor. Its session cookie is scoped
+to the community's domain with a leading dot, so one sign-in covers every app.
+Four things follow, and each is refused:
+
+* **Declaring an `oauth2-proxy` app.** The gate is the toolkit's; the apps it
+  was for set `gated` or `auto_login` instead.
+* **An app named `gate`, or no gateway site**, while an app uses the gate,
+  since the gate needs both the name and the gateway.
+* **A gated or auto-login app on a hostname outside the community's domain**
+  (`uses-gate-outside-the-domain`). The browser never sends the gate's cookie
+  there, so a gated app would send every member back to sign in forever and
+  auto-login would never fire.
+* **An app using the gate whose member group is not `members`**
+  (`oidc-member-group-disagrees-with-gate`). The gate admits one group and the
+  app's client the other, so they would disagree about who a member is.
+
+#### The settings gating needs are checked on both sides
+
+The gate leaves ActivityPub, and for Mbin a token holder's API calls, to the
+app, so some of the app's own settings are part of the gate: Mbin's private
+instance mode, allow list and authorized fetch, WriteFreely's private mode and
+authorized fetch. Each kind records which ones it needs and when, in
+`internal/kinds` beside its gate record, and how to read them from a running
+copy. Every one is rendered into the file the app reads and named in that
+file's lock list, so the app reads it from disk and nothing inside the app can
+change it. Nothing the toolkit does writes an app's database.
+
+* **`validate`** refuses a `config:` key the stack already writes
+  (`config-key-already-rendered`), the same rule render applies, so a key that
+  gating has made redundant or contradictory is refused before `apply` touches
+  a host. Whether a template writes a key can depend on the rest of the file,
+  so `validate` renders the deployment to find out, with secrets it generates
+  in memory and throws away: which keys a template writes never depends on a
+  secret's value.
+* **`doctor`** reads each running copy and fails when one of these settings is
+  off or not locked; see *`paisans doctor` reports what is stuck and how to
+  recover*. `doctor --execute` removes a `config:` key that only repeats what
+  gating renders.
+
+See `docs/specs/2026-10-12-gate-settings.md`.
 
 ### `storage init` provisions object storage
 
@@ -3173,8 +3278,8 @@ restore that looks complete until someone goes looking for their account.
 
 | Artifact | Holds | Without it |
 |----------|-------|------------|
-| `paisans.yaml` | topology | nothing knows what to build |
-| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted |
+| `paisans.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
+| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an admin's age key still decrypts it |
 | Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
 
@@ -3184,7 +3289,215 @@ live in the database. A community's identity provider configuration is
 particularly easy to assume is in the config when it is not.
 
 The age private keys are the fifth thing, and they must be backed up somewhere
-other than the repo they decrypt.
+other than the repo they decrypt. A copy of the first two on every site is no
+substitute: the encrypted file on a site is readable only with an age key, so
+losing every admin's key still loses every credential.
+
+The first two need no backup of their own beyond the sites, because every site
+keeps every signed version of them and `paisans config recover` writes them onto
+an empty workstation. The sites are one failure domain's worth of copies,
+though: a copy outside them, in object storage, waits for the backup design,
+which is not built.
+
+## Every site keeps signed copies of the configuration
+
+`paisans.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
+(see *Backup and restore*), so a lost workstation without a copy elsewhere loses
+the topology and every credential. Every site therefore keeps every version of
+the three files, each signed by the admin who published it, and an admin with an
+empty workstation can recover them from any host.
+`docs/specs/2026-10-12-config-store.md` is the approved specification, and
+*`paisans config`* and *`paisans admin register`* in
+[docs/commands.md](docs/commands.md) give the commands' mechanics.
+
+The copies are recovery copies now and are built to become the deployment's
+shared source of truth: every version records its parent, two versions from one
+parent are a fork, and `apply` refuses to run from files older than the sites'
+newest version. The one loss this cannot protect is every admin losing their age
+key, which is why *Rendered configuration is a build artifact* tells every
+deployment to add a second recipient to `.sops.yaml`.
+
+**A version is a signed git commit of exactly the three files.** A commit
+holding anything else is invalid. It is signed with the publishing admin's SSH
+key by git's `gpg.format=ssh`, so signing goes through the operator's ssh-agent
+and needs no new key. The signature covers the tree, and so the files, because
+nothing in the files can prove who wrote them: encrypting to an age recipient
+needs only the recipient's public key, which every stored `.sops.yaml` names, so
+anyone could write a secrets file that decrypts for every admin. A version
+carries `Paisans-Revision: <n>`, one more than its highest parent. Nothing
+decides by the commit date, because any host's clock can be wrong and anyone
+writing a copy can set it. Each version is kept under `refs/versions/<sha>`, a
+name that is its own hash, so two versions never compete for one. A store
+creates a version's ref only where it is absent and never moves or deletes one
+(see *How a site stores them*).
+
+### Trust starts from the operator's own signature, never from the sites
+
+A site keeps whatever it is sent, so every decision is made on the workstation.
+It starts from something the operator holds that nobody else can forge: the
+newest version signed by the operator's own SSH key, or a root hash the operator
+pins with `--root`. **A history found only on the sites is never trusted on its
+own, however consistent it looks**, because someone with root on those sites
+could have written it, signed with their own key and listing themselves as an
+admin. With neither an own signature nor a pin, a pull or a recovery is refused
+and asks for one.
+
+From that anchor a version is trusted when it passes three rules, each of which
+closes a forgery:
+
+| Rule | Because |
+|------|---------|
+| Shape: the tree holds exactly the three files, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
+| The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
+| Removal is final, key by key: when a trusted version drops a key a parent listed (an admin removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an admin removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real admin |
+
+The rule works key by key, not admin by admin, because rotating one of an
+admin's keys out must bar that key without barring the admin's others. Removals
+in the anchor's own history always stand, since the operator signed after them.
+When two admins each remove the other and neither removal is in the anchor's
+history, the toolkit refuses and shows both to the operator. Revision and hash
+cannot decide it, because whoever signs chooses both. A root outside the
+anchor's history is never trusted, for the same reason: only the anchor can say
+where the true history starts, so a second root written on a site is refused.
+
+**The head is the trusted version with the highest revision that no other
+trusted version builds on.** Two such versions are a fork, which stops `apply`
+until `paisans config publish --merge` resolves it.
+
+**Removing an admin who could decrypt the file** is also the operator's to
+finish by hand: take their age key out of `.sops.yaml` and re-encrypt the file
+under a new data key (`sops rotate --rm-age`) before publishing the version that
+removes them. Nothing in `paisans` checks that this was done. A version that
+only drops them from `admins` would leave every later write readable to them,
+since the file is still encrypted to their key.
+
+### An old version is made visible, not impossible
+
+A version that was really published verifies forever, so someone who controls a
+site can delete the newer ones there and serve an old one. Applying it would put
+back old secrets, undoing a `storage rotate-key`. No signature can prove a
+version is the newest, so three memories make an old one visible:
+
+| Memory | What it does | Why it is there |
+|--------|--------------|-----------------|
+| The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
+| A majority of sites | a pull, recovery, registration, the publish of a first version or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
+
+So a host attacker can roll back only the hosts they hold. What stays is a fresh
+workstation that reaches only sites the attacker controls: it can be served an
+old, genuine version, and applying it reaches only those sites.
+
+### How a site stores them
+
+`host prepare` gives each site, besides installing `git`:
+
+* a bare repository at `/var/lib/paisans/config/<token>.git`, owned by root;
+* a read-only `git daemon`, the unit `paisans-<token>-config-daemon`, bound to
+  the site's mesh address and serving only that directory. The mesh is already
+  let in whole by the firewall, and a mesh peer reads `paisans.yaml` and the
+  encrypted secrets, both of which a peer is trusted with already;
+* a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches the
+  versions each peer's mesh address serves, so a site that was down when a
+  version was published learns of it.
+
+Every store, and the workstation's own, takes versions in by one rule, whether
+from a peer's sync, a push or a gather. A fetch straight into `refs/versions/`
+would fast-forward a version's ref to a child of it, which hides the version and
+makes every later honest copy of it fail. So the fetch lands in a quarantine of
+its own, `refs/incoming/<id>/`, and each ref there named for the commit it
+points to becomes `refs/versions/<sha>` only where that ref is absent. An
+existing ref never moves, every other ref is ignored, and nothing is pruned, so
+no version is ever deleted; the quarantine refs are removed once read. A store
+also bundles only correctly named versions, so a ref planted under another name
+never travels.
+
+A site that `site remove` takes out stops being a peer, so it neither fetches
+nor serves. A version is tens of kilobytes, so thousands take a few megabytes
+and nothing is pruned.
+
+### Gathering, and why every site is asked
+
+`pull`, `recover` and `apply` gather the same way before they decide anything:
+
+1. With `--execute`, every site reached starts its sync with its peers and the
+   command waits, so a version only a site the operator cannot log in to holds
+   (Eg: a host whose allowlist leaves them out) arrives through one they can. A
+   dry run and `config log` start no sync, because a command changes a host only
+   with `--execute`; they read what each site holds now.
+2. Every site is reached over ssh, with `sudo` because the store is root's:
+   those the configuration names, or, for a recovery, those the trusted heads
+   name, not only the hosts given on the command line.
+3. The copies are combined, and only then are the rules applied and the head
+   chosen, so a site serving an old version is outvoted by the rest.
+
+### Commands
+
+```sh
+paisans admin register --execute      # sign an attestation, record your key
+paisans config publish --execute      # sign the local files, push to every site
+paisans config pull --execute         # move the files to the sites' newest
+paisans config log                    # every version, signer, holding sites
+paisans config publish --merge --execute   # one version on every head of a fork
+paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
+```
+
+* **`paisans admin register`** gives an admin who has never published an anchor
+  of their own, since they have signed nothing. It finds the key in their
+  ssh-agent that matches one listed under their entry in `admins` (or the one
+  `--key` names), gathers, and signs an attestation: a version with the head's
+  tree and the head as its only parent. It records the key in
+  `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
+  It attests only a head whose files equal the operator's local files, since an
+  attestation says "I hold this version"; otherwise it shows the difference. It
+  changes only the sites' stores, and nothing without `--execute`. With
+  `--execute` it asks for `partial` when no more than half the sites answered
+  directly, since the attestation becomes the operator's anchor.
+* **`paisans config publish`** commits the files with the base as parent, signs,
+  and pushes to every site it reaches. It refuses when its base is not the
+  sites' head, when no loaded key belongs to an admin the parent lists, and when
+  no site answers; a site that missed it gets it from its peers. A first
+  version, with no trusted head among the sites that answered, starts the
+  history, so with no more than half the sites reached directly it asks for
+  `partial`: an empty site must not start a second history silently.
+* **`paisans config pull`** moves files with no local edits to the head. Over
+  local edits on an older base it refuses, shows the difference, and with
+  `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
+  before `publish --merge`.
+* **`paisans config recover`** onto a workstation with nothing gathers from the
+  named hosts and every site the trusted heads name. It needs `--root` with the
+  hash of a version the operator trusts, kept somewhere other than the
+  workstation that was lost, because a history found only on the sites is
+  never trusted on its own. `--id` names the
+  deployment when a host's registry lists more than one. With a fork it writes
+  each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
+  head wins is for an admin to decide, never an order.
+* **`apply`** gathers before the review, so a fork or files older than the
+  sites' newest version are refused before the operator is asked anything; after
+  the approval it publishes the very bytes it loaded and applies, so the store
+  shows the declared state even when the apply stops part way, and each host
+  records the version it was given. A version that reaches no site is refused,
+  naming `host prepare` for a site with no store yet, because a version no site
+  holds is not one the hosts can be checked against.
+
+### Secrets are merged key by key
+
+Two edits of the encrypted file cannot be merged as text. When only the secrets
+file differs on both sides, `pull` decrypts the base, the local file and the
+head in memory and compares them key by key: changes to different keys merge,
+and two changes to one key are refused, naming the key and never a value. The
+pull takes neither side's value by itself. To take the head's value, set that
+key locally to it and pull again. To keep the local value, take the head's value
+first so the pull can merge the rest, pull, then set the key back to your value
+with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
+records and `secrets set` does not accept, is edited in the file with `sops`
+instead. A side with a `paisans mesh rekey` under way (a site with a next
+WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
+`mesh rekey` to finish it first on the side that holds it: a rekey's state is a
+sequence over live hosts, so combining two such states key by key could promote
+a key no host runs, and a rekey finishes in minutes. A file that cannot be
+decrypted and parsed here is refused without quoting its error, because a parse
+error can quote a value.
 
 ## Bootstrapping a site
 
@@ -3815,6 +4128,23 @@ at its next prepare, and one that loses it loses them at its next prepare. A
 monitor behind the operator's own web server opens neither: that server holds
 both, and its rules are the operator's.
 
+#### host prepare gives each site a configuration store
+
+A site cannot keep signed copies of the configuration (see *Every site keeps
+signed copies of the configuration*) until something exists on it to keep them
+in, and `apply` publishes a version before it changes anything else, so the
+store has to exist first. `host prepare` therefore installs `git` and plans,
+under *configuration store* in its plan, only what the host lacks: the bare
+repository at `/var/lib/paisans/config/<token>.git`, made only where its `HEAD`
+is absent so that a re-run never touches versions already there; the read-only
+daemon unit and the sync timer, `paisans-<token>-config-daemon` and
+`paisans-<token>-config-sync`, both named for the token so `site remove` finds
+them; and a file listing every other site's mesh address, which the sync reads.
+The repository is root's but readable by the user the daemon runs as, since a
+daemon that cannot read the store would serve nothing. A site added later gets
+the peers it lacks by a `host prepare` on the existing sites, which rewrites the
+list.
+
 #### host prepare owns its rules, and only its rules
 
 Every rule `host prepare` adds carries a ufw comment, `paisans-<token>: <why>`,
@@ -4001,6 +4331,75 @@ keys is refused. The key the current connection used is not removed either, by
 construction: the transport offers only listed keys, so the session's key is a
 listed one, unless `--ssh` or the operator's own `IdentityFile` chose another.
 
+**The host's owner may bound which keys it adds.** `paisans.yaml` is one file
+every admin of a deployment edits, and whoever runs `host prepare` runs it with
+their own access, so any admin can get a key of theirs made an authorized key
+of `ssh.user` through someone else's run. That user has `sudo` and is in the
+`docker` group, so the key is root on the host. The review (see *`apply` and
+`host prepare` review what `paisans.yaml` grants*) is the operator's check on
+that; this one is the host owner's, who may not be the one running the
+command. `/etc/paisans/ssh-allow.<user>`, root's and 0644, one per login user
+and shared by every deployment on the host, lists the fingerprints `host
+prepare` may add there, one per line, with `#` starting a comment:
+
+```
+# Keys host prepare may add to ubuntu's authorized_keys, one per line.
+SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA bob bob@example.org
+SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
+```
+
+It holds fingerprints, not admin names, because a name is whatever
+`paisans.yaml` says it is: replacing the key under `admins.alice.keys` must not
+carry Alice's permission to the new key. A line is the fingerprint, then any
+run of spaces or tabs, then a comment; it is read that way both when `host
+prepare` plans and when its append checks the list on the host, so the two
+never disagree. A line that is not a fingerprint allows nothing, so a mistyped
+line can only refuse a key.
+
+**No file, every key allowed.** A host behaves as it did before until its
+owner makes a list. Founder decision. An empty file allows no key.
+
+**With a file, `host prepare` refuses to append a key it does not list**, as a
+refusal in the plan, before any step runs, naming the key, its admin and the
+`host allow` that would allow it, whoever runs the command. Nothing else the
+list touches is refused:
+
+| Plan step | With the key not on the list |
+|---|---|
+| `authorize ssh key` (append) | **refused** |
+| `share ssh key`, `rename ssh key` | allowed: the key is already in `authorized_keys`, so nothing new can log in |
+| `release ssh key`, `forget ssh key`, `remove ssh key` | allowed: they only take away |
+
+The append checks the list again under the authorized keys lock as it runs,
+so a list made between the plan and the run still holds; so does a share
+that finds the line gone and appends it. A key already in `authorized_keys`
+keeps working whatever the list says: the list decides what `host prepare` may
+add, not who may log in now. Taking a key away is still removing it from
+`ssh.keys` and preparing again, or deleting it by hand.
+
+`paisans host allow <site> <admin>...` adds an admin's keys. It shows every
+fingerprint with its comment, and the list as it would be, so the owner checks
+each against the admin, out of band when unsure, before it is what the list
+holds. A list that does not exist yet is made holding also every key some
+deployment's sidecar already claims for the user, listed apart, so that making
+a list refuses no access the host already has. `paisans host disallow <site>
+<admin|fingerprint>...` takes lines off; it removes no key from
+`authorized_keys`, and says so. Taking the last line leaves an empty list,
+which allows nothing, rather than no file, which would allow everything; going
+back to no list is deleting the file by hand. Both are the owner's: they claim
+nothing in the registry and touch nothing of a deployment's, and `--execute`
+asks for the site's name at a terminal, since writing the list is granting or
+withdrawing access and is never scripted. `host disallow` asks as `host allow`
+does, because taking lines off can empty the list, which blocks every key
+`host prepare` would add later. The list is written under the same
+lock as `authorized_keys`, by a temporary file and a rename, and only over the
+list that was read. The file is the owner's, so both keep every line they do
+not change as it was written, comments included, and refuse a list holding a
+line they cannot read, naming it, rather than keep or drop a line whose
+meaning they do not know; the owner fixes it by hand. How to run them is under *`paisans host allow`* and
+*`paisans host disallow`* in [docs/commands.md](docs/commands.md); `doctor`
+reports each host's list.
+
 #### The watchdog
 
 On a data site, `host prepare` gives Patroni the device the site's `watchdog`
@@ -4023,6 +4422,119 @@ against a fake transport. `ufw show added` was observed on Ubuntu 24.04 for
 uncommented rules; the commented form, adoption and removal are written from
 ufw's source, not observed, as are `systemctl show -p RuntimeWatchdogUSec` and
 `dpkg-query`. The first real run of each should be read rather than trusted.
+
+### `apply` and `host prepare` review what `paisans.yaml` grants
+
+`paisans.yaml` is one file every admin of a deployment edits and commits, and
+whoever runs `apply` runs it with their own access. So any admin can grant
+themselves a host through someone else's run: by adding their name to a
+site's `ssh.keys`, or replacing the key under an admin it already names, which
+makes `host prepare` install their key for a user that is root on the host; or
+by pointing `apps.<name>.images` at an image they control, which `apply` pulls
+and runs with whatever the template mounts. A plan line saying `○ authorize
+ssh key` is easy to miss, and with `--execute` it is not shown at all. So both
+commands show what changes and ask before it does.
+`docs/specs/2026-10-11-config-review.md` is the approved specification.
+
+**The grant** is the part of the configuration that decides who may log in to
+a host and what code runs on it. It is computed from the configuration and the
+render, never from the host, so nothing on the host chooses what is reviewed:
+
+| Part | Holds | Comes from |
+|---|---|---|
+| login | `ssh.user` | the site's `ssh` section |
+| keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
+| images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
+| web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
+
+A key is the same key when its fingerprint is, so a new comment or a new admin
+for it is a change of that key. An image is the same when its reference is,
+which is why `validate` refuses a floating tag for an app. An app's settings,
+`config` and `smtp` are not reviewed: they configure an image the review
+already covers, and choose no code. A field added later that does choose code
+(a command, a hook, a mount) joins the review in the same change.
+
+**The review prints only what it can show.** A key comment, an admin's name or
+email, or an image reference holding a control character (Eg: ESC, DEL, or a
+C1 control such as CSI) is refused when the file is loaded, naming the field.
+A terminal reads those characters as commands, so a comment carrying one could
+move the cursor and redraw a review line, Eg: dress a `+ key` up as another
+admin's `~ key`. A host file is not loaded through that check, so as a second
+line, everything the review, `host allow`, `host disallow` and `doctor` print
+from the configuration or from a host shows such a character as an escape
+(Eg: `\x1b`), never raw.
+
+**Each host records the grant last applied**, in
+`/var/lib/paisans/granted.<token>.json`, root's and 0644. It holds
+fingerprints and image references, nothing secret, so it is readable without
+`sudo`; only root writes it, so the login user alone cannot rewrite the
+baseline. Each part is written by the command that applies it, once that
+command's steps for the site have all succeeded: the login and keys by `host
+prepare`, the images and the web server's directory by `apply`. A run that
+fails part way writes nothing, and the next run reviews the same changes again.
+It is written under `/var/lib/paisans/registry.lock`, by a temporary file and
+a rename, and only over the file that was read, so two commands writing
+different parts lose neither. A host with no record, which is every host of a
+deployment built before it existed, has an empty baseline: every entry is new
+and is reviewed once. That is the record being made, not a migration. A record
+this toolkit cannot read is not rewritten; deleting it by hand makes the next
+run review everything again. `site remove` deletes it with the registry entry.
+
+**The review** compares each entry of the grant with the record:
+
+| Compared with the record | Shown as | Needs approval |
+|---|---|---|
+| in both, the same | not shown | no |
+| in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
+| in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
+| in the record only | `- key SHA256:… (carol, carol@desk)` | no |
+
+A removal is shown and not approved, because it only takes away. The review
+is one line per site, pending when anything needs approval, with every change
+under it at every verbosity, with `--execute` as well as without: the login and
+the keys first, then the images stack by stack, then the web server, so a long
+list stays readable. A host with no record of the parts a review covers says
+`first review` on its line, and that every entry is new because there is no
+record yet: the first `--execute` on such a host asks once for the whole list,
+which is the record being made, and later runs show only what changes.
+`host prepare` reviews the login and the keys; `apply --site` the images and
+the web server's directory, narrowed to the named stacks by `--only`; `site
+add` the new site's images, since its stage 4 applies that site's whole
+render, recording them once that stage's gate has passed; `apply` with no
+`--site` every part of every site, since it runs them all.
+
+**The dry run shows the review and asks nothing.** It ends with what
+`--execute` will ask for.
+
+**`--execute` asks once.** When anything needs approval, the command asks the
+operator to type `approve` at a terminal, through the same prompt `site remove
+--delete-data` uses, before its first change: the registry claim, which comes
+before the plan, so that an operator who does not approve leaves the host
+exactly as it was. Anything else, or end of input, stops the command with
+nothing changed. `apply` with no `--site` asks once for every site, at the
+point where it settles `sudo` passwords, before its first step; each step it
+runs then checks that it applies what was approved, and refuses anything that
+changed since, rather than asking again. An `init` it runs comes first, since
+it changes no host and the images are rendered from the secrets it generates.
+
+**No terminal, no approval.** When something needs approval and standard input
+is not a terminal, the command is refused before any host changes, saying to
+run it at a terminal. No flag answers the question: a flag that could would be
+in every script within a week, and approving is the control.
+
+**Nothing to approve, nothing asked.** A run that adds or changes no key and no
+image behaves as it always has, terminal or not, so routine applies stay
+scriptable.
+
+**Who approved.** When exactly one admin's key in `paisans.yaml` is loaded in
+the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
+`approved_by: <admin>`; otherwise it records no name. It is a label for the
+next reader, not a check: anyone can load any key they hold. Who wrote a change
+is the repository's history, which the toolkit cannot see.
+
+The review is the operator's check. The host's owner, who may not be the one
+running the command, bounds which keys `host prepare` may add at all with an
+allowlist on the host (see *host prepare manages the login user's authorized keys*).
 
 ### Where WireGuard keys are generated
 
@@ -4160,6 +4672,23 @@ it:
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
+**The configuration is published once the stores exist.** The version `apply`
+applies is gathered before the review, so a fork or files older than the sites'
+newest version are refused before anything is asked (see *Every site keeps
+signed copies of the configuration*). It is published after the `host prepare`
+steps, which create every site's store, and before any other step changes a
+host: it cannot be pushed to a store that does not exist yet, and `host
+prepare`'s own changes are reviewed already. Publishing earlier than the first
+change keeps the store showing the declared state even if the run stops part
+way. A run that stops between prepare and publish has granted keys without
+publishing the version, and the next run publishes it. A version that reaches no
+site is refused, naming `host prepare`, because the hosts are checked against
+what the store holds. `apply --site` without a store refuses in the same words.
+Gathering reaches every site with `sudo` and needs the standard file names
+beside `paisans.yaml`, so a deployment with renamed files cannot use `apply`
+until they are renamed; and a dry run needs an admin key in the ssh-agent too,
+because it checks the key `--execute` would sign with.
+
 **DNS comes before any site is applied.** Each site's `wg-quick` resolves the
 `endpoint` names it dials, those of sites with no `public_address`, as the
 mesh interface starts, and one name that does
@@ -4196,7 +4725,13 @@ the first install, the resume after a failure, and every later change. Each
 step is the command an operator would type, so it plans, gates, claims and
 refuses as that command does, and the sudo password each host asks for is
 asked once for the run, every one of them before the first step (see *A sudo
-that wants a password is asked for once, on a terminal*). `-v` reaches every step, and `--keep-images` and
+that wants a password is asked for once, on a terminal*). Then, before the
+first step that changes a host, it shows one review of what `paisans.yaml`
+grants on every site, and asks once when anything is added or changed (see
+*`apply` and `host prepare` review what `paisans.yaml` grants*); each step then
+applies what was approved, and refuses anything that changed since. An `init`
+with work to do runs ahead of the review: it writes only local files, and the
+images reviewed are rendered from the secrets it generates. `-v` reaches every step, and `--keep-images` and
 `--min-free` each `apply`; `--ssh`, `--overwrite`, `--only` and `--recreate`
 are about one site, and are refused without `--site`. A stop names its step and how
 to carry on: usually by running it again, but a DNS record pointing elsewhere
@@ -4249,7 +4784,7 @@ once the line ends, and output without a terminal never shows it:
 prepare
   ✓ vm: 1.8s
   ✓ watch: 2.0s
-  ⠹ home-b: 38s (install packages: wireguard-tools, ufw)
+  ⠹ home-b: 38s (install packages: wireguard-tools, ufw, git)
   ⠹ home-a: 38s (start docker)
 ```
 
@@ -4322,34 +4857,33 @@ out the configuration's findings, which the run showed at its start, and its
 own closing line, since the run ends on its own.
 
 Its dry run changes nothing on the servers. When the yaml has its id and mesh
-subnet and the secrets file reads but lacks a generated secret, it generates
-the missing ones into that file, as `init` would: only what is missing, nothing
+subnet and the secrets file reads but lacks a generated secret, it generates the
+missing ones into that file, as `init` would: only what is missing, nothing
 overwritten, encrypted to the recipients in `.sops.yaml`. Its `init` line names
-what it wrote, never a value, and the closing line says the secrets were
-added; the later steps are then checked rather than waiting on init. A missing
-id, subnet or secrets file is still left to `init`, which `--execute` runs
-first. Every host's prepare is checked at the same time, drawn as with
-`--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog. Each install line
-is its site's steps' own dry runs together, and the storage line its step's:
-`✓` when every one is up to date, a dim `·` with `after prepare` (or
+what it wrote, never a value, and the closing line says the secrets were added;
+the later steps are then checked rather than waiting on init. A missing id,
+subnet or secrets file is still left to `init`, which `--execute` runs first.
+Every host's prepare is checked at the same time, drawn as with `--execute`. A
+prepare line names each kind of change its site's plan makes, in the order
+docker, wireguard, firewall, ssh keys, watchdog, configuration store. Each
+install line is its site's steps' own dry runs together, and the storage line
+its step's: `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is
 work, with what each step found, and `✗` when a step would refuse, with the
 refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
-work. `-v` lists each step under its line with its own status. Each pull
-line is the plan its site's apply would make: `○` with how many images it
-would pull and the free space they land in, `✓` `nothing to pull`, `✗` with
-the free space refusal `--execute` would stop at, or a dim `·` `after host
-prepare` while its site's prepare has work, since a host without Docker has no
-images to ask about:
+work. `-v` lists each step under its line with its own status. Each pull line is
+the plan its site's apply would make: `○` with how many images it would pull and
+the free space they land in, `✓` `nothing to pull`, `✗` with the free space
+refusal `--execute` would stop at, or a dim `·` `after host prepare` while its
+site's prepare has work, since a host without Docker has no images to ask about:
 
 ```
 configuration
   ✓ init: generated 4 secrets into secrets.enc.yaml (cluster.admin_password, cluster.standby_password, cluster.superuser_password and 1 more)
 
 prepare
-  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog
+  ○ home-a: docker, wireguard, firewall, ssh keys, watchdog, configuration store
   ✓ home-b
   ✓ vm
   ✓ watch
@@ -4985,7 +5519,7 @@ What stays open is what a peer needs before it can sign anything: our
 instance actor carries the key it verifies our requests with, so gating it
 would leave two such servers each waiting on the other. A peer that does not
 sign its fetches cannot read either app. `false` turns it off for an ungated app, and a gated app refuses it
-(`visibility-gate-without-signed-fetch`), as does anything but a YAML boolean
+(`gated-without-signed-fetch`), as does anything but a YAML boolean
 (`authorized-fetch-not-a-boolean`).
 
 **Both answer a status-only `/healthz`.** 200 with an empty body when the
@@ -5145,12 +5679,16 @@ Founder decision, 2026-10-08.
 last pass: 200 with two or more members, 503 with fewer, on a failed write,
 with no group named `admins`, when Pocket ID does not answer, before the first
 pass, and once the last pass is more than two and a half hours old. The body
-is one line naming users by username. The uptime kind checks every site's
-reconciler, so a community down to one administrator gets an incident while that
-administrator can still fix it. Docker's healthcheck asks `/livez` instead,
-which fails only when the pass loop has hung: a new deployment has no `admins`
-group until someone makes one, and `apply`'s health gate must not hold the
-Pocket ID stack back on it.
+is one line naming users by username, and a standby's is `standby`, with a
+200. The uptime kind does not ask it directly: the active instance's
+`admins-heartbeat` pushes what it says to the monitor's
+`<app> — admin continuity` (*Monitoring*), so a community down to one
+administrator gets an incident while that administrator can still fix it,
+from whichever site is active.
+The monitor's per site check asks `/livez`, which fails only when the pass
+loop has hung, and so does Docker's healthcheck: a new deployment has no
+`admins` group until someone makes one, and `apply`'s health gate must not
+hold the Pocket ID stack back on it.
 
 **The reconciler's two writes are approved once, not per write.** An agent
 needs a human for every change to Pocket ID's groups; the reconciler is a
@@ -5319,7 +5857,7 @@ the admin reconciler and the heartbeat's curl image):
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
@@ -5388,8 +5926,18 @@ are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
 Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
 address, marked verified for the reason `app admin create` gives below, and
 `name` is split at its first space into a first and a last name. Each is put
-in every app's admin group, as `app admin create` does. Declaring the admin is
-the approval for all of it.
+in every app's admin group, as `app admin create` does, and in every app's
+member group as well. Declaring the admin is the approval for all of it.
+
+**A declared admin is a member of every app too**, because an app that gates
+on its member group would otherwise refuse its own administrator. Mbin reads
+`settings.member_group` and refuses a login whose claim lacks it unless the
+linked account is already an Mbin administrator, which a first login never
+is; releases of the fork before 1.15.1 did so even when the claim named the
+admin group. Joining the member groups makes every app admit its
+administrators, whatever it reads, including one that reads no group itself
+and relies on the client's restriction at Pocket ID. A member group that is
+also an admin group is joined once. Founder decision.
 
 The username is set when the account is created and never changed after:
 the pocket-id kind turns account editing off (`allow_own_account_edit`, under
@@ -5630,7 +6178,7 @@ apps:
       session_duration: 10080        # a week
       home_page_url: /settings/apps
       allow_user_signups: withToken
-      signup_default_groups: [provisional]
+      signup_default_groups: [members]
       email_one_time_access_as_unauthenticated: true
       email_verification: true
       allow_own_account_edit: false  # the only value it takes
@@ -5844,7 +6392,9 @@ and `ok` instead:
 ```
 
 **Each line is a Pocket ID mutation.** For an app
-declared in `paisans.yaml` the declaration approves its client; the plan is
+declared in `paisans.yaml` the declaration approves its client, and for the
+gate, which no file declares, so does setting `gated` or `auto_login` on an
+app; the plan is
 what lets an operator see what that approval does, in a dry run of either
 `apply` or the command, before `--execute`, and `--verbose` shows exactly what
 each request sends. The same probe runs
@@ -5885,13 +6435,13 @@ one that can disagree with the client. All four are confidential clients.
 Putting a user in the admin group is `app admin create`'s job, not this
 command's.
 
-**`validate` holds the groups to the gate.** The gate's `members` instance
-admits `apps.<gate>.settings.members_group`, default `members`, and a
-member gated app's client admits that app's `member_group`. When the two name
-different groups, someone is let through the gate and refused by the app, or
-admitted by the app on a path the gate leaves open, and nothing says which
-group "member" means; so an app with `visibility_gate: member` whose member
-group is not the gate's is refused (`oidc-member-group-disagrees-with-gate`).
+**`validate` holds the groups to the gate.** The gate admits `members`, and
+an app using the gate has a client admitting that app's `member_group`. When
+the two name different groups, someone is let through the gate and refused by
+the app, or admitted by the app on a path the gate leaves open, and nothing
+says which group "member" means; so an app setting `gated` or `auto_login`
+whose member group is not `members` is refused
+(`oidc-member-group-disagrees-with-gate`).
 A `member_group` or `admin_group` that is blank or not a string is refused
 too (`oidc-member-group-not-a-name`): the default would hold and the client
 would still be restricted, but what the operator wrote reads as a restriction
@@ -5977,8 +6527,8 @@ by hand is not this command's to change. **Differing in either direction is a
 refusal.** A client allowing less than the app needs cannot sign anyone in; a
 client allowing more is a privilege leak, so an extra callback URL (a sign in
 started here could finish at another host) and an extra allowed group (its
-members are exactly who the member group was meant to keep out, `provisional`
-being the usual one) are refused by name, as is PKCE on for an app that sends
+members are exactly who the member group was meant to keep out) are refused by
+name, as is PKCE on for an app that sends
 no challenge. The allow step, when it runs, sends exactly the app's groups,
 never a union with what the client held. A launch URL that is empty or a
 toolkit default is the one exception, set as above, because neither is a
@@ -6398,6 +6948,9 @@ deployment's is left alone and not listed:
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
+| the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
+| the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
+| the host's key allowlist | nothing: `/etc/paisans/ssh-allow.<user>` is the host owner's, shared by every deployment on the host | never touched. Taking a deployment off does not change what the owner allows |
 
 The check that nothing of this deployment's is left comes last, after the
 registry entry.
@@ -6979,11 +7532,18 @@ nothing right, and the closing line counts it apart from the checks that
 passed. It exits 1 when any finding is `FAIL`, so a script or a monitor can
 tell a healthy deployment from one that needs a human.
 
-It **changes nothing**, and it has no `--execute`. Every command it sends is a
-read: a list, a status, a key, a log tail. The recoveries it describes are
-printed for a human to run, because doctor is run in the middle of an outage
-and the one recovery that touches member data, a forced failover, loses
-commits. Which commits a community keeps is a human's decision.
+It **changes no host**. Every command it sends is a read: a list, a status, a
+key, a log tail. The recoveries it describes are printed for a human to run,
+because doctor is run in the middle of an outage and the one recovery that
+touches member data, a forced failover, loses commits. Which commits a
+community keeps is a human's decision. Its one change is to the local
+`paisans.yaml`, and only with `--execute`: before it loads the file, it removes
+every `config:` key that only repeats a value gating makes the template write
+(Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin), which `validate`
+otherwise refuses as `config-key-already-rendered`. The file then says the
+same thing with one fewer place to say it. A key with any other value
+contradicts the gate, and changing it would change policy, so it is left for
+the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
 check runs with the sites that did. Each ssh attempt gives up after ten
@@ -7003,9 +7563,11 @@ that the first `FAIL` is usually the cause of those after it:
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
 | Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running | any container is not running |
+| Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| SSH allowlist | `/etc/paisans/ssh-allow.<user>` on every site that answered (see *host prepare manages the login user's authorized keys*) | never. No list is `info`, since every key is then allowed; a list says how many keys it holds, and each key `ssh.keys` names that it does not hold and that is not in the login user's `authorized_keys` yet is a `WARN`, as the refusal the next `host prepare` would give when it appends that key, with the `host allow` that allows it. A key already in `authorized_keys` is never appended, so it is no warning; where `authorized_keys` could not be read, every key the list lacks is reported, as the refusal host prepare would give if it had to add it. Nothing is broken now, so it is never a `FAIL` |
 
 The health check names each member rather than using `--cluster`, because
 `--cluster` first asks the cluster for its member list (etcd v3.5.16,

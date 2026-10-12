@@ -117,6 +117,12 @@ func (p *Plan) buildReplica(members []patroniMember) *Stage {
 		Gate: fmt.Sprintf("`patronictl list` on %s shows %s streaming, with its replay lag falling, or zero, across %d samples %s apart",
 			p.patroni, p.Site, lagSamples, lagInterval),
 	}
+	st.passed = func() error {
+		if p.Replicated == nil {
+			return nil
+		}
+		return p.Replicated()
+	}
 	if m := findMember(members, p.Site); m != nil && m.state() == "streaming" {
 		st.gate = p.replicaGate
 		return st

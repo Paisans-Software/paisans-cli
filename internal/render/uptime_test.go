@@ -168,12 +168,12 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 	}
 
 	docs := cfg.Apps["docs"]
-	docs.VisibilityGate = config.GatePublic
+	docs.Gated = false
 	cfg.Apps["docs"] = docs
 	if _, ok := byName(renderSeed(t, cfg, secrets))["docs — gate"]; ok {
-		t.Error("visibility_gate: public is no gate, yet outline has a gate check")
+		t.Error("gated: false is no gate, yet outline has a gate check")
 	}
-	docs.VisibilityGate = config.GateProvisional
+	docs.Gated = true
 	cfg.Apps["docs"] = docs
 	gated := byName(renderSeed(t, cfg, secrets))
 	if got := gated["docs — public"]["expected_status"]; got != "200" {
@@ -196,7 +196,7 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 func TestAGatedWriteFreelyIsProvedByItsOutbox(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	blog := cfg.Apps["blog"]
-	blog.VisibilityGate = config.GateMember
+	blog.Gated = true
 	cfg.Apps["blog"] = blog
 	monitors := byName(renderSeed(t, cfg, secrets))
 	signed := monitors["blog — signed fetch"]
@@ -218,7 +218,7 @@ func TestAGatedWriteFreelyIsProvedByItsOutbox(t *testing.T) {
 func TestAnUngatedMbinHasNoPrivateAPICheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	talk := cfg.Apps["talk"]
-	talk.VisibilityGate = config.GatePublic
+	talk.Gated = false
 	cfg.Apps["talk"] = talk
 	for name := range byName(renderSeed(t, cfg, secrets)) {
 		if strings.Contains(name, "private API") {
@@ -322,7 +322,9 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 
 // Every site Pocket ID runs on gets a check on its admin reconciler, straight to
 // the reconciler's port on the mesh, and nothing public: the gateway does not
-// route the reconciler.
+// route the reconciler. It asks /livez, the reconciler service's own health,
+// which a standby passes too; the admins group's health is the push monitor's
+// (TestTheSeedExpectsAnAdminsHeartbeatPerPocketID).
 func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
@@ -335,7 +337,7 @@ func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 		if m == nil {
 			t.Fatalf("no admin reconciler check on %s", site)
 		}
-		if want := "http://" + cfg.Sites[site].Address + ":1412/healthz"; m["url"] != want || m["expected_status"] != "200" {
+		if want := "http://" + cfg.Sites[site].Address + ":1412/livez"; m["url"] != want || m["expected_status"] != "200" {
 			t.Errorf("%s: url %v expects %v, want %s expecting 200", site, m["url"], m["expected_status"], want)
 		}
 		if _, ok := m["request_headers"]; ok {
@@ -349,20 +351,31 @@ func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 	}
 }
 
-// The monitor cannot report its own death, but whenever it runs it can see
-// the path in front of it: DNS, the web server and the certificate, whose
-// expiry the fork warns about. So it checks its own public URL, and only that.
-func TestTheMonitorChecksItsOwnPublicURL(t *testing.T) {
+// A monitor does not watch itself: if it is down it cannot report that, and a
+// check of its own container from inside it can only pass. So its own app has
+// no check at its hostname and no direct check, while every other app keeps
+// both.
+func TestTheMonitorDoesNotCheckItself(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	self := byName(renderSeed(t, cfg, secrets))[render.PublicCheckName("status")]
-	if self == nil || self["url"] != "https://status.example.org/healthz" || self["expected_status"] != "200" || self["follow_redirects"] != false {
-		t.Fatalf("self check: %v", self)
+	monitors := byName(renderSeed(t, cfg, secrets))
+	for name, m := range monitors {
+		if strings.HasPrefix(name, "status — ") {
+			t.Errorf("the monitor seeds a check of itself: %s", name)
+		}
+		if url, _ := m["url"].(string); strings.Contains(url, "status.example.org") {
+			t.Errorf("%s checks the monitor's own hostname: %s", name, url)
+		}
+	}
+	for _, name := range []string{"auth — public", "talk — gate", "talk — direct (home-a)", "talk — direct (home-b)"} {
+		if monitors[name] == nil {
+			t.Errorf("%s is no longer seeded", name)
+		}
 	}
 }
 
 // With a second monitor on a second monitor site, each checks the other's
-// public URL exactly as it checks its own, so a monitor host that dies is
-// noticed by the one still running. Neither gains a second check of itself.
+// public URL, so a monitor host that dies is noticed by the one still
+// running. Neither checks itself.
 func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	watchB := cfg.Sites["watch"]
@@ -387,10 +400,11 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 		for _, m := range seed.Monitors {
 			count[m["name"].(string)]++
 		}
-		for _, name := range []string{render.PublicCheckName(self), render.PublicCheckName(other)} {
-			if count[name] != 1 {
-				t.Errorf("%s seeds %q %d times", self, name, count[name])
-			}
+		if n := count[render.PublicCheckName(self)]; n != 0 {
+			t.Errorf("%s checks its own public URL %d times", self, n)
+		}
+		if n := count[render.PublicCheckName(other)]; n != 1 {
+			t.Errorf("%s checks %s's public URL %d times", self, other, n)
 		}
 		m := byName(seed)[render.PublicCheckName(other)]
 		want := "https://" + cfg.Apps[other].Hostname + "/healthz"
@@ -411,7 +425,8 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 }
 
 // Two monitors on one monitor site share a host, so checking each other
-// proves nothing about losing it: each seeds only its own public URL. validate
+// proves nothing about losing it, and neither checks itself: neither seeds a
+// public check of a monitor. validate
 // refuses this shape today (port-collision in mode paisans, and in mode
 // external a monitor site hosts the monitor alone), but Build does not
 // validate, so the seed holds the rule itself rather than leaning on that.
@@ -423,8 +438,8 @@ func TestMonitorsOnOneSiteDoNotCheckEachOther(t *testing.T) {
 	secrets.Apps["status-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	for self, other := range map[string]string{"status": "status-b", "status-b": "status"} {
 		monitors := byName(renderSeedAt(t, cfg, secrets, "watch/srv/paisans/f2a9/"+self+"/monitors.json"))
-		if monitors[render.PublicCheckName(self)] == nil {
-			t.Errorf("%s does not check its own public URL", self)
+		if monitors[render.PublicCheckName(self)] != nil {
+			t.Errorf("%s checks its own public URL", self)
 		}
 		if monitors[render.PublicCheckName(other)] != nil {
 			t.Errorf("%s checks %s, which shares its site", self, other)
@@ -432,17 +447,14 @@ func TestMonitorsOnOneSiteDoNotCheckEachOther(t *testing.T) {
 	}
 }
 
-// A deployment with one monitor seeds exactly one uptime check, its own.
-func TestASingleMonitorSeedsOnlyItsOwnUptimeCheck(t *testing.T) {
+// A deployment with one monitor seeds no uptime check: the only monitor is
+// itself.
+func TestASingleMonitorSeedsNoUptimeCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	var public []string
 	for _, m := range renderSeed(t, cfg, secrets).Monitors {
 		if url, _ := m["url"].(string); strings.HasPrefix(url, "https://status") {
-			public = append(public, m["name"].(string))
+			t.Errorf("uptime check: %s", m["name"])
 		}
-	}
-	if len(public) != 1 || public[0] != render.PublicCheckName("status") {
-		t.Fatalf("uptime checks: %v", public)
 	}
 }
 
