@@ -43,12 +43,13 @@ const (
 	// that list does not name. Founder decision, over accepting an empty
 	// role list for such a site.
 	RoleStorage Role = "storage"
-	// RoleMonitor is a host that runs the uptime monitor. It is never the
-	// gateway or the witness, because reporting their failures is its job,
-	// and it serves its own apps rather than routing them through the
-	// gateway, which would take it dark at exactly the moment it is needed.
-	// See docs/specs/2026-10-08-monitor-role-and-host-check.md. Founder
-	// decision.
+	// RoleMonitor is a host that runs the uptime monitor. It serves its own
+	// apps rather than routing them through the gateway, which would take it
+	// dark at exactly the moment it is needed. It is best on a machine of its
+	// own, since reporting the others' failures is its job; beside the gateway
+	// or the witness it is allowed with a warning, and the gateway's Caddy
+	// serves it there. See docs/specs/2026-10-08-monitor-role-and-host-check.md
+	// and docs/specs/2026-10-12-monitor-on-gateway.md. Founder decisions.
 	RoleMonitor Role = "monitor"
 )
 

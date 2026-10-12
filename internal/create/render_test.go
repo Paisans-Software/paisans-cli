@@ -2,6 +2,8 @@ package create
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -174,5 +176,35 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "id: "+testID) {
 		t.Errorf("the id is not written")
+	}
+}
+
+// One machine with the status page beside its gateway renders the file in
+// testdata, which validates with the shared-site warning.
+func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) {
+	a := answersFor(ShapeOneMachine, true, false)
+	a.Monitor, a.MonitorOnGateway = nil, true
+	data, err := Render(a, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden := filepath.Join("testdata", "one-machine-monitor-on-gateway.yaml")
+	if *update {
+		if err := os.WriteFile(golden, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("%v (run with -update to write it)", err)
+	}
+	if string(want) != string(data) {
+		t.Errorf("%s differs from what the answers render; run with -update and read the diff", golden)
+	}
+	if got := rules(check(t, data).Warnings()); !slices.Contains(got, "monitor-shares-a-site") {
+		t.Errorf("warnings %v", got)
+	}
+	if strings.Contains(string(data), "on a machine of its own") || !strings.Contains(string(data), "beside the gateway") {
+		t.Errorf("the status page's comment does not say where it runs:\n%s", data)
 	}
 }

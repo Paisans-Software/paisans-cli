@@ -199,7 +199,29 @@ func (w *Wizard) sites() error {
 		return err
 	}
 	a.Shape, a.Sites = shape, sites
+	w.settleMonitor()
 	return nil
+}
+
+// settleMonitor drops the status page's place beside the gateway when the
+// machines answered again no longer give it one: exactly one gateway with a
+// public address, and no machine holding the monitor role already. The status
+// page then goes to the machine that holds the role, or to none, which
+// validate refuses and answering the apps again settles.
+func (w *Wizard) settleMonitor() {
+	a := &w.Answers
+	if !a.MonitorOnGateway {
+		return
+	}
+	for _, s := range a.Sites {
+		if s.Has(config.RoleMonitor) {
+			a.MonitorOnGateway = false
+			return
+		}
+	}
+	if w.publicGateway() == "" {
+		a.MonitorOnGateway = false
+	}
 }
 
 func (w *Wizard) siteNames(sites []Site) []string {

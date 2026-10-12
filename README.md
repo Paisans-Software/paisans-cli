@@ -704,7 +704,12 @@ sites:
   check refuses a host where a foreign network or route already holds it.
   The certificate and its renewal belong to whoever runs that web server: the
   toolkit cannot know how an unfamiliar server obtains one, and must not edit
-  a configuration it does not own. `paisans apply` without `--site` runs
+  a configuration it does not own. A machine that was the gateway and
+  switches to `managed_by: external` in the same edit that moves the gateway
+  off it no longer runs the toolkit's Caddy, so `paisans gateway move` treats
+  it as an ordinary old gateway and stops that Caddy: the status page is down
+  until the operator's web server serves it. Move the gateway first, then
+  switch the web server in an apply of its own. `paisans apply` without `--site` runs
   `paisans web-server check` for each such app once every step has run, and
   `paisans apply --site` on such a monitor runs it for the apps the monitor
   serves once its stacks are up, a line

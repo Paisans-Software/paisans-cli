@@ -386,8 +386,8 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 	}
 
 	if site.RunsCaddy {
-		// A gateway routes every app but a monitor's; a monitor serves only
-		// the apps pinned to it. Both are the same Caddyfile, image and
+		// A gateway routes every app but another site's monitor's; a monitor
+		// that is not a gateway serves only the apps pinned to it. Both are the same Caddyfile, image and
 		// certificate story, so a monitor's edge is the gateway's minus the
 		// other hostnames.
 		routes := p.routesFor(site)

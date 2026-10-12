@@ -353,3 +353,25 @@ func TestADepartingGatewayMountsTheHostOwnersSites(t *testing.T) {
 		t.Errorf("the departing gateway's Caddy lacks %q:\n%s", mount, compose)
 	}
 }
+
+// With two gateways, as during a move, the status page beside one of them is
+// served by that gateway alone: the other skips it, as it skips any monitor
+// elsewhere.
+func TestAMonitorOnOneOfTwoGatewaysIsServedByThatOneAlone(t *testing.T) {
+	cfg := monitorOnGateway(t)
+	b := cfg.Sites["home-b"]
+	b.Roles = append(b.Roles, config.RoleGateway)
+	b.PublicAddress = "203.0.113.30"
+	cfg.Sites["home-b"] = b
+	files := planFiles(mustBuild(t, cfg))
+	if vm := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]; !strings.Contains(vm, "status.example.org {") {
+		t.Errorf("vm, the monitor's gateway, does not serve it:\n%s", vm)
+	}
+	other := files["home-b/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	if !strings.Contains(other, "talk.example.org {") {
+		t.Fatalf("home-b is not rendered as a gateway:\n%s", other)
+	}
+	if strings.Contains(other, "status.example.org") {
+		t.Errorf("home-b serves the monitor on vm:\n%s", other)
+	}
+}
