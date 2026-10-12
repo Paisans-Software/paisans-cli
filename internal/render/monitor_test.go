@@ -239,3 +239,73 @@ func TestAnExternalMonitorClaimsItsNetwork(t *testing.T) {
 		t.Errorf("mode paisans claims %+v", got)
 	}
 }
+
+// monitorOnGateway is the fixture with the watch site gone and the monitor
+// on vm, the gateway and witness, with the public address a monitor needs.
+func monitorOnGateway(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := fixture(t)
+	delete(cfg.Sites, "watch")
+	vm := cfg.Sites["vm"]
+	vm.Roles = append(vm.Roles, config.RoleMonitor)
+	vm.PublicAddress = "203.0.113.10"
+	cfg.Sites["vm"] = vm
+	status := cfg.Apps["status"]
+	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
+	cfg.Apps["status"] = status
+	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
+		t.Fatalf("the monitor on the gateway is refused: %v", refusals)
+	}
+	return cfg
+}
+
+// The monitor beside the gateway shares its Caddy: one Caddyfile carries the
+// status page and every ordinary app, and one claim each on 80 and 443.
+func TestAMonitorOnTheGatewayIsServedByTheGatewaysCaddy(t *testing.T) {
+	cfg := monitorOnGateway(t)
+	files := planFiles(mustBuild(t, cfg))
+	gateway := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	for _, host := range []string{"status.example.org {", "talk.example.org {"} {
+		if !strings.Contains(gateway, host) {
+			t.Errorf("the gateway's Caddyfile lacks %q:\n%s", host, gateway)
+		}
+	}
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/status.caddy"]; !ok {
+		t.Error("the gateway carries no snippet for the monitor")
+	}
+	claims := map[int]int{}
+	for _, l := range render.SiteListeners(cfg, "vm") {
+		if l.Owner == "Caddy" && l.Proto == "tcp" && (l.Port == 80 || l.Port == 443) {
+			claims[l.Port]++
+		}
+	}
+	if claims[80] != 1 || claims[443] != 1 {
+		t.Errorf("claims on 80 and 443: %v", claims)
+	}
+}
+
+// Every other site is still pinged and still sends its heartbeat; the
+// monitor's own site, the gateway, is not pinged.
+func TestAMonitorOnTheGatewayPingsEveryOtherSite(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	delete(cfg.Sites, "watch")
+	vm := cfg.Sites["vm"]
+	vm.Roles = append(vm.Roles, config.RoleMonitor)
+	vm.PublicAddress = "203.0.113.10"
+	cfg.Sites["vm"] = vm
+	status := cfg.Apps["status"]
+	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
+	cfg.Apps["status"] = status
+	monitors := byName(renderSeedAt(t, cfg, secrets, "vm/srv/paisans/f2a9/status/monitors.json"))
+	for _, name := range []string{"home-a — ping", "home-b — ping"} {
+		if monitors[name] == nil {
+			t.Errorf("%s is missing", name)
+		}
+	}
+	if monitors["vm — ping"] != nil {
+		t.Error("the monitor pings its own site")
+	}
+	if monitors["talk — gate"] == nil {
+		t.Error("an app on the monitor's machine lost its checks")
+	}
+}
