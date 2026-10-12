@@ -205,6 +205,35 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 // names are still wanted, and it is an error: the caller decides nothing is
 // deleted.
 func BuildSiteRemoval(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
+	rules, err := siteRemovalRules(before, site, after)
+	if err != nil {
+		return nil, err
+	}
+	plan, _, err := planPrune(ctx, provider, before, rules)
+	return plan, err
+}
+
+// BuildSiteEviction plans an eviction's DNS stage: BuildSiteRemoval's rules,
+// except that a record at a name the configuration without the site still
+// wants is deleted too. An evicted host may be hostile, and every visitor a
+// record sends it is one whose session it can read; a name still wanted
+// answers nothing until the apply that brings up the replacement creates its
+// record at the new address. Rules 1 to 4 still tie each record to the
+// evicted host alone: this deployment's comment, an address record, a name
+// of this deployment's, and the evicted site's own address, which no
+// remaining site shares.
+func BuildSiteEviction(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
+	rules, err := siteRemovalRules(before, site, after)
+	if err != nil {
+		return nil, err
+	}
+	rules.wanted = map[string][]string{}
+	plan, _, err := planPrune(ctx, provider, before, rules)
+	return plan, err
+}
+
+// siteRemovalRules are BuildSiteRemoval's rules.
+func siteRemovalRules(before *config.Config, site string, after *config.Config) (pruneRules, error) {
 	rules := pruneRules{
 		domain:     normalise(before.Community.Domain),
 		producedBy: "the configuration before " + site + " is removed",
@@ -214,10 +243,10 @@ func BuildSiteRemoval(ctx context.Context, provider Provider, before *config.Con
 		wantedBy:   "the configuration without " + site,
 	}
 	if rules.domain == "" {
-		return nil, fmt.Errorf("dns: community.domain is not set, so there is no subtree to remove records within")
+		return rules, fmt.Errorf("dns: community.domain is not set, so there is no subtree to remove records within")
 	}
 	if len(rules.addresses) == 0 {
-		return nil, fmt.Errorf("dns: %s has no public address, so no record points at it", site)
+		return rules, fmt.Errorf("dns: %s has no public address, so no record points at it", site)
 	}
 	// The addresses are keyed by where they are declared; rule 4 matches the
 	// address.
@@ -240,11 +269,10 @@ func BuildSiteRemoval(ctx context.Context, provider Provider, before *config.Con
 	}
 	wants, err := Desired(after)
 	if err != nil {
-		return nil, err
+		return rules, err
 	}
 	rules.wanted = wantedSet(wants)
-	plan, _, err := planPrune(ctx, provider, before, rules)
-	return plan, err
+	return rules, nil
 }
 
 // siteAddresses is a site's declared public addresses, canonical, keyed by
