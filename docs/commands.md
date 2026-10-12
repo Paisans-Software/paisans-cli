@@ -201,11 +201,13 @@ paisans config recover --from admin@203.0.113.9 --execute   # onto an empty dire
   `.paisans/incoming/` to merge by hand. When only `secrets.enc.yaml` differs on
   both sides it merges key by key: two changes to one key refuse, naming the key
   and never a value, and the pull takes neither side's value by itself (set the
-  key locally to the head's value and pull again, or keep the local value and
-  pull once no key conflicts). `recover` refuses to write over files, and with a
+  key locally to the head's value and pull again; to keep the local value, take
+  the head's first, pull, then set the key back with `paisans secrets set` and
+  publish, or edit a `pocket_id_groups` key with `sops`). `recover` refuses to write over files, and with a
   fork writes each head to `.paisans/incoming/<sha>/` and refuses to choose.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
-  answered directly, for `pull`, `recover` and `admin register`; `rollback`
+  answered directly, for `apply --execute`, `config pull`, `config recover` and
+  `admin register` (when it writes files); `rollback`
   when the newest version is older than one this workstation has seen. An
   accepted `rollback` re-bases `.paisans/config-seen` to the head chosen. `log`
   asks for neither: it warns and lists. A dry run says what `--execute` will ask.
@@ -411,10 +413,11 @@ init`; the founding applies, `site add`, the other sites, storage and pass
 two; `gateway move`, when a site without the gateway role still serves as
 the gateway; a `pocket id` check for an admin; and, for each app behind the
 operator's own web server, its site file written into the web server's
-`include_dir` and `web-server check`'s checks. The version of the configuration it applies is
-published once the `host prepare` steps have made every site's store and before any other step changes a host
-(see *Every site keeps signed copies of the configuration*). Each `apply --site` it runs that
-covers the whole site, rather than holding apps back until their sign in
+`include_dir` and `web-server check`'s checks. The version of the
+configuration it applies is published once the `host prepare` steps have made
+every site's store and before any other step changes a host (see *Every site
+keeps signed copies of the configuration* in `README.md`). Each `apply --site`
+it runs that covers the whole site, rather than holding apps back until their sign in
 clients exist, ends by sweeping the old images its site's stacks used (see
 *`apply` prunes the images it superseded* in `README.md`).
 
@@ -441,8 +444,9 @@ clients exist, ends by sweeping the old images its site's stacks used (see
 * **Configuration store:** before the review, every site's versions are
   gathered (under `configuration store`) and a fork, a base older than the
   sites' newest version, or a key no admin lists is refused, naming `config
-  pull` or `config publish --merge`. A dry run changes no site and starts no
-  sync. After the approval, a host whose record holds a newer revision, or
+  pull` or `config publish --merge`. With `--execute`, it asks for `partial`
+  when fewer than a majority of sites answered directly. A dry run changes no
+  site and starts no sync. After the approval, a host whose record holds a newer revision, or
   another version at the same revision, asks for `rollback`. `--execute` then
   publishes the version, signed with the recorded key, after the `host prepare`
   steps; a version that reaches no site refuses, naming `host prepare`. See

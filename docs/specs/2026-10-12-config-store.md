@@ -152,8 +152,9 @@ prove a version is the newest; these make an old one visible:
   rollback and what `--execute` will ask. A root pinned for one run with
   `--root` and not recorded does not raise the record, so a mistaken pin
   cannot poison it.
-* **A majority of sites.** A pull or a recovery reports how many sites it reached
-  directly, and with fewer than a majority the operator types `partial` to go on.
+* **A majority of sites.** A pull, a recovery, `admin register` and `apply --execute` report how many
+  sites they reached directly, and with fewer than a majority the operator types
+  `partial` to go on.
 * **Hosts are witnesses.** Each host's grant record
   (docs/specs/2026-10-11-config-review.md) also holds the hash and revision of the
   version last applied to it, and `apply` refuses to apply an older revision to a
@@ -250,8 +251,10 @@ the operator merges by hand and publishes with `--merge`.
 keys merge; two changes to one key are refused, naming the key and no value. The
 pull takes neither side's value by itself: to take the head's value the
 operator sets that key locally to it (`paisans secrets set` does it for a key it
-accepts) and pulls again, and to keep the local value the pull merges the rest
-once no key conflicts and the merge is then published.
+accepts) and pulls again. To keep the local value, the operator takes the head's value
+first so the pull can merge the rest, pulls, then sets the key back to their
+value and publishes; a `pocket_id_groups` key, which `paisans secrets set` does
+not accept, is edited with `sops`.
 
 ## Failures
 

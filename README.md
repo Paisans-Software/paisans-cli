@@ -3025,11 +3025,11 @@ closes a forgery:
 The rule works key by key, not admin by admin, because rotating one of an
 admin's keys out must bar that key without barring the admin's others. Removals
 in the anchor's own history always stand, since the operator signed after them.
-Two removals that each would bar the other, neither in the anchor's history,
-are refused and shown to the operator: nothing decides between them by revision
-or hash, since whoever signs chooses both. A root outside the anchor's history is never trusted, for the same reason:
-only the anchor can say where the true history starts, so a second root
-written on a site is refused.
+When two admins each remove the other and neither removal is in the anchor's
+history, the toolkit refuses and shows both to the operator. Revision and hash
+cannot decide it, because whoever signs chooses both. A root outside the
+anchor's history is never trusted, for the same reason: only the anchor can say
+where the true history starts, so a second root written on a site is refused.
 
 **The head is the trusted version with the highest revision that no other
 trusted version builds on.** Two such versions are a fork, which stops `apply`
@@ -3051,7 +3051,7 @@ prove a version is the newest, so three memories make an old one visible:
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
 | The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
-| A majority of sites | a pull or recovery counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| A majority of sites | a pull, recovery, registration or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
 | The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a
@@ -3139,8 +3139,11 @@ file differs on both sides, `pull` decrypts the base, the local file and the
 head in memory and compares them key by key: changes to different keys merge,
 and two changes to one key are refused, naming the key and never a value. The
 pull takes neither side's value by itself. To take the head's value, set that
-key locally to it and pull again; to keep the local value, the pull merges the
-rest once no key conflicts, and the merge is then published. A file that cannot
+key locally to it and pull again. To keep the local value, take the head's value
+first so the pull can merge the rest, pull, then set the key back to your value
+with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
+records and `secrets set` does not accept, is edited in the file with `sops`
+instead. A file that cannot
 be decrypted and parsed here is refused without quoting its error, because a
 parse error can quote a value.
 
