@@ -96,7 +96,15 @@ is asked. Founder decision.
 Stage 1 runs against every remaining site at once and its gate is strict: a
 site that did not sync is named, and nothing after it runs. A partial cut is
 still safe to leave, since every peer that dropped the key no longer talks to
-it, and a re-run completes it.
+it, and a re-run completes it: once the cut has started on any remaining site,
+Patroni's members are not required healthy before the run goes on, since a
+failover may be under way, and the database stage's gate is what has to hold.
+
+The remaining Patroni members must be healthy before anything changes, as in
+any removal, except that when the evicted site leads, its replicas' streaming
+state is not required. A leader in hostile hands can stop them streaming, and
+would otherwise block its own eviction; their lag, which `lose writes` weighs,
+covers it.
 
 ## A dead Garage node
 

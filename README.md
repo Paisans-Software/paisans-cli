@@ -6444,6 +6444,15 @@ planned from live state, as in a plain removal, so a run stopped anywhere
 resumes; a remaining site whose mesh file was written by a run that stopped
 before its interface took it is handed the file again.
 
+**Patroni's health is required of the members that stay, as in any removal,
+with two exceptions.** When the evicted site leads, its replicas' streaming
+state is its to decide: a leader in hostile hands can stop them streaming, and
+refusing on that would let it block its own eviction. Their lag is shown
+instead, and is what `lose writes` weighs. And once the cut has started on any
+remaining site, a failover may be under way and the members are read as they
+move; the database stage waits for it and its gate is what has to hold, which
+is what lets a re-run complete a partial cut.
+
 **The DNS stage deletes the records at names still wanted, too.** A removed
 host is gone, but an evicted one may be hostile, and every visitor a record
 sends it is one whose session cookie it can read. So rule 5 of *The site's DNS

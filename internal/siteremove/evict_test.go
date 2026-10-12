@@ -527,3 +527,73 @@ func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
 		}
 	}
 }
+
+// hostileLeader is home-a leading with its replicas stopped from streaming,
+// as a leader in hostile hands can make them.
+func hostileLeader(t *testing.T) (*world, *dnstest.Provider) {
+	w, zone := evictWorld(t, "home-a", leadersAway)
+	for _, name := range []string{"home-b", "home-c"} {
+		w.member(name)["Role"], w.member(name)["State"] = "Replica", "running"
+	}
+	return w, zone
+}
+
+// A leader that stops its replicas streaming does not block its own
+// eviction: the plan asks to lose writes instead, and goes on.
+func TestAHostileLeaderCannotBlockItsEviction(t *testing.T) {
+	w, zone := hostileLeader(t)
+	p, err := w.build("home-a", evictOptions(zone))
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if p.LoseWrites() == nil {
+		t.Error("no streaming Sync Standby, and the plan asks to lose nothing")
+	}
+	execute(t, p)
+	if l := w.leader(); l == "home-a" || l == "" {
+		t.Errorf("the leader is %q", l)
+	}
+}
+
+// A cut that stopped part way, the replicas not streaming, resumes: both
+// while the evicted site still leads, and once another has taken over and
+// the replicas have not caught up with it yet.
+func TestAPartialCutResumesWithReplicasNotStreaming(t *testing.T) {
+	t.Run("the evicted site leads", func(t *testing.T) {
+		w, zone := hostileLeader(t)
+		w.failOnce = "wg syncconf"
+		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
+			t.Fatal("the partial cut passed")
+		}
+		execute(t, w.mustBuild("home-a", evictOptions(zone)))
+		if w.member("home-a") != nil {
+			t.Error("home-a is still a member")
+		}
+	})
+	t.Run("another site leads", func(t *testing.T) {
+		w, zone := evictWorld(t, "home-a", leadersAway)
+		w.failOnce = "wg syncconf"
+		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
+			t.Fatal("the partial cut passed")
+		}
+		w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "stopped"
+		w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
+		w.member("home-c")["Role"], w.member("home-c")["State"] = "Replica", "running"
+		p, err := w.build("home-a", evictOptions(zone))
+		if err != nil {
+			t.Fatalf("a partial cut does not resume: %v", err)
+		}
+		w.member("home-c")["State"] = "streaming"
+		execute(t, p)
+	})
+}
+
+// When the evicted site does not lead, the members that stay must still be
+// healthy before anything changes.
+func TestAnEvictedReplicaNeedsTheRestStreaming(t *testing.T) {
+	w, zone := evictWorld(t, "home-c")
+	w.member("home-b")["State"] = "running"
+	if _, err := w.build("home-c", evictOptions(zone)); err == nil || !strings.Contains(err.Error(), "home-b is running, not streaming") {
+		t.Errorf("err = %v", err)
+	}
+}

@@ -359,6 +359,14 @@ func (p *Plan) probePatroni() error {
 	if p.patroni.at == "" {
 		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.live(p.end.Cluster.Sites), ", "))
 	}
+	// An evicted leader decides what its replicas do: a hostile one can stop
+	// them streaming, and would block its own eviction if that were refused.
+	// Their lag is what the operator weighs instead, when typing `lose
+	// writes`.
+	evictedLeads := false
+	for _, m := range p.patroni.members {
+		evictedLeads = evictedLeads || p.Evict && m.name() == p.Site && m.role() == "Leader"
+	}
 	var problems []string
 	seen := map[string]bool{}
 	for _, m := range p.patroni.members {
@@ -374,7 +382,7 @@ func (p *Plan) probePatroni() error {
 			if m.state() != "running" {
 				problems = append(problems, fmt.Sprintf("the leader %s is %s", m.name(), m.state()))
 			}
-		case m.state() != "streaming":
+		case m.state() != "streaming" && !evictedLeads:
 			problems = append(problems, fmt.Sprintf("%s is %s, not streaming", m.name(), m.state()))
 		}
 	}
@@ -386,10 +394,11 @@ func (p *Plan) probePatroni() error {
 	if p.patroni.leader == "" {
 		problems = append(problems, "no member holds the leader key")
 	}
-	// Once the site is cut off a failover is under way, and the members that
-	// stay are read as they move: the database stage waits for it, and its
-	// gate is what has to hold.
-	if p.Evict && p.evict.cutDone {
+	// Once the cut has started, on every remaining site or on some, a
+	// failover may be under way, and the members that stay are read as they
+	// move: the database stage waits for it, and its gate is what has to
+	// hold. A re-run after a partial cut completes it.
+	if p.Evict && (p.evict.cutDone || p.evict.cutStarted) {
 		problems = nil
 	}
 	if len(problems) > 0 {

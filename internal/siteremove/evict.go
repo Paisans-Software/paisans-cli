@@ -67,6 +67,9 @@ type evictState struct {
 	// cutDone is whether no remaining site's interface lists any of the
 	// keys, which a run that already cut finds.
 	cutDone bool
+	// cutStarted is whether some remaining site whose mesh file lists the
+	// site no longer runs it as a peer: a cut that stopped part way.
+	cutStarted bool
 	// cutRendered is the end state rendered without the joining sites, which
 	// the cut writes: it must not wait on a host or a DNS record that does not
 	// exist yet.
@@ -213,6 +216,9 @@ func (p *Plan) probeEvict() error {
 		}
 		p.evict.stillPeers[name] = listed
 		p.evict.cutDone = p.evict.cutDone && !listed
+		if !listed && listsAny(renderedContent(p.full, name, p.dep().WireGuardConf()), keys) {
+			p.evict.cutStarted = true
+		}
 	}
 	if p.evict.cutRendered, err = p.render(p.liveEnd()); err != nil {
 		return err
@@ -247,6 +253,16 @@ func (p *Plan) listsPeer(site string, keys ...string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// listsAny is whether a mesh file names any of keys as a peer.
+func listsAny(conf string, keys []string) bool {
+	for _, key := range keys {
+		if strings.Contains(conf, "PublicKey = "+key+"\n") || strings.HasSuffix(conf, "PublicKey = "+key) {
+			return true
+		}
+	}
+	return false
 }
 
 // refuseLostRelay refuses an eviction that would cut a remaining site off

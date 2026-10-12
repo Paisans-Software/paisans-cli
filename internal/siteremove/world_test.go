@@ -939,12 +939,23 @@ func (w *world) failover() {
 			next = m
 		}
 	}
+	// Replicas a hostile leader stopped streaming still run Postgres, and
+	// Patroni promotes one when it is within maximum_lag_on_failover.
+	for _, m := range w.members {
+		if next == nil && m["Member"] != w.evicted && m["State"] == "running" {
+			next = m
+		}
+	}
 	if next == nil {
 		return
 	}
 	for _, m := range w.members {
-		if m["Member"] == w.evicted {
+		switch {
+		case m["Member"] == w.evicted:
 			m["Role"], m["State"] = "Replica", "stopped"
+		case m["State"] == "running":
+			// It follows the new leader.
+			m["State"] = "streaming"
 		}
 	}
 	next["Role"], next["State"] = "Leader", "running"
