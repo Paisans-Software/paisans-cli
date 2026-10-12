@@ -411,8 +411,15 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	if deployed != "" {
 		// Named without its digest: the tag is what the operator compares
 		// with the configuration.
-		running := ui.Name(nameOf(deployed))
-		explain += fmt.Sprintf("\nApply does not keep %s, which this site runs, because it cannot confirm %s is a build of %s.", running, running, ui.Name(want))
+		// The request is named by its tag, or its digest, alone: the
+		// repository is already in the hint.
+		asked := want
+		if ref := kinds.ParseReference(want); ref.Digest != "" {
+			asked = ref.Digest
+		} else if ref.Tag != "" {
+			asked = ref.Tag
+		}
+		explain += fmt.Sprintf("\nApply does not keep the running %s: it can't confirm that build is %s.", ui.Name(nameOf(deployed)), ui.Name(asked))
 	}
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("could not reach %s to resolve %s", host, named),
