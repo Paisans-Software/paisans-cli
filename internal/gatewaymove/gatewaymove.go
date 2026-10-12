@@ -47,6 +47,11 @@ type Options struct {
 	// it once the site no longer holds the gateway's record, so that its
 	// Caddy reloads with the monitor's routes alone.
 	ApplySite func(site string) error
+	// CheckSite is ApplySite's dry run. An executed move off a site that
+	// keeps the monitor runs it before the first stage, so a refusal the
+	// hand-off's apply would meet after DNS has moved stops the move at the
+	// start instead.
+	CheckSite func(site string) error
 }
 
 // dnsTimeout bounds one plan or one run against the provider.
@@ -149,6 +154,7 @@ type Plan struct {
 	// off rather than stops.
 	shared    bool
 	applySite func(site string) error
+	checkSite func(site string) error
 }
 
 func (p *Plan) reporter() ui.Reporter {
@@ -178,7 +184,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	if probes.Get == nil {
 		probes = DefaultProbes()
 	}
-	p := &Plan{To: to, cfg: cfg, transports: transports, probes: probes, applySite: o.ApplySite}
+	p := &Plan{To: to, cfg: cfg, transports: transports, probes: probes, applySite: o.ApplySite, checkSite: o.CheckSite}
 
 	// The DNS stages need the provider's API; a move it cannot reach is
 	// refused rather than left half done, since the old gateway may only be
@@ -884,6 +890,9 @@ func Execute(p *Plan) error {
 		return nil
 	}
 	r := p.reporter()
+	if err := p.checkHandOff(); err != nil {
+		return err
+	}
 	for _, st := range p.Stages {
 		r.Section(stageTitle(st))
 		if st.Skipped != "" {
@@ -904,6 +913,25 @@ func Execute(p *Plan) error {
 			}
 		}
 		g.Done("passed")
+	}
+	return nil
+}
+
+// checkHandOff tries the hand-off's apply as a dry run before any stage
+// runs, when the move has a hand-off left to do. Its own refusals, such as a
+// secrets file other than the one beside the configuration or no admin key
+// to sign with, would otherwise meet the move at stage 7, after DNS has
+// moved and the record is gone.
+func (p *Plan) checkHandOff() error {
+	if !p.shared || p.checkSite == nil {
+		return nil
+	}
+	last := p.Stages[len(p.Stages)-1]
+	if last.Number != stageHandOff || last.Skipped != "" || len(last.Steps) == 0 {
+		return nil
+	}
+	if err := p.checkSite(p.From); err != nil {
+		return fmt.Errorf("the hand-off's apply of %s would be refused, so nothing was changed: %w\nFix that, then run paisans gateway move --execute again", p.From, err)
 	}
 	return nil
 }

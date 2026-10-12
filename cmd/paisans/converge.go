@@ -500,7 +500,8 @@ func convergeFlags(args []string, o convergeOptions) []string {
 	if o.Verbose {
 		out = append(out, "-v")
 	}
-	if args[0] == "apply" {
+	// gateway move takes them for the apply its hand-off runs.
+	if args[0] == "apply" || args[0] == "gateway" {
 		if o.MinFree != "" {
 			out = append(out, "--min-free", o.MinFree)
 		}

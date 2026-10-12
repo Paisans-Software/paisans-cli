@@ -108,8 +108,10 @@ type world struct {
 	// old are the ids of the records the move may delete; kept those it
 	// must not.
 	old, kept []string
-	// applySite is the hand-off's apply, nil for a move that has none.
+	// applySite is the hand-off's apply, nil for a move that has none, and
+	// checkSite its dry run.
 	applySite func(site string) error
+	checkSite func(site string) error
 }
 
 func newWorld(t *testing.T, edits ...func(string) string) *world {
@@ -176,6 +178,7 @@ func (w *world) options() gatewaymove.Options {
 	return gatewaymove.Options{
 		DNSProvider: w.zone.For("cloudflare"),
 		ApplySite:   w.applySite,
+		CheckSite:   w.checkSite,
 		Probes: gatewaymove.Probes{
 			Get: func(_ context.Context, address, hostname, _ string) (int, error) {
 				w.gets++
@@ -670,5 +673,41 @@ func TestAMoveLeavingAStatusRecordBehindIsRefused(t *testing.T) {
 	}
 	if len(w.hosts["home-a"].caddy) != 1 {
 		t.Error("home-a's Caddy was touched")
+	}
+}
+
+// The hand-off's apply is tried as a dry run before anything moves, so a
+// refusal it would meet at stage 7, after DNS has moved, stops the move at
+// the start instead.
+func TestAHandOffItsApplyWouldRefuseStopsTheMoveBeforeItStarts(t *testing.T) {
+	sw := sharedWorld(t)
+	var checked []string
+	sw.checkSite = func(site string) error {
+		checked = append(checked, site)
+		return errors.New("--secrets names a file other than secrets.enc.yaml")
+	}
+	err := sw.run()
+	if err == nil || !strings.Contains(err.Error(), "secrets.enc.yaml") {
+		t.Fatalf("want the dry run's refusal: %v", err)
+	}
+	if !slices.Equal(checked, []string{"home-a"}) || len(sw.applied) != 0 {
+		t.Errorf("checked %v, applied %v", checked, sw.applied)
+	}
+	if _, ok := sw.hosts["home-a"].files[deployrecord.Path(sw.cfg.Deployment())]; !ok {
+		t.Error("the record was removed")
+	}
+	for _, h := range dns.GatewayHostnames(sw.cfg) {
+		if got := sw.at(h.Name); !slices.Equal(got, []string{oldIP}) {
+			t.Errorf("%s points at %v: DNS changed", h.Name, got)
+		}
+	}
+}
+
+// A plain move has no hand-off, so nothing is tried.
+func TestAPlainMoveTriesNoHandOff(t *testing.T) {
+	w := newWorld(t)
+	w.checkSite = func(site string) error { t.Errorf("tried a hand-off of %s", site); return nil }
+	if err := w.run(); err != nil {
+		t.Fatal(err)
 	}
 }

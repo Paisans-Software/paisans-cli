@@ -8114,11 +8114,14 @@ because its host still holds the deployment record or the move's marker:
 its Caddyfile keeps every gateway route beside the monitor's, the gate's
 snippets and the host owner's sites. Stage 6 removes the record and the
 marker, and stage 7 applies the site's `infra` stack, which now renders the
-monitor it is, so its Caddy reloads with the monitor's routes alone. A run
-that stops between the two finds the site again by the gateway routes its
-Caddyfile still names, and runs the stages again: the DNS stage finds
-nothing to delete and records the time afresh, so the wait is one more
-default TTL, and then the hand-off. The host owner's sites in
+monitor it is, so its Caddy reloads with the monitor's routes alone. Before
+the first stage, an executed move tries that apply as a dry run, so a
+refusal it would meet at stage 7, after DNS has moved, stops the move at the
+start instead; `--keep-images` and `--min-free` are passed to it. A run that
+stops between the two finds the site again by the gateway routes its
+Caddyfile still names, skips every stage before the hand-off, and hands it
+off; if the hand-off itself fails, `paisans apply --site <old> --only infra
+--execute` finishes it directly. The host owner's sites in
 `/srv/caddy.d` stop stage 6 as they stop a plain move, since a monitor's
 Caddy does not serve them. `paisans apply` without `--site` asks such a site
 too, so it ends with the move.
