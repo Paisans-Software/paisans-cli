@@ -151,7 +151,7 @@ func TestSecretsSetReencrypts(t *testing.T) {
 // certificate, which only a visitor would discover. It is refused, and the
 // refusal says how to supply it.
 func TestRenderRefusesAGatewayWithoutItsACMEToken(t *testing.T) {
-	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "secrets.fixture.yaml"))
+	fixture, err := os.ReadFile(fixtureSecretsPath())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -43,7 +44,27 @@ func TestMain(m *testing.M) {
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}
-	os.Exit(m.Run())
+	// No test writes the checked-in secrets fixture: apply and init may
+	// fill in a generated secret the file they are given lacks, so every
+	// test reads a copy. TestSecretsFixtureIsComplete checks the original.
+	dir, err := os.MkdirTemp("", "paisans-cmd-test-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	data, err := os.ReadFile(checkedInSecrets)
+	if err == nil {
+		secretsCopy = filepath.Join(dir, "secrets.fixture.yaml")
+		err = os.WriteFile(secretsCopy, data, 0o600)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // noStore is a configuration store that checks nothing and publishes

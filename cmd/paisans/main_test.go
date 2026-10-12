@@ -146,7 +146,7 @@ func captureStdout(t *testing.T, fn func()) string {
 // declares desec and gives the gateway no public_address.
 func TestRunDNSInitRefusesBeforeContactingAProvider(t *testing.T) {
 	fixture := filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml")
-	secrets := filepath.Join("..", "..", "internal", "render", "testdata", "secrets.fixture.yaml")
+	secrets := fixtureSecretsPath()
 
 	err := runDNSInit([]string{"--config", fixture, "--secrets", secrets})
 	if err == nil || !strings.Contains(err.Error(), "sites.vm.public_address is not set") {
@@ -195,7 +195,7 @@ func TestRunDNSInitRefusesBeforeContactingAProvider(t *testing.T) {
 // stops the command after the findings and before any provider is called.
 func TestDNSInitInsideApplyLeavesTheFindingsToIt(t *testing.T) {
 	fixture := filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml")
-	secrets := filepath.Join("..", "..", "internal", "render", "testdata", "secrets.fixture.yaml")
+	secrets := fixtureSecretsPath()
 	data, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
