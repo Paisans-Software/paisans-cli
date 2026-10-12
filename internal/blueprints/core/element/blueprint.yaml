@@ -1,0 +1,25 @@
+# The element blueprint. A core blueprint.
+# internal/kinds reads it; Parse there documents every key.
+apiVersion: paisans.blueprint/v1
+name: element
+services:
+  # No database: Element is a static client that talks to a homeserver
+  # the browser reaches directly.
+  #
+  # v1.12.27 checked against ghcr.io on 2026-09-15 by requesting the
+  # manifest for that exact tag, which resolved (200, an OCI image
+  # index). The registry's tag list was paged through in full and
+  # v1.12.27 is the newest non release candidate tag; v1.12.28-rc.1
+  # exists but is a release candidate, not a release.
+  - {name: "app", image: "ghcr.io/element-hq/element-web:v1.12.27", purpose: "the web client"}
+database: {engine: none}
+port: 80
+config:
+  format: json
+  file: "config.json"
+  setting_keys:
+    - {key: "brand", file: "config.json", setting: "brand"}
+# The static client has no health route; /version is a cheap file the
+# image serves. Ran v1.12.27: /version 200, /health 404.
+health: {path: "/version", status: [200]}
+gate: {gateable: true}

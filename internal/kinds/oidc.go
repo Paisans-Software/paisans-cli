@@ -78,12 +78,6 @@ type OIDCDef struct {
 	ReadsGroups        bool
 }
 
-// callbackPath is a Callback for a kind whose redirect URI is a fixed path on
-// the app's own hostname.
-func callbackPath(path string) func(hostname, app string) string {
-	return func(hostname, _ string) string { return "https://" + hostname + path }
-}
-
 // OIDCClient is the client spec for app, an app of a kind served at
 // hostname, and whether this toolkit knows one for it.
 func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {

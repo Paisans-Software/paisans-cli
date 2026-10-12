@@ -1,0 +1,62 @@
+# The pocket-id blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/kinds reads it; Parse there documents every key.
+apiVersion: paisans.blueprint/v1
+name: pocket-id
+services:
+  - {name: "app", image: "ghcr.io/pocket-id/pocket-id:v2.14.0", purpose: "the application"}
+  # Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml
+  # and published by the tag admin-reconciler-v0.1.0. Checked against
+  # ghcr.io on 2026-10-08 with an anonymous pull token, which resolved
+  # the tag to this digest: an OCI image index for linux/amd64 and
+  # linux/arm64.
+  - {name: "reconciler", image: "ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d", purpose: "the admin reconciler"}
+  - {name: "postgres", purpose: "its own database, when the app is pinned"}
+database: {engine: postgres}
+port: 1411
+config:
+  format: env
+  file: ".env"
+  # FILE_BACKEND is owned by file_backend. Every setting in
+  # kinds.PocketIDSettings owns its variable as well, and the toolkit adds
+  # those from that table rather than listing them again here, so a setting
+  # added there is an owner without a second edit. signup_default_groups is
+  # not among them: its variable carries recorded IDs, which the setting
+  # chooses only by way of apply.
+  setting_keys:
+    - {key: "FILE_BACKEND", file: ".env", setting: "file_backend"}
+# 204 No Content, not 200 (backend/internal/controller/
+# healthz_controller.go:18,30-31 at v2.14.0); ran the image.
+health: {path: "/healthz", status: [204]}
+# The sign-in flow itself: gating it would gate the login.
+gate: {gateable: false}
+# Its whole application configuration is rendered (see
+# PocketIDSettings), its mail settings among it.
+mail: reads
+secrets:
+  required:
+    # env_config.go:167-169 at tag v2.14.0.
+    - {key: "encryption_key", why: "Pocket ID refuses to start without an ENCRYPTION_KEY of at least 16 bytes"}
+    # Not needed to start, but without it the toolkit cannot create an
+    # administrator or a client, and Pocket ID deletes the synthetic
+    # user an earlier key created (apikey/service.go:31-36).
+    - {key: "static_api_key", why: "it is the only credential `paisans app admin create`, `paisans oidc client create` and apply's client step can reach Pocket ID's API with"}
+  # Pocket ID will not start without an ENCRYPTION_KEY of at least 16 bytes
+  # (backend/internal/common/env_config.go:167-169 at tag v2.14.0). A
+  # generated password is 32 random bytes, base64 encoded. It encrypts
+  # stored secrets, so like every generated secret it is never replaced
+  # once set.
+  #
+  # static_api_key is how this toolkit administers Pocket ID without a
+  # browser: STATIC_API_KEY authenticates the X-API-Key header as a
+  # synthetic administrator (apikey/service.go:156-163 and :221-259,
+  # middleware/api_key_auth.go:38) and must be at least 16 characters
+  # (env_config.go:182-184). README, "The toolkit administers Pocket ID
+  # through its static API key", says why it is generated here.
+  #
+  # admins_heartbeat_token is what every instance of the app pushes the
+  # admins group's health to each monitor with, and what each monitor's
+  # seed names for the app (internal/render/adminsheartbeat.go). One per
+  # app rather than per site, so that the one monitor follows whichever
+  # instance is active.
+  generate: ["encryption_key", "static_api_key", "admins_heartbeat_token"]
+  self_rotated: ["static_api_key"]
