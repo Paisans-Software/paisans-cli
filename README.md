@@ -4290,20 +4290,19 @@ what it wrote, never a value, and the closing line says the secrets were
 added; the later steps are then checked rather than waiting on init. A missing
 id, subnet or secrets file is still left to `init`, which `--execute` runs
 first. Every host's prepare is checked at the same time, drawn as with
-`--execute`. A prepare line names each kind of change its site's plan makes,
-in the order docker, wireguard, firewall, ssh keys, watchdog, configuration
-store. Each install line is its site's steps' own dry runs together, and the storage line its step's:
-`✓` when every one is up to date, a dim `·` with `after prepare` (or
-`after init`) while a step waits on one that has not run, `○` when there is
-work, with what each step found, and `✗` when a step would refuse, with the
-refusal's hint after the site and what to do below it. A refusal outranks a
+`--execute`. A prepare line names each kind of change its site's plan makes, in
+the order docker, wireguard, firewall, ssh keys, watchdog, configuration store.
+Each install line is its site's steps' own dry runs together, and the storage
+line its step's: `✓` when every one is up to date, a dim `·` with `after
+prepare` (or `after init`) while a step waits on one that has not run, `○` when
+there is work, with what each step found, and `✗` when a step would refuse, with
+the refusal's hint after the site and what to do below it. A refusal outranks a
 wait, and a wait outranks work; a step that waits on another install step is
-work. `-v` lists each step under its line with its own status. Each pull
-line is the plan its site's apply would make: `○` with how many images it
-would pull and the free space they land in, `✓` `nothing to pull`, `✗` with
-the free space refusal `--execute` would stop at, or a dim `·` `after host
-prepare` while its site's prepare has work, since a host without Docker has no
-images to ask about:
+work. `-v` lists each step under its line with its own status. Each pull line is
+the plan its site's apply would make: `○` with how many images it would pull and
+the free space they land in, `✓` `nothing to pull`, `✗` with the free space
+refusal `--execute` would stop at, or a dim `·` `after host prepare` while its
+site's prepare has work, since a host without Docker has no images to ask about:
 
 ```
 configuration

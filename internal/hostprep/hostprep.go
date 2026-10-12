@@ -275,9 +275,10 @@ func Shared() Option { return func(o *options) { o.shared = true } }
 // Build probes the site's host and returns only what is missing, in the order
 // it must run: packages, then services, then the watchdog, then the
 // configuration store, then the login user's authorized keys, then the
-// firewall, then removing authorized keys no longer listed. The firewall follows the packages because the package
-// step may be what installs it; key removals are last so that nothing is
-// taken away before every listed key is in place.
+// firewall, then removing authorized keys no longer listed. The firewall
+// follows the packages because the package step may be what installs it; key
+// removals are last so that nothing is taken away before every listed key is in
+// place.
 func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan, error) {
 	var o options
 	for _, opt := range opts {
