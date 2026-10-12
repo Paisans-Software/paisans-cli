@@ -25,6 +25,9 @@ the role-less monitor site, and the seed's treatment of the monitor itself.
 
 ## Part 1: the `monitor` role
 
+> **Amended 2026-10-12** by `2026-10-12-monitor-on-gateway.md`: a monitor
+> beside the gateway or the witness is a warning, not a refusal.
+
 ### Roles
 
 `monitor` joins `data`, `apps`, `gateway`, `witness` and `storage`.
