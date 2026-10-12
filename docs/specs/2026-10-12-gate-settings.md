@@ -41,9 +41,9 @@ the render's refusal into a finding. The throwaway secrets never leave memory.
   same message render gives.
 * Render keeps its own check. It is the last line before files reach a host,
   and a caller that skips `validate` still meets it.
-* Cost: generating Mbin's OAuth keypair and the other secrets. Measured cost
-  is reported in the pull request; if it is noticeable, the throwaway set is
-  generated once per `validate` run.
+* Cost: generating the secrets is nearly all of it (an Mbin's OAuth key pair
+  takes a few hundred milliseconds; rendering each key, milliseconds), so the
+  throwaway set is kept for the life of the process and only topped up.
 * Only this rule is taken from render. Any other render error is left to
   render, so `validate` does not grow a second copy of render's failures.
 
@@ -70,7 +70,7 @@ type GateSetting struct {
 // GateSettings implements it in its own file.
 type LiveSettings interface {
 	Service() string                   // the compose service to exec in
-	ReadCommand(names []string) string // what the app holds, and what it locks
+	ReadCommand(names []string) []string // argv: what the app holds, and what it locks
 	Parse(out string, names []string) (map[string]Live, error)
 }
 
@@ -129,25 +129,30 @@ is a property of the software, not a setting.
 
 ## Part 3: `doctor` reads both sides
 
-A new section, `settings`, after `containers`. For each app using the gate:
+**`paisans.yaml`.** `doctor` loads the file through `validate`, as every
+command that reaches a host does, so a `config:` or `settings:` key that
+contradicts gating stops it with `validate`'s refusal
+(`config-key-already-rendered`, `gated-without-signed-fetch`). When the
+refused key only repeats the value gating requires, the refusal says that
+`paisans doctor --execute` removes it.
 
-* **`paisans.yaml`**: every `GateSetting` whose `ConfigKey` or `SettingKey`
-  the file sets to a different value is a Fail, with the key and the value it
-  must take. `validate` already refuses each of these (`gated-without-signed-
-  fetch`, `config-key-already-rendered`); `doctor` repeats them so that one
-  command shows a deployment's whole gating state.
-* **The running app**, on each site it runs on: every `GateSetting` whose
-  effective value differs from `Want` is a Fail, naming where the value comes
-  from (environment or database) and the fix. A site that did not answer, or
-  an app whose container is down, is a Skip, not a pass.
+**The running apps.** A new section, `settings`, after `containers`. For each
+app using the gate, on each site it runs on that `doctor` reached, the kind's
+read command runs in the app's running container, found by its compose labels
+and this deployment's. Every `GateSetting` whose value differs from `Want`, or
+that the file does not lock, is a Fail naming `paisans apply --site <site>`,
+or the image when the app does not lock it after an apply. An app not running
+there, or a read that failed, is a Skip, not a pass. An app that uses the gate
+only for auto-login has no setting left to it, so nothing to check.
 
 `doctor` needs no secrets for either: the wanted values come from the kind's
-record and `paisans.yaml`, not from a render.
+record, not from a render.
 
 ## Part 4: `doctor --execute`
 
 `doctor` stays read only without `--execute`, as every other command that
-changes something. With it, it applies the fixes it printed, and no others:
+changes something. With it, before it loads the file, it applies the one fix it can make
+safely, and no other:
 
 | Drift | `--execute` does |
 |---|---|

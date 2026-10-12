@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
@@ -1858,16 +1859,45 @@ func (c *checker) configKeyAlreadyRendered() {
 	if !declared {
 		return
 	}
-	throwaway := &config.Secrets{}
-	if _, err := secretsgen.Fill(c.cfg, throwaway); err != nil {
+	collisions, err := throwawayCollisions(c.cfg)
+	if err != nil {
 		// Generating a secret failed, which is the machine's trouble and not
 		// this file's; render meets the same keys at apply.
 		return
 	}
-	for _, col := range render.ConfigCollisions(c.cfg, throwaway) {
-		c.refuse("config-key-already-rendered", col.ConfigKey(),
-			"config key is already rendered by the toolkit", "%s", col.Detail)
+	redundant := map[kinds.RedundantKey]bool{}
+	for _, k := range kinds.RedundantGateConfig(c.cfg) {
+		redundant[k] = true
 	}
+	for _, col := range collisions {
+		detail := col.Detail
+		if redundant[kinds.RedundantKey{App: col.App, Key: col.Key}] {
+			detail += " It repeats the value gating requires, so `paisans doctor --execute` removes it, and changes nothing else."
+		}
+		c.refuse("config-key-already-rendered", col.ConfigKey(),
+			"config key is already rendered by the toolkit", "%s", detail)
+	}
+}
+
+// throwaway is the secrets configKeyAlreadyRendered renders with, kept for
+// the life of the process and only topped up: generating them is almost all
+// of the rule's cost (an Mbin's OAuth key pair alone takes a few hundred
+// milliseconds), and their values never matter. They never leave memory.
+var throwaway struct {
+	sync.Mutex
+	secrets config.Secrets
+}
+
+// throwawayCollisions renders cfg's passthrough keys with the throwaway set,
+// filled for cfg first. The lock covers the render too, which reads the set
+// another check may be filling; a render takes milliseconds.
+func throwawayCollisions(cfg *config.Config) ([]*render.ConfigCollision, error) {
+	throwaway.Lock()
+	defer throwaway.Unlock()
+	if _, err := secretsgen.Fill(cfg, &throwaway.secrets); err != nil {
+		return nil, err
+	}
+	return render.ConfigCollisions(cfg, &throwaway.secrets), nil
 }
 
 // watchdogOffOnDataSite warns that a data site's Patroni runs unfenced.

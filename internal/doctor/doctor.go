@@ -64,12 +64,13 @@ const (
 	SectionEtcd       = "etcd"
 	SectionPatroni    = "patroni"
 	SectionContainers = "containers"
+	SectionSettings   = "settings"
 	SectionPocketID   = "pocket-id"
 	SectionClocks     = "clocks"
 	SectionLeftovers  = "leftovers"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionPocketID, SectionClocks, SectionLeftovers}
+var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -198,6 +199,7 @@ type Input struct {
 	Standby    []StandbyProbe
 	Clocks     []ClockSample
 	Leftovers  []LeftoverProbe
+	Settings   []SettingsProbe
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -239,6 +241,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Etcd(cfg, in)...)
 	findings = append(findings, Patroni(cfg, in)...)
 	findings = append(findings, Containers(cfg.Deployment(), in.Containers, LeaderName(in.Patroni.Cluster))...)
+	findings = append(findings, Settings(cfg, in.Settings)...)
 	// Only a cluster that answered can be said to have no primary.
 	noPrimary := len(in.Patroni.Cluster) > 0 && !HasLeader(in.Patroni.Cluster)
 	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)

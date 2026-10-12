@@ -2526,6 +2526,31 @@ Four things follow, and each is refused:
   (`oidc-member-group-disagrees-with-gate`). The gate admits one group and the
   app's client the other, so they would disagree about who a member is.
 
+#### The settings gating needs are checked on both sides
+
+The gate leaves ActivityPub, and for Mbin a token holder's API calls, to the
+app, so some of the app's own settings are part of the gate: Mbin's private
+instance mode, allow list and authorized fetch, WriteFreely's private mode and
+authorized fetch. Each kind records which ones it needs and when, in
+`internal/kinds` beside its gate record, and how to read them from a running
+copy. Every one is rendered into the file the app reads and named in that
+file's lock list, so the app reads it from disk and nothing inside the app can
+change it. Nothing the toolkit does writes an app's database.
+
+* **`validate`** refuses a `config:` key the stack already writes
+  (`config-key-already-rendered`), the same rule render applies, so a key that
+  gating has made redundant or contradictory is refused before `apply` touches
+  a host. Whether a template writes a key can depend on the rest of the file,
+  so `validate` renders the deployment to find out, with secrets it generates
+  in memory and throws away: which keys a template writes never depends on a
+  secret's value.
+* **`doctor`** reads each running copy and fails when one of these settings is
+  off or not locked; see *`paisans doctor` reports what is stuck and how to
+  recover*. `doctor --execute` removes a `config:` key that only repeats what
+  gating renders.
+
+See `docs/specs/2026-10-12-gate-settings.md`.
+
 ### `storage init` provisions object storage
 
 `apply` renders files and reconciles them against a manifest it wrote; that is
@@ -6627,11 +6652,18 @@ nothing right, and the closing line counts it apart from the checks that
 passed. It exits 1 when any finding is `FAIL`, so a script or a monitor can
 tell a healthy deployment from one that needs a human.
 
-It **changes nothing**, and it has no `--execute`. Every command it sends is a
-read: a list, a status, a key, a log tail. The recoveries it describes are
-printed for a human to run, because doctor is run in the middle of an outage
-and the one recovery that touches member data, a forced failover, loses
-commits. Which commits a community keeps is a human's decision.
+It **changes no host**. Every command it sends is a read: a list, a status, a
+key, a log tail. The recoveries it describes are printed for a human to run,
+because doctor is run in the middle of an outage and the one recovery that
+touches member data, a forced failover, loses commits. Which commits a
+community keeps is a human's decision. Its one change is to the local
+`paisans.yaml`, and only with `--execute`: before it loads the file, it removes
+every `config:` key that only repeats a value gating makes the template write
+(Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin), which `validate`
+otherwise refuses as `config-key-already-rendered`. The file then says the
+same thing with one fewer place to say it. A key with any other value
+contradicts the gate, and changing it would change policy, so it is left for
+the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
 check runs with the sites that did. Each ssh attempt gives up after ten
@@ -6651,6 +6683,7 @@ that the first `FAIL` is usually the cause of those after it:
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
 | Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running | any container is not running |
+| Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
