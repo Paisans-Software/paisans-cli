@@ -71,6 +71,15 @@ type Whole interface {
 	RunWhole(e Env) error
 }
 
+// Retirer is a rotation whose old value stays valid at its issuer until it
+// is retired there, Eg: an OIDC client's other secrets at Pocket ID. The
+// engine retires it after every user presents the next value and passed its
+// gate, and before the next value is promoted, so a run stopped in between
+// resumes and retires again. Retire must be safe to run again.
+type Retirer interface {
+	Retire(e Env) error
+}
+
 // Generated is the part of a rotator every generated secret shares, meant
 // to be embedded: its path, a next value from secretsgen.Replacement in the
 // shape that secret's consumer parses, and promotion by setting the path.

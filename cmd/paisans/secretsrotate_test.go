@@ -191,10 +191,21 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The OIDC clients of kinds `oidc client create` cannot build are pasted.
+	for _, r := range rs {
+		if r.Path() == "oidc_clients.gate.client_secret" {
+			if _, ok := r.(secretsrotate.Whole); ok {
+				t.Error("gate's client secret is rotated by oidc client create")
+			}
+		}
+	}
 	want := []string{
 		"external.acme_dns_token",
+		"external.smtp_password",
 		"oidc_clients.blog.client_secret",
+		"oidc_clients.chat.client_secret",
 		"oidc_clients.docs.client_secret",
+		"oidc_clients.gate.client_secret",
 		"oidc_clients.status.client_secret",
 		"oidc_clients.talk.client_secret",
 		"apps.talk.oauth",
@@ -239,8 +250,6 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	for _, p := range []string{
 		"apps.auth.encryption_key",
 		"apps.chat.mas_encryption_secret",
-		"oidc_clients.chat.client_secret",
-		"oidc_clients.gate.client_secret",
 		"sites.*.wireguard_private_key",
 	} {
 		if !slices.Contains(keptPaths, p) {
@@ -282,9 +291,8 @@ func TestSecretsRotateRefusesBeforeReachingAHost(t *testing.T) {
 		"apps.chat.mas_encryption_secret":     "unreadable",
 		"sites.home-a.wireguard_private_key":  "paisans mesh rekey",
 		"apps.talk.oauth_passphrase":          "apps.talk.oauth",
-		"external.smtp_password":              "no rotation",
+		"external.nothing":                    "no rotation",
 		"apps.talk.nonsense":                  "no rotation",
-		"oidc_clients.gate.client_secret":     "oauth2-proxy",
 		"cluster.standby_password nonsense.x": "no rotation",
 	} {
 		err := runSecretsRotate(rotateArgs(configPath, secretsPath, strings.Fields(args)...), strings.NewReader(""), &bytes.Buffer{})
@@ -374,12 +382,20 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 		{"wrong word", "yes\n", true, `"yes" is not sign out`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, rec := fakeRotateHosts(t)
+			w, rec := fakeRotateHosts(t)
 			configPath, secretsPath := rotateDeployment(t, nil)
 			before, _ := os.ReadFile(secretsPath)
 			err := runSecretsRotate(rotateArgs(configPath, secretsPath, "apps.gate.cookie_secret", "--execute"), terminalStdin(t, tc.answer, tc.terminal), &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "Nothing was changed") {
 				t.Errorf("err = %v\n%s", err, rec.Lines())
+			}
+			if strings.Count(err.Error(), "Nothing was changed") != 1 {
+				t.Errorf("err = %v", err)
+			}
+			for _, c := range w.commands {
+				if strings.Contains(c, registry.Path) {
+					t.Errorf("a host was claimed before sign out was answered: %s", c)
+				}
 			}
 			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 				t.Error("a refused run changed the secrets file")
@@ -420,9 +436,21 @@ func TestSecretsRotateAsksNothingWithoutSignOut(t *testing.T) {
 	_, rec := fakeRotateHosts(t)
 	configPath, secretsPath := rotateDeployment(t, nil)
 	var out bytes.Buffer
-	runSecretsRotate(rotateArgs(configPath, secretsPath, "storage.garage.admin_token", "--execute"), terminalStdin(t, "", false), &out)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "storage.garage.admin_token", "--execute"), terminalStdin(t, "", false), &out)
 	if strings.Contains(out.String(), "sign out") {
 		t.Errorf("asked:\n%s\n%s", out.String(), rec.Lines())
+	}
+	// Past the confirmation: stage 1 wrote the next value, and the fake host
+	// refused the write after it.
+	if err == nil || strings.Contains(err.Error(), "sign out") || strings.Contains(err.Error(), "terminal") {
+		t.Errorf("err = %v", err)
+	}
+	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if s.Rotations["storage.garage.admin_token"] == "" {
+		t.Errorf("the run stopped before stage 1: %v\n%s", err, rec.Lines())
 	}
 }
 
@@ -461,21 +489,33 @@ func TestSecretsRotateNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for path, want := range map[string]string{
 		"oidc_clients.docs.client_secret": "deleted at Pocket ID",
 		"apps.docs.s3_secret_access_key":  "deleted from Garage",
 		"storage.garage.rpc_secret":       "home-a, home-b",
 		"external.acme_dns_token":         "paisans secrets set external.acme_dns_token",
+		"external.smtp_password":          "paisans secrets set external.smtp_password",
+		"oidc_clients.gate.client_secret": "old client secrets are deleted at Pocket ID",
 	} {
-		if got := strings.Join(rotationNotes(cfg, path), " "); !strings.Contains(got, want) {
+		if got := strings.Join(rotationNotes(cfg, s, path), " "); !strings.Contains(got, want) {
 			t.Errorf("%s: notes %q, want %q", path, got, want)
 		}
 	}
-	if got := rotationNotes(cfg, "cluster.standby_password"); len(got) != 0 {
+	if got := rotationNotes(cfg, s, "cluster.standby_password"); len(got) != 0 {
 		t.Errorf("a two-member cluster's role notes %q", got)
 	}
+	gate := s.OIDCClients["gate"]
+	gate.ClientID = ""
+	s.OIDCClients["gate"] = gate
+	if got := strings.Join(rotationNotes(cfg, s, "oidc_clients.gate.client_secret"), " "); !strings.Contains(got, "by hand") {
+		t.Errorf("a pasted client with no recorded ID notes %q", got)
+	}
 	cfg.Cluster.Sites = cfg.Cluster.Sites[:1]
-	if got := strings.Join(rotationNotes(cfg, "cluster.standby_password"), " "); !strings.Contains(got, "in place") {
+	if got := strings.Join(rotationNotes(cfg, s, "cluster.standby_password"), " "); !strings.Contains(got, "in place") {
 		t.Errorf("a one-member cluster's role notes %q", got)
 	}
 }
@@ -513,5 +553,22 @@ func TestRotationsHoldTheOAuthUnitPath(t *testing.T) {
 	}
 	if back.Rotations["apps.talk.oauth"] != unit || !back.Encrypted || back.UnknownKeys {
 		t.Errorf("rotations = %q, encrypted %v, unknown keys %v", back.Rotations, back.Encrypted, back.UnknownKeys)
+	}
+}
+
+// --all on a file that lacks a secret init generates is refused, naming
+// init, before any host is reached: --all would leave that secret out.
+func TestSecretsRotateAllRefusesAnUnfilledFile(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, func(text string) string {
+		out := strings.Replace(text, "    cookie_secret: \"fixture-not-a-secret-gate-cookie\"\n", "    {}\n", 1)
+		if out == text {
+			t.Fatal("the fixture's gate cookie line moved")
+		}
+		return out
+	})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "paisans init") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
+		t.Errorf("err = %v", err)
 	}
 }

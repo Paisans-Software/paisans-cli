@@ -102,7 +102,8 @@ type Run struct {
 	// Nil discards it.
 	Report ui.Reporter
 
-	all bool
+	all              bool
+	signOutConfirmed bool
 }
 
 func (r *Run) reporter() ui.Reporter {
@@ -281,6 +282,10 @@ func (r *Run) Show(w ui.Reporter) {
 			w.Step(useTitle(u)).End(ui.Pending, "")
 			w.Detail("then the health gate on %s before anything after it", u.Site)
 		}
+		if _, ok := it.Rotator.(Retirer); ok {
+			w.Step("retire the old value at its issuer").End(ui.Pending, "")
+			w.Detail("only once every user above presents the next value")
+		}
 		w.Step("stage 4, promote").End(ui.Pending, "")
 		w.Detail("the next value becomes %s, and its entry under rotations is removed", path)
 	}
@@ -291,20 +296,8 @@ func (r *Run) Show(w ui.Reporter) {
 // fails. A rotation that stops leaves its next value in the file, and the
 // next run resumes it.
 func (r *Run) Execute(e Env, confirm func(word, what string) error) error {
-	if r.SignsOut() {
-		var paths []string
-		for _, it := range r.Items {
-			if it.Cost.SignsOut {
-				paths = append(paths, it.Rotator.Path())
-			}
-		}
-		what := fmt.Sprintf("rotating %s signs members out of the sessions it signs", strings.Join(paths, ", "))
-		if confirm == nil {
-			return fmt.Errorf("secrets rotate: %s, and there is no way to ask. Nothing was changed", what)
-		}
-		if err := confirm("sign out", what); err != nil {
-			return fmt.Errorf("secrets rotate: %w. Nothing was changed", err)
-		}
+	if err := r.ConfirmSignOut(confirm); err != nil {
+		return err
 	}
 	if r.all {
 		var paths []string
@@ -320,6 +313,35 @@ func (r *Run) Execute(e Env, confirm func(word, what string) error) error {
 			return fmt.Errorf("secrets rotate %s stopped: %w. Nothing after it ran. Fix the cause and run secrets rotate again: it resumes with the next value the secrets file holds", it.Rotator.Path(), err)
 		}
 	}
+	return nil
+}
+
+// ConfirmSignOut asks confirm to have "sign out" typed when the run holds a
+// rotation that signs members out, and nothing otherwise. A caller that has
+// more to do before Execute that a refusal should spare, Eg: claiming the
+// hosts, asks it first; once answered, Execute does not ask again.
+func (r *Run) ConfirmSignOut(confirm func(word, what string) error) error {
+	if !r.SignsOut() || r.signOutConfirmed {
+		return nil
+	}
+	var paths []string
+	for _, it := range r.Items {
+		if it.Cost.SignsOut {
+			paths = append(paths, it.Rotator.Path())
+		}
+	}
+	what := fmt.Sprintf("rotating %s signs members out of the sessions it signs", strings.Join(paths, ", "))
+	if confirm == nil {
+		return fmt.Errorf("secrets rotate: %s, and there is no way to ask. Nothing was changed", what)
+	}
+	if err := confirm("sign out", what); err != nil {
+		// confirmWord says so already; another confirm may not.
+		if strings.HasSuffix(err.Error(), "Nothing was changed") {
+			return fmt.Errorf("secrets rotate: %w", err)
+		}
+		return fmt.Errorf("secrets rotate: %w. Nothing was changed", err)
+	}
+	r.signOutConfirmed = true
 	return nil
 }
 
@@ -440,6 +462,16 @@ func (r *Run) rotate(e Env, it Item) error {
 			return fmt.Errorf("gate: %s on %s: %w", strings.Join(u.Stacks, ", "), u.Site, err)
 		}
 		step.Done("healthy")
+	}
+
+	// The old value retired at its issuer, once every user presents the next.
+	if rr, ok := rot.(Retirer); ok {
+		step := w.Step("retire the old value at its issuer")
+		if err := rr.Retire(e); err != nil {
+			step.Fail(err)
+			return err
+		}
+		step.Done("retired")
 	}
 
 	// Stage 4: promote.

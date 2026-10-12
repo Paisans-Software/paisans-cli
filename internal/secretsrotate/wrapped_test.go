@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 const (
@@ -463,5 +464,105 @@ func TestWrappedRotationsKeepTheirPlaceInTheOrder(t *testing.T) {
 	}
 	if want := []string{"external.acme_dns_token", "oidc_clients.talk.client_secret", "apps.talk.s3_secret_access_key"}; !slices.Equal(paths, want) {
 		t.Errorf("order %v", paths)
+	}
+}
+
+// An SMTP password the hosts were last applied with has not been replaced at
+// the mail provider, and is refused like the DNS token, naming the command
+// that sets the new one.
+func TestSMTPPasswordUnchangedIsRefused(t *testing.T) {
+	w := newWrapWorld(t)
+	_, err := Plan(w.env(), []Rotator{SMTPPassword("external.smtp_password")})
+	if err == nil || !strings.Contains(err.Error(), "paisans secrets set external.smtp_password") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A replaced SMTP password reaches every stack that renders it, found by
+// rendering, one site at a time and each healthy before the next; the file
+// keeps the value it was set to.
+func TestSMTPPasswordSetAnewReachesEveryUser(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses := run.Items[0].Uses
+	var stacks []string
+	for _, u := range uses {
+		stacks = append(stacks, u.Stacks...)
+	}
+	for _, want := range []string{"talk", "status"} {
+		if !slices.Contains(stacks, want) {
+			t.Errorf("%s is not handed the password: %v", want, uses)
+		}
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.log) != 2*len(uses) {
+		t.Errorf("log %v for uses %v", w.log, uses)
+	}
+	for i, u := range uses {
+		if w.log[2*i] != fmt.Sprintf("apply %s %s", u.Site, strings.Join(u.Stacks, ",")) || !strings.HasPrefix(w.log[2*i+1], "healthy "+u.Site) {
+			t.Errorf("log %v", w.log)
+		}
+	}
+	if s, _ = w.store.Load(); s.External["smtp_password"] != "fixture-not-a-secret-smtp-reissued" || len(s.Rotations) != 0 {
+		t.Errorf("after: %q, %v", s.External["smtp_password"], s.Rotations)
+	}
+}
+
+// The client secret of a kind `oidc client create` cannot build is pasted:
+// minted at Pocket ID and set in the file, it is refused while unchanged,
+// and once set anew every site running the app is applied, and only then
+// are the client's other secrets retired.
+func TestPastedClientAppliesThenRetires(t *testing.T) {
+	w := newWrapWorld(t)
+	retire := &fakeFlow{w: w, name: "retire"}
+	if _, err := Plan(w.env(), []Rotator{PastedClient("gate", retire.run)}); err == nil || !strings.Contains(err.Error(), "paisans secrets set oidc_clients.gate.client_secret") {
+		t.Fatalf("an unchanged client secret: %v", err)
+	}
+	s, _ := w.store.Load()
+	_ = s.Set("oidc_clients.gate.client_secret", "fixture-not-a-secret-gate-secret-2")
+	_ = w.store.Save(s)
+	e := w.env()
+	run, err := Plan(e, []Rotator{PastedClient("gate", retire.run)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	run.Show(rec)
+	if rec.Index("pending", "retire") < 0 {
+		t.Errorf("the plan does not show the retirement:\n%s", rec.Lines())
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"apply home-a gate", "healthy home-a gate", "retire gate"}; !slices.Equal(w.log, want) {
+		t.Errorf("log %v, want %v", w.log, want)
+	}
+}
+
+// Without a recorded client ID there is nothing to retire by: no step.
+func TestPastedClientWithoutRetireOnlyApplies(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	_ = s.Set("oidc_clients.gate.client_secret", "fixture-not-a-secret-gate-secret-2")
+	_ = w.store.Save(s)
+	e := w.env()
+	run, err := Plan(e, []Rotator{PastedClient("gate", nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"apply home-a gate", "healthy home-a gate"}; !slices.Equal(w.log, want) {
+		t.Errorf("log %v, want %v", w.log, want)
 	}
 }

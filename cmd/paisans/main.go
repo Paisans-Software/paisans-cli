@@ -220,12 +220,16 @@ Commands:
              in scope with --all, one at a time in gated stages: a next
              value in the secrets file, the side that checks it, each
              site that uses it healthy before the next, then the value
-             promoted. Lists the secrets it keeps and why. Refuses while a
-             mesh rekey is unfinished, a site does not answer, or etcd or
-             Patroni is unhealthy; apply refuses while a rotation is
-             unfinished. A run that signs members out asks for sign out
-             at a terminal. A stopped run resumes. Writes nothing
-             without --execute.
+             promoted. A pasted secret (the DNS token, an SMTP password,
+             a client secret minted at Pocket ID) is handed on once it is
+             replaced at its issuer and set with secrets set, and refused
+             while unchanged. Lists the secrets it keeps and why. --all
+             refuses a file that lacks a secret init generates. Refuses
+             while a mesh rekey is unfinished, a site does not answer, or
+             etcd or Patroni is unhealthy; apply refuses while a rotation
+             is unfinished. A run that signs members out asks for sign
+             out at a terminal, before any host is claimed. A stopped run
+             resumes. Writes nothing without --execute.
   app        admin create: make sure a user exists, is verified and is an
              administrator of Pocket ID, and is in every admin group the
              apps signing in through it read. There is no password: a

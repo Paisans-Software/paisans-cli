@@ -425,6 +425,40 @@ func TestSignsOutWithoutConfirmationRunsNothing(t *testing.T) {
 	}
 }
 
+// Asked before the run, as the command does before it claims the hosts,
+// sign out is not asked again when the run executes; refused, nothing runs.
+func TestSignOutAskedOnceBeforeExecute(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	r := newRot(w, pw, "a")
+	r.cost.SignsOut = true
+	run, err := secretsrotate.Plan(w.env(pw), []secretsrotate.Rotator{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked := 0
+	confirm := func(word, what string) error { asked++; return nil }
+	if err := run.ConfirmSignOut(confirm); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(w.env(pw), confirm); err != nil {
+		t.Fatal(err)
+	}
+	if asked != 1 {
+		t.Errorf("asked %d times", asked)
+	}
+
+	w = newWorld(t, map[string]string{pw: "old"})
+	r = newRot(w, pw, "a")
+	r.cost.SignsOut = true
+	run, _ = secretsrotate.Plan(w.env(pw), []secretsrotate.Rotator{r})
+	if err := run.ConfirmSignOut(func(string, string) error { return errors.New("no") }); err == nil {
+		t.Fatal("a refusal passed")
+	}
+	if err := run.Execute(w.env(pw), nil); err == nil || w.saves != 0 {
+		t.Fatalf("ran after a refused confirmation: %v, %d saves", err, w.saves)
+	}
+}
+
 // A run without one asks nothing.
 func TestNoSignOutAsksNothing(t *testing.T) {
 	w := newWorld(t, map[string]string{pw: "old"})

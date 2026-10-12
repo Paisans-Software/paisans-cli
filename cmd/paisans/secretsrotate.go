@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/meshrekey"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/secretsrotate"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 	"github.com/paisans-software/paisans-stack/internal/validate"
@@ -102,6 +103,11 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := refuseRotateMidRekey(secrets); err != nil {
 		return err
 	}
+	if *all {
+		if err := refuseUnfilled(cfg, store, *secretsPath); err != nil {
+			return err
+		}
+	}
 	if *execute {
 		// Every stage writes the file, and an encrypted file with no
 		// recipient beside it would be written back in plaintext.
@@ -170,7 +176,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	kept = append(kept, planKept...)
 	for i := range run.Items {
-		run.Items[i].Notes = rotationNotes(cfg, run.Items[i].Rotator.Path())
+		run.Items[i].Notes = rotationNotes(cfg, secrets, run.Items[i].Rotator.Path())
 	}
 	showKept(r, kept)
 	if !*execute || r.Verbose() {
@@ -179,6 +185,14 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(run.Items) == 0 {
 		r.Result("Nothing to rotate: every secret named is kept. Nothing changed.")
 		return nil
+	}
+	// Asked before the hosts are claimed, so a refusal leaves even the
+	// registries as they were.
+	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
+	if *execute {
+		if err := run.ConfirmSignOut(confirm); err != nil {
+			return err
+		}
 	}
 	// Every site may be handed a value, and each is written to only through
 	// a claim, as apply's are.
@@ -194,7 +208,6 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	run.Report = r
-	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
 	if err := run.Execute(env, confirm); err != nil {
 		return err
 	}
@@ -333,10 +346,13 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 	var rs []secretsrotate.Rotator
 	var kept []keptSecret
 	if all {
-		rs, kept = rotateAll(cfg, s, w)
+		var err error
+		if rs, kept, err = rotateAll(cfg, s, w); err != nil {
+			return nil, nil, err
+		}
 	} else {
 		for _, path := range named {
-			r, err := rotatorFor(cfg, path, w)
+			r, err := rotatorFor(cfg, s, path, w)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -355,7 +371,7 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 		if has[path] {
 			continue
 		}
-		r, err := rotatorFor(cfg, path, w)
+		r, err := rotatorFor(cfg, s, path, w)
 		if err != nil {
 			return nil, nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and no rotation of it can be built to finish it: %w", path, err)
 		}
@@ -367,12 +383,14 @@ func rotateTargets(cfg *config.Config, s *config.Secrets, named []string, all bo
 
 // rotatorFor is the rotation of the secret at path, or why secrets rotate
 // does not rotate it.
-func rotatorFor(cfg *config.Config, path string, w rotateWiring) (secretsrotate.Rotator, error) {
+func rotatorFor(cfg *config.Config, s *config.Secrets, path string, w rotateWiring) (secretsrotate.Rotator, error) {
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
 	switch {
 	case path == "external.acme_dns_token":
 		return secretsrotate.DNSToken(), nil
+	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && last == "smtp_password":
+		return secretsrotate.SMTPPassword(path), nil
 	case strings.HasPrefix(last, "wireguard_"):
 		return nil, fmt.Errorf("secrets rotate: %s is not rotated here: %s", path, wireguardKept)
 	case path == "storage.garage.admin_token":
@@ -384,10 +402,8 @@ func rotatorFor(cfg *config.Config, path string, w rotateWiring) (secretsrotate.
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		return secretsrotate.Heartbeat(parts[1]), nil
 	case len(parts) == 3 && parts[0] == "oidc_clients" && last == "client_secret":
-		if app, ok := cfg.Apps[parts[1]]; ok {
-			if reason, ok := oidcUnsupported(parts[1], app); ok {
-				return nil, fmt.Errorf("secrets rotate: %s is not rotated here: %s", path, reason)
-			}
+		if app, ok := cfg.Apps[parts[1]]; ok && pastedClient(parts[1], app) {
+			return secretsrotate.PastedClient(parts[1], clientRetire(s, parts[1], w)), nil
 		}
 		return secretsrotate.OIDCClient(parts[1], w.oidcRun, w.oidcRetire), nil
 	case len(parts) == 3 && parts[0] == "apps":
@@ -415,22 +431,50 @@ func rotatorFor(cfg *config.Config, path string, w rotateWiring) (secretsrotate.
 	return nil, fmt.Errorf("secrets rotate: there is no rotation for %s. It names a secret by its path in the secrets file, Eg: cluster.standby_password, or apps.<app>.oauth for Mbin's OAuth2 keys. Nothing was changed", path)
 }
 
-// oidcUnsupported is why app's OIDC client secret is not rotated here: the
-// rotation is `oidc client create --rotate-secret`, which knows only some
-// kinds' clients.
-func oidcUnsupported(name string, app config.App) (string, bool) {
-	if _, ok := clientDesired(name, app, true); ok {
-		return "", false
+// pastedClient reports whether app's OIDC client secret is rotated as a
+// pasted secret: `oidc client create --rotate-secret` knows only some kinds'
+// clients, and for the rest a human mints the new secret at Pocket ID.
+func pastedClient(name string, app config.App) bool {
+	_, ok := clientDesired(name, app, true)
+	return !ok
+}
+
+// clientRetire is how a pasted client secret's old secrets are retired at
+// Pocket ID: by the client ID the file records, or not at all when it
+// records none, which the plan then says.
+func clientRetire(s *config.Secrets, app string, w rotateWiring) func(string) error {
+	if s.OIDCClients[app].ClientID == "" {
+		return nil
 	}
-	return fmt.Sprintf("its rotation is `paisans oidc client create --rotate-secret`, which does not know what a %s client looks like, so replace it at Pocket ID by hand, set it with `paisans secrets set oidc_clients.%s.client_secret`, and apply", app.Kind, name), true
+	return w.oidcRetire
+}
+
+// refuseUnfilled refuses --all on a secrets file that lacks a secret init
+// generates: --all is every secret the deployment has, and a run that
+// skipped one would leave it as the evicted admin knew it, or never made.
+func refuseUnfilled(cfg *config.Config, store secretsrotate.Store, path string) error {
+	fresh, err := store.Load()
+	if err != nil {
+		return err
+	}
+	filled, err := secretsgen.Fill(cfg, fresh)
+	if err != nil {
+		return fmt.Errorf("secrets rotate: reading which secrets %s lacks: %w", path, err)
+	}
+	if filled.Changed() {
+		return fmt.Errorf("secrets rotate --all: %s lacks %s, which `paisans init` generates. Run it, and apply, first. Nothing was changed", path, strings.Join(filled.Generated, ", "))
+	}
+	return nil
 }
 
 // rotateAll is every secret --all rotates on this deployment, in the order
 // the spec gives (what works from the internet first: the DNS token, client
 // secrets and signing keys; then what only the mesh reaches), each only for
-// the apps and sites that have it; and what it keeps, with why. A secret the
-// file holds no value for has nothing to rotate.
-func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secretsrotate.Rotator, []keptSecret) {
+// the apps and sites that have it; and what it keeps, with why. The command
+// refuses --all on a file that lacks a generated secret (refuseUnfilled), so
+// a generated secret with no value is one the configuration does not need. A
+// pasted secret with no value, or that nothing renders, has nothing to rotate.
+func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secretsrotate.Rotator, []keptSecret, error) {
 	var rs []secretsrotate.Rotator
 	var kept []keptSecret
 	has := func(path string) bool { v, ok := s.Get(path); return ok && v != "" }
@@ -455,13 +499,31 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	if has("external.acme_dns_token") && len(cfg.CaddySites()) > 0 {
 		rs = append(rs, secretsrotate.DNSToken())
 	}
-	for _, name := range cfg.AppNames() {
-		path := "oidc_clients." + name + ".client_secret"
+	// The other pasted secrets, with the DNS token: each issued by a
+	// provider on the internet, and used only where the deployment sends
+	// mail.
+	smtp := []string{"external.smtp_password"}
+	for _, app := range cfg.AppNames() {
+		smtp = append(smtp, "apps."+app+".smtp_password")
+	}
+	for _, path := range smtp {
 		if !has(path) {
 			continue
 		}
-		if reason, ok := oidcUnsupported(name, cfg.Apps[name]); ok {
-			kept = append(kept, keptSecret{path, reason})
+		used, err := secretsrotate.Carries(cfg, s, path)
+		if err != nil {
+			return nil, nil, err
+		}
+		if used {
+			rs = append(rs, secretsrotate.SMTPPassword(path))
+		}
+	}
+	for _, name := range cfg.AppNames() {
+		if !has("oidc_clients." + name + ".client_secret") {
+			continue
+		}
+		if pastedClient(name, cfg.Apps[name]) {
+			rs = append(rs, secretsrotate.PastedClient(name, clientRetire(s, name, w)))
 			continue
 		}
 		rs = append(rs, secretsrotate.OIDCClient(name, w.oidcRun, w.oidcRetire))
@@ -536,16 +598,25 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			break
 		}
 	}
-	return rs, kept
+	return rs, kept, nil
 }
 
 // rotationNotes is what the plan says about the rotation of path beyond its
 // cost: when the old secret stops being valid where another command retires
 // it, a restart in place where there is nothing to switch over to, and what
 // a step named for one site covers.
-func rotationNotes(cfg *config.Config, path string) []string {
+func rotationNotes(cfg *config.Config, s *config.Secrets, path string) []string {
 	parts := strings.Split(path, ".")
 	switch {
+	case len(parts) == 3 && parts[0] == "oidc_clients" && cfg.Apps[parts[1]].Kind != "" && pastedClient(parts[1], cfg.Apps[parts[1]]):
+		app := parts[1]
+		minted := fmt.Sprintf("the client secret the file holds now: mint a new one for %s at Pocket ID and set it with `paisans secrets set %s` before this runs, or it is refused as unchanged; each site running %s is then applied in turn", app, path, app)
+		if s.OIDCClients[app].ClientID == "" {
+			return []string{minted, fmt.Sprintf("the secrets file records no client ID for %s, so its old secrets are not deleted here: delete them at Pocket ID by hand once every site runs the new one", app)}
+		}
+		return []string{minted, "the old client secrets are deleted at Pocket ID only after every site runs the new one"}
+	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && parts[2] == "smtp_password":
+		return []string{fmt.Sprintf("the password the file holds now: replace it at the mail provider and set it with `paisans secrets set %s` before this runs, or it is refused as unchanged", path)}
 	case len(parts) == 3 && parts[0] == "oidc_clients":
 		app := parts[1]
 		return []string{fmt.Sprintf("as `paisans oidc client create --app %s --rotate-secret --execute`, then each site running %s applied in turn, each healthy before the next; the old client secrets are deleted at Pocket ID only after every site runs the new one", app, app)}
