@@ -15,7 +15,7 @@
 - Work in `src/paisans-stack/.worktrees/monitor-on-gateway`, branch `feat/monitor-on-gateway`, which is stacked on `fix/wizard-site-prompt` (PR #199). Never `git stash`.
 - Run `gofmt -l cmd internal` (expect no output), `go vet ./...` and `go test ./...` before every commit.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- No migration code: nothing converts an older `paisans.yaml`.
+- No migration code: nothing converts an older `paisans-stack.yaml`.
 - Docs, comments and commits never describe rejected alternatives; the spec is the only record of them.
 - Comments match the surrounding code: full sentences, the *why*, founder decisions named as such.
 - Rule names, exactly: `monitor-shares-a-site` (warn), `web-server-on-gateway` (refuse). `monitor-on-gateway` and `monitor-on-witness` cease to exist as rules.
@@ -599,7 +599,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 )
 
-// refuseSharedGatewayMove refuses to apply a site that paisans.yaml no
+// refuseSharedGatewayMove refuses to apply a site that paisans-stack.yaml no
 // longer gives the gateway role, that runs Caddy for a monitor, and whose
 // host still holds the gateway's record or a move's marker. Applying it
 // would rewrite its Caddy to the monitor's routes alone while DNS still sends

@@ -157,7 +157,7 @@ session:
 * **Finding it.** A site that runs Caddy for a monitor is read too, with its
   Caddy not counted as evidence: the record and the marker are.
 * **Keeping the overlap.** While such a site still holds the record or the
-  marker and paisans.yaml no longer gives it `gateway`, `apply` renders it as
+  marker and paisans-stack.yaml no longer gives it `gateway`, `apply` renders it as
   a departing gateway: its Caddyfile keeps every gateway route beside the
   monitor's. `apply` reads this from the host, as it already reads whether a
   move is pending, and passes it to render.

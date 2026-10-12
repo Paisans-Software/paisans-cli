@@ -6,7 +6,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 )
 
-// refuseSharedGatewayMove refuses to apply a site that paisans.yaml no
+// refuseSharedGatewayMove refuses to apply a site that paisans-stack.yaml no
 // longer gives the gateway role, that runs Caddy for a monitor, and whose
 // host still holds the gateway's record or a move's marker. Applying it
 // would rewrite its Caddy to the monitor's routes alone while DNS still sends
