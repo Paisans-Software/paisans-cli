@@ -654,3 +654,41 @@ func TestClusterRoleAdminThatLogsInIsRotated(t *testing.T) {
 	}
 	w.noSecretOnArgv(next)
 }
+
+// TestClusterRolesInOneRunFollowTheLeader runs superuser then standby in one
+// Execute. The first moves the leader with its switchover, so the second must
+// order its users by the leader as it stands when its stage 3 starts, not as
+// it stood when the run was planned, or it would try to switch the leader
+// away from a site whose replicas still run the old value.
+func TestClusterRolesInOneRunFollowTheLeader(t *testing.T) {
+	w := newPGWorld(t)
+	e := w.env()
+	run, err := Plan(e, []Rotator{ClusterRole("superuser"), ClusterRole("standby")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	var switchovers []string
+	for _, entry := range w.log {
+		if strings.HasPrefix(entry, "switchover") {
+			switchovers = append(switchovers, entry)
+		}
+	}
+	// One switchover per role, each away from the leader as it then stood.
+	if !slices.Equal(switchovers, []string{"switchover home-b to home-c", "switchover home-c to home-b"}) {
+		t.Fatalf("switchovers %v, want home-b to home-c then home-c to home-b", switchovers)
+	}
+	for _, entry := range w.log {
+		if strings.HasPrefix(entry, "FAILOVER") {
+			t.Fatalf("a step was a failover: %v", w.log)
+		}
+	}
+	if w.store.s.Cluster.SuperuserPassword == "super-old" || w.store.s.Cluster.StandbyPassword == "standby-old" {
+		t.Fatalf("not both promoted: %+v", w.store.s.Cluster)
+	}
+	if len(w.store.s.Rotations) != 0 {
+		t.Fatalf("rotations left: %v", w.store.s.Rotations)
+	}
+}

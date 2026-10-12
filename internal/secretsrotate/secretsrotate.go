@@ -79,7 +79,9 @@ type Item struct {
 	Cost    Cost
 	// From is the stage the rotation starts at.
 	From Stage
-	// Uses are the rotator's users, in order.
+	// Uses are the rotator's users, in order, as the plan shows them. Stage 3
+	// reads them again when it starts, since a rotation before it in the run
+	// can change them.
 	Uses []Use
 	// Pending is a rotation an earlier run left with a next value.
 	Pending bool
@@ -441,12 +443,21 @@ func (r *Run) rotate(e Env, it Item) error {
 	step.Done("accepts the next value")
 
 	// Stage 3: each user in turn, rendered with the next value while the
-	// file still names the old one, each healthy before the next.
+	// file still names the old one, each healthy before the next. The users
+	// are read again here rather than taken from the plan: a rotation earlier
+	// in the run can change their order, Eg: a cluster role's switchover moves
+	// the leader, which the next cluster role must restart last.
 	shown := cloneSecrets(s)
 	if err := rot.Promote(shown, next); err != nil {
 		return err
 	}
-	for _, u := range it.Uses {
+	uses := rot.Users(e)
+	for _, u := range uses {
+		if u.Do == nil && e.Apply == nil {
+			return fmt.Errorf("no apply to hand %s the next value with", u.Site)
+		}
+	}
+	for _, u := range uses {
 		step := w.Step(useTitle(u))
 		if u.Do != nil {
 			err = u.Do(e, shown)
