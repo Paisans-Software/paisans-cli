@@ -1,0 +1,115 @@
+package configstore
+
+import (
+	"encoding/base64"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-stack/internal/deployment"
+)
+
+type fakeSite struct {
+	files    map[string]string
+	commands []string
+	// answer is what the gather command prints.
+	answer string
+	// failSync makes the sync unit's start fail.
+	failSync bool
+}
+
+func (f *fakeSite) Run(c string) (string, error) {
+	f.commands = append(f.commands, c)
+	switch {
+	case strings.HasPrefix(c, "systemctl start") && f.failSync:
+		return "boom", errors.New("exit 1")
+	case strings.Contains(c, "bundle create"):
+		return f.answer, nil
+	}
+	return "", nil
+}
+func (f *fakeSite) RunInput(c, _ string) (string, error) { return f.Run(c) }
+func (f *fakeSite) ReadFile(p string) (string, bool, error) {
+	s, ok := f.files[p]
+	return s, ok, nil
+}
+func (f *fakeSite) WriteFile(p, content string, _ uint32) error {
+	f.files[p] = content
+	f.commands = append(f.commands, "write "+p)
+	return nil
+}
+func (f *fakeSite) Describe() string { return "fake" }
+
+var dep = deployment.Deployment{ID: "f2a9c1d4e5b6"}
+
+func TestPushWritesThenVerifiesAndFetchesWithoutForce(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}}
+	if err := Push(h, dep, []byte("BUNDLE")); err != nil {
+		t.Fatal(err)
+	}
+	tmp := "/var/lib/paisans/config/" + dep.Token() + ".incoming.bundle"
+	if h.files[tmp] != "BUNDLE" {
+		t.Fatalf("bundle not written at %s: %v", tmp, h.files)
+	}
+	if len(h.commands) != 2 || h.commands[0] != "write "+tmp {
+		t.Fatalf("commands = %q", h.commands)
+	}
+	c := h.commands[1]
+	for _, want := range []string{"bundle verify", "fetch --no-prune", "'refs/versions/*:refs/versions/*'", "rm -f '" + tmp + "'"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("command lacks %q: %s", want, c)
+		}
+	}
+	if strings.Contains(c, "+") {
+		t.Errorf("refspec must not force: %s", c)
+	}
+}
+
+func TestPullOfAnEmptyRepositoryIsNilAndNoError(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__\n"}
+	b, r, err := Pull(h, dep, false)
+	if err != nil || b != nil || r != nil {
+		t.Fatalf("got %v %v %v", b, r, err)
+	}
+}
+
+func TestPullDecodesTheBundleAndTrailingNewline(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: base64.StdEncoding.EncodeToString([]byte("PACK\x00\x01")) + "\n"}
+	b, _, err := Pull(h, dep, false)
+	if err != nil || string(b) != "PACK\x00\x01" {
+		t.Fatalf("got %q %v", b, err)
+	}
+	for _, c := range h.commands {
+		if strings.HasPrefix(c, "systemctl") {
+			t.Fatalf("sync started without syncFirst: %q", h.commands)
+		}
+	}
+}
+
+func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__"}
+	if _, _, err := Pull(h, dep, true); err != nil {
+		t.Fatal(err)
+	}
+	if h.commands[0] != "systemctl start "+dep.Prefix()+"-config-sync.service" {
+		t.Fatalf("commands = %q", h.commands)
+	}
+	h = &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", failSync: true}
+	_, r, err := Pull(h, dep, true)
+	if err != nil || r == nil || r.SyncErr == "" {
+		t.Fatalf("got %+v %v", r, err)
+	}
+}
+
+func TestPullParsesTheSyncLog(t *testing.T) {
+	h := &fakeSite{files: map[string]string{
+		"/var/lib/paisans/config/" + dep.Token() + ".sync.json": `{"at":"2026-10-12T10:00:00Z","peers":[{"peer":"10.9.0.2","ok":true},{"peer":"10.9.0.3","ok":false}]}`,
+	}, answer: "__PAISANS_EMPTY__"}
+	_, r, err := Pull(h, dep, false)
+	if err != nil || r == nil {
+		t.Fatal(r, err)
+	}
+	if r.At.Year() != 2026 || len(r.Peers) != 2 || r.Peers[0].Peer != "10.9.0.2" || !r.Peers[0].OK || r.Peers[1].OK {
+		t.Fatalf("report = %+v", r)
+	}
+}
