@@ -113,3 +113,44 @@ func TestPullParsesTheSyncLog(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 }
+
+func TestPullIgnoresNoiseBeforeTheAnswer(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "Warning: Permanently added host\nsudo: notice\n__PAISANS_EMPTY__\n"}
+	if b, _, err := Pull(h, dep, false); err != nil || b != nil {
+		t.Fatalf("marker: %v %v", b, err)
+	}
+	h.answer = "Warning: noise\n" + base64.StdEncoding.EncodeToString([]byte("PACK")) + "\n"
+	if b, _, err := Pull(h, dep, false); err != nil || string(b) != "PACK" {
+		t.Fatalf("base64: %q %v", b, err)
+	}
+}
+
+func TestPullRefusesAnEmptyAnswer(t *testing.T) {
+	for _, ans := range []string{"", "\n  \n"} {
+		h := &fakeSite{files: map[string]string{}, answer: ans}
+		if b, _, err := Pull(h, dep, false); err == nil || b != nil {
+			t.Fatalf("%q: got %v %v", ans, b, err)
+		}
+	}
+}
+
+func TestPullKeepsTheBundleWhenTheSyncLogIsMalformed(t *testing.T) {
+	h := &fakeSite{files: map[string]string{
+		"/var/lib/paisans/config/" + dep.Token() + ".sync.json": "{not json",
+	}, answer: base64.StdEncoding.EncodeToString([]byte("PACK"))}
+	b, r, err := Pull(h, dep, false)
+	if err != nil || string(b) != "PACK" || r == nil || r.SyncErr == "" {
+		t.Fatalf("got %q %+v %v", b, r, err)
+	}
+}
+
+type failingRun struct{ fakeSite }
+
+func (f *failingRun) Run(c string) (string, error) { return "bad bundle", errors.New("exit 1") }
+
+func TestPushSurfacesAFailure(t *testing.T) {
+	h := &failingRun{fakeSite{files: map[string]string{}}}
+	if err := Push(h, dep, []byte("B")); err == nil || !strings.Contains(err.Error(), "bad bundle") {
+		t.Fatalf("err = %v", err)
+	}
+}

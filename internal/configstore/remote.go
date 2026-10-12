@@ -26,8 +26,9 @@ type SyncReport struct {
 		Peer string
 		OK   bool
 	}
-	// SyncErr is why the sync a Pull asked for did not complete. The log above
-	// is then the previous run's, so it is reported beside it, not instead.
+	// SyncErr is why the sync a Pull asked for did not complete, or why the
+	// sync log could not be read. The fields above are then the previous run's
+	// or empty, and it is reported beside the gathered versions, not instead.
 	SyncErr string
 }
 
@@ -77,17 +78,26 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *
 	if err != nil {
 		return nil, nil, fmt.Errorf("gather the versions on %s: %w: %s", t.Describe(), err, strings.TrimSpace(out))
 	}
-	out = strings.TrimSpace(out)
+	line := lastLine(out)
+	if line == "" {
+		return nil, nil, fmt.Errorf("%s printed neither a bundle nor %s", t.Describe(), emptyMark)
+	}
 	var bundle []byte
-	if out != emptyMark {
-		bundle, err = base64.StdEncoding.DecodeString(out)
+	if line != emptyMark {
+		bundle, err = base64.StdEncoding.DecodeString(line)
 		if err != nil {
 			return nil, nil, fmt.Errorf("the bundle from %s is not base64: %w", t.Describe(), err)
 		}
+		if len(bundle) == 0 {
+			return nil, nil, fmt.Errorf("the bundle from %s is empty", t.Describe())
+		}
 	}
-	report, err := readSyncLog(t, d)
-	if err != nil {
-		return nil, nil, err
+	// The log only describes the sync. A log that cannot be read or parsed is
+	// reported beside the versions, never in place of them: recovery has to
+	// work on a site whose log is damaged.
+	report, logErr := readSyncLog(t, d)
+	if logErr != nil {
+		syncErr = strings.TrimSpace(syncErr + " " + logErr.Error())
 	}
 	if syncErr != "" {
 		if report == nil {
@@ -96,6 +106,14 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *
 		report.SyncErr = syncErr
 	}
 	return bundle, report, nil
+}
+
+// lastLine is the last non-empty line of out. SSHTransport merges stderr into
+// stdout, so ssh or sudo may print notices before the command's own answer,
+// which is always its final line.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // readSyncLog parses the log the sync script writes, nil when there is none.
