@@ -920,30 +920,41 @@ is a flag that `show-config` reports.
 
 ## `secrets rotate`, one secret at a time
 
-`internal/secretsrotate` is the engine: `Plan` and `PlanAll` read where each
-rotation stands and change nothing, and `Run.Execute` takes each secret
-through its four stages. Each secret is a `Rotator` (`rotator.go`) saying
+`internal/secretsrotate` is the engine: `Plan`, `PlanAll` and `PlanAllRestart`
+read where each rotation stands and change nothing, and `Run.Execute` takes each
+secret through its four stages. Each secret is a `Rotator` (`rotator.go`) saying
 where its next value comes from, how the checking side learns it, which sites
-and stacks present it, and how the value is promoted, grouped into files by
-what checks the secret (`postgres.go`, `rabbitmq.go`, `garage.go`, `uptime.go`,
-`appsecret.go`), and `wrapped.go` for the pasted secrets and for the OIDC and
-S3 rotations, which run `oidc client create --rotate-secret` and `storage
+and stacks present it, and how the value is promoted, grouped into files by what
+checks the secret (`postgres.go`, `rabbitmq.go`, `garage.go`, `uptime.go`,
+`appsecret.go`), and `wrapped.go` for the pasted secrets and for the OIDC and S3
+rotations, which run `oidc client create --rotate-secret` and `storage
 rotate-key` in their place in the order. `cmd/paisans/secretsrotate.go` maps a
 path to its rotator, builds `--all`'s order, and hands the engine a scoped
 `apply` rendered from the secrets with the next value in place, never from the
-file, so stage 3 presents what stage 2 taught. What is easy to undo by
-accident:
+file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 
 * **The next value is written before any host is handed it**, and the file
   is read back and compared after every write. A re-run takes the pending
   value from `rotations` and never generates another while one is there.
-* **`apply` and `secrets rotate` each refuse while the other's work is
-  pending** (`refuseMidRotation` and `refuseRotateMidRekey`, both in
-  `cmd/paisans/secretsrotate.go`). Either would render a value some host no
-  longer runs.
+* **Every command that renders refuses while a rotation is pending, and
+  `secrets rotate` refuses while a `mesh rekey` is** (`refuseMidRotation`
+  and `refuseRotateMidRekey`, both in `cmd/paisans/secretsrotate.go`).
+  Either would render a value some host no longer runs. A new command that
+  renders from the secrets file and reaches a host calls `refuseMidRotation`
+  too.
 * **A kept secret is a `KeptError`, not a refusal.** A precheck that finds
   nothing checks the secret (an admin role that cannot log in, a queue with no
-  broker) returns one, and the command lists it as kept and plans the rest.
+  broker) returns one, and the engine lists it in `Run.Kept` and plans the
+  rest. A pending rotation's precheck is run too, except a pasted secret's,
+  and there any refusal, a `KeptError` included, means it cannot finish; its
+  refusal ends with `secretsrotate.CannotFinish`, as every such refusal does.
+* **Stage 3 asks the rotator for its users again.** The plan's `Item.Uses`
+  are only what it shows: a cluster role's switchover moves the leader, and
+  the next cluster role in the same run restarts the new one last.
+* **A pasted secret is compared line by line.** `carriers` finds the lines a
+  render with a probe value changes, and the host prints the hash of each
+  line of its copy (`lineHashCommand`), so a file that differs elsewhere does
+  not pass for a replaced secret.
 * **Passwords never reach `argv` or a log, except where upstream leaves no
   other way in.** SQL goes on stdin with statement logging off, as `apply`'s
   bootstrap does; `rabbitmqctl` takes a password only as an argument, which

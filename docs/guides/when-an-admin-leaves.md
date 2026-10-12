@@ -138,8 +138,13 @@ community's decision.
       apps' session secrets, the S3 keys, then the Postgres, RabbitMQ, Valkey,
       Mercure, Garage and heartbeat secrets. It asks for `sign out` at the
       terminal, since some of these end members' sessions; the plan says
-      which. A run that stops resumes when run again, and `apply` refuses
-      until it finishes.
+      which. A run that stops resumes when run again, and `apply`, like
+      every command that renders, refuses until it finishes. A plan that
+      says it is resuming an earlier `--all` run that was not this one
+      would leave the secrets that run finished as the departed admin knew
+      them: run `paisans secrets rotate --all --restart` instead, which
+      rotates every secret again. A rotation that cannot finish is ended by
+      hand: README, *A rotation that cannot finish*.
 
    Closes: every secret they could read, except the ones the plan lists as
    kept. Open: Pocket ID's `encryption_key` and Matrix Authentication
@@ -301,8 +306,11 @@ included, and refuses while one does not answer.
 
     It asks for `sign out`: after a gateway's eviction, signing members out
     is the point, since the evicted host saw every session cookie. A run
-    that stops resumes when run again, and `apply` refuses until it
-    finishes. The WireGuard keys were step 6.
+    that stops resumes when run again, and `apply`, like every command that
+    renders, refuses until it finishes. When the plan says it is resuming an
+    earlier `--all` run that was not this one, add `--restart`, so every
+    secret is rotated again. A rotation that cannot finish is ended by hand:
+    README, *A rotation that cannot finish*. The WireGuard keys were step 6.
 
 11. **Remove the evicted site's secrets**, now that no site names it:
 

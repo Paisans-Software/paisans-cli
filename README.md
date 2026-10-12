@@ -2032,23 +2032,34 @@ while the file still names the old one, so a user is handed exactly the value
 the checking side already accepts.
 
 **The next value lives in the file from stage 1**, so a run that stops after
-Postgres holds the new password and before the apps do still has it. A
-rotation is pending while its path is under `rotations`; a re-run finishes the
-pending ones first, asks the checking side whether it already accepts the
-value, and hands the users the same value again, which changes nothing on a
-user that already presents it. A `--all` run records what it has left
+Postgres holds the new password and before the apps do still has it. A rotation
+is pending while its path is under `rotations`; a re-run finishes the pending
+ones first, asks the checking side whether it already accepts the value, and
+hands the users the same value again, which changes nothing on a user that
+already presents it. A `--all` run records what it has left
 (`rotate_remaining`), so a stopped `--all` run resumes with those and does not
-rotate again a secret it finished. Every write is encrypted to the recipients
-`.sops.yaml` names, so once the departed admin is out of it and the file is
-re-encrypted, a next value is never readable by them.
+rotate again a secret it finished. Because an operator who runs `--all` expects
+every secret, the resume is said at every verbosity and in the result, and a
+recorded path the deployment no longer has a rotation of, Eg: an app since
+removed, is refused rather than left on the list for ever. **`--all --restart`**
+discards the record and rotates the full list again; it is refused while a
+rotation is pending, which has to finish first. Every write is encrypted to the
+recipients `.sops.yaml` names, so once the departed admin is out of it and the
+file is re-encrypted, a next value is never readable by them.
 
 **`apply` refuses while a rotation is pending**, with or without `--site`, and
 names the `secrets rotate` that finishes it: some hosts may already check or
 present the next value, and `apply` renders the old one and would hand it back
-to them. **`secrets rotate` refuses while a `mesh rekey` is pending**, naming
-the rekey: its scoped applies render each site's current WireGuard key, which
-a site part way through its rekey may no longer run. Finishing either
-command first costs nothing but its resume.
+to them. So does every other command that renders from the secrets file and
+reaches a host, for the same reason: `site add`, `site remove`, `storage add`,
+`storage rotate-key`, `app remove` and `mesh rekey`. The commands `secrets
+rotate` runs in its place in the order, `storage rotate-key` and `oidc client
+create`, are reached only once every rotation before them is promoted, so none
+is pending then. A rotation that cannot finish is ended by hand (*A rotation
+that cannot finish*). **`secrets rotate` refuses while a `mesh rekey` is
+pending**, naming the rekey: its scoped applies render each site's current
+WireGuard key, which a site part way through its rekey may no longer run.
+Finishing either command first costs nothing but its resume.
 
 **What each secret costs:**
 
@@ -2094,18 +2105,25 @@ client `oidc client create` cannot make (Synapse's, oauth2-proxy's) is minted
 at Pocket ID; nothing here can issue them. The operator replaces each at its
 issuer and sets it with `paisans secrets set <path>`, and `secrets rotate`
 hands the value the file then holds to every stack that renders it, one site
-at a time. It is refused while every host using it was last applied with the
-value the file holds, since rotating it then would restart them for nothing,
-and `--all` refuses until each pasted secret it includes has been replaced so.
-That refusal cannot tell a secret never replaced from one replaced and then
+at a time. It is refused while every host using it runs the value the file
+holds, since rotating it then would restart them for nothing, and `--all`
+refuses until each pasted secret it includes has been replaced so. **Which
+value a host runs is read per secret, not per file.** The lines that carry
+the secret are the ones a render with any other value changes; the host
+prints the SHA-256 of each line of its own copy of that file, so only hashes
+cross ssh and nothing secret is on a command line; and the host runs the
+value when every carrying line's hash is among them. A file that differs
+only elsewhere, Eg: a comment an upgrade changed in `caddy.env`, or an app
+setting not yet applied, would otherwise pass for a secret replaced. That
+refusal cannot tell a secret never replaced from one replaced and then
 applied, as an eviction does with the DNS token, so the operator says which:
 **`--replaced <path>`** names a pasted secret every host using it already runs
-from the file. It is checked the same way, against each site's manifest, and
-refused for a generated secret, for one some host does not run yet, and for
-one whose rotation is under way; a path it accepts is listed in the plan as
-replaced earlier and not rotated. For such a client, the old secrets are
-deleted at Pocket ID after every site runs the new one, through the client ID
-the file records; without one, the plan says to delete them there by hand.
+from the file. It is checked the same way, and refused for a generated
+secret, for one some host does not run yet, and for one whose rotation is
+under way; a path it accepts is listed in the plan as replaced earlier and not
+rotated. For such a client, the old secrets are deleted at Pocket ID after
+every site runs the new one, through the client ID the file records; without
+one, the plan says to delete them there by hand.
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
@@ -2140,8 +2158,8 @@ includes it (Founder decision).
 password changed on a limping cluster can leave a member unable to rejoin; a
 site that does not answer over ssh, since it would keep the old value and
 break when the old one is retired; a pasted secret not yet replaced; a pending
-rotation whose stage cannot be read from the hosts; and a pending `mesh
-rekey`.
+rotation whose stage cannot be read from the hosts, or that cannot finish; and
+a pending `mesh rekey`.
 
 ### A rotation that cannot finish
 
