@@ -528,3 +528,27 @@ func TestLoadSecretsNotesUnknownKeys(t *testing.T) {
 		}
 	}
 }
+
+// The backup section holds two generated keys and each destination's pasted
+// credentials, and nothing else.
+func TestBackupSecretsGetAndSet(t *testing.T) {
+	s := &config.Secrets{}
+	for key, value := range map[string]string{
+		"backup.restic_password":                   "r",
+		"backup.walg_libsodium_key":                "w",
+		"backup.destinations.b2.access_key_id":     "id",
+		"backup.destinations.b2.secret_access_key": "secret",
+	} {
+		if err := s.Set(key, value); err != nil {
+			t.Fatalf("Set(%s): %v", key, err)
+		}
+		if got, ok := s.Get(key); !ok || got != value {
+			t.Fatalf("Get(%s) = %q, %v", key, got, ok)
+		}
+	}
+	for _, bad := range []string{"backup.nothing", "backup.destinations.b2.password", "backup.destinations.b2", "backup.destinations.B2.access_key_id"} {
+		if err := s.Set(bad, "x"); err == nil {
+			t.Errorf("Set(%s) accepted a key nothing reads", bad)
+		}
+	}
+}

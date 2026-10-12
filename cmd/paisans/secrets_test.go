@@ -439,3 +439,25 @@ func TestPruneMergesTheGatewaysRecords(t *testing.T) {
 		t.Error("the gateway that missed the removal kept monitor-a")
 	}
 }
+
+// A backup destination's credentials are owed for each destination declared,
+// so they go in here; a destination nobody declared has none.
+func TestSecretsSetTakesADeclaredDestinationsCredentials(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	if _, err := set(t, configPath, secretsPath, "backup.destinations.offsite.access_key_id", "AKIAEXAMPLE\n"); err != nil {
+		t.Fatalf("a declared destination's key was refused: %v", err)
+	}
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := secrets.Backup.Destinations["offsite"].AccessKeyID; got != "AKIAEXAMPLE" {
+		t.Errorf("stored %q", got)
+	}
+	if _, err := set(t, configPath, secretsPath, "backup.destinations.nowhere.access_key_id", "x"); err == nil || !strings.Contains(err.Error(), "neither set nor owed") {
+		t.Errorf("an undeclared destination's key: %v", err)
+	}
+	if _, err := set(t, configPath, secretsPath, "backup.restic_password", "x"); err == nil || !strings.Contains(err.Error(), "paisans init") {
+		t.Errorf("a generated backup key nobody created: %v", err)
+	}
+}

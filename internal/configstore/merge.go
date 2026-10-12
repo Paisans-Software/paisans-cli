@@ -164,6 +164,12 @@ func flatten(s *config.Secrets) map[string]string {
 	put("cluster.standby_password", s.Cluster.StandbyPassword)
 	put("storage.garage.admin_token", s.Storage.Garage.AdminToken)
 	put("storage.garage.rpc_secret", s.Storage.Garage.RPCSecret)
+	put("backup.restic_password", s.Backup.ResticPassword)
+	put("backup.walg_libsodium_key", s.Backup.WALGLibsodiumKey)
+	for name, d := range s.Backup.Destinations {
+		put("backup.destinations."+name+".access_key_id", d.AccessKeyID)
+		put("backup.destinations."+name+".secret_access_key", d.SecretAccessKey)
+	}
 	for name, site := range s.Sites {
 		put("sites."+name+".wireguard_private_key", site.WireGuardPrivateKey)
 		put("sites."+name+".wireguard_next_private_key", site.WireGuardNextPrivateKey)
@@ -208,6 +214,10 @@ func clone(s *config.Secrets) *config.Secrets {
 	c.OIDCClients = make(map[string]config.OIDCClient, len(s.OIDCClients))
 	for k, v := range s.OIDCClients {
 		c.OIDCClients[k] = v
+	}
+	c.Backup.Destinations = make(map[string]config.DestinationSecrets, len(s.Backup.Destinations))
+	for k, v := range s.Backup.Destinations {
+		c.Backup.Destinations[k] = v
 	}
 	c.PocketIDGroups = make(map[string]string, len(s.PocketIDGroups))
 	for k, v := range s.PocketIDGroups {
@@ -254,6 +264,14 @@ func assign(dst, src *config.Secrets, path string) error {
 			client.ClientSecret = src.OIDCClients[parts[1]].ClientSecret
 		}
 		dst.OIDCClients[parts[1]] = client
+	case parts[0] == "backup" && len(parts) == 4:
+		d, from := dst.Backup.Destinations[parts[2]], src.Backup.Destinations[parts[2]]
+		if parts[3] == "access_key_id" {
+			d.AccessKeyID = from.AccessKeyID
+		} else {
+			d.SecretAccessKey = from.SecretAccessKey
+		}
+		dst.Backup.Destinations[parts[2]] = d
 	default:
 		v, _ := src.Get(path)
 		return dst.Set(path, v)
@@ -303,6 +321,20 @@ func remove(s *config.Secrets, path string) error {
 		if client == (config.OIDCClient{}) {
 			delete(s.OIDCClients, parts[1])
 		}
+	case "backup":
+		if len(parts) == 2 {
+			return s.Set(path, "")
+		}
+		d := s.Backup.Destinations[parts[2]]
+		if parts[3] == "access_key_id" {
+			d.AccessKeyID = ""
+		} else {
+			d.SecretAccessKey = ""
+		}
+		s.Backup.Destinations[parts[2]] = d
+		if d == (config.DestinationSecrets{}) {
+			delete(s.Backup.Destinations, parts[2])
+		}
 	default:
 		return s.Set(path, "")
 	}
@@ -321,6 +353,9 @@ func routable(parts []string) bool {
 	want := map[string]int{"cluster": 2, "storage": 3, "sites": 3, "apps": 3, "external": 2, "oidc_clients": 3}
 	if parts[0] == "pocket_id_groups" {
 		return len(parts) >= 2
+	}
+	if parts[0] == "backup" {
+		return len(parts) == 2 || len(parts) == 4 && parts[1] == "destinations"
 	}
 	n, ok := want[parts[0]]
 	return ok && len(parts) == n

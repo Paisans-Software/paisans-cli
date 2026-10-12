@@ -1947,6 +1947,10 @@ something the configuration does not declare:
 | `apps.<name>` | no app `<name>` is declared |
 | `oidc_clients.<name>` | no app `<name>` is declared |
 | `pocket_id_groups.<name>` | no Pocket ID app's `signup_default_groups` names `<name>` |
+| `backup.destinations.<name>` | no backup destination `<name>` is declared |
+
+The restic password and WAL-G's key are never orphaned, even with no `backup`
+section: they decrypt every backup already taken.
 
 **What is deployed is recorded on each gateway**, so that a site or an app
 missing from `paisans.yaml` by mistake (commented out, renamed, a bad merge)
@@ -1998,7 +2002,8 @@ changes nothing; with `--execute` it removes them and writes the file,
 encrypted to the same recipients, and refuses an encrypted file with no
 `.sops.yaml` beside it rather than writing it in plaintext. Pruning an `oidc_clients` entry does not
 delete the client at Pocket ID, which it says: delete it there by hand if that
-Pocket ID still runs. A removed site's WireGuard key is safe to prune once no
+Pocket ID still runs. Pruning a backup destination's credentials does not delete
+its key at the provider either, which it says too. A removed site's WireGuard key is safe to prune once no
 site's mesh lists it, which is true after a full `site remove`, or after every
 remaining site's next `apply`. How to run it, and its flags, are under
 *`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
@@ -2184,6 +2189,13 @@ includes it (Founder decision).
   runs, so no account has the password, and it is kept unused.
 * **WireGuard keys**, which are `mesh rekey`'s (*Rekeying the mesh: `mesh
   rekey`*).
+* **`backup.restic_password` and `backup.walg_libsodium_key`** encrypt every
+  backup already taken, and a new one would not re-encrypt them: whoever held
+  the old one can still read any copy they made. What keeps an evicted admin
+  out of the backups is the destinations' credentials.
+* **Each backup destination's credentials**, which its provider issued. Issue a
+  new key there, pipe it in with `paisans secrets set`, apply, then delete the
+  old key at the provider.
 
 **Refused before anything changes:** etcd or Patroni unhealthy, since a
 password changed on a limping cluster can leave a member unable to rejoin; a
@@ -3588,6 +3600,21 @@ And warns, on every run:
 * **`backup-single-destination`**: one destination is one failure domain.
 * **`backup-without-a-monitor`**: no `uptime` app, so a failed run would be
   reported to nobody.
+
+**Backups that are on have four kinds of secret.** `init` generates two, and
+never shows them: `backup.restic_password`, which opens the restic repository
+in every destination, and `backup.walg_libsodium_key`, 32 bytes as hex, which
+encrypts every object WAL-G writes. A restore reads both from the secrets
+file, so losing that file loses the backups too. Each destination's S3 key is
+issued by its provider and owed, and `init` names it with what it needs: read,
+write, list and delete on that bucket, and nothing else.
+
+```
+paisans secrets set backup.destinations.b2.access_key_id < key-id-file
+paisans secrets set backup.destinations.b2.secret_access_key < secret-file
+```
+
+Backups that are off generate and owe nothing.
 
 ## Bootstrapping a site
 

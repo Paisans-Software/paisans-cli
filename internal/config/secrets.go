@@ -42,6 +42,7 @@ type Secrets struct {
 	ID          string                    `yaml:"id,omitempty"`
 	Cluster     ClusterSecrets            `yaml:"cluster"`
 	Storage     StorageSecrets            `yaml:"storage"`
+	Backup      BackupSecrets             `yaml:"backup,omitempty"`
 	Sites       map[string]SiteSecrets    `yaml:"sites"`
 	Apps        map[string]map[string]any `yaml:"apps"`
 	External    map[string]string         `yaml:"external"`
@@ -100,6 +101,25 @@ type StorageSecrets struct {
 type GarageSecrets struct {
 	AdminToken string `yaml:"admin_token"`
 	RPCSecret  string `yaml:"rpc_secret"`
+}
+
+// BackupSecrets is what backups need beyond paisans.yaml's backup section:
+// two keys generated at init and never seen, and each destination's
+// credentials, which its provider issues and an operator pastes.
+type BackupSecrets struct {
+	// ResticPassword opens the restic repository in every destination.
+	ResticPassword string `yaml:"restic_password,omitempty"`
+	// WALGLibsodiumKey encrypts every object WAL-G writes, 32 bytes as hex.
+	WALGLibsodiumKey string `yaml:"walg_libsodium_key,omitempty"`
+	// Destinations is keyed by the destination's name in paisans.yaml.
+	Destinations map[string]DestinationSecrets `yaml:"destinations,omitempty"`
+}
+
+// DestinationSecrets is the S3 key a destination's provider issued for its
+// bucket.
+type DestinationSecrets struct {
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
 }
 
 type SiteSecrets struct {
