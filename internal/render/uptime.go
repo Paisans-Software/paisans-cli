@@ -82,9 +82,10 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
 		if app.Kind == config.KindUptime {
-			// A monitor cannot report its own death, and a direct check of
-			// its own container can only ever pass. Its public URL, and
-			// every other monitor's, is checked below, after every other app.
+			// A monitor does not watch itself: down, it cannot report that,
+			// and a direct check of its own container can only ever pass.
+			// Every other monitor's public URL is checked below, after every
+			// other app.
 			continue
 		}
 		health, ok := kinds.HealthFor(app.Kind)
@@ -167,36 +168,34 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			}
 		}
 	}
-	// The monitor's own public URL. The process is alive whenever it can run
-	// this, so what it proves is the path in front of it: DNS, the web
-	// server and the certificate, whose expiry the fork warns about 14 days
-	// ahead. Behind an operator's own web server it is the only thing that
-	// notices a renewal that silently stopped.
-	//
-	// The public URL of every monitor on another monitor site follows,
-	// checked the same way and in AppNames order. A monitor cannot report its
-	// own death or its host's, so a monitor on a separate site is what
-	// notices either: this check covers the other monitor and the path in
-	// front of it, and the ping of its site, seeded below, covers its host.
-	// A monitor on this same site dies with this host, so checking it would
-	// add nothing about losing the host, and it is left out.
+	// The public URL of every monitor on another monitor site, in AppNames
+	// order, and never this monitor's own. A monitor cannot report its own
+	// death or its host's, so a monitor on a separate site is what notices
+	// either: this check covers the other monitor and the path in front of it,
+	// and the ping of its site, seeded below, covers its host. The path in
+	// front of this monitor is still exercised from outside it: every other
+	// site's heartbeat is pushed to its public hostname (heartbeat.go), so
+	// broken DNS, web server or certificate there leaves every heartbeat
+	// stale. A monitor on this same site dies with this host, so checking it
+	// would add nothing about losing the host, and it is left out.
 	if health, ok := kinds.HealthFor(config.KindUptime); ok {
-		uptimeCheck := func(name string) seedMonitor {
-			return seedMonitor{
-				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
-				URL: "https://" + p.cfg.Apps[name].Hostname + health.Path, ExpectedStatus: health.Expect,
-				FollowRedirects: &noRedirects,
-				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
-			}
-		}
-		monitors = append(monitors, uptimeCheck(self))
 		for _, name := range p.cfg.AppNames() {
 			other := p.cfg.Apps[name]
-			if other.Kind == config.KindUptime && other.Placement.Site != monitorSite {
-				monitors = append(monitors, uptimeCheck(name))
+			if name == self || other.Kind != config.KindUptime || other.Placement.Site == monitorSite {
+				continue
 			}
+			monitors = append(monitors, seedMonitor{
+				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
+				URL: "https://" + other.Hostname + health.Path, ExpectedStatus: health.Expect,
+				FollowRedirects: &noRedirects,
+				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+			})
 		}
 	}
+	// No ping and no heartbeat for this monitor's own site: a ping from the
+	// host to itself, and a push from the host to the monitor running on it,
+	// can only ever succeed. Every other app on this site keeps its checks
+	// above.
 	for _, site := range p.order {
 		if site == monitorSite {
 			continue

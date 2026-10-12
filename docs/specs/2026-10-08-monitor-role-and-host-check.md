@@ -112,6 +112,9 @@ the path in front of it: DNS, the web server, and the certificate, which the
 fork warns about 14 days before expiry. For `mode: external` this is the only
 thing that notices a proxy whose renewal has silently stopped.
 
+*Superseded 2026-10-11: the monitor no longer checks its own public URL. See
+the amendment of that date in `2026-10-07-uptime-monitoring.md`.*
+
 The existing public check for every other app now runs from a machine that is
 not the gateway, so a dead gateway shows as every public check failing while
 the direct checks stay green.

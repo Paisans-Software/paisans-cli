@@ -490,12 +490,15 @@ check --app status` until it passes.
 
 ## Afterwards
 
-The monitor checks its own public URL, `https://<hostname>/healthz`, every
-minute, and the fork warns 14 days before the certificate there expires. In
-`managed_by: external` that check is the only thing that notices a renewal that silently
-stopped, so keep the monitor's email channel working. Where the deployment
-has a second monitor on a second `monitor` site, that one checks this URL
-too, so a monitor whose host has died is still reported.
+The monitor does not check its own public URL: a monitor watching itself
+reports nothing when it is down. Every other site pushes its heartbeat to
+`https://<hostname>/ping/<token>` once a minute, so a certificate there that
+has expired, or a web server that stopped answering, leaves every heartbeat
+stale at once, and the monitor reports it. Where the deployment has a second
+monitor on a second `monitor` site, that one checks this URL every minute,
+warns 14 days before the certificate there expires, and reports a monitor
+whose host has died. With one monitor, watch the certificate's renewal in
+your web server yourself.
 
 Changing your web server, its certificate or its address needs nothing from
 the toolkit. Changing `listen` does: edit `paisans.yaml`, apply the site, and
