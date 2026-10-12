@@ -119,7 +119,7 @@ storage:
     replication: 1
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
 `

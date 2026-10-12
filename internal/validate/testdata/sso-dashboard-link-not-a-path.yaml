@@ -63,14 +63,14 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_bucket: docs-uploads
       sso_dashboard_link: https://docs.example.org/home
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:

@@ -72,13 +72,13 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_bucket: docs-uploads
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -88,7 +88,7 @@ apps:
       host: smtp.example.org
       from_address: id@example.org
   invite:
-    kind: invite
+    blueprint: invite
     hostname: invite.example.org
     placement: cluster
     settings:
@@ -98,7 +98,7 @@ apps:
 
         Treat each other well.
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: status.example.org
     placement: { pinned: watch }
     settings:

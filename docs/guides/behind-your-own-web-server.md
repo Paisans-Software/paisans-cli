@@ -34,7 +34,7 @@ sites:
 
 apps:
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
     settings:

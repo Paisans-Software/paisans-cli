@@ -72,7 +72,7 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     config:
@@ -80,13 +80,13 @@ apps:
     settings:
       s3_bucket: docs-uploads
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
       file_backend: database
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: status.example.org
     placement: { pinned: watch }
     settings:

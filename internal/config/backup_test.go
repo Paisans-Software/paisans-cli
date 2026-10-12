@@ -70,7 +70,7 @@ func TestBackupIsOnUnlessExplicitlyOff(t *testing.T) {
 }
 
 func TestAnAppBacksUpUnlessItSaysNot(t *testing.T) {
-	body := strings.Replace(minimal, "    kind: ", "    backup: false\n    kind: ", 1)
+	body := strings.Replace(minimal, "    blueprint: ", "    backup: false\n    blueprint: ", 1)
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
 		t.Fatal(err)

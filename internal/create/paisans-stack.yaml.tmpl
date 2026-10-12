@@ -108,7 +108,7 @@ storage:
 apps:
 {{- range .Apps}}
   {{.Key}}:
-    kind: {{.Kind}}
+    blueprint: {{.Kind}}
     hostname: {{q .Hostname}}
     placement: {{.Placement}}
 {{- if .MembersOnly}}

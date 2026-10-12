@@ -78,7 +78,7 @@ storage:
 
 apps:
   talk:
-    kind: mbin
+    blueprint: mbin
     hostname: talk.example.org
     placement: cluster
     # Behind the gate, with auto-login: a member the gate signed in goes
@@ -96,14 +96,14 @@ apps:
     config:
       KBIN_META_TITLE: A place to talk
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_force_path_style: true
       s3_bucket: docs-uploads
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -122,7 +122,7 @@ apps:
       # Quoted in the .env, which the invite app's INVITE_ACCENT_COLOR follows.
       accent_color: "#2f6f5e"
   chat:
-    kind: synapse
+    blueprint: synapse
     hostname: chat.example.org
     hostnames:
       wellknown: example.org
@@ -140,7 +140,7 @@ apps:
     config:
       require_auth_for_profile_requests: true
   blog:
-    kind: writefreely
+    blueprint: writefreely
     hostname: blog.example.org
     # Public, with auto-login: anyone reads the blog, and a member the gate
     # signed in is signed into it too.
@@ -155,7 +155,7 @@ apps:
     config:
       app.max_blogs: 3
   web:
-    kind: element
+    blueprint: element
     hostname: web.example.org
     # Pinned for the same reason as the blog, and refused otherwise: a static
     # client keeps nothing in Postgres, so there is no cluster for it to join.
@@ -166,7 +166,7 @@ apps:
     config:
       default_theme: dark
   invite:
-    kind: invite
+    blueprint: invite
     hostname: invite.example.org
     placement: cluster
     settings:
@@ -180,7 +180,7 @@ apps:
 
         To each other.
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: status.example.org
     # The monitor on a site of its own, which neither the homes' failures nor
     # the gateway's take down with them.

@@ -73,13 +73,13 @@ storage:
 
 apps:
   docs:
-    kind: outline
+    blueprint: outline
     hostname: docs.example.org
     placement: cluster
     settings:
       s3_bucket: docs-uploads
   auth:
-    kind: pocket-id
+    blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
@@ -87,7 +87,7 @@ apps:
   # Present only so that the gate exists: an app naming a gate no app renders
   # is a different refusal, and a fixture must break one thing.
   status:
-    kind: uptime
+    blueprint: uptime
     hostname: status.example.org
     placement: { pinned: watch }
     gated: true
