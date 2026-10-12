@@ -61,8 +61,10 @@ func incomingPath(d deployment.Deployment) string {
 }
 
 // Push puts a bundle's versions into the site's repository. The bundle is
-// verified first and fetched without a plus in the refspec and without
-// pruning, so a push can add versions and can never move or remove one.
+// verified first and taken in by hostprep.ConfigReceiveShell's paisans_receive,
+// which creates each version the bundle names correctly where it is absent
+// and ignores every other ref, so a push can add versions and can never move
+// or remove one.
 func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 	if err := checkID(d); err != nil {
 		return err
@@ -80,7 +82,8 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 	if err := t.WriteFile(tmp, string(bundle), 0o600); err != nil {
 		return fmt.Errorf("write the bundle to %s: %w", t.Describe(), err)
 	}
-	cmd := fmt.Sprintf("git -C %[1]s bundle verify %[2]s >/dev/null && git -C %[1]s fetch --no-prune --quiet %[2]s 'refs/versions/*:refs/versions/*'; rc=$?; rm -f %[2]s; exit $rc",
+	// The comment names the command in an error, which quotes its first line.
+	cmd := "# take the pushed versions into the store\n" + hostprep.ConfigReceiveShell + fmt.Sprintf("git -C %[1]s bundle verify %[2]s >/dev/null && paisans_receive %[1]s %[2]s; rc=$?; rm -f %[2]s; exit $rc",
 		quote(repo), quote(tmp))
 	if out, err := t.Run(cmd); err != nil {
 		return fmt.Errorf("take the bundle into %s: %w: %s", t.Describe(), err, strings.TrimSpace(out))
@@ -102,11 +105,16 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *
 			syncErr = strings.TrimSpace(err.Error() + " " + out)
 		}
 	}
+	// Only correctly named versions are listed, by paisans_versions, and
+	// given to bundle create on its stdin, so no ref name reaches a command
+	// line. bundle create's stderr is kept for the error; the base64 line is
+	// always the last.
 	repo := hostprep.ConfigRepo(d)
-	cmd := fmt.Sprintf("set -e; r=%s; if [ ! -d \"$r\" ] || [ -z \"$(git -C \"$r\" for-each-ref --count=1 'refs/versions/*')\" ]; then echo %s; exit 0; fi; "+
+	cmd := "# bundle the versions the store holds\n" + hostprep.ConfigVersionsShell + fmt.Sprintf("set -e; r=%s; v=''; if [ -d \"$r\" ]; then v=$(paisans_versions \"$r\" refs/versions/); fi; "+
+		"if [ -z \"$v\" ]; then echo %s; exit 0; fi; "+
 		"tmp=$(mktemp); trap 'rm -f \"$tmp\"' EXIT; "+
-		"git -C \"$r\" for-each-ref --format='%%(refname)' 'refs/versions/*' | xargs git -C \"$r\" bundle create \"$tmp\" >/dev/null 2>&1; "+
-		"base64 -w0 \"$tmp\"; echo",
+		"printf '%%s\\n' $v | sed 's|^|refs/versions/|' | git -C \"$r\" bundle create --quiet \"$tmp\" --stdin >/dev/null; "+
+		"base64 -w0 <\"$tmp\"; echo",
 		quote(repo), emptyMark)
 	out, err := t.Run(cmd)
 	if err != nil {

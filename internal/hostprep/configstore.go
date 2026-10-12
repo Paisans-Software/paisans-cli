@@ -72,7 +72,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		})
 	}
 
-	data := map[string]string{"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "WireGuardUnit": d.WireGuardUnit()}
+	data := map[string]string{"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "WireGuardUnit": d.WireGuardUnit(), "Receive": ConfigReceiveShell}
 	peerList := ""
 	if len(peers) > 0 {
 		// A final newline, since read in the sync script drops a last line without one.

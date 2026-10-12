@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/hostprep"
 )
 
 type fakeSite struct {
@@ -42,7 +43,7 @@ func (f *fakeSite) Describe() string { return "fake" }
 
 var dep = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
 
-func TestPushWritesThenVerifiesAndFetchesWithoutForce(t *testing.T) {
+func TestPushWritesThenVerifiesAndReceives(t *testing.T) {
 	h := &fakeSite{files: map[string]string{}}
 	if err := Push(h, dep, []byte("BUNDLE")); err != nil {
 		t.Fatal(err)
@@ -55,13 +56,13 @@ func TestPushWritesThenVerifiesAndFetchesWithoutForce(t *testing.T) {
 		t.Fatalf("commands = %q", h.commands)
 	}
 	c := h.commands[2]
-	for _, want := range []string{"bundle verify", "fetch --no-prune", "'refs/versions/*:refs/versions/*'", "rm -f '" + tmp + "'"} {
+	for _, want := range []string{"bundle verify", "paisans_receive '" + hostprep.ConfigRepo(dep) + "' '" + tmp + "'", "rm -f '" + tmp + "'"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("command lacks %q: %s", want, c)
 		}
 	}
-	if strings.Contains(c, "+") {
-		t.Errorf("refspec must not force: %s", c)
+	if !strings.Contains(c, hostprep.ConfigReceiveShell) {
+		t.Errorf("command does not define the receive rule: %s", c)
 	}
 }
 

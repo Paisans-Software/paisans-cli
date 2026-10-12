@@ -141,18 +141,21 @@ func (r Repo) Commit(f Files, parents []string, revision int, signingKey string,
 	return sha, nil
 }
 
-// versionRefs returns the commits that refs/versions/ names correctly. A ref
-// is named for the commit it points to; one that is not, or that points at
-// anything but a commit, is not a version and is skipped.
-func (r Repo) versionRefs() ([]string, error) {
-	out, err := r.git(nil, nil, "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/versions/")
+// versionRefs returns the commits that refs/versions/ names correctly.
+func (r Repo) versionRefs() ([]string, error) { return r.namedVersions("refs/versions/") }
+
+// namedVersions returns the commits refs under prefix name correctly: a ref
+// prefix<sha> is named for the commit sha it points to. One that is not, or
+// that points at anything but a commit, is not a version and is skipped.
+func (r Repo) namedVersions(prefix string) ([]string, error) {
+	out, err := r.git(nil, nil, "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", prefix)
 	if err != nil {
 		return nil, err
 	}
 	var shas []string
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
-		if len(f) != 3 || f[2] != "commit" || f[0] != "refs/versions/"+f[1] || checkSHA(f[1]) != nil {
+		if len(f) != 3 || f[2] != "commit" || f[0] != prefix+f[1] || checkSHA(f[1]) != nil {
 			continue
 		}
 		shas = append(shas, f[1])
@@ -251,10 +254,12 @@ func (r Repo) Files(sha string) (Files, error) {
 	return f, nil
 }
 
-// Bundle packs every refs/versions/* ref; it is nil when there are none.
+// Bundle packs every version the repository holds, by the rule versionRefs
+// lists them by; it is nil when there are none. A misnamed ref is never
+// packed, so it cannot travel to another store.
 func (r Repo) Bundle() ([]byte, error) {
-	out, err := r.git(nil, nil, "for-each-ref", "--count=1", "--format=%(refname)", "refs/versions/")
-	if err != nil || len(bytes.TrimSpace(out)) == 0 {
+	shas, err := r.versionRefs()
+	if err != nil || len(shas) == 0 {
 		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "paisans-bundle-")
@@ -263,15 +268,24 @@ func (r Repo) Bundle() ([]byte, error) {
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "b.bundle")
-	if _, err := r.git(nil, nil, "bundle", "create", "--quiet", path, "--glob=refs/versions"); err != nil {
+	var names strings.Builder
+	for _, sha := range shas {
+		names.WriteString("refs/versions/" + sha + "\n")
+	}
+	if _, err := r.git(strings.NewReader(names.String()), nil, "bundle", "create", "--quiet", path, "--stdin"); err != nil {
 		return nil, err
 	}
 	return os.ReadFile(path)
 }
 
-// FetchBundle adds the versions in a bundle after git has verified it. The
-// refspec has no force marker: a ref is named for its own commit, so it never
-// legitimately moves, and an update to one is a forgery that must fail.
+// FetchBundle adds the versions in a bundle after git has verified it, by
+// the receive rule hostprep.ConfigReceiveShell's paisans_receive follows on a site.
+// A fetch into refs/versions/ would fast-forward a version's ref to a child
+// of it, even without a plus in the refspec, so the bundle is fetched into a
+// quarantine, refs/incoming/<random>/, and each version it names correctly
+// is created where it is absent, against the null hash, so an existing ref
+// never moves. Every other ref is ignored. Each version is created on its
+// own, so one that fails leaves the rest; the quarantine is deleted after.
 func (r Repo) FetchBundle(bundle []byte) error {
 	dir, err := os.MkdirTemp("", "paisans-bundle-")
 	if err != nil {
@@ -285,8 +299,44 @@ func (r Repo) FetchBundle(bundle []byte) error {
 	if _, err := r.git(nil, nil, "bundle", "verify", path); err != nil {
 		return err
 	}
-	_, err = r.git(nil, nil, "fetch", "--no-prune", "--no-tags", "--quiet", path, "refs/versions/*:refs/versions/*")
-	return err
+	q := "refs/incoming/" + filepath.Base(dir) + "/"
+	defer r.dropRefs(q)
+	_, fetchErr := r.git(nil, nil, "fetch", "--no-prune", "--no-tags", "--quiet", path, "+refs/versions/*:"+q+"*")
+	shas, err := r.namedVersions(q)
+	if err != nil {
+		return err
+	}
+	null, err := r.nullOID()
+	if err != nil {
+		return err
+	}
+	for _, sha := range shas {
+		// An existing ref makes this fail, which is the point.
+		r.git(nil, nil, "update-ref", "refs/versions/"+sha, sha, null)
+	}
+	return fetchErr
+}
+
+// nullOID is the all-zero hash in the repository's object format, which
+// update-ref takes as "this ref must not exist".
+func (r Repo) nullOID() (string, error) {
+	out, err := r.git(nil, nil, "rev-parse", "--show-object-format")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(string(out)) == "sha256" {
+		return strings.Repeat("0", 64), nil
+	}
+	return strings.Repeat("0", 40), nil
+}
+
+// dropRefs deletes every ref under prefix.
+func (r Repo) dropRefs(prefix string) {
+	out, err := r.git(nil, nil, "for-each-ref", "--format=delete %(refname)", prefix)
+	if err != nil || len(out) == 0 {
+		return
+	}
+	r.git(bytes.NewReader(out), nil, "update-ref", "--stdin")
 }
 
 // bundleVersions lists the versions a bundle names, by the same rule as
