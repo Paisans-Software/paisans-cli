@@ -309,3 +309,47 @@ func TestAMonitorOnTheGatewayPingsEveryOtherSite(t *testing.T) {
 		t.Error("an app on the monitor's machine lost its checks")
 	}
 }
+
+// A monitor that was the gateway, while gateway move has not handed it off,
+// keeps every gateway route beside its own monitor's, and the host owner's
+// sites. The new gateway still leaves that monitor's hostname out, and a
+// site that runs no Caddy is not made one.
+func TestADepartingGatewayKeepsEveryRoute(t *testing.T) {
+	cfg := monitorConfig(t, nil)
+	importLine := "import " + render.HostSitesMount + "/*.caddy"
+	plain := planFiles(mustBuild(t, cfg))
+	if watch := plain["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]; strings.Contains(watch, "talk.example.org") || strings.Contains(watch, importLine) {
+		t.Fatalf("a plain monitor routes the gateway's hostnames:\n%s", watch)
+	}
+	plan, err := render.Build(cfg, fixtureSecrets(t), render.WithDepartingGateway("watch"), render.WithDepartingGateway("home-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := planFiles(plan)
+	watch := files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	for _, want := range []string{"talk.example.org {", "status.example.org {", importLine} {
+		if !strings.Contains(watch, want) {
+			t.Errorf("the departing gateway's Caddyfile lacks %q:\n%s", want, watch)
+		}
+	}
+	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "status.example.org") {
+		t.Error("the new gateway routes the departing monitor's hostname")
+	}
+	if _, ok := files["home-a/srv/paisans/f2a9/infra/caddy/Caddyfile"]; ok {
+		t.Error("a site that runs no Caddy was given one")
+	}
+}
+
+// The departing gateway's Caddy mounts the host owner's sites, as the
+// gateway's does.
+func TestADepartingGatewayMountsTheHostOwnersSites(t *testing.T) {
+	cfg := monitorConfig(t, nil)
+	plan, err := render.Build(cfg, fixtureSecrets(t), render.WithDepartingGateway("watch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := planFiles(plan)["watch/srv/paisans/f2a9/infra/compose.yaml"]
+	if mount := "- " + render.HostSitesDir + ":" + render.HostSitesMount + ":ro"; !strings.Contains(compose, mount) {
+		t.Errorf("the departing gateway's Caddy lacks %q:\n%s", mount, compose)
+	}
+}
