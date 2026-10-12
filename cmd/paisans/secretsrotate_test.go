@@ -710,3 +710,78 @@ func TestSecretsRotateAllPassesWithReplaced(t *testing.T) {
 		}
 	}
 }
+
+// withRemaining records paths as an earlier --all run's rotate_remaining.
+func withRemaining(paths ...string) func(string) string {
+	return func(text string) string {
+		text += "\nrotate_remaining:\n"
+		for _, p := range paths {
+			text += "  - " + p + "\n"
+		}
+		return text
+	}
+}
+
+// --restart starts an --all run again, and means nothing without one.
+func TestSecretsRotateRestartTakesAll(t *testing.T) {
+	noRotateHost(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "cluster.standby_password", "--restart"), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--restart takes --all") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// A resumed --all says so on --execute at the default verbosity, where the
+// plan itself is not shown: an operator who ran --all expects every secret.
+func TestSecretsRotateResumeIsNotedOnExecute(t *testing.T) {
+	_, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, withRemaining("storage.garage.admin_token"))
+	// The fake host refuses the apply after stage 1; the note comes first.
+	_ = runSecretsRotate(rotateArgs(configPath, secretsPath, "--all", "--execute"), terminalStdin(t, "", false), &bytes.Buffer{})
+	if !rec.Has("note", "resuming the --all run") {
+		t.Errorf("the resume is not noted:\n%s", rec.Lines())
+	}
+}
+
+// A path an earlier --all run left that this deployment no longer has a
+// rotation of is refused, naming it and --all --restart.
+func TestSecretsRotateResumeRefusesAPathWithNoRotation(t *testing.T) {
+	fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, withRemaining("apps.gone.database_password"))
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "apps.gone.database_password") || !strings.Contains(err.Error(), "--all --restart") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// A resumed --all whose every path left is now kept clears what the file
+// records on --execute, so the next --all rotates everything.
+func TestSecretsRotateResumeOfOnlyKeptClearsTheRecord(t *testing.T) {
+	_, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, withRemaining("apps.talk.rabbitmq_password"))
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all", "--execute"), strings.NewReader(""), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	s, err := config.LoadDeploymentSecrets(secretsPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.RotateRemaining) != 0 {
+		t.Errorf("rotate_remaining %v", s.RotateRemaining)
+	}
+	if !rec.Has("result", "not rotated again") {
+		t.Errorf("the result does not say what was not rotated again:\n%s", rec.Lines())
+	}
+}
+
+// --all --restart is refused while a rotation is pending.
+func TestSecretsRotateRestartRefusedWhilePending(t *testing.T) {
+	fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, withRotation("apps.gate.cookie_secret"))
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all", "--restart"), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--restart") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
+		t.Errorf("err = %v", err)
+	}
+}

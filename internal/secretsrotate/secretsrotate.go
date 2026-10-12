@@ -98,8 +98,15 @@ type Item struct {
 type Run struct {
 	Items []Item
 	// Resumed is an --all run picking up the paths an earlier --all run had
-	// left, which the secrets file records.
+	// left, which the secrets file records. The secrets that run finished are
+	// not rotated again.
 	Resumed bool
+	// Restarted is an --all --restart run: what an earlier --all run left is
+	// discarded, and the full list starts again.
+	Restarted bool
+	// Kept is what the run leaves alone because its precheck found it kept,
+	// Eg: an admin role that cannot log in, each with why.
+	Kept []KeptError
 	// Report receives each rotation as a section and each stage as a step.
 	// Nil discards it.
 	Report ui.Reporter
@@ -128,14 +135,19 @@ func (r *Run) SignsOut() bool {
 // Plan plans the rotation of rs, in the order given, after any rotation an
 // earlier run left pending. rs must hold a rotator for every pending path.
 // It reads the file and the checking sides, and changes nothing.
-func Plan(e Env, rs []Rotator) (*Run, error) { return plan(e, rs, false) }
+func Plan(e Env, rs []Rotator) (*Run, error) { return plan(e, rs, false, false) }
 
 // PlanAll plans `--all`: rs is every secret in scope, in the order --all
 // rotates them. A run that an earlier --all left part way does only the
-// paths it recorded as left.
-func PlanAll(e Env, rs []Rotator) (*Run, error) { return plan(e, rs, true) }
+// paths it recorded as left, and rs must hold a rotator for each of them.
+func PlanAll(e Env, rs []Rotator) (*Run, error) { return plan(e, rs, true, false) }
 
-func plan(e Env, rs []Rotator, all bool) (*Run, error) {
+// PlanAllRestart plans `--all --restart`: the full list of rs, whatever an
+// earlier --all run left, which executing it replaces. It is refused while
+// any rotation is pending, since that one has to finish first.
+func PlanAllRestart(e Env, rs []Rotator) (*Run, error) { return plan(e, rs, true, true) }
+
+func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 	if e.Store == nil {
 		return nil, fmt.Errorf("secrets rotate: no secrets file to write the next values to")
 	}
@@ -162,7 +174,20 @@ func plan(e Env, rs []Rotator, all bool) (*Run, error) {
 			return nil, fmt.Errorf("secrets rotate: %s has a rotation under way, and this run cannot finish it. It finishes first, before anything else changes. Nothing was changed", path)
 		}
 	}
-	run := &Run{all: all}
+	if restart && len(pending) > 0 {
+		return nil, fmt.Errorf("secrets rotate --all --restart: %s has a rotation under way, and starting the list again would leave it unfinished. Finish it first with paisans secrets rotate %s --execute. Nothing was changed", strings.Join(pending, ", "), strings.Join(pending, " "))
+	}
+	resume := all && !restart && len(s.RotateRemaining) > 0
+	if resume {
+		// A recorded path this run has no rotation of would never be taken
+		// off the list, and every later --all would stop short of it.
+		for _, path := range s.RotateRemaining {
+			if _, ok := byPath[path]; !ok {
+				return nil, fmt.Errorf("secrets rotate --all: the earlier --all run left %s to rotate, and this deployment has no rotation of it any more, Eg: the app that held it is gone. Run paisans secrets rotate --all --restart to discard what that run left and start the full list again. Nothing was changed", path)
+			}
+		}
+	}
+	run := &Run{all: all, Resumed: resume, Restarted: restart && len(s.RotateRemaining) > 0}
 	var order []Rotator
 	for _, r := range rs {
 		if slices.Contains(pending, r.Path()) {
@@ -173,13 +198,10 @@ func plan(e Env, rs []Rotator, all bool) (*Run, error) {
 		if slices.Contains(pending, r.Path()) {
 			continue
 		}
-		if all && len(s.RotateRemaining) > 0 {
-			// An --all run that stopped resumes with the paths it had left,
-			// so a secret it already promoted is not rotated a second time.
-			run.Resumed = true
-			if !slices.Contains(s.RotateRemaining, r.Path()) {
-				continue
-			}
+		// An --all run that stopped resumes with the paths it had left, so a
+		// secret it already promoted is not rotated a second time.
+		if resume && !slices.Contains(s.RotateRemaining, r.Path()) {
+			continue
 		}
 		order = append(order, r)
 	}
@@ -195,6 +217,13 @@ func plan(e Env, rs []Rotator, all bool) (*Run, error) {
 			// hosts may already hold the next value the precheck compares.
 			if p, ok := r.(Prechecker); ok {
 				if err := p.Precheck(e); err != nil {
+					// A secret nothing checks on this deployment is listed
+					// as kept, with why, rather than refusing the run.
+					var k *KeptError
+					if errors.As(err, &k) {
+						run.Kept = append(run.Kept, *k)
+						continue
+					}
 					return nil, fmt.Errorf("secrets rotate %s: %w. Nothing was changed", path, err)
 				}
 			}
@@ -248,9 +277,7 @@ func useTitle(u Use) string {
 // Show prints the run as planned: each secret's path, what it costs, and the
 // stages ahead of it with the users of stage 3 in order.
 func (r *Run) Show(w ui.Reporter) {
-	if r.Resumed {
-		w.Detail("resuming the --all run the secrets file records as left: %d rotations", len(r.Items))
-	}
+	r.ShowResume(w)
 	if r.SignsOut() {
 		w.Note("this run signs members out", "--execute asks for `sign out` to be typed at a terminal before anything changes, and without a terminal it is refused")
 	}
@@ -290,6 +317,20 @@ func (r *Run) Show(w ui.Reporter) {
 		}
 		w.Step("stage 4, promote").End(ui.Pending, "")
 		w.Detail("the next value becomes %s, and its entry under rotations is removed", path)
+	}
+}
+
+// ShowResume says, at every verbosity, that the run picks up an earlier
+// --all run or discards it: an operator who ran --all expects every secret,
+// and one resumed does only what was left. The command calls it on --execute,
+// where the plan itself is shown only when verbose.
+func (r *Run) ShowResume(w ui.Reporter) {
+	switch {
+	case r.Resumed:
+		w.Note(fmt.Sprintf("resuming the --all run the secrets file records as left: %d rotations", len(r.Items)),
+			"the secrets that run finished are not rotated again. To rotate every secret once more, run paisans secrets rotate --all --restart")
+	case r.Restarted:
+		w.Note("starting --all again", "what an earlier --all run left is discarded, and every secret in scope is rotated, including those it finished")
 	}
 }
 

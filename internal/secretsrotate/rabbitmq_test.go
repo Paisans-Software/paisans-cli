@@ -162,8 +162,8 @@ func TestMbinRabbitMQOnPostgresQueueIsKeptAndNothingIsWritten(t *testing.T) {
 	if len(w.cmds) != 0 {
 		t.Fatalf("commands ran: %v", w.cmds)
 	}
-	if err := w.run(MbinRabbitMQ("plain")); err == nil {
-		t.Fatal("rotated a secret nothing checks")
+	if err := w.run(MbinRabbitMQ("plain")); err != nil {
+		t.Fatal(err)
 	}
 	if len(w.store.s.Rotations) != 0 {
 		t.Fatalf("rotations %v", w.store.s.Rotations)

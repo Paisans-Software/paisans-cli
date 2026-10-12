@@ -610,14 +610,24 @@ func TestAcceptsTellsAWrongPasswordFromAnUnanswerablePostgres(t *testing.T) {
 }
 
 // On a cluster whose admin is NOLOGIN, as Spilo 4 creates it, no login
-// checks cluster.admin_password: the rotation refuses as kept before
-// anything changes.
+// checks cluster.admin_password: its precheck refuses as kept, and the plan
+// lists it as kept, before anything changes.
 func TestClusterRoleAdminNoLoginIsKept(t *testing.T) {
 	w := newPGWorld(t)
-	err := w.rotate(ClusterRole("admin"))
+	err := ClusterRole("admin").(Prechecker).Precheck(w.env())
 	var kept *KeptError
 	if !errors.Is(err, ErrKept) || !errors.As(err, &kept) || kept.Path != "cluster.admin_password" || !strings.Contains(kept.Reason, "NOLOGIN") {
 		t.Fatalf("admin was not refused as kept: %v", err)
+	}
+	run, err := Plan(w.env(), []Rotator{ClusterRole("admin")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Items) != 0 || len(run.Kept) != 1 || run.Kept[0].Path != "cluster.admin_password" {
+		t.Fatalf("items %v, kept %v", run.Items, run.Kept)
+	}
+	if err := run.Execute(w.env(), nil); err != nil {
+		t.Fatal(err)
 	}
 	if len(w.store.s.Rotations) != 0 || w.store.s.Cluster.AdminPassword != "admin-old" {
 		t.Fatalf("the secrets file changed: rotations %v, admin %q", w.store.s.Rotations, w.store.s.Cluster.AdminPassword)

@@ -96,3 +96,18 @@ func (g Generated) Next(e Env, s *config.Secrets) (string, error) {
 func (g Generated) Promote(s *config.Secrets, next string) error {
 	return s.Set(g.SecretPath, next)
 }
+
+// kept is a rotator the run lists as kept, with why, in place of rotating
+// it.
+type kept struct {
+	Rotator
+	reason string
+}
+
+// Keep is r listed as kept for reason rather than rotated, Eg: a pasted
+// secret the operator names as already replaced and applied. It keeps its
+// place in an --all run, so a path an earlier run left is taken off the list
+// rather than refused as one with no rotation.
+func Keep(r Rotator, reason string) Rotator { return kept{Rotator: r, reason: reason} }
+
+func (k kept) Precheck(e Env) error { return &KeptError{Path: k.Path(), Reason: k.reason} }

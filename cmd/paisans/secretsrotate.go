@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +27,7 @@ var rotateHost = func(name string, site config.Site, sudo bool) apply.Transport 
 	return siteTransport(name, site, "", sudo)
 }
 
-const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--replaced <path>]... [--execute]"
+const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]... [--execute]"
 
 // replacedEarlier is how the plan lists a pasted secret named with
 // --replaced.
@@ -68,6 +67,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
+	restart := fs.Bool("restart", false, "with --all: discard what an earlier --all run left and rotate every secret again (refused while a rotation is pending)")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and Docker are root's")
 	var replaced pathList
 	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable)")
@@ -83,6 +83,8 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	switch {
 	case *all && len(named) > 0:
 		return &ui.Problem{Hint: "--all takes no path", Explain: "Name the secrets to rotate, or pass --all for every one. Got " + strings.Join(named, " ") + " too. " + rotateUsage}
+	case *restart && !*all:
+		return &ui.Problem{Hint: "--restart takes --all", Explain: "--restart starts an --all run's full list again, discarding what an earlier --all run left. " + rotateUsage}
 	case !*all && len(named) == 0:
 		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: paisans secrets rotate cluster.standby_password, or apps.<app>.oauth for Mbin's OAuth2 keys; or --all for every one. " + rotateUsage}
 	}
@@ -178,31 +180,29 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		Now: time.Now,
 	}
-	var planKept []keptSecret
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
-		k, err := checkReplaced(env, replacedRs)
-		if err != nil {
+		if err := checkReplaced(env, replacedRs); err != nil {
 			return nil, err
 		}
-		kept = append(kept, k...)
-		run, k, err := planRotation(env, targets, *all)
-		planKept = k
-		return run, err
+		return planRotation(env, targets, *all, *restart)
 	})
 	if err != nil {
 		return err
 	}
-	kept = append(kept, planKept...)
+	for _, k := range run.Kept {
+		kept = append(kept, keptSecret{Path: k.Path, Reason: k.Reason})
+	}
 	for i := range run.Items {
 		run.Items[i].Notes = rotationNotes(cfg, secrets, run.Items[i].Rotator.Path())
 	}
 	showKept(r, kept)
 	if !*execute || r.Verbose() {
 		run.Show(r)
+	} else {
+		run.ShowResume(r)
 	}
 	if len(run.Items) == 0 {
-		r.Result("Nothing to rotate: every secret named is kept. Nothing changed.")
-		return nil
+		return nothingToRotate(r, env, run, *execute)
 	}
 	// Asked before the hosts are claimed, so a refusal leaves even the
 	// registries as they were.
@@ -233,7 +233,31 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	for _, it := range run.Items {
 		done = append(done, it.Rotator.Path())
 	}
-	r.Result("%s rotated: every host that checks or uses each one runs its new value, and %s holds only the new values.", strings.Join(done, ", "), *secretsPath)
+	again := ""
+	if run.Resumed {
+		again = " The secrets the earlier --all run finished were not rotated again."
+	}
+	r.Result("%s rotated: every host that checks or uses each one runs its new value, and %s holds only the new values.%s", strings.Join(done, ", "), *secretsPath, again)
+	return nil
+}
+
+// nothingToRotate ends a run with nothing left to rotate. A resumed --all
+// whose every path left is now kept still has the file recording them, and
+// executing it clears that record, so the next --all is a full one rather
+// than another that does nothing.
+func nothingToRotate(r ui.Reporter, env secretsrotate.Env, run *secretsrotate.Run, execute bool) error {
+	if !run.Resumed {
+		r.Result("Nothing to rotate: every secret named is kept. Nothing changed.")
+		return nil
+	}
+	if !execute {
+		r.Result("Nothing to rotate: every secret the earlier --all run left is kept. Nothing changed. Re-run with --execute to clear what the secrets file records as left.")
+		return nil
+	}
+	if err := run.Execute(env, nil); err != nil {
+		return err
+	}
+	r.Result("Nothing to rotate: every secret the earlier --all run left is kept, and the secrets file no longer records that run. The secrets it finished were not rotated again.")
 	return nil
 }
 
@@ -329,31 +353,18 @@ func showKept(r ui.Reporter, kept []keptSecret) {
 	}
 }
 
-// planRotation plans rs. A rotator whose precheck finds its secret kept
-// (secretsrotate.KeptError: nothing checks it on this deployment) is taken
-// out of the run and listed with its reason, rather than refusing the run,
-// and the rest planned again. Every other refusal stands.
-func planRotation(e secretsrotate.Env, rs []secretsrotate.Rotator, all bool) (*secretsrotate.Run, []keptSecret, error) {
-	var kept []keptSecret
-	for {
-		var run *secretsrotate.Run
-		var err error
-		if all {
-			run, err = secretsrotate.PlanAll(e, rs)
-		} else {
-			run, err = secretsrotate.Plan(e, rs)
-		}
-		var k *secretsrotate.KeptError
-		if err == nil || !errors.As(err, &k) {
-			return run, kept, err
-		}
-		i := slices.IndexFunc(rs, func(r secretsrotate.Rotator) bool { return r.Path() == k.Path })
-		if i < 0 {
-			return nil, nil, err
-		}
-		kept = append(kept, keptSecret{Path: k.Path, Reason: k.Reason})
-		rs = slices.Delete(slices.Clone(rs), i, i+1)
+// planRotation plans rs as a run of named secrets, an --all run, or an
+// --all run started again. A rotator whose precheck finds its secret kept
+// (secretsrotate.KeptError: nothing checks it on this deployment) is listed
+// in the run's Kept with its reason, rather than refusing the run.
+func planRotation(e secretsrotate.Env, rs []secretsrotate.Rotator, all, restart bool) (*secretsrotate.Run, error) {
+	switch {
+	case restart:
+		return secretsrotate.PlanAllRestart(e, rs)
+	case all:
+		return secretsrotate.PlanAll(e, rs)
 	}
+	return secretsrotate.Plan(e, rs)
 }
 
 // refuseReplacedPending refuses --replaced for a secret whose rotation is
@@ -368,10 +379,13 @@ func refuseReplacedPending(s *config.Secrets, replaced []string) error {
 	return nil
 }
 
-// takeReplaced is targets without the secrets --replaced names, and the
-// rotators of those, which must be pasted: only a secret issued elsewhere
-// can have been replaced and applied without a rotation, and a generated
-// one named here would be left as the departed admin knew it.
+// takeReplaced is targets with each secret --replaced names kept in its
+// place rather than rotated (secretsrotate.Keep), or added kept when targets
+// lacks it, and the rotators of those, which must be pasted: only a secret
+// issued elsewhere can have been replaced and applied without a rotation,
+// and a generated one named here would be left as the departed admin knew
+// it. Kept in its place, a path an earlier --all run left is taken off that
+// run's list rather than refused as one with no rotation.
 func takeReplaced(cfg *config.Config, s *config.Secrets, targets []secretsrotate.Rotator, replaced []string, w rotateWiring) ([]secretsrotate.Rotator, []secretsrotate.Rotator, error) {
 	var rs []secretsrotate.Rotator
 	for _, path := range replaced {
@@ -387,30 +401,34 @@ func takeReplaced(cfg *config.Config, s *config.Secrets, targets []secretsrotate
 		}
 		rs = append(rs, r)
 	}
-	out := slices.DeleteFunc(slices.Clone(targets), func(t secretsrotate.Rotator) bool {
-		return slices.ContainsFunc(rs, func(r secretsrotate.Rotator) bool { return r.Path() == t.Path() })
-	})
+	out := slices.Clone(targets)
+	for _, r := range rs {
+		k := secretsrotate.Keep(r, replacedEarlier)
+		if i := slices.IndexFunc(out, func(t secretsrotate.Rotator) bool { return t.Path() == r.Path() }); i >= 0 {
+			out[i] = k
+		} else {
+			out = append(out, k)
+		}
+	}
 	return out, rs, nil
 }
 
-// checkReplaced lists each secret --replaced names as kept, once every host
-// using it is read to run the value the secrets file holds, the same reading
-// a pasted secret's precheck makes. One a host does not run yet, or whose
-// hosts cannot be read, is refused: it still has a value to hand out, and
-// rotating it is how that is done.
-func checkReplaced(e secretsrotate.Env, rs []secretsrotate.Rotator) ([]keptSecret, error) {
-	var kept []keptSecret
+// checkReplaced refuses a secret --replaced names unless every host using it
+// is read to run the value the secrets file holds, the same reading a pasted
+// secret's precheck makes. One a host does not run yet, or whose hosts
+// cannot be read, still has a value to hand out, and rotating it is how that
+// is done. The run lists the rest as kept (takeReplaced).
+func checkReplaced(e secretsrotate.Env, rs []secretsrotate.Rotator) error {
 	for _, r := range rs {
 		ok, err := secretsrotate.HostsRun(e, r)
 		if err != nil {
-			return nil, fmt.Errorf("secrets rotate: --replaced %s, and whether its hosts run the value the secrets file holds cannot be told: %w. Nothing was changed", r.Path(), err)
+			return fmt.Errorf("secrets rotate: --replaced %s, and whether its hosts run the value the secrets file holds cannot be told: %w. Nothing was changed", r.Path(), err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("secrets rotate: --replaced %s, but not every host using it was last applied with the value the secrets file holds, so it still has a value to hand out. Rotate it without --replaced. Nothing was changed", r.Path())
+			return fmt.Errorf("secrets rotate: --replaced %s, but not every host using it was last applied with the value the secrets file holds, so it still has a value to hand out. Rotate it without --replaced. Nothing was changed", r.Path())
 		}
-		kept = append(kept, keptSecret{Path: r.Path(), Reason: replacedEarlier})
 	}
-	return kept, nil
+	return nil
 }
 
 // rotateTargets is the rotators of a run, in order: every secret in scope

@@ -615,3 +615,115 @@ func TestGeneratedDefaults(t *testing.T) {
 		t.Fatalf("promoted %q", v)
 	}
 }
+
+// A resumed --all says so at every verbosity, and that what the earlier run
+// finished is not rotated again.
+func TestResumedAllIsANote(t *testing.T) {
+	const tok = "storage.garage.admin_token"
+	w := newWorld(t, map[string]string{pw: "old", tok: "oldtok"})
+	w.secrets.RotateRemaining = []string{tok}
+	run, err := secretsrotate.PlanAll(w.env(pw, tok), []secretsrotate.Rotator{newRot(w, pw, "a"), newRot(w, tok, "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	run.ShowResume(rec)
+	i := rec.Index("note", "resuming the --all run")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, "not rotated again") || !strings.Contains(rec.Events[i].Extra, "--all --restart") {
+		t.Fatalf("no note of the resume:\n%s", rec.Lines())
+	}
+	rec = &ui.Recorder{}
+	run.Show(rec)
+	if !rec.Has("note", "resuming the --all run") {
+		t.Fatalf("the plan does not note the resume:\n%s", rec.Lines())
+	}
+}
+
+// A resumed --all whose only paths left are pending is still a resume.
+func TestResumedWhenEverythingLeftIsPending(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	w.secrets.RotateRemaining = []string{pw}
+	w.secrets.Rotations = map[string]string{pw: "pw-next"}
+	run, err := secretsrotate.PlanAll(w.env(pw), []secretsrotate.Rotator{newRot(w, pw, "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.Resumed {
+		t.Fatal("not resumed")
+	}
+}
+
+// A path the earlier --all run left that this run has no rotation of is
+// refused, naming it and the way to start again: otherwise it would stay on
+// the list, and every later --all would stop short of it.
+func TestResumedPathWithoutRotatorIsRefused(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	w.secrets.RotateRemaining = []string{"apps.gone.database_password", pw}
+	_, err := secretsrotate.PlanAll(w.env(pw), []secretsrotate.Rotator{newRot(w, pw, "a")})
+	if err == nil || !strings.Contains(err.Error(), "apps.gone.database_password") || !strings.Contains(err.Error(), "--all --restart") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A secret whose precheck finds it kept is listed with why, and a resumed
+// --all with nothing left but kept secrets clears what the file records when
+// executed, so the next --all is a full one.
+func TestKeptIsListedAndClearsWhatIsLeft(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	w.secrets.RotateRemaining = []string{pw}
+	r := newRot(w, pw, "a")
+	r.pre = &secretsrotate.KeptError{Path: pw, Reason: "nothing checks it"}
+	run, err := secretsrotate.PlanAll(w.env(pw), []secretsrotate.Rotator{prechecked{r}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Items) != 0 || len(run.Kept) != 1 || run.Kept[0].Path != pw || run.Kept[0].Reason != "nothing checks it" {
+		t.Fatalf("items %v, kept %v", run.Items, run.Kept)
+	}
+	if !run.Resumed {
+		t.Fatal("not resumed")
+	}
+	if err := run.Execute(w.env(pw), noConfirm); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.secrets.RotateRemaining) != 0 {
+		t.Fatalf("rotate_remaining %v", w.secrets.RotateRemaining)
+	}
+}
+
+// --all --restart discards what an earlier --all left and plans every
+// secret again, recording the full list when executed.
+func TestRestartPlansTheFullList(t *testing.T) {
+	const tok = "storage.garage.admin_token"
+	w := newWorld(t, map[string]string{pw: "old", tok: "oldtok"})
+	w.secrets.RotateRemaining = []string{tok}
+	run, err := secretsrotate.PlanAllRestart(w.env(pw, tok), []secretsrotate.Rotator{newRot(w, pw, "a"), newRot(w, tok, "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Resumed || !run.Restarted || len(run.Items) != 2 {
+		t.Fatalf("resumed %v, restarted %v, items %d", run.Resumed, run.Restarted, len(run.Items))
+	}
+	rec := &ui.Recorder{}
+	run.ShowResume(rec)
+	if !rec.Has("note", "starting --all again") {
+		t.Fatalf("no note of the restart:\n%s", rec.Lines())
+	}
+	if err := run.Execute(w.env(pw, tok), noConfirm); err != nil {
+		t.Fatal(err)
+	}
+	if w.get(pw) == "old" || w.get(tok) == "oldtok" || len(w.secrets.RotateRemaining) != 0 {
+		t.Fatalf("pw %q, tok %q, remaining %v", w.get(pw), w.get(tok), w.secrets.RotateRemaining)
+	}
+}
+
+// --all --restart is refused while a rotation is pending: it has to finish
+// first, and the refusal names the command that finishes it.
+func TestRestartRefusedWhilePending(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	w.secrets.Rotations = map[string]string{pw: "pw-next"}
+	_, err := secretsrotate.PlanAllRestart(w.env(pw), []secretsrotate.Rotator{newRot(w, pw, "a")})
+	if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate "+pw+" --execute") {
+		t.Fatalf("err = %v", err)
+	}
+}
