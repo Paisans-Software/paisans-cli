@@ -193,7 +193,16 @@ the pinned root; `config-head`, the version the local files started from;
 and `signing-key`, the operator's public key that `admin register` recorded. The
 anchor is the newest version that key signed. A cache of the versions gathered
 (`store.git`) and the files a refused pull sets aside (`incoming/`) sit beside
-them, and a `.gitignore` there keeps both out of the operator's own repository.
+them.
+
+All of it but `config-root` is per-operator, and the `.gitignore` paisans
+writes in `.paisans/` keeps it out of a repository the admins share:
+`store.git/`, `incoming/`, `signing-key`, `config-head` and `config-seen`. The
+signing key is the one that matters: a workstation that checked out another
+admin's would start its trust from their signature rather than its own.
+`config-head` and `config-seen` describe this workstation's files and gathers.
+`config-root` may be committed, so the admins share one pin. A `.gitignore`
+already in `.paisans/` is the operator's own and is left as it is.
 
 The three files of a version have fixed names, so `--config` must name a file
 called `paisans.yaml`, with `secrets.enc.yaml` and `.sops.yaml` beside it.

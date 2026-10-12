@@ -31,16 +31,21 @@ const (
 	signingFile   = "signing-key"
 	cacheDir      = "store.git"
 	incomingDir   = "incoming"
-	stateIgnore   = "store.git/\nincoming/\n"
+	stateIgnore   = "store.git/\nincoming/\n" + signingFile + "\n" + headFile + "\n" + seenFile + "\n"
 	stateFileMode = 0o644
 )
 
 func (l Local) state(name string) string { return filepath.Join(l.Dir, stateDir, name) }
 
-// ensureState creates .paisans/ and its .gitignore, which keeps the cache and
-// the incoming files out of the operator's own repository: the cache is
-// this workstation's own memory of every version it has seen, and the
-// incoming files are a pull's scratch.
+// ensureState creates .paisans/ and its .gitignore, which keeps this
+// operator's own state out of the repository the admins share: the cache,
+// this workstation's memory of every version it has seen; the incoming
+// files, a pull's scratch; the signing key, since a workstation that
+// checked out another admin's would anchor its trust on their signature;
+// and the head and the seen revision, which describe this workstation's
+// files and gathers. config-root is left out, so the admins can commit the
+// pin and share it. A .gitignore already there is the operator's, and is
+// left as it is.
 func (l Local) ensureState() error {
 	if err := os.MkdirAll(filepath.Join(l.Dir, stateDir), 0o755); err != nil {
 		return err

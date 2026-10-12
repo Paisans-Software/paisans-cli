@@ -176,7 +176,7 @@ func TestPublishFirstCreatesTheRootAndState(t *testing.T) {
 		t.Fatalf("root %q head %q key %q, want %s and alice's key", root, head, key, sha)
 	}
 	ignore, err := os.ReadFile(filepath.Join(l.Dir, ".paisans", ".gitignore"))
-	if err != nil || !strings.Contains(string(ignore), "store.git/") || !strings.Contains(string(ignore), "incoming/") {
+	if err != nil || string(ignore) != "store.git/\nincoming/\nsigning-key\nconfig-head\nconfig-seen\n" {
 		t.Fatalf(".gitignore %q, %v", ignore, err)
 	}
 	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
