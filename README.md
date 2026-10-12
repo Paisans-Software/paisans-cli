@@ -1892,12 +1892,12 @@ which accepts a caller supplied secret; see *`oidc client create` makes an
 app's client at Pocket ID*.
 
 **The file names its format and its deployment.** Its first two keys are
-`version`, the secrets file's own format (currently 1, and independent of
+`version`, the secrets file's own format (currently 2, and independent of
 `paisans.yaml`'s `version`), and `id`, the id of the deployment it belongs to,
 the same value as `paisans.yaml`'s `id`:
 
 ```yaml
-version: 1
+version: 2
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 cluster:
   ...
@@ -1905,7 +1905,10 @@ cluster:
 
 Every write of the file sets both, whether by `init`, `apply`, `secrets set` or
 `oidc client create`. A file with a newer `version` is refused, since a newer
-toolkit wrote it. A file whose `id` is not `paisans.yaml`'s is refused by every
+toolkit wrote it. A version 1 file is read as it is and written as version 2,
+the first with the backup section: a toolkit that reads only version 1 would
+drop that section, and with it the two keys every backup needs, so it must
+refuse the file instead. A file whose `id` is not `paisans.yaml`'s is refused by every
 command that reads it:
 
 ```

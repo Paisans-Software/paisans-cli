@@ -51,7 +51,12 @@ func WriteSOPSConfig(dir, recipient string) error {
 // anything at all would leave an operator with generated secrets that went
 // nowhere.
 func WriteSecrets(path string, s *Secrets, recipients []string) error {
-	plain, err := yaml.Marshal(s)
+	// Every write is at this toolkit's format, whatever was read, so that an
+	// older toolkit refuses the file rather than dropping what it does not
+	// know (SecretsVersion).
+	stamped := *s
+	stamped.Version = SecretsVersion
+	plain, err := yaml.Marshal(&stamped)
 	if err != nil {
 		return fmt.Errorf("serialising secrets: %w", err)
 	}

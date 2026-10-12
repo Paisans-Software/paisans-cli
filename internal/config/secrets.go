@@ -22,7 +22,13 @@ import (
 // SecretsVersion is the format of the secrets file this toolkit reads and
 // writes. It is the file's own, and changes independently of paisans.yaml's
 // version.
-const SecretsVersion = 1
+//
+// Version 2 adds the backup section. Its restic password and WAL-G key
+// decrypt every backup taken, and nothing can regenerate them, so a toolkit
+// that reads only version 1, and would drop the section on its next write,
+// must refuse the file instead. Version 1 is read as it is, and every write
+// is at this version.
+const SecretsVersion = 2
 
 // Secrets is the decrypted content of secrets.enc.yaml. Nothing here is ever
 // written back out except into a rendered artifact.
