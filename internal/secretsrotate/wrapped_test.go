@@ -3,7 +3,6 @@ package secretsrotate
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -22,33 +21,58 @@ const (
 	newDNSToken = "fixture-not-a-secret-desec-reissued"
 )
 
-// manifestHost is a site that holds the manifest its last apply wrote, and
-// nothing else this package reads. reads is every path read; anything other
-// than a read is a failure, since a precheck changes nothing.
-type manifestHost struct {
-	t        *testing.T
-	site     string
-	manifest string
-	found    bool
-	reads    []string
+// fileHost is a site that holds the files its last apply wrote, and answers
+// only the command that prints the hash of each line of one of them. runs is
+// every command run; anything else is a failure, since a precheck changes
+// nothing and reads nothing but those hashes.
+type fileHost struct {
+	t     *testing.T
+	site  string
+	files map[string]string
+	runs  []string
 }
 
-func (h *manifestHost) Describe() string { return h.site }
-func (h *manifestHost) ReadFile(path string) (string, bool, error) {
-	h.reads = append(h.reads, path)
-	return h.manifest, h.found, nil
+func (h *fileHost) Describe() string { return h.site }
+func (h *fileHost) ReadFile(path string) (string, bool, error) {
+	h.t.Errorf("%s read %s", h.site, path)
+	return "", false, errors.New("not read here")
 }
-func (h *manifestHost) Run(command string) (string, error) {
-	h.t.Errorf("%s ran %q", h.site, command)
-	return "", errors.New("not run here")
+func (h *fileHost) Run(command string) (string, error) {
+	h.runs = append(h.runs, command)
+	out, ok := answerLineHashes(command, h.files)
+	if !ok {
+		h.t.Errorf("%s ran %q", h.site, command)
+		return "", errors.New("not run here")
+	}
+	return out, nil
 }
-func (h *manifestHost) RunInput(command, stdin string) (string, error) {
+func (h *fileHost) RunInput(command, stdin string) (string, error) {
 	h.t.Errorf("%s ran %q with stdin", h.site, command)
 	return "", errors.New("not run here")
 }
-func (h *manifestHost) WriteFile(path, content string, mode uint32) error {
+func (h *fileHost) WriteFile(path, content string, mode uint32) error {
 	h.t.Errorf("%s wrote %s", h.site, path)
 	return errors.New("not written here")
+}
+
+// answerLineHashes answers lineHashCommand from files, as the shell would:
+// the SHA-256 of each line of the named file, or lineHashesAbsent.
+func answerLineHashes(command string, files map[string]string) (string, bool) {
+	rest, ok := strings.CutPrefix(command, "f='")
+	if !ok || !strings.Contains(command, "sha256sum") {
+		return "", false
+	}
+	path, _, _ := strings.Cut(rest, "'")
+	content, ok := files[path]
+	if !ok {
+		return lineHashesAbsent + "\n", true
+	}
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {
+		digest := sha256.Sum256([]byte(line))
+		out.WriteString(hex.EncodeToString(digest[:]) + "  -\n")
+	}
+	return out.String(), true
 }
 
 // wrapWorld is the fixture deployment, whose Caddy runs on vm, the gateway,
@@ -58,7 +82,7 @@ type wrapWorld struct {
 	t     *testing.T
 	cfg   *config.Config
 	store *memStore
-	hosts map[string]*manifestHost
+	hosts map[string]*fileHost
 	log   []string
 	// presented is the DNS token each Caddy site's caddy.env was rendered
 	// with by stage 3's applies.
@@ -76,16 +100,16 @@ func newWrapWorld(t *testing.T) *wrapWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &wrapWorld{t: t, cfg: cfg, store: &memStore{s: s}, hosts: map[string]*manifestHost{}, presented: map[string]string{}, unhealthy: map[string]error{}}
+	w := &wrapWorld{t: t, cfg: cfg, store: &memStore{s: s}, hosts: map[string]*fileHost{}, presented: map[string]string{}, unhealthy: map[string]error{}}
 	for _, site := range cfg.SiteNames() {
-		w.hosts[site] = &manifestHost{t: t, site: site}
+		w.hosts[site] = &fileHost{t: t, site: site}
 	}
 	w.applied(s, cfg.SiteNames()...)
 	return w
 }
 
-// applied records in each site's manifest the files rendered with s, as an
-// apply leaves it.
+// applied writes to each site the files rendered with s, as an apply leaves
+// them.
 func (w *wrapWorld) applied(s *config.Secrets, sites ...string) {
 	w.t.Helper()
 	plan, err := render.Build(w.cfg, s)
@@ -93,18 +117,13 @@ func (w *wrapWorld) applied(s *config.Secrets, sites ...string) {
 		w.t.Fatal(err)
 	}
 	for _, site := range sites {
-		var m render.Manifest
-		m.Version = 1
+		files := map[string]string{}
 		for _, f := range plan.Files {
-			rel, ok := strings.CutPrefix(f.Path, site+"/")
-			if !ok {
-				continue
+			if rel, ok := strings.CutPrefix(f.Path, site+"/"); ok {
+				files["/"+rel] = f.Content
 			}
-			digest := sha256.Sum256([]byte(f.Content))
-			m.Files = append(m.Files, render.ManifestFile{Path: rel, SHA256: hex.EncodeToString(digest[:]), Mode: fmt.Sprintf("%04o", f.Mode)})
 		}
-		data, _ := json.Marshal(m)
-		w.hosts[site].manifest, w.hosts[site].found = string(data), true
+		w.hosts[site].files = files
 	}
 }
 
@@ -157,23 +176,54 @@ func TestDNSTokenUnchangedSinceTheLastApplyIsRefused(t *testing.T) {
 	}
 }
 
-// The precheck reads only each Caddy site's manifest, and so sends nothing
-// secret over ssh: the hash it compares is computed on the workstation.
-func TestDNSTokenPrecheckReadsOnlyTheManifests(t *testing.T) {
+// The precheck runs only the command that prints each line's hash of
+// caddy.env, on each Caddy site, so nothing secret crosses ssh: the hashes it
+// compares are computed on the workstation, and the token is on no command
+// line.
+func TestDNSTokenPrecheckReadsOnlyLineHashes(t *testing.T) {
 	w := newWrapWorld(t)
 	w.setToken(newDNSToken)
 	if _, err := Plan(w.env(), []Rotator{DNSToken()}); err != nil {
 		t.Fatal(err)
 	}
-	manifest := w.cfg.Deployment().Manifest()
 	for name, h := range w.hosts {
-		want := []string(nil)
-		if w.cfg.Sites[name].RunsCaddy() {
-			want = []string{manifest}
+		if !w.cfg.Sites[name].RunsCaddy() {
+			if len(h.runs) != 0 {
+				t.Errorf("%s ran %v", name, h.runs)
+			}
+			continue
 		}
-		if !slices.Equal(h.reads, want) {
-			t.Errorf("%s read %v, want %v", name, h.reads, want)
+		if len(h.runs) != 1 || !strings.Contains(h.runs[0], "/caddy.env'") {
+			t.Errorf("%s ran %v, want the line hashes of its caddy.env", name, h.runs)
 		}
+		for _, c := range h.runs {
+			if strings.Contains(c, newDNSToken) || strings.Contains(c, oldDNSToken) {
+				t.Errorf("%s: a token is on the command line: %s", name, c)
+			}
+		}
+	}
+}
+
+// A carrying file that differs from what the hosts hold only elsewhere, Eg:
+// a comment an upgrade changed, is not a replaced secret: the check is made
+// on the lines that carry the token, so an unreplaced token is still
+// refused.
+func TestDNSTokenUnrelatedChangeInItsFileIsStillRefused(t *testing.T) {
+	w := newWrapWorld(t)
+	for _, h := range w.hosts {
+		for path, content := range h.files {
+			if strings.HasSuffix(path, "/caddy.env") {
+				h.files[path] = "# written by an older toolkit\n" + content
+			}
+		}
+	}
+	_, err := Plan(w.env(), []Rotator{DNSToken()})
+	if err == nil || !strings.Contains(err.Error(), "paisans secrets set external.acme_dns_token") {
+		t.Fatalf("an unreplaced token passed for replaced: %v", err)
+	}
+	ok, err := HostsRun(w.env(), DNSToken())
+	if err != nil || !ok {
+		t.Fatalf("HostsRun %v, %v: the hosts run the file's token", ok, err)
 	}
 }
 
@@ -222,12 +272,12 @@ func TestDNSTokenOneStaleCaddyIsEnough(t *testing.T) {
 	}
 }
 
-// A Caddy site with no manifest, or none recording caddy.env, was never
-// applied, and what it runs cannot be told: refused, naming apply.
+// A Caddy site with no caddy.env was never applied, and what it runs cannot
+// be told: refused, naming apply.
 func TestDNSTokenACaddyNeverAppliedIsRefused(t *testing.T) {
 	w := newWrapWorld(t)
 	w.setToken(newDNSToken)
-	w.hosts["watch"].found = false
+	w.hosts["watch"].files = nil
 	_, err := Plan(w.env(), []Rotator{DNSToken()})
 	if err == nil || !strings.Contains(err.Error(), "watch") || !strings.Contains(err.Error(), "paisans apply") {
 		t.Fatalf("got %v", err)

@@ -3,7 +3,6 @@ package secretsrotate
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -131,12 +130,12 @@ func (p pasted) Users(e Env) []Use {
 
 // Precheck refuses a secret that has not been replaced since the hosts were
 // last applied: rotating it would restart every stack using it for nothing.
-// Each file carrying it is rendered on the workstation from the file, and its
-// hash compared with the one its site's manifest records for it, so only the
-// manifests are read over ssh and nothing secret crosses it. One file
-// rendered with another value is enough to rotate. A site with no record of
-// such a file was never applied, and what it holds cannot be told, so it is
-// refused too, whatever the other sites hold.
+// It is read per secret, not per file (hostsRun), so a carrying file that
+// differs only elsewhere, Eg: a comment an upgrade changed, or an app setting
+// not yet applied, does not pass for a replaced secret. One file whose
+// carrying lines the host does not hold is enough to rotate. A site with no
+// copy of such a file was never applied, and what it holds cannot be told,
+// so it is refused too, whatever the other sites hold.
 func (p pasted) Precheck(e Env) error {
 	unchanged, sites, err := p.hostsRun(e)
 	if err != nil {
@@ -145,7 +144,7 @@ func (p pasted) Precheck(e Env) error {
 	if !unchanged {
 		return nil
 	}
-	return fmt.Errorf("%s is the value every host using it was last applied with (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it. When it was replaced and applied before, as an eviction does with the DNS token, pass --replaced %s instead", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path, p.path)
+	return fmt.Errorf("%s is the value every host using it runs (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it. When it was replaced and applied before, as an eviction does with the DNS token, pass --replaced %s instead", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path, p.path)
 }
 
 // Pasted reports whether r rotates a pasted secret: the DNS token, an SMTP
@@ -158,12 +157,12 @@ func Pasted(r Rotator) bool {
 	return false
 }
 
-// HostsRun reports whether every host using the pasted secret r rotates was
-// last applied with the value the secrets file holds, read the way Precheck
-// reads it: each carrying file rendered here and its hash compared with the
-// one its site's manifest records. It is what `secrets rotate --replaced`
-// accepts a path on, since a secret replaced and applied before has nothing
-// left to hand out. A rotator of a generated secret is an error.
+// HostsRun reports whether every host using the pasted secret r rotates runs
+// the value the secrets file holds, read the way Precheck reads it: each
+// carrying line rendered here, and its hash looked for among the hashes of
+// the lines of the host's copy of its file. It is what `secrets rotate
+// --replaced` accepts a path on, since a secret replaced and applied before
+// has nothing left to hand out. A rotator of a generated secret is an error.
 func HostsRun(e Env, r Rotator) (bool, error) {
 	switch p := r.(type) {
 	case pasted:
@@ -177,8 +176,14 @@ func HostsRun(e Env, r Rotator) (bool, error) {
 }
 
 // hostsRun is whether every host using the secret runs the file's value,
-// and the sites read. A site with no record of a carrying file is an error,
-// since which value it holds cannot be told.
+// and the sites read. Each carrying file is rendered here, and the lines
+// that carry the secret are the ones a render with any other value changes
+// (carriers). The host prints the SHA-256 of every line of its own copy of
+// that file (lineHashes), so only hashes come back over ssh and nothing
+// secret is on its command line. The host runs the value when each carrying
+// line's hash is among them, whatever else in the file differs. A site with
+// no copy of a carrying file is an error, since which value it holds cannot
+// be told.
 func (p pasted) hostsRun(e Env) (bool, []string, error) {
 	s, err := e.Store.Load()
 	if err != nil {
@@ -194,41 +199,66 @@ func (p pasted) hostsRun(e Env) (bool, []string, error) {
 	if len(files) == 0 {
 		return false, nil, fmt.Errorf("nothing the configuration renders carries %s, so no host uses it", p.path)
 	}
-	d := e.Cfg.Deployment()
 	var sites []string
 	changed := false
-	recorded := map[string]map[string]string{}
 	for _, f := range files {
-		if recorded[f.site] == nil {
-			t := e.Sites[f.site]
-			if t == nil {
-				return false, nil, fmt.Errorf("%s renders %s, and there is no way to reach it", f.site, p.path)
-			}
-			content, found, err := t.ReadFile(d.Manifest())
-			if err != nil {
-				return false, nil, fmt.Errorf("reading %s's manifest: %w", f.site, err)
-			}
-			var m render.Manifest
-			if found {
-				if err := json.Unmarshal([]byte(content), &m); err != nil {
-					return false, nil, fmt.Errorf("%s's %s is not readable as a manifest: %w", f.site, d.Manifest(), err)
-				}
-			}
-			recorded[f.site] = map[string]string{}
-			for _, mf := range m.Files {
-				recorded[f.site][mf.Path] = mf.SHA256
-			}
+		t := e.Sites[f.site]
+		if t == nil {
+			return false, nil, fmt.Errorf("%s renders %s, and there is no way to reach it", f.site, p.path)
+		}
+		if !slices.Contains(sites, f.site) {
 			sites = append(sites, f.site)
 		}
-		had := recorded[f.site][f.rel]
-		if had == "" {
-			return false, nil, fmt.Errorf("%s renders %s into %s and has no record of an apply writing it, so which value it holds cannot be told. Run `paisans apply --site %s` first", f.site, p.path, f.rel, f.site)
+		held, found, err := lineHashes(t, "/"+f.rel)
+		if err != nil {
+			return false, nil, fmt.Errorf("%s: reading the lines of %s: %w", f.site, f.rel, err)
 		}
-		if had != f.sha {
-			changed = true
+		if !found {
+			return false, nil, fmt.Errorf("%s renders %s into %s and has no copy of it, so which value it holds cannot be told. Run `paisans apply --site %s` first", f.site, p.path, f.rel, f.site)
+		}
+		for _, line := range f.lines {
+			if !held[line] {
+				changed = true
+			}
 		}
 	}
 	return !changed, sites, nil
+}
+
+// lineHashesAbsent is what lineHashCommand prints for a file the host does
+// not have.
+const lineHashesAbsent = "absent"
+
+// lineHashCommand prints the SHA-256 of each line of path, without its
+// newline, one per line in sha256sum's form, or lineHashesAbsent when there
+// is no such file. printf is the shell's own, so no line reaches an argv.
+func lineHashCommand(path string) string {
+	return fmt.Sprintf(`f=%s; if [ -f "$f" ]; then while IFS= read -r l || [ -n "$l" ]; do printf '%%s' "$l" | sha256sum; done < "$f"; else echo %s; fi`,
+		"'"+strings.ReplaceAll(path, "'", `'\''`)+"'", lineHashesAbsent)
+}
+
+// lineHashes is the set of the SHA-256 of each line of path on t, and
+// whether t has the file.
+func lineHashes(t interface{ Run(string) (string, error) }, path string) (map[string]bool, bool, error) {
+	out, err := t.Run(lineHashCommand(path))
+	if err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(out) == lineHashesAbsent {
+		return nil, false, nil
+	}
+	held := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields[0]) != sha256.Size*2 {
+			return nil, false, fmt.Errorf("unexpected answer: a line is not a SHA-256")
+		}
+		held[fields[0]] = true
+	}
+	return held, true, nil
 }
 
 // Carries reports whether anything cfg renders with s carries the secret at
@@ -240,8 +270,12 @@ func Carries(cfg *config.Config, s *config.Secrets, path string) (bool, error) {
 }
 
 // carrier is a rendered file that carries a secret: its site, its stack, its
-// path relative to the host's / and the hash of its content as rendered.
-type carrier struct{ site, stack, rel, sha string }
+// path relative to the host's /, and the SHA-256 of each of its lines that
+// carries the secret, as rendered.
+type carrier struct {
+	site, stack, rel string
+	lines            []string
+}
 
 // probeValue stands in for a secret to find the files that carry it. It is
 // long and plain so that no renderer refuses it.
@@ -249,6 +283,9 @@ const probeValue = "paisans-rotate-probe-0123456789abcdef0123456789abcdef"
 
 // carriers renders cfg with s and with the secret at path replaced by a
 // probe, and returns every file whose content differs, in render's order.
+// The lines that carry the secret are those of the first render the probe's
+// lacks: found by rendering rather than by looking for the value, they are
+// found however the template quotes or encodes it.
 func carriers(cfg *config.Config, s *config.Secrets, path string) ([]carrier, error) {
 	plan, err := render.Build(cfg, s)
 	if err != nil {
@@ -276,8 +313,21 @@ func carriers(cfg *config.Config, s *config.Secrets, path string) ([]carrier, er
 		if !ok {
 			return nil, fmt.Errorf("%s carries %s outside any stack, and no scoped apply could hand it on", f.Path, path)
 		}
-		digest := sha256.Sum256([]byte(f.Content))
-		out = append(out, carrier{site: site, stack: stack, rel: rel, sha: hex.EncodeToString(digest[:])})
+		probed := map[string]bool{}
+		for _, line := range strings.Split(other[f.Path], "\n") {
+			probed[line] = true
+		}
+		var lines []string
+		for _, line := range strings.Split(f.Content, "\n") {
+			if !probed[line] {
+				digest := sha256.Sum256([]byte(line))
+				lines = append(lines, hex.EncodeToString(digest[:]))
+			}
+		}
+		if len(lines) == 0 {
+			return nil, fmt.Errorf("%s carries %s, and no line of it does alone, so whether a host runs it cannot be read line by line", f.Path, path)
+		}
+		out = append(out, carrier{site: site, stack: stack, rel: rel, lines: lines})
 	}
 	return out, nil
 }

@@ -31,7 +31,7 @@ const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--restart]
 
 // replacedEarlier is how the plan lists a pasted secret named with
 // --replaced.
-const replacedEarlier = "replaced earlier, hosts already run it: the value the secrets file holds is what every host using it was last applied with, so there is nothing to hand out"
+const replacedEarlier = "replaced earlier, hosts already run it: the value the secrets file holds is what every host using it runs, so there is nothing to hand out"
 
 // encryptsStoredData is why Pocket ID's encryption_key and MAS's
 // mas_encryption_secret are kept (docs/specs/2026-10-12-secrets-rotate.md,
@@ -425,7 +425,7 @@ func checkReplaced(e secretsrotate.Env, rs []secretsrotate.Rotator) error {
 			return fmt.Errorf("secrets rotate: --replaced %s, and whether its hosts run the value the secrets file holds cannot be told: %w. Nothing was changed", r.Path(), err)
 		}
 		if !ok {
-			return fmt.Errorf("secrets rotate: --replaced %s, but not every host using it was last applied with the value the secrets file holds, so it still has a value to hand out. Rotate it without --replaced. Nothing was changed", r.Path())
+			return fmt.Errorf("secrets rotate: --replaced %s, but not every host using it runs the value the secrets file holds, so it still has a value to hand out. Rotate it without --replaced. Nothing was changed", r.Path())
 		}
 	}
 	return nil

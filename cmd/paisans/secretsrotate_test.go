@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -75,8 +74,9 @@ type rotateWorld struct {
 	silent map[string]bool
 	// sickEtcd is an etcd that reports an unhealthy endpoint.
 	sickEtcd bool
-	// manifests is each site's apply manifest, as its last apply left it.
-	manifests map[string]string
+	// files is each site's rendered files, by path, as its last apply left
+	// them.
+	files map[string]map[string]string
 }
 
 func (f rotateFake) Describe() string { return "ubuntu@" + f.name + ".local" }
@@ -87,6 +87,12 @@ func (f rotateFake) Run(command string) (string, error) {
 	f.w.mu.Unlock()
 	if f.w.silent[f.name] {
 		return "", fmt.Errorf("ssh: connect to host %s.local port 22: Connection timed out", f.name)
+	}
+	f.w.mu.Lock()
+	files := f.w.files[f.name]
+	f.w.mu.Unlock()
+	if out, ok := answerLineHashes(command, files); ok {
+		return out, nil
 	}
 	switch {
 	case strings.Contains(command, "endpoint health"):
@@ -114,14 +120,6 @@ func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.R
 func (f rotateFake) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path || strings.Contains(path, "wireguard") {
 		return "", false, nil
-	}
-	if path == f.cfg.Deployment().Manifest() {
-		f.w.mu.Lock()
-		m, ok := f.w.manifests[f.name]
-		f.w.mu.Unlock()
-		if ok {
-			return m, true, nil
-		}
 	}
 	return "", false, errors.New("fake: no file here")
 }
@@ -587,9 +585,8 @@ func TestSecretsRotateAllRefusesAnUnfilledFile(t *testing.T) {
 	}
 }
 
-// applied records in every site's manifest the files rendered with the
-// secrets at secretsPath, edited by edit when it is not nil, as an apply
-// leaves it.
+// applied writes to every site the files rendered with the secrets at
+// secretsPath, edited by edit when it is not nil, as an apply leaves them.
 func (w *rotateWorld) applied(t *testing.T, configPath, secretsPath string, edit func(*config.Secrets)) {
 	t.Helper()
 	cfg, err := config.Load(configPath)
@@ -609,24 +606,36 @@ func (w *rotateWorld) applied(t *testing.T, configPath, secretsPath string, edit
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.manifests = map[string]string{}
+	w.files = map[string]map[string]string{}
 	for _, site := range cfg.SiteNames() {
-		var m render.Manifest
-		m.Version = 1
+		w.files[site] = map[string]string{}
 		for _, f := range plan.Files {
-			rel, ok := strings.CutPrefix(f.Path, site+"/")
-			if !ok {
-				continue
+			if rel, ok := strings.CutPrefix(f.Path, site+"/"); ok {
+				w.files[site]["/"+rel] = f.Content
 			}
-			digest := sha256.Sum256([]byte(f.Content))
-			m.Files = append(m.Files, render.ManifestFile{Path: rel, SHA256: hex.EncodeToString(digest[:]), Mode: fmt.Sprintf("%04o", f.Mode)})
 		}
-		data, err := json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		w.manifests[site] = string(data)
 	}
+}
+
+// answerLineHashes answers the command a pasted secret's check runs, which
+// prints the SHA-256 of each line of one file, from files, as the shell
+// would; ok is false for any other command.
+func answerLineHashes(command string, files map[string]string) (string, bool) {
+	rest, ok := strings.CutPrefix(command, "f='")
+	if !ok || !strings.Contains(command, "sha256sum") {
+		return "", false
+	}
+	path, _, _ := strings.Cut(rest, "'")
+	content, ok := files[path]
+	if !ok {
+		return "absent\n", true
+	}
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {
+		digest := sha256.Sum256([]byte(line))
+		out.WriteString(hex.EncodeToString(digest[:]) + "  -\n")
+	}
+	return out.String(), true
 }
 
 // A pasted secret replaced and applied before, which every host using it
@@ -822,5 +831,25 @@ func TestRenderingCommandsRefuseMidRotation(t *testing.T) {
 				t.Errorf("a refused %s reached a host:\n%s", name, reached)
 			}
 		})
+	}
+}
+
+// --replaced reads the hosts per secret: a caddy.env that differs from the
+// render only in a line that does not carry the token, Eg: a comment an
+// upgrade changed, still runs the token the file holds.
+func TestSecretsRotateReplacedIgnoresUnrelatedLines(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	for _, files := range w.files {
+		for path, content := range files {
+			if strings.HasSuffix(path, "/caddy.env") {
+				files[path] = "# written by an older toolkit\n" + content
+			}
+		}
+	}
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--replaced", "external.acme_dns_token"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
 	}
 }
