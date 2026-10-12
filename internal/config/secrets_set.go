@@ -35,8 +35,6 @@ func (s *Secrets) Get(key string) (string, bool) {
 		}[parts[2]]
 	case len(parts) == 3 && parts[0] == "apps":
 		value, _ = s.Apps[parts[1]][parts[2]].(string)
-	case len(parts) == 2 && parts[0] == "paisans" && parts[1] == "config_digest":
-		value = s.Paisans.ConfigDigest
 	case len(parts) == 2 && parts[0] == "external":
 		value = s.External[parts[1]]
 	case len(parts) == 3 && parts[0] == "oidc_clients":
@@ -94,8 +92,6 @@ func (s *Secrets) Set(key, value string) error {
 			s.Apps[parts[1]] = map[string]any{}
 		}
 		s.Apps[parts[1]][parts[2]] = value
-	case len(parts) == 2 && parts[0] == "paisans" && parts[1] == "config_digest":
-		s.Paisans.ConfigDigest = value
 	case len(parts) == 2 && parts[0] == "external" && secretName.MatchString(parts[1]):
 		if s.External == nil {
 			s.External = map[string]string{}
@@ -116,7 +112,7 @@ func (s *Secrets) Set(key, value string) error {
 		}
 		s.OIDCClients[parts[1]] = client
 	default:
-		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, sites.<site>, apps.<app>, external, oidc_clients.<app> and paisans.config_digest", key)
+		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, sites.<site>, apps.<app>, external and oidc_clients.<app>", key)
 	}
 	return nil
 }

@@ -7,17 +7,6 @@ import (
 	"testing"
 )
 
-func TestConfigDigestRoundTrips(t *testing.T) {
-	s := &Secrets{Version: 1, ID: testID}
-	if err := s.Set("paisans.config_digest", "sha256:aa sha256:bb"); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := s.Get("paisans.config_digest")
-	if !ok || got != "sha256:aa sha256:bb" {
-		t.Fatalf("Get = %q, %v", got, ok)
-	}
-}
-
 func TestDecryptSecretsBytesRefusesTampering(t *testing.T) {
 	key := identity(t)
 	store(t, key)
