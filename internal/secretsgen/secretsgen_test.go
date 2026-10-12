@@ -668,6 +668,48 @@ func TestFillGeneratesAHeartbeatTokenPerSite(t *testing.T) {
 	}
 }
 
+// Every Pocket ID app gets an admins heartbeat token, the one each of its
+// instances pushes the admins group's health to each monitor with: the same
+// 32 lowercase hex shape as a site's heartbeat token, and kept once set like
+// it.
+func TestFillGeneratesAnAdminsHeartbeatTokenPerPocketID(t *testing.T) {
+	cfg := load(t)
+	secrets := &config.Secrets{}
+	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+		t.Fatal(err)
+	}
+	shape := regexp.MustCompile(`^[0-9a-f]{32}$`)
+	before := map[string]string{}
+	for _, name := range cfg.AppNames() {
+		token, _ := secrets.Apps[name]["admins_heartbeat_token"].(string)
+		if cfg.Apps[name].Kind != config.KindPocketID {
+			if token != "" {
+				t.Errorf("apps.%s, a %s, was given an admins heartbeat token", name, cfg.Apps[name].Kind)
+			}
+			continue
+		}
+		if !shape.MatchString(token) {
+			t.Errorf("apps.%s.admins_heartbeat_token is %q, not 32 lowercase hex characters", name, token)
+		}
+		before[name] = token
+	}
+	if len(before) == 0 {
+		t.Fatal("the fixture declares no Pocket ID app")
+	}
+	filled, err := secretsgen.Fill(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filled.Changed() {
+		t.Fatalf("a second pass generated %v", filled.Generated)
+	}
+	for name, token := range before {
+		if secrets.Apps[name]["admins_heartbeat_token"] != token {
+			t.Errorf("apps.%s.admins_heartbeat_token was replaced", name)
+		}
+	}
+}
+
 // An app keeping its files on its own disk has no bucket, so init generates
 // no Garage key for it, and a key left in its stanza (Eg: from before it was
 // switched to local) is not checked, because nothing renders it.

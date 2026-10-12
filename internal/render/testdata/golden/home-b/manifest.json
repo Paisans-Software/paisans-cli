@@ -12,8 +12,18 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env",
+      "sha256": "0d088b7d9246e3e08dd4f09917beb82df3560cb15d71d085e58867dc498fc581",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/auth/admins-heartbeat/push.sh",
+      "sha256": "f1ef9bc2fce9c0242289087a9e308879e2891aa71666d28d3aaa0a34438b3145",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "fc1de2483e9e165784cc4c7812a5b993162b593e10d2de1bdc96e68688feae4f",
+      "sha256": "0d22846add6064124951a8d9d35053866013ce4dc8bbd3862bc6e04109f9e7bf",
       "mode": "0644"
     },
     {

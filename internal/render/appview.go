@@ -175,6 +175,12 @@ type appValues struct {
 	// deployment (uptime.go). Populated only for that kind.
 	UptimeSeed string
 
+	// AdminsHeartbeat is true for a Pocket ID app in a deployment with a
+	// monitor, whose stack then runs the admins heartbeat pusher on
+	// HeartbeatImage (adminsheartbeat.go).
+	AdminsHeartbeat bool
+	HeartbeatImage  string
+
 	secrets map[string]any
 	set     map[string]any
 }
@@ -450,6 +456,8 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.PocketID = pid
+		v.AdminsHeartbeat = len(adminsHeartbeatTargets(p.cfg)) > 0
+		v.HeartbeatImage = HeartbeatImage
 	}
 	if planned.Kind == config.KindUptime {
 		seed, err := p.uptimeSeed(planned.Name)

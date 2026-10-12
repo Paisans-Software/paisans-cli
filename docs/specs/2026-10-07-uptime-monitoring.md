@@ -735,3 +735,104 @@ A deployed self check is tagged `managed` and no longer in the seed, so the
 fork deletes it at the next start (`src/lib/seed.js` `reconcileMonitors`,
 lines 114 to 121 at `1.1.0-oidc.4`), which the next apply of the monitor's
 stack causes by restarting it on the changed seed.
+
+
+## Amendment, 2026-10-12: the admin reconciler is two monitors
+
+Operator decision, approved in session. The seed held one check per Pocket ID
+site, `<app> — admin reconciler (<site>)`, on the reconciler's `/healthz`.
+That mixed two things: the reconciler service on that site, and the health of
+the `admins` group, which only the active instance knows. A standby answers
+`/healthz` with 200 `standby`, so the alert moved between sites on a
+failover: the site that went standby showed green, and its history kept the
+outages it had while active.
+
+### Service health, per site
+
+`<app> — admin reconciler (<site>)` keeps its name, URL host, port, interval,
+timeout and threshold, and asks `http://<site address>:1412/livez` expecting
+200. `/livez` answers 200 while the pass loop runs, standby or not, and 503
+once the last pass is stale, so the check reports that site's reconciler
+service and nothing about the group.
+
+### Community health, per app
+
+The seed gains one heartbeat monitor per Pocket ID app, `<app> — admins`,
+with `heartbeat_token` the app's own `apps.<app>.admins_heartbeat_token` and
+the site heartbeat's other fields: `heartbeat_schedule_kind: interval`,
+`interval_seconds: 60`, `heartbeat_grace_seconds: 120`,
+`failure_threshold: 2`. Every monitor seeds it, wherever the app runs.
+
+Each Pocket ID stack, on every site the app runs on, gains an
+`admins-heartbeat` service: the site heartbeat's image,
+`docker.io/curlimages/curl:8.11.1`, running a rendered
+`admins-heartbeat/push.sh`. Once a minute, with the sleep beside the work as
+the site heartbeat has it, it asks `http://reconciler:1412/healthz` on the
+stack's own network (`curl -s -m 10`, no `--retry`, since curl's retry counts
+a 503 as transient) and:
+
+| Reconciler answers | Pushed |
+|---|---|
+| 200 `standby` | nothing |
+| any other 200 | `https://<monitor hostname>/ping/<token>` |
+| 503 | `https://<monitor hostname>/ping/<token>/fail`, the body's one line as a `text/plain` POST body |
+| no answer, or any other status | nothing |
+
+Each push is the site heartbeat's curl (`-fsS -o /dev/null -m 10 --retry 2`,
+no `-k`), one per monitor, in the background. Every instance pushes to the
+same token, so the monitor reflects whichever instance is active, and silence
+past the grace, which is no instance active or none with a working
+reconciler, reads as down.
+
+**What the fork does with it**, read from its source at `v1.1.0-oidc.4` on
+2026-10-11. A status segment of `fail`, `failure` or `down` is a failure
+(`src/routes/ping.js:61-70`), on GET, HEAD, POST and PUT alike (`:118-128`).
+The body of a POST is captured raw when no parser of the app's took it
+(`captureRawBody`, `:16-51`); `src/server.js:60` mounts `express.urlencoded`,
+which would parse a form body into an object, so the reason is sent as
+`text/plain`. The ping router is mounted at `src/server.js:101`, before the
+session middleware. The body is stored with the ping and as
+`last_heartbeat_body` (`src/monitor.js:517-548`), and shown, first line,
+80 characters, in the recent pings on the monitor's page
+(`views/site-detail.ejs:298-299`). It is not the incident's message, which is
+the fixed `heartbeat reported failure (exit 1)` (`src/monitor.js:552-554`):
+an alert says the group is unhealthy, and the monitor's page says why.
+
+**Every monitor, the one on the pushing site included.** The site
+heartbeat leaves out a monitor on its own site, because a push from the
+monitor's own host proves nothing about reaching it. This push carries the
+group's health, the same news from any host, and the active instance may be
+the one beside a monitor, so it goes to every monitor. Rendered only when the
+deployment has a monitor, as the site heartbeat is; with two, every instance
+pushes to both with the one token, which the fork keeps unique within one
+instance only.
+
+The URLs are in `admins-heartbeat/heartbeat.env`, 0600, read through
+`env_file`; the 0644 compose file names neither the token nor the hostnames,
+and the pusher never reads the stack's `.env`, which holds the static API
+key. A change to that env file is `up -d` for the stack, which replaces the
+pusher alone. The pusher's image is the toolkit's own, at an exact version,
+and is not among the images `apply` resolves and pins.
+
+### Secrets
+
+`apps.<app>.admins_heartbeat_token` for every Pocket ID app: 16 random bytes,
+hex, generated at `init`, and by `apply`'s dry run with the other generated
+secrets. Kept once set. `render` refuses a missing or malformed one by name
+when there is a monitor, as for `sites.<site>.heartbeat_token`. It lives under
+the app, so it is listed, pruned and held by the deployment record with the
+app's other secrets.
+
+### Tests
+
+Seed: `/livez` on the per site check; `<app> — admins` with the app's token,
+schedule, grace and threshold, in both seeds with two monitors. Render: the
+pusher service, its 0600 env and its script on every Pocket ID site, the
+token in no compose file, both monitors' URLs with two; no monitor, no pusher
+and no token needed; a missing or malformed token refused by name; the
+pusher's image not listed for pinning. The script runs under `sh` against a
+fake curl: a standby pushes nothing, a healthy group pushes success to each
+monitor with the site heartbeat's options, a 503 pushes `/fail` with the
+reason as plain text, and no answer or another status pushes nothing.
+`secretsgen`: a token per Pocket ID app in shape, kept on a second pass.
+Golden tree regenerated.

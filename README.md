@@ -901,9 +901,17 @@ from this configuration and the fork reconciles it at every start:
   A ping alone reports every one of those the same way. Founder decision;
   the design is the amendment of 2026-10-09 in
   `docs/specs/2026-10-07-uptime-monitoring.md`.
-* every site Pocket ID runs on gets a check on its **admin reconciler**, which
-  fails while the `admins` group has fewer than two members (see *The admin
-  reconciler keeps `admins` equal to Pocket ID's administrators*).
+* every site Pocket ID runs on gets a check on its **admin reconciler**
+  service, `<app> — admin reconciler (<site>)`, which asks `/livez` and
+  expects 200: that site's reconciler is running its passes, standby or not.
+  It says nothing about the `admins` group, which only the active instance
+  knows.
+* every Pocket ID app gets one **admins heartbeat**, `<app> — admins`: a
+  push monitor its active instance feeds from the reconciler's `/healthz`,
+  so it fails while the `admins` group has fewer than two members (see *The
+  admin reconciler keeps `admins` equal to Pocket ID's administrators*), and
+  follows whichever site is active across a failover with one history
+  (below).
 * the monitor does not watch itself: its seed has no public or direct check
   of its own app, and no ping or heartbeat of its own site. A monitor that is
   down cannot report it, and a check from the monitor to its own host can only
@@ -981,6 +989,27 @@ monitor site skips the stage, and `validate` warns that nothing watches it
 needs a second, so it is a warning rather than a refusal. Every one of these
 commands therefore has to reach the monitor's host, and host checks it as
 `apply` would.
+
+**The admins heartbeat is a service beside the reconciler.** Each Pocket ID
+stack, on every site the app runs on, runs `admins-heartbeat`: the
+heartbeat's curl image around a rendered `admins-heartbeat/push.sh` that once
+a minute asks the reconciler's `/healthz` over the stack's own network. A
+standby answers 200 `standby`, and nothing is pushed. The active instance
+answers 200 with the group healthy, pushed as success to
+`https://<monitor hostname>/ping/<token>`, or 503 with one line saying what is
+wrong, pushed to `.../ping/<token>/fail` with that line as a plain text body.
+No answer, or any other status, pushes nothing. Every instance pushes to the
+same token, `apps.<app>.admins_heartbeat_token`, generated at `init` (and by
+`apply`'s dry run, with the other generated secrets) in the site heartbeat
+token's shape and refused by `render` the same way, so the one monitor hears
+whichever instance is active, and silence past the grace means no instance is.
+It pushes to every monitor, the one on its own site included: what it carries
+is the group's health, not the site's reachability, and the active instance
+may be the one beside a monitor. The interval, grace and threshold are the
+site heartbeat's, and a deployment with no monitor renders no pusher. The
+fork keeps the body with the ping and shows its first line in the monitor's
+recent pings; the incident and the alert say only that the heartbeat
+reported a failure.
 
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
@@ -1816,7 +1845,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
@@ -4921,12 +4950,15 @@ Founder decision, 2026-10-08.
 last pass: 200 with two or more members, 503 with fewer, on a failed write,
 with no group named `admins`, when Pocket ID does not answer, before the first
 pass, and once the last pass is more than two and a half hours old. The body
-is one line naming users by username. The uptime kind checks every site's
-reconciler, so a community down to one administrator gets an incident while that
-administrator can still fix it. Docker's healthcheck asks `/livez` instead,
-which fails only when the pass loop has hung: a new deployment has no `admins`
-group until someone makes one, and `apply`'s health gate must not hold the
-Pocket ID stack back on it.
+is one line naming users by username, and a standby's is `standby`, with a
+200. The uptime kind does not ask it directly: the active instance's
+`admins-heartbeat` pushes what it says to the monitor's `<app> — admins`
+(*Monitoring*), so a community down to one administrator gets an incident
+while that administrator can still fix it, from whichever site is active.
+The monitor's per site check asks `/livez`, which fails only when the pass
+loop has hung, and so does Docker's healthcheck: a new deployment has no
+`admins` group until someone makes one, and `apply`'s health gate must not
+hold the Pocket ID stack back on it.
 
 **The reconciler's two writes are approved once, not per write.** An agent
 needs a human for every change to Pocket ID's groups; the reconciler is a
@@ -5095,7 +5127,7 @@ the admin reconciler and the heartbeat's curl image):
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
