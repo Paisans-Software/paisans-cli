@@ -20,8 +20,8 @@ command: what it does, when it is run on its own rather than through the whole
 `apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
-validate and render touch nothing outside the working directory. init writes
-only local files, and reads every site over ssh to settle the mesh subnet.
+validate and render touch nothing outside the working directory, and create
+writes one new file there. init writes only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
@@ -138,6 +138,21 @@ security find-generic-password -s acme -w \
 `validate` loads a declaration and prints every problem it finds, rather than
 stopping at the first, because fixing a file one error per run is miserable. It
 exits non zero when anything was refused.
+
+`create` asks a new deployment's questions at a terminal and writes its
+`paisans.yaml`. `internal/create` holds the questions (`wizard.go`), the three
+named shapes and the capabilities they are asked in (`shapes.go`), the checks
+each answer meets when it is typed (`checks.go`), and the template the file is
+rendered from (`paisans.yaml.tmpl`, through `render.go`, which also decides
+placement, object storage and etcd timings from the answers). The rendered
+bytes go through `config.LoadBytes` and `validate.Check` before they are
+shown, and a refusal leads back to the section its key names
+(`create.SectionFor`). `cmd/paisans/create.go` refuses an existing file and a
+stdin that is not a terminal, and writes with `O_EXCL`. The tests in
+`internal/create` render every named shape, with no apps and with every app,
+gated and not, and require no refusal and exactly the warnings each is known
+to leave; `testdata/` holds one golden file per shape, rewritten with `go test
+./internal/create -update`.
 
 `init` first gives the declaration an `id` if it has none, written as one line
 after `version:` with every other byte left as it was, and never changes one

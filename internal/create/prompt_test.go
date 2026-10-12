@@ -1,0 +1,189 @@
+package create
+
+import (
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+)
+
+func prompter(input string) (*Prompter, *strings.Builder) {
+	var out strings.Builder
+	return NewPrompter(strings.NewReader(input), &out), &out
+}
+
+func TestTextTakesTheDefaultOnEnter(t *testing.T) {
+	p, out := prompter("\n")
+	got, err := p.Text("Domain", "example.org", nil)
+	if err != nil || got != "example.org" {
+		t.Fatalf("Text = %q, %v; want the default", got, err)
+	}
+	if !strings.Contains(out.String(), "Domain [example.org]: ") {
+		t.Errorf("the prompt does not show its default:\n%s", out)
+	}
+}
+
+func TestTextAsksAgainUntilAnswered(t *testing.T) {
+	p, out := prompter("\n  \nExample\n")
+	got, err := p.Text("Name", "", nil)
+	if err != nil || got != "Example" {
+		t.Fatalf("Text = %q, %v", got, err)
+	}
+	if n := strings.Count(out.String(), "an answer is required"); n != 2 {
+		t.Errorf("said an answer is required %d times, want 2:\n%s", n, out)
+	}
+}
+
+func TestTextAsksAgainWithTheCheck(t *testing.T) {
+	p, out := prompter("bad\ngood\n")
+	got, err := p.Text("Word", "", func(s string) error {
+		if s == "bad" {
+			return errors.New("not that one")
+		}
+		return nil
+	})
+	if err != nil || got != "good" {
+		t.Fatalf("Text = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "not that one") {
+		t.Errorf("the check's reason is not shown:\n%s", out)
+	}
+}
+
+func TestOptionalAcceptsBlank(t *testing.T) {
+	p, _ := prompter("\n")
+	got, err := p.Optional("Public address", "", nil)
+	if err != nil || got != "" {
+		t.Fatalf("Optional = %q, %v; want blank", got, err)
+	}
+}
+
+func TestOptionalChecksWhatIsGiven(t *testing.T) {
+	p, _ := prompter("x\n\n")
+	got, err := p.Optional("Address", "", func(s string) error {
+		if s == "x" {
+			return errors.New("no")
+		}
+		return nil
+	})
+	if err != nil || got != "" {
+		t.Fatalf("Optional = %q, %v", got, err)
+	}
+}
+
+func TestYesNo(t *testing.T) {
+	for _, c := range []struct {
+		input string
+		def   bool
+		want  bool
+	}{
+		{"\n", true, true},
+		{"\n", false, false},
+		{"y\n", false, true},
+		{"YES\n", false, true},
+		{"n\n", true, false},
+		{"maybe\nno\n", true, false},
+	} {
+		p, _ := prompter(c.input)
+		got, err := p.YesNo("Ok?", c.def)
+		if err != nil || got != c.want {
+			t.Errorf("YesNo(%q, default %v) = %v, %v; want %v", c.input, c.def, got, err, c.want)
+		}
+	}
+}
+
+func TestYesNoShowsItsDefault(t *testing.T) {
+	p, out := prompter("\n\n")
+	p.YesNo("A", true)
+	p.YesNo("B", false)
+	if !strings.Contains(out.String(), "A [Y/n]: ") || !strings.Contains(out.String(), "B [y/N]: ") {
+		t.Errorf("defaults not shown:\n%s", out)
+	}
+}
+
+func TestChooseNumbersItsOptions(t *testing.T) {
+	p, out := prompter("0\n4\nx\n2\n")
+	got, err := p.Choose("Shape", []string{"one", "two", "three"}, 0)
+	if err != nil || got != 1 {
+		t.Fatalf("Choose = %d, %v; want 1", got, err)
+	}
+	for _, want := range []string{"  1) one\n", "  2) two\n", "  3) three\n", "Choose [1]: "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out.String(), "a number from 1 to 3"); n != 3 {
+		t.Errorf("refused %d answers, want 3:\n%s", n, out)
+	}
+}
+
+func TestChooseTakesTheDefault(t *testing.T) {
+	p, _ := prompter("\n")
+	if got, err := p.Choose("Shape", []string{"one", "two"}, 1); err != nil || got != 1 {
+		t.Fatalf("Choose = %d, %v; want the default 1", got, err)
+	}
+}
+
+func TestLinesEndsAtABlankLine(t *testing.T) {
+	p, _ := prompter("ssh-ed25519 AAAA a@x\n  ssh-ed25519 BBBB b@x  \n\nnext\n")
+	got, err := p.Lines("Keys", nil, nil)
+	if err != nil || !slices.Equal(got, []string{"ssh-ed25519 AAAA a@x", "ssh-ed25519 BBBB b@x"}) {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if rest, _ := p.Text("Next", "", nil); rest != "next" {
+		t.Errorf("Lines read past its blank line: next answer %q", rest)
+	}
+}
+
+func TestLinesKeepsTheDefaultOnABlankFirstLine(t *testing.T) {
+	p, out := prompter("\n")
+	got, err := p.Lines("Keys", []string{"ssh-ed25519 AAAA a@x"}, nil)
+	if err != nil || !slices.Equal(got, []string{"ssh-ed25519 AAAA a@x"}) {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "keeps the 1 given") {
+		t.Errorf("the prompt does not say a blank line keeps the default:\n%s", out)
+	}
+}
+
+func TestLinesRequiresOne(t *testing.T) {
+	p, out := prompter("\nssh-ed25519 AAAA a@x\n\n")
+	got, err := p.Lines("Keys", nil, nil)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "at least one line is required") {
+		t.Errorf("an empty paste was not refused:\n%s", out)
+	}
+}
+
+func TestLinesChecksEachLine(t *testing.T) {
+	p, out := prompter("nonsense\nssh-ed25519 AAAA a@x\n\n")
+	got, err := p.Lines("Keys", nil, func(s string) error {
+		if s == "nonsense" {
+			return errors.New("not a public key")
+		}
+		return nil
+	})
+	if err != nil || !slices.Equal(got, []string{"ssh-ed25519 AAAA a@x"}) {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "not a public key") {
+		t.Errorf("a bad line was not refused:\n%s", out)
+	}
+}
+
+func TestEndOfInputAborts(t *testing.T) {
+	p, _ := prompter("")
+	if _, err := p.Text("Name", "x", nil); !errors.Is(err, ErrAborted) {
+		t.Errorf("Text at end of input = %v, want ErrAborted", err)
+	}
+	p, _ = prompter("partial")
+	if got, err := p.Text("Name", "", nil); err != nil || got != "partial" {
+		t.Errorf("a last line with no newline = %q, %v; want it read", got, err)
+	}
+	p, _ = prompter("ssh-ed25519 AAAA a@x\n")
+	if _, err := p.Lines("Keys", nil, nil); !errors.Is(err, ErrAborted) {
+		t.Errorf("Lines at end of input = %v, want ErrAborted", err)
+	}
+}
