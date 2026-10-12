@@ -68,7 +68,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		}
 		return true, &ui.Problem{
 			Hint:    "the local secrets and the sites' newest version change the same key differently",
-			Explain: fmt.Sprintf("Both changed %s since %s. Nothing was written. Make the local value the one to keep, or the head's, by editing those keys alone: %s A pull merges the rest.", strings.Join(conflicts, ", "), base[:12], secretsConflictAdvice(conflicts)),
+			Explain: fmt.Sprintf("Both changed %s since %s. Nothing was written. %s", strings.Join(conflicts, ", "), base[:12], secretsConflictAdvice(conflicts)),
 		}
 	}
 	for _, p := range changedPaths(baseSecrets, ours, theirSecrets) {
@@ -156,8 +156,11 @@ func secretsMergeProblem(what string) error {
 	return &ui.Problem{Hint: "cannot read " + what + " to merge the secrets", Explain: "It could not be decrypted and parsed on this workstation, and the secrets are merged key by key only with both sides readable. The reason is left out because it can quote a value."}
 }
 
-// secretsConflictAdvice says how to settle conflicting keys: the sections
-// paisans secrets set writes by it, the rest by what records them.
+// secretsConflictAdvice says what settles conflicting keys, and that nothing
+// happens by itself. The pull refuses while any key conflicts, so the head's
+// value is taken by setting the key locally to it and pulling again; paisans
+// secrets set does that for a key it accepts, and a pocket_id_groups key,
+// which apply records, is not one.
 func secretsConflictAdvice(conflicts []string) string {
 	var settable, recorded bool
 	for _, p := range conflicts {
@@ -167,12 +170,14 @@ func secretsConflictAdvice(conflicts []string) string {
 			settable = true
 		}
 	}
-	var out []string
+	out := []string{"The pull refuses while a key conflicts and takes neither side's value by itself.",
+		"To take the head's value, set that key locally to the head's value and pull again."}
 	if settable {
-		out = append(out, "set the value to keep with paisans secrets set (keeping the local value means setting it again after a pull of the head's).")
+		out = append(out, "paisans secrets set does it for a key it accepts.")
 	}
 	if recorded {
-		out = append(out, "pocket_id_groups keys are recorded by apply; taking the head's value is the default, and apply records it again.")
+		out = append(out, "A pocket_id_groups key is recorded by apply, and paisans secrets set does not accept it; set it in the file with sops.")
 	}
+	out = append(out, "To keep the local value, keep it: the pull merges the rest once no key conflicts, and the merge is then published.")
 	return strings.Join(out, " ")
 }
