@@ -3922,8 +3922,10 @@ A removal is shown and not approved, because it only takes away. The review
 is one line per site, pending when anything needs approval, with every change
 under it, keys first, at every verbosity, with `--execute` as well as without.
 `host prepare` reviews the login and the keys; `apply --site` the images and
-the web server's directory, narrowed to the named stacks by `--only`; `apply`
-with no `--site` every part of every site, since it runs both.
+the web server's directory, narrowed to the named stacks by `--only`; `site
+add` the new site's images, since its stage 4 applies that site's whole
+render, recording them once that stage's gate has passed; `apply` with no
+`--site` every part of every site, since it runs them all.
 
 **The dry run shows the review and asks nothing.** It ends with what
 `--execute` will ask for.

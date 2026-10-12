@@ -359,7 +359,7 @@ func runStep(args []string) error {
 	case args[0] == "apply":
 		return runApply(args[1:], os.Stdin, os.Stdout)
 	case args[0] == "site" && args[1] == "add":
-		return runSiteAdd(args[2:])
+		return runSiteAdd(args[2:], os.Stdin, os.Stdout)
 	case args[0] == "storage" && args[1] == "init":
 		return runStorageInit(args[2:])
 	case args[0] == "storage" && args[1] == "add":

@@ -50,7 +50,7 @@ holds this one's token, WireGuard interface or listen port, or an overlapping
 mesh subnet (see *A deployment has an id, and a host knows every deployment on
 it* in `README.md`).
 
-With `--execute`, `apply`, `apply --site` and `host prepare` first show what
+With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first show what
 `paisans.yaml` grants on each host they reach that the host has not had (a key
 that may log in, an image that runs, the directory the operator's web server
 reads), and, when anything is added or changed, ask for the word `approve` at
@@ -426,6 +426,12 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   `--secrets`, `--execute`, `--sudo`. No `--ssh`, since it reaches several
   hosts.
 * **Hosts:** every site.
+* **Review:** stage 4 applies the new site's whole render, so `site add`
+  reviews the new site's images as `apply --site` does: shown under `review
+  what paisans.yaml grants` before the stages, asked for as `approve` at a
+  terminal with `--execute`, refused without one, and recorded once stage 4's
+  gate has passed. As a step of the whole apply it asks nothing and refuses
+  an image the run's review did not approve.
 * **`--execute`:** runs the stages, stopping at the first gate that fails; a
   re-run plans only what differs and resumes.
 

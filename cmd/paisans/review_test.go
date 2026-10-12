@@ -392,3 +392,69 @@ func TestAStepChecksTheRunsApproval(t *testing.T) {
 		t.Errorf("dry run: %v %v", s, err)
 	}
 }
+
+// joinConfig is the fixture declared for site add to join home-b, as
+// fixtureRuns declares it: home-b holds the data role alone, and every site
+// dials the others directly.
+func joinConfig(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := strings.Replace(string(body), "    endpoint: vm.example.org:51820\n", "    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
+	s = strings.Replace(s, "  home-a:\n    roles: [data, apps]\n", "  home-a:\n    roles: [data, apps]\n    endpoint: 192.0.2.1:51820\n", 1)
+	joined := strings.Replace(s, "  home-b:\n    roles: [data, apps]", "  home-b:\n    roles: [data]", 1)
+	if joined == s {
+		t.Fatal("the fixture no longer declares the sites this edit expects")
+	}
+	path := filepath.Join(t.TempDir(), "paisans.yaml")
+	if err := os.WriteFile(path, []byte(joined), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// site add applies the new site's whole render in its stage 4, so it
+// reviews the new site's images as apply --site does: with something to
+// approve and no terminal it is refused before any host is claimed, and the
+// dry run shows the review and asks nothing.
+func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
+	path := joinConfig(t)
+	log := loggingSSH(t, "")
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	rec := recordConverge(t)
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") || !strings.Contains(problemText(err), "paisans site add home-b --execute") {
+		t.Fatalf("got %v\n%s", err, rec.Lines())
+	}
+	if claimed(logged(t, log)) {
+		t.Errorf("the hosts were claimed before the review was approved:\n%s", logged(t, log))
+	}
+	if !strings.Contains(rec.Lines(), "explain: + image infra/") || strings.Contains(rec.Lines(), "explain: + key ") {
+		t.Errorf("the review is not the new site's images:\n%s", rec.Lines())
+	}
+
+	rec = recordConverge(t)
+	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}, noTerminalStdin(), io.Discard)
+	if !strings.Contains(rec.Lines(), "--execute asks for approve") {
+		t.Errorf("the dry run does not show the review:\n%s", rec.Lines())
+	}
+}
+
+// As a step of apply with no --site, site add checks its review against the
+// run's approval rather than asking, and refuses an image the run did not
+// approve.
+func TestSiteAddChecksTheRunsApproval(t *testing.T) {
+	path := joinConfig(t)
+	log := loggingSSH(t, "")
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
+	recordConverge(t)
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || claimed(logged(t, log)) {
+		t.Errorf("err %v, claimed %v", err, claimed(logged(t, log)))
+	}
+}

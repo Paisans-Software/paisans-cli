@@ -301,7 +301,7 @@ func main() {
 	case "site":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "add":
-			err = runSiteAdd(os.Args[3:])
+			err = runSiteAdd(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
 		default:

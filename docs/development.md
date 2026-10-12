@@ -76,8 +76,8 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 (`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
-`apply`, `apply --site` and `host prepare` review what `paisans.yaml` grants
-before their first change. `internal/grant` computes a site's grant from the
+`apply`, `apply --site`, `host prepare` and `site add` review what
+`paisans.yaml` grants before their first change. `internal/grant` computes a site's grant from the
 configuration and the render (the login user, every key of the admins
 `ssh.keys` names, every rendered service's image, and the web server's
 `include_dir`), compares it with the host's record,
@@ -1503,7 +1503,7 @@ before.
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
-* **No flag answers the review.** `apply` and `host prepare` ask for
+* **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
   `approve` at a terminal when what `paisans.yaml` grants adds or changes
   something, and refuse without one, before the claim. A flag that answered
   it would end up in every script, and approving is the control. Tests in
