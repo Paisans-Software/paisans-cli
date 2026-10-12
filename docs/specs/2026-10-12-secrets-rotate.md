@@ -1,6 +1,7 @@
 # `paisans secrets rotate`
 
-Date: 2026-10-12. Status: draft, for the founder. The third piece of the work
+Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12, with
+the decisions under *Settled*. The third piece of the work
 that begins with docs/specs/2026-10-11-config-review.md and
 docs/specs/2026-10-11-site-evict.md: after an admin is evicted, or leaves
 having been able to read `secrets.enc.yaml`, every secret they could read is
@@ -104,10 +105,17 @@ point.
 | a pasted secret whose value in the file has not changed since the hosts were last applied | rotating it would restart services for nothing; replace it at the issuer and with `secrets set` first |
 | a `.next` value whose stage cannot be read from the hosts | a person has to look before anything else changes |
 
-## Decisions this needs
+## Settled
 
-1. The scope, and keeping Pocket ID's and MAS's encryption secrets out of it.
-2. The typed `sign out` confirmation, and `--all` including the rotations that
-   sign members out.
-3. Storage downtime for Garage's `rpc_secret`, accepted with the plan saying so,
-   or refused unless asked for by name.
+Founder decisions, 2026-10-12, in session:
+
+1. **Scope.** Every generated secret that can be replaced without losing data,
+   and the pasted secrets once replaced at their issuer. Pocket ID's
+   `encryption_key` and Matrix Authentication Service's `mas_encryption_secret`
+   are kept, and the plan says why.
+2. **Signing members out.** `--all` includes the rotations that sign members
+   out, and a run that includes one asks the operator to type `sign out` at a
+   terminal first.
+3. **Garage's `rpc_secret`.** `--all` includes it: every Garage node restarts
+   with the new value together, and the plan says storage is unavailable for
+   that restart.
