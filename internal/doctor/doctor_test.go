@@ -569,3 +569,16 @@ func TestAllowlist(t *testing.T) {
 		t.Errorf("no command to allow it: %s", more)
 	}
 }
+
+// What doctor prints of a host's list and its error shows a control
+// character as an escape.
+func TestAllowlistShowsControlCharactersEscaped(t *testing.T) {
+	cfg := fixture(t)
+	got := Allowlist(cfg, []AllowlistProbe{{Site: "watch", Err: "refused \x1b[2K\x1b[1Aok"}})
+	for _, f := range got {
+		text := f.Line + strings.Join(f.More, " ")
+		if strings.ContainsRune(text, 0x1b) || !strings.Contains(text, `\x1b[2K`) {
+			t.Errorf("printed raw: %q", text)
+		}
+	}
+}

@@ -383,3 +383,27 @@ func testDeployment(t *testing.T) deployment.Deployment {
 	t.Helper()
 	return deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
 }
+
+// A control character in what the review prints, from the configuration or
+// from the record a host holds, is shown as an escape: a comment carrying
+// ESC cannot redraw the review's lines.
+func TestReviewLinesShowControlCharactersEscaped(t *testing.T) {
+	esc := "\x1b[1A\x1b[2K~ key"
+	g := grant.Grant{Login: "ubuntu",
+		Keys:   []grant.Key{{Admin: "bob", Fingerprint: "SHA256:b", Comment: "bob" + esc}},
+		Images: []grant.Image{{Stack: "talk", Service: "app", Reference: "ghcr.io/x/mbin:1.1" + esc}},
+	}
+	rec := grant.Record{
+		Keys:   &grant.KeysPart{Login: "ubuntu", Entries: []grant.Key{{Admin: "carol", Fingerprint: "SHA256:c", Comment: "carol" + esc}}},
+		Images: &grant.ImagesPart{Entries: []grant.Image{{Stack: "talk", Service: "app", Reference: "ghcr.io/x/mbin:1.0" + esc}}},
+	}
+	rev := grant.Compare("home-a", g, rec, grant.AllScope)
+	if len(rev.Changes) != 3 {
+		t.Fatalf("changes: %+v", rev.Changes)
+	}
+	for _, c := range rev.Changes {
+		if strings.ContainsRune(c.Line(), 0x1b) || !strings.Contains(c.Line(), `\x1b[1A`) {
+			t.Errorf("printed raw: %q", c.Line())
+		}
+	}
+}

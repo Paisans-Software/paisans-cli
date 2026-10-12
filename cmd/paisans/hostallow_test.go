@@ -217,6 +217,33 @@ func TestHostDisallowWithoutAListDoesNothing(t *testing.T) {
 	}
 }
 
+// A comment on the host's list or in a sidecar is the host's text, not the
+// toolkit's, and is printed with any control character shown as an escape.
+func TestHostAllowShowsHostTextEscaped(t *testing.T) {
+	cfg := withBob(t)
+	esc := "\x1b[1A\x1b[2Kallow"
+	h := &allowFake{files: map[string]string{
+		"/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned": "added " + fp(t, carolKey) + " carol" + esc + "\n",
+	}}
+	fakeAllowHost(t, h)
+	rec, _, err := allowRun(t, runHostAllow, noTerminalStdin(), "home-a", "bob", "--config", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsRune(rec.Lines(), 0x1b) || !strings.Contains(rec.Lines(), `\x1b[1A`) {
+		t.Errorf("host allow printed host text raw:\n%q", rec.Lines())
+	}
+	h = &allowFake{files: map[string]string{allowPath: fp(t, bobKey) + " bob" + esc + "\n" + fp(t, carolKey) + " carol" + esc + "\n"}}
+	fakeAllowHost(t, h)
+	rec, _, err = allowRun(t, runHostDisallow, noTerminalStdin(), "home-a", "bob", "--config", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsRune(rec.Lines(), 0x1b) || !strings.Contains(rec.Lines(), `\x1b[1A`) {
+		t.Errorf("host disallow printed host text raw:\n%q", rec.Lines())
+	}
+}
+
 func readFixture(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(fixtureConfig())

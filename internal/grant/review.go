@@ -3,6 +3,8 @@ package grant
 import (
 	"fmt"
 	"strings"
+
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // Op is how an entry of the grant compares with the record.
@@ -31,8 +33,11 @@ type Change struct {
 // NeedsApproval reports whether the change adds or changes something.
 func (c Change) NeedsApproval() bool { return c.Op != Removed }
 
-// Line is the change as the review prints it.
-func (c Change) Line() string { return string(c.Op) + " " + c.Text }
+// Line is the change as the review prints it. Its text comes from the
+// configuration and from the host's record, so any control character in it
+// is shown as an escape (ui.Visible): a comment carrying ESC cannot redraw
+// the review.
+func (c Change) Line() string { return string(c.Op) + " " + ui.Visible(c.Text) }
 
 // Review is what one site's grant changes from its record: keys first, then
 // images, then the web server. An entry in both and the same is not in it.

@@ -129,12 +129,23 @@ func adminKeys(cfg *config.Config, configPath string, names []string) ([]hostpre
 func adminNames(cfg *config.Config) []string { return slices.Sorted(maps.Keys(cfg.Admins)) }
 
 // showList is the file as it would be, at every verbosity: what the owner
-// is about to put on the host.
+// is about to put on the host. Its comments are the host's text and the
+// configuration's, so each line is shown with any control character
+// escaped.
 func showList(r ui.Reporter, path, content string) {
 	r.Step("write "+path).End(ui.Pending, "")
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
-		r.Explain(line)
+		r.Explain(ui.Visible(line))
 	}
+}
+
+// allowLabel is one line of a list as a step names it, with any control
+// character in it escaped: a comment is the host's text or an admin's.
+func allowLabel(l hostprep.AllowLine) string {
+	if l.Comment == "" {
+		return ui.Visible(l.Fingerprint)
+	}
+	return ui.Visible(l.Fingerprint + " (" + l.Comment + ")")
 }
 
 // writeList asks for the site's name and writes the list, unless it changed
@@ -197,7 +208,7 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	var added []hostprep.AllowLine
 	for _, k := range keys {
-		s := r.Step("allow " + k.Fingerprint + " (" + k.Comment + ")")
+		s := r.Step("allow " + allowLabel(k))
 		if hostprep.Allows(lines, k.Fingerprint) {
 			s.Done("already listed")
 			continue
@@ -206,7 +217,7 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 		added = append(added, k)
 	}
 	for _, c := range seeded {
-		s := r.Step("keep " + c.Fingerprint + " (" + c.Comment + ")")
+		s := r.Step("keep " + allowLabel(c))
 		s.Detail("already authorized for %s by a deployment on this host; listed so that making the list refuses no access the host has", t.user)
 		s.End(ui.Pending, "a deployment claims it")
 	}
@@ -277,7 +288,7 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 	taken := 0
 	for _, l := range lines {
 		if hostprep.Allows(drop, l.Fingerprint) {
-			r.Step("disallow "+l.Fingerprint+" ("+l.Comment+")").End(ui.Pending, "")
+			r.Step("disallow "+allowLabel(l)).End(ui.Pending, "")
 			taken++
 			continue
 		}
@@ -285,7 +296,7 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	for _, d := range drop {
 		if !hostprep.Allows(lines, d.Fingerprint) {
-			r.Step("disallow " + d.Fingerprint).Done("not on the list")
+			r.Step("disallow " + ui.Visible(d.Fingerprint)).Done("not on the list")
 		}
 	}
 	if taken == 0 {

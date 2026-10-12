@@ -3898,7 +3898,10 @@ email, or an image reference holding a control character (Eg: ESC, DEL, or a
 C1 control such as CSI) is refused when the file is loaded, naming the field.
 A terminal reads those characters as commands, so a comment carrying one could
 move the cursor and redraw a review line, Eg: dress a `+ key` up as another
-admin's `~ key`.
+admin's `~ key`. A host file is not loaded through that check, so as a second
+line, everything the review, `host allow`, `host disallow` and `doctor` print
+from the configuration or from a host shows such a character as an escape
+(Eg: `\x1b`), never raw.
 
 **Each host records the grant last applied**, in
 `/var/lib/paisans/granted.<token>.json`, root's and 0644. It holds
