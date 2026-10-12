@@ -27,7 +27,9 @@ func fakeRunGrants(t *testing.T, stale ...string) {
 		}
 		return grant.Update(grant.Record{}, g, grant.AllScope, time.Unix(0, 0), ""), nil
 	}
-	convergeRender = func(cfg *config.Config, secrets *config.Secrets) (*render.Plan, error) { return render.Build(cfg, secrets) }
+	convergeRender = func(cfg *config.Config, secrets *config.Secrets) (*render.Plan, error) {
+		return render.Build(cfg, secrets)
+	}
 	t.Cleanup(func() { convergeRecord, convergeRender = saved, savedRender })
 }
 

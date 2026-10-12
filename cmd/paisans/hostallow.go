@@ -131,7 +131,7 @@ func adminNames(cfg *config.Config) []string { return slices.Sorted(maps.Keys(cf
 // showList is the file as it would be, at every verbosity: what the owner
 // is about to put on the host.
 func showList(r ui.Reporter, path, content string) {
-	r.Step("write " + path).End(ui.Pending, "")
+	r.Step("write "+path).End(ui.Pending, "")
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
 		r.Explain(line)
 	}
@@ -277,7 +277,7 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 	taken := 0
 	for _, l := range lines {
 		if hostprep.Allows(drop, l.Fingerprint) {
-			r.Step("disallow " + l.Fingerprint + " (" + l.Comment + ")").End(ui.Pending, "")
+			r.Step("disallow "+l.Fingerprint+" ("+l.Comment+")").End(ui.Pending, "")
 			taken++
 			continue
 		}
