@@ -264,6 +264,11 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 		// signs everyone out.
 		keys = append(keys, "admin_password", "session_secret")
 	}
+	if app.Kind == config.KindInvite {
+		// email_hash_key keys the hash of a declined address; session_key
+		// signs the sign-in cookie (docs/specs/2026-10-12-invite-service.md).
+		keys = append(keys, "email_hash_key", "session_key")
+	}
 	if app.Kind == config.KindSynapse {
 		// Three, because the homeserver no longer authenticates anyone and
 		// Matrix Authentication Service in front of it needs its own.

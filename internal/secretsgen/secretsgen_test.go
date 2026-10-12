@@ -780,3 +780,37 @@ func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
 		t.Errorf("a key on a local storage app was checked: %v", err)
 	}
 }
+
+// withInvite is the fixture deployment with an invite app added beside its
+// other apps, pinned to the same site as the uptime fixture.
+func withInvite(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := load(t)
+	cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Hostname: "invite.example.org",
+		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
+		Settings:  map[string]any{"admin_group": "admins"}}
+	return cfg
+}
+
+// The invite service's two keys are generated once: the email hash key keys
+// the hash of every declined address, and the session key signs the sign in
+// cookie, so a regenerated one signs everyone out and a regenerated hash key
+// stops matching the addresses already recorded.
+func TestInviteKeysAreStable(t *testing.T) {
+	cfg := withInvite(t)
+	s := &config.Secrets{}
+	if _, err := secretsgen.Fill(cfg, s); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.Apps["invite"]["session_key"].(string)
+	hashKey, _ := s.Apps["invite"]["email_hash_key"].(string)
+	if len(first) != 43 || len(hashKey) != 43 {
+		t.Fatalf("want 32 bytes as unpadded base64url: session %q, hash %q", first, hashKey)
+	}
+	if _, err := secretsgen.Fill(cfg, s); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.Apps["invite"]["session_key"].(string); again != first {
+		t.Fatal("init must never replace an existing key")
+	}
+}
