@@ -65,6 +65,9 @@ type view struct {
 	Replication int
 	Apps        []appView
 	SMTP        SMTP
+	// MonitorBesideGateway is the status page sharing the gateway's machine,
+	// which its comment in the file says.
+	MonitorBesideGateway bool
 }
 
 type siteView struct {
@@ -118,6 +121,7 @@ func build(a Answers, id string) view {
 		}
 		if monitor == "" && s.Has(config.RoleMonitor) {
 			monitor = s.Name
+			v.MonitorBesideGateway = s.Has(config.RoleGateway)
 		}
 		// The chat server binds the ports Patroni and bg_mon do, so it goes
 		// where no data is, and off a monitor that is not the gateway, which

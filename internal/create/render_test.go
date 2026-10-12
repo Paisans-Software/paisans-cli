@@ -204,4 +204,7 @@ func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) 
 	if got := rules(check(t, data).Warnings()); !slices.Contains(got, "monitor-shares-a-site") {
 		t.Errorf("warnings %v", got)
 	}
+	if strings.Contains(string(data), "on a machine of its own") || !strings.Contains(string(data), "beside the gateway") {
+		t.Errorf("the status page's comment does not say where it runs:\n%s", data)
+	}
 }
