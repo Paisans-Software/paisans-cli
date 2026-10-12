@@ -1,0 +1,161 @@
+# paisans.yaml: the whole deployment, declared. Written by `paisans create`.
+#
+# This file is plain and safe to commit. It holds no secrets: those live in
+# secrets.enc.yaml, encrypted with sops and age, which `paisans init` makes.
+#
+# It declares intent, never status. Edit it and run `paisans apply` to change
+# the deployment; examples/paisans.example.yaml in the toolkit explains every
+# key this file can hold.
+
+version: 1
+# The deployment's identity. Never changes.
+id: {{.ID}}
+
+community:
+  name: {{q .Name}}
+  # ONE-WAY DOOR. Federation identity is the hostname, and remote instances
+  # record it. Changing this after federating is a rebuild, not a rename.
+  domain: {{q .Domain}}
+
+mesh:
+  # The private network every site sits on. `paisans init` checks it against
+  # every site before the first apply, and when it overlaps anything there it
+  # rolls another 10.x.y.0/24, moving each site's address with it. Once
+  # deployed it never changes.
+  subnet: {{.Subnet}}
+
+# Certificates are always issued over DNS-01, so the gateway can hold valid
+# certificates before DNS points at it. This names where the domain's DNS
+# lives; its API token is owed to the secrets file, and `paisans init` says so.
+acme:
+  provider: {{.Provider}}
+
+# The people who may log in to the sites. Each becomes a Pocket ID
+# administrator on the first apply, and each key below an authorized key on
+# every site that names them.
+admins:
+{{- range .Admins}}
+  {{.ID}}:
+    name: {{q .Name}}
+    email: {{q .Email}}
+    keys: |
+{{- range .Keys}}
+      {{.}}
+{{- end}}
+{{- end}}
+
+# Every machine. Each address is the site's WireGuard address inside
+# mesh.subnet, stable forever, and each ssh section is how the toolkit reaches
+# the site: a public key per admin, never a private one.
+sites:
+{{- range .Sites}}
+  {{.Name}}:
+    roles: [{{.RoleList}}]
+    address: {{.Address}}
+{{- if .Endpoint}}
+    # Dialled by the other sites: a dynamic DNS name and a forwarded UDP port.
+    endpoint: {{q .Endpoint}}
+{{- end}}
+{{- if .PublicAddress}}
+    # What the internet reaches this site on. `paisans dns init` points
+    # hostnames at it, and the other sites dial it.
+    public_address: {{q .PublicAddress}}
+{{- end}}
+    ssh:
+{{- if .SSHHost}}
+      host: {{q .SSHHost}}
+{{- end}}
+      user: {{q .SSHUser}}
+      keys: [{{$.AdminIDs}}]
+{{- end}}
+{{- if .Synchronous}}
+
+# Every data site holds the database, and Patroni fails it over between them.
+cluster:
+  # A commit waits for a second copy, so failover loses no committed write.
+  synchronous: true
+  # Degrade to standalone rather than block writes while a site is down.
+  synchronous_strict: false
+{{- end}}
+{{- if gt .Voters 1}}
+
+etcd:
+  # The defaults (100ms / 1000ms) assume one datacenter. Over home
+  # connections they start an election at every hiccup. Identical on every
+  # member; measure the real round trip through the mesh and tune.
+  heartbeat_ms: 200
+  election_timeout_ms: 2000
+{{- end}}
+{{- if .Garage}}
+
+storage:
+  # Object storage for the apps' uploads. Each app serves its objects on a
+  # hostname beside its own, <label>-media.{{.Domain}}, which needs a DNS
+  # record too; `paisans dns init` makes it.
+  garage:
+    # Preference order: the first site takes every write. Put the site with
+    # the best upload first.
+    sites: [{{range $i, $s := .Garage}}{{if $i}}, {{end}}{{$s}}{{end}}]
+{{- if eq .Replication 1}}
+    # Copies of each object. One copy on one site is lost with that site, and
+    # validate warns about it until a second Garage site is added.
+{{- else}}
+    # Copies of each object. Two copies on two sites means an upload needs
+    # both: losing one keeps the database up through failover but stops
+    # uploads, and validate warns about it until a third site is added.
+{{- end}}
+    replication: {{.Replication}}
+{{- end}}
+
+# Every app is rendered to trust the mesh subnet for forwarded client
+# addresses, never one host, so the gateway role can move later.
+apps:
+{{- range .Apps}}
+  {{.Key}}:
+    kind: {{.Kind}}
+    hostname: {{q .Hostname}}
+    placement: {{.Placement}}
+{{- if .MembersOnly}}
+    # Behind the gate, which admits members and admins. The toolkit runs the
+    # gate itself, at gate.{{$.Domain}} on the gateway.
+{{- if or (eq .Kind "mbin") (eq .Kind "writefreely")}}
+    # Federation still works: ActivityPub goes to the app, which checks
+    # every signature.
+{{- end}}
+    gated: true
+{{- end}}
+{{- if eq .Kind "pocket-id"}}
+    # Sign in for every other app. Its settings are rendered into its
+    # configuration, and its admin page for them is read only.
+    settings:
+      # Avatars and branding, about a megabyte: in Postgres they ride
+      # replication, and sign in gains no dependency on object storage.
+      file_backend: database
+      # Also the sender name on its mail.
+      app_name: {{q $.Name}}
+{{- end}}
+{{- if eq .Kind "element"}}
+    settings:
+      # The chat server's API hostname, which becomes base_url.
+      homeserver: {{q .Homeserver}}
+      brand: {{q $.Name}}
+{{- end}}
+{{- if eq .Kind "uptime"}}
+    # The uptime monitor, on a machine of its own so it does not go dark with
+    # the gateway it reports on. Its checks are generated from this file.
+    settings:
+      # Only members of this group may sign in.
+      admin_group: admins
+{{- end}}
+{{- end}}
+
+# How the apps that send mail send it: Pocket ID's login links and codes, the
+# status page's alerts, Mbin's account mail. The password is a secret, set
+# with `paisans secrets set external.smtp_password`.
+smtp:
+  host: {{q .SMTP.Host}}
+  port: {{.SMTP.Port}}
+  security: {{.SMTP.Security}}
+  username: {{q .SMTP.Username}}
+  from_address: {{q .SMTP.FromAddress}}
+  from_name: {{q .SMTP.FromName}}

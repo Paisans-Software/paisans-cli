@@ -1,7 +1,7 @@
 // Command paisans renders, checks and applies a paisans deployment
 // declaration.
 //
-// validate and render touch nothing outside the working directory. init
+// validate, render and create touch nothing outside the working directory. init
 // reads every site to choose a mesh subnet, and writes only local files.
 // `host prepare`, `apply` and `storage init` reach a machine: each reads it to
 // show what it would do, and changes nothing on it unless told to with
@@ -45,6 +45,7 @@ const usage = `paisans renders and checks a community stack declaration.
 
 Usage:
   paisans validate [--config paisans.yaml]
+  paisans create   [--config paisans.yaml]
   paisans init     [--config paisans.yaml] [--secrets secrets.enc.yaml] [--sudo=false]
   paisans render   [--config paisans.yaml] [--secrets secrets.enc.yaml] --out ./out
   paisans host prepare --site <name> [--config paisans.yaml] [--ssh <destination>]
@@ -108,7 +109,12 @@ Usage:
 
 Commands:
   validate   Load the configuration and report every problem found.
-  init       Give the configuration an id if it has none; until the
+  create     For a new deployment: ask, at a terminal, about the community,
+             its admins, its machines, its apps and its mail, and write a
+             commented paisans.yaml that validate refuses nothing in, once
+             you have read it and said yes. Refuses a file that exists.
+             Asks for no secret and reaches no host.
+  init     Give the configuration an id if it has none; until the
              deployment is on any site, reach every site and keep
              mesh.subnet only if it overlaps nothing there, else roll a
              random /24 that overlaps nothing and move each site's address
@@ -358,6 +364,8 @@ func main() {
 	switch os.Args[1] {
 	case "validate":
 		err = runValidate(os.Args[2:])
+	case "create":
+		err = runCreate(os.Args[2:], os.Stdin, os.Stdout)
 	case "init":
 		err = runInit(os.Args[2:])
 	case "render":
