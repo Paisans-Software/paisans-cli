@@ -291,3 +291,78 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
 	}
 }
+
+// --evict refuses what would reach the host, and an unattended run, before
+// any host is read.
+func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
+	noSiteHosts(t)
+	for args, want := range map[string]string{
+		"home-b --evict --force":               "--evict cleans no host",
+		"home-b --evict --ssh admin@192.0.2.1": "--evict cleans no host",
+		"home-b --evict --delete-data":         "--evict and --delete-data cannot be used together",
+		"home-b --evict --execute":             "stdin is not a terminal",
+	} {
+		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", args, err, want)
+		}
+	}
+}
+
+// Every word an eviction asks for is typed in turn, from one reader, and a
+// wrong one stops it.
+func TestConfirmEvictionAsksForEachWord(t *testing.T) {
+	saved := isTerminal
+	isTerminal = func(*os.File) bool { return true }
+	t.Cleanup(func() { isTerminal = saved })
+	questions := []question{{"revoked", "the token"}, {"vm", "the site"}, {"lose writes", "the lag"}, {"lose objects", "the objects"}}
+	for answers, want := range map[string]string{
+		"revoked\nvm\nlose writes\nlose objects\n": "",
+		"revoked\nvm\nyes\nlose objects\n":         `"yes" is not lose writes`,
+		"vm\n":                                     `"vm" is not revoked`,
+		"revoked\nvm\nlose writes\n":               "no answer read",
+	} {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.WriteString(answers)
+		w.Close()
+		var out bytes.Buffer
+		err = confirmEviction(r, &out, questions)
+		r.Close()
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%q: %v", answers, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%q: err = %v, want %q", answers, err, want)
+		}
+		if want == "" && strings.Count(out.String(), "Type ") != 4 {
+			t.Errorf("asked:\n%s", out.String())
+		}
+	}
+	isTerminal = func(*os.File) bool { return false }
+	r, w, _ := os.Pipe()
+	w.WriteString("revoked\n")
+	w.Close()
+	defer r.Close()
+	if err := confirmEviction(r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
+		t.Errorf("without a terminal: %v", err)
+	}
+}
+
+// The questions follow the plan: revoked only for a gateway, the site's name
+// always, and the losses only when the plan has them.
+func TestEvictionQuestionsFollowThePlan(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var words []string
+	for _, q := range evictionQuestions(cfg, "home-b", &siteremove.Plan{}) {
+		words = append(words, q.word)
+	}
+	if strings.Join(words, ",") != "home-b" {
+		t.Errorf("asked %v", words)
+	}
+}
