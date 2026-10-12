@@ -367,3 +367,28 @@ func TestAnsweringTheMachinesAgainSettlesTheMonitorOnTheGateway(t *testing.T) {
 		}
 	}
 }
+
+// Answering the machines or the apps again, Enter at every question, keeps
+// the status page beside the gateway: "Where it runs" defaults to it.
+func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines, "", "n", "n", "n", "n", "", "", "2")
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, s := range []Section{SectionSites, SectionApps} {
+		var again strings.Builder
+		w.p = NewPrompter(strings.NewReader(strings.Repeat("\n", 40)), &again)
+		if err := w.Ask(s); err != nil {
+			t.Fatalf("%s: %v\n%s", s, err, again.String())
+		}
+		if !w.Answers.MonitorOnGateway || w.Answers.Monitor != nil {
+			t.Errorf("answering %s again moved the status page: %+v", s, w.Answers)
+		}
+	}
+}
