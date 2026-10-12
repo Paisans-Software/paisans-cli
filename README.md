@@ -3512,6 +3512,71 @@ side accepts. A file that cannot be
 decrypted and parsed here is refused without quoting its error, because a parse
 error can quote a value.
 
+### Backups are declared in `paisans.yaml`, and may be added later
+
+The `backup` section says how often a run happens and where the backups go.
+The design is `docs/specs/2026-10-11-backups.md`. What exists so far is the
+section and its validation; nothing runs a backup yet.
+
+```yaml
+backup:
+  schedule: daily               # daily | weekly | monthly | yearly
+  at: "03:00"                   # UTC
+  destinations:                 # the first is the primary
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+```
+
+Each destination is any S3 compatible endpoint, and keeps its own retention:
+`keep` says how many of each period's newest backup survive, which is restic's
+own model. `prune` defaults to true; declaring `keep` is what approves the
+deletions pruning makes.
+
+**A deployment may run without backups, and is told so on every run.** No
+`backup` section, or `enabled: false`, warns `backups-off` from `validate` and
+`apply`, and nothing else about backups is checked. Adding the section later is
+an ordinary `apply`, with nothing to convert first; the spec's *Turning backups
+on later* says what each part does when it does.
+
+While backups are on, `validate` refuses:
+
+* **`backup-without-destinations`**: backups that go nowhere.
+* **`backup-schedule-unknown`** and **`backup-at-not-a-time`**: a schedule
+  other than the four periods, or a start that is not `HH:MM`, quoted so YAML
+  does not read it as a number.
+* **`backup-destination-incomplete`**: a destination without its endpoint,
+  region or bucket. All three are needed to reach it.
+* **`backup-destination-name`** and **`backup-destination-duplicate`**: a name
+  that is not lowercase letters, digits and hyphens, or one used twice. The
+  name is part of the destination's secrets' keys,
+  `backup.destinations.<name>.access_key_id`, so it has to be one.
+* **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme
+  and host. The bucket goes in `bucket`.
+* **`backup-keep-empty`**: pruning with nothing kept, which would delete every
+  backup.
+* **`backup-keep-negative`** and **`backup-number-negative`**: a negative count.
+* **`backup-keep-never-filled`**: a tier finer than the schedule, Eg:
+  `keep.daily` with `schedule: weekly`, which can never hold more than one
+  backup per period.
+* **`pinned-postgres-without-walg`**: a pinned app whose `images.postgres` is
+  not `ghcr.io/paisans-software/postgres-walg`. That database would have no
+  backup and nothing else would say so. The app either runs that image or opts
+  out with `apps.<name>.backup: false`.
+
+And warns, on every run:
+
+* **`backup-app-excluded`**: each app with `backup: false`. Nothing it owns is
+  backed up, so a database without a backup is always something the
+  declaration says.
+* **`backup-prune-off`**: a destination that is never pruned, whose bucket
+  only grows.
+* **`backup-single-destination`**: one destination is one failure domain.
+* **`backup-without-a-monitor`**: no `uptime` app, so a failed run would be
+  reported to nobody.
+
 ## Bootstrapping a site
 
 `apply` renders configuration on a workstation and pushes it over SSH — but the
