@@ -138,3 +138,26 @@ func TestAHeartbeatEnvChangeDoesNotEngageTheGatewayGates(t *testing.T) {
 		t.Errorf("the infrastructure action is %q, want `up -d`", a.Command(p.Deployment))
 	}
 }
+
+// A Pocket ID stack's admins-heartbeat/heartbeat.env is read by the
+// admins-heartbeat service alone, so a new token or monitor URL in it is a
+// plain `up -d` of the app's stack, which replaces only that service, since
+// it is the only one whose configuration changed. Nothing is forced, no
+// other stack is acted on, and no gateway gate is engaged.
+func TestAnAdminsHeartbeatEnvChangeIsAPlainUpOfItsStack(t *testing.T) {
+	host := applied(t, "home-a")
+	host.running = true
+	p, err := apply.Build("home-a", planChangingOn(t, "home-a", "srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env"), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.GatewayChanging {
+		t.Error("an admins heartbeat.env change is treated as the gateway changing")
+	}
+	if len(p.Actions) != 1 || p.Actions[0].Stack != "auth" {
+		t.Fatalf("actions %v, want one on auth", p.Actions)
+	}
+	if a := p.Actions[0]; !a.Recreate || a.Force || a.Down {
+		t.Errorf("the auth action is %q, want `up -d`", a.Command(p.Deployment))
+	}
+}

@@ -1124,7 +1124,10 @@ may be the one beside a monitor. The interval, grace and threshold are the
 site heartbeat's, and a deployment with no monitor renders no pusher. The
 fork keeps the body with the ping and shows its first line in the monitor's
 recent pings; the incident and the alert say only that the heartbeat
-reported a failure.
+reported a failure. `secrets rotate` replaces the token, by name or with
+`--all`: every monitor learns it first, then the pusher on each site is
+recreated with it (*`secrets rotate` replaces a secret where it is checked and
+where it is used*).
 
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
@@ -2267,7 +2270,8 @@ Finishing either command first costs nothing but its resume.
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
-| `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused for at most one push interval |
+| `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
+| Pocket ID `admins_heartbeat_token` | the monitor | the admins heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
 it keeps in Postgres, so an open session lasts until it ends and the next sign
@@ -2276,6 +2280,33 @@ survive either of its secrets changing, so the plan takes the stricter reading.
 A cluster with one data member has no replica to switch over to, so its
 Patroni restarts in place and the database is unavailable for that restart;
 the plan says so.
+
+**A heartbeat token reaches the monitors before the pusher.** The monitor
+checks a heartbeat token, and its seed is the only place it learns one, so
+stage 3 first applies each monitor that checks the token, its uptime app's own
+stack on its own site, one at a time, which rewrites its seed with the next
+token and restarts it to adopt it. Only then is the pusher handed the token.
+
+* **`sites.<site>.heartbeat_token`** is checked by every monitor off that
+  site, a monitor never watching its own. The pusher is the site's
+  infrastructure stack, where the changed `heartbeat/heartbeat.env` recreates
+  the `heartbeat` service alone. A site no monitor watches renders no pusher,
+  so its token is replaced in the file and handed to nobody.
+* **A Pocket ID app's `admins_heartbeat_token`** is checked by every monitor,
+  the one on a site the app runs on included. The pusher is the app's own
+  stack on each of its sites in turn, where the changed
+  `admins-heartbeat/heartbeat.env` recreates the `admins-heartbeat` service
+  alone: `up -d` replaces only the service whose configuration changed, so
+  Pocket ID, its reconciler and its database keep running and nobody is
+  signed out. A deployment with no monitor renders no pusher, so the token is
+  replaced in the file and handed to nobody.
+
+From the first monitor learning the token until the pusher sends it, a monitor
+that already holds it answers the old one with 404. That lasts one scoped
+apply and health gate per monitor and then the pusher's, which normally
+finishes within the grace the monitor allows before counting a heartbeat
+missed: the 60 second push interval and 120 seconds after it. A run that
+stops in between leaves the pushes refused until it is resumed.
 
 **`--all` runs them in the table's order**: what works from the internet
 first, the DNS token, the mail passwords, client secrets and signing keys;

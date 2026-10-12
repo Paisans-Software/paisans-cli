@@ -12,22 +12,30 @@ import (
 )
 
 // uptimeWorld is a deployment with two monitors, status on home-c and watch
-// on home-a, and three sites that each push a heartbeat to every monitor off
-// their own site. seeded is the token a monitor's seed holds for a site,
-// keyed app/site; pushed is the token a site's heartbeat service pushes with;
+// on home-a, three sites that each push a heartbeat to every monitor off
+// their own site, and a Pocket ID app, auth, on home-a and home-b, whose
+// instances push its admins heartbeat to every monitor. seeded is the token a
+// monitor's seed holds for a site, keyed app/site, and for auth's admins
+// heartbeat, keyed app/auth; pushed is the token a site's heartbeat service
+// pushes with; adminsPushed is the token auth's pusher on a site pushes with;
 // admin is the ADMIN_PASS each monitor runs with.
 type uptimeWorld struct {
-	t         *testing.T
-	cfg       *config.Config
-	store     *memStore
-	seeded    map[string]string
-	pushed    map[string]string
-	admin     map[string]string
-	unhealthy map[string]error
+	t      *testing.T
+	cfg    *config.Config
+	store  *memStore
+	seeded map[string]string
+	pushed map[string]string
+	// adminsPushed is keyed by site.
+	adminsPushed map[string]string
+	admin        map[string]string
+	unhealthy    map[string]error
 	// seededAtPush is what every monitor's seed held when a site's heartbeat
 	// service was handed its token.
 	seededAtPush map[string]map[string]string
-	log          []string
+	// adminsSeededAtPush is what every monitor's seed held when auth's
+	// stack on a site was handed its token.
+	adminsSeededAtPush map[string]map[string]string
+	log                []string
 }
 
 var heartbeatShape = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -43,6 +51,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 		},
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}},
 		Apps: map[string]config.App{
+			"auth":   {Kind: config.KindPocketID, Hostname: "id.example.org", Placement: config.Placement{Mode: config.PlacementCluster}},
 			"forum":  {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}},
 			"status": {Kind: config.KindUptime, Hostname: "status.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
 			"watch":  {Kind: config.KindUptime, Hostname: "watch.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
@@ -51,6 +60,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 	s := &config.Secrets{
 		Sites: map[string]config.SiteSecrets{},
 		Apps: map[string]map[string]any{
+			"auth":   {"admins_heartbeat_token": strings.Repeat("ab", 16)},
 			"status": {"admin_password": "status-admin-old", "session_secret": "status-session"},
 			"watch":  {"admin_password": "watch-admin-old", "session_secret": "watch-session"},
 		},
@@ -60,17 +70,30 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 	}
 	w := &uptimeWorld{
 		t: t, cfg: cfg, store: &memStore{s: s},
-		seeded: map[string]string{}, pushed: map[string]string{}, admin: map[string]string{},
-		unhealthy: map[string]error{}, seededAtPush: map[string]map[string]string{},
+		seeded: map[string]string{}, pushed: map[string]string{}, adminsPushed: map[string]string{}, admin: map[string]string{},
+		unhealthy: map[string]error{}, seededAtPush: map[string]map[string]string{}, adminsSeededAtPush: map[string]map[string]string{},
 	}
 	w.render(s, func(string) {})
 	w.log = nil
 	return w
 }
 
+// monitors is the uptime apps the configuration declares, in app order.
+func (w *uptimeWorld) monitors() []string {
+	var out []string
+	for _, name := range w.cfg.AppNames() {
+		if w.cfg.Apps[name].Kind == config.KindUptime {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // render is what an apply of each stack leaves on the host, as the render
-// places it: a monitor's seed names every site off its own, and a site
-// pushes to every monitor off it. changed is called for each change.
+// places it: a monitor's seed names every site off its own and auth's admins
+// heartbeat, a site pushes to every monitor off it, and auth's pusher on
+// each of its sites pushes to every monitor while there is one. changed is
+// called for each change.
 func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed func(string)) {
 	switch stack {
 	case "infra":
@@ -101,10 +124,25 @@ func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed
 				changed(fmt.Sprintf("apply %s %s seed %s", site, stack, other))
 			}
 		}
+		if token, _ := s.Get("apps.auth.admins_heartbeat_token"); w.seeded[stack+"/auth"] != token {
+			w.seeded[stack+"/auth"] = token
+			changed(fmt.Sprintf("apply %s %s seed auth", site, stack))
+		}
 		pass, _ := s.Get("apps." + stack + ".admin_password")
 		if w.admin[stack] != pass {
 			w.admin[stack] = pass
 			changed(fmt.Sprintf("apply %s %s admin", site, stack))
+		}
+	case "auth":
+		if site != "home-a" && site != "home-b" {
+			w.t.Fatalf("auth applied on %s, where it does not run", site)
+		}
+		if len(w.monitors()) == 0 {
+			return
+		}
+		if token, _ := s.Get("apps.auth.admins_heartbeat_token"); w.adminsPushed[site] != token {
+			w.adminsPushed[site] = token
+			changed(fmt.Sprintf("apply %s auth admins-heartbeat", site))
 		}
 	default:
 		w.t.Fatalf("%s applied on %s: not a stack this world runs", stack, site)
@@ -117,6 +155,8 @@ func (w *uptimeWorld) render(s *config.Secrets, changed func(string)) {
 	}
 	w.renderStack("home-c", "status", s, changed)
 	w.renderStack("home-a", "watch", s, changed)
+	w.renderStack("home-a", "auth", s, changed)
+	w.renderStack("home-b", "auth", s, changed)
 }
 
 func (w *uptimeWorld) env() Env {
@@ -127,6 +167,9 @@ func (w *uptimeWorld) env() Env {
 			for _, stack := range stacks {
 				if stack == "infra" {
 					w.seededAtPush[site] = maps(w.seeded)
+				}
+				if stack == "auth" {
+					w.adminsSeededAtPush[site] = maps(w.seeded)
 				}
 				w.renderStack(site, stack, s, func(l string) { w.log = append(w.log, l) })
 			}
@@ -249,8 +292,8 @@ func TestHeartbeatCostStatesTheRefusedPush(t *testing.T) {
 	if c.SignsOut || c.Reconnects {
 		t.Fatalf("cost %+v: a heartbeat token signs nobody out", c)
 	}
-	if !strings.Contains(c.Downtime, "at most one") || !strings.Contains(c.Downtime, "interval") {
-		t.Fatalf("downtime %q: the plan must say a push may be refused for at most one interval", c.Downtime)
+	if !strings.Contains(c.Downtime, "refuse") || !strings.Contains(c.Downtime, "grace") {
+		t.Fatalf("downtime %q: the plan must say pushes may be refused, within the grace", c.Downtime)
 	}
 }
 
@@ -300,6 +343,8 @@ func TestUptimePrechecksRefuse(t *testing.T) {
 		{UptimeAdmin("nowhere"), "declares no app"},
 		{UptimeAdmin("forum"), "uptime"},
 		{Heartbeat("nowhere"), "declares no site"},
+		{AdminsHeartbeat("nowhere"), "declares no app"},
+		{AdminsHeartbeat("status"), "pocket-id"},
 	} {
 		err := tc.r.(Prechecker).Precheck(w.env())
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -308,5 +353,117 @@ func TestUptimePrechecksRefuse(t *testing.T) {
 	}
 	if err := Heartbeat("home-b").(Prechecker).Precheck(w.env()); err != nil {
 		t.Fatal(err)
+	}
+	if err := AdminsHeartbeat("auth").(Prechecker).Precheck(w.env()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every monitor learns the admins heartbeat's next token first, the one on a
+// site auth runs on included, each healthy before the next, and auth's
+// pushers are handed it only once every monitor holds it, one site at a time.
+func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
+	w := newUptimeWorld(t)
+	r := AdminsHeartbeat("auth")
+	if r.Path() != "apps.auth.admins_heartbeat_token" {
+		t.Fatalf("path %q", r.Path())
+	}
+	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-c:status", "home-a:watch", "home-a:auth", "home-b:auth"}) {
+		t.Fatalf("users %v, want every monitor, then auth on each of its sites", got)
+	}
+	old, _ := w.store.s.Get("apps.auth.admins_heartbeat_token")
+	if err := w.rotate(r); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"apply home-c status seed auth", "healthy home-c",
+		"apply home-a watch seed auth", "healthy home-a",
+		"apply home-a auth admins-heartbeat", "healthy home-a",
+		"apply home-b auth admins-heartbeat", "healthy home-b",
+	}
+	if !slices.Equal(w.log, want) {
+		t.Fatalf("log\n%v\nwant\n%v", w.log, want)
+	}
+	next, _ := w.store.s.Get("apps.auth.admins_heartbeat_token")
+	if next == old || !heartbeatShape.MatchString(next) {
+		t.Fatalf("the file holds a token of %d characters, not a new one of 32 lowercase hex", len(next))
+	}
+	for _, site := range []string{"home-a", "home-b"} {
+		at := w.adminsSeededAtPush[site]
+		if at["status/auth"] != next || at["watch/auth"] != next {
+			t.Fatalf("auth on %s pushed the next token before every monitor held it", site)
+		}
+		if w.adminsPushed[site] != next {
+			t.Fatalf("auth on %s does not push the promoted token", site)
+		}
+	}
+	for _, site := range []string{"home-a", "home-b", "home-c"} {
+		if w.seeded["status/"+site] == next || w.seeded["watch/"+site] == next {
+			t.Fatal("a site heartbeat's seeded token changed with the admins heartbeat's")
+		}
+	}
+	if len(w.store.s.Rotations) != 0 {
+		t.Fatalf("rotations left: %v", w.store.s.Rotations)
+	}
+}
+
+// With no monitor no pusher is rendered and no seed names the token: it is
+// replaced in the file and handed to nobody.
+func TestAdminsHeartbeatWithNoMonitor(t *testing.T) {
+	w := newUptimeWorld(t)
+	delete(w.cfg.Apps, "status")
+	delete(w.cfg.Apps, "watch")
+	r := AdminsHeartbeat("auth")
+	if got := usesOf(w.env(), r); len(got) != 0 {
+		t.Fatalf("users %v, want none", got)
+	}
+	old, _ := w.store.s.Get("apps.auth.admins_heartbeat_token")
+	if err := w.rotate(r); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.log) != 0 {
+		t.Fatalf("log %v, want nothing applied", w.log)
+	}
+	if next, _ := w.store.s.Get("apps.auth.admins_heartbeat_token"); next == old || !heartbeatShape.MatchString(next) {
+		t.Fatal("the token was not replaced in the file")
+	}
+}
+
+// A run stopped between the monitors and the pushers resumes with the same
+// token: the monitors already hold it and are not changed again.
+func TestAdminsHeartbeatResumesAtThePushers(t *testing.T) {
+	w := newUptimeWorld(t)
+	w.unhealthy["home-b"] = errors.New("admins-heartbeat is restarting")
+	if err := w.rotate(AdminsHeartbeat("auth")); err == nil {
+		t.Fatal("an unhealthy pusher did not stop the rotation")
+	}
+	next, pending := w.store.s.Rotations["apps.auth.admins_heartbeat_token"]
+	if !pending {
+		t.Fatal("the next token was not kept for the resumed run")
+	}
+	delete(w.unhealthy, "home-b")
+	w.log = nil
+	if err := w.rotate(AdminsHeartbeat("auth")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"healthy home-c", "healthy home-a", "healthy home-a", "healthy home-b"}
+	if !slices.Equal(w.log, want) {
+		t.Fatalf("resumed log %v, want %v", w.log, want)
+	}
+	if got, _ := w.store.s.Get("apps.auth.admins_heartbeat_token"); got != next {
+		t.Fatal("the resumed run promoted a different token from the one the monitors hold")
+	}
+}
+
+func TestAdminsHeartbeatCostStatesTheRefusedPush(t *testing.T) {
+	c := AdminsHeartbeat("auth").Cost()
+	if c.SignsOut || c.Reconnects {
+		t.Fatalf("cost %+v: an admins heartbeat token signs nobody out", c)
+	}
+	if !strings.Contains(c.Downtime, "admins heartbeat") || !strings.Contains(c.Downtime, "refuse") || !strings.Contains(c.Downtime, "grace") {
+		t.Fatalf("downtime %q: the plan must say the admins heartbeat may be refused, within the grace", c.Downtime)
+	}
+	if ok, err := AdminsHeartbeat("auth").Accepts(Env{}, "anything"); !ok || err != nil {
+		t.Fatalf("Accepts %v %v: the monitors are handed it as users", ok, err)
 	}
 }

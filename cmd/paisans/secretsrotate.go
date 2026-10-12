@@ -533,6 +533,8 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.MbinRabbitMQ(app), nil
 		case "admin_password":
 			return secretsrotate.UptimeAdmin(app), nil
+		case "admins_heartbeat_token":
+			return secretsrotate.AdminsHeartbeat(app), nil
 		}
 		if _, ok := secretsrotate.AppSelfKind(last); ok {
 			return secretsrotate.AppSelf(app, last, secretsrotate.AppSelfCost(last)), nil
@@ -668,6 +670,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".heartbeat_token") {
 			rs = append(rs, secretsrotate.Heartbeat(site))
+		}
+	}
+	for _, app := range appsOf(config.KindPocketID) {
+		if has("apps." + app + ".admins_heartbeat_token") {
+			rs = append(rs, secretsrotate.AdminsHeartbeat(app))
 		}
 	}
 

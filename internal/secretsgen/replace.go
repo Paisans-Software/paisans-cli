@@ -49,6 +49,8 @@ func Replacement(path string, s *config.Secrets) (string, error) {
 			gen = password
 		case masSigningKey:
 			gen = rsaPrivateKeyPEM
+		case adminsHeartbeatToken:
+			gen = func() (string, error) { return hexSecret(16) }
 		}
 	}
 	if gen == nil {
