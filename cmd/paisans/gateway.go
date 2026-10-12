@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -74,8 +76,18 @@ func runGatewayMove(args []string) error {
 	for _, name := range cfg.SiteNames() {
 		transports[name] = gatewayTransport(name, cfg.Sites[name], *sudo)
 	}
+	options := gatewayMoveOptions()
+	if options.ApplySite == nil {
+		// The hand-off off a site that keeps the monitor applies its infra
+		// stack as typed by hand, with this move's own files and sudo, so it
+		// claims, reviews and gates exactly as apply does. Only an executed
+		// move reaches it.
+		options.ApplySite = func(site string) error {
+			return runApply([]string{"--site", site, "--only", "infra", "--execute", "--config", *configPath, "--secrets", *secretsPath, "--sudo=" + strconv.FormatBool(*sudo)}, os.Stdin, os.Stdout)
+		}
+	}
 	plan, err := ui.Get(r, "find the gateway to move from", func() (*gatewaymove.Plan, error) {
-		return gatewaymove.Build(cfg, secrets, transports, gatewayMoveOptions())
+		return gatewaymove.Build(cfg, secrets, transports, options)
 	})
 	if err != nil {
 		return err
