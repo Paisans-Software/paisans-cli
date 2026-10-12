@@ -656,6 +656,10 @@ legal for a site hosting a pinned app of any other kind.
 the monitor, and refuses, as does `paisans apply --site` on that site once
 the gateway role has left it: stopping its Caddy would take the monitor down.
 Pin the status page to another monitor site first, then move the gateway.
+Moving the monitor with the gateway works, but the move changes only the
+gateway's hostnames: it refuses while the status page's record still points
+at the old machine, so change that record first, as in *Moving an existing
+monitor* below.
 
 **It serves its own hostname.** An app pinned to a monitor site is left out
 of the gateway's Caddyfile, and `dns init` points its hostname at the

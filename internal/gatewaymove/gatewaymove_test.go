@@ -512,3 +512,26 @@ func TestAMoveOffASiteThatKeepsTheMonitorIsRefused(t *testing.T) {
 		t.Errorf("home-b holds nothing: %v %v", held, err)
 	}
 }
+
+// The gateway and the monitor moved together, from home-a to vm, and the
+// status page's record still points at home-a. The move moves only the
+// gateway's hostnames, so stopping home-a's Caddy would take the status page
+// down: the move is refused until that record is changed.
+func TestAMoveLeavingAStatusRecordBehindIsRefused(t *testing.T) {
+	w := newWorld(t, func(s string) string {
+		s = strings.Replace(s, "    roles: [gateway, witness]\n", "    roles: [gateway, witness, monitor]\n", 1)
+		return strings.Replace(s, "placement: { pinned: watch }", "placement: { pinned: vm }", 1)
+	})
+	for i, r := range w.zone.InZone["zone-1"] {
+		if r.ID == "keep-status" {
+			w.zone.InZone["zone-1"][i].Content = oldIP
+		}
+	}
+	_, err := w.build()
+	if err == nil || !strings.Contains(err.Error(), "status.example.org") {
+		t.Fatalf("want a refusal naming status.example.org, got %v", err)
+	}
+	if len(w.hosts["home-a"].caddy) != 1 {
+		t.Error("home-a's Caddy was touched")
+	}
+}

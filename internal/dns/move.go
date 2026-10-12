@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -250,6 +251,44 @@ func ExecuteMoveRemove(ctx context.Context, provider Provider, plan *MovePlan, r
 		return fmt.Errorf("dns: records point at %s that this move may not delete: %s. Nothing was deleted", plan.From, strings.Join(names, ", "))
 	}
 	return ExecutePrune(ctx, provider, &PrunePlan{Provider: plan.Provider, Entries: plan.Deletes, comment: plan.comment}, r)
+}
+
+// MonitorRecordsAt returns the hostnames of apps a monitor on another site
+// serves whose records, made by dns init for this deployment, still point at
+// one of site's addresses, sorted. A move moves only the gateway's hostnames,
+// so a monitor that moved off the old gateway with it leaves its record
+// behind, and stopping the old gateway's Caddy would take it down.
+func MonitorRecordsAt(ctx context.Context, provider Provider, cfg *config.Config, site string) ([]string, error) {
+	addresses := map[string]bool{}
+	for _, ip := range siteAddresses(cfg, site) {
+		addresses[canonical(ip)] = true
+	}
+	comment := RecordComment(cfg.Deployment())
+	zones := map[string]zone{}
+	var out []string
+	for _, name := range cfg.AppNames() {
+		monitor, ok := render.ServedBy(cfg, name)
+		if !ok || monitor == site {
+			continue
+		}
+		host := cfg.Apps[name].Hostname
+		z, err := FindZone(ctx, provider, host, zones)
+		if err != nil {
+			return nil, err
+		}
+		records, err := provider.Records(ctx, z.id, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range records {
+			typ := strings.ToUpper(r.Type)
+			if (typ == "A" || typ == "AAAA") && r.Comment == comment && addresses[canonical(r.Content)] && !slices.Contains(out, host) {
+				out = append(out, host)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // FormerGateways is every declared site other than the gateway that a

@@ -223,6 +223,18 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	if cfg.Sites[p.From].RunsCaddy() {
 		return nil, SharedRefusal(p.From)
 	}
+	// A monitor that moved off the old gateway with it keeps a record there
+	// until it is changed by hand, as for any monitor that moves; the stages
+	// below move only the gateway's hostnames, and the last stops the Caddy
+	// that record still reaches.
+	behind, err := dns.MonitorRecordsAt(ctx, provider, cfg, p.From)
+	if err != nil {
+		return nil, err
+	}
+	if len(behind) > 0 {
+		return nil, refuse(fmt.Sprintf("%s still point at %s", strings.Join(behind, ", "), p.From),
+			fmt.Sprintf("A monitor serves each from another site now, but its record was made for %s, and the move changes only the gateway's hostnames: stopping %s's Caddy would take it down. Nothing was changed. Point each at the address of the site that serves it now, at your DNS provider (README.md, \"Moving an existing monitor\"), then run the move again.", p.From, p.From))
+	}
 	p.evidence = held[p.From]
 	p.evidence.Marker = p.ours(p.evidence.Marker)
 
