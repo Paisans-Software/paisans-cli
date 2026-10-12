@@ -942,3 +942,47 @@ func TestSecretsRotateAllCoversEveryGeneratedSecret(t *testing.T) {
 		}
 	}
 }
+
+// secrets rotate keeps every backup secret, with why: the two keys encrypt
+// the backups already taken, and a destination's credentials are replaced at
+// the provider that issued them.
+func TestSecretsRotateKeepsTheBackupSecrets(t *testing.T) {
+	for path, want := range map[string]string{
+		"backup.restic_password":                        "backup already taken",
+		"backup.walg_libsodium_key":                     "backup already taken",
+		"backup.destinations.offsite.access_key_id":     "provider",
+		"backup.destinations.offsite.secret_access_key": "provider",
+	} {
+		if _, err := rotatorFor(path, rotateWiring{}); err == nil || !strings.Contains(err.Error(), "is kept") || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+
+	cfg, err := config.Load(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &config.Secrets{Backup: config.BackupSecrets{
+		ResticPassword:   "r",
+		WALGLibsodiumKey: "w",
+		Destinations:     map[string]config.DestinationSecrets{"offsite": {AccessKeyID: "a", SecretAccessKey: "b"}},
+	}}
+	rs, kept, err := rotateAll(cfg, s, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if strings.HasPrefix(r.Path(), "backup.") {
+			t.Errorf("--all rotates %s", r.Path())
+		}
+	}
+	var paths []string
+	for _, k := range kept {
+		paths = append(paths, k.Path)
+	}
+	for _, want := range []string{"backup.restic_password", "backup.walg_libsodium_key", "backup.destinations.*"} {
+		if !slices.Contains(paths, want) {
+			t.Errorf("--all does not list %s as kept: %v", want, paths)
+		}
+	}
+}

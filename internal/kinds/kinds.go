@@ -41,6 +41,11 @@ type Service struct {
 // change.
 const PostgresService = "postgres"
 
+// WALGImage is the repository of the Postgres image every pinned Postgres
+// runs: Debian's postgres:<major>-trixie plus WAL-G, built by this
+// repository (docs/specs/2026-10-11-backups.md, "Pinned Postgres").
+const WALGImage = "ghcr.io/paisans-software/postgres-walg"
+
 // catalogue is every kind and its services.
 //
 // The service lists are short because the compose templates are short. They

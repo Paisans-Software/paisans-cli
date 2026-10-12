@@ -47,6 +47,14 @@ const forgetsDeclines = "rotating it forgets every declined address"
 // wireguardKept is why secrets rotate leaves the WireGuard keys alone.
 const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, which moves it without dropping a tunnel"
 
+// backupKeyKept is why the restic password and WAL-G's key are kept. restic
+// wraps its repository's master key in each password, so a new password
+// leaves the key it opens unchanged, and WAL-G has no re-encryption at all.
+const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an evicted admin out of the backups is the destinations' credentials"
+
+// destinationKept is why a backup destination's credentials are kept.
+const destinationKept = "it is issued by the provider behind the destination: issue a new key there, pipe it in with `paisans secrets set`, apply, then delete the old key at the provider"
+
 // rotateStopped is what a failed health gate inside secrets rotate tells the
 // operator.
 const rotateStopped = "secrets rotate stopped here, with the next value kept in the secrets file; run it again to resume."
@@ -490,6 +498,10 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		return secretsrotate.DNSToken(), nil
 	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && last == "smtp_password":
 		return secretsrotate.SMTPPassword(path), nil
+	case path == "backup.restic_password", path == "backup.walg_libsodium_key":
+		return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, backupKeyKept)
+	case len(parts) == 4 && parts[0] == "backup" && parts[1] == "destinations":
+		return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, destinationKept)
 	case strings.HasPrefix(last, "wireguard_"):
 		return nil, fmt.Errorf("secrets rotate: %s is not rotated here: %s", path, wireguardKept)
 	case path == "storage.garage.admin_token":
@@ -673,6 +685,14 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		if path := "apps." + app + ".email_hash_key"; has(path) {
 			kept = append(kept, keptSecret{path, forgetsDeclines})
 		}
+	}
+	for _, path := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {
+		if has(path) {
+			kept = append(kept, keptSecret{path, backupKeyKept})
+		}
+	}
+	if len(s.Backup.Destinations) > 0 {
+		kept = append(kept, keptSecret{"backup.destinations.*", destinationKept})
 	}
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".wireguard_private_key") {

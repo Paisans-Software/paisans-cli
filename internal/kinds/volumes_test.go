@@ -97,6 +97,9 @@ func TestPostgresDataMountFollowsTheImage(t *testing.T) {
 		{"postgres:18-alpine", "17", "/var/lib/postgresql"},
 		{"postgres:latest", "17", "/var/lib/postgresql/data"},
 		{"ghcr.io/example-org/postgres:16", "18", "/var/lib/postgresql"},
+		// postgres-walg is the official image plus WAL-G, tagged by major.
+		{"ghcr.io/paisans-software/postgres-walg:17", "18", "/var/lib/postgresql/data"},
+		{"ghcr.io/paisans-software/postgres-walg:18", "17", "/var/lib/postgresql"},
 		{"", "17", "/var/lib/postgresql/data"},
 	} {
 		got := kinds.PostgresDataMount(tc.image, tc.cluster)

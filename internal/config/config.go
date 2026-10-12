@@ -105,8 +105,11 @@ type Config struct {
 	Storage Storage          `yaml:"storage"`
 	// SMTP is how apps send mail, the default for every app that sends any.
 	// An app's own smtp block overrides it field by field: see SMTPFor.
-	SMTP SMTP           `yaml:"smtp"`
-	Apps map[string]App `yaml:"apps"`
+	SMTP SMTP `yaml:"smtp"`
+	// Backup is nil when the declaration has no backup section, which means
+	// no backups, and validate warns about it on every run.
+	Backup *Backup        `yaml:"backup"`
+	Apps   map[string]App `yaml:"apps"`
 
 	// Path is where this configuration was read from. Error messages use it.
 	Path string `yaml:"-"`
@@ -447,8 +450,11 @@ type App struct {
 	// Changing this is not changing Kind. A fork that renames a variable or
 	// moves a config path needs a different template set, which is a different
 	// kind; this is for a different build of the same software.
-	Images   map[string]string `yaml:"images"`
-	Settings map[string]any    `yaml:"settings"`
+	Images map[string]string `yaml:"images"`
+	// Backup is nil unless written. `backup: false` excludes everything the
+	// app owns from backups, and validate warns about it on every run.
+	Backup   *bool          `yaml:"backup"`
+	Settings map[string]any `yaml:"settings"`
 
 	// Config is passed through to the file this app's kind reads, in that file's
 	// own syntax, without the toolkit interpreting the key.
@@ -769,6 +775,11 @@ func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 		return nil, parseProblem(path, "a configuration", err)
 	}
 	cfg.deriveLists(written)
+	// `backup:` with no value decodes to nil, which would read as no section
+	// at all; a section written empty is a section, and backups are on.
+	if written["backup"] && cfg.Backup == nil {
+		cfg.Backup = &Backup{}
+	}
 	cfg.deriveGate()
 	cfg.resolveKeys()
 	if cfg.Storage.Garage.Capacity == "" {
@@ -787,10 +798,12 @@ func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 var (
 	membersKey      = []string{"etcd", "members"}
 	clusterSitesKey = []string{"cluster", "sites"}
+	backupKey       = []string{"backup"}
 )
 
-// writtenLists reports which of etcd.members and cluster.sites the file has,
-// with any value, so an empty list or a key with no value counts as written.
+// writtenLists reports which of etcd.members, cluster.sites and backup the
+// file has, with any value, so an empty list or a key with no value counts as
+// written.
 // The decoded struct cannot tell a key left out from one written empty.
 func writtenLists(data []byte) (map[string]bool, error) {
 	var doc yaml.Node
@@ -801,7 +814,7 @@ func writtenLists(data []byte) (map[string]bool, error) {
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return out, nil
 	}
-	for _, keys := range [][]string{membersKey, clusterSitesKey} {
+	for _, keys := range [][]string{membersKey, clusterSitesKey, backupKey} {
 		out[strings.Join(keys, ".")] = walk(doc.Content[0], keys...) != nil
 	}
 	return out, nil

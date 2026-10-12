@@ -129,6 +129,10 @@ apps:
     placement: { pinned: vm }
     images:
       postgres: postgres:17-trixie
+    # The image above is an official one at an older major than the
+    # cluster's, which is what this fixture exercises; it carries no WAL-G,
+    # so the app is out of backups, and validate warns.
+    backup: false
     # A yaml key in homeserver.yaml. Not url_preview_enabled: Synapse
     # v1.160.0's synapse/config/repository.py raises a ConfigError for it
     # unless url_preview_ip_range_blacklist is also set, and a list is not a
@@ -195,3 +199,18 @@ smtp:
   username: robot@example.org
   from_address: hello@example.org
   from_name: Example Community
+
+backup:
+  schedule: daily
+  at: "03:00"
+  destinations:
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: fixture-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage
+      bucket: fixture-backups
+      keep: { weekly: 4, monthly: 12 }

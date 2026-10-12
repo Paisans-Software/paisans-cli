@@ -201,6 +201,40 @@ storage:
     # capacities:
     #   store: 2T
 
+backup:
+  # Leave this section out, or write `enabled: false`, and nothing is backed
+  # up: validate and apply say so on every run. Adding it later is an ordinary
+  # apply; nothing has to be converted first.
+  #
+  # How often a run happens: daily, weekly, monthly or yearly. It is not how
+  # long backups are kept; that is `keep`, per destination.
+  schedule: daily
+  at: "03:00"                   # UTC
+  destinations:
+    # The first destination is the primary: Postgres streams its write ahead
+    # log to it continuously. The others receive a copy after each run, and
+    # each keeps its own retention. Two providers are two failure domains;
+    # one is a single point of loss, and validation warns about it.
+    #
+    # Credentials are secrets, never written here:
+    #   paisans secrets set backup.destinations.b2.access_key_id
+    #   paisans secrets set backup.destinations.b2.secret_access_key
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      # How many of each period's newest backup survive: the last seven
+      # nights, the newest of each of the last four weeks, and so on.
+      # Pruning deletes what no tier covers; this list is what approves it.
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage              # Garage's region is its own s3_region
+      bucket: paisans
+      # Nothing here is ever deleted, so this bucket only grows. Validation
+      # warns about it on every run.
+      prune: false
+
 # Every app is rendered with trusted proxies set to the mesh subnet, never to a
 # specific host. That is what lets the gateway role move between machines later
 # without breaking client-address handling. It is expensive to retrofit and

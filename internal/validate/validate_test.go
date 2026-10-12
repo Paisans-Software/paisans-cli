@@ -167,6 +167,9 @@ func TestRulesFire(t *testing.T) {
 func withConfig(t *testing.T, app string, keys map[string]any) *config.Config {
 	t.Helper()
 	cfg := load(t, "config-key-looks-like-a-secret")
+	// The valid fixture's backups, so the base is quiet without each case
+	// tolerating the warning that a deployment without them draws.
+	cfg.Backup = load(t, "valid").Backup
 	for name, a := range cfg.Apps {
 		a.Config = nil
 		cfg.Apps[name] = a
@@ -269,10 +272,11 @@ func TestPocketIDOnTwoAppsSitesIsAllowed(t *testing.T) {
 	}
 }
 
-// The shipped example must validate. It deliberately demonstrates two
+// The shipped example must validate. It deliberately demonstrates three
 // warnings: its Synapse stack is pinned to the site that also holds the
-// witness role, and its two Garage sites at replication 2 stop uploads while
-// either is down. The monitor has a site of its own and adds none.
+// witness role, its two Garage sites at replication 2 stop uploads while
+// either is down, and its home backup destination is never pruned. The
+// monitor has a site of its own and adds none.
 func TestExampleValidates(t *testing.T) {
 	cfg, err := config.Load(filepath.Join("..", "..", "examples", "paisans.example.yaml"))
 	if err != nil {
@@ -288,7 +292,7 @@ func TestExampleValidates(t *testing.T) {
 		rules = append(rules, w.Rule)
 	}
 	sort.Strings(rules)
-	if strings.Join(rules, ",") != "garage-two-sites-stop-uploads,pinned-app-on-witness" {
+	if strings.Join(rules, ",") != "backup-prune-off,garage-two-sites-stop-uploads,pinned-app-on-witness" {
 		t.Fatalf("unexpected warnings on the example: %v", warnings)
 	}
 }
@@ -595,11 +599,12 @@ func TestAMediaHostnameCannotBeAnotherAppsHostname(t *testing.T) {
 }
 
 // A site holding nothing but the monitor role, with the monitor pinned to it,
-// draws no finding of its own: it needs no other role.
+// draws no finding of its own: it needs no other role. The fixture declares
+// no backups, which is warned about and is not what this test is about.
 func TestAMonitorOnlySiteIsQuiet(t *testing.T) {
 	result := validate.Check(load(t, "uptime-without-smtp"))
 	for _, f := range result.Findings {
-		if f.Rule != "uptime-without-smtp" {
+		if f.Rule != "uptime-without-smtp" && f.Rule != "backups-off" {
 			t.Errorf("unexpected finding: %s", f)
 		}
 	}

@@ -2005,12 +2005,12 @@ which accepts a caller supplied secret; see *`oidc client create` makes an
 app's client at Pocket ID*.
 
 **The file names its format and its deployment.** Its first two keys are
-`version`, the secrets file's own format (currently 1, and independent of
+`version`, the secrets file's own format (currently 2, and independent of
 `paisans.yaml`'s `version`), and `id`, the id of the deployment it belongs to,
 the same value as `paisans.yaml`'s `id`:
 
 ```yaml
-version: 1
+version: 2
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 cluster:
   ...
@@ -2018,7 +2018,10 @@ cluster:
 
 Every write of the file sets both, whether by `init`, `apply`, `secrets set` or
 `oidc client create`. A file with a newer `version` is refused, since a newer
-toolkit wrote it. A file whose `id` is not `paisans.yaml`'s is refused by every
+toolkit wrote it. A version 1 file is read as it is and written as version 2,
+the first with the backup section: a toolkit that reads only version 1 would
+drop that section, and with it the two keys every backup needs, so it must
+refuse the file instead. A file whose `id` is not `paisans.yaml`'s is refused by every
 command that reads it:
 
 ```
@@ -2060,6 +2063,10 @@ something the configuration does not declare:
 | `apps.<name>` | no app `<name>` is declared |
 | `oidc_clients.<name>` | no app `<name>` is declared |
 | `pocket_id_groups.<name>` | no Pocket ID app's `signup_default_groups` names `<name>` |
+| `backup.destinations.<name>` | no backup destination `<name>` is declared |
+
+The restic password and WAL-G's key are never orphaned, even with no `backup`
+section: they decrypt every backup already taken.
 
 **What is deployed is recorded on each gateway**, so that a site or an app
 missing from `paisans.yaml` by mistake (commented out, renamed, a bad merge)
@@ -2111,7 +2118,8 @@ changes nothing; with `--execute` it removes them and writes the file,
 encrypted to the same recipients, and refuses an encrypted file with no
 `.sops.yaml` beside it rather than writing it in plaintext. Pruning an `oidc_clients` entry does not
 delete the client at Pocket ID, which it says: delete it there by hand if that
-Pocket ID still runs. A removed site's WireGuard key is safe to prune once no
+Pocket ID still runs. Pruning a backup destination's credentials does not delete
+its key at the provider either, which it says too. A removed site's WireGuard key is safe to prune once no
 site's mesh lists it, which is true after a full `site remove`, or after every
 remaining site's next `apply`. How to run it, and its flags, are under
 *`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
@@ -2302,6 +2310,13 @@ includes it (Founder decision).
   name and `--all` keeps it; only `paisans secrets set` changes it.
 * **WireGuard keys**, which are `mesh rekey`'s (*Rekeying the mesh: `mesh
   rekey`*).
+* **`backup.restic_password` and `backup.walg_libsodium_key`** encrypt every
+  backup already taken, and a new one would not re-encrypt them: whoever held
+  the old one can still read any copy they made. What keeps an evicted admin
+  out of the backups is the destinations' credentials.
+* **Each backup destination's credentials**, which its provider issued. Issue a
+  new key there, pipe it in with `paisans secrets set`, apply, then delete the
+  old key at the provider.
 
 **Refused before anything changes:** etcd or Patroni unhealthy, since a
 password changed on a limping cluster can leave a member unable to rejoin; a
@@ -3630,6 +3645,98 @@ combining two such states key by key could promote a value no host's checking
 side accepts. A file that cannot be
 decrypted and parsed here is refused without quoting its error, because a parse
 error can quote a value.
+
+### Backups are declared in `paisans.yaml`, and may be added later
+
+The `backup` section says how often a run happens and where the backups go.
+The design is `docs/specs/2026-10-11-backups.md`. What exists so far is the
+section and its validation; nothing runs a backup yet.
+
+```yaml
+backup:
+  schedule: daily               # daily | weekly | monthly | yearly
+  at: "03:00"                   # UTC
+  destinations:                 # the first is the primary
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+```
+
+Each destination is any S3 compatible endpoint, and keeps its own retention:
+`keep` says how many of each period's newest backup survive, which is restic's
+own model. `prune` defaults to true; declaring `keep` is what approves the
+deletions pruning makes.
+
+**A deployment may run without backups, and is told so on every run.** No
+`backup` section, or `enabled: false`, warns `backups-off` from `validate` and
+`apply`, and nothing else about backups is checked. Adding the section later is
+an ordinary `apply`, with nothing to convert first; the spec's *Turning backups
+on later* says what each part does when it does.
+
+While backups are on, `validate` refuses:
+
+* **`backup-without-destinations`**: backups that go nowhere.
+* **`backup-schedule-unknown`** and **`backup-at-not-a-time`**: a schedule
+  other than the four periods, or a start that is not `HH:MM`, quoted so YAML
+  does not read it as a number.
+* **`backup-destination-incomplete`**: a destination without its endpoint,
+  region or bucket. All three are needed to reach it.
+* **`backup-destination-name`** and **`backup-destination-duplicate`**: a name
+  that is not lowercase letters, digits and hyphens, or one used twice. The
+  name is part of the destination's secrets' keys,
+  `backup.destinations.<name>.access_key_id`, so it has to be one.
+* **`backup-destination-same-place`**: two destinations with one endpoint,
+  bucket and prefix. They would be one repository pruned twice, not two
+  copies, and the single destination warning would not see it.
+* **`backup-endpoint-not-a-url`**: an endpoint with anything past its scheme,
+  host and port: a path, a query, a fragment. The bucket goes in `bucket`.
+* **`backup-endpoint-has-credentials`**: a user name or password before an `@`
+  in the endpoint. `paisans.yaml` is plaintext and meant to be committed, so
+  the credential belongs in the secrets, and no finding prints it back.
+* **`backup-bucket-name`**: a bucket name S3's naming rules do not allow: 3 to
+  63 lowercase letters, digits, dots and hyphens, starting and ending with a
+  letter or a digit, no two dots together, not shaped like an IP address.
+* **`backup-prefix-not-a-path`**: a prefix with a slash at either end, an empty
+  segment, `.` or `..`, or a character outside letters, digits, dots, hyphens
+  and underscores. It names a place inside the bucket, and only one.
+* **`backup-keep-empty`**: pruning with nothing kept, which would delete every
+  backup.
+* **`backup-keep-negative`** and **`backup-number-negative`**: a negative count.
+* **`backup-keep-never-filled`**: a tier finer than the schedule, Eg:
+  `keep.daily` with `schedule: weekly`, which can never hold more than one
+  backup per period.
+* **`pinned-postgres-without-walg`**: a pinned app whose `images.postgres` is
+  not `ghcr.io/paisans-software/postgres-walg`. That database would have no
+  backup and nothing else would say so. The app either runs that image or opts
+  out with `apps.<name>.backup: false`.
+
+And warns, on every run:
+
+* **`backup-app-excluded`**: each app with `backup: false`. Nothing it owns is
+  backed up, so a database without a backup is always something the
+  declaration says.
+* **`backup-prune-off`**: a destination that is never pruned, whose bucket
+  only grows.
+* **`backup-single-destination`**: one destination is one failure domain.
+* **`backup-without-a-monitor`**: no `uptime` app, so a failed run would be
+  reported to nobody.
+
+**Backups that are on have four kinds of secret.** `init` generates two, and
+never shows them: `backup.restic_password`, which opens the restic repository
+in every destination, and `backup.walg_libsodium_key`, 32 bytes as hex, which
+encrypts every object WAL-G writes. A restore reads both from the secrets
+file, so losing that file loses the backups too. Each destination's S3 key is
+issued by its provider and owed, and `init` names it with what it needs: read,
+write, list and delete on that bucket, and nothing else.
+
+```
+paisans secrets set backup.destinations.b2.access_key_id < key-id-file
+paisans secrets set backup.destinations.b2.secret_access_key < secret-file
+```
+
+Backups that are off generate and owe nothing.
 
 ## Bootstrapping a site
 

@@ -26,6 +26,7 @@ import (
 // default postgres_version of 18 rendered a database that could not start.
 //
 // The major is read from the image's tag when the image is the official one,
+// or WALGImage, which is the official image plus WAL-G and tagged by major,
 // because an app may pin an older image than the cluster's (the fixture's
 // Synapse runs postgres:17-trixie beside a cluster at 18), and the mount has
 // to match what the container runs. Any other image falls back to the
@@ -43,8 +44,8 @@ func PostgresDataMount(image, clusterMajor string) string {
 }
 
 // officialPostgresMajor is the leading number of an official postgres image's
-// tag (Eg: 17 from postgres:17.6-alpine), false for any other image or a tag
-// that does not start with one.
+// tag, or WALGImage's (Eg: 17 from postgres:17.6-alpine), false for any other
+// image or a tag that does not start with one.
 func officialPostgresMajor(image string) (string, bool) {
 	ref := image
 	if i := strings.Index(ref, "@"); i >= 0 {
@@ -55,7 +56,7 @@ func officialPostgresMajor(image string) (string, bool) {
 		repo, tag = ref[:i], ref[i+1:]
 	}
 	switch repo {
-	case "postgres", "library/postgres", "docker.io/postgres", "docker.io/library/postgres":
+	case "postgres", "library/postgres", "docker.io/postgres", "docker.io/library/postgres", WALGImage:
 	default:
 		return "", false
 	}

@@ -127,6 +127,25 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	}
 	note(created, "storage.garage.rpc_secret")
 
+	if cfg.Backup.On() {
+		// The restic repository's password and WAL-G's libsodium key, which
+		// encrypt every backup in every destination. Generated, never seen:
+		// a restore reads them from this file.
+		created, err = fillString(&secrets.Backup.ResticPassword)
+		if err != nil {
+			return result, err
+		}
+		note(created, "backup.restic_password")
+		// 32 bytes as hex, which WAL-G reads with
+		// WALG_LIBSODIUM_KEY_TRANSFORM=hex (wal-g docs/README.md,
+		// "Encryption", at v3.0.9).
+		created, err = fillHex(&secrets.Backup.WALGLibsodiumKey)
+		if err != nil {
+			return result, err
+		}
+		note(created, "backup.walg_libsodium_key")
+	}
+
 	// One WireGuard identity per site, kept in the file rather than on the
 	// host, so rebuilding a dead machine restores the same identity and no
 	// peer is reconfigured.
@@ -511,6 +530,20 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 	}
 	if o, ok := owedSMTPPassword(cfg, secrets); ok {
 		out = append(out, o)
+	}
+	if cfg.Backup.On() {
+		for _, d := range cfg.Backup.Destinations {
+			have := secrets.Backup.Destinations[d.Name]
+			for _, leaf := range []struct{ name, value string }{{"access_key_id", have.AccessKeyID}, {"secret_access_key", have.SecretAccessKey}} {
+				if leaf.value != "" {
+					continue
+				}
+				out = append(out, Owed{
+					Name: "backup.destinations." + d.Name + "." + leaf.name,
+					Why:  fmt.Sprintf("issued by the provider behind %s for the bucket %s, with read, write, list and delete on it and nothing else. Backups cannot reach %s without it", d.Endpoint, d.Bucket, d.Name),
+				})
+			}
+		}
 	}
 	for _, name := range cfg.AppNames() {
 		if _, ok := secrets.OIDCClients[name]; ok {
