@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,39 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrNotFound is a registry answering that the tag does not exist (404, the
+// distribution API's MANIFEST_UNKNOWN), and ErrDenied one refusing the
+// anonymous pull this lookup makes (401 or 403, from the manifest or from the
+// token service). A failure that is neither did not get an answer about the
+// tag: the registry was not reached, timed out, or failed on its side. apply
+// gives each its own advice, so the registry's errors wrap these.
+var (
+	ErrNotFound = errors.New("not found")
+	ErrDenied   = errors.New("access denied")
+)
+
+// answer is a registry's answer that was not a digest, with which of
+// ErrNotFound and ErrDenied it was. Its text is the registry's answer alone.
+type answer struct {
+	text string
+	kind error
+}
+
+func (a *answer) Error() string { return a.text }
+func (a *answer) Unwrap() error { return a.kind }
+
+// answered is the error for a registry that answered status, worded text,
+// wrapping ErrNotFound or ErrDenied when status is one of theirs.
+func answered(status int, text string) error {
+	switch status {
+	case http.StatusNotFound:
+		return &answer{text, ErrNotFound}
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return &answer{text, ErrDenied}
+	}
+	return errors.New(text)
+}
 
 // Registry resolves a reference by asking its registry. The zero value is
 // usable, with a client that gives up after Timeout.
@@ -89,7 +123,7 @@ func (r Registry) Digest(ref string) (string, error) {
 // digest, which is how the distribution API defines one.
 func getDigest(client *http.Client, manifest, token, ref, host string, headStatus int) (string, error) {
 	if headStatus == http.StatusNotFound {
-		return "", fmt.Errorf("%s answered that %s does not exist", host, ref)
+		return "", answered(headStatus, fmt.Sprintf("%s answered that %s does not exist", host, ref))
 	}
 	resp, err := ask(client, http.MethodGet, manifest, token)
 	if err != nil {
@@ -97,7 +131,7 @@ func getDigest(client *http.Client, manifest, token, ref, host string, headStatu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s answered %s for %s", host, resp.Status, ref)
+		return "", answered(resp.StatusCode, fmt.Sprintf("%s answered %s for %s", host, resp.Status, ref))
 	}
 	if digest := contentDigest(resp); digest != "" {
 		return digest, nil
@@ -142,7 +176,9 @@ func contentDigest(resp *http.Response) string {
 func anonymousToken(client *http.Client, challenge, repo string) (string, error) {
 	scheme, params, _ := strings.Cut(challenge, " ")
 	if !strings.EqualFold(scheme, "Bearer") {
-		return "", fmt.Errorf("the registry wants %q authentication, and only an anonymous bearer token is asked for", scheme)
+		// A registry that wants credentials before it says anything refuses
+		// the anonymous pull as surely as a 401 after a token does.
+		return "", &answer{fmt.Sprintf("the registry wants %q authentication, and only an anonymous bearer token is asked for", scheme), ErrDenied}
 	}
 	fields := challengeFields(params)
 	realm := fields["realm"]
@@ -170,7 +206,7 @@ func anonymousToken(client *http.Client, challenge, repo string) (string, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("the token service answered %s; a private image needs credentials this lookup does not use", resp.Status)
+		return "", answered(resp.StatusCode, fmt.Sprintf("the token service answered %s; a private image needs credentials this lookup does not use", resp.Status))
 	}
 	var body struct {
 		Token       string `json:"token"`
