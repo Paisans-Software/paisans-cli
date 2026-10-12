@@ -155,11 +155,11 @@ func (l Local) raiseSeen(rev int, sha string) error {
 	return l.writeState(seenFile, fmt.Sprintf("%d %s", rev, sha))
 }
 
-// AcceptRollback records revision rev at sha as the newest seen, even when
+// acceptRollback records revision rev at sha as the newest seen, even when
 // it is lower than what is recorded. It is the one way the record goes down,
 // and only because the operator typed rollback for that head: they chose to
 // go on from it, and every later gather is judged against that choice.
-func (l Local) AcceptRollback(rev int, sha string) error {
+func (l Local) acceptRollback(rev int, sha string) error {
 	if rev < 1 {
 		return fmt.Errorf("revision %d is not one", rev)
 	}
@@ -167,6 +167,35 @@ func (l Local) AcceptRollback(rev int, sha string) error {
 		return err
 	}
 	return l.writeState(seenFile, fmt.Sprintf("%d %s", rev, sha))
+}
+
+// SeenChange is the change to .paisans/config-seen a gather leads to:
+// raising the record to a newer trusted head, or, with Lower, setting it to
+// an older head the operator accepted by typing rollback. A gather only
+// carries it; RecordSeen writes it, which a command does once its last
+// confirmation has passed and it commits its change, so a run that stops
+// leaves the record as it was.
+type SeenChange struct {
+	Revision int
+	SHA      string
+	Lower    bool
+}
+
+// RecordSeen writes the change to the seen record g carries, if any.
+func (l Local) RecordSeen(g Gathered) error {
+	switch {
+	case g.Seen == nil:
+		return nil
+	case g.Seen.Lower:
+		return l.acceptRollback(g.Seen.Revision, g.Seen.SHA)
+	}
+	return l.raiseSeen(g.Seen.Revision, g.Seen.SHA)
+}
+
+// AcceptRollback makes g carry the older head rb names as the record's new
+// value, once the operator has typed rollback for it.
+func (g *Gathered) AcceptRollback(rb *RollbackError) {
+	g.Seen = &SeenChange{Revision: rb.Revision, SHA: rb.SHA, Lower: true}
 }
 
 // RollbackError is a gather whose newest trusted version is older than one
@@ -360,6 +389,9 @@ type Gathered struct {
 	Versions map[string]Version
 	Holders  map[string][]string // version -> the sites whose answer held it
 	Signers  map[string]string   // version -> the admin id its key belongs to, "" when none
+	// Seen is the change to the seen record this gather leads to, nil for
+	// none; Local.RecordSeen writes it.
+	Seen *SeenChange
 }
 
 // Direct is the sites reached directly, in name order.
@@ -405,34 +437,21 @@ type (
 	PushFunc func(apply.Transport, deployment.Deployment, []byte) error
 )
 
-// Gather collects every version the sites hold into the cache and judges
-// them from the workstation's own anchor (Local.Anchor). Each site first
-// syncs with its peers (Pull with syncFirst), which changes the site, so
-// Gather is for a command run with --execute. configured is how many sites
-// the configuration declares, which the majority is counted against.
-//
-// A head older than the newest this workstation has seen is a
-// *RollbackError, returned with the complete Gathered; otherwise the head's
-// revision is recorded as seen.
-func Gather(l Local, sites map[string]apply.Transport, configured int, id string) (Gathered, error) {
-	a, err := l.Anchor()
-	if err != nil {
-		return Gathered{}, err
-	}
-	return gather(l, sites, configured, id, a, GatherOptions{Sync: true, Remember: true}, Pull)
-}
-
 // GatherOptions say what a gather may change. Sync asks each site to sync
 // with its peers first, which changes the site, so only a run with --execute
-// sets it. Remember raises the newest revision seen; it is set only when the
-// anchor is the workstation's recorded one, or a root this run records, so
-// that judging from a root the operator only tried out leaves no trace.
+// sets it.
 type GatherOptions struct {
-	Sync, Remember bool
+	Sync bool
 }
 
-// GatherAnchored is Gather from the anchor a, with what it may change set
-// by o.
+// GatherAnchored collects every version the sites hold into the cache and
+// judges them from the anchor a. configured is how many sites the
+// configuration declares, which the majority is counted against.
+//
+// A head older than the newest this workstation has seen is a
+// *RollbackError, returned with the complete Gathered; otherwise a head
+// newer than the record is carried in Gathered.Seen, for the command to
+// record once it commits. A gather never writes the record itself.
 func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, o GatherOptions) (Gathered, error) {
 	return gather(l, sites, configured, id, a, o, Pull)
 }
@@ -515,10 +534,10 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	if rev < seenRev {
 		return g, &RollbackError{SeenRevision: seenRev, SeenSHA: seenSHA, Revision: rev, SHA: top}
 	}
-	if !o.Remember {
-		return g, nil
+	if rev > seenRev {
+		g.Seen = &SeenChange{Revision: rev, SHA: top}
 	}
-	return g, l.raiseSeen(rev, top)
+	return g, nil
 }
 
 // versionConfigs reads a version's paisans.yaml, decoded as strictly as
@@ -648,49 +667,18 @@ type publishOpts struct {
 	now      time.Time
 }
 
-// Publish commits the three local files as a version whose parent is the
-// head, signs it with signingKey (a public key line the ssh-agent holds), and
-// pushes the cache to every site that answered. It refuses a base that is
-// not the sites' head, a fork, a key that no admin of the parent lists (of
-// the local paisans.yaml for the first version), and a run that reaches no
-// site. It records the version as the head, the first as the root, and the
-// key as the signing key when none is recorded. Unchanged files since the
-// head make no new version: the head is pushed again. A rollback refuses
-// here; a caller that lets the operator accept one gathers itself and calls
-// PublishFrom.
-func Publish(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (string, []string, error) {
-	return publish(l, sites, publishOpts{keyLine: signingKey, signWith: "key::" + signingKey, now: now}, Pull, Push)
-}
-
-// PublishMerge is Publish with every head as a parent, after the operator
-// has merged them by hand. It resolves a fork, and an incoming change alike.
-func PublishMerge(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (string, []string, error) {
-	return publish(l, sites, publishOpts{keyLine: signingKey, signWith: "key::" + signingKey, merge: true, now: now}, Pull, Push)
-}
-
-func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull PullFunc, push PushFunc) (string, []string, error) {
-	f, err := l.Files()
-	if err != nil {
-		return "", nil, fmt.Errorf("read the files to publish: %w", err)
-	}
-	local, err := config.LoadBytes(f.Paisans)
-	if err != nil {
-		return "", nil, err
-	}
-	a, err := l.Anchor()
-	if err != nil {
-		return "", nil, err
-	}
-	g, err := gather(l, sites, len(sites), local.ID, a, GatherOptions{Sync: true, Remember: true}, pull)
-	if err != nil {
-		return "", nil, err
-	}
-	return publishFrom(l, g, sites, o, push)
-}
-
-// PublishFrom is Publish on a gather the caller has already made, and
-// judged: Eg: one whose rollback the operator accepted. signWith is what
-// git's user.signingKey is given, "key::" and the key line for the agent.
+// PublishFrom commits the three local files as a version whose parent is
+// the head, on a gather the caller has already made and judged (Eg: one
+// whose rollback the operator accepted), signs it with keyLine (a public key
+// line the ssh-agent holds), and pushes the cache to every site that
+// answered. It refuses a base that is not the sites' head, a fork, a key
+// that no admin of the parent lists (of the local paisans.yaml for the first
+// version), and a run that reaches no site. It records the change to the
+// seen record the gather carries, the version as the head, the first as the
+// root, and the key as the signing key when none is recorded. Unchanged
+// files since the head make no new version: the head is pushed again.
+// signWith is what git's user.signingKey is given, "key::" and the key line
+// for the agent.
 func PublishFrom(l Local, g Gathered, sites map[string]apply.Transport, keyLine, signWith string, merge bool, now time.Time) (string, []string, error) {
 	return publishFrom(l, g, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
 }
@@ -738,6 +726,9 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 		return "", nil, err
 	}
 
+	if err := l.RecordSeen(g); err != nil {
+		return "", nil, err
+	}
 	sha := ""
 	if !o.merge && head != "" && len(parents) == 1 && parents[0] == head {
 		if hf, err := cache.Files(head); err == nil && hf.Equal(f) {
@@ -933,48 +924,17 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	return head, false, nil
 }
 
-// Attest gathers from the sites the local paisans.yaml declares, anchored on
-// the pinned root and on signingKey (a public key line the ssh-agent holds),
-// and signs an attestation of the head: a version whose tree is exactly the
-// head's and whose only parent is the head, one revision on. It pushes it to
-// every site that answered and records the key, the attestation as the head,
-// and the root when none is pinned, so the attestation is the operator's
-// anchor from then on. It changes nothing on a site but its store. A
-// workstation without the local files gathers itself and calls AttestFrom.
-func Attest(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (string, error) {
-	return attest(l, sites, signingKey, "key::"+signingKey, now, Pull, Push)
-}
-
-func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string, now time.Time, pull PullFunc, push PushFunc) (string, error) {
-	f, err := l.Files()
-	if err != nil {
-		return "", fmt.Errorf("read the local files: %w", err)
-	}
-	local, err := config.LoadBytes(f.Paisans)
-	if err != nil {
-		return "", err
-	}
-	key, opts, err := config.ParseKeyLine(keyLine)
-	if err != nil || len(opts) > 0 {
-		return "", fmt.Errorf("the signing key is not a bare public key line: %q", keyLine)
-	}
-	root, err := l.Root()
-	if err != nil {
-		return "", err
-	}
-	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signer: key.Fingerprint}, GatherOptions{Sync: true, Remember: true}, pull)
-	if err != nil {
-		return "", err
-	}
-	sha, _, err := attestFrom(l, g, sites, root, keyLine, signWith, now, push)
-	return sha, err
-}
-
-// AttestFrom is Attest on a gather the caller has already made, and judged,
-// from the anchor of the pinned root pin and the key. signWith is what git's
-// user.signingKey is given, "key::" and the key line for the agent. A head
-// the key signed already is pushed again rather than attested twice, so
-// running it again resumes a push some sites missed.
+// AttestFrom signs an attestation of the head of a gather the caller has
+// already made and judged, from the anchor of the pinned root pin and the
+// key: a version whose tree is exactly the head's and whose only parent is
+// the head, one revision on. It pushes it to every site that answered and
+// records the change to the seen record the gather carries, the key, the
+// attestation as the head, and the root when none is pinned, so the
+// attestation is the operator's anchor from then on. It changes nothing on
+// a site but its store. signWith is what git's user.signingKey is given,
+// "key::" and the key line for the agent. A head the key signed already is
+// pushed again rather than attested twice, so running it again resumes a
+// push some sites missed.
 func AttestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyLine, signWith string, now time.Time) (string, []string, error) {
 	return attestFrom(l, g, sites, pin, keyLine, signWith, now, Push)
 }
@@ -1004,6 +964,9 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 		return "", nil, fmt.Errorf("version %s: %w", head, err)
 	}
 	if err := CheckSigner(l, []string{head}, cfg, keyLine); err != nil {
+		return "", nil, err
+	}
+	if err := l.RecordSeen(g); err != nil {
 		return "", nil, err
 	}
 	sha := head

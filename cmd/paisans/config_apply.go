@@ -74,7 +74,8 @@ type gathered struct {
 }
 
 // gatherForApply gathers as config publish does, without the side effects
-// in a dry run: no site syncs and the newest revision seen is not raised.
+// in a dry run: no site syncs. The seen record is written only when the
+// version is published, after the review's approval (configstore.PublishFiles).
 // loaded is the paisans.yaml and secrets.enc.yaml the caller loaded and
 // applies, which are what is published; nil reads them here, for apply
 // without --site, whose steps each check that they load the same.
@@ -104,7 +105,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute, remember: execute}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute}, stdin, stdout)
 	if err != nil {
 		return nil, err
 	}

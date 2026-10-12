@@ -129,37 +129,41 @@ const rollbackWord = "rollback"
 // gatherMode is what a gather may do. execute, for a run with --execute,
 // asks each site to sync with its peers first and asks for rollback at a
 // terminal; without it no site is changed and a rollback is only reported.
-// remember raises the newest revision seen (configstore.GatherOptions).
-// log reports a rollback without saying --execute asks. noAnchor, when set,
-// replaces what a missing anchor's refusal says to do.
+// log reports a rollback without saying --execute asks. accepted is a
+// rollback the operator accepted earlier in this run, which is not asked
+// again. noAnchor, when set, replaces what a missing anchor's refusal says
+// to do.
 type gatherMode struct {
-	execute, remember, log bool
-	noAnchor               string
+	execute, log bool
+	accepted     *configstore.SeenChange
+	noAnchor     string
 }
 
 // gatherAt gathers from sites, reporting each, and explains a missing anchor.
 // A dry run changes no site, and says so. A head older than one this
 // workstation has seen goes on, with --execute, only once the operator types
-// rollback at a terminal, and that head is then recorded as the newest seen.
+// rollback at a terminal. Nothing is written to the seen record here: the
+// gather carries the change (a newer head, or the accepted older one), and
+// the command records it with Local.RecordSeen once it commits its change.
 func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
 	names := slices.Sorted(maps.Keys(sites))
 	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
 		return configstore.Gathered{}, err
 	}
 	s := r.Step("gather the versions every site holds")
-	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute, Remember: m.remember})
+	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute})
 	var rb *configstore.RollbackError
 	if errors.As(err, &rb) {
 		s.End(ui.Warned, "older than this workstation has seen")
 		why := rb.Error() + ". A site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
 		switch {
+		case m.execute && m.accepted != nil && m.accepted.Lower && m.accepted.Revision == rb.Revision && m.accepted.SHA == rb.SHA:
+			g.AcceptRollback(rb)
 		case m.execute:
 			if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the newer version is gone."); err != nil {
 				return g, err
 			}
-			if err := l.AcceptRollback(rb.Revision, rb.SHA); err != nil {
-				return g, err
-			}
+			g.AcceptRollback(rb)
 		case m.log:
 			r.Note("the newest version is older than one seen here", why)
 		default:
@@ -354,7 +358,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{remember: true}, stdin, stdout)
+		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{}, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -389,7 +393,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, remember: true}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -446,7 +450,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -484,16 +488,17 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	switch {
-	case base == head && !edited:
-		if *execute && *root != "" {
-			if err := l.SetRoot(*root); err != nil {
+	case base == head:
+		if *execute {
+			if err := recordPull(l, g, *root); err != nil {
 				return err
 			}
 		}
-		r.Result("up to date with %s", describe(g, head))
-		return nil
-	case base == head:
-		r.Result("up to date with %s; the local edits are not published yet", describe(g, head))
+		if edited {
+			r.Result("up to date with %s; the local edits are not published yet", describe(g, head))
+		} else {
+			r.Result("up to date with %s", describe(g, head))
+		}
 		return nil
 	case edited:
 		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, len(sites), localFiles, headFiles, *execute, stdin, stdout); handled {
@@ -514,12 +519,23 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := l.Checkout(head); err != nil {
 		return err
 	}
-	if *root != "" {
-		if err := l.SetRoot(*root); err != nil {
-			return err
-		}
+	if err := recordPull(l, g, *root); err != nil {
+		return err
 	}
 	r.Result("moved the local files to %s", describe(g, head))
+	return nil
+}
+
+// recordPull is what a pull with --execute records once it has passed its
+// last confirmation: the change to the seen record its gather carries, and
+// root, when given, as the pinned root.
+func recordPull(l configstore.Local, g configstore.Gathered, root string) error {
+	if err := l.RecordSeen(g); err != nil {
+		return err
+	}
+	if root != "" {
+		return l.SetRoot(root)
+	}
 	return nil
 }
 
@@ -689,7 +705,7 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("versions of " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{remember: *root == "", log: true}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{log: true}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -772,7 +788,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -787,7 +803,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
+	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -822,10 +838,8 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := l.Checkout(head); err != nil {
 		return err
 	}
-	if pin != "" {
-		if err := l.SetRoot(pin); err != nil {
-			return err
-		}
+	if err := recordPull(l, g, pin); err != nil {
+		return err
 	}
 	r.Result("recovered %s into %s", describe(g, head), l.Dir)
 	return nil

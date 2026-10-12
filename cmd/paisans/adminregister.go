@@ -49,10 +49,6 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	recorded, err := l.Anchor()
-	if err != nil {
-		return err
-	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err
@@ -76,7 +72,6 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 	sites := configTransports(cfg)
 	m := gatherMode{
 		execute:  *execute,
-		remember: *execute || anchor == recorded,
 		noAnchor: "Pin the first version you trust with --root <sha>; an admin who has one can read its hash from paisans config log.",
 	}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)

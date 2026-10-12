@@ -670,3 +670,67 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// Typing rollback lowers the seen record only once the command commits: a
+// pull whose partial question is then declined leaves it as it was.
+func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	recoverHosts(t, answer) // home-a alone answers: one of four sites
+	seenPath := filepath.Join(l.Dir, ".paisans", "config-seen")
+	seen := "9 " + strings.Repeat("b", 40) + "\n"
+	if err := os.WriteFile(seenPath, []byte(seen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
+	if err == nil || !strings.Contains(out.String(), "Type rollback") {
+		t.Fatalf("got %v\n%s", err, out.String())
+	}
+	if b, _ := os.ReadFile(seenPath); string(b) != seen {
+		t.Fatalf("seen changed to %q by a pull that stopped", b)
+	}
+	if h, _ := l.Head(); h != shas[0] {
+		t.Fatalf("head moved to %s", h)
+	}
+}
+
+// A pull --execute --root that refuses records neither the root nor a newer
+// revision seen.
+func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer) // home-a alone answers: one of four sites
+	l := configstore.Local{Dir: t.TempDir()}
+	l.WriteFiles(files[0])
+	l.SetHead(shas[0])
+	var out bytes.Buffer
+	err := runConfig([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("got %v", err)
+	}
+	if rev, _, _ := l.Seen(); rev != 0 {
+		t.Fatalf("seen raised to %d", rev)
+	}
+	if r, _ := l.Root(); r != "" {
+		t.Fatalf("root %s recorded", r)
+	}
+}
+
+// Dry runs of publish, pull and log leave the seen record alone.
+func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
+	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
+	saved := agentKeys
+	agentKeys = func() []string { return []string{pub} }
+	t.Cleanup(func() { agentKeys = saved })
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var out bytes.Buffer
+	for _, sub := range []string{"pull", "log", "publish"} {
+		if err := runConfig([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+			t.Fatalf("%s: %v", sub, err)
+		}
+		if rev, _, _ := l.Seen(); rev != 0 {
+			t.Fatalf("a %s dry run raised seen to %d", sub, rev)
+		}
+	}
+}

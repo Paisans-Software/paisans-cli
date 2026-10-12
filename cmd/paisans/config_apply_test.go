@@ -144,6 +144,9 @@ func TestApplyRefusesAStaleBase(t *testing.T) {
 	if h, _ := f.l.Head(); h != f.shas[0] {
 		t.Errorf("head moved to %s", h)
 	}
+	if rev, _, _ := f.l.Seen(); rev != 0 {
+		t.Errorf("a refused apply raised seen to %d", rev)
+	}
 }
 
 // publishedBeforeClaim reports whether the version was published, and
