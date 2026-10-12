@@ -608,3 +608,22 @@ func TestAllowlistWarnsOnlyForKeysHostPrepareWouldAdd(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// A gateway that also runs the monitor takes every public hostname with it,
+// the monitor's included.
+func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
+	cfg := fixture(t)
+	delete(cfg.Sites, "watch")
+	vm := cfg.Sites["vm"]
+	vm.Roles = append(vm.Roles, config.RoleMonitor)
+	cfg.Sites["vm"] = vm
+	got := losses(cfg, "vm")
+	for _, want := range []string{"its gateway, which every public hostname goes through", "the uptime monitor"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("vm's loss lacks %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "but the monitor's") {
+		t.Errorf("vm's loss excepts the monitor it runs: %s", got)
+	}
+}
