@@ -1,14 +1,17 @@
 package apply
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // Resolver says which build a tag names now, as the digest `docker pull`
@@ -232,7 +235,7 @@ func (p *Plan) FirstPins() []ImagePin {
 func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
 	rendered, err := kinds.ComposeMounts(compose)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: reading the images its compose file names: %w", site, err)
+		return "", nil, nil, fmt.Errorf("reading the images its compose file names: %w", err)
 	}
 	// A host file that does not parse is not this function's to report: the
 	// comparison that follows calls it a conflict.
@@ -274,7 +277,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 	}
 	out, err := render.PinImages(compose, pinned, lines)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: %w", site, err)
+		return "", nil, nil, err
 	}
 	return out, pins, notes, nil
 }
@@ -332,29 +335,90 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 	digest, failed := r.Digest(want)
 	if failed == nil {
 		pin.Reference, pin.Source = want+"@"+digest, "registry"
-		return pin, resolvedNotes(site, label, *pin), nil
+		return pin, resolvedNotes(label, *pin), nil
 	}
 
-	// The registry did not answer. What the host runs is what the operator
+	// The registry gave no digest. What the host runs is what the operator
 	// last saw planned, so it is the safe thing to keep, provided it is the
-	// same tag, pinned or bare: another tag or another image is not the
-	// configuration's.
+	// same tag, pinned or bare: another tag or another image is not what the
+	// configuration names.
 	if deployed != "" && nameOf(deployed) == want {
 		pin.Reference, pin.Source = deployed, "deployed"
-		kept := fmt.Sprintf("%s, the build this site already runs", deployed)
+		kept := fmt.Sprintf("keeps %s, the build this site runs", ui.Name(deployed))
 		if digestOf(deployed) == "" {
-			kept = fmt.Sprintf("%s as the site runs it, unpinned, until an apply can resolve it", deployed)
+			kept = fmt.Sprintf("keeps %s unpinned, as this site runs it, until an apply can resolve it", ui.Name(deployed))
 		}
 		return pin, []Note{{
-			Hint: fmt.Sprintf("%s: %s stays on the build it runs, %s could not be resolved", site, label, want),
-			Text: fmt.Sprintf("%s: asking the registry which build %s names failed (%v), so the plan keeps %s. A newer build, if one exists, reaches the site on the next apply that can reach the registry.", site, want, failed, kept),
+			Hint: fmt.Sprintf("could not resolve %s %s; keeping the build this site runs", label, ui.Name(want)),
+			Text: fmt.Sprintf("Resolving %s failed (%v), so the plan %s. A newer build, if one exists, arrives with the next apply that resolves %s.", ui.Name(want), failed, kept, ui.Name(want)),
 		}}, nil
 	}
-	runs := "This site runs no build of it to keep instead"
-	if deployed != "" {
-		runs = fmt.Sprintf("This site runs %s, which is not a build of it, so keeping that would not be the configuration's", deployed)
+	return nil, nil, unresolved(image, deployed, failed, r)
+}
+
+// unresolved is the refusal for an image whose tag could not be resolved,
+// on a site that runs no build of that tag to keep. It names no site: the
+// line it is shown on (converge) or the section above it (`apply --site`)
+// already does.
+//
+// apply stops rather than carry on, for two reasons the message leaves out
+// unless the operator needs them to act:
+//   - it does not keep the image the site runs, because a different tag or
+//     image is not what the configuration asks for, and apply cannot tell
+//     whether it is a build of the requested tag;
+//   - it does not write the bare tag, because a compose file naming only a
+//     tag never changes, so Docker would never pull a newer build behind it
+//     (see ResolveImages).
+//
+// The advice depends on what the registry said (imagedigest.ErrNotFound,
+// imagedigest.ErrDenied, or no answer about the tag at all).
+func unresolved(image render.ComposeImage, deployed string, failed error, r Resolver) error {
+	want := image.Image
+	named := imageLabel(image) + " " + ui.Name(want)
+	setting := ui.Name(image.Setting())
+	host := imagedigest.Host(want)
+	switch {
+	case errors.Is(failed, imagedigest.ErrNotFound) && image.Default && kinds.Channel(want) != "":
+		// The kind's default follows a channel (internal/kinds/kinds.go),
+		// which exists only once the fork's promote workflow has moved it
+		// to a release the toolkit was verified against
+		// (docs/specs/2026-10-11-stack-channels.md, "Promotion"). Until
+		// then no build of it exists to resolve. Pinning an unverified
+		// release instead is allowed: the message says what it is, and
+		// nothing refuses it.
+		return &ui.Problem{
+			Hint: fmt.Sprintf("%s is not published (%s: not found)", named, host),
+			Explain: fmt.Sprintf("The %s channel has no paisans-verified release yet. Set %s to a published tag (Eg: %s) or a digest to run one anyway; it will not be a paisans-verified release.",
+				ui.Name(kinds.Channel(want)), setting, ui.Name(exampleTag(want, r))),
+			Cause: failed,
+		}
+	case errors.Is(failed, imagedigest.ErrNotFound):
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("%s does not exist (%s: not found)", named, host),
+			Explain: fmt.Sprintf("Check %s: set it to a published tag (Eg: %s) or a digest.", setting, ui.Name(exampleTag(want, r))),
+			Cause:   failed,
+		}
+	case errors.Is(failed, imagedigest.ErrDenied):
+		// imagedigest asks anonymously, so a refusal is a private image or
+		// a name the registry does not know and will not say so for.
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("%s is not public (%s: access denied)", named, host),
+			Explain: fmt.Sprintf("Either the image is private, which needs credentials this lookup does not use, or its name is wrong. Check %s, or set it to a digest.", setting),
+			Cause:   failed,
+		}
 	}
-	return nil, nil, fmt.Errorf("%s: could not resolve which build %s names, for %s: %v. %s, and a compose file naming only the tag would never move again. Run apply again once this workstation reaches the registry, or set %s to a digest", site, want, label, failed, runs, image.Setting())
+	explain := fmt.Sprintf("Run apply again once this workstation reaches %s, or set %s to a digest.", host, setting)
+	if deployed != "" {
+		// Named without its digest: the tag is what the operator compares
+		// with the configuration.
+		running := ui.Name(nameOf(deployed))
+		explain += fmt.Sprintf("\nApply does not keep %s, which this site runs, because it cannot confirm %s is a build of %s.", running, running, ui.Name(want))
+	}
+	return &ui.Problem{
+		Hint:    fmt.Sprintf("could not reach %s to resolve %s", host, named),
+		Explain: explain,
+		Cause:   failed,
+	}
 }
 
 // holdImage is the build an app this site shares with sites the apply does
@@ -367,14 +431,17 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 // template. A build is compared by its digest, or by its reference when it
 // names none.
 func holdImage(site string, image render.ComposeImage, services []string, host map[string]kinds.ServiceMounts, peers []PeerCompose, r Resolver) (string, []Note, error) {
-	label := imageLabel(image)
+	app := ui.Name(image.App)
 	builds := map[string]string{}
 	var unread, all []string
 	var notes []Note
 	consider := func(name string, mounts map[string]kinds.ServiceMounts) error {
 		ref, mixed := deployedRef(mounts, services)
 		if len(mixed) > 1 {
-			return fmt.Errorf("%s runs %s from more than one build on %s (%s), so there is no one build for this apply to keep it on. Run `paisans apply` without --site, which plans every site of %s, to move it to one build", image.App, label, name, strings.Join(mixed, ", "), image.App)
+			return &ui.Problem{
+				Hint:    fmt.Sprintf("%s runs more than one build on %s", app, ui.Name(name)),
+				Explain: fmt.Sprintf("%s runs %s on %s, so this apply has no one build to keep. Run `paisans apply` without --site, which plans every site of %s and moves them to one build.", app, names(mixed, ", "), ui.Name(name), app),
+			}
 		}
 		if ref != "" {
 			builds[name] = ref
@@ -382,15 +449,15 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		return nil
 	}
 	if err := consider(site, host); err != nil {
-		return "", nil, fmt.Errorf("%s: %w", site, err)
+		return "", nil, err
 	}
 	for _, peer := range peers {
 		all = append(all, peer.Site)
 		if peer.Err != nil {
 			unread = append(unread, peer.Site)
 			notes = append(notes, Note{
-				Hint: fmt.Sprintf("%s: %s's build on %s not read", site, image.App, peer.Site),
-				Text: fmt.Sprintf("%s: reading %s's compose file on %s failed (%v), so the build %s runs there is not compared with this site's", site, image.App, peer.Site, peer.Err, label),
+				Hint: fmt.Sprintf("build of %s on %s not read", app, ui.Name(peer.Site)),
+				Text: fmt.Sprintf("Reading the compose file of %s on %s failed (%v), so the build there is not compared with this site's.", app, ui.Name(peer.Site), peer.Err),
 			})
 			continue
 		}
@@ -399,10 +466,14 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		}
 		mounts, err := kinds.ComposeMounts(peer.Content)
 		if err != nil {
-			return "", nil, fmt.Errorf("%s: %s's compose file on %s is not readable (%v), so the build %s runs there is not known. Fix the file there, or run `paisans apply` without --site, which plans every site of %s", site, image.App, peer.Site, err, label, image.App)
+			return "", nil, &ui.Problem{
+				Hint:    fmt.Sprintf("compose file of %s on %s is not readable", app, ui.Name(peer.Site)),
+				Explain: fmt.Sprintf("This apply cannot tell which build %s runs there. Fix the file on %s, or run `paisans apply` without --site, which plans every site of %s.", app, ui.Name(peer.Site), app),
+				Cause:   err,
+			}
 		}
 		if err := consider(peer.Site, mounts); err != nil {
-			return "", nil, fmt.Errorf("%s: %w", site, err)
+			return "", nil, err
 		}
 	}
 
@@ -410,11 +481,19 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 	case !agreed:
 		var each []string
 		for _, name := range siteNames(builds) {
-			each = append(each, name+" runs "+builds[name])
+			each = append(each, ui.Name(name)+" runs "+ui.Name(builds[name]))
 		}
-		return "", nil, fmt.Errorf("%s: %s runs on %s, and its sites run different builds of %s: %s. An apply covering only some of them cannot choose between them, and two builds against one database is how a migration runs twice or not at all. Run `paisans apply` without --site, which plans every site of %s and moves them to one build", site, image.App, strings.Join(append([]string{site}, all...), ", "), label, strings.Join(each, "; "), image.App)
+		// Two builds against one database is how a migration runs twice or
+		// not at all, so an apply of some sites must not pick one.
+		return "", nil, &ui.Problem{
+			Hint:    fmt.Sprintf("the sites of %s run different builds", app),
+			Explain: fmt.Sprintf("%s. An apply of only some of them cannot choose one. Run `paisans apply` without --site, which plans every site of %s and moves them to one build.", strings.Join(each, "; "), app),
+		}
 	case len(builds) == 0 && len(unread) > 0:
-		return "", nil, fmt.Errorf("%s: %s runs on %s as well, which could not be read, and no site of it that could be read runs %s yet, so this apply cannot tell which build to start it on. Run apply again once %s can be reached", site, image.App, strings.Join(unread, ", "), label, strings.Join(unread, ", "))
+		return "", nil, &ui.Problem{
+			Hint:    fmt.Sprintf("cannot tell which build to start %s on", app),
+			Explain: fmt.Sprintf("%s also runs on %s, which could not be read, and no site that could be read runs %s yet. Run apply again once %s can be reached.", app, names(unread, ", "), app, names(unread, " and ")),
+		}
 	case len(builds) == 0:
 		return "", nil, nil
 	}
@@ -422,12 +501,12 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 
 	// Say so, and say it louder when the tag names a newer build than the
 	// one kept: that build is what the operator would have got.
-	text := fmt.Sprintf("%s: %s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving it to a new build takes an apply that covers all its sites: `paisans apply` without --site", site, image.App, strings.Join(all, ", "), label, held)
+	text := fmt.Sprintf("%s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving %s to a new build takes `paisans apply` without --site.", app, names(all, ", "), app, ui.Name(held), app)
 	note := Note{Text: text}
 	if r != nil {
 		if digest, err := r.Digest(image.Image); err == nil && digest != digestOf(held) {
-			note.Hint = fmt.Sprintf("%s: %s stays on the build its other sites run", site, image.App)
-			note.Text = fmt.Sprintf("%s. %s names a newer build, %s, which this apply does not move it to", text, image.Image, digest)
+			note.Hint = fmt.Sprintf("%s stays on the build its other sites run", app)
+			note.Text = fmt.Sprintf("%s %s names a newer build, %s, which this apply does not move %s to.", text, ui.Name(image.Image), ui.Name(digest), app)
 		}
 	}
 	return held, append(notes, note), nil
@@ -543,30 +622,67 @@ func servicesNaming(mounts map[string]kinds.ServiceMounts, image string) []strin
 	return out
 }
 
-// imageLabel names an image for the operator: Caddy, or an app's service.
+// imageLabel names an image for the operator, ahead of its reference: the
+// Caddy image, or an app's (Eg: `talk` image). The reference that follows
+// says which of an app's images it is, and Setting names its service.
 func imageLabel(image render.ComposeImage) string {
 	if image.App == "" {
-		return "Caddy"
+		return "Caddy image"
 	}
-	return fmt.Sprintf("%s's %s image", image.App, strings.Join(image.Services, "/"))
+	return ui.Name(image.App) + " image"
 }
 
 // resolvedNotes say what resolving decided, when it decided anything the
-// host does not already run.
-func resolvedNotes(site, label string, pin ImagePin) []Note {
+// host does not already run. Like unresolved, they name no site.
+func resolvedNotes(label string, pin ImagePin) []Note {
+	named := label + " " + ui.Name(pin.Image)
+	stack := ui.Name(pin.Stack)
 	switch {
 	case pin.Deployed == "":
-		return []Note{{Text: fmt.Sprintf("%s: %s, %s, resolves to %s", site, label, pin.Image, digestOf(pin.Reference))}}
+		return []Note{{Text: fmt.Sprintf("%s resolves to %s.", named, ui.Name(digestOf(pin.Reference)))}}
 	case pin.FirstPin():
-		return []Note{{Text: fmt.Sprintf("%s: %s, %s, runs as a bare tag and is pinned for the first time, to %s, the build the tag names now; the %s stack's compose file changes once, so its containers are recreated once, on that build", site, label, pin.Image, digestOf(pin.Reference), pin.Stack)}}
+		// The compose file changes once, from the bare tag to the tag and
+		// its digest, which is why the stack is recreated even though the
+		// build may be the one already running.
+		return []Note{{Text: fmt.Sprintf("%s runs unpinned. This apply pins it to %s, the build the tag names now, and recreates the %s stack once.", named, ui.Name(digestOf(pin.Reference)), stack)}}
 	case pin.Moved():
 		before := digestOf(pin.Deployed)
 		if before == "" {
 			before = pin.Deployed
 		}
-		return []Note{{Text: fmt.Sprintf("%s: %s, %s, names a new build, %s, where the site runs %s, so the %s stack's compose file changes and its containers are replaced and checked as for any new image", site, label, pin.Image, digestOf(pin.Reference), before, pin.Stack)}}
+		return []Note{{Text: fmt.Sprintf("%s names a new build, %s, where the site runs %s. The %s stack's containers are replaced and checked as for any new image.", named, ui.Name(digestOf(pin.Reference)), ui.Name(before), stack)}}
 	}
 	return nil
+}
+
+// Lister names the newest version-shaped tag of a reference's repository.
+// imagedigest.Registry and imagedigest.Cache are both.
+type Lister interface {
+	NewestVersion(ref string) (string, error)
+}
+
+// exampleTag is a published tag of ref's repository for advice to show: the
+// newest version r lists, or, when r lists none or cannot, the repository
+// with a placeholder for the version (Eg: ghcr.io/example/mbin:<version>).
+// It is read from the registry rather than written here so the example is
+// never a version the registry has moved past.
+func exampleTag(ref string, r Resolver) string {
+	name := kinds.ParseReference(ref).Name
+	if l, ok := r.(Lister); ok {
+		if newest, err := l.NewestVersion(ref); err == nil && newest != "" {
+			return name + ":" + newest
+		}
+	}
+	return name + ":<version>"
+}
+
+// names is each of list as a name (see ui.Name), joined by sep.
+func names(list []string, sep string) string {
+	out := make([]string, len(list))
+	for i, s := range list {
+		out[i] = ui.Name(s)
+	}
+	return strings.Join(out, sep)
 }
 
 // pinRecord is what the manifest records of the builds this site runs after
