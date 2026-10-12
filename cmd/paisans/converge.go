@@ -762,6 +762,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	steps := convergePlan(cfg, st)
+	// The version the run applies is gathered once, before the review, so
+	// a fork or a stale base is refused before the operator is asked
+	// anything; its steps do not gather again.
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), cfg, execute, o.stdin, o.stdout)
+	if err != nil {
+		return err
+	}
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's admin problem is shown on its line; it stops nothing.
@@ -769,7 +776,11 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		convergeWebServerPending(r, cfg, webServerScope{})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
-		_, pending, _ := convergeReview(r, cfg, o)
+		reviews, pending, _ := convergeReview(r, cfg, o)
+		// What --execute checks every host's record against and publishes.
+		if _, err := store.land(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
+			return err
+		}
 		convergeLeft(r, cfg, secretsPath, configPath)
 		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
 		if pending > 0 {
@@ -787,6 +798,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// files, and the images are rendered from the secrets it generates.
 	reviews, _, err := convergeReview(r, cfg, o)
 	if err != nil {
+		return err
+	}
+	// Approved, and before the first step: every host's record is checked
+	// against the version and the version published, once for the run, so
+	// the store holds what is applied even if the run stops part way. Each
+	// apply step records it.
+	if reviewedByRun.version, err = store.land(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
 	if err := convergeExecute(r, cfg, steps, o); err != nil {

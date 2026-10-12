@@ -93,6 +93,12 @@ type siteReview struct {
 	scope  grant.Scope
 	review grant.Review
 	host   registry.Runner
+	// record is the grant record the review was compared with, which also
+	// holds the configuration version last applied to the host.
+	record grant.Record
+	// version is the configuration version the command applies, recorded
+	// with what was granted; nil records none.
+	version *appliedVersion
 }
 
 // reviewSite reads site's record of deployment d through host and compares
@@ -103,7 +109,7 @@ func reviewSite(d deployment.Deployment, site string, g grant.Grant, scope grant
 	if err != nil {
 		return nil, err
 	}
-	return &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: host}, nil
+	return &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: host, record: rec}, nil
 }
 
 // entries is n entries to approve, as a review line's result says it.
@@ -179,14 +185,20 @@ func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []
 }
 
 // recordGrant writes the parts of a site's grant its command covers, once
-// the command's steps for the site have all succeeded. A record already
-// holding them is left as it is, and says nothing.
+// the command's steps for the site have all succeeded, and the configuration
+// version it applied. A record already holding them is left as it is, and
+// says nothing.
 func recordGrant(r ui.Reporter, s *siteReview, d deployment.Deployment, approvedBy string) error {
 	if s == nil {
 		return nil
 	}
 	wrote, err := grant.Write(s.host, d, func(rec grant.Record) grant.Record {
-		return grant.Update(rec, s.grant, s.scope, grantNow(), approvedBy)
+		now := grantNow()
+		out := grant.Update(rec, s.grant, s.scope, now, approvedBy)
+		if s.version != nil {
+			out = out.WithConfig(s.version.sha, s.version.revision, now)
+		}
+		return out
 	})
 	if err != nil {
 		r.Step("record what was granted").Fail(err)
@@ -212,6 +224,9 @@ type runReview struct {
 	approved map[string]grant.Review
 	// approvedBy is who approved it, as approver says.
 	approvedBy string
+	// version is the configuration version the run published, which each
+	// step records with what it applied; nil in a dry run.
+	version *appliedVersion
 }
 
 // reviewedByRun is set while apply with no --site runs.
@@ -247,6 +262,7 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run paisans apply --execute again to review them.",
 			}
 		}
+		s.version = run.version
 		return s, run.approvedBy, nil
 	}
 	if !execute {

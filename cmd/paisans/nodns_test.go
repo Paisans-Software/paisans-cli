@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/keystore"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // TestMain stands a refusal in for the DNS provider site remove builds, so
@@ -24,6 +27,11 @@ func TestMain(m *testing.M) {
 	// No test reaches a host to ask whether it was the gateway; a test
 	// about the move says otherwise.
 	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
+	// No test's apply reaches a configuration store; a test about the
+	// store sets gatherForApply back.
+	applyStore = func(ui.Reporter, string, string, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {
+		return noStore{}, nil
+	}
 	// No test reaches the workstation's keystore: init makes and reads age
 	// keys in memory. A test about the keystore sets its own. Nor does a
 	// SOPS_AGE_* variable from the shell running the tests decide which key
@@ -35,6 +43,14 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(name)
 	}
 	os.Exit(m.Run())
+}
+
+// noStore is a configuration store that checks nothing and publishes
+// nothing.
+type noStore struct{}
+
+func (noStore) land(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.Writer) (*appliedVersion, error) {
+	return nil, nil
 }
 
 // testCaddyDigest is the build every test's registry says Caddy's tag names.

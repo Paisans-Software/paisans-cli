@@ -737,6 +737,15 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := requireACMEToken(cfg, secrets, []string{*site}); err != nil {
 		return err
 	}
+	// The version this applies is gathered before the review, so a fork or
+	// a stale base is refused before the operator is asked anything. As a
+	// step of apply without --site the run did this once for every site.
+	var store storeVersion
+	if reviewedByRun == nil {
+		if store, err = applyStore(r, *configPath, *secretsPath, cfg, *execute, stdin, stdout); err != nil {
+			return err
+		}
+	}
 
 	transport := siteTransport(*site, declared, *destination, *sudo)
 	// As a step of apply without --site (a checkReporter) it leaves the
@@ -775,6 +784,14 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
 	if err != nil {
 		return err
+	}
+	// Approved, and before the first change: the host's record is checked
+	// against the version and the version published, so the store holds
+	// what is applied even if the apply stops part way.
+	if store != nil && review != nil {
+		if review.version, err = store.land(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
+			return err
+		}
 	}
 	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
