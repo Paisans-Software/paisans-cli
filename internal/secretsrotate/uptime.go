@@ -70,14 +70,15 @@ func (r uptimeAdmin) Accepts(e Env, next string) (bool, error) { return true, ni
 func (r uptimeAdmin) Users(e Env) []Use { return appUses(e, r.app) }
 
 // heartbeatGap is what a heartbeat rotation costs, as the plan says it.
-// Between the monitors restarting with the next token and the site's
-// heartbeat service being recreated with it, the site still pushes the old
-// one, which the monitors answer 404 to. That is one apply and one health
-// gate, shorter than the one minute interval the site pushes at, and the
-// monitor counts the site stale only after the interval and its grace
-// (internal/render/heartbeat.go, heartbeatGraceSeconds). A run that stops
-// between the two leaves the pushes refused until it is resumed.
-const heartbeatGap = "the site's heartbeat, which the monitors may refuse for at most one push interval between learning the next token and the site pushing it"
+// From the first monitor restarting with the next token until the site's
+// heartbeat service is recreated with it, the site still pushes the old one,
+// which a monitor that already holds the next answers 404 to. That is one
+// scoped apply and health gate per monitor, then the pusher's, and a monitor
+// counts the heartbeat missed only after the 60 second interval and its 120
+// second grace (internal/render/heartbeat.go, heartbeatGraceSeconds), which
+// those applies normally finish within. A run that stops in between leaves
+// the pushes refused until it is resumed.
+const heartbeatGap = "the site's heartbeat, which the monitors may refuse while they restart with the next token and until the site pushes it, normally within the grace before a heartbeat counts as missed"
 
 // heartbeat rotates the token a site pushes its heartbeat with.
 type heartbeat struct {
@@ -139,11 +140,13 @@ func (r heartbeat) Users(e Env) []Use {
 }
 
 // adminsHeartbeatGap is what an admins heartbeat rotation costs, for the
-// same reason as heartbeatGap: between the monitors restarting with the next
-// token and the active Pocket ID instance's pusher being recreated with it,
-// that instance still pushes the old one, which the monitors answer 404 to.
-// Nobody is signed out, and Pocket ID keeps running throughout.
-const adminsHeartbeatGap = "the admins heartbeat, which the monitors may refuse for at most one push interval between learning the next token and the active instance pushing it"
+// same reason as heartbeatGap: from the first monitor restarting with the
+// next token until the active Pocket ID instance's pusher is recreated with
+// it, that instance still pushes the old one, which a monitor already
+// holding the next answers 404 to. The pushers are recreated one site at a
+// time, so the active instance may be the last. Nobody is signed out, and
+// Pocket ID keeps running throughout.
+const adminsHeartbeatGap = "the admins heartbeat, which the monitors may refuse while they restart with the next token and until the active instance pushes it, normally within the grace before a heartbeat counts as missed"
 
 // adminsHeartbeat rotates the token a Pocket ID app's instances push the
 // admins group's health with.

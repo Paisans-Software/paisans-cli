@@ -984,8 +984,8 @@ func TestSecretsRotateKeepsTheBackupSecrets(t *testing.T) {
 }
 
 // A Pocket ID app's admins heartbeat token is rotated by name, at the cost of
-// the admins heartbeat refused for at most one push interval, and signs
-// nobody out.
+// the admins heartbeat's pushes refused while the monitors and pushers take
+// it, and signs nobody out.
 func TestSecretsRotateNamesTheAdminsHeartbeatToken(t *testing.T) {
 	r, err := rotatorFor("apps.auth.admins_heartbeat_token", rotateWiring{})
 	if err != nil {

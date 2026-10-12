@@ -292,8 +292,8 @@ func TestHeartbeatCostStatesTheRefusedPush(t *testing.T) {
 	if c.SignsOut || c.Reconnects {
 		t.Fatalf("cost %+v: a heartbeat token signs nobody out", c)
 	}
-	if !strings.Contains(c.Downtime, "at most one") || !strings.Contains(c.Downtime, "interval") {
-		t.Fatalf("downtime %q: the plan must say a push may be refused for at most one interval", c.Downtime)
+	if !strings.Contains(c.Downtime, "refuse") || !strings.Contains(c.Downtime, "grace") {
+		t.Fatalf("downtime %q: the plan must say pushes may be refused, within the grace", c.Downtime)
 	}
 }
 
@@ -460,8 +460,8 @@ func TestAdminsHeartbeatCostStatesTheRefusedPush(t *testing.T) {
 	if c.SignsOut || c.Reconnects {
 		t.Fatalf("cost %+v: an admins heartbeat token signs nobody out", c)
 	}
-	if !strings.Contains(c.Downtime, "admins heartbeat") || !strings.Contains(c.Downtime, "at most one") || !strings.Contains(c.Downtime, "interval") {
-		t.Fatalf("downtime %q: the plan must say the admins heartbeat may be refused for at most one interval", c.Downtime)
+	if !strings.Contains(c.Downtime, "admins heartbeat") || !strings.Contains(c.Downtime, "refuse") || !strings.Contains(c.Downtime, "grace") {
+		t.Fatalf("downtime %q: the plan must say the admins heartbeat may be refused, within the grace", c.Downtime)
 	}
 	if ok, err := AdminsHeartbeat("auth").Accepts(Env{}, "anything"); !ok || err != nil {
 		t.Fatalf("Accepts %v %v: the monitors are handed it as users", ok, err)
