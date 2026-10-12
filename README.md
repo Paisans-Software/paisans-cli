@@ -2193,6 +2193,13 @@ break when the old one is retired; a pasted secret not yet replaced; a pending
 rotation whose stage cannot be read from the hosts, or that cannot finish; and
 a pending `mesh rekey`.
 
+**The signed copies.** The applies a rotation runs hand each stack its next
+value and nothing else: they neither ask for the review nor publish a version,
+since nothing an admin declared changed. The rotated secrets file is a local
+edit like any other, so the next `apply --execute` publishes it, and `config
+publish` can publish it sooner. A secrets merge refuses while either side has a
+rotation under way (*Secrets are merged key by key*).
+
 ### A rotation that cannot finish
 
 A rotation is pending until it is promoted, and while it is, `apply` and every

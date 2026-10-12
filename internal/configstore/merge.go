@@ -113,8 +113,7 @@ func rekeyUnderway(ours, theirs *config.Secrets) error {
 // sequence over live hosts, the checking side moved to the next value before
 // its users are, so combining two such states key by key could promote a
 // value no host's checking side accepts. Finishing the rotation on the side
-// that holds it settles the state, so that is what the refusal names; a
-// restarted --all would rotate again the secrets the first run finished.
+// that holds it settles the state, so that is what the refusal names.
 //
 // The error names paths, never a value.
 func rotationUnderway(ours, theirs *config.Secrets) error {
