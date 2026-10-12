@@ -175,6 +175,7 @@ func Check(cfg *config.Config) Result {
 	c.mbinSMTPSender()
 	c.mbinContactEmail()
 	c.storage()
+	c.backup()
 	c.mediaHostnameShape()
 	c.mediaHostnameUnderAnAppHostname()
 	c.mailDomains()
