@@ -140,12 +140,20 @@ func TestCreateRefusesStdinThatIsNotATerminal(t *testing.T) {
 
 func TestCreateWritesNothingOnNo(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans.yaml")
-	plainReporter(t)
+	rec := plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
 		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{"n"})...)
-	err := runCreate([]string{"--config", path}, in, &bytes.Buffer{})
-	if hint, _ := ui.Describe(err); !strings.Contains(hint, "nothing written") {
+	var out bytes.Buffer
+	// Declining is the operator's choice, not a failure.
+	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
 		t.Errorf("err = %v", err)
+	}
+	// A blank line parts the answer from the result.
+	if !strings.HasSuffix(out.String(), "? [Y/n]: \n") {
+		t.Errorf("no blank line after the write prompt:\n%q", out.String()[max(0, out.Len()-80):])
+	}
+	if want := "paisans.yaml not written. Run paisans create again to start over."; !strings.Contains(rec.String(), want) {
+		t.Errorf("missing %q:\n%s", want, rec.String())
 	}
 	if _, err := os.Stat(path); err == nil {
 		t.Error("a file was written")

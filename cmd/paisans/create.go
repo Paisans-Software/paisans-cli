@@ -78,7 +78,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 				return createAborted(err)
 			}
 			if next < 0 {
-				return nothingWritten("you chose to quit")
+				return notWritten(r, p, path)
 			}
 			section = next
 			continue
@@ -88,11 +88,12 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 			return createAborted(err)
 		}
 		if !write {
-			return nothingWritten("you chose not to write it")
+			return notWritten(r, p, path)
 		}
 		if err := writeNew(path, data); err != nil {
 			return err
 		}
+		p.Say("")
 		r.Result("Wrote %s.", path)
 		p.Say("\nNext:")
 		p.Say("  paisans secrets set external.smtp_password   # the SMTP password, read from stdin")
@@ -165,6 +166,14 @@ func createAborted(err error) error {
 		return nothingWritten("input ended before every question was answered")
 	}
 	return err
+}
+
+// notWritten reports an operator's choice to leave the file unwritten. It is
+// not a failure, so it is a result rather than a problem.
+func notWritten(r ui.Reporter, p *create.Prompter, path string) error {
+	p.Say("")
+	r.Result("%s not written. Run paisans create again to start over.", ui.ShortPath(path))
+	return nil
 }
 
 func nothingWritten(why string) error {
