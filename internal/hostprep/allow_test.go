@@ -299,3 +299,14 @@ func TestClaimedKeys(t *testing.T) {
 		t.Errorf("seeded %v", got)
 	}
 }
+
+// AuthorizedFingerprints reads authorized_keys as host prepare does: every
+// key line, with options or without, and nothing else.
+func TestAuthorizedFingerprints(t *testing.T) {
+	host := preparedHost(false)
+	host.files[authorizedKeys] = "# a comment\n" + keyAlice + "\nfrom=\"203.0.113.0/24\" " + keyBob + "\nnot a key\n"
+	got, err := hostprep.AuthorizedFingerprints(host, "ubuntu")
+	if err != nil || strings.Join(got, " ") != fingerprint(keyAlice)+" "+fingerprint(keyBob) {
+		t.Errorf("%v %v", got, err)
+	}
+}

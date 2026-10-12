@@ -548,7 +548,7 @@ func TestAllowlist(t *testing.T) {
 	got := Allowlist(cfg, []AllowlistProbe{
 		{Site: "home-a"},
 		{Site: "home-b", Found: true, Content: "# owner's\n" + alice + " alice\n"},
-		{Site: "vm", Found: true, Content: "# empty\n"},
+		{Site: "vm", Found: true, Content: "# empty\n", KeysRead: true},
 		{Site: "watch", Err: "ssh: connection refused"},
 	})
 	var lines []string
@@ -559,7 +559,7 @@ func TestAllowlist(t *testing.T) {
 		"info home-a: no list for ubuntu; host prepare adds any key ssh.keys names",
 		"ok home-b: ubuntu's list holds 1 key",
 		"ok vm: ubuntu's list holds 0 keys",
-		"WARN vm: " + alice + " (alice) is not on ubuntu's list",
+		"WARN vm: " + alice + " (alice) is not on ubuntu's list, and host prepare would add it",
 		"skip watch: could not read /etc/paisans/ssh-allow.ubuntu",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
@@ -580,5 +580,31 @@ func TestAllowlistShowsControlCharactersEscaped(t *testing.T) {
 		if strings.ContainsRune(text, 0x1b) || !strings.Contains(text, `\x1b[2K`) {
 			t.Errorf("printed raw: %q", text)
 		}
+	}
+}
+
+// A key ssh.keys names that is already in authorized_keys is never added,
+// so the list's lacking it is no warning; one doctor could not read
+// authorized_keys for is warned about as what host prepare would refuse if
+// it had to add it.
+func TestAllowlistWarnsOnlyForKeysHostPrepareWouldAdd(t *testing.T) {
+	cfg := fixture(t)
+	keys, _ := cfg.Sites["home-a"].SSH.AuthorizedKeys()
+	alice := keys[0].Fingerprint
+	got := Allowlist(cfg, []AllowlistProbe{
+		{Site: "home-a", Found: true, Content: "# empty\n", KeysRead: true, Authorized: []string{alice}},
+		{Site: "home-b", Found: true, Content: "# empty\n"},
+	})
+	var lines []string
+	for _, f := range got {
+		lines = append(lines, f.Level.String()+" "+f.Line)
+	}
+	want := []string{
+		"ok home-a: ubuntu's list holds 0 keys",
+		"ok home-b: ubuntu's list holds 0 keys",
+		"WARN home-b: " + alice + " (alice) is not on ubuntu's list, and host prepare would refuse it if it had to add it",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }

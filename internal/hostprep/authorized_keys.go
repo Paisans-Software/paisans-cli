@@ -98,6 +98,72 @@ func parseOwned(content string) []ownedEntry {
 	return out
 }
 
+// userKeys is a login user's authorized_keys as host prepare reads it: who
+// owns it, where it is, and every key line it understands.
+type userKeys struct {
+	uid, gid, dir, file string
+	found               bool
+	lines               []hostKeyLine
+}
+
+// keysHost is what reading a user's authorized_keys needs.
+type keysHost interface {
+	Reader
+	Describe() string
+}
+
+// readUserKeys reads user's authorized_keys on the host t reaches, finding
+// it from the user's passwd entry.
+func readUserKeys(t keysHost, user string) (userKeys, error) {
+	entry, err := t.Run(passwdProbe(user))
+	if err != nil {
+		return userKeys{}, err
+	}
+	entry = strings.TrimSpace(entry)
+	if entry == "" || entry == "__PAISANS_ABSENT__" {
+		return userKeys{}, fmt.Errorf("ssh.user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
+	}
+	fields := strings.Split(entry, ":")
+	if len(fields) < 7 || fields[5] == "" {
+		return userKeys{}, fmt.Errorf("cannot read the passwd entry for %s on %s: %q", user, t.Describe(), entry)
+	}
+	k := userKeys{uid: fields[2], gid: fields[3], dir: strings.TrimSuffix(fields[5], "/") + "/.ssh"}
+	k.file = k.dir + "/authorized_keys"
+	content, found, err := t.ReadFile(k.file)
+	if err != nil {
+		return userKeys{}, err
+	}
+	k.found = found
+	for _, raw := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		key, options, err := config.ParseKeyLine(trimmed)
+		if err != nil {
+			continue // not a key this package understands, so never touched
+		}
+		k.lines = append(k.lines, hostKeyLine{raw: strings.TrimSuffix(raw, "\r"), key: key, options: len(options) > 0})
+	}
+	return k, nil
+}
+
+// AuthorizedFingerprints is the fingerprint of every key in user's
+// authorized_keys on the host t reaches, as host prepare reads the file: a
+// key listed here is one host prepare shares or keeps rather than appends,
+// so the host's allowlist never refuses it.
+func AuthorizedFingerprints(t keysHost, user string) ([]string, error) {
+	k, err := readUserKeys(t, user)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, l := range k.lines {
+		out = append(out, l.key.Fingerprint)
+	}
+	return out, nil
+}
+
 // planAuthorizedKeys compares the listed keys with the user's authorized_keys,
 // this deployment's sidecar and every other deployment's sidecar for the same
 // user. It returns the additions and the changes to the sidecar, which run
@@ -115,38 +181,11 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s con
 		return out, nil, fmt.Errorf("ssh.keys: %s", strings.Join(problems, "; "))
 	}
 
-	entry, err := t.Run(passwdProbe(user))
+	keys, err := readUserKeys(t, user)
 	if err != nil {
 		return out, nil, err
 	}
-	entry = strings.TrimSpace(entry)
-	if entry == "" || entry == "__PAISANS_ABSENT__" {
-		return out, nil, fmt.Errorf("ssh.user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
-	}
-	fields := strings.Split(entry, ":")
-	if len(fields) < 7 || fields[5] == "" {
-		return out, nil, fmt.Errorf("cannot read the passwd entry for %s on %s: %q", user, t.Describe(), entry)
-	}
-	uid, gid, home := fields[2], fields[3], fields[5]
-	dir := strings.TrimSuffix(home, "/") + "/.ssh"
-	file := dir + "/authorized_keys"
-
-	content, found, err := t.ReadFile(file)
-	if err != nil {
-		return out, nil, err
-	}
-	var lines []hostKeyLine
-	for _, raw := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		key, options, err := config.ParseKeyLine(trimmed)
-		if err != nil {
-			continue // not a key this package understands, so never touched
-		}
-		lines = append(lines, hostKeyLine{raw: strings.TrimSuffix(raw, "\r"), key: key, options: len(options) > 0})
-	}
+	uid, gid, dir, file, found, lines := keys.uid, keys.gid, keys.dir, keys.file, keys.found, keys.lines
 
 	allowContent, hasList, err := t.ReadFile(AllowPath(user))
 	if err != nil {

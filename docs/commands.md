@@ -530,7 +530,8 @@ Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
 that are down, Pocket ID's active instance, clocks, what is left over, and
 each host's key allowlist, with each key `ssh.keys` names that it does not
-hold.
+hold and that the next `host prepare` would add, since one already in
+`authorized_keys` is never added again.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,

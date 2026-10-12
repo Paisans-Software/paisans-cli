@@ -224,6 +224,13 @@ func gatherDoctor(cfg *config.Config, sites []string, transports map[string]appl
 			p.Err = err.Error()
 		}
 		p.Found, p.Content = found, content
+		// Only a key host prepare would append is refused, so the warning
+		// needs to know which keys authorized_keys holds already.
+		if found {
+			if fps, err := hostprep.AuthorizedFingerprints(transports[name], cfg.Sites[name].SSH.User); err == nil {
+				p.KeysRead, p.Authorized = true, fps
+			}
+		}
 		in.Allowlists = append(in.Allowlists, p)
 	}
 
