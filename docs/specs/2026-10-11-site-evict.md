@@ -91,7 +91,10 @@ writes` before the eviction goes on. A failover then promotes that replica, and
 any commit the evicted leader acknowledged after the replica's last received
 WAL is lost. Replication is asynchronous unless `cluster.synchronous` is set,
 so this is the usual case for a leader. With a streaming Sync Standby nothing
-is asked. Founder decision.
+is asked. Founder decision. Patroni is read again immediately before stage 1,
+after the answers: when the evicted site has taken or lost the leader, or the
+Sync Standby or the replica a failover would promote has changed, the run
+stops before anything changes and says to run it again.
 
 Stage 1 runs against every remaining site at once and its gate is strict: a
 site that did not sync is named, and nothing after it runs. A partial cut is

@@ -362,15 +362,21 @@ func (p *Plan) evictQuorum(members []apply.EtcdMember, up int) error {
 // longer renew its leader key.
 func (p *Plan) evictLeader() {
 	p.evict.failover = true
+	p.patroni.candidate, p.evict.loseWrites = p.succession(p.patroni.members)
+}
+
+// succession is who takes over from the evicted leader in members: the
+// streaming Sync Standby, or else no candidate and the most current replica
+// that a failover promotes, losing what it had not received.
+func (p *Plan) succession(members []member) (string, *Lag) {
 	live := p.live(p.end.Cluster.Sites)
-	for _, m := range p.patroni.members {
+	for _, m := range members {
 		if m.role() == "Sync Standby" && m.state() == "streaming" && contains(live, m.name()) {
-			p.patroni.candidate = m.name()
-			return
+			return m.name(), nil
 		}
 	}
 	var best *Lag
-	for _, m := range p.patroni.members {
+	for _, m := range members {
 		if m.name() == p.Site || !contains(live, m.name()) {
 			continue
 		}
@@ -386,7 +392,49 @@ func (p *Plan) evictLeader() {
 	if best == nil {
 		best = &Lag{}
 	}
-	p.evict.loseWrites = best
+	return "", best
+}
+
+// recheckLeader reads Patroni again immediately before the cut, after the
+// questions were answered: which site leads, and who would take over from
+// it, decide whether `lose writes` is asked and what it agrees to. Either
+// having changed since the plan was read stops the run before anything
+// changes. Once a cut has started, a failover may be under way, and the
+// database stage's gate decides instead.
+func (p *Plan) recheckLeader() error {
+	if p.evict.cutDone || p.evict.cutStarted || p.patroni.at == "" {
+		return nil
+	}
+	list, err := p.patroniList()
+	if err != nil {
+		return fmt.Errorf("site remove %s: reading Patroni again before the cut: %w. Nothing was changed", p.Site, err)
+	}
+	leader := ""
+	for _, m := range list {
+		if m.role() == "Leader" {
+			leader = m.name()
+		}
+	}
+	changed := ""
+	switch was, now := p.patroni.leader == p.Site, leader == p.Site; {
+	case now && !was:
+		changed = fmt.Sprintf("%s took the Patroni leader since the plan was read", p.Site)
+	case was && !now:
+		changed = fmt.Sprintf("%s no longer holds the Patroni leader, %s does", p.Site, leader)
+	case now:
+		candidate, lose := p.succession(list)
+		before := p.evict.loseWrites
+		switch {
+		case candidate != p.patroni.candidate:
+			changed = "the streaming Sync Standby that would take over changed"
+		case (lose == nil) != (before == nil), lose != nil && (lose.Replica != before.Replica || lose.Known != before.Known):
+			changed = "the replica a failover would promote, which `lose writes` agreed to, changed"
+		}
+	}
+	if changed != "" {
+		return fmt.Errorf("site remove %s: %s, and the answers given rest on it. Nothing was changed: run site remove %s --evict again, which reads it afresh", p.Site, changed, p.Site)
+	}
+	return nil
 }
 
 // receivedLag is how far a replica is behind in received WAL, in MB, which

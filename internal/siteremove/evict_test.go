@@ -597,3 +597,66 @@ func TestAnEvictedReplicaNeedsTheRestStreaming(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Patroni is read again immediately before the cut: the leader, and who
+// would take over from it, decide what the operator agreed to, and either
+// having changed since the plan was read stops the run before anything
+// changes.
+func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
+	noSync := func(w *world) {
+		w.syncMode = false
+		for _, m := range w.members {
+			if m["Role"] == "Sync Standby" {
+				m["Role"] = "Replica"
+			}
+		}
+		w.member("home-b")["Receive Lag"] = 4.0
+		w.member("home-c")["Receive Lag"] = 1.5
+	}
+	asyncConfig := func(text string) string {
+		return strings.Replace(text, "  synchronous: true", "  synchronous: false", 1)
+	}
+	for _, tc := range []struct {
+		name   string
+		site   string
+		edits  []func(string) string
+		before func(*world)
+		after  func(*world)
+		want   string
+	}{
+		{"the evicted site took the leader", "home-b", nil, nil, func(w *world) {
+			w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "streaming"
+			w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
+		}, "home-b took the Patroni leader"},
+		{"the evicted site lost the leader", "home-a", []func(string) string{leadersAway}, nil, func(w *world) {
+			w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "streaming"
+			w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
+		}, "home-a no longer holds the Patroni leader"},
+		{"another replica is now the most current", "home-a", []func(string) string{leadersAway, asyncConfig}, noSync, func(w *world) {
+			w.member("home-b")["Receive Lag"] = 0.5
+		}, "which `lose writes` agreed to, changed"},
+		{"a Sync Standby now streams", "home-a", []func(string) string{leadersAway, asyncConfig}, noSync, func(w *world) {
+			w.member("home-b")["Role"] = "Sync Standby"
+		}, "Sync Standby that would take over changed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, zone := evictWorld(t, tc.site, tc.edits...)
+			if tc.before != nil {
+				tc.before(w)
+			}
+			p := w.mustBuild(tc.site, evictOptions(zone))
+			tc.after(w)
+			err := siteremove.Execute(p)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "Nothing was changed") {
+				t.Fatalf("err = %v", err)
+			}
+			for name, h := range w.hosts {
+				for _, c := range h.commands {
+					if strings.Contains(c, "syncconf") {
+						t.Errorf("%s ran %q", name, c)
+					}
+				}
+			}
+		})
+	}
+}

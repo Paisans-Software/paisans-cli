@@ -627,6 +627,11 @@ func (p *Plan) writtenLists() string {
 // before moving past it.
 func Execute(p *Plan) error {
 	r := p.reporter()
+	if p.Evict {
+		if err := p.recheckLeader(); err != nil {
+			return err
+		}
+	}
 	for _, st := range p.Stages {
 		r.Section(stageTitle(st))
 		if st.Skipped != "" {

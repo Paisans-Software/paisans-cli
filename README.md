@@ -6493,6 +6493,13 @@ there is no flag that answers any of them:
 * `lose objects`, when the site's Garage node held objects nothing else does
   (below).
 
+Patroni is read again immediately before the cut, after the answers: which
+site leads, and who would take over from it, decide whether `lose writes` is
+asked and what it agrees to, and either can change while the questions wait
+at a terminal. When the evicted site has taken or lost the leader, or the
+Sync Standby or the replica a failover would promote is another, the run stops
+before anything changes and says to run it again, which reads it afresh.
+
 **A replacement is a new site, declared in the same edit, and the eviction
 comes first.** The site's name keys its WireGuard key and heartbeat token in
 the secrets, its etcd and Patroni member names, its Garage zone, its DNS
