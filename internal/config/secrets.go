@@ -53,6 +53,11 @@ type Secrets struct {
 	// it is state the toolkit wrote about a live instance, which is what
 	// this file holds beside the credentials.
 	PocketIDGroups map[string]string `yaml:"pocket_id_groups,omitempty"`
+	// Paisans holds what the toolkit records about the configuration itself.
+	// config_digest binds a published version's paisans.yaml and .sops.yaml
+	// to this file: sops's MAC covers it, so only someone who can decrypt the
+	// file can write a digest that verifies (docs/specs/2026-10-12-config-store.md).
+	Paisans PaisansSecrets `yaml:"paisans,omitempty"`
 
 	// Path is where these were read from, for error messages.
 	Path string `yaml:"-"`
@@ -63,6 +68,11 @@ type Secrets struct {
 	// UnknownKeys records that the file holds a key this type does not, at
 	// any depth, which writing the file back would drop.
 	UnknownKeys bool `yaml:"-"`
+}
+
+// PaisansSecrets is the toolkit's own section of the secrets file.
+type PaisansSecrets struct {
+	ConfigDigest string `yaml:"config_digest,omitempty"`
 }
 
 type ClusterSecrets struct {
