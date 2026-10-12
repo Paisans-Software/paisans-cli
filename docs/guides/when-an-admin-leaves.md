@@ -126,7 +126,8 @@ community's decision.
 
    3. Each app's S3 key: `paisans storage rotate-key --app talk --execute`.
    4. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
-      site at a time. Run no `apply` until it finishes.
+      site at a time. `apply` refuses until it finishes, and a run that stops
+      resumes when run again.
 
    Open: the Postgres superuser, standby and admin passwords, the apps'
    database passwords, Garage's `rpc_secret` and `admin_token`, the heartbeat
@@ -216,7 +217,10 @@ the mesh is rekeyed after the eviction and before the replacement joins.
    ```
 
    One site at a time; the replacement is not brought up yet, so it is left
-   out. Run no `apply` until it finishes. Closes: every remaining site's
+   out. Around the swap of a site others relay through, Eg: the one VM the
+   homes reach each other through, Patroni is paused and then resumed, and the
+   plan says so. A run that stops resumes when run again, and `apply` refuses
+   until it finishes. Closes: every remaining site's
    WireGuard key, which an admin who could read the secrets file holds, and
    which WireGuard accepts from any address that proves it. Skip it only when
    they were never a recipient. Open: nothing on the mesh, once every site is
