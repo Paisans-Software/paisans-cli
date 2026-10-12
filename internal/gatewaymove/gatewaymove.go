@@ -280,6 +280,15 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	p.Stages = []*Stage{p.recordStage(), p.serveStage(), p.addStage(mp), p.removeStage(mp), p.waitStage(mp)}
 	if p.shared {
 		p.Stages = append(p.Stages, p.releaseStage(), p.handOffStage())
+		// A run stopped at the hand-off finds the site by its routes alone:
+		// the record and the marker are gone and DNS has moved, so every
+		// stage before the hand-off is done, and running them again would
+		// write a marker and wait out a TTL for nothing.
+		if !p.evidence.Record && p.evidence.Marker == nil && mp.Clear() {
+			for _, st := range p.Stages[:len(p.Stages)-1] {
+				st.Skipped = p.From + " was released already: it holds neither the record nor the marker, and no record points at it"
+			}
+		}
 		p.Notes = append(p.Notes, fmt.Sprintf("%s keeps its Caddy, which serves the monitor's hostnames alone once handed off.", p.From))
 	} else {
 		p.Stages = append(p.Stages, p.stopStage())
@@ -901,7 +910,12 @@ func Execute(p *Plan) error {
 
 func (p *Plan) fail(st *Stage, err error) error {
 	head := fmt.Sprintf("gateway move stopped at stage %d (%s)", st.Number, st.Name)
-	const next = "Fix the cause and run paisans gateway move --execute again: it resumes at the first stage with anything left to do"
+	next := "Fix the cause and run paisans gateway move --execute again: it resumes at the first stage with anything left to do"
+	if st.Number == stageHandOff {
+		// The record and the marker are gone by now, so the old site applies
+		// like any other, with whatever flags its own refusal asks for.
+		next = fmt.Sprintf("Fix the cause, then apply %s directly: paisans apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). paisans gateway move --execute also resumes here", p.From, p.From)
+	}
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
 		return pr
 	}

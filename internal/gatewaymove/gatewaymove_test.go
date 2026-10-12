@@ -586,13 +586,36 @@ func TestAHandOffStoppedAfterStageSixResumes(t *testing.T) {
 	if _, ok := sw.hosts["home-a"].files[deployrecord.Path(d)]; ok {
 		t.Fatal("stage 6 left the record")
 	}
-	if p := sw.mustBuild(); p.From != "home-a" {
+	p := sw.mustBuild()
+	if p.From != "home-a" {
 		t.Fatalf("the resumed run does not find home-a: %q", p.From)
 	}
+	// Released already: the record, the marker and DNS are done with, so
+	// only the hand-off is left to do.
+	for _, st := range p.Stages[:6] {
+		if st.Skipped == "" {
+			t.Errorf("stage %d (%s) is not skipped on a released site", st.Number, st.Name)
+		}
+	}
+	slept := sw.slept
 	if err := sw.run(); err != nil {
 		t.Fatal(err)
 	}
+	if sw.slept != slept {
+		t.Errorf("the resumed run waited %s again", sw.slept-slept)
+	}
 	sw.handedOff(t)
+}
+
+// A hand-off that fails says how to apply the old site directly, which works
+// once the record and the marker are gone.
+func TestAFailedHandOffNamesTheApplyThatFinishesIt(t *testing.T) {
+	sw := sharedWorld(t)
+	sw.failApply = true
+	err := sw.run()
+	if want := "paisans apply --site home-a --only infra --execute"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want %q in: %v", want, err)
+	}
 }
 
 // A dry run lists the hand-off and applies nothing.
