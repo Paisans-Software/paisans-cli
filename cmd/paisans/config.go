@@ -44,6 +44,11 @@ var configSiteTransport = func(name string, site config.Site) apply.Transport {
 	return siteTransport(name, site, "", true)
 }
 
+// configSignWith is what git's user.signingKey is given to sign with the
+// public key line: key:: and the line, so the ssh-agent signs. Tests replace
+// it with a private key file.
+var configSignWith = func(line string) string { return "key::" + line }
+
 // configNow is the clock a version's commit date is written by. Tests
 // replace it.
 var configNow = time.Now
@@ -121,23 +126,42 @@ func shaShape(s string) bool {
 // serve an old, genuine one, and applying it would put back old secrets.
 const rollbackWord = "rollback"
 
+// gatherMode is what a gather may do. execute, for a run with --execute,
+// asks each site to sync with its peers first and asks for rollback at a
+// terminal; without it no site is changed and a rollback is only reported.
+// remember raises the newest revision seen (configstore.GatherOptions).
+// log reports a rollback without saying --execute asks.
+type gatherMode struct {
+	execute, remember, log bool
+}
+
 // gatherAt gathers from sites, reporting each, and explains a missing anchor.
-// With sync, which only a run with --execute passes, each site first syncs
-// with its peers; a dry run changes no site, and says so. A head older than
-// one this workstation has seen goes on only once the operator types
-// rollback at a terminal.
-func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, sync bool, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
+// A dry run changes no site, and says so. A head older than one this
+// workstation has seen goes on, with --execute, only once the operator types
+// rollback at a terminal, and that head is then recorded as the newest seen.
+func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
 	names := slices.Sorted(maps.Keys(sites))
 	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
 		return configstore.Gathered{}, err
 	}
 	s := r.Step("gather the versions every site holds")
-	g, err := configstore.GatherAnchored(l, sites, configured, id, a, sync)
+	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute, Remember: m.remember})
 	var rb *configstore.RollbackError
 	if errors.As(err, &rb) {
 		s.End(ui.Warned, "older than this workstation has seen")
-		if err := confirmWord(stdin, stdout, rollbackWord, rb.Error()+". A site that deleted the newer versions can serve an old one, and applying it would put back old secrets. Go on only if you know why the newer version is gone."); err != nil {
-			return g, err
+		why := rb.Error() + ". A site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
+		switch {
+		case m.execute:
+			if err := confirmWord(stdin, stdout, rollbackWord, why+" Go on only if you know why the newer version is gone."); err != nil {
+				return g, err
+			}
+			if err := l.AcceptRollback(rb.Revision, rb.SHA); err != nil {
+				return g, err
+			}
+		case m.log:
+			r.Note("the newest version is older than one seen here", why)
+		default:
+			r.Note("--execute asks for rollback", why)
 		}
 		s = r.Step("go on from the older version")
 		err = nil
@@ -154,7 +178,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		return g, err
 	}
 	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
-	if !sync {
+	if !m.execute {
 		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute starts each site's sync before reading it, so versions only its peers hold arrive too.")
 	}
 	for _, rc := range g.Reached {
@@ -293,7 +317,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, false, stdin, stdout)
+		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{remember: true}, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -324,15 +348,16 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Step("publish "+what).End(ui.Pending, "signed with "+k.Fingerprint+"; --execute signs and pushes it")
 		return nil
 	}
-	if err := settleSudo(r, cfg.SiteNames(), func(n string) apply.Transport { return sites[n] }); err != nil {
+	a, err := l.Anchor()
+	if err != nil {
 		return err
 	}
-	publish := configstore.Publish
-	if *merge {
-		publish = configstore.PublishMerge
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, remember: true}, stdin, stdout)
+	if err != nil {
+		return err
 	}
 	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
-	sha, pushed, err := publish(l, sites, key, configNow())
+	sha, pushed, err := configstore.PublishFrom(l, g, sites, key, configSignWith(key), *merge, configNow())
 	var pe *configstore.PushError
 	switch {
 	case errors.As(err, &pe) && len(pushed) > 0:
@@ -384,7 +409,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, *execute, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -615,7 +640,7 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("versions of " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, false, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{remember: *root == "", log: true}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -698,7 +723,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, *execute, stdin, stdout)
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -713,7 +738,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, *execute, stdin, stdout)
+	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, remember: *root == "" || *execute}, stdin, stdout)
 	if err != nil {
 		return err
 	}

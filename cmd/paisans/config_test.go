@@ -139,6 +139,14 @@ func storedVersion(t *testing.T) (string, string, configstore.Files) {
 // her key as alice's: what someone with root on a site can write.
 func storedHistory(t *testing.T, n, forged int) ([]string, string, []configstore.Files) {
 	t.Helper()
+	shas, answer, files, _, _ := storedHistoryKey(t, n, forged)
+	return shas, answer, files
+}
+
+// storedHistoryKey is storedHistory with the signing key's private key path
+// and public key line.
+func storedHistoryKey(t *testing.T, n, forged int) ([]string, string, []configstore.Files, string, string) {
+	t.Helper()
 	key, pub := testKey(t)
 	s := newStore(t)
 	yaml := fixtureAs(t, pub)
@@ -160,7 +168,7 @@ func storedHistory(t *testing.T, n, forged int) ([]string, string, []configstore
 			parent, _ = s.commit(t, myaml, "# forged\n", []string{parent}, i+2, mkey)
 		}
 	}
-	return shas, s.answer(t), files
+	return shas, s.answer(t), files, key, pub
 }
 
 // recoverHosts makes --from reach a host holding the version, and the
@@ -481,8 +489,99 @@ func TestConfigPullAsksRollback(t *testing.T) {
 	if h, _ := l.Head(); h != shas[1] {
 		t.Fatalf("head %s after rollback", h)
 	}
-	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != seen {
-		t.Fatalf("seen lowered to %q", b)
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != "2 "+shas[1]+"\n" {
+		t.Fatalf("seen after accepting %q", b)
+	}
+}
+
+// Once rollback is accepted on a pull, publish goes on from that head, and
+// the new version's revision follows it.
+func TestConfigPublishAfterAnAcceptedRollback(t *testing.T) {
+	shas, answer, files, key, pub := storedHistoryKey(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	seenPath := filepath.Join(l.Dir, ".paisans", "config-seen")
+	os.WriteFile(seenPath, []byte("9 "+strings.Repeat("b", 40)+"\n"), 0o644)
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var out bytes.Buffer
+	if err := runConfig([]string{"pull", "--config", cfgPath, "--execute"}, answering(t, "rollback\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	savedKeys, savedSign := agentKeys, configSignWith
+	agentKeys = func() []string { return []string{pub} }
+	configSignWith = func(string) string { return key }
+	t.Cleanup(func() { agentKeys, configSignWith = savedKeys, savedSign })
+	edited := files[1]
+	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
+	if err := l.WriteFiles(edited); err != nil {
+		t.Fatal(err)
+	}
+	if err := runConfig([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	head, _ := l.Head()
+	b, _ := os.ReadFile(seenPath)
+	if head == shas[1] || string(b) != "3 "+head+"\n" {
+		t.Fatalf("head %s, seen %q", head, b)
+	}
+}
+
+// log and dry runs never ask for rollback: they report it, and a dry run
+// says --execute will ask.
+func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
+	seen := "9 " + strings.Repeat("b", 40)
+	os.WriteFile(filepath.Join(l.Dir, ".paisans", "config-seen"), []byte(seen+"\n"), 0o644)
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var rep, out bytes.Buffer
+	reporterOverride = ui.NewPlain(&rep, false)
+	if err := runConfig([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"revision 9", strings.Repeat("b", 40), "revision 2", shas[1]} {
+		if !strings.Contains(rep.String(), want) {
+			t.Errorf("log's report lacks %q:\n%s", want, rep.String())
+		}
+	}
+	if !strings.Contains(out.String(), shas[1][:12]) || !strings.Contains(out.String(), shas[0][:12]) {
+		t.Errorf("log did not list the versions:\n%s", out.String())
+	}
+	rep.Reset()
+	if err := runConfig([]string{"pull", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rep.String(), "--execute asks for rollback") {
+		t.Errorf("dry run report:\n%s", rep.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != seen+"\n" {
+		t.Fatalf("seen changed to %q", b)
+	}
+}
+
+// Judging from a --root this run does not record leaves no newest revision
+// behind.
+func TestConfigATriedRootRaisesNothing(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	l := configstore.Local{Dir: t.TempDir()}
+	l.WriteFiles(files[0])
+	l.SetHead(shas[0])
+	cfgPath := filepath.Join(l.Dir, "paisans.yaml")
+	var out bytes.Buffer
+	for _, sub := range []string{"log", "pull"} {
+		if err := runConfig([]string{sub, "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+			t.Fatalf("%s: %v", sub, err)
+		}
+	}
+	if rev, _, _ := l.Seen(); rev != 0 {
+		t.Fatalf("seen raised to %d", rev)
+	}
+	if err := runConfig([]string{"pull", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rev, _, _ := l.Seen(); rev != 2 {
+		t.Fatalf("a recorded root left seen at %d", rev)
 	}
 }
 

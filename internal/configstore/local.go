@@ -155,6 +155,20 @@ func (l Local) raiseSeen(rev int, sha string) error {
 	return l.writeState(seenFile, fmt.Sprintf("%d %s", rev, sha))
 }
 
+// AcceptRollback records revision rev at sha as the newest seen, even when
+// it is lower than what is recorded. It is the one way the record goes down,
+// and only because the operator typed rollback for that head: they chose to
+// go on from it, and every later gather is judged against that choice.
+func (l Local) AcceptRollback(rev int, sha string) error {
+	if rev < 1 {
+		return fmt.Errorf("revision %d is not one", rev)
+	}
+	if err := checkSHA(sha); err != nil {
+		return err
+	}
+	return l.writeState(seenFile, fmt.Sprintf("%d %s", rev, sha))
+}
+
 // RollbackError is a gather whose newest trusted version is older than one
 // this workstation has seen before: what a site serving an old, genuine
 // version after deleting the newer ones looks like. The Gathered returned
@@ -405,17 +419,26 @@ func Gather(l Local, sites map[string]apply.Transport, configured int, id string
 	if err != nil {
 		return Gathered{}, err
 	}
-	return gather(l, sites, configured, id, a, true, Pull)
+	return gather(l, sites, configured, id, a, GatherOptions{Sync: true, Remember: true}, Pull)
 }
 
-// GatherAnchored is Gather from the anchor a, for a command given a root to
-// pin that it has not recorded yet, asking the sites to sync first only when
-// sync is set: a dry run reads and changes no site.
-func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, sync bool) (Gathered, error) {
-	return gather(l, sites, configured, id, a, sync, Pull)
+// GatherOptions say what a gather may change. Sync asks each site to sync
+// with its peers first, which changes the site, so only a run with --execute
+// sets it. Remember raises the newest revision seen; it is set only when the
+// anchor is the workstation's recorded one, or a root this run records, so
+// that judging from a root the operator only tried out leaves no trace.
+type GatherOptions struct {
+	Sync, Remember bool
 }
 
-func gather(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, sync bool, pull PullFunc) (Gathered, error) {
+// GatherAnchored is Gather from the anchor a, with what it may change set
+// by o.
+func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, o GatherOptions) (Gathered, error) {
+	return gather(l, sites, configured, id, a, o, Pull)
+}
+
+func gather(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, o GatherOptions, pull PullFunc) (Gathered, error) {
+	sync := o.Sync
 	cache, err := l.Cache()
 	if err != nil {
 		return Gathered{}, err
@@ -491,6 +514,9 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	}
 	if rev < seenRev {
 		return g, &RollbackError{SeenRevision: seenRev, SeenSHA: seenSHA, Revision: rev, SHA: top}
+	}
+	if !o.Remember {
+		return g, nil
 	}
 	return g, l.raiseSeen(rev, top)
 }
@@ -629,7 +655,9 @@ type publishOpts struct {
 // the local paisans.yaml for the first version), and a run that reaches no
 // site. It records the version as the head, the first as the root, and the
 // key as the signing key when none is recorded. Unchanged files since the
-// head make no new version: the head is pushed again.
+// head make no new version: the head is pushed again. A rollback refuses
+// here; a caller that lets the operator accept one gathers itself and calls
+// PublishFrom.
 func Publish(l Local, sites map[string]apply.Transport, signingKey string, now time.Time) (string, []string, error) {
 	return publish(l, sites, publishOpts{keyLine: signingKey, signWith: "key::" + signingKey, now: now}, Pull, Push)
 }
@@ -641,6 +669,33 @@ func PublishMerge(l Local, sites map[string]apply.Transport, signingKey string, 
 }
 
 func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull PullFunc, push PushFunc) (string, []string, error) {
+	f, err := l.Files()
+	if err != nil {
+		return "", nil, fmt.Errorf("read the files to publish: %w", err)
+	}
+	local, err := config.LoadBytes(f.Paisans)
+	if err != nil {
+		return "", nil, err
+	}
+	a, err := l.Anchor()
+	if err != nil {
+		return "", nil, err
+	}
+	g, err := gather(l, sites, len(sites), local.ID, a, GatherOptions{Sync: true, Remember: true}, pull)
+	if err != nil {
+		return "", nil, err
+	}
+	return publishFrom(l, g, sites, o, push)
+}
+
+// PublishFrom is Publish on a gather the caller has already made, and
+// judged: Eg: one whose rollback the operator accepted. signWith is what
+// git's user.signingKey is given, "key::" and the key line for the agent.
+func PublishFrom(l Local, g Gathered, sites map[string]apply.Transport, keyLine, signWith string, merge bool, now time.Time) (string, []string, error) {
+	return publishFrom(l, g, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
+}
+
+func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
 	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
@@ -653,14 +708,6 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 		return "", nil, err
 	}
 	head, err := l.Head()
-	if err != nil {
-		return "", nil, err
-	}
-	a, err := l.Anchor()
-	if err != nil {
-		return "", nil, err
-	}
-	g, err := gather(l, sites, len(sites), local.ID, a, true, pull)
 	if err != nil {
 		return "", nil, err
 	}

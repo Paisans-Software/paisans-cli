@@ -177,7 +177,7 @@ func TestPublishFirstCreatesTheRootAndState(t *testing.T) {
 	if err != nil || !strings.Contains(string(ignore), "store.git/") || !strings.Contains(string(ignore), "incoming/") {
 		t.Fatalf(".gitignore %q, %v", ignore, err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), true, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), true, fakePull)
+	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil || g.Verdict.Heads[0] != v1 {
 		t.Fatalf("bob's gather %+v %v", g.Verdict, err)
 	}
@@ -273,7 +273,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gather(lb, all, 2, testID, mustAnchor(t, lb), true, fakePull); err != nil {
+	if _, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{Sync: true, Remember: true}, fakePull); err != nil {
 		t.Fatal(err)
 	}
 	if err := lb.Checkout(v1); err != nil {
@@ -290,7 +290,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(la, all, 2, testID, mustAnchor(t, la), true, fakePull)
+	g, err := gather(la, all, 2, testID, mustAnchor(t, la), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err = gather(la, all, 2, testID, mustAnchor(t, la), true, fakePull)
+	g, err = gather(la, all, 2, testID, mustAnchor(t, la), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	sites["vm"].down, sites["watch"].down = true, true
-	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 4, testID, mustAnchor(t, l), true, fakePull)
+	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 4, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	if direct != 2 || !slices.Equal(g.Holders[sha], []string{"home-b"}) {
 		t.Fatalf("direct %d, holders %v", direct, g.Holders)
 	}
-	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 3, testID, mustAnchor(t, l), true, fakePull)
+	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 3, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil || !g.Majority {
 		t.Fatalf("two of three: %v %v", g.Majority, err)
 	}
@@ -363,7 +363,7 @@ func TestGatherWithoutAnAnchorIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := Local{Dir: t.TempDir()}
-	if _, err := gather(empty, reach(sites, "home-a"), 1, testID, mustAnchor(t, empty), true, fakePull); !errors.Is(err, ErrNoAnchor) {
+	if _, err := gather(empty, reach(sites, "home-a"), 1, testID, mustAnchor(t, empty), GatherOptions{Sync: true, Remember: true}, fakePull); !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -388,7 +388,7 @@ func TestRecoverWritesTheFilesAndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := Local{Dir: t.TempDir()}
-	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, true, fakePull)
+	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestPublishSignsThroughTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), true, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil || !g.Verdict.Trusted[sha] || !g.Versions[sha].Signed {
 		t.Fatalf("verdict %+v %v", g.Verdict, err)
 	}
@@ -519,7 +519,7 @@ func TestGatherRefusesARollbackTheWorkstationRemembers(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(l.Dir, ".paisans", "store.git")); err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(l, reach(sites, "home-b"), 2, testID, mustAnchor(t, l), true, fakePull)
+	g, err := gather(l, reach(sites, "home-b"), 2, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	var rb *RollbackError
 	if !errors.As(err, &rb) || rb.Revision != 1 || rb.SHA != v1 || rb.SeenRevision != 2 || rb.SeenSHA != v2 {
 		t.Fatalf("got %v", err)
@@ -546,7 +546,7 @@ func TestGatherSyncsOnlyWhenAsked(t *testing.T) {
 	}
 	l := Local{Dir: t.TempDir()}
 	for _, sync := range []bool{false, true} {
-		g, err := gather(l, reach(sites, "home-a"), 1, testID, Anchor{}, sync, pull)
+		g, err := gather(l, reach(sites, "home-a"), 1, testID, Anchor{}, GatherOptions{Sync: sync}, pull)
 		if err != nil || g.Synced != sync {
 			t.Fatalf("sync %v: %+v %v", sync, g, err)
 		}
@@ -593,7 +593,7 @@ func TestForgedVersionsAreNeverHeads(t *testing.T) {
 	}
 	one := forge(t, sites["home-a"], mallory, v1, 2, 1)
 	chain := forge(t, sites["home-a"], mallory, v1, 2, 4)
-	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), true, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), GatherOptions{Sync: true, Remember: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,5 +604,37 @@ func TestForgedVersionsAreNeverHeads(t *testing.T) {
 	}
 	if !slices.Equal(g.Verdict.Heads, []string{v2}) || g.Versions[chain[3]].Revision != 5 {
 		t.Fatalf("heads %v", g.Verdict.Heads)
+	}
+}
+
+// A gather that may not remember leaves the record alone, and an accepted
+// rollback is the one write that lowers it.
+func TestSeenIsRaisedOnlyWhenRememberingAndLoweredOnlyByAcceptance(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	l := workstation(t, edit(testFiles(), "1", map[string]string{"alice": alice.pub}))
+	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := Local{Dir: t.TempDir()}
+	if _, err := gather(fresh, reach(sites, "home-a"), 1, testID, Anchor{Root: v1}, GatherOptions{}, fakePull); err != nil {
+		t.Fatal(err)
+	}
+	if rev, _, _ := fresh.Seen(); rev != 0 {
+		t.Fatalf("a gather from an unrecorded root raised seen to %d", rev)
+	}
+	if err := l.AcceptRollback(1, v1); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.AcceptRollback(7, strings.Repeat("c", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.AcceptRollback(1, v1); err != nil {
+		t.Fatal(err)
+	}
+	if rev, sha, _ := fresh.Seen(); rev != 1 || sha != v1 {
+		t.Fatalf("accepted rollback left %d %s", rev, sha)
 	}
 }
