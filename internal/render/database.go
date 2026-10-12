@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // clusteredDatabaseHost is what a clustered application instance connects to:
@@ -54,36 +55,14 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 		planned.Name)
 }
 
-// requiredAppSecrets lists, per kind, the app secrets without which the
-// application will not start, and why. Most app secrets render as an empty
-// value when unset, because the kinds differ in what they need and an absent
-// optional one is not an error. These are not optional, and an empty one is a
-// container that exits on a host after the apply has already moved, so render
-// refuses first and names the command that fixes it.
-var requiredAppSecrets = map[config.Kind][]struct{ Key, Why string }{
-	config.KindUptime: {
-		// src/config.js at 1.1.0-oidc.1: ADMIN_PASS falls back to "admin" and
-		// SESSION_SECRET to a value invented per boot.
-		{"admin_password", "the monitor falls back to the password `admin` when ADMIN_PASS is unset"},
-		{"session_secret", "without it every restart signs every admin out"},
-	},
-	config.KindInvite: {
-		{"email_hash_key", "paisans-invite refuses to start without INVITE_EMAIL_HASH_KEY"},
-		{"session_key", "paisans-invite refuses to start without INVITE_SESSION_KEY"},
-	},
-	config.KindPocketID: {
-		// env_config.go:167-169 at tag v2.14.0.
-		{"encryption_key", "Pocket ID refuses to start without an ENCRYPTION_KEY of at least 16 bytes"},
-		// Not needed to start, but without it the toolkit cannot create an
-		// administrator or a client, and Pocket ID deletes the synthetic
-		// user an earlier key created (apikey/service.go:31-36).
-		{"static_api_key", "it is the only credential `paisans app admin create`, `paisans oidc client create` and apply's client step can reach Pocket ID's API with"},
-	},
-}
-
-// requireAppSecrets refuses an app whose kind needs a secret that is unset.
+// requireAppSecrets refuses an app whose kind needs a secret that is unset
+// (kinds.Def.RequiredSecrets). Most app secrets render as an empty value when
+// unset, because the kinds differ in what they need and an absent optional
+// one is not an error. These are not optional, and an empty one is a
+// container that exits on a host after the apply has already moved, so
+// render refuses first and names the command that fixes it.
 func (p *planner) requireAppSecrets(planned plannedApp) error {
-	for _, need := range requiredAppSecrets[planned.Kind] {
+	for _, need := range kinds.RequiredSecrets(planned.Kind) {
 		if p.appSecret(planned.Name, need.Key) == "" {
 			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
 		}

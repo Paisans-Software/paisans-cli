@@ -1591,7 +1591,7 @@ before.
 * **Every port a site binds is listed once, in `render.SiteListeners`**, from
   the constants the templates render. `validate`'s `port-collision` reads it,
   so a new listener added to a template without a constant, or a new kind's
-  port added to `appPort` without a look at the others, escapes the check.
+  port added to its record (`kinds.Def.Port`) without a look at the others, escapes the check.
   `TestPublishedPortsAreDistinctPerSite` in `internal/render` catches the
   second against the fixture; nothing catches the first.
 * **A pinned stack uses bind mounts under `/srv/paisans/<token>/<stack>/`**, never named

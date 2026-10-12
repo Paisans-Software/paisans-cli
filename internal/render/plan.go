@@ -45,34 +45,10 @@ type Plan struct {
 	Images map[string][]ComposeImage
 }
 
-// appPort is the port an application listens on inside its container. The
-// gateway needs it to route, and it is a property of the software rather than
-// of a deployment, so it is not configurable.
-var appPort = map[config.Kind]int{
-	config.KindElement:     80,
-	config.KindMbin:        8080,
-	config.KindOAuth2Proxy: 4180,
-	config.KindOutline:     3000,
-	config.KindPocketID:    1411,
-	config.KindSynapse:     8008,
-	// Not WriteFreely's default 8080: Mbin publishes 8080, and a pinned blog
-	// on an apps site sits beside a clustered Mbin. WriteFreely reads its
-	// port from the config.ini this toolkit renders, so the number is ours.
-	config.KindWriteFreely: 8081,
-	// Not the fork's default 3000: Outline publishes 3000, and two apps on
-	// one site publish on the same mesh address.
-	config.KindUptime: 3001,
-	// Not the service's default 8080: Mbin publishes 8080, and both are
-	// clustered, so they share every apps site's mesh address. The service
-	// reads its port from INVITE_LISTEN_ADDR, which this toolkit renders, and
-	// its image's health check probes the same variable.
-	config.KindInvite: 8082,
-}
-
 // AppPort is the port a kind listens on, which is also the port it publishes
-// on its site's mesh address. A command that calls an application's own API
-// from its host needs it, and reading it here keeps one number in one place.
-func AppPort(kind config.Kind) int { return appPort[kind] }
+// on its site's mesh address (kinds.Def.Port). A command that calls an
+// application's own API from its host needs it.
+func AppPort(kind config.Kind) int { return kinds.Port(kind) }
 
 // reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
 // the mesh address for the uptime monitor. A literal, like masPort:
@@ -309,7 +285,7 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 		Hostname: app.Hostname,
 		Pinned:   pinned,
 		Site:     site.Name,
-		Port:     appPort[app.Kind],
+		Port:     kinds.Port(app.Kind),
 		OwnsDB:   pinned,
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),

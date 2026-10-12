@@ -1,29 +1,6 @@
 package kinds
 
-import (
-	"strings"
-
-	"github.com/paisans-software/paisans-stack/internal/config"
-)
-
-// WriteFreely's gate settings. Each is rendered into config.ini's [app] and
-// named in its locked_settings, which the writefreely-wisp fork reads from
-// the file and refuses to change from its admin page or its own command line
-// (config/locked.go at v0.21.1+wisp).
-func init() {
-	registerGateSettings(config.KindWriteFreely, []GateSetting{
-		{
-			Name: "app.private", Want: "true", When: gated,
-			Why:       "only private mode makes the blog read from its allowlist alone; without it authorized fetch admits any signer",
-			ConfigKey: "app.private", SettingKey: "private",
-		},
-		{
-			Name: "app.authorized_fetch", Want: "true", When: gatedFederating,
-			Why:       "the gate leaves ActivityPub to the blog, and without authorized fetch it answers an unsigned read and accepts an unsigned delivery",
-			ConfigKey: "app.authorized_fetch", SettingKey: "authorized_fetch",
-		},
-	}, writefreelyLive{})
-}
+import "strings"
 
 // writefreelyLive reads the blog's gate settings with its own settings
 // command, which prints each setting's effective value and marks the ones

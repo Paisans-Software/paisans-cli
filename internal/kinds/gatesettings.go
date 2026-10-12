@@ -34,7 +34,7 @@ type GateSetting struct {
 
 // LiveSettings reads a kind's gate settings in a running app: the value it
 // enforces and whether its file locks it. A kind with gate settings
-// implements it in its own file, so doctor reads every kind the same way.
+// names one in its record, so doctor reads every kind the same way.
 type LiveSettings interface {
 	// Service is the compose service to run ReadCommand in.
 	Service() string
@@ -55,18 +55,6 @@ type Live struct {
 	Locked bool
 }
 
-var (
-	gateSettings = map[config.Kind][]GateSetting{}
-	liveSettings = map[config.Kind]LiveSettings{}
-)
-
-// registerGateSettings records a kind's gate settings and how to read them.
-// Each kind with any calls it from its own file.
-func registerGateSettings(kind config.Kind, settings []GateSetting, live LiveSettings) {
-	gateSettings[kind] = settings
-	liveSettings[kind] = live
-}
-
 // GateSettingsFor is every gate setting an app needs, given how it is
 // declared: none for an app that does not use the gate.
 func GateSettingsFor(app config.App) []GateSetting {
@@ -74,7 +62,7 @@ func GateSettingsFor(app config.App) []GateSetting {
 		return nil
 	}
 	var out []GateSetting
-	for _, s := range gateSettings[app.Kind] {
+	for _, s := range of(app.Kind).GateSettings {
 		if s.When(app) {
 			out = append(out, s)
 		}
@@ -86,8 +74,8 @@ func GateSettingsFor(app config.App) []GateSetting {
 // LiveSettingsFor is how to read a kind's gate settings in a running app,
 // false for a kind with none.
 func LiveSettingsFor(kind config.Kind) (LiveSettings, bool) {
-	l, ok := liveSettings[kind]
-	return l, ok
+	l := of(kind).LiveSettings
+	return l, l != nil
 }
 
 // gated is When for a setting every gated app needs.

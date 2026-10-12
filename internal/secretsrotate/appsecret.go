@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -25,27 +26,11 @@ import (
 // goes one site at a time, each healthy before the next, so with cluster
 // placement the second site runs the old value while the first is checked.
 
-// selfKinds is the kind whose secret each key is, for the keys AppSelf
-// rotates.
-var selfKinds = map[string]config.Kind{
-	"app_secret":         config.KindMbin,
-	"mercure_jwt_secret": config.KindMbin,
-	"valkey_password":    config.KindMbin,
-	"cookie_secret":      config.KindOAuth2Proxy,
-	"session_secret":     config.KindUptime,
-	"session_key":        config.KindInvite,
-	"mas_signing_key":    config.KindSynapse,
-	"mas_matrix_secret":  config.KindSynapse,
-	"static_api_key":     config.KindPocketID,
-}
-
 // AppSelfKind is the kind whose secret key is, for each key AppSelf rotates,
 // and false for any other key: what `secrets rotate` reads to find, in a
-// deployment's apps, the ones whose secret it is.
-func AppSelfKind(key string) (config.Kind, bool) {
-	kind, ok := selfKinds[key]
-	return kind, ok
-}
+// deployment's apps, the ones whose secret it is. Each kind's record names
+// its keys (kinds.Def.SelfRotated).
+func AppSelfKind(key string) (config.Kind, bool) { return kinds.SelfRotatedKind(key) }
 
 // mbinRestart is the downtime of a rotation that restarts the Mbin stack.
 const mbinRestart = "the Mbin stack, for one restart on each site in turn"
@@ -131,7 +116,7 @@ func (r appSelf) Precheck(e Env) error {
 	if _, ok := oauthKey[r.key]; ok {
 		return fmt.Errorf("%s encrypts or opens Mbin's OAuth2 keypair, and is rotated with the rest of it as apps.%s.oauth", r.Path(), r.app)
 	}
-	kind, ok := selfKinds[r.key]
+	kind, ok := AppSelfKind(r.key)
 	if !ok {
 		return fmt.Errorf("%s is not a secret its app checks itself", r.Path())
 	}

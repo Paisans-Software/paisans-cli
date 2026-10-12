@@ -49,7 +49,7 @@ const hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 // refuse configuration it produces itself.
 //
 // It walks config.Kinds() and each kind's own kinds.Services() rather than a
-// list of service names written out here, so a kind added to the catalogue,
+// list of service names written out here, so a kind given a record,
 // or a kind whose services are not all named "app" (Eg: mbin's messenger),
 // still gets checked: there is no second list this one can fall out of step
 // with.

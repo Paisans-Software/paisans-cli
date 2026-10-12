@@ -1,34 +1,6 @@
 package kinds
 
-import (
-	"strings"
-
-	"github.com/paisans-software/paisans-stack/internal/config"
-)
-
-// Mbin's gate settings. Each is rendered into its .env and named in
-// MBIN_LOCKED_SETTINGS, which the paisans fork reads from the environment on
-// every read and never from its database (SettingsManager.php:104 at
-// v1.15.1+paisans), so the container's environment is what Mbin enforces.
-func init() {
-	registerGateSettings(config.KindMbin, []GateSetting{
-		{
-			Name: "MBIN_PRIVATE_INSTANCE", Want: "true", When: gated,
-			Why:       "the gate lets a request with a bearer token reach /api/*, and without private instance mode Mbin answers its API reads with no user at all",
-			ConfigKey: "MBIN_PRIVATE_INSTANCE",
-		},
-		{
-			Name: "MBIN_USE_FEDERATION_ALLOW_LIST", Want: "true", When: gated,
-			Why:       "the gate leaves ActivityPub to Mbin, and without the allow list Mbin answers a signed read from any instance",
-			ConfigKey: "MBIN_USE_FEDERATION_ALLOW_LIST",
-		},
-		{
-			Name: "MBIN_AUTHORIZED_FETCH", Want: "true", When: gatedFederating,
-			Why:       "the gate leaves ActivityPub to Mbin, and without authorized fetch Mbin answers an unsigned read",
-			ConfigKey: "MBIN_AUTHORIZED_FETCH", SettingKey: "authorized_fetch",
-		},
-	}, mbinLive{})
-}
+import "strings"
 
 // mbinLive reads Mbin's gate settings from the app container's environment.
 // Mbin has no command that lists its settings, and a locked one is the

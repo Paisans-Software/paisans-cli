@@ -5,15 +5,10 @@ import "github.com/paisans-software/paisans-stack/internal/config"
 // KeepsFilesOnlyLocally reports whether a kind stores files that can live
 // only on its own site's disk, with no object storage form at all.
 //
-// Synapse's S3 storage provider supplements its media store rather than
-// replacing it, so a local media directory is always required. The uptime
-// fork keeps everything, its SQLite database included, under /data. Both are
-// pinned only for that reason, and an app's `storage` key has nothing to
-// choose between for either: local is accepted, because it is what the kind
-// does anyway, and s3 is refused.
-func KeepsFilesOnlyLocally(kind config.Kind) bool {
-	return kind == config.KindSynapse || kind == config.KindUptime
-}
+// A kind like that is pinned only for that reason, and an app's `storage`
+// key has nothing to choose between for it: local is accepted, because it is
+// what the kind does anyway, and s3 is refused.
+func KeepsFilesOnlyLocally(kind config.Kind) bool { return of(kind).LocalFilesOnly }
 
 // InObjectStorage reports whether an app keeps its files in the deployment's
 // Garage, which is what decides whether it has a bucket, a key, a media
@@ -50,35 +45,16 @@ func KeepsFilesLocally(cfg *config.Config, app config.App) bool {
 	return UsesObjectStorage(app.Kind) && !InObjectStorage(cfg, app)
 }
 
-// localMediaPaths is where each kind serves its stored files on its own
-// hostname when it keeps them locally, for a kind whose files must be
-// readable with no credential (ServesObjectsPublicly). In S3 mode the media
-// hostname carries these and is never gated; in local mode the app's own
-// hostname carries them, so a gated app opens exactly these paths to keep
-// the same contract.
-//
-// Mbin's are under /media, served as static files by the web server in its
-// own container (docs/02-admin/01-installation/02-docker.md, "Uploaded media
-// files", at the paisans fork's tag v1.14.0+paisans), and the federated copy
-// of a post points a remote instance there. The writefreely-wisp fork's are
-// under /uploads/, served by uploadsHandler from the local image store
-// (imagestore.go:364-386 at ff9dceb, the commit the pinned image is built
-// from).
-//
-// Outline is absent on purpose. Its local store answers through its own API
-// with the reader's session or a signature it issued, so there is nothing to
-// open.
-var localMediaPaths = map[config.Kind][]string{
-	config.KindMbin:        {"/media/*"},
-	config.KindWriteFreely: {"/uploads/*"},
-}
-
 // LocalMediaPaths is the paths an app's locally kept files are served on,
 // on its own hostname, that must stay readable without a gate session. Empty
 // for an app in object storage, and for a kind whose files are private.
+//
+// In S3 mode the media hostname carries these and is never gated; in local
+// mode the app's own hostname carries them, so a gated app opens exactly
+// these paths to keep the same contract.
 func LocalMediaPaths(cfg *config.Config, app config.App) []string {
 	if !KeepsFilesLocally(cfg, app) {
 		return nil
 	}
-	return append([]string(nil), localMediaPaths[app.Kind]...)
+	return append([]string(nil), of(app.Kind).LocalMediaPaths...)
 }
