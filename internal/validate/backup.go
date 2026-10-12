@@ -21,11 +21,21 @@ var clock = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 // docs/specs/2026-10-11-backups.md, "Validation").
 func (c *checker) backup() {
 	b := c.cfg.Backup
+	if b == nil {
+		c.warn("backups-off", "backup",
+			"backups are off",
+			"is missing. Nothing in this deployment is backed up: not its databases, its files, its buckets or its configuration. Add a backup section, with a schedule and at least one destination, to turn them on; the next apply does the rest.")
+		return
+	}
 	if !b.On() {
+		c.warn("backups-off", "backup.enabled",
+			"backups are off",
+			"is false. Nothing in this deployment is backed up: not its databases, its files, its buckets or its configuration.")
 		return
 	}
 	c.pinnedPostgresWithoutWALG()
 	c.excludedApps()
+	c.backupMonitor()
 	if !scheduleKnown(b.Schedule) {
 		c.refuse("backup-schedule-unknown", "backup.schedule",
 			"schedule is not daily, weekly, monthly or yearly",
@@ -51,6 +61,11 @@ func (c *checker) backup() {
 	for i, d := range b.Destinations {
 		key := fmt.Sprintf("backup.destinations[%d]", i)
 		c.destination(key, d, b.Schedule, seen)
+	}
+	if len(b.Destinations) == 1 {
+		c.warn("backup-single-destination", "backup.destinations",
+			"backups go to one place",
+			"has one destination, so one provider is one failure domain: losing its account, its region or its bucket loses every backup. A second destination with another provider, or on hardware at home, removes that.")
 	}
 }
 
@@ -98,6 +113,11 @@ func (c *checker) destination(key string, d config.BackupDestination, schedule c
 		c.refuse("backup-keep-empty", key+".keep",
 			"prune is on and nothing is kept",
 			"is empty while prune is on, which would delete every backup. Declare how many of each period to keep, Eg: keep: { daily: 7, weekly: 4 }, or set prune: false.")
+	}
+	if !d.Prunes() {
+		c.warn("backup-prune-off", key+".prune",
+			"a destination is never pruned",
+			"is false, so nothing in %s is ever deleted and its bucket only grows.", d.Name)
 	}
 	if scheduleKnown(schedule) {
 		for _, tier := range config.Schedules {
@@ -186,4 +206,18 @@ func imageRepository(ref string) string {
 		ref = ref[:i]
 	}
 	return ref
+}
+
+// backupMonitor warns when nothing would page anyone about a failed run: the
+// runner reports to the deployment's uptime monitor, and without one a
+// failure is silent.
+func (c *checker) backupMonitor() {
+	for _, name := range c.cfg.AppNames() {
+		if c.cfg.Apps[name].Kind == config.KindUptime {
+			return
+		}
+	}
+	c.warn("backup-without-a-monitor", "backup",
+		"no monitor to report failed backups to",
+		"is on, but the deployment runs no uptime app, so a failed backup run is reported to nobody. Declare one (README, \"Monitoring\").")
 }

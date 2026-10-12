@@ -191,3 +191,43 @@ func warned(r validate.Result, rule string) bool {
 	}
 	return false
 }
+
+func TestBackupWarnings(t *testing.T) {
+	no := false
+	for _, tc := range []struct {
+		name, rule string
+		edit       func(cfg *config.Config)
+	}{
+		{"disabled", "backups-off", func(cfg *config.Config) { cfg.Backup.Enabled = &no }},
+		{"no section", "backups-off", func(cfg *config.Config) { cfg.Backup = nil }},
+		{"prune off", "backup-prune-off", func(cfg *config.Config) { cfg.Backup.Destinations[0].Prune = &no }},
+		{"one destination", "backup-single-destination", func(cfg *config.Config) { cfg.Backup.Destinations = cfg.Backup.Destinations[:1] }},
+		{"no uptime app", "backup-without-a-monitor", func(cfg *config.Config) {
+			for name, a := range cfg.Apps {
+				if a.Kind == config.KindUptime {
+					delete(cfg.Apps, name)
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := load(t, "valid")
+			tc.edit(cfg)
+			if r := validate.Check(cfg); !warned(r, tc.rule) {
+				t.Fatalf("%s did not fire: %v", tc.rule, r.Findings)
+			}
+		})
+	}
+}
+
+func TestDisabledBackupsWarnOnlyThatTheyAreDisabled(t *testing.T) {
+	no := false
+	cfg := load(t, "valid")
+	cfg.Backup.Enabled = &no
+	cfg.Backup.Destinations = cfg.Backup.Destinations[:1]
+	for _, f := range validate.Check(cfg).Findings {
+		if strings.HasPrefix(f.Rule, "backup") && f.Rule != "backups-off" {
+			t.Errorf("a disabled section also warned %s", f.Rule)
+		}
+	}
+}
