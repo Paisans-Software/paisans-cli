@@ -10,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // dnsTokenPath is the pasted DNS token's path in the secrets file.
@@ -86,6 +87,7 @@ func (p pasted) Next(e Env, s *config.Secrets) (string, error) {
 	if v == "" {
 		return "", fmt.Errorf("the secrets file holds no %s. Set the one %s issued with `paisans secrets set %s`", p.path, p.issuer(e.Cfg), p.path)
 	}
+	ui.Secret(v)
 	return v, nil
 }
 
@@ -189,9 +191,12 @@ func (p pasted) hostsRun(e Env) (bool, []string, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	if _, err := p.Next(e, s); err != nil {
+	v, err := p.Next(e, s)
+	if err != nil {
 		return false, nil, err
 	}
+	// Registered here too, since an error from a host below may quote it.
+	ui.Secret(v)
 	files, err := carriers(e.Cfg, s, p.path)
 	if err != nil {
 		return false, nil, err

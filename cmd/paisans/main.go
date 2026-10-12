@@ -79,7 +79,7 @@ Usage:
   paisans dns prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--name <fqdn>]... [--execute]
   paisans secrets set <dotted.key> [--config paisans.yaml] [--secrets secrets.enc.yaml] < value
   paisans secrets prune [--config paisans.yaml] [--secrets secrets.enc.yaml] [--execute]
-  paisans secrets rotate <path>... | --all [--replaced <path>]...
+  paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...
                [--config paisans.yaml] [--secrets secrets.enc.yaml]
                [--sudo=false] [--execute]
   paisans app admin create --app <pocket-id app> --username <u> --email <e>
@@ -224,13 +224,17 @@ Commands:
              promoted. A pasted secret (the DNS token, an SMTP password,
              a client secret minted at Pocket ID) is handed on once it is
              replaced at its issuer and set with secrets set, and refused
-             while unchanged; --replaced <path> lists one already replaced
-             and applied, which every host runs, instead. Lists the secrets it keeps and why. --all
-             refuses a file that lacks a secret init generates. Refuses
-             while a mesh rekey is unfinished, a site does not answer, or
-             etcd or Patroni is unhealthy; apply refuses while a rotation
-             is unfinished. A run that signs members out asks for sign
-             out at a terminal, before any host is claimed. A stopped run
+             while every host using it runs the value the file holds,
+             read line by line; --replaced <path> lists one already
+             replaced and applied, which every host runs, instead. Lists
+             the secrets it keeps and why. --all refuses a file that lacks
+             a secret init generates. A stopped --all resumes with what it
+             left, and says so; --all --restart starts the full list
+             again. Refuses while a mesh rekey is unfinished, a site does
+             not answer, or etcd or Patroni is unhealthy; apply and every
+             other command that renders refuse while a rotation is
+             unfinished. A run that signs members out asks for sign out
+             at a terminal, before any host is claimed. A stopped run
              resumes. Writes nothing without --execute.
   app        admin create: make sure a user exists, is verified and is an
              administrator of Pocket ID, and is in every admin group the
@@ -265,9 +269,9 @@ Commands:
              paisans), only the first two apply.
 
 host prepare, host deployments, apply, prune, site add, site remove, mesh
-rekey, storage init, storage add, storage rotate-key, app admin create, app remove, oidc
-client create, secrets prune, preflight, failover test, doctor and init are the
-only commands that reach a host.
+rekey, storage init, storage add, storage rotate-key, app admin create, app
+remove, oidc client create, secrets prune, secrets rotate, preflight, failover
+test, doctor and init are the only commands that reach a host.
 Each reads it to plan, and changes it only with --execute; host deployments,
 preflight, doctor and init have no --execute and never change it; secrets
 prune only reads the gateways' deployment records, and its --execute writes

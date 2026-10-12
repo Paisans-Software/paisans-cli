@@ -363,7 +363,7 @@ func (r *Run) Execute(e Env, confirm func(word, what string) error) error {
 			paths = append(paths, it.Rotator.Path())
 		}
 		if err := r.record(e, paths); err != nil {
-			return fmt.Errorf("secrets rotate: recording the secrets --all rotates: %w. Nothing was changed", err)
+			return fmt.Errorf("secrets rotate: recording the secrets --all rotates: %w. No host was touched", err)
 		}
 	}
 	for _, it := range r.Items {

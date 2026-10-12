@@ -800,3 +800,28 @@ func TestUnfinishablePendingNamesTheWayOut(t *testing.T) {
 		}
 	})
 }
+
+// failingSave is a secrets file that reads but does not take a write.
+type failingSave struct{ *world }
+
+func (f failingSave) Save(*config.Secrets) error { return errors.New("disk full") }
+
+// A run that cannot record what --all has left stops before any host is
+// touched, and says so: the file was written, so "nothing was changed" would
+// not be true of it.
+func TestRecordFailureTouchesNoHost(t *testing.T) {
+	w := newWorld(t, map[string]string{pw: "old"})
+	e := w.env(pw)
+	e.Store = failingSave{w}
+	run, err := secretsrotate.PlanAll(e, []secretsrotate.Rotator{newRot(w, pw, "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run.Execute(e, noConfirm)
+	if err == nil || !strings.Contains(err.Error(), "No host was touched") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.log) != 0 {
+		t.Fatalf("touched: %v", w.log)
+	}
+}

@@ -144,13 +144,16 @@ func (r garageRPC) Users(e Env) []Use {
 // present brings every Garage node to the next value, and is safe to run
 // again:
 //
-//  1. Every Garage site's garage.toml is written with the next value, each
+//  1. Every node is read before any file is written, so a node whose state
+//     cannot be read stops the step with no garage.toml changed anywhere.
+//  2. Every Garage site's garage.toml is written with the next value, each
 //     compared against what the last apply recorded before any is written.
-//  2. When any node does not run with the next value, garage is restarted on
-//     every Garage site, one straight after another and none waited for in
-//     between: a node restarted alone could not talk to the others. A restart
-//     that fails does not stop the rest.
-//  3. It waits for `garage status` on every node to list every node healthy.
+//  3. When any node does not run with the next value, read again now that
+//     the files are written, garage is restarted on every Garage site, one
+//     straight after another and none waited for in between: a node
+//     restarted alone could not talk to the others. A restart that fails
+//     does not stop the rest.
+//  4. It waits for `garage status` on every node to list every node healthy.
 //
 // Where every node already runs with the next value, it only waits.
 func (r garageRPC) present(e Env, s *config.Secrets) error {
@@ -159,9 +162,16 @@ func (r garageRPC) present(e Env, s *config.Secrets) error {
 		return fmt.Errorf("the secrets handed to it hold no value for %s", r.SecretPath)
 	}
 	sites := e.Cfg.Storage.Garage.Sites
+	for _, site := range sites {
+		if _, err := garageRunsWith(e, site, "rpc_secret", next); err != nil {
+			return err
+		}
+	}
 	if err := writeGarageConfig(e, s, sites); err != nil {
 		return err
 	}
+	// Read again after the write: a node whose file the write changed was
+	// started before it, and so does not run with what it now says.
 	stale := false
 	for _, site := range sites {
 		has, err := garageRunsWith(e, site, "rpc_secret", next)

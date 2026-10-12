@@ -616,3 +616,18 @@ func TestPastedClientWithoutRetireOnlyApplies(t *testing.T) {
 		t.Errorf("log %v, want %v", w.log, want)
 	}
 }
+
+// A pasted secret's value is registered as a secret as soon as it is read,
+// so nothing shown afterwards carries it.
+func TestPastedNextRegistersTheValue(t *testing.T) {
+	w := newWrapWorld(t)
+	const token = "fixture-not-a-secret-desec-registered"
+	w.setToken(token)
+	s, _ := w.store.Load()
+	if _, err := DNSToken().Next(w.env(), s); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ui.Redact("the host said "+token), token) {
+		t.Fatal("the token is not registered as a secret")
+	}
+}

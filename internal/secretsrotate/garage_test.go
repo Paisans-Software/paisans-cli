@@ -32,8 +32,9 @@ type garageWorld struct {
 	clock int64
 	log   []string
 	// restartFails names a site whose restart fails; down a site whose node
-	// does not come back after a restart.
-	restartFails, down string
+	// does not come back after a restart; unreadable a site whose node's
+	// state cannot be read.
+	restartFails, down, unreadable string
 }
 
 type garageHost struct {
@@ -151,6 +152,9 @@ func (h *garageHost) Run(command string) (string, error) {
 	compose := w.cfg.Deployment().ComposeCmd("infra")
 	switch {
 	case strings.Contains(command, "ps -aq garage"):
+		if w.unreadable == h.site {
+			return "Cannot connect to the Docker daemon", errors.New("exit status 1")
+		}
 		if h.id == "" || (!h.up && h.started == 0) {
 			return "absent\n", nil
 		}
@@ -470,6 +474,21 @@ func TestGarageRotationsRefuseWithoutGarage(t *testing.T) {
 		err := w.rotate(r)
 		if err == nil || !strings.Contains(err.Error(), "storage.garage.sites") {
 			t.Errorf("%s: err %v, want a refusal naming storage.garage.sites", r.Path(), err)
+		}
+	}
+}
+
+// Every node's state is read before any garage.toml is written, so a node
+// that cannot be read stops the rotation with no file anywhere changed.
+func TestGarageRPCReadsEveryNodeBeforeWriting(t *testing.T) {
+	w := newGarageWorld(t)
+	w.unreadable = w.cfg.Storage.Garage.Sites[len(w.cfg.Storage.Garage.Sites)-1]
+	if err := w.rotate(GarageRPC()); err == nil {
+		t.Fatal("an unreadable node passed")
+	}
+	for _, entry := range w.log {
+		if strings.HasPrefix(entry, "write ") || strings.HasPrefix(entry, "restart ") {
+			t.Fatalf("changed a node before every node was read: %v", w.log)
 		}
 	}
 }
