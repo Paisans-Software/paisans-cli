@@ -2133,30 +2133,28 @@ file that lacks a secret `init` generates, naming `paisans init`, since a run
 that skipped one would leave it as the departed admin knew it.
 
 **A pasted secret is replaced by a person first.** The DNS token and the SMTP
-passwords are issued by a provider, and nothing here can issue them. Every
-OIDC client secret, the homeserver's and the gate's included, is minted by
-`oidc client create --rotate-secret` instead. The operator replaces each at
-its issuer and sets it with `paisans secrets set <path>`, and `secrets rotate`
-hands the value the file then holds to every stack that renders it, one site
-at a time. It is refused while every host using it runs the value the file
-holds, since rotating it then would restart them for nothing, and `--all`
-refuses until each pasted secret it includes has been replaced so. **Which
-value a host runs is read per secret, not per file.** The lines that carry the
-secret are the ones a render with any other value changes; the host prints the
-SHA-256 of each line of its own copy of that file, so only hashes cross ssh
-and nothing secret is on a command line; and the host runs the value when
-every carrying line's hash is among them. A file that differs only elsewhere,
-Eg: a comment an upgrade changed in `caddy.env`, or an app setting not yet
-applied, would otherwise pass for a secret replaced. That refusal cannot tell
-a secret never replaced from one replaced and then applied, as an eviction
-does with the DNS token, so the operator says which: **`--replaced <path>`**
-names a pasted secret every host using it already runs from the file. It is
-checked the same way, and refused for a generated secret, for one some host
-does not run yet, and for one whose rotation is under way; a path it accepts
-is listed in the plan as replaced earlier and not rotated. For such a client,
-the old secrets are deleted at Pocket ID after every site runs the new one,
-through the client ID the file records; without one, the plan says to delete
-them there by hand.
+passwords are issued by a provider, and nothing here can issue them. The
+operator replaces each at its issuer and sets it with `paisans secrets set
+<path>`, and `secrets rotate` hands the value the file then holds to every
+stack that renders it, one site at a time. It is refused while every host
+using it runs the value the file holds, since rotating it then would restart
+them for nothing, and `--all` refuses until each pasted secret it includes has
+been replaced so. **Which value a host runs is read per secret, not per
+file.** The lines that carry the secret are the ones a render with any other
+value changes; the host prints the SHA-256 of each line of its own copy of
+that file, so only hashes cross ssh and nothing secret is on a command line;
+and the host runs the value when every carrying line's hash is among them. A
+file that differs only elsewhere, Eg: a comment an upgrade changed in
+`caddy.env`, or an app setting not yet applied, would otherwise pass for a
+secret replaced. That refusal cannot tell a secret never replaced from one
+replaced and then applied, as an eviction does with the DNS token, so the
+operator says which: **`--replaced <path>`** names a pasted secret every host
+using it already runs from the file. It is checked the same way, and refused
+for a generated secret, for one some host does not run yet, and for one whose
+rotation is under way; a path it accepts is listed in the plan as replaced
+earlier and not rotated. No OIDC client secret is pasted: every one, the
+homeserver's and the gate's included, is minted by `oidc client create
+--rotate-secret`.
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
@@ -6439,7 +6437,7 @@ control and the operator should know that nothing else stands behind it:
 | `outline` | `/auth/oidc.callback` (`plugins/oidc/server/auth/oidcRouter.ts:63` at `v1.10.0`) | off: the rendered `.env` sets the four explicit `OIDC_*_URI` values, and that branch of the plugin never passes `pkce` (`plugins/oidc/server/auth/oidc.ts:27-35`; only the `OIDC_ISSUER_URL` branch does) | not read. The restriction at Pocket ID is the whole control |
 | `writefreely` | `/oauth/callback/generic`, built by `configureGenericOauth` and not configurable (`oauth.go:249` at writefreely-wisp `ff9dceb`) | off: nothing in the fork sends a code challenge | not read. The restriction at Pocket ID is the whole control |
 | `uptime` | `/login/oidc/callback` (`src/lib/oidc.js:26`) | on: every sign in sends an S256 challenge (`src/lib/oidc.js:96-103`) | read. `settings.admin_group` is both groups: its members administer the monitor and nobody else may sign in |
-| `synapse` | `/upstream/callback/<ulid>`, the authentication service's callback for its upstream provider (`crates/router/src/endpoints.rs:742-762` at MAS `v1.24.0`), with the id derived from the app's name | on: `mas.yaml` leaves `pkce_method` at `auto`, which uses PKCE when discovery advertises S256 (`crates/handlers/src/upstream_oauth2/cache.rs:129-139`, `crates/oidc-client/src/requests/authorization_code.rs:242-256`), and Pocket ID's does (`backend/internal/controller/well_known_controller.go:117` at `v2.14.0`) | not read: `mas.yaml` requests no `groups` scope. The restriction at Pocket ID is the whole control |
+| `synapse` | `/upstream/callback/<ulid>`, the authentication service's callback for its upstream provider (`crates/router/src/endpoints.rs:742-762` at MAS `v1.24.0`), with the id derived from the app's name | on: `mas.yaml` sets `pkce_method: always`, the S256 mode (`crates/config/src/sections/upstream_oauth2.rs:420-436`, `crates/cli/src/sync.rs:289-298`), so every sign in sends an S256 challenge (`crates/handlers/src/upstream_oauth2/cache.rs:137`, `crates/oidc-client/src/requests/authorization_code.rs:242-256`) | not read: `mas.yaml` requests no `groups` scope. The restriction at Pocket ID is the whole control |
 | `oauth2-proxy` | `/oauth2/callback` on the gate's hostname: no redirect URL is rendered, so oauth2-proxy builds it from the proxy prefix and the request's host (`oauthproxy.go:175-178,1113-1135` at `v7.15.4`) | on: the `.env` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, and with a method set every sign in sends a challenge (`oauthproxy.go:833-851`) | read. The gate admits only `OAUTH2_PROXY_ALLOWED_GROUPS`, `members` (`providers/provider_default.go:125-138`) |
 
 PKCE is set per client the way the app behaves, not on as a matter of course:

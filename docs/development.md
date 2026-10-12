@@ -163,11 +163,11 @@ about it are load bearing:
 * **It generates only what it can.** A DNS token is issued by a provider, a
   mail password by the mail provider (`external.smtp_password`, when an app
   sends mail through a host and has no password of its own), and an OIDC
-  client lives at a running identity provider, where creating one is a
-  mutation a human approves. Each is reported as owed, with the reason,
-  rather than invented or left silent. An owed client of a kind with a known
-  shape (`kinds.OIDCClient`) says that `apply --execute` creates it, since
-  declaring the app is the approval for its client.
+  client lives at a running identity provider. Each is reported as owed,
+  with the reason, rather than invented or left silent. An owed client
+  (every kind with a client shape, `kinds.OIDCClient`) says that `apply
+  --execute` creates it, since declaring the app is the approval for its
+  client, and names its redirect URI and PKCE.
 * **Without an age recipient it writes plaintext and says so loudly.** Refusing
   would leave an operator holding generated secrets that went nowhere, and a
   first look at the tool must not require a key.
@@ -211,8 +211,9 @@ Pocket ID, restricted to the member and admin groups the app's `settings`
 name (`member_group` and `admin_group`, defaulting to `members` and
 `admins`; uptime's one group is `admin_group`, used as both, with no default
 because `validate` requires it; the gate's is `members` alone, with no
-setting), with a launch URL so Pocket ID's dashboard lists it, except for
-Synapse and the gate, which have no page for a member, and records its ID and
+setting), with a launch URL so Pocket ID's dashboard lists it, by default
+for every kind but Synapse and the gate, which have no page for a member
+(`sso_dashboard_link` still gives either one), and records its ID and
 secret under `oidc_clients.<app>`. Every step is printed with what it sends and
 nothing changes without `--execute`. The secret is generated on the
 workstation and written to the secrets file before Pocket ID is sent it, and is
