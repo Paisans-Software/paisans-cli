@@ -802,15 +802,25 @@ func TestInviteKeysAreStable(t *testing.T) {
 	if _, err := secretsgen.Fill(cfg, s); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := s.Apps["invite"]["session_key"].(string)
-	hashKey, _ := s.Apps["invite"]["email_hash_key"].(string)
+	first, ok := s.Apps["invite"]["session_key"].(string)
+	if !ok {
+		t.Fatal("session_key missing from apps.invite after Fill")
+	}
+	hashKey, ok := s.Apps["invite"]["email_hash_key"].(string)
+	if !ok {
+		t.Fatal("email_hash_key missing from apps.invite after Fill")
+	}
 	if len(first) != 43 || len(hashKey) != 43 {
 		t.Fatalf("want 32 bytes as unpadded base64url: session %q, hash %q", first, hashKey)
 	}
 	if _, err := secretsgen.Fill(cfg, s); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := s.Apps["invite"]["session_key"].(string); again != first {
+	again, ok := s.Apps["invite"]["session_key"].(string)
+	if !ok {
+		t.Fatal("session_key missing from apps.invite after second Fill")
+	}
+	if again != first {
 		t.Fatal("init must never replace an existing key")
 	}
 }
