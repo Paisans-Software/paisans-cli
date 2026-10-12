@@ -169,7 +169,8 @@ func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
 		"Who can see the forums and social?",
 		"Who can see the wiki?",
 		"  yes: members only. Anyone else is sent to sign in first;",
-		"  no:  anyone who can reach it.",
+		"  no:  any public person or bot that can reach it will be able to read\n" +
+			"       whatever content isn't protected/hidden behind a login.",
 		"Members only? [Y/n]",
 	} {
 		if !strings.Contains(out, want) {
