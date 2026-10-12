@@ -457,8 +457,8 @@ func TestStateFiles(t *testing.T) {
 	}
 }
 
-// Publish signs as Publish does, with key::<public key line>, so the private
-// key is the ssh-agent's alone.
+// A publish signs as the commands do, with key::<public key line>, so the
+// private key is the ssh-agent's alone.
 func TestPublishSignsThroughTheAgent(t *testing.T) {
 	needTools(t, "git", "ssh-keygen", "ssh-agent", "ssh-add")
 	alice := newOperator(t)
