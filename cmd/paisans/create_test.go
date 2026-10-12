@@ -107,7 +107,7 @@ func TestCreateAsksAgainAfterARefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cfg.Sites["server"]; !ok {
+	if _, ok := cfg.Sites["all-in-one"]; !ok {
 		t.Errorf("the corrected machines were not written: %v", cfg.SiteNames())
 	}
 }

@@ -38,14 +38,14 @@ var shapes = []shape{
 	ShapeOneMachine: {
 		label: "one machine",
 		sites: []shapeSite{
-			{name: "server", roles: []config.Role{config.RoleData, config.RoleApps, config.RoleGateway}, public: true},
+			{name: "all-in-one", roles: []config.Role{config.RoleData, config.RoleApps, config.RoleGateway}, public: true},
 		},
 	},
 	ShapeHomeAndVPS: {
 		label: "one home and one VPS",
 		sites: []shapeSite{
 			{name: "home", roles: []config.Role{config.RoleData, config.RoleApps}},
-			{name: "vps", roles: []config.Role{config.RoleGateway}, public: true},
+			{name: "gateway", roles: []config.Role{config.RoleGateway}, public: true},
 		},
 	},
 	ShapeHighAvailability: {
@@ -53,7 +53,7 @@ var shapes = []shape{
 		sites: []shapeSite{
 			{name: "home-a", roles: []config.Role{config.RoleData, config.RoleApps}, endpoint: true},
 			{name: "home-b", roles: []config.Role{config.RoleData, config.RoleApps}},
-			{name: "vps", roles: []config.Role{config.RoleGateway, config.RoleWitness}, public: true},
+			{name: "gateway", roles: []config.Role{config.RoleGateway, config.RoleWitness}, public: true},
 		},
 	},
 	ShapeCustom: {label: "custom: choose each site's roles"},
