@@ -48,8 +48,22 @@ func (e *anchorError) Is(target error) bool { return target == ErrNoAnchor }
 type ConflictError struct{ A, B string }
 
 func (e *ConflictError) Error() string {
-	return fmt.Sprintf("versions %s and %s each remove a key the other depends on, and neither is in your anchor's history; choose one by publishing on it", e.A, e.B)
+	return fmt.Sprintf("versions %s and %s are part of a loop of removals that bar one another, none of them in your anchor's history; choose one by publishing on it", e.A, e.B)
 }
+
+// UnreadableAdminsError is a version in the anchor's history whose
+// paisans.yaml cannot be read. Its removals still stand, but which keys it
+// removed is unknown, so Judge refuses rather than trust what they would bar.
+type UnreadableAdminsError struct {
+	SHA string
+	Err error
+}
+
+func (e *UnreadableAdminsError) Error() string {
+	return fmt.Sprintf("the admins of version %s, in your anchor's history, cannot be read: %v", e.SHA, e.Err)
+}
+
+func (e *UnreadableAdminsError) Unwrap() error { return e.Err }
 
 // Judge decides which versions to trust, starting from the operator's anchor,
 // by the spec's "Which versions the workstation trusts":
@@ -69,9 +83,16 @@ func (e *ConflictError) Error() string {
 //     not trusted and removes nothing; repeat until nothing changes. What is
 //     left bars itself in a loop, and is a *ConflictError.
 //
-// The result does not depend on map order, and Judge terminates on any graph,
-// including one with a missing parent or a cycle.
+// Judge returns ErrNoAnchor (or an error that is it to errors.Is) when trust
+// has nowhere to start or the pin is not a good root, *UnreadableAdminsError
+// when a version in the anchor's history has admins that cannot be read, and
+// *ConflictError for a loop of removals. The result does not depend on map
+// order, and Judge terminates on any graph, including one with a missing
+// parent or a cycle.
 func Judge(g Graph, a Anchor) (Verdict, error) {
+	if g.Admins == nil {
+		return Verdict{}, errors.New("judging versions needs a way to read their admins")
+	}
 	j := &judgement{g: g, admins: map[string]adminsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
@@ -82,6 +103,13 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	history := map[string]bool{anchor: true}
 	for sha := range j.ancestors(anchor) {
 		history[sha] = true
+	}
+	for _, sha := range order {
+		if history[sha] {
+			if err := j.adminsOf(sha).err; err != nil {
+				return Verdict{}, &UnreadableAdminsError{SHA: sha, Err: err}
+			}
+		}
 	}
 
 	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, AnchorAt: anchor}
@@ -308,20 +336,19 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 			}
 		}
 	}
-	if a.Root != "" && signed != "" {
+	if a.Root != "" {
+		if reason := j.goodRoot(a.Root); reason != "" {
+			return "", &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
+		}
+		if signed == "" {
+			return a.Root, nil
+		}
 		if a.Root != signed && !j.ancestors(signed)[a.Root] {
 			return "", &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", signed, a.Root)}
 		}
-		return signed, nil
 	}
 	if signed != "" {
 		return signed, nil
-	}
-	if a.Root != "" {
-		if reason := j.goodRoot(a.Root); reason != "" {
-			return "", &anchorError{fmt.Sprintf("the pinned root %s %s, and no version is signed by your key", a.Root, reason)}
-		}
-		return a.Root, nil
 	}
 	return "", ErrNoAnchor
 }
@@ -405,8 +432,9 @@ func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 
 // bars says why removals in r bar v, or "" when they do not: v is signed by a
 // key one of r's parents listed and r does not, and v is neither r nor an
-// ancestor of it. A version with unreadable admins is taken to remove nothing,
-// since what it lists is unknown.
+// ancestor of it. Judge refuses an anchor's history with unreadable admins and
+// never makes a candidate of a version with them, so own.err is not expected
+// here; it is treated as removing nothing.
 func (j *judgement) bars(r, v string) string {
 	if r == v || j.ancestors(r)[v] {
 		return ""

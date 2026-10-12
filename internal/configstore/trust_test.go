@@ -437,3 +437,105 @@ func TestJudgeSignerAnchorTies(t *testing.T) {
 	wantUntrusted(t, v, "x4", "shape")
 	wantHeads(t, v, "c3", "k3")
 }
+
+// An invalid pin is refused even when the operator's own signed version
+// descends from it.
+func TestJudgeInvalidPinWithSignerAnchor(t *testing.T) {
+	f := chain()
+	f.add("e1", 1, "fp-eve", nil, "alice")
+	f.add("e2", 2, "fp-alice", on("e1"), "alice")
+	for _, pin := range []string{"elsewhere", "v2", "e1"} {
+		_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: pin})
+		if !errors.Is(err, ErrNoAnchor) {
+			t.Fatalf("pin %s: err = %v, want ErrNoAnchor", pin, err)
+		}
+	}
+}
+
+// A version in the anchor's history whose admins cannot be read would hide
+// its removals, so Judge refuses.
+func TestJudgeUnreadableAdminsInHistory(t *testing.T) {
+	f := newFake()
+	f.add("h1", 1, "fp-alice", nil, "alice", "mallory")
+	f.add("h2", 2, "fp-alice", on("h1"), "alice")
+	f.add("h3", 3, "fp-alice", on("h2"), "alice")
+	f.add("s2", 2, "fp-mallory", on("h1"), "alice", "mallory")
+	g := f.graph()
+	g.Admins = func(sha string) (map[string]string, error) {
+		if sha == "h2" {
+			return nil, errors.New("bad yaml")
+		}
+		return f.admins[sha], nil
+	}
+	_, err := Judge(g, alice())
+	var u *UnreadableAdminsError
+	if !errors.As(err, &u) || u.SHA != "h2" {
+		t.Fatalf("err = %v, want *UnreadableAdminsError for h2", err)
+	}
+}
+
+func TestJudgeNilAdmins(t *testing.T) {
+	if _, err := Judge(Graph{Versions: chain().vs}, alice()); err == nil {
+		t.Fatal("no error with nil Admins")
+	}
+}
+
+func TestJudgeConflictMessage(t *testing.T) {
+	msg := (&ConflictError{A: "ax", B: "cz"}).Error()
+	if !strings.Contains(msg, "loop of removals") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+// A key rotated twice: the stale keys cannot sign on the parents that still
+// listed them.
+func TestJudgeKeyRotatedTwice(t *testing.T) {
+	f := newFake()
+	keys := func(sha string, fps ...string) {
+		m := map[string]string{}
+		for _, fp := range fps {
+			m[fp] = "alice"
+		}
+		f.admins[sha] = m
+	}
+	f.add("v1", 1, "k1", nil)
+	keys("v1", "k1")
+	f.add("v2", 2, "k1", on("v1"))
+	keys("v2", "k2")
+	f.add("v3", 3, "k2", on("v2"))
+	keys("v3", "k3")
+	f.add("v4", 4, "k3", on("v3"))
+	keys("v4", "k3")
+	f.add("s2", 2, "k1", on("v1"))
+	keys("s2", "k1")
+	f.add("s3", 3, "k2", on("v2"))
+	keys("s3", "k2")
+	for _, a := range []Anchor{{Signer: "k3"}, {Root: "v1"}} {
+		v := judgeOK(t, f, a)
+		wantUntrusted(t, v, "s2", "removal")
+		wantUntrusted(t, v, "s3", "removal")
+		wantTrusted(t, v, "v1", "v2", "v3", "v4")
+		wantHeads(t, v, "v4")
+	}
+}
+
+// An admin removed and later re-added with a new key signs again; their old
+// key stays barred.
+func TestJudgeRemovedThenReaddedWithNewKey(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("v2", 2, "fp-alice", on("v1"), "alice")
+	f.add("v3", 3, "fp-alice", on("v2"), "alice")
+	f.admins["v3"]["fp-bob2"] = "bob"
+	f.add("v4", 4, "fp-bob2", on("v3"), "alice")
+	f.admins["v4"]["fp-bob2"] = "bob"
+	f.add("v5", 5, "fp-alice", on("v4"), "alice")
+	f.admins["v5"]["fp-bob2"] = "bob"
+	f.add("s2", 2, "fp-bob", on("v1"), "alice", "bob")
+	for _, a := range []Anchor{alice(), {Root: "v1"}} {
+		v := judgeOK(t, f, a)
+		wantUntrusted(t, v, "s2", "removal")
+		wantTrusted(t, v, "v4", "v5")
+		wantHeads(t, v, "v5")
+	}
+}
