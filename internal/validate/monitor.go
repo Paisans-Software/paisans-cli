@@ -12,13 +12,13 @@ import (
 // monitorRoles checks where the uptime monitor may run. README.md: "The
 // monitor has a site of its own".
 //
-// A monitor exists to report the failures of everything else, so it must not
-// share a failure with what it reports. On the gateway it would go dark with
-// the edge it is meant to watch; on the witness, etcd's tiebreaker and the
-// thing that reports etcd losing quorum would fail together, and the witness
-// is usually the gateway machine anyway. Both are refused, with no override.
-// Beside data or apps it is allowed with a warning: a small deployment may
-// have no other machine, and the warning says which failures go unreported.
+// A monitor exists to report the failures of everything else, and it cannot
+// report the machine it runs on. A machine of its own is the recommendation,
+// but a deployment may have no machine to spare, so a monitor beside any other
+// role is allowed with one warning that names what it shares and what then
+// goes unreported. Founder decision, 2026-10-12, which made the gateway and
+// the witness warnings rather than refusals. Storage is left out: a monitor's
+// absence hides nothing about it.
 //
 // The monitor serves its own hostname from its own public address, so that
 // address must be declared. Founder decision.
@@ -29,20 +29,20 @@ func (c *checker) monitorRoles() {
 			continue
 		}
 		key := fmt.Sprintf("sites.%s.roles", name)
-		if site.Has(config.RoleGateway) {
-			c.refuse("monitor-on-gateway", key,
-				"monitor shares a site with the gateway",
-				"holds both monitor and gateway. The monitor's job is to report the gateway's failures, and on the same machine it goes dark with the gateway, at exactly the moment it is needed. Put the monitor on another site.")
+		var shared []string
+		for _, r := range []config.Role{config.RoleGateway, config.RoleWitness, config.RoleData, config.RoleApps} {
+			if site.Has(r) {
+				shared = append(shared, string(r))
+			}
 		}
-		if site.Has(config.RoleWitness) {
-			c.refuse("monitor-on-witness", key,
-				"monitor shares a site with the witness",
-				"holds both monitor and witness. etcd's tiebreaker and the thing that reports etcd losing quorum must not fail together, and the witness is usually the gateway machine as well. Put the monitor on another site.")
-		}
-		if site.Has(config.RoleData) || site.Has(config.RoleApps) {
+		if len(shared) > 0 {
+			witness := ""
+			if site.Has(config.RoleWitness) {
+				witness = " Nothing reports etcd losing its tiebreaker either."
+			}
 			c.warn("monitor-shares-a-site", key,
-				"monitor shares a site with data or apps",
-				"holds monitor beside data or apps. A small deployment may have no other machine, but the monitor cannot report its own host failing, so losing %s takes the database or the apps there down with nothing left to say so. A separate small machine reports it.", name)
+				"monitor shares a site",
+				"holds monitor beside %s. It cannot report %s failing: when it goes down, the monitor goes with it and no alert is sent.%s A small machine of its own with roles: [monitor] reports it.", andList(shared), name, witness)
 		}
 		if !c.hostsUptime(name) {
 			c.refuse("monitor-without-uptime", key,
@@ -66,7 +66,7 @@ func (c *checker) monitorRoles() {
 		}
 		c.refuse("uptime-needs-a-monitor-site", fmt.Sprintf("apps.%s.placement", name),
 			"uptime app is pinned to a site without the monitor role",
-			"pins the monitor to %s, which does not hold the monitor role. The monitor runs on a site of its own role, never the gateway or the witness, and serves its own hostname rather than through the gateway. Give a site roles: [monitor] and pin it there.", app.Placement.Site)
+			"pins the monitor to %s, which does not hold the monitor role. The monitor runs on a site holding the monitor role, and serves its own hostname from it. Give a site roles: [monitor] and pin it there.", app.Placement.Site)
 	}
 }
 
@@ -74,8 +74,7 @@ func (c *checker) monitorRoles() {
 // README.md: "The monitor has a site of its own".
 //
 // Every other rule here is about where a monitor may run, and a deployment
-// with none passes all of them. That is allowed, since a first install may
-// have one machine and the monitor needs a second, but it is a risk worth a
+// with none passes all of them. That is allowed, but it is a risk worth a
 // line in every validate: a gateway or a database that dies is then noticed
 // by a member, not by a check. A warning rather than a refusal, because the
 // deployment is coherent without one.
@@ -87,7 +86,7 @@ func (c *checker) nothingWatches() {
 	}
 	c.warn("no-uptime-monitor", "apps",
 		"no uptime monitor is declared",
-		"declares no app of kind uptime, so nothing watches this deployment: a site, the gateway or the database going down is noticed by a member before an admin. Give a second machine roles: [monitor] with a public_address, pin an uptime app to it, and apply it (README.md, \"Monitoring\").")
+		"declares no app of kind uptime, so nothing watches this deployment: a site, the gateway or the database going down is noticed by a member before an admin. Declare an uptime app pinned to a site with the monitor role, ideally a small machine of its own with a public_address, and apply it (README.md, \"Monitoring\").")
 }
 
 // hostsUptime reports whether an uptime app is pinned to a site.
@@ -100,12 +99,21 @@ func (c *checker) hostsUptime(site string) bool {
 	return false
 }
 
+// andList joins words as a sentence does: "a", "a and b", "a, b and c".
+func andList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
 // webServer checks a site's web_server block. README.md: "The monitor has a site
 // of its own".
 //
 // Only a monitor may carry one: a gateway always runs the toolkit's Caddy,
 // and every other site is reached through the gateway, so the block would be
-// ignored anywhere else. listen is where Docker publishes the app for the
+// ignored anywhere else. A monitor beside the gateway is served by the
+// gateway's Caddy, so it carries none either. listen is where Docker publishes the app for the
 // operator's own web server, so it belongs to managed_by external alone, which
 // cannot work without it. Docker publishes a port in front of ufw, so a
 // listen address the internet could reach would expose the app around the
@@ -129,6 +137,12 @@ func (c *checker) webServer() {
 			c.refuse("web-server-outside-monitor", key,
 				"web_server is declared on a site without the monitor role",
 				"is declared on %s, which does not hold the monitor role. A gateway always runs the toolkit's Caddy, and every other site is reached through the gateway, so the block would be ignored. Remove it, or give the site the monitor role.", name)
+			continue
+		}
+		if site.Has(config.RoleGateway) {
+			c.refuse("web-server-on-gateway", key,
+				"web_server is declared on a gateway",
+				"is declared on %s, which also holds the gateway role. The gateway's Caddy serves the monitor there, so the block would be ignored, or would hand 80 and 443 to a second web server that Caddy already holds. Remove the block.", name)
 			continue
 		}
 		managedBy, listen := site.WebServerManagedBy(), site.WebServer.Listen
