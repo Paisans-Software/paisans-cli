@@ -22,7 +22,7 @@
 - Settings and ranges, copied from the spec: `identity_app` (required, a `pocket-id` app), `invite_quota` 1–100 (3), `require_approval` bool (true), `invite_lifetime_days` 1–365 (14), `application_wait_days` 1–365 (14), `decline_retention_days` 1–3650 (183), `code_of_conduct` (required, a path relative to `paisans.yaml`). Plus `member_group` and `admin_group`, the OIDC group settings every client-bearing kind reads (defaults `members`, `admins`).
 - Generated secrets: `apps.<invite>.email_hash_key`, `apps.<invite>.session_key`, both the default `password()` shape (32 random bytes, unpadded base64url). Plus `database_password`, which `UsesPostgres` already brings.
 - The environment variable names are exactly the service plan's contract table; rename nothing.
-- `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; no SMTP host and sender for the invite app; a `code_of_conduct` file that does not exist; a placement other than `cluster`; a setting out of range.
+- `validate` refuses: an `identity_app` missing or not `pocket-id`; that app's `allow_user_signups` set to anything but `disabled`; that app's `email_one_time_access_as_admin` set to `false`; that app's `email_one_time_access_as_unauthenticated` not set to `true` (rule `invite-recovery-disabled`; founder decision 2026-10-12: a member whose 7-day link expired recovers through Pocket ID's email-code sign-in); no SMTP host and sender for the invite app; a `code_of_conduct` file that does not exist; a placement other than `cluster`; a setting out of range.
 - The example configuration's `signup_default_groups` becomes `[members]`, and its `allow_user_signups` becomes `disabled`.
 - README: no rejected alternatives; describe what is, not what was weighed.
 
@@ -158,7 +158,7 @@ git add -A && git commit -m "feat: the invite kind's catalogue, port, health, ga
 
 **Files:**
 - Create: `internal/validate/invite.go`, `internal/validate/invite_test.go`
-- Create fixtures: `internal/validate/testdata/invite-must-be-clustered.yaml`, `invite-identity-app.yaml`, `invite-signups-not-disabled.yaml`, `invite-login-link-disabled.yaml`, `invite-without-smtp.yaml`, `invite-code-of-conduct-missing.yaml`, `invite-setting-invalid.yaml`, and `internal/validate/testdata/code-of-conduct.md`
+- Create fixtures: `internal/validate/testdata/invite-must-be-clustered.yaml`, `invite-identity-app.yaml`, `invite-signups-not-disabled.yaml`, `invite-login-link-disabled.yaml`, `invite-recovery-disabled.yaml`, `invite-without-smtp.yaml`, `invite-code-of-conduct-missing.yaml`, `invite-setting-invalid.yaml`, and `internal/validate/testdata/code-of-conduct.md`
 - Modify: `internal/validate/validate.go:121-205` (register the checks in `Check()`), `internal/validate/validate_test.go:26-130` (`TestRulesFire` rows), `internal/validate/testdata/valid.yaml` (add an `invite` app so every fixture starts valid)
 
 **Interfaces:**
@@ -166,7 +166,7 @@ git add -A && git commit -m "feat: the invite kind's catalogue, port, health, ga
 
 - [ ] **Step 1: Failing tests**
 
-Add the `invite` app to `testdata/valid.yaml` (its `auth` app must not set `allow_user_signups` to anything but `disabled`, and the file must have an `smtp:` block; it already has one if uptime is in it):
+Add the `invite` app to `testdata/valid.yaml` (its `auth` app must not set `allow_user_signups` to anything but `disabled`, must set `email_one_time_access_as_unauthenticated: true`, and the file must have an `smtp:` block; it already has one if uptime is in it):
 
 ```yaml
   invite:
@@ -188,6 +188,7 @@ Each fixture is `valid.yaml` with one thing broken:
 | `invite-identity-app` | `identity_app: nope` |
 | `invite-signups-not-disabled` | the `auth` app gets `allow_user_signups: withToken` |
 | `invite-login-link-disabled` | the `auth` app gets `email_one_time_access_as_admin: false` |
+| `invite-recovery-disabled` | the `auth` app's `email_one_time_access_as_unauthenticated` removed |
 | `invite-without-smtp` | the top-level `smtp:` block removed (and any app needing it adjusted so only this rule fires; if uptime then fires its warning, that is a warning, not a refusal) |
 | `invite-code-of-conduct-missing` | `code_of_conduct: missing.md` |
 | `invite-setting-invalid` | `invite_quota: 0` |
@@ -317,6 +318,11 @@ func (c *checker) inviteIdentityApp() {
 			c.refuse("invite-signups-not-disabled", fmt.Sprintf("apps.%s.settings.allow_user_signups", idp),
 				"pocket id signups bypass the code of conduct",
 				"With an invite app, new accounts come only from invites, after the code of conduct. Pocket ID's own signup links would admit people past it. Set allow_user_signups: disabled or remove it.")
+		}
+		if v := s["email_one_time_access_as_unauthenticated"]; v != true {
+			c.refuse("invite-recovery-disabled", fmt.Sprintf("apps.%s.settings.email_one_time_access_as_unauthenticated", idp),
+				"members could not recover an expired sign-in link",
+				"A new member whose 7-day sign-in link expired gets a fresh one from Pocket ID's sign-in page with an email code. Set email_one_time_access_as_unauthenticated: true.")
 		}
 		if v, set := s["email_one_time_access_as_admin"]; set && v == false {
 			c.refuse("invite-login-link-disabled", fmt.Sprintf("apps.%s.settings.email_one_time_access_as_admin", idp),
@@ -740,7 +746,7 @@ git add -A && git commit -m "feat: render the invite service's compose, environm
 
 - [ ] **Step 1: Change the example**
 
-In `auth`'s settings: `allow_user_signups: disabled` and `signup_default_groups: [members]`. Add:
+In `auth`'s settings: `allow_user_signups: disabled` and `signup_default_groups: [members]`; keep `email_one_time_access_as_unauthenticated: true` (already there, and now required by `invite-recovery-disabled`). Add:
 
 ```yaml
   # Members bring new people in. The invitee agrees to the code of conduct

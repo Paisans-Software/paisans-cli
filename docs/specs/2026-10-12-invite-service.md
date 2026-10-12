@@ -55,7 +55,8 @@ The application never names Pocket ID. It speaks to an interface:
 | `EmailTaken(email)` | whether an account already has this email address |
 | `FindUser(username)` | the provider's user, if one exists, so a retry never creates a second |
 | `CreateUser(username, email, displayName)` | creates the account and returns its ID |
-| `SendLoginLink(userID)` | has the provider email the user a one-time sign in link |
+| `AdminGroupEmails(group)` | the email addresses of the members of the service's admin group |
+| `SendLoginLink(userID)` | has the provider email the user a one-time sign in link that lasts 7 days |
 
 The service keeps its own record of invites, applications and who invited whom.
 Some of that duplicates what the provider holds, and that is accepted: it is
@@ -63,16 +64,22 @@ what lets a deployment change provider by writing a second adapter.
 
 **The Pocket ID adapter**, against Pocket ID v2.18.0:
 
-* `UsernameTaken`, `EmailTaken`, `FindUser`: `GET /api/users?search=…`, matched
-  exactly on the field in question.
+* `UsernameTaken`, `EmailTaken`, `FindUser`: `GET /api/users`, every page, matched
+  case-insensitively on the field in question. Pocket ID's `search` is a
+  case-sensitive `LIKE` on Postgres, so the service never relies on it.
+* `AdminGroupEmails`: reads of the admin group and its members, so the people
+  who can approve are the ones told an application is waiting.
 * `CreateUser`: `POST /api/users` with `username`, `email`, `emailVerified:
   false`, `displayName`, and nothing else. **No `userGroupIds` and no
   `isAdmin`.** Pocket ID puts a user created without groups into the instance's
   signup default groups (`backend/internal/service/user_service.go:355-361`,
   `applyDefaultGroups` at `:382`), so group membership is the deployment's
   `signup_default_groups`, never the service's.
-* `SendLoginLink`: `POST /api/users/:id/one-time-access-email`
-  (`backend/internal/onetimeaccess/module.go:69`). Pocket ID sends the mail
+* `SendLoginLink`: `POST /api/users/:id/one-time-access-email` with the body
+  `{"ttl":"168h"}` and nothing else (`backend/internal/onetimeaccess/module.go:69`).
+  Without a `ttl` Pocket ID makes the link last 15 minutes, which an approved
+  invitee would usually miss. This link is not tied to a device: it works on
+  whichever phone or computer opens it. Pocket ID sends the mail
   itself, through its own SMTP settings, and refuses unless
   `EmailOneTimeAccessAsAdminEnabled` is on (`onetimeaccess/service.go:56-59`).
 
@@ -109,8 +116,11 @@ and actions check the admin group claim on every request.
   username at the time, created and expiry times, and a state: `open`,
   `applied`, `used`, `expired`, `revoked` or `declined`.
 * **`applications`**: the invite, the chosen username, email and display name,
-  the code of conduct version agreed to and when, a state (`pending` or
-  `link_unsent`), and who decided and when. An application is deleted once its
+  the code of conduct version agreed to and when, a state (`pending`,
+  `approving` or `link_unsent`), when an approval claimed it, and who decided
+  and when. An approval claims the row (`pending` → `approving`) before it
+  creates the account, so a decline, a second approval or the sweep cannot
+  remove it mid-way; a claim older than ten minutes may be taken over. An application is deleted once its
   account exists and the link has gone, or once it is declined.
 * **`declines`**: the keyed hash of a declined email address and when it was
   declined.
@@ -141,8 +151,21 @@ email address. It then stores the application with the code of conduct's
 version and the time of agreement, and marks the invite `applied`.
 
 * With `require_approval` off, it goes straight on to create the account.
-* With it on, the invitee is told they will receive an email, and every admin
-  is emailed that an application is waiting.
+* With it on, every member of the admin group is emailed that an application
+  is waiting.
+
+What the invitee is shown next, exactly:
+
+* Approval off: **Check your email.** "We've sent you a sign-in link. It
+  expires in 7 days." Below it, smaller: "Link expired? Go to
+  `<identity host>`, choose sign in with an email code, and enter the code from
+  the new email on that same screen."
+* Approval on: **Thanks for applying.** "An admin will review your
+  application. Once you're approved, we'll email you a sign-in link." Nothing
+  about expiry: it may be days before the admin acts.
+
+The recovery line relies on Pocket ID's own "sign in with an email code", whose
+codes last 15 minutes and work only in the browser that asked for them.
 
 **An admin approves or declines.** The queue shows each pending application:
 the inviter, username, display name, email address, when it was made, and the
@@ -250,6 +273,8 @@ apps:
   Pocket ID's own signup links would admit people past the code of conduct;
 * that app's `email_one_time_access_as_admin` set to `false`, because the login
   link could not be sent;
+* that app's `email_one_time_access_as_unauthenticated` not set to `true`,
+  because a member whose sign-in link expired recovers through it;
 * no `smtp:` settings;
 * a `code_of_conduct` file that does not exist;
 * any `placement` other than `cluster`;
