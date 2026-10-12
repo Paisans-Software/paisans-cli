@@ -573,7 +573,8 @@ session, changes five things here:
 * **The seed.** The monitor still gets no direct check of its own container,
   but it gains one check of its own public URL, `https://<hostname>/healthz`
   expecting 200, which proves the path in front of it: DNS, the web server
-  and the certificate.
+  and the certificate. *Superseded by the amendment of 2026-10-11 below: the
+  monitor checks nothing of its own.*
 * **`TRUST_PROXY`** is exactly where the proxy in front of the monitor
   connects from, rather than the mesh subnet: the site's own mesh address
   behind the monitor's own Caddy, and in mode external the pinned compose
@@ -701,3 +702,36 @@ the first release to honour a seeded `heartbeat_token`. On an older image
 the fork invents its own token and every heartbeat stays "waiting for first
 heartbeat": inconclusive, never down, so a deployment that applies this
 render before the image is published loses nothing and gains nothing.
+
+
+## Amendment, 2026-10-11: the monitor checks nothing of its own
+
+Operator report: the seed held `<monitor> — public`, a check of the monitor's
+own public URL. A monitor watching itself tells nobody anything when it is
+down, which is the one case that matters, so its own seed now holds no check
+of its own app and none of its own site:
+
+* **Its own app:** no `— public` and no `— direct (<site>)`. The direct check
+  was already left out.
+* **Its own site:** no `— ping` and no `— heartbeat`, as before: a ping from
+  the host to itself, and a push from the host to the monitor on it, can only
+  succeed. Every other app on that site keeps its public and direct checks.
+* **Kept:** the heartbeat of every other site. It is pushed from that site's
+  host to the monitor's public hostname over the internet, so it carries
+  information about that site, and it also exercises the path in front of the
+  monitor: DNS, the web server and the certificate there failing leaves every
+  heartbeat stale at once.
+* **Kept:** the public check of every monitor pinned to another `monitor`
+  site, exactly as the amendment of 2026-10-08 set it. Two monitors watching
+  each other is how a dead monitor, or its host, is noticed. A monitor on the
+  same site shares the host and is still left out; `validate` refuses that
+  shape anyway.
+
+What goes with the self check is the fork's 14 day certificate warning for
+the monitor's own hostname. With a second monitor on a second site, that
+monitor's public check of this one carries the warning instead.
+
+A deployed self check is tagged `managed` and no longer in the seed, so the
+fork deletes it at the next start (`src/lib/seed.js` `reconcileMonitors`,
+lines 114 to 121 at `1.1.0-oidc.4`), which the next apply of the monitor's
+stack causes by restarting it on the changed seed.

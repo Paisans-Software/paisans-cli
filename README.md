@@ -904,14 +904,17 @@ from this configuration and the fork reconciles it at every start:
 * every site Pocket ID runs on gets a check on its **admin reconciler**, which
   fails while the `admins` group has fewer than two members (see *The admin
   reconciler keeps `admins` equal to Pocket ID's administrators*).
-* the monitor checks no container of its own, which could only ever pass,
-  but it does check its own public URL, `https://<hostname>/healthz`: it is
-  alive whenever it can run that check, so what the check proves is the path
-  in front of it, DNS, the web server and the certificate. Behind an
-  operator's web server it is the only thing that notices a renewal that
-  silently stopped.
-* every `uptime` app pinned to a different `monitor` site gets the same
-  check of its public URL, `https://<hostname>/healthz` expecting 200. A
+* the monitor does not watch itself: its seed has no public or direct check
+  of its own app, and no ping or heartbeat of its own site. A monitor that is
+  down cannot report it, and a check from the monitor to its own host can only
+  pass. Every other app on the monitor's site is checked like any other. The
+  path in front of the monitor, DNS, the web server and the certificate, is
+  still exercised from outside it: every other site pushes its heartbeat to
+  the monitor's public hostname, so a failure there leaves every heartbeat
+  stale at once.
+* every other `uptime` app pinned to a different `monitor` site gets a
+  check of its public URL, `https://<hostname>/healthz` expecting 200, which
+  also carries the fork's 14 day certificate warning for that hostname. A
   monitor cannot report its own death, so a monitor on a separate site is
   what notices one that died, and the ping of its site, above, says whether
   it was the host. A monitor on the same site is not checked: it shares the
