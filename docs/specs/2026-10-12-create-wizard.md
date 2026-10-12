@@ -12,11 +12,16 @@ validates, and hands over to `paisans init`.
 ## Scope
 
 In: a new `paisans create` command, a new `internal/create` package, the entry
-in `docs/commands.md`, the `README.md` and `docs/development.md` lines that list
-commands, and the monitor site in `examples/paisans.example.yaml` renamed to
-`health`, with its app at `health.example.org`.
+in `docs/commands.md`, and the `README.md` and `docs/development.md` lines that
+list commands.
 
 Out:
+
+* **Renaming the example's monitor site.** `examples/paisans.example.yaml`
+  names it `watch`, with its app at `status.example.org`, where the wizard's
+  defaults are `health` and `health.example.org`. The example is the fixture
+  most of the test suite and the render golden tree load, so the rename is its
+  own change, made once on its own branch.
 
 * **Editing an existing file.** `create` writes a file that does not exist and
   refuses one that does. Adding a site, an app or an admin later is an edit to
@@ -229,4 +234,3 @@ paisans apply                                # shows every step; --execute runs 
   back unchanged.
 * The command: an existing file is refused, stdin that is not a terminal is
   refused, and "no" at review writes nothing.
-* The example still validates as it did before the rename.
