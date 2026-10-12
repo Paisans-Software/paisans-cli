@@ -123,10 +123,10 @@ sites:
   # is to report their failures, so it must not fail with them. It serves its
   # own hostname from its own address instead of through the gateway, so
   # public_address is required here, and its hostname's record points at it.
-  watch:
+  health:
     roles: [monitor]
     address: 10.44.0.4
-    endpoint: watch.example.org:51820
+    endpoint: health.example.org:51820
     public_address: 203.0.113.20
     # What is in front of the monitor. Left out, it is managed_by: paisans: the
     # toolkit's own Caddy, the gateway's image, with certificates over DNS-01.
@@ -138,7 +138,7 @@ sites:
     #   managed_by: external
     #   listen: 127.0.0.1:8480
     ssh:
-      host: watch.example.org
+      host: health.example.org
       user: ubuntu
       keys: [alice, bob]
 
@@ -415,13 +415,13 @@ apps:
 
   status:
     kind: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     # The uptime monitor. Pinned only, and only to a site holding the monitor
     # role: it keeps SQLite on local disk, and it must not go dark with the
     # gateway it reports on. Its monitors are not declared here: every app
     # gets a public and a direct check, every other site a ping, and the
     # monitor one check of its own public URL, generated from this file.
-    placement: { pinned: watch }
+    placement: { pinned: health }
     settings:
       # Required. Only members of this identity provider group may sign in.
       admin_group: admins

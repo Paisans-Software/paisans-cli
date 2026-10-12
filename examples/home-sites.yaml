@@ -78,7 +78,7 @@ sites:
 
   # The monitor, on a third VPS, so it does not go dark with the gateway it
   # reports on.
-  watch:
+  health:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20
@@ -159,8 +159,8 @@ apps:
 
   status:
     kind: uptime
-    hostname: status.example.org
-    placement: { pinned: watch }
+    hostname: health.example.org
+    placement: { pinned: health }
     settings:
       admin_group: admins
 

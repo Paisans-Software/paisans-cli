@@ -659,7 +659,7 @@ exactly the moment it is needed. What is in front of it is the site's
 
 ```yaml
 sites:
-  watch:
+  health:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.20  # the mesh dials it here, on 51820
@@ -713,7 +713,7 @@ sites:
   reloaded, so the check waits on it: it checks again after 2, 4, 8 and 16
   seconds and then 30, a minute in all, the line saying meanwhile what it
   waits for (`waiting for caddy's certificate`), and passes with how long it
-  waited (`status.example.org, after 14s`). After a minute it fails on the
+  waited (`health.example.org, after 14s`). After a minute it fails on the
   last check's result. A failure waiting cannot fix, such as a name that does
   not resolve or an app reachable around the web server, fails at once. A
   site file already in place and unchanged is checked once, and waited on
@@ -848,7 +848,7 @@ instead; either way the run does not end as complete.
 `include_dir` unset, apply derives it beside the server's main configuration,
 `<its directory>/paisans.d`, and writes it into `paisans.yaml` under the
 site's `web_server`, in place, keeping every comment, with a warning saying so
-(`watch: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
+(`health: include_dir set to /etc/nginx/paisans.d in paisans.yaml`). It is
 recorded only once the server is found to include it. For a server in a
 container the directory must be visible inside it: the host path comes from
 the mount of the configuration's directory, and the line names the path as
