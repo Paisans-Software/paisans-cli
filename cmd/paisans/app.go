@@ -211,7 +211,7 @@ func adminGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -236,7 +236,7 @@ func memberGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname)
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}

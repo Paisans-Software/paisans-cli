@@ -212,7 +212,7 @@ apps:
     placement: cluster
     # gated is access policy, and access policy belongs in configuration, not
     # in a hand edited Caddy include somebody has to remember exists. It puts
-    # the app behind the gate, which admits members only. Federation still
+    # the app behind the gate, which admits members and admins. Federation still
     # works: ActivityPub goes to Mbin, which checks every signature, and this
     # turns its allow list and private instance mode on. Mbin's mobile apps
     # work too, on the token their sign-in earns. Nobody declares the gate:

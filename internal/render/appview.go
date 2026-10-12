@@ -307,7 +307,7 @@ func (v appValues) OIDCAdminGroup() string  { admin, _ := v.oidcGroups(); return
 func (v appValues) OIDCMemberGroup() string { _, member := v.oidcGroups(); return member }
 
 func (v appValues) oidcGroups() (admin, member string) {
-	spec, ok := kinds.OIDCClient(v.App.Kind, v.App.Hostname)
+	spec, ok := kinds.OIDCClient(v.App.Kind, v.App.Hostname, v.App.Name)
 	if !ok {
 		return "", ""
 	}

@@ -5,11 +5,11 @@
 # nothing renders a host block for this file, and it carries no routing of its
 # own until a host block imports one of these names.
 #
-# The gate admits members only (OAUTH2_PROXY_ALLOWED_GROUPS). A person needs a
-# page, not oauth2-proxy's raw status, so a request with no session becomes a
-# redirect to sign in, carrying a fixed body, which is how the monitor tells
-# the gate's redirect from an app's own. Someone signed in who is not a member
-# gets oauth2-proxy's own 403. `rd` is not URL encoded, because Caddy has no
+# The gate admits members and admins (OAUTH2_PROXY_ALLOWED_GROUPS). A person
+# needs a page, not oauth2-proxy's raw status, so a request with no session
+# becomes a redirect to sign in, carrying a fixed body, which is how the
+# monitor tells the gate's redirect from an app's own. Someone signed in who is
+# in neither group gets oauth2-proxy's own 403. `rd` is not URL encoded, because Caddy has no
 # placeholder that encodes one, so a deep link with more than one query
 # parameter loses the extras on the first visit that crosses sign-in. The page
 # is right; only extra parameters are lost.

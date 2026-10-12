@@ -96,7 +96,7 @@ var catalogue = map[config.Kind][]Service{
 		{Name: PostgresService, Purpose: "its own database, when the app is pinned"},
 	},
 	config.KindOAuth2Proxy: {
-		// One instance, admitting members only: it runs the sign-in and
+		// One instance, admitting members and admins: it runs the sign-in and
 		// answers the gateway's forward_auth for every app that sets gated
 		// or auto_login. It listens on 4180, this kind's port in
 		// internal/render/plan.go's appPort, spelled out in the compose and

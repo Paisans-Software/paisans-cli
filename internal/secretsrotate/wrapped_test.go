@@ -567,69 +567,6 @@ func TestSMTPPasswordSetAnewReachesEveryUser(t *testing.T) {
 	}
 }
 
-// gateSite is the one site the fixture's gate runs on. The config places the
-// gate it derives, so the test reads the placement rather than repeating it.
-func (w *wrapWorld) gateSite() string {
-	w.t.Helper()
-	gate, ok := w.cfg.Apps[config.GateApp]
-	if !ok || gate.Placement.Mode != config.PlacementPinned || gate.Placement.Site == "" {
-		w.t.Fatalf("the fixture's gate is not pinned to a site: %+v", gate)
-	}
-	return gate.Placement.Site
-}
-
-// The client secret of a kind `oidc client create` cannot build is pasted:
-// minted at Pocket ID and set in the file, it is refused while unchanged,
-// and once set anew every site running the app is applied, and only then
-// are the client's other secrets retired.
-func TestPastedClientAppliesThenRetires(t *testing.T) {
-	w := newWrapWorld(t)
-	retire := &fakeFlow{w: w, name: "retire"}
-	if _, err := Plan(w.env(), []Rotator{PastedClient("gate", retire.run)}); err == nil || !strings.Contains(err.Error(), "paisans secrets set oidc_clients.gate.client_secret") {
-		t.Fatalf("an unchanged client secret: %v", err)
-	}
-	s, _ := w.store.Load()
-	_ = s.Set("oidc_clients.gate.client_secret", "fixture-not-a-secret-gate-secret-2")
-	_ = w.store.Save(s)
-	e := w.env()
-	run, err := Plan(e, []Rotator{PastedClient("gate", retire.run)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := &ui.Recorder{}
-	run.Show(rec)
-	if rec.Index("pending", "retire") < 0 {
-		t.Errorf("the plan does not show the retirement:\n%s", rec.Lines())
-	}
-	if err := run.Execute(e, nil); err != nil {
-		t.Fatal(err)
-	}
-	site := w.gateSite()
-	if want := []string{"apply " + site + " gate", "healthy " + site + " gate", "retire gate"}; !slices.Equal(w.log, want) {
-		t.Errorf("log %v, want %v", w.log, want)
-	}
-}
-
-// Without a recorded client ID there is nothing to retire by: no step.
-func TestPastedClientWithoutRetireOnlyApplies(t *testing.T) {
-	w := newWrapWorld(t)
-	s, _ := w.store.Load()
-	_ = s.Set("oidc_clients.gate.client_secret", "fixture-not-a-secret-gate-secret-2")
-	_ = w.store.Save(s)
-	e := w.env()
-	run, err := Plan(e, []Rotator{PastedClient("gate", nil)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := run.Execute(e, nil); err != nil {
-		t.Fatal(err)
-	}
-	site := w.gateSite()
-	if want := []string{"apply " + site + " gate", "healthy " + site + " gate"}; !slices.Equal(w.log, want) {
-		t.Errorf("log %v, want %v", w.log, want)
-	}
-}
-
 // A pasted secret's value is registered as a secret as soon as it is read,
 // so nothing shown afterwards carries it.
 func TestPastedNextRegistersTheValue(t *testing.T) {

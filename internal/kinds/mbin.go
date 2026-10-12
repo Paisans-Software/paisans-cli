@@ -78,11 +78,12 @@ func (s OIDCClientSpec) AdminGroupSource(app string) string {
 	return "apps." + app + ".settings." + s.AdminGroupSetting
 }
 
-// OIDCClient is the client spec for an app of a kind, and whether this
-// toolkit knows one for it yet. Every spec's callback is read off the pinned
-// image's source and cited, because a client with the wrong one fails at the
-// end of the first sign in, after the member has authenticated.
-func OIDCClient(kind config.Kind, hostname string) (OIDCClientSpec, bool) {
+// OIDCClient is the client spec for app, an app of a kind served at
+// hostname, and whether this toolkit knows one for it yet. Every spec's
+// callback is read off the pinned image's source and cited, because a client
+// with the wrong one fails at the end of the first sign in, after the member
+// has authenticated. Only synapse's callback depends on the app's name.
+func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 	switch kind {
 	case config.KindMbin:
 		// The paisans fork's generic OIDC provider, read at tag
@@ -151,6 +152,50 @@ func OIDCClient(kind config.Kind, hostname string) (OIDCClientSpec, bool) {
 			PKCE:               true,
 			AdminGroupSetting:  "admin_group",
 			MemberGroupSetting: "admin_group",
+			ReadsGroups:        true,
+		}, true
+	case config.KindSynapse:
+		// The relying party is the homeserver's authentication service, MAS
+		// at tag v1.24.0, so the callback is its upstream provider's,
+		// MASRedirectURI (crates/router/src/endpoints.rs:742-762). PKCE is on:
+		// mas.yaml sets pkce_method: always, the S256 mode
+		// (crates/config/src/sections/upstream_oauth2.rs:420-436,
+		// crates/cli/src/sync.rs:289-298), whose methods are S256 alone
+		// (crates/handlers/src/upstream_oauth2/cache.rs:137), so every sign
+		// in sends an S256 challenge
+		// (crates/oidc-client/src/requests/authorization_code.rs:242-256).
+		// mas.yaml requests no groups scope and imports no groups claim, so
+		// the restriction at Pocket ID is the whole control. No launch URL:
+		// the homeserver's hostname serves no page for a member, and a Matrix
+		// client is where they go.
+		return OIDCClientSpec{
+			CallbackURL:        MASRedirectURI(hostname, app),
+			PKCE:               true,
+			MemberGroupSetting: "member_group",
+			DefaultAdminGroup:  AdminsGroup,
+			DefaultMemberGroup: MembersGroup,
+		}, true
+	case config.KindOAuth2Proxy:
+		// oauth2-proxy v7.15.4, the gate: the toolkit renders no redirect
+		// URL, so the callback is the proxy prefix, /oauth2, plus /callback
+		// (oauthproxy.go:53,175-178, pkg/apis/options/options.go:103) on the
+		// host the request came in on (oauthproxy.go:1113-1135), and
+		// /oauth2/start is reached only on the gate's own hostname
+		// (caddy.snippet.gates.tmpl). PKCE is on: the .env renders
+		// OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256, and with a method set
+		// every sign in sends a challenge (oauthproxy.go:833-851). It reads
+		// the groups claim (pkg/apis/options/providers.go:10) and admits a
+		// session in any group of OAUTH2_PROXY_ALLOWED_GROUPS
+		// (providers/provider_default.go:125-138), which compose.yaml renders
+		// from these two groups, so the gate and its client admit the same
+		// people: members, and admins, since an admin can see everything a
+		// member can (founder decision, 2026-10-12). Neither is a setting. No
+		// launch URL: the gate has no page of its own.
+		return OIDCClientSpec{
+			CallbackURL:        "https://" + hostname + "/oauth2/callback",
+			PKCE:               true,
+			DefaultAdminGroup:  AdminsGroup,
+			DefaultMemberGroup: MembersGroup,
 			ReadsGroups:        true,
 		}, true
 	}

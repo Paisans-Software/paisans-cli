@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -769,5 +770,37 @@ func TestListClientPlanMarksWhatIsPresentDone(t *testing.T) {
 	}
 	if strings.Contains(out, "present ") {
 		t.Errorf("a finding carries its label:\n%s", out)
+	}
+}
+
+// The homeserver's client and the gate's are built like every other kind's:
+// apply and `oidc client create` make them, at the authentication service's
+// callback and at oauth2-proxy's, each with PKCE on, since both always send a
+// code challenge. The gate's client admits members and admins, as the gate
+// does.
+func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, ok := clientDesired("chat", cfg.Apps["chat"], false)
+	if !ok {
+		t.Fatal("no client for the homeserver")
+	}
+	if want := kinds.MASRedirectURI(cfg.Apps["chat"].Hostname, "chat"); chat.CallbackURL != want || !chat.PKCE {
+		t.Errorf("chat's client: callback %s PKCE %v, want %s with PKCE", chat.CallbackURL, chat.PKCE, want)
+	}
+	if chat.MemberGroup != kinds.MembersGroup || chat.AdminGroup != kinds.AdminsGroup || chat.LaunchURL != "" {
+		t.Errorf("chat's client: member %q admin %q launch URL %q", chat.MemberGroup, chat.AdminGroup, chat.LaunchURL)
+	}
+	gate, ok := clientDesired(config.GateApp, cfg.Apps[config.GateApp], true)
+	if !ok {
+		t.Fatal("no client for the gate")
+	}
+	if want := "https://" + cfg.Apps[config.GateApp].Hostname + "/oauth2/callback"; gate.CallbackURL != want || !gate.PKCE {
+		t.Errorf("the gate's client: callback %s PKCE %v, want %s with PKCE", gate.CallbackURL, gate.PKCE, want)
+	}
+	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != kinds.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
+		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)
 	}
 }

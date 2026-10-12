@@ -187,11 +187,10 @@ func TestOwedSecretsAreReported(t *testing.T) {
 	}
 }
 
-// A homeserver's client is registered with a redirect URI that no other kind
-// uses, and an operator needs it BEFORE anything is rendered: the only other
-// place it appears is a 0600 file that exists after apply, which is after they
-// needed it. A client registered with the wrong one fails at the end of the
-// first sign in, after the member has already authenticated.
+// A homeserver's client returns to its authentication service, at a redirect
+// URI no other kind uses, and an operator checking an existing client needs
+// it BEFORE anything is rendered: the only other place it appears is a 0600
+// file that exists after apply. Apply creates the client, with PKCE on.
 func TestAHomeserversOwedClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	secrets := &config.Secrets{}
@@ -212,10 +211,54 @@ func TestAHomeserversOwedClientNamesItsRedirectURI(t *testing.T) {
 	if !strings.Contains(why, want) {
 		t.Errorf("the owed client does not name the redirect URI to register (%s):\n%s", want, why)
 	}
-	// Naming the other kinds' callback as the contrast is fine; offering it as
-	// the URI to register is not.
 	if strings.Contains(why, "https://"+cfg.Apps["chat"].Hostname+"/oauth/callback") {
-		t.Errorf("the owed client offers the callback every other kind uses:\n%s", why)
+		t.Errorf("the owed client offers a callback the authentication service does not serve:\n%s", why)
+	}
+	for _, want := range []string{"paisans apply", "PKCE enabled"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the owed client does not say %q:\n%s", want, why)
+		}
+	}
+}
+
+// Every kind with a client spec is owed a client whose reason says that
+// apply makes it and names its redirect URI, and a kind without one, the
+// identity provider itself and a Matrix client, is owed none.
+func TestEveryOwedClientSaysWhatApplyMakes(t *testing.T) {
+	cfg := load(t)
+	for _, kind := range []config.Kind{config.KindMbin, config.KindOutline, config.KindWriteFreely, config.KindUptime, config.KindSynapse, config.KindOAuth2Proxy, config.KindElement, config.KindPocketID} {
+		cfg.Apps["k-"+string(kind)] = config.App{Kind: kind, Hostname: string(kind) + ".example.org", Settings: map[string]any{"admin_group": "admins"}}
+	}
+	owed := owedBy(t, cfg, &config.Secrets{})
+	for _, name := range cfg.AppNames() {
+		app := cfg.Apps[name]
+		why, isOwed := owed["oidc_clients."+name]
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		if !ok {
+			if isOwed {
+				t.Errorf("%s (%s) has no client, and is owed one: %q", name, app.Kind, why)
+			}
+			continue
+		}
+		for _, want := range []string{"paisans apply", spec.CallbackURL, "PKCE"} {
+			if !strings.Contains(why, want) {
+				t.Errorf("%s (%s): the owed client does not say %q:\n%s", name, app.Kind, want, why)
+			}
+		}
+	}
+}
+
+// The gate's client is created by apply like every other kind's, returns to
+// oauth2-proxy's own callback, and is restricted to the groups the gate admits,
+// members and admins.
+func TestTheGatesOwedClientNamesItsRedirectURI(t *testing.T) {
+	cfg := load(t)
+	cfg.Apps["gate"] = config.App{Kind: config.KindOAuth2Proxy, Hostname: "auth-gate.example.org"}
+	why := owedBy(t, cfg, &config.Secrets{})["oidc_clients.gate"]
+	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + kinds.MembersGroup + " and " + kinds.AdminsGroup} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the owed client does not say %q:\n%s", want, why)
+		}
 	}
 }
 

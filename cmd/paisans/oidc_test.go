@@ -254,7 +254,7 @@ func TestOIDCClientCreateRefusesAKindItDoesNotKnow(t *testing.T) {
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
 	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", tempSecrets(t), "--app", "web"})
-	if err == nil || !strings.Contains(err.Error(), "Implemented kinds: mbin, outline, writefreely, uptime") {
+	if err == nil || !strings.Contains(err.Error(), "Kinds with one: mbin, outline, writefreely, uptime, synapse, oauth2-proxy") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fake.commands) != 0 {

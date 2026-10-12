@@ -16,8 +16,8 @@ import (
 // dnsTokenPath is the pasted DNS token's path in the secrets file.
 const dnsTokenPath = "external.acme_dns_token"
 
-// pasted rotates a secret issued elsewhere: a DNS token, an SMTP password, an
-// OIDC client secret minted at Pocket ID by hand. No next value is made here.
+// pasted rotates a secret issued elsewhere: a DNS token or an SMTP password.
+// No next value is made here.
 // The operator replaces it at its issuer and sets it with `paisans secrets set
 // <path>`, and the rotation hands the value the file then holds to every
 // stack that renders it, one site at a time, each healthy before the next.
@@ -49,34 +49,6 @@ func DNSToken() Rotator {
 func SMTPPassword(path string) Rotator {
 	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }}
 }
-
-// pastedClient is a pasted OIDC client secret whose client's other secrets
-// are retired at Pocket ID once every site presents the new one.
-type pastedClient struct {
-	pasted
-	app    string
-	retire func(app string) error
-}
-
-// PastedClient is the rotation of oidc_clients.<app>.client_secret for an
-// app whose client `oidc client create` cannot build, so cannot rotate: the
-// operator mints a new secret at Pocket ID and sets it with `paisans secrets
-// set`, and the rotation hands it to every site running the app. retire,
-// when not nil, deletes the client's other secrets at Pocket ID
-// (oidcclient.Retire) after every site presents the new one, since an old
-// secret that stays valid is a secret not rotated; it must read the file
-// again for the secret to keep. Without a recorded client ID there is no
-// client to retire by, and retire is nil.
-func PastedClient(app string, retire func(app string) error) Rotator {
-	p := pasted{path: "oidc_clients." + app + ".client_secret", issuer: func(*config.Config) string { return "Pocket ID" }}
-	if retire == nil {
-		return p
-	}
-	return pastedClient{pasted: p, app: app, retire: retire}
-}
-
-// Retire deletes the client's other secrets at Pocket ID.
-func (r pastedClient) Retire(e Env) error { return r.retire(r.app) }
 
 func (p pasted) Path() string { return p.path }
 func (p pasted) Cost() Cost   { return Cost{} }
@@ -149,14 +121,11 @@ func (p pasted) Precheck(e Env) error {
 	return fmt.Errorf("%s is the value every host using it runs (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it. When it was replaced and applied before, as an eviction does with the DNS token, pass --replaced %s instead", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path, p.path)
 }
 
-// Pasted reports whether r rotates a pasted secret: the DNS token, an SMTP
-// password, or an OIDC client secret minted at Pocket ID by hand.
+// Pasted reports whether r rotates a pasted secret: the DNS token or an SMTP
+// password.
 func Pasted(r Rotator) bool {
-	switch r.(type) {
-	case pasted, pastedClient:
-		return true
-	}
-	return false
+	_, ok := r.(pasted)
+	return ok
 }
 
 // HostsRun reports whether every host using the pasted secret r rotates runs
@@ -166,11 +135,7 @@ func Pasted(r Rotator) bool {
 // --replaced` accepts a path on, since a secret replaced and applied before
 // has nothing left to hand out. A rotator of a generated secret is an error.
 func HostsRun(e Env, r Rotator) (bool, error) {
-	switch p := r.(type) {
-	case pasted:
-		ok, _, err := p.hostsRun(e)
-		return ok, err
-	case pastedClient:
+	if p, ok := r.(pasted); ok {
 		ok, _, err := p.hostsRun(e)
 		return ok, err
 	}

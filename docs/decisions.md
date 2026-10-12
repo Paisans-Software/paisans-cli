@@ -1873,7 +1873,8 @@ Founder decisions, in session. The design is the amended
 * **The provisional concept is retired.** No gate admits a signed-in
   non-member, so the gate is one oauth2-proxy instance with
   `OAUTH2_PROXY_ALLOWED_GROUPS=members`, and the second instance, the 403
-  redirect and the `/pending` page are gone.
+  redirect and the `/pending` page are gone. It admits admins as well since
+  2026-10-12 (*The gate admits admins*, below).
 * **The gate is never declared.** When any app sets either key, `config.Load`
   derives an app named `gate` at `gate.<community.domain>`, pinned to the
   first gateway site. A declared `oauth2-proxy` app is refused.
@@ -1972,3 +1973,28 @@ Mbin's `config:` passes `validate` before this change and is refused after it,
 in 1.3 seconds. Not run against a live Mbin or WriteFreely: each read is taken
 from the fork's source (Mbin's `SettingsManager.php` at `v1.15.1+paisans`,
 WriteFreely's `cmd/writefreely/settings.go` at `v0.21.1+wisp`).
+
+## 2026-10-12: The gate admits admins
+
+Founder decision.
+
+### What was decided
+
+* The gate admits `members` and `admins`:
+  `OAUTH2_PROXY_ALLOWED_GROUPS=members,admins`, rendered from
+  `kinds.MembersGroup` and `kinds.AdminsGroup` through the gate's client spec.
+* The gate's client at Pocket ID is restricted to the same two groups, so the
+  gate and its client admit the same people.
+
+### Why
+
+By definition an admin can see everything a member can, so the gate has no
+reason to refuse one who is not also in `members`. Rendering the gate's groups
+from its client spec keeps the two sides from naming different groups.
+
+### What was run
+
+`gofmt -l .` empty, `go vet ./...`, `go test ./...` and `go test -race ./...`.
+oauth2-proxy `v7.15.4` reads `OAUTH2_PROXY_ALLOWED_GROUPS` through viper, which
+splits a string on commas into a list (`pkg/apis/options/load.go:27-55`; viper
+`v1.21.0`, `viper.go:977-1022`), read from source. Not run against a live gate.

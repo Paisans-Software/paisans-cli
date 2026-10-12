@@ -138,18 +138,25 @@ account:
 
 upstream_oauth2:
   providers:
-    # THE REDIRECT URI TO REGISTER AT THE IDENTITY PROVIDER IS
+    # THE REDIRECT URI THE CLIENT AT THE IDENTITY PROVIDER ALLOWS IS
     # https://chat.example.org/upstream/callback/0F7E2P4F3W17YSR71ETCRS95ZY
-    # `paisans init` says the same thing while the client is still owed, which
-    # is before this file exists.
+    # `paisans apply` creates the client with it, and `paisans init` names it
+    # while the client is still owed, which is before this file exists.
     # The id below is part of that URL, which is why it is derived from the
     # app's name and stays the same every time this file is rendered rather
-    # than being generated fresh and silently invalidating the registration.
+    # than being generated fresh and silently invalidating the client.
     - id: 0F7E2P4F3W17YSR71ETCRS95ZY
       issuer: "https://id.example.org"
       client_id: "fixture-not-a-secret-chat-id"
       client_secret: "fixture-not-a-secret-chat-secret"
       token_endpoint_auth_method: client_secret_basic
+      # Always send an S256 code challenge. The client at the identity
+      # provider has PKCE on, which refuses any request without one, so the
+      # challenge must not depend on what discovery advertises: `always` is
+      # the S256 mode (crates/config/src/sections/upstream_oauth2.rs:420-436
+      # and crates/cli/src/sync.rs:289-298 at tag v1.24.0), where `auto`, the
+      # default, sends one only when discovery lists S256.
+      pkce_method: always
       scope: "openid profile email"
       claims_imports:
         localpart:

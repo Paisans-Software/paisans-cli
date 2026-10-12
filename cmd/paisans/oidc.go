@@ -72,7 +72,7 @@ func runOIDCClientCreate(args []string) error {
 	}
 	desired, ok := clientDesired(*appName, app, *rotate)
 	if !ok {
-		return fmt.Errorf("oidc client create: this toolkit does not know what a %s client looks like yet. Implemented kinds: mbin, outline, writefreely, uptime", app.Kind)
+		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: mbin, outline, writefreely, uptime, synapse, oauth2-proxy", app.Kind)
 	}
 	idp := pocketIDApp(cfg)
 	if idp == "" {

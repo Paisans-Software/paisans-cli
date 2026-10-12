@@ -5,11 +5,11 @@ import (
 	"math/big"
 )
 
-// The synapse kind's authentication service needs two facts that three
+// The synapse kind's authentication service needs two facts that several
 // packages have to agree on, so they live here rather than in whichever one
 // happened to need them first: internal/render writes them into a rendered
-// configuration, and internal/secretsgen tells an operator what to register at
-// the identity provider before that configuration exists.
+// configuration, OIDCClient makes the client at the identity provider with
+// them, and internal/secretsgen names them before that configuration exists.
 
 // MASUpstreamProviderID is the identifier Matrix Authentication Service gives
 // the identity provider it authenticates against.
@@ -38,8 +38,8 @@ func MASUpstreamProviderID(app string) string {
 	return string(out)
 }
 
-// MASRedirectURI is the callback an operator registers at the identity
-// provider for a homeserver's client.
+// MASRedirectURI is the callback a homeserver's client at the identity
+// provider allows.
 //
 // It is not the `/oauth/callback` every other kind uses. The client belongs to
 // the authentication service rather than to the application, and MAS serves

@@ -255,11 +255,12 @@ homeserver, not as a setting inside it.** Synapse stopped being where a
 member logs in: it is a resource server now, and MAS is what owns the login,
 holds sessions, and talks to the identity provider on the homeserver's
 behalf. The identity provider itself sits upstream of MAS, one hop further
-out than every other application's OIDC client, which is why registering it
-takes a different redirect URI. `paisans init` prints that URI, in the form
-`https://<hostname>/upstream/callback/<ulid>`, alongside every other owed
-secret, because a client registered against the wrong path fails at the end
-of the first sign in rather than at registration. MAS keeps its own Postgres
+out than every other application's OIDC client, which is why its client
+takes a different redirect URI, in the form
+`https://<hostname>/upstream/callback/<ulid>`. `apply` creates the client with
+that URI, as it does every other app's, and `paisans init` prints it alongside
+every other owed secret, because a client with the wrong path fails at the end
+of the first sign in rather than when it is made. MAS keeps its own Postgres
 database beside the homeserver's, which is part of why `placement: cluster`
 is refused above: a clustered site has nowhere to put either.
 
@@ -2132,30 +2133,28 @@ file that lacks a secret `init` generates, naming `paisans init`, since a run
 that skipped one would leave it as the departed admin knew it.
 
 **A pasted secret is replaced by a person first.** The DNS token and the SMTP
-passwords are issued by a provider, and the client secret of an app whose
-client `oidc client create` cannot make (Synapse's, oauth2-proxy's) is minted
-at Pocket ID; nothing here can issue them. The operator replaces each at its
-issuer and sets it with `paisans secrets set <path>`, and `secrets rotate`
-hands the value the file then holds to every stack that renders it, one site
-at a time. It is refused while every host using it runs the value the file
-holds, since rotating it then would restart them for nothing, and `--all`
-refuses until each pasted secret it includes has been replaced so. **Which
-value a host runs is read per secret, not per file.** The lines that carry
-the secret are the ones a render with any other value changes; the host
-prints the SHA-256 of each line of its own copy of that file, so only hashes
-cross ssh and nothing secret is on a command line; and the host runs the
-value when every carrying line's hash is among them. A file that differs
-only elsewhere, Eg: a comment an upgrade changed in `caddy.env`, or an app
-setting not yet applied, would otherwise pass for a secret replaced. That
-refusal cannot tell a secret never replaced from one replaced and then
-applied, as an eviction does with the DNS token, so the operator says which:
-**`--replaced <path>`** names a pasted secret every host using it already runs
-from the file. It is checked the same way, and refused for a generated
-secret, for one some host does not run yet, and for one whose rotation is
-under way; a path it accepts is listed in the plan as replaced earlier and not
-rotated. For such a client, the old secrets are deleted at Pocket ID after
-every site runs the new one, through the client ID the file records; without
-one, the plan says to delete them there by hand.
+passwords are issued by a provider, and nothing here can issue them. The
+operator replaces each at its issuer and sets it with `paisans secrets set
+<path>`, and `secrets rotate` hands the value the file then holds to every
+stack that renders it, one site at a time. It is refused while every host
+using it runs the value the file holds, since rotating it then would restart
+them for nothing, and `--all` refuses until each pasted secret it includes has
+been replaced so. **Which value a host runs is read per secret, not per
+file.** The lines that carry the secret are the ones a render with any other
+value changes; the host prints the SHA-256 of each line of its own copy of
+that file, so only hashes cross ssh and nothing secret is on a command line;
+and the host runs the value when every carrying line's hash is among them. A
+file that differs only elsewhere, Eg: a comment an upgrade changed in
+`caddy.env`, or an app setting not yet applied, would otherwise pass for a
+secret replaced. That refusal cannot tell a secret never replaced from one
+replaced and then applied, as an eviction does with the DNS token, so the
+operator says which: **`--replaced <path>`** names a pasted secret every host
+using it already runs from the file. It is checked the same way, and refused
+for a generated secret, for one some host does not run yet, and for one whose
+rotation is under way; a path it accepts is listed in the plan as replaced
+earlier and not rotated. No OIDC client secret is pasted: every one, the
+homeserver's and the gate's included, is minted by `oidc client create
+--rotate-secret`.
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
@@ -2570,7 +2569,8 @@ access policy belongs in the configuration, not in a hand edited include.
 | `false` | `true` | reads the app as it is; its sign-in page signs in at the gate first | is signed straight into the app |
 | `true` | `true` | is sent to sign in | is let through and signed straight into the app |
 
-`gated: true` admits members only. Both default to `false`.
+`gated: true` admits members, and admins, who can see everything a member can.
+Both default to `false`.
 
 **A gated hostname gates every request except the ones that carry their own
 authentication, which the app verifies.** Gating only browser navigations
@@ -6308,8 +6308,8 @@ records both in the secrets file, where `render` already reads them
 (`oidc_clients.<app>.client_id` and `.client_secret`).
 
 **`apply` does this itself, for every app it starts whose kind has a client
-shape** (`kinds.OIDCClient`, today `mbin`, `outline`, `writefreely` and
-`uptime`). Creating an app's
+shape** (`kinds.OIDCClient`, today `mbin`, `outline`, `writefreely`,
+`uptime`, `synapse` and `oauth2-proxy`). Creating an app's
 client at the deployment's own Pocket ID is part of setting the app up, and
 declaring the app in `paisans.yaml` is the approval for that client. Founder
 decision, 2026-10-08. So a first apply of a site needs nothing run before it:
@@ -6422,7 +6422,11 @@ the app sees them. The two groups are `apps.<app>.settings.member_group` and
 whichever is missing. Outline and WriteFreely read no admin group, so theirs
 is always `admins` and only `member_group` is a setting; the uptime monitor
 has one group, `settings.admin_group`, with no default, because `validate`
-requires it (`uptime-needs-an-admin-group`). The defaults exist because an
+requires it (`uptime-needs-an-admin-group`). Synapse's client is its
+authentication service's, which reads no admin group, so like Outline's it is
+`admins` plus `member_group`. The gate's is `members` and `admins`, with no
+setting, the same two groups its compose file admits: an admin can see
+everything a member can (Founder decision). The defaults exist because an
 empty pair would leave an open client: anyone who could make a Pocket ID account could sign in to the
 app. Which app reads the groups claim itself differs by kind, and the table
 says so, because for a kind that does not, the restriction is the whole
@@ -6434,6 +6438,8 @@ control and the operator should know that nothing else stands behind it:
 | `outline` | `/auth/oidc.callback` (`plugins/oidc/server/auth/oidcRouter.ts:63` at `v1.10.0`) | off: the rendered `.env` sets the four explicit `OIDC_*_URI` values, and that branch of the plugin never passes `pkce` (`plugins/oidc/server/auth/oidc.ts:27-35`; only the `OIDC_ISSUER_URL` branch does) | not read. The restriction at Pocket ID is the whole control |
 | `writefreely` | `/oauth/callback/generic`, built by `configureGenericOauth` and not configurable (`oauth.go:249` at writefreely-wisp `ff9dceb`) | off: nothing in the fork sends a code challenge | not read. The restriction at Pocket ID is the whole control |
 | `uptime` | `/login/oidc/callback` (`src/lib/oidc.js:26`) | on: every sign in sends an S256 challenge (`src/lib/oidc.js:96-103`) | read. `settings.admin_group` is both groups: its members administer the monitor and nobody else may sign in |
+| `synapse` | `/upstream/callback/<ulid>`, the authentication service's callback for its upstream provider (`crates/router/src/endpoints.rs:742-762` at MAS `v1.24.0`), with the id derived from the app's name | on: `mas.yaml` sets `pkce_method: always`, the S256 mode (`crates/config/src/sections/upstream_oauth2.rs:420-436`, `crates/cli/src/sync.rs:289-298`), so every sign in sends an S256 challenge (`crates/handlers/src/upstream_oauth2/cache.rs:137`, `crates/oidc-client/src/requests/authorization_code.rs:242-256`) | not read: `mas.yaml` requests no `groups` scope. The restriction at Pocket ID is the whole control |
+| `oauth2-proxy` | `/oauth2/callback` on the gate's hostname: no redirect URL is rendered, so oauth2-proxy builds it from the proxy prefix and the request's host (`oauthproxy.go:175-178,1113-1135` at `v7.15.4`) | on: the `.env` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, and with a method set every sign in sends a challenge (`oauthproxy.go:833-851`) | read. The gate admits a session in any group of `OAUTH2_PROXY_ALLOWED_GROUPS` (`providers/provider_default.go:125-138`), which is rendered as `members,admins`, the same two groups as its client; oauth2-proxy splits that value on commas (`pkg/apis/options/load.go:27-55`, viper `v1.21.0` `viper.go:977-1022`) |
 
 PKCE is set per client the way the app behaves, not on as a matter of course:
 a Pocket ID client with PKCE on refuses every request that carries no code
@@ -6449,6 +6455,7 @@ Putting a user in the admin group is `app admin create`'s job, not this
 command's.
 
 **`validate` holds the groups to the gate.** The gate admits `members`, and
+`admins` as every client does by default, and
 an app using the gate has a client admitting that app's `member_group`. When
 the two name different groups, someone is let through the gate and refused by
 the app, or admitted by the app on a path the gate leaves open, and nothing

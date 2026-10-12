@@ -511,60 +511,48 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 		if _, ok := secrets.OIDCClients[name]; ok {
 			continue
 		}
-		if cfg.Apps[name].Kind == config.KindPocketID {
-			continue // the identity provider has no client at itself
-		}
-		if cfg.Apps[name].Kind == config.KindElement {
-			// A Matrix client does not authenticate at the identity provider.
-			// It authenticates at the homeserver, which delegates to its own
-			// authentication service, which is the relying party. Asking an
-			// operator to mint a client for it would send them to approve a
-			// Pocket ID mutation that nothing would ever use, and its template
-			// set reads no OIDC value at all.
+		app := cfg.Apps[name]
+		// A kind with no client spec has no client: Pocket ID has none at
+		// itself, and a Matrix client authenticates at the homeserver, whose
+		// authentication service is the relying party.
+		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		if !ok {
 			continue
 		}
-		why := "minted by the identity provider, and creating a client there is a mutation a human approves. The toolkit records the value afterwards rather than automating the approval away"
-		if cfg.Apps[name].Kind == config.KindSynapse {
-			// Said here rather than only in the rendered configuration,
-			// because the rendered configuration is 0600 and does not exist
-			// until apply, which is after the operator needed this. A client
-			// registered with the wrong redirect URI fails at the end of the
-			// first sign in, once the member has already authenticated.
-			why += ". Register its redirect URI as " +
-				kinds.MASRedirectURI(cfg.Apps[name].Hostname, name) +
-				", which is the authentication service's callback for this upstream provider and not the /oauth/callback every other kind uses"
+		// Apply creates the client itself, since declaring the app is the
+		// approval for it (founder decision, 2026-10-08). The redirect URI
+		// and PKCE are still named, because they are what apply creates and
+		// what an operator checking an existing client needs to see; for a
+		// homeserver, the rendered configuration that also names them is
+		// 0600 and does not exist until apply.
+		pkce := "PKCE off: the app sends no code challenge, and a Pocket ID client with PKCE on refuses a request without one"
+		if spec.PKCE {
+			pkce = "PKCE enabled: the app always sends a code challenge"
 		}
-		// A kind with a known client shape has its client created by apply
-		// itself, since declaring the app is the approval for it (founder
-		// decision, 2026-10-08). The redirect URI and PKCE are still named,
-		// because they are what apply creates and what an operator checking
-		// an existing client needs to see.
-		created := "created at the deployment's Pocket ID by `paisans apply --execute` on a site that runs " + name +
+		why := "created at the deployment's Pocket ID by `paisans apply --execute` on a site that runs " + name +
 			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `paisans oidc client create --app " + name +
-			"` runs the same step alone. "
-		if cfg.Apps[name].Kind == config.KindMbin {
+			"` runs the same step alone. The client's redirect URI is " + spec.CallbackURL + ", with " + pkce
+		admin, member := spec.Groups(app)
+		switch app.Kind {
+		case config.KindMbin:
 			// The fork's OidcClient extends KnpU's OAuth2PKCEClient and always
 			// sends a code challenge (src/Security/Oidc/OidcClient.php:18 at
 			// tag v1.13.3+paisans).
-			spec, _ := kinds.OIDCClient(config.KindMbin, cfg.Apps[name].Hostname)
-			admin, member := spec.Groups(cfg.Apps[name])
-			why = created + "The client's redirect URI is " +
-				kinds.MbinRedirectURI(cfg.Apps[name].Hostname) + ", with PKCE enabled: Mbin always sends a code challenge. It is restricted to the groups " +
-				member + " and " + admin + ", which the fork reads from the groups claim as its member and admin groups"
-		}
-		if cfg.Apps[name].Kind == config.KindOutline || cfg.Apps[name].Kind == config.KindWriteFreely {
-			// Neither app reads a groups claim, so the client's restriction at
-			// Pocket ID is the whole control, and the owed text says so where
-			// an operator checking an existing client will read it.
-			spec, _ := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname)
-			_, member := spec.Groups(cfg.Apps[name])
-			why = created + "The client's redirect URI is " + spec.CallbackURL +
-				", with PKCE off: the app sends no code challenge, and a Pocket ID client with PKCE on refuses a request without one. It is restricted to the groups " +
-				member + " and " + kinds.AdminsGroup + ", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
-		}
-		if cfg.Apps[name].Kind == config.KindUptime {
-			why = created + "The client's redirect URI is https://" + cfg.Apps[name].Hostname +
-				"/login/oidc/callback (src/lib/oidc.js:26 in the uptime fork), restricted to the group named in apps." +
+			why += ". It is restricted to the groups " + member + " and " + admin +
+				", which the fork reads from the groups claim as its member and admin groups"
+		case config.KindOutline, config.KindWriteFreely, config.KindSynapse:
+			// None of these reads a groups claim, so the client's restriction
+			// at Pocket ID is the whole control, and the owed text says so
+			// where an operator checking an existing client will read it.
+			if app.Kind == config.KindSynapse {
+				why += ". The redirect URI is the authentication service's callback for this upstream provider, and the service is configured to send a challenge always"
+			}
+			why += ". It is restricted to the groups " + member + " and " + admin +
+				", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
+		case config.KindOAuth2Proxy:
+			why += ". It is restricted to the groups " + member + " and " + admin + ", the ones the gate admits"
+		case config.KindUptime:
+			why += ". The redirect URI is the fork's own (src/lib/oidc.js:26 in the uptime fork). It is restricted to the group named in apps." +
 				name + ".settings.admin_group, so the identity provider refuses everyone else before the monitor does"
 		}
 		out = append(out, Owed{Name: "oidc_clients." + name, Why: why})

@@ -62,9 +62,10 @@ Nobody declares the gate. When any app sets `gated` or `auto_login`,
 ID, its cookie secret, its DNS record, its monitor check and its stack are
 made the way every app's are.
 
-It is one container on 4180 with `OAUTH2_PROXY_ALLOWED_GROUPS=members`. It
+It is one container on 4180 with `OAUTH2_PROXY_ALLOWED_GROUPS=members,admins`:
+an admin can see everything a member can (Founder decision, 2026-10-12). It
 runs the sign-in and answers the gateway's `forward_auth`, and it fails
-closed: a session outside `members` gets oauth2-proxy's 403. Its session
+closed: a session in neither group gets oauth2-proxy's 403. Its session
 cookie, `_oauth2_proxy`, is scoped to `.<community.domain>`, so one sign-in
 covers every app under the domain.
 
