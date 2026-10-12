@@ -39,8 +39,9 @@ const (
 
 var (
 	// A cut leader's key expires with Patroni's ttl, 30 seconds by default,
-	// and a remaining member promotes itself within a loop_wait, 10 seconds,
-	// after that. The wait leaves room for both several times over.
+	// and a remaining member promotes itself within a loop_wait, 10 seconds
+	// by default, after that (Patroni v4.1.0, patroni/config.py,
+	// __DEFAULT_CONFIG). The wait leaves room for both several times over.
 	failoverWait = 3 * time.Minute
 	failoverPoll = 5 * time.Second
 
@@ -554,7 +555,7 @@ func (p *Plan) buildEvictDatabase() *Stage {
 				return fmt.Errorf("no remaining member leads yet")
 			})
 			if err != nil {
-				return fmt.Errorf("no remaining member took over within %s: %w. Patroni promotes no replica further behind than maximum_lag_on_failover (1 MB unless set otherwise); read `patronictl list` on %s", failoverWait, err, p.patroni.at)
+				return fmt.Errorf("no remaining member took over within %s: %w. Patroni promotes no replica further behind than maximum_lag_on_failover, which `patronictl show-config` on %s says; read `patronictl list` there", failoverWait, err, p.patroni.at)
 			}
 		}
 		if p.patroni.sync && len(p.live(p.end.Cluster.Sites)) < 2 {

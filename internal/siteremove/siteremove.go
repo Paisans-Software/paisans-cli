@@ -304,7 +304,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 	}
 	if s.Has(config.RoleGateway) && len(cfg.GatewaySites()) == 1 {
 		if o.Evict {
-			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Evicting a site: --evict\").")
+			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Evicting a site: `--evict`\").")
 		}
 		return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Give another site the gateway role and apply it first (README, \"Moving the gateway\").")
 	}
