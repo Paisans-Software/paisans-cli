@@ -3495,7 +3495,13 @@ instead. A side with a `paisans mesh rekey` under way (a site with a next
 WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
 `mesh rekey` to finish it first on the side that holds it: a rekey's state is a
 sequence over live hosts, so combining two such states key by key could promote
-a key no host runs, and a rekey finishes in minutes. A file that cannot be
+a key no host runs, and a rekey finishes in minutes. A side with a `paisans
+secrets rotate` under way (a secret with a next value under `rotations`, or
+paths a `--all` run has left under `rotate_remaining`) is refused the same way,
+naming the paths and `secrets rotate` to finish it on the side that holds it: a
+rotation moves the checking side to the next value before its users, so
+combining two such states key by key could promote a value no host's checking
+side accepts. A file that cannot be
 decrypted and parsed here is refused without quoting its error, because a parse
 error can quote a value.
 

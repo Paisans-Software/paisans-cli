@@ -268,7 +268,9 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   again; to keep the local value, take the head's first, pull, then set the key
   back with `paisans secrets set` and publish, or edit a `pocket_id_groups` key
   with `sops`). It refuses while either side has a `paisans mesh rekey` under
-  way, naming the sites, until `mesh rekey` finishes it. `recover` refuses to
+  way, naming the sites, until `mesh rekey` finishes it, and while either side
+  has a `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
+  naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
   `.paisans/incoming/<sha>/` and refuses to choose.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
