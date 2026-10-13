@@ -10,11 +10,15 @@
 !internal/render/testdata/golden/**/.env
 !internal/render/testdata/golden-local-storage/**/.env
 
-# A kind's template set is source, and the templates that render an .env are
+# A blueprint's templates are source, and the templates that render an .env are
 # named for what they produce. The rule above matches them by accident, and the
 # failure is silent in the worst way: the files stay on the machine that wrote
-# them, tests pass there, and a fresh checkout renders no .env at all.
+# them, tests pass there, and a fresh checkout renders no .env at all. The test
+# copy of the core catalog is held to the pin by TestTheTestCopyMatchesThePin,
+# which is how this was found missing from it.
 !internal/render/templates/**/.env*.tmpl
+!internal/blueprints/reserved/**/.env*.tmpl
+!internal/blueprints/testdata/core/**/.env*.tmpl
 *.key
 *.pem
 # Except the golden tree's, which are rendered from the throwaway pair in
