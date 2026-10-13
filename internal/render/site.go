@@ -670,6 +670,11 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 		if err != nil {
 			return err
 		}
+		if _, fromCatalog := kinds.Source(app.Kind); fromCatalog && rel == "compose.yaml" {
+			if err := checkComposePolicy(content, values.DataPath); err != nil {
+				return fmt.Errorf("apps.%s: blueprint %s: %w", app.Name, app.Kind, err)
+			}
+		}
 		dest := base + p.dep().RelPath(app.Name, rel)
 		files = append(files, File{Path: dest, Content: content, Mode: mode})
 		sources[dest] = path

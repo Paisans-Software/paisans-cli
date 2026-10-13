@@ -41,7 +41,7 @@ func (c Change) NeedsApproval() bool { return c.Op != Removed }
 func (c Change) Line() string { return string(c.Op) + " " + ui.Visible(c.Text) }
 
 // Review is what one site's grant changes from its record: keys first, then
-// images, then the web server. An entry in both and the same is not in it.
+// images, then catalog blueprints, then the web server. An entry in both and the same is not in it.
 type Review struct {
 	Site    string
 	Changes []Change
@@ -95,10 +95,61 @@ func Compare(site string, g Grant, rec Record, s Scope) Review {
 		}
 		r.Changes = append(r.Changes, compareImages(s.images(g.Images), was)...)
 	}
+	if s.Images {
+		var was []Blueprint
+		if rec.Blueprints != nil {
+			was = s.blueprints(rec.Blueprints.Entries)
+		}
+		r.Changes = append(r.Changes, compareBlueprints(s.blueprints(g.Blueprints), was)...)
+	}
 	if s.WebServer {
 		r.Changes = append(r.Changes, compareWebServer(g.WebServer, rec.WebServer)...)
 	}
 	return r
+}
+
+// blueprintLabel is how a review names a catalog blueprint's release.
+func blueprintLabel(b Blueprint) string {
+	release := b.Commit
+	if len(release) > 12 {
+		release = release[:12]
+	}
+	if b.Tag != "" {
+		release = b.Tag + " (" + release + ")"
+	}
+	out := b.Blueprint + " at " + release
+	if b.Unsigned {
+		out += ", unsigned: nothing checked who published it"
+	}
+	return out
+}
+
+// compareBlueprints is each app's catalog blueprint against the record. A
+// blueprint whose files changed is a change even at the same release name,
+// since the files are what the render used.
+func compareBlueprints(now, was []Blueprint) []Change {
+	prior := map[string]Blueprint{}
+	for _, b := range was {
+		prior[b.App] = b
+	}
+	var out []Change
+	for _, b := range now {
+		subject, to := "blueprint "+b.App, b.Blueprint+"@"+b.SHA256
+		p, ok := prior[b.App]
+		switch {
+		case !ok:
+			out = append(out, Change{Op: Added, Subject: subject, To: to, Text: "blueprint " + b.App + ": " + blueprintLabel(b)})
+		case p.Blueprint != b.Blueprint || p.SHA256 != b.SHA256 || p.Unsigned != b.Unsigned:
+			out = append(out, Change{Op: Changed, Subject: subject, To: to, Text: "blueprint " + b.App + ": " + blueprintLabel(p) + " → " + blueprintLabel(b)})
+		}
+		delete(prior, b.App)
+	}
+	for _, b := range was {
+		if _, gone := prior[b.App]; gone {
+			out = append(out, Change{Op: Removed, Subject: "blueprint " + b.App, Text: "blueprint " + b.App + ": " + blueprintLabel(b)})
+		}
+	}
+	return out
 }
 
 func keyLabel(k Key) string {

@@ -4838,6 +4838,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
 | images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
+| blueprints | per app whose blueprint a catalog provides: the blueprint, its tag and commit, the SHA-256 of its files, and whether its catalog is unsigned | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does |
 
 A key is the same key when its fingerprint is, so a new comment or a new admin
 for it is a change of that key. An image is the same when its reference is,
@@ -4845,6 +4846,15 @@ which is why `validate` refuses a floating tag for an app. An app's settings,
 `config` and `smtp` are not reviewed: they configure an image the review
 already covers, and choose no code. A field added later that does choose code
 (a command, a hook, a mount) joins the review in the same change.
+
+**A catalog blueprint's compose file is held to what a stack may ask of its
+host.** The render refuses one that sets `privileged`, `cap_add`, `devices`,
+`security_opt` or `cgroup_parent`; that shares the host's network, process,
+IPC, UTS, user or cgroup namespace, or another container's; or that mounts the
+Docker socket or any host path outside the stack's own directory. Each is a way
+past the stack: the Docker daemon is root on the host. The blueprints built
+into the toolkit are reviewed with its code instead, which is how the uptime
+monitor keeps the capability its ping needs.
 
 **The review prints only what it can show.** A key comment, an admin's name or
 email, or an image reference holding a control character (Eg: ESC, DEL, or a

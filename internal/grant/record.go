@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,11 +27,12 @@ const Version = 2
 // all succeeded: the keys part by host prepare, the images, web server and
 // configuration parts by apply. A part that was never written is nil.
 type Record struct {
-	Version   int            `json:"version"`
-	Keys      *KeysPart      `json:"keys,omitempty"`
-	Images    *ImagesPart    `json:"images,omitempty"`
-	WebServer *WebServerPart `json:"web_server,omitempty"`
-	Config    *ConfigPart    `json:"config,omitempty"`
+	Version    int             `json:"version"`
+	Keys       *KeysPart       `json:"keys,omitempty"`
+	Images     *ImagesPart     `json:"images,omitempty"`
+	WebServer  *WebServerPart  `json:"web_server,omitempty"`
+	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
+	Config     *ConfigPart     `json:"config,omitempty"`
 }
 
 // ConfigPart is the version of the configuration apply last applied: its
@@ -62,6 +64,13 @@ type ImagesPart struct {
 	AppliedAt  string  `json:"applied_at"`
 	ApprovedBy string  `json:"approved_by,omitempty"`
 	Entries    []Image `json:"entries"`
+}
+
+// BlueprintsPart is the catalog blueprints apply last rendered.
+type BlueprintsPart struct {
+	AppliedAt  string      `json:"applied_at"`
+	ApprovedBy string      `json:"approved_by,omitempty"`
+	Entries    []Blueprint `json:"entries"`
 }
 
 // WebServerPart is the include directory apply last wrote into.
@@ -233,6 +242,16 @@ func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
 }
 
+func (s Scope) blueprints(list []Blueprint) []Blueprint {
+	var out []Blueprint
+	for _, b := range list {
+		if s.stack(b.App) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func (s Scope) images(list []Image) []Image {
 	var out []Image
 	for _, i := range list {
@@ -282,6 +301,28 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 				part.ApprovedBy = rec.Images.ApprovedBy
 			}
 			out.Images = part
+		}
+	}
+	if s.Images {
+		var kept []Blueprint
+		if rec.Blueprints != nil {
+			for _, b := range rec.Blueprints.Entries {
+				if !s.stack(b.App) {
+					kept = append(kept, b)
+				}
+			}
+		}
+		entries := append(kept, s.blueprints(g.Blueprints)...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].App < entries[j].App })
+		switch {
+		case len(entries) == 0:
+			out.Blueprints = nil
+		case rec.Blueprints == nil || !slices.Equal(rec.Blueprints.Entries, entries):
+			part := &BlueprintsPart{AppliedAt: at, ApprovedBy: approvedBy, Entries: entries}
+			if rec.Blueprints != nil && subset(entries, rec.Blueprints.Entries) {
+				part.ApprovedBy = rec.Blueprints.ApprovedBy
+			}
+			out.Blueprints = part
 		}
 	}
 	if s.WebServer {
