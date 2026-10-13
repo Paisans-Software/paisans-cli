@@ -1045,12 +1045,19 @@ from this configuration and the fork reconciles it at every start:
   expects 200: that site's reconciler is running its passes, standby or not.
   It says nothing about the `admins` group, which only the active instance
   knows.
-* every Pocket ID app gets one **admins heartbeat**,
-  `<app> — admin continuity`: a push monitor its active instance feeds from
-  the reconciler's `/healthz`, so it fails while the `admins` group has
-  fewer than two members (see *The admin reconciler keeps `admins` equal to
-  Pocket ID's administrators*), and follows whichever site is active across
-  a failover with one history (below).
+* every Pocket ID app gets one **admins heartbeat**, `admin continuity`: a
+  push monitor its active instance feeds from the reconciler's `/healthz`, so
+  it fails while the `admins` group has fewer than two members (see *The
+  admin reconciler keeps `admins` equal to Pocket ID's administrators*), and
+  follows whichever site is active across a failover with one history
+  (below). It is named for the community, not the app, because every
+  instance pushes to the one token; a deployment with more than one Pocket ID
+  app prefixes each continuity monitor with the app key, since the seed tells
+  monitors apart by name.
+* a deployment on Cloudflare that has pasted `external.dns_members_token`
+  gets two more beside it, `admin continuity: dns super admins` and
+  `admin continuity: dns 2fa`, fed the same way from the reconciler's DNS
+  check (see *The reconciler checks the DNS provider's account*).
 * the monitor does not watch itself: its seed has no public or direct check
   of its own app, and no ping or heartbeat of its own site. A monitor that is
   down cannot report it, and a check from the monitor to its own host can only
@@ -1152,6 +1159,14 @@ reported a failure. `secrets rotate` replaces the token, by name or with
 `--all`: every monitor learns it first, then the pusher on each site is
 recreated with it (*`secrets rotate` replaces a secret where it is checked and
 where it is used*).
+
+The same pusher relays the DNS check's two answers when the deployment
+renders it. Each cycle it also asks `/healthz/dns-super-admins` and
+`/healthz/dns-2fa`, with the same table of answers, and pushes each to its
+own monitor under its own token, `apps.<app>.dns_super_admins_heartbeat_token`
+and `apps.<app>.dns_2fa_heartbeat_token`, whose URLs are two more variables
+in the same 0600 `heartbeat.env`. One pusher serves all three, so the check
+adds no service, image or port.
 
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
 admin makes by hand, and the channels an admin attaches to any monitor, are
@@ -2075,8 +2090,8 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
-| **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app) | issued elsewhere, supplied by a human |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token and its DNS check's hash key and two heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an admin's address at the DNS provider when it is not their email (`admins.<admin>.dns_provider_email`) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
 **`init` never replaces a generated secret; `secrets rotate` does, on
@@ -2365,7 +2380,8 @@ Finishing either command first costs nothing but its resume.
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
-| Pocket ID `admins_heartbeat_token` | the monitor | the admins heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
+| Pocket ID `admins_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the admins heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
+| Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
 it keeps in Postgres, so an open session lasts until it ends and the next sign
@@ -2386,7 +2402,8 @@ token and restarts it to adopt it. Only then is the pusher handed the token.
   infrastructure stack, where the changed `heartbeat/heartbeat.env` recreates
   the `heartbeat` service alone. A site no monitor watches renders no pusher,
   so its token is replaced in the file and handed to nobody.
-* **A Pocket ID app's `admins_heartbeat_token`** is checked by every monitor,
+* **A Pocket ID app's `admins_heartbeat_token`**, and its DNS check's two
+  tokens the same way, is checked by every monitor,
   the one on a site the app runs on included. The pusher is the app's own
   stack on each of its sites in turn, where the changed
   `admins-heartbeat/heartbeat.env` recreates the `admins-heartbeat` service
@@ -6221,7 +6238,7 @@ pass, and once the last pass is more than two and a half hours old. The body
 is one line naming users by username, and a standby's is `standby`, with a
 200. The uptime kind does not ask it directly: the active instance's
 `admins-heartbeat` pushes what it says to the monitor's
-`<app> — admin continuity` (*Monitoring*), so a community down to one
+`admin continuity` (*Monitoring*), so a community down to one
 administrator gets an incident while that administrator can still fix it,
 from whichever site is active.
 The monitor's per site check asks `/livez`, which fails only when the pass
@@ -6250,6 +6267,53 @@ marker reports `standby` with a 200.
 **The group is always `admins`.** `validate` warns
 (`admin-group-not-admins`) about an app in a deployment running Pocket ID
 whose admin group is another one, since the reconciler does not watch it.
+
+### The reconciler checks the DNS provider's account
+
+Whoever controls the zone controls every hostname the deployment serves. A
+Cloudflare account whose Super Administrators have all gone keeps resolving,
+and its Administrators keep editing records, but Cloudflare's Administrator
+role "Cannot manage members"
+([Cloudflare: Roles](https://developers.cloudflare.com/fundamentals/manage-members/roles/)),
+so nobody can add the next administrator, and once the last one leaves the
+zone is recovered only at the registrar.
+
+**Every enabled Pocket ID administrator must be an accepted Super
+Administrator of the account holding the zone, and there must be at least
+two.** Administrator with access to the zone does not count, a pending
+invitation does not count, and Cloudflare members who are not Pocket ID
+administrators are allowed. Founder decision; the design is
+`docs/specs/2026-10-13-dns-admin-continuity.md`.
+
+**The check is optional, and Cloudflare only.** It renders when
+`acme.provider` is `cloudflare` and `external.dns_members_token` is pasted: a
+token with Account Settings Read on the account and Zone Read on the zone,
+and nothing else. It is not `acme_dns_token`, which edits records and lives
+only beside Caddy, because this one is rendered into the Pocket ID stack on
+every apps site, and a leak there must not be control of every hostname.
+
+**It runs on the reconciler's pass**, on the active instance only, and makes
+two reads at Cloudflare: the zone holding `community.domain`, found by its
+suffixes as `dns init` finds it, for its account, and that account's members.
+It writes nothing there. It answers on `/healthz/dns-super-admins` and
+`/healthz/dns-2fa` with `/healthz`'s contract, and the admins heartbeat
+pusher relays both (*Monitoring*). Each body is a count, such as
+`1 of 3 admins not cloudflare super admin (1 pending)`: the monitors exist to
+say the community is at risk, and the reconciler's log names who by Pocket ID
+username. When Cloudflare cannot be read, both fail with
+`cloudflare unreadable:` and the status, never the response or the token.
+
+**An admin whose address at Cloudflare differs** is mapped in the secrets
+file, `admins.<admin>.dns_provider_email`, by the admin's key in
+`paisans-stack.yaml`. The configuration is copied to every site in plaintext,
+and the secrets file only encrypted, so the address stays where only a
+workstation reads it. No address reaches a host: `apply` renders each mapping
+as two HMAC-SHA256 hashes under `apps.<app>.dns_email_hash_key`, and the
+reconciler compares every address under the same key. `render` refuses a
+mapping that names no declared admin, or that would let one membership count
+for two admins. A host taken over while the reconciler runs is not protected:
+the token can list the account's members directly, which is why it reads and
+does nothing else.
 
 ### `apply` checks free space before it pulls
 

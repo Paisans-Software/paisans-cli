@@ -1415,7 +1415,7 @@ installed, on a workstation or anywhere else.
 | Path | Holds |
 |------|-------|
 | `cmd/paisans` | the command, flag parsing, and how findings are printed |
-| `cmd/admin-reconciler` | the admin reconciler's binary and its image's Dockerfile: the pass loop, `/healthz`, and `healthcheck` |
+| `cmd/admin-reconciler` | the admin reconciler's binary and its image's Dockerfile: the pass loop, `/healthz` and the DNS check's two paths, and `healthcheck` |
 | `internal/adminreconciler` | one admin reconciler pass: who to add to `admins` and who to remove, the two writes, the floor under removals, and what `/healthz` says |
 | `internal/config` | loading `paisans-stack.yaml`, and decrypting `secrets.enc.yaml` |
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
@@ -1429,6 +1429,7 @@ installed, on a workstation or anywhere else.
 | `internal/kinds` | what an application kind is: its compose services, and the image each runs by default |
 | `internal/acme` | what each ACME DNS provider needs: its Caddy module, the image that carries it, and its Caddyfile directive |
 | `internal/render` | placement, templates, and the writer |
+| `internal/dnscontinuity` | the reconciler's DNS check: reading the Cloudflare account's members (two GETs, nothing else), the keyed hash every address is compared under, and the counts the two DNS continuity monitors carry |
 | `internal/dns` | which public records a deployment needs, creating the missing ones at the DNS provider, and pruning the ones it created that nothing wants |
 | `internal/apply` | what to push to a host, what to restart, and the gates before either |
 | `internal/siteadd` | joining a new data site: eight staged, gated, resumable stages |

@@ -68,11 +68,13 @@ admins:
     dns_provider_email: alice.work@example.org
 ```
 
-Unmapped admins need nothing. Matching is one to one: `validate` refuses two
+Unmapped admins need nothing. Matching is one to one: `render` refuses two
 admins mapped to the same address, or a mapped address equal to another
 admin's `email`, because either lets one Cloudflare membership satisfy two
 administrators. It also refuses a key that is not an admin `paisans-stack.yaml`
-declares. Founder decision.
+declares, naming admins by key and never the address. Founder decision.
+`validate` reads no secrets, so the refusal is `render`'s, where a malformed
+heartbeat token's already is.
 
 **Why the secrets file, and not `paisans-stack.yaml`.** The configuration is
 copied in plaintext to every site (`2026-10-12-config-store.md`); the secrets
@@ -243,7 +245,7 @@ the whole of what it does with what it reads.
   mapped address or the token, asserted over every case above.
 * **Hashing**: case and surrounding space are folded on both sides; `+tag` is
   not.
-* **Validate**: two admins mapped to one address, a mapping equal to another
+* **Mapping refusals**, at render: two admins mapped to one address, a mapping equal to another
   admin's `email`, and a key that is no declared admin are each refused.
 * **Render**: without the token, the golden tree is unchanged. With it, the
   Pocket ID `.env` gains the token, the domain, the key and the hashed map; the seed gains
