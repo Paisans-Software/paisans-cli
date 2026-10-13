@@ -477,7 +477,7 @@ func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
 	if rec.Has("warn", "oidc_clients.") {
 		t.Errorf("a sign in client was warned about as a decision:\n%s", rec.Lines())
 	}
-	if !rec.Has("warn", "external.acme_dns_token needs a decision") {
+	if !rec.Has("warn", "Secret for external.acme_dns_token needs to be set") {
 		t.Errorf("an owed secret is no longer warned about:\n%s", rec.Lines())
 	}
 	want := "7 sign in clients (blog, chat, docs, gate, invite, status, talk) are created by apply"

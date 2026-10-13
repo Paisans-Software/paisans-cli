@@ -363,7 +363,7 @@ func (e *secretsWriteError) Unwrap() error { return e.err }
 // makes for each under --verbose.
 func reportOwed(r ui.Reporter, filled secretsgen.Result) {
 	for _, owed := range filled.Owed {
-		r.Warn(owed.Name+" needs a decision", owed.Why)
+		r.Warn("Secret for "+owed.Name+" needs to be set", owed.Why)
 	}
 	var order []string
 	byKind := map[string][]secretsgen.Pending{}
