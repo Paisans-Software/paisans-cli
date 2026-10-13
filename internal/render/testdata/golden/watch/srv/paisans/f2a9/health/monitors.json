@@ -426,7 +426,7 @@
       "heartbeat_grace_seconds": 120
     },
     {
-      "name": "auth — admin continuity",
+      "name": "admin continuity",
       "monitor_type": "heartbeat",
       "interval_seconds": 60,
       "timeout_ms": 10000,
