@@ -11,6 +11,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/keystore"
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 func withKeystore(t *testing.T, s keystore.Store) {
@@ -352,4 +353,60 @@ func TestInitNoKeystoreThenKeyFile(t *testing.T) {
 	if got, _ := config.Recipients(filepath.Dir(path)); len(got) != 1 || got[0] != identity.Recipient().String() {
 		t.Errorf(".sops.yaml names %v, want %s", got, identity.Recipient())
 	}
+}
+
+// initDefaultOutput runs init with the reporter an operator gets without
+// --verbose, and returns what it printed.
+func initDefaultOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	var b strings.Builder
+	reporterOverride = ui.NewPlain(&b, false)
+	t.Cleanup(func() { reporterOverride = nil })
+	if err, _ := runInitShowing(t, args...); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("init printed:\n%s", b.String())
+	return b.String()
+}
+
+// Without --verbose, init still says where it kept the private key, on the
+// line after the one that made it, and never shows the key itself.
+func TestInitSaysWhereTheAgeKeyIs(t *testing.T) {
+	t.Run("keystore", func(t *testing.T) {
+		withoutAgeKey(t)
+		ks := keystore.NewMemory()
+		withKeystore(t, ks)
+		path, _ := initWorld(t, nil, fakeSites(), nil)
+		out := initDefaultOutput(t, "--config", path, "--sudo=false")
+		cfg, err := config.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "  ok   make age key\n  ok   save age key: " + ks.Describe(cfg.ID) + "\n"
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+		if strings.Contains(out, "AGE-SECRET-KEY") {
+			t.Error("the private key was shown")
+		}
+	})
+	t.Run("file", func(t *testing.T) {
+		withoutAgeKey(t)
+		withKeystore(t, keystore.NewMemory())
+		path, _ := initWorld(t, nil, fakeSites(), nil)
+		keyFile := filepath.Join(t.TempDir(), "deployment.key")
+		out := initDefaultOutput(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile)
+		want := "  ok   make age key\n  ok   save age key: " + ui.ShortPath(keyFile) + "\n"
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+		// paisans cannot find a key file on its own, so the line that says
+		// how to point it there is not left to --verbose.
+		if !strings.Contains(out, "export SOPS_AGE_KEY_FILE='"+keyFile+"'") {
+			t.Errorf("output lacks the export line:\n%s", out)
+		}
+		if strings.Contains(out, "AGE-SECRET-KEY") {
+			t.Error("the private key was shown")
+		}
+	})
 }

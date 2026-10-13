@@ -54,13 +54,20 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 		step.Fail(err)
 		return err
 	}
+	step.Done("")
+	// Where the key went is its own line, shown at every verbosity: the
+	// operator has to know which item or file is now the only copy, and a
+	// line that only --verbose shows is one they never see.
+	step = r.Step("save age key")
 	key, recipient := identity.String(), identity.Recipient().String()
-	var where, export string
+	var where, shown, export string
 	if keyFile != "" {
 		where, err = writeKeyFile(id, configPath, keyFile, key)
+		shown = ui.ShortPath(where)
 		export = "SOPS_AGE_KEY_FILE=" + shellQuote(where)
 	} else {
 		where, err = storeKey(id, key, recipient)
+		shown = where
 		if command := config.AgeKeystore.LookupCommand(id); command != "" {
 			export = "SOPS_AGE_KEY_CMD=" + shellQuote(command)
 		}
@@ -82,12 +89,13 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 		return err
 	}
 	step.Detail("public key %s, written to %s", recipient, ui.ShortPath(sopsPath))
-	step.Detail("private key kept in %s", where)
-	step.Done("")
+	step.Done(shown)
 	variable, variableSet := config.AgeVariableSet()
 	switch {
 	case keyFile != "":
-		r.Detail("Set this before running paisans or sops: export %s", export)
+		// paisans does not look for a key file on its own, so without this
+		// line the next command cannot decrypt.
+		r.Note("set this before running paisans or sops", "export "+export)
 	case variableSet:
 		r.Detail("%s is set, so paisans uses it instead of %s until it is unset", variable, where)
 	case export != "":
