@@ -48,8 +48,30 @@ type Def struct {
 	// made. A passthrough key that names one is refused.
 	OmittedKeys []OmittedKey
 
-	// Health is the route a monitor checks. Every kind has one.
+	// Health is the route a monitor checks. Every built in kind has one; a
+	// catalog blueprint may leave it out and is watched by a fallback.
 	Health Health
+
+	// Engine is the database engine the kind keeps its data in: postgres,
+	// mysql, sqlite or none.
+	Engine string
+
+	// Backup is how to dump and restore a database the backups do not reach
+	// as files, nil for a kind with none.
+	Backup *BackupSpec
+
+	// Checks are the kind's own validate rules, each a CEL condition every
+	// app of the kind must meet.
+	Checks []Check
+
+	// Settings are the `settings` keys the kind reads, with their types,
+	// for a blueprint that declares them; a built in kind's are checked by
+	// validate's own code instead.
+	Settings map[string]SettingSpec
+
+	// RequiresToolkit is the oldest toolkit release the blueprint needs, as
+	// written: ">= MAJOR.MINOR[.PATCH]", empty for none.
+	RequiresToolkit string
 
 	// Gate is what the kind needs from the gateway's Caddy to sit behind the
 	// gate, and GateSettings and LiveSettings what it must enforce itself

@@ -2626,6 +2626,20 @@ a catalog's signature: they trust the operator's signature on the configuration
 version that carries the blueprints (see *Every site keeps signed copies of the
 configuration*).
 
+**A catalog blueprint brings rules of its own, and is held to what it leaves
+out.** Its `checks` are CEL conditions over the app's declaration, each run by
+`validate` under the blueprint's own rule id as a refusal or a warning; its
+`settings` are checked by type, and a key it does not read is warned about. A
+blueprint with no health route is still watched, by a TCP connect to its port
+on each site and its front page at the public hostname answering anything
+below 500, with a warning (`blueprint-without-health`) since an app up and
+broken goes unnoticed; `health: {tcp: true}` declares an app that serves no
+HTTP. A blueprint keeping a database the backups cannot read as files (MySQL)
+must say how to dump and restore it, or a deployment with backups refuses it
+(`blueprint-without-backup`). A gated app whose blueprint says the gate leaves
+something open past it, and enforces no setting to close it, is warned about
+(`gated-leaves-open`).
+
 #### A blueprint ships a template set, not a single `.env`
 
 Not every application is configured through environment variables, and the

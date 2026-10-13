@@ -204,6 +204,7 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDSettingUnknown()
 	c.pocketIDSMTPFromName()
 	c.nothingWatches()
+	c.blueprintRules()
 	c.pocketIDStandbyMarkerUnknown()
 	c.mbinRabbitMQAcrossSites()
 	c.imageForAbsentPostgres()
