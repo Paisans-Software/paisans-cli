@@ -3,7 +3,7 @@
 Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12.
 Implemented 2026-10-13, in pull requests #209, #211, #212, #213, #214, #215,
 #217, #218 and #221; the core catalog is
-[`Paisans-Software/blueprints`](https://github.com/Paisans-Software/blueprints).
+[`Paisans-Software/paisans-blueprints`](https://github.com/Paisans-Software/paisans-blueprints).
 
 **Where the implementation differs from the design below**, each because the
 simpler form covered every blueprint there is:
@@ -467,7 +467,7 @@ with it.
 
 The core catalog holds every first party blueprint that is not reserved:
 `element`, `mbin`, `outline`, `synapse` and `writefreely`. Its URL is compiled
-into the binary: `https://github.com/Paisans-Software/blueprints`.
+into the binary: `https://github.com/Paisans-Software/paisans-blueprints`.
 
 * **It is always there.** A deployment with no `catalogs:` key uses it, and so
   does one that declares other catalogs. Declaring a third party catalog never

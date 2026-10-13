@@ -13,7 +13,7 @@
 # the copy fails a test rather than shipping as if it were the catalog's.
 set -eu
 
-url=${CORE_CATALOG_URL:-https://github.com/Paisans-Software/blueprints}
+url=${CORE_CATALOG_URL:-https://github.com/Paisans-Software/paisans-blueprints}
 commit=${1:?usage: $0 <40 character commit id>}
 case $commit in
 *[!0-9a-f]*) echo "$commit is not a lowercase hex commit id" >&2; exit 2 ;;
