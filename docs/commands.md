@@ -363,6 +363,46 @@ paisans admin register --key ~/.ssh/id_ed25519.pub --execute
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
 
+### `paisans catalog`
+
+Pins the catalogs of blueprints the deployment's apps may name, in
+`paisans-stack.yaml`. None of its subcommands reaches a host.
+
+```sh
+paisans catalog add example https://github.com/example/paisans-blueprints --unsigned
+paisans catalog update            # every catalog; or name one, with --tag
+paisans catalog remove example
+paisans catalog list
+```
+
+* **`add <name> <url>`:** reads the newest tag (or `--tag`) and the commit it
+  names with `git ls-remote`, fetches that commit into the catalog cache,
+  refuses a repository with no `catalog.yaml`, and writes the pin as
+  `catalogs.<name>`. An app then names a blueprint as `<name>/<blueprint>`.
+* **`update [<name>]`:** for each declared catalog, or the one named, moves the
+  pin to the newest tag (or `--tag`) when it names another commit, saying for
+  each app using one of its blueprints what changes: images, port, sign-in, the
+  gate's openings, storage, secrets. A release that drops a blueprint an app
+  uses is refused, and nothing changes.
+* **`remove <name>`:** refused while an app names one of its blueprints.
+* **`list`:** the core catalog with the commit the toolkit carries (or the one
+  pinned under `catalogs.core`), then every declared catalog with its URL, tag,
+  commit and whether its tags are checked.
+* **Unsigned:** until a signer can be checked, `add` needs `--unsigned`, and
+  `update` moves only a catalog declared `unsigned: true`.
+
+### `paisans blueprint`
+
+```sh
+paisans blueprint list                      # every name an app can use
+paisans blueprint show example/journal      # its blueprint.yaml at the pin
+paisans blueprint lint ./blueprints/journal # for a catalog author; needs no paisans-stack.yaml
+```
+
+`lint` checks that `blueprint.yaml` is one this toolkit reads, that every other
+file is a template, and that `compose.yaml.tmpl` and `caddy.snippet.tmpl` are
+there. See *A blueprint can come from a catalog* in `README.md`.
+
 ## Hosts
 
 ### `paisans host prepare`

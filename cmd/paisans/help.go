@@ -56,6 +56,8 @@ var groupSummary = map[string]string{
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
 	"oidc client": "Create an app's sign-in client at Pocket ID.",
 	"web-server":  "Show or check the web server in front of a monitor's app.",
+	"catalog":     "Add, move, remove and list the catalogs of blueprints.",
+	"blueprint":   "List, show and lint blueprints.",
 }
 
 var helpSections = []helpSection{
@@ -64,10 +66,54 @@ var helpSections = []helpSection{
 	{"Hosts and sites", []string{"host", "site", "mesh", "gateway", "storage", "prune"}},
 	{"Check", []string{"doctor", "preflight", "failover", "web-server"}},
 	{"Configuration and secrets", []string{"config", "admin", "secrets", "dns"}},
-	{"Apps", []string{"app", "oidc"}},
+	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
 }
 
 var helpCommands = []helpCommand{
+	{
+		name:    "catalog add",
+		summary: "Pin a catalog of blueprints at its newest release.",
+		usage:   []string{"paisans catalog add <name> <url> [--tag <tag>] --unsigned [--config " + config.FileName + "]"},
+		detail: "Read the catalog at <url>, pin its newest tag (or --tag) and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>. " +
+			"Without a signer to check, --unsigned is required. Edits only " + config.FileName + ".",
+	},
+	{
+		name:    "catalog update",
+		summary: "Move catalogs' pins to their newest releases.",
+		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--config " + config.FileName + "]"},
+		detail: "For each declared catalog, or the one named: read its newest tag (or --tag), and when it names another commit, say what it changes for each app using one of its blueprints (images, port, sign-in, the gate's openings, storage, secrets) and move the pin. " +
+			"Refuses a move that would leave an app without its blueprint. Edits only " + config.FileName + ".",
+	},
+	{
+		name:    "catalog remove",
+		summary: "Remove a catalog no app uses.",
+		usage:   []string{"paisans catalog remove <name> [--config " + config.FileName + "]"},
+		detail:  "Remove catalogs.<name> from " + config.FileName + ". Refused while an app names one of its blueprints.",
+	},
+	{
+		name:    "catalog list",
+		summary: "List the catalogs and their pins.",
+		usage:   []string{"paisans catalog list [--config " + config.FileName + "]"},
+		detail:  "List the core catalog, with the commit the toolkit carries or the one pinned here, and every declared catalog with its URL, tag, commit and whether its tags are checked.",
+	},
+	{
+		name:    "blueprint list",
+		summary: "List every blueprint an app can name.",
+		usage:   []string{"paisans blueprint list [--config " + config.FileName + "]"},
+		detail:  "List the reserved and core blueprints built into the toolkit, and every blueprint in each declared catalog, as an app names it.",
+	},
+	{
+		name:    "blueprint show",
+		summary: "Print a blueprint's blueprint.yaml.",
+		usage:   []string{"paisans blueprint show <name|catalog/name> [--config " + config.FileName + "]"},
+		detail:  "Print the blueprint.yaml of a built in blueprint, or of one in a declared catalog at its pinned commit.",
+	},
+	{
+		name:    "blueprint lint",
+		summary: "Check blueprint directories as a catalog author writes them.",
+		usage:   []string{"paisans blueprint lint <dir>..."},
+		detail:  "Check each directory: its blueprint.yaml is one this toolkit reads, every other file is a template, and compose.yaml.tmpl and caddy.snippet.tmpl are there. Needs no " + config.FileName + ".",
+	},
 	{
 		name:    "validate",
 		summary: "Report every problem in " + config.FileName + ".",
