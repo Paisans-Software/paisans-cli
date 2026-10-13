@@ -57,7 +57,7 @@ var ImageVolumes = map[string][]string{
 	// linux/amd64 only; WriteFreely's declares none on linux/amd64 and
 	// linux/arm64.
 	"ghcr.io/paisans-software/mbin:1.15.1-paisans":       {"/app/var/"},
-	"ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp": nil,
+	"ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp": nil,
 	// /data, the Dockerfile's only VOLUME.
 	"ghcr.io/paisans-software/uptime:1.1.0-oidc.4": {"/data"},
 	// Distroless, declares none.

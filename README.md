@@ -1816,7 +1816,7 @@ build.
 **The forks' kinds name a release by its version tag.** The `mbin` and
 `writefreely` kinds default to one release of each fork
 (`ghcr.io/paisans-software/mbin:1.15.1-paisans`,
-`ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp`), the release this
+`ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp`), the release this
 toolkit's templates were tested against, so a toolkit release renders for a
 known build. A newer release arrives with a toolkit release that names it, or
 sooner by naming it in `images`, which runs it against templates written for
@@ -6327,7 +6327,7 @@ for linux/amd64 alone:
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | invite (`paisans-invite`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-invite/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.1-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when

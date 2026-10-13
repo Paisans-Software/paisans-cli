@@ -13,7 +13,7 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp
+    image: ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp
     restart: unless-stopped
     # Root, not the image's writefreely user (uid 1000). `paisans apply`
     # writes config.ini as root at 0600, and Docker creates data/ as root,

@@ -156,7 +156,7 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 func TestTheForksDefaultToAReleaseVersion(t *testing.T) {
 	for kind, want := range map[config.Kind]string{
 		config.KindMbin:        "ghcr.io/paisans-software/mbin:1.15.1-paisans",
-		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp",
+		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp",
 	} {
 		if got, _ := kinds.DefaultImage(kind, "app"); got != want {
 			t.Errorf("%s app image is %s, want %s", kind, got, want)
