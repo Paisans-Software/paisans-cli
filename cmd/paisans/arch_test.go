@@ -90,9 +90,13 @@ func TestAnExecutedRunRecordsEveryMissingArchAndRereads(t *testing.T) {
 func TestADryRunRecordsInMemoryAndWritesNothing(t *testing.T) {
 	path, cfg := archFixture(t, twoDataSites)
 	before, _ := os.ReadFile(path)
+	original := cfg
 	cfg, err := recordArchitectures(&ui.Recorder{}, path, cfg, map[string]string{"home-a": "amd64", "home-b": "amd64"}, false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if original.Sites["home-a"].Arch != "" {
+		t.Fatal("a dry run changed the configuration it was given")
 	}
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {

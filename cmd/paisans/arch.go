@@ -72,6 +72,14 @@ func recordArchitectures(r ui.Reporter, path string, cfg *config.Config, read ma
 			}
 			cfg = reread
 		} else {
+			// Copy before setting so the caller's configuration is left as it
+			// was read.
+			planned := *cfg
+			planned.Sites = make(map[string]config.Site, len(cfg.Sites))
+			for name, site := range cfg.Sites {
+				planned.Sites[name] = site
+			}
+			cfg = &planned
 			for _, name := range names {
 				site := cfg.Sites[name]
 				site.Arch = missing[name]
