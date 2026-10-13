@@ -172,7 +172,7 @@ func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 // an app leaves out, and the app's own value for one it sets.
 func TestACatalogBlueprintsTemplatesSeeItsDefaults(t *testing.T) {
 	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	repo := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/journal/blueprint.yaml": `apiVersion: paisans.blueprint/v1
