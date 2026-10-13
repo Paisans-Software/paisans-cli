@@ -263,9 +263,10 @@ behalf. The identity provider itself sits upstream of MAS, one hop further
 out than every other application's OIDC client, which is why its client
 takes a different redirect URI, in the form
 `https://<hostname>/upstream/callback/<ulid>`. `apply` creates the client with
-that URI, as it does every other app's, and `paisans init` prints it alongside
-every other owed secret, because a client with the wrong path fails at the end
-of the first sign in rather than when it is made. MAS keeps its own Postgres
+that URI, as it does every other app's, and `paisans init --verbose` prints it
+under the line naming the sign in clients apply will create, because a client
+with the wrong path fails at the end of the first sign in rather than when it
+is made. MAS keeps its own Postgres
 database beside the homeserver's, which is part of why `placement: cluster`
 is refused above: a clustered site has nowhere to put either.
 
@@ -2110,11 +2111,13 @@ terminal with echo off, which leaves no copy on the screen. The owed list is
 the one `init` and `apply` print, so the operator is asked for exactly what
 they were told to supply. Each answer is written before the next is asked, so
 an interrupted walk keeps what was typed; an empty answer skips the key, which
-stays owed and is named at the end. A sign in client is not asked for: it is a
-client ID and a secret together, and `apply --execute` creates and records it.
+stays owed and is named at the end. A sign in client is never owed, so it is
+not asked for: it is pending, a client ID and a secret together that `apply
+--execute` creates at Pocket ID and records.
 With no key and a pipe on stdin it refuses, since one value could belong to
 any owed key. It accepts
-a key that is already set (a rotation), a key `init` reports as owed, or any key
+a key that is already set (a rotation), a key `init` reports as owed or
+pending (a client made by hand may be recorded), or any key
 under `external`; it refuses a generated key nobody created, because `init`
 creates those with the shapes their consumers require, and it refuses an unknown
 top level section, because a value written where nothing reads it looks

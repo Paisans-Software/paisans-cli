@@ -91,8 +91,8 @@ func TestExampleSecretsLoadAndPassEveryCheck(t *testing.T) {
 	}
 }
 
-// oidc_clients.<name> is owed by every app that is not the identity provider
-// itself, per the owed() reasoning below. The example shows a captured value
+// oidc_clients.<name> is pending for every app that is not the identity provider
+// itself, per pending() in secretsgen.go. The example shows a captured value
 // for every app that needs one, including the homeserver's, whose client
 // belongs to Matrix Authentication Service rather than to Synapse.
 func TestExampleOIDCClientsCoverEveryApp(t *testing.T) {

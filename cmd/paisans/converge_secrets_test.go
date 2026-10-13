@@ -481,7 +481,7 @@ func TestConvergeEndsWithDeploymentComplete(t *testing.T) {
 }
 
 // The closing notes name only what the operator supplies. A sign in client
-// is owed until apply creates and records it, so it is not one of them.
+// is pending, since apply creates and records it, so it is not one of them.
 func TestConvergeLeftNamesNoSignInClient(t *testing.T) {
 	configPath, secretsPath := secretsDir(t, "version: 1\n")
 	cfg, err := config.Load(configPath)

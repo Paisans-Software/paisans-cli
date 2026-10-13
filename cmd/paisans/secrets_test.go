@@ -69,10 +69,10 @@ func TestSecretsSetWritesAnOwedKeyAndPrintsOnlyItsName(t *testing.T) {
 		t.Errorf("stored %q, want the value less its one trailing newline", got)
 	}
 
-	// An OIDC client is owed for every app with a sign in, so it may be
-	// created here too.
+	// An OIDC client is pending for every app with a sign in, which apply
+	// creates, and one made by hand may be recorded here instead.
 	if _, err := set(t, configPath, secretsPath, "oidc_clients.talk.client_secret", "s3cret"); err != nil {
-		t.Errorf("an owed OIDC client secret was refused: %v", err)
+		t.Errorf("a pending OIDC client secret was refused: %v", err)
 	}
 }
 
@@ -493,8 +493,7 @@ func atTerminal(t *testing.T, answers map[string]string) (stdin *os.File, asked 
 	return f, asked
 }
 
-// owedLeaves is every owed key the walk asks for: all of them but a sign in
-// client, which apply creates and records itself.
+// owedLeaves is every owed key the walk asks for.
 func owedLeaves(t *testing.T, configPath, secretsPath string) []string {
 	t.Helper()
 	cfg, err := config.Load(configPath)
@@ -505,13 +504,7 @@ func owedLeaves(t *testing.T, configPath, secretsPath string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
-	for _, name := range secretsgen.OwedNames(cfg, secrets) {
-		if !strings.HasPrefix(name, "oidc_clients.") {
-			out = append(out, name)
-		}
-	}
-	return out
+	return secretsgen.OwedNames(cfg, secrets)
 }
 
 // With no key at a terminal, it asks for each owed key in turn, writes each

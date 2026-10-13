@@ -449,3 +449,26 @@ func TestCheckMeshLiveSaysWhoHoldsTheSubnet(t *testing.T) {
 		}
 	}
 }
+
+// A sign in client is not the operator's to provide: apply creates it at
+// Pocket ID and records it. init names the clients apply will create on one
+// line, never as a warning, and warns only for what the operator owes.
+func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
+	path, rec := initWorld(t, nil, fakeSites(), nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Has("warn", "oidc_clients.") {
+		t.Errorf("a sign in client was warned about as a decision:\n%s", rec.Lines())
+	}
+	if !rec.Has("warn", "external.acme_dns_token needs a decision") {
+		t.Errorf("an owed secret is no longer warned about:\n%s", rec.Lines())
+	}
+	want := "7 sign in clients (blog, chat, docs, gate, invite, status, talk) are created by apply"
+	if !rec.Has("pending", want) {
+		t.Errorf("no pending line %q:\n%s", want, rec.Lines())
+	}
+	if !rec.Has("detail", "https://talk.example.org/") {
+		t.Errorf("--verbose does not say what apply creates for each client:\n%s", rec.Lines())
+	}
+}
