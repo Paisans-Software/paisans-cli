@@ -26,7 +26,10 @@ const VersionLabel = "org.opencontainers.image.version"
 // beside its digests. A digest is what pins a build; a label is what a
 // publisher wrote in it, and a build without one is not an error.
 func (r Registry) Version(ref string) (string, error) {
-	builds, err := r.platforms(ref)
+	if !strings.Contains(ref, "@") {
+		return "", fmt.Errorf("%s names no digest", ref)
+	}
+	builds, err := r.Builds(ref)
 	if err != nil {
 		return "", err
 	}
@@ -80,18 +83,24 @@ type Build struct {
 	Volumes []string
 }
 
-// platforms reads the configuration of every platform of the build ref
-// names by digest: each linux entry of an index, skipping the attestations
-// an index lists beside them, or the one manifest of an image published for
-// a single platform.
-func (r Registry) platforms(ref string) ([]Build, error) {
-	at := strings.LastIndex(ref, "@")
-	if at < 0 {
-		return nil, fmt.Errorf("%s names no digest", ref)
+// Builds reads the configuration of every platform of the build ref names,
+// by digest or by tag: each linux entry of an index, skipping the
+// attestations an index lists beside them, or the one manifest of an image
+// published for a single platform. It reads anonymously, as Digest does, and
+// needs no Docker, so it answers for every platform from any workstation.
+func (r Registry) Builds(ref string) ([]Build, error) {
+	name, digest := ref, ""
+	if at := strings.LastIndex(ref, "@"); at >= 0 {
+		name, digest = ref[:at], ref[at+1:]
 	}
-	name, digest := ref[:at], ref[at+1:]
 	if slash, colon := strings.LastIndex(name, "/"), strings.LastIndex(name, ":"); colon > slash {
+		if digest == "" {
+			digest = name[colon+1:]
+		}
 		name = name[:colon]
+	}
+	if digest == "" {
+		digest = "latest"
 	}
 	host, repo := locate(name)
 	if repo == "" {

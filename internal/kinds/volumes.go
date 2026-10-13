@@ -12,9 +12,11 @@ import (
 )
 
 // ImageVolumes records the VOLUME paths each image this toolkit pins declares,
-// as `docker image inspect --format '{{json .Config.Volumes}}'` printed them
-// for linux/amd64 on 2026-10-07, after a `docker pull` of each exact
-// reference. An empty list means the image declares none.
+// on every platform it is published for. They were first read with `docker
+// image inspect` for linux/amd64 on 2026-10-07; on 2026-10-13 every entry was
+// read from the registry for each of its platforms by
+// TestRecordedVolumesMatchEveryPlatform, and every platform agreed with it.
+// An empty list means the image declares none.
 //
 // A declared volume that the compose file does not mount at exactly that path
 // gets an anonymous volume from Docker, a new one for every container, and
@@ -31,9 +33,14 @@ import (
 // an operator's own `images` override; this table covers what the toolkit
 // ships.
 //
-// Inspect with --platform linux/amd64 on a machine of another architecture:
-// Docker's containerd image store otherwise answers for the native platform,
-// and printed null for images that do declare volumes.
+// Record a new reference by running that test, which reads the registry
+// anonymously and needs no Docker:
+//
+//	go test -tags registry_integration -run TestRecordedVolumesMatchEveryPlatform ./internal/kinds/
+//
+// A `docker image inspect` on one machine answers for one platform only, and
+// on an arm64 workstation Docker's containerd image store printed null for
+// images that do declare volumes.
 var ImageVolumes = map[string][]string{
 	// Applications, the defaults in each kind's record.
 	"docker.io/cloudamqp/amqproxy:3.2.0":                      nil,
@@ -45,15 +52,11 @@ var ImageVolumes = map[string][]string{
 	"ghcr.io/element-hq/matrix-authentication-service:1.24.0": nil,
 	"ghcr.io/element-hq/element-web:v1.12.27":                 nil,
 	"quay.io/oauth2-proxy/oauth2-proxy:v7.15.4":               nil,
-	// /data at 1.1.0-oidc.3, inspected as above; 1.1.0-oidc.4 is built from
-	// the same Dockerfile, whose only VOLUME is /data, and is to be inspected
-	// once published.
+	// /data, the Dockerfile's only VOLUME.
 	"ghcr.io/paisans-software/uptime:1.1.0-oidc.4": {"/data"},
-	// Distroless, declares none: `docker image inspect` printed null for this
-	// exact tag on 2026-10-12.
+	// Distroless, declares none.
 	"ghcr.io/paisans-software/paisans-invite:0.1.0": nil,
-	// Declares none: cmd/admin-reconciler/Dockerfile has no VOLUME, checked with
-	// `docker image inspect` on a local build on 2026-10-08.
+	// Declares none: cmd/admin-reconciler/Dockerfile has no VOLUME.
 	"ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d": nil,
 	// A pinned app's own database, one per postgres_version the toolkit
 	// knows. The path moved in 18; see PostgresDataMount. The Debian trixie
@@ -73,10 +76,7 @@ var ImageVolumes = map[string][]string{
 	"gcr.io/etcd-development/etcd:v3.5.16": nil,
 	"haproxy:3.0-alpine":                   nil,
 	"dxflrs/garage:v1.0.1":                 nil,
-	// The per site heartbeat (internal/render/heartbeat.go). curl's image
-	// declares no VOLUME in its Dockerfile (curl/curl-container, alpine
-	// variant); recorded from the Dockerfile rather than an inspect, which
-	// is still to be run against the exact reference.
+	// The per site heartbeat (internal/render/heartbeat.go).
 	"docker.io/curlimages/curl:8.11.1": nil,
 }
 
@@ -89,18 +89,21 @@ var ImageVolumes = map[string][]string{
 // names when it plans (see acme.Published), so no reference to it stays fixed
 // for long enough to be a key. Every build comes from the same Dockerfile in
 // Paisans-Software/caddy-dns, and the build the tag named on 2026-10-11
-// (sha256:b401d1cb...) declared none, inspected as above. `paisans apply`
-// inspects the exact build it deploys against the host's copy all the same,
-// so a later build that declared a path is still refused before it runs.
+// (sha256:b401d1cb...) declared none; the registry test reads whichever
+// build it names now, on every platform. `paisans apply` inspects the exact
+// build it deploys against the host's copy all the same, so a later build
+// that declared a path is still refused before it runs.
 //
 // The two forks' channel tags are the others: the mbin and writefreely kinds
 // name stack-1, which a maintainer moves to each promoted release
 // (docs/specs/2026-10-11-stack-channels.md). Each fork builds every release
 // from one Dockerfile. Mbin's declares /app/var/ (docker/Dockerfile:9 at
 // Paisans-Software/mbin v1.15.0+paisans), and 1.15.0-paisans, its first
-// promotion, declared exactly that when inspected as above on 2026-10-11.
-// WriteFreely's declares none (Dockerfile at writefreely-wisp develop
-// f95d840), and 0.21.0-wisp printed null inspected the same way.
+// promotion, declared exactly that when inspected for linux/amd64, its only
+// platform, on 2026-10-11. WriteFreely's declares none (Dockerfile at
+// writefreely-wisp develop f95d840), and 0.21.0-wisp printed null inspected
+// the same way. The registry test checks each channel tag on every platform
+// it names.
 var RepositoryVolumes = map[string][]string{
 	acme.Repository:                          nil,
 	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
