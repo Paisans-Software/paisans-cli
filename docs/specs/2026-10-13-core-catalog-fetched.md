@@ -133,7 +133,7 @@ blueprints already in the cache, so no test reaches the network.
 A fetched core blueprint can change with a new catalog commit, but Go code that
 tests an app's name cannot. Every place outside tests that names `mbin`,
 `outline`, `synapse`, `element` or `writefreely` goes, by founder decision,
-2026-10-13, in one of four ways.
+2026-10-13, in one of the ways below.
 
 **Rules become CEL checks in the blueprint.** The single app refusals and
 warnings in `internal/validate` move to each blueprint's `checks`, under the
@@ -146,23 +146,45 @@ rule ids they have today, so an operator's output does not change:
 | the mail settings `mbin_mail.go` checks | mbin |
 | a federation setting that is not a real boolean | mbin, writefreely |
 | a placement that makes the homeserver less available than its app | synapse |
+| a WriteFreely numeric setting out of its range | writefreely |
 
 Some of these read more than CEL sees today, so the environment gains
-`app.sites` (the sites the app is placed on), `app.storage` (its storage mode
-and bucket names) and `deployment.sites` (each site's name and roles), which
-the blueprints spec lists but `internal/kinds/cel.go` does not yet declare. Each
-is part of the helper contract.
+`app.name`, `app.sites` (the sites the app is placed on), `app.storage` (its
+storage mode, after the Garage default, and its bucket names) and
+`deployment.sites` (each site's name and roles), which the blueprints spec
+lists but `internal/kinds/cel.go` does not yet declare. Each is part of the
+helper contract.
+
+**A check's message may be an expression.** Today's rules name what is wrong,
+the bucket, the value, the number of sites, and a check's `message` is fixed
+text. A check may give `message_expr` instead: a CEL expression over the same
+variables, of type string, whose value is the message. A check may also give
+`key_expr`, for a rule whose key depends on where a value came from, as the
+mail rules' does (`smtp.from_address` or `apps.<name>.smtp.from_address`).
 
 **Facts become fields the blueprint declares**, and the Go that tested a name
-reads the field:
+reads the field. Three already exist: `oidc.callback`, `oidc.pkce` and
+`oidc.reads_groups` are parsed and declared by the core catalog, so the Go
+beside them (`render/appview.go`'s callback paths, `kinds.MbinRedirectURI`,
+`kinds.MASRedirectURI`, `secretsgen`'s reason by name) is deleted. New:
 
 | Field | Replaces |
 |---|---|
-| `oidc.callback_path` | the homeserver's and Mbin's own callback paths in `render/appview.go` |
-| `oidc.pkce` | Mbin always sending a code challenge, in `secretsgen` |
-| `oidc.reads_groups` | the client restriction reason for apps that read no groups claim, in `secretsgen` |
 | `storage.local_only_reason` | why Synapse has no S3 form, in `validate/storage.go` |
-| `ports.served_by_web_server` | Synapse's port, which nothing dials on the mesh, in `render/ports.go` |
+| `services[].port` | the homeserver's authentication service, its second listener: published on the site's mesh address, given its own gateway upstreams and checked for collisions (`render/plan.go`, `appview.go`, `ports.go`, `site.go`) |
+| `database.extra` | the authentication service's second database, `<database>_<name>`, which the blueprint's `initdb.d` creates |
+
+**Template helpers are generic.** Catalog templates call helpers named for one
+app today. Each becomes a helper of the contract that names none, or data the
+blueprint already declares, and the core catalog's templates change with it:
+
+| Today | Becomes |
+|---|---|
+| `MailerDSN` | `SMTPDSN`, the same Symfony DSN encoding |
+| `MbinSenderEmail`, `MbinContactEmail` | `SMTPSender` and `ContactEmail`, with the fallbacks they have today |
+| `MbinLockedSettings`, `WriteFreelyLockedSettings` | `LockedSettings`, read from the blueprint's `gate_settings` |
+| `MbinQueue` | `.Setting "queue"`, with the default the blueprint declares |
+| `masUpstreamProviderID` | `stableULID`, a ULID derived from the app's name, so rendering stays deterministic |
 
 **Links between apps become a capability.** Element finds its homeserver, and
 a homeserver's `server_name` depends on whether it delegates to a well known
@@ -173,13 +195,29 @@ does today, and element consumes it. A template reads the consumed values as
 `.Linked "matrix-homeserver" "server_name"`. The role is named for what it is,
 so a second homeserver blueprint provides the same one.
 
-**Rotation steps become in-app actions.** Rotating Mbin's RabbitMQ password
-and OAuth2 keys, and Synapse's and Outline's self rotated secrets, runs
-commands in their containers from Go today (`secretsrotate/rabbitmq.go`,
-`appsecret.go`, `cmd/paisans/secretsrotate.go`). Each moves to the blueprint
-as a step under its secret: the service to run in, the command, and the value
-it is given, with the boundary the blueprints spec sets for every in-app
-action (*Capabilities, helpers and in-app actions*).
+**Secrets say how they are made and what rotating them costs.** Value
+formats, costs and the keys never rotated are chosen by key name in Go
+today (`secretsgen`, `secretsrotate`, `cmd/paisans/secretsrotate.go`). Each
+generated secret in a blueprint gains:
+
+* `format`, one of a closed set the toolkit implements: `password`, `hex32`,
+  `rsa-pem`, and `rsa-keypair` for a private and public key encrypted under
+  another of the app's secrets.
+* `rotation_cost`: `signs-out` or `restart`, which `secrets rotate` states
+  before it asks.
+* `never_rotate`, with the reason, for a key whose rotation would lose data,
+  as Synapse's and Outline's encryption keys would.
+* `group`, for keys that rotate together as one unit, as Mbin's OAuth
+  passphrase, encryption key and keypair do.
+
+**A rotation that needs the running app is an in-app action.** Only one does
+today: Mbin's RabbitMQ password, which `rabbitmqctl` changes inside the
+`rabbitmq` service before the stack is given the new value. Its blueprint
+declares the step under the secret: the service to run in, the command, the
+value on stdin, and the command that says the new value is accepted, with the
+boundary the blueprints spec sets for every in-app action (*Capabilities,
+helpers and in-app actions*). The toolkit keeps the stages, the gates between
+them and the order across sites.
 
 **What resolves from the blueprint instead of a name:**
 
@@ -188,14 +226,15 @@ action (*Capabilities, helpers and in-app actions*).
   or `oidc.default_admin_group`, and points at the Pocket ID app. Only Mbin
   gets that message today.
 * **The create wizard** keeps its menu in Go: which blueprint is offered as
-  talk, docs, blog, chat and web. Everything else it asks of a blueprint,
-  whether it can join the cluster and whether its files go to object storage
-  when it does, it reads from the blueprint (`kinds.UsesPostgres`, the
-  blueprint's `storage`) rather than from `clusterable` and `storesObjects`.
+  talk, docs, blog, chat and web, and which site each entry goes on when there
+  are two. Everything else it asks of a blueprint, whether it can join the
+  cluster and whether its files go to object storage when it does, it reads
+  from the blueprint (`kinds.UsesPostgres`, the blueprint's `storage`) rather
+  than from `clusterable` and `storesObjects`.
 
 **The order across the two repositories.** The toolkit gains the CEL
-variables, the fields, `.Linked` and the rotation steps first, while the Go
-rules still run. The core catalog then declares them, in a pull request to
+variables, message expressions, the fields, the generic helpers, `.Linked` and
+the secret fields first, while the Go rules still run. The core catalog then declares them, in a pull request to
 `Paisans-Software/paisans-blueprints`, and the toolkit pins that commit. Only
 then are the Go rules deleted, with the tests showing the same refusals and
 warnings from the blueprints.
@@ -209,10 +248,13 @@ warnings from the blueprints.
 3. Core read from the cache: `config.knownKinds` and `kinds` built in records
    reduced to the reserved four, `internal/blueprints/core/` emptied but for the
    pin, and core in the snapshot and the grant review.
-4. The CEL variables, the new fields, `.Linked` and declared rotation steps in
-   the toolkit, beside the Go rules.
+4. In the toolkit, beside the Go rules, one pull request each: the CEL
+   variables and message expressions; `services[].port`, `database.extra` and
+   `storage.local_only_reason`; the generic helpers and `.Linked`; the secret
+   fields and the in-app rotation step.
 5. The core catalog declares them; the toolkit pins that commit and deletes
-   the Go rules, `clusterable`, `storesObjects` and the Mbin admin refusal.
+   the Go rules, the named helpers, `clusterable`, `storesObjects`, the Mbin
+   admin refusal and the `config.Kind` constants for core blueprints.
 6. README, `docs/commands.md`, `docs/development.md`, and the blueprints spec's
    status.
 
