@@ -695,12 +695,24 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if leftAlone {
 				r, peers = nil, nil
 			}
-			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, peers)
+			var fresh Resolver
+			if FreshImages != nil && !leftAlone {
+				fresh = FreshImages()
+			}
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers)
 			if err != nil {
 				finish(done, err)
 				return nil, err
 			}
 			content = pinned
+			if track := unresolvedTrack(content); track != "" && !leftAlone {
+				err := &ui.Problem{
+					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
+					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
+				}
+				finish(done, err)
+				return nil, err
+			}
 			if !leftAlone {
 				for _, pin := range pins {
 					note, err := platformCheck(site, o.arch, pin, r)

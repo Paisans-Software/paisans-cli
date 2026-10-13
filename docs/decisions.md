@@ -2286,6 +2286,16 @@ release and for every operator to upgrade.
   someone bumps it.
 * **A separate foundation repository:** a second place to bump and a second
   release to tag, for images the core catalog can hold beside its blueprints.
+* **A track as a mapping**, `{repository, tags}`: a second shape beside the
+  reference every other image key takes, where a tag holding the pattern
+  reads as the reference it resolves to.
+* **Reading each resolved build's volumes from the registry at plan time:**
+  the host check apply already makes sees every build, an operator's included,
+  so a second check would only move the refusal earlier, at the cost of a
+  configuration read per image and platform on every run.
+* **Holding a narrower command to the builds the deployment record names:**
+  every such command already keeps what the host runs, and the only image it
+  must resolve is one nothing runs, for which there is no build to hold.
 * This reverses the per blueprint digest pin of
   `docs/specs/2026-10-13-core-catalog-fetched.md`, which was what said core
   files were the ones a release was tested with. With catalogs unsigned and

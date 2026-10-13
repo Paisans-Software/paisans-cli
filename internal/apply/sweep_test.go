@@ -134,7 +134,7 @@ func TestTheSweepReachesRecordedRepositoriesOnly(t *testing.T) {
 func TestTheSweepKeepsADigestPinnedCaddy(t *testing.T) {
 	host := gatewayAt(t, buildA)
 	const caddyRepo = "ghcr.io/paisans-software/caddy"
-	pinned := caddyRepo + ":2@" + buildA
+	pinned := caddyTag + "@" + buildA
 	host.images = imageLine(caddyRepo, "<none>", fakeID(pinned)) +
 		imageLine(caddyRepo, "<none>", fakeID("an older build"))
 

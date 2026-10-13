@@ -954,6 +954,12 @@ func checkStandby(r ui.Reporter, cfg *config.Config, plan *apply.Plan, site stri
 // apply.ResolveImages. Tests replace it, so that none reaches a registry.
 var imageDigests apply.Resolver = imagedigest.Registry{}
 
+func init() {
+	// A command that starts a stack where none ran resolves its tracks
+	// through the same resolver apply does.
+	apply.FreshImages = func() apply.Resolver { return imageDigests }
+}
+
 // cacheDigests puts an imagedigest.Cache in front of imageDigests for the
 // rest of an apply, and returns what puts it back. Every plan the apply makes
 // then names the build its first plan resolved each tag to: without --site

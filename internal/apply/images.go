@@ -54,6 +54,32 @@ func ResolveImages(r Resolver) Option {
 	return func(o *options) { o.resolver = r }
 }
 
+// FreshImages, when set, is what Build resolves an image through when the
+// image follows a track, runs nowhere on the host yet, and the plan has no
+// resolver of its own (ResolveImages). A command that starts a stack on a
+// site that had none, such as `site add`, then starts it on the newest build
+// of the track: a track is a pattern, which no host can pull. Every image
+// the host already runs is kept, as without a resolver. `paisans` sets it.
+var FreshImages func() Resolver
+
+// unresolvedTrack is the first image line of compose still naming a track,
+// empty when there is none.
+func unresolvedTrack(compose string) string {
+	for _, line := range strings.Split(compose, "\n") {
+		if ref, ok := strings.CutPrefix(strings.TrimSpace(line), "image: "); ok && imagedigest.IsTrack(ref) {
+			return ref
+		}
+	}
+	return ""
+}
+
+// Tracker is a Resolver that can also put a track (imagedigest.IsTrack) on
+// the newest tag matching it. imagedigest.Registry and imagedigest.Cache are
+// both.
+type Tracker interface {
+	Track(ref string) (string, error)
+}
+
 // Platformer is a Resolver that can also name the platforms a build was
 // published for. imagedigest.Registry and imagedigest.Cache are both.
 type Platformer interface {
@@ -121,7 +147,14 @@ func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver)
 		seen[image.Image] = true
 		pin := ImagePin{Image: image.Image, Reference: image.Image}
 		if ref := kinds.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
-			digest, err := r.Digest(image.Image)
+			tagged, err := image.Image, error(nil)
+			if t, ok := r.(Tracker); ok && imagedigest.IsTrack(image.Image) {
+				tagged, err = t.Track(image.Image)
+			}
+			digest := ""
+			if err == nil {
+				digest, err = r.Digest(tagged)
+			}
 			if err != nil {
 				notes = append(notes, Note{
 					Hint: fmt.Sprintf("could not resolve %s", ui.Name(image.Image)),
@@ -129,7 +162,7 @@ func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver)
 				})
 				continue
 			}
-			pin.Reference = image.Image + "@" + digest
+			pin.Reference = tagged + "@" + digest
 		}
 		note, err := platformCheck(site, arch, pin, r)
 		if err != nil {
@@ -286,7 +319,7 @@ func buildKey(ref string) string {
 // Caddy or this plan did not read its compose file.
 func (p *Plan) Caddy() *ImagePin {
 	for i := range p.Pins {
-		if p.Pins[i].Stack == infraStack && p.Pins[i].App == "" {
+		if p.Pins[i].Stack == infraStack && p.Pins[i].App == "" && len(p.Pins[i].Services) == 1 && p.Pins[i].Services[0] == "caddy" {
 			return &p.Pins[i]
 		}
 	}
@@ -321,7 +354,7 @@ func (p *Plan) FirstPins() []ImagePin {
 // ResolveImages and OtherSites describe. compose is the file as rendered,
 // current and found the host's copy. It returns the file to compare and
 // write, the pins for the plan and its manifest, and notes for the operator.
-func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
+func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
 	rendered, err := kinds.ComposeMounts(compose)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("reading the images its compose file names: %w", err)
@@ -343,7 +376,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 				stackPeers = append(stackPeers, peer)
 			}
 		}
-		pin, imageNotes, err := pinImage(site, image, services, host, r, stackPeers)
+		pin, imageNotes, err := pinImage(site, image, services, host, r, fresh, stackPeers)
 		if err != nil {
 			return "", nil, nil, err
 		}
@@ -375,10 +408,14 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 // services that run it, host the host's compose file, nil when it has none.
 // The pin is nil when nothing was pinned: no resolver, and no build of the
 // tag on the host to keep.
-func pinImage(site string, image render.ComposeImage, services []string, host map[string]kinds.ServiceMounts, r Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
+func pinImage(site string, image render.ComposeImage, services []string, host map[string]kinds.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
 	want := image.Image
 	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want}
 	deployed, _ := deployedRef(host, services)
+	if imagedigest.IsTrack(deployed) {
+		// No host can pull a track, so a file naming one runs nothing.
+		deployed = ""
+	}
 	pin.Deployed = deployed
 	ref := kinds.ParseReference(want)
 	label := imageLabel(image)
@@ -396,8 +433,20 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 			pin.Reference, pin.Source = want, "configured"
 			return pin, nil, nil
 		}
+		if imagedigest.IsTrack(want) && fresh != nil {
+			// A track is a pattern, not a tag a host can pull: one that
+			// runs nowhere here yet is resolved for a command that starts
+			// it (ResolveFresh).
+			resolved, err := resolve(want, fresh)
+			if err != nil {
+				return nil, nil, unresolved(image, "", err, fresh)
+			}
+			pin.Reference, pin.Source = resolved, "registry"
+			return pin, nil, nil
+		}
 		// Nothing runs: the tag is rendered as it is, and the next apply
-		// pins it.
+		// pins it. A track rendered as it is cannot be pulled, so Build
+		// refuses to write one (unresolvedTrack).
 		return nil, nil, nil
 	}
 	if ref.Digest != "" || ref.Tag == "" {
@@ -421,17 +470,17 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		// No site of the app runs it yet: it is resolved like any other.
 	}
 
-	digest, failed := r.Digest(want)
+	resolved, failed := resolve(want, r)
 	if failed == nil {
-		pin.Reference, pin.Source = want+"@"+digest, "registry"
+		pin.Reference, pin.Source = resolved, "registry"
 		return pin, resolvedNotes(label, *pin), nil
 	}
 
 	// The registry gave no digest. What the host runs is what the operator
 	// last saw planned, so it is the safe thing to keep, provided it is the
-	// same tag, pinned or bare: another tag or another image is not what the
-	// configuration names.
-	if deployed != "" && nameOf(deployed) == want {
+	// same tag, pinned or bare, or a build on the same track: another tag or
+	// another image is not what the configuration names.
+	if deployed != "" && (nameOf(deployed) == want || imagedigest.OnTrack(want, deployed)) {
 		pin.Reference, pin.Source = deployed, "deployed"
 		kept := fmt.Sprintf("keeps %s, the build this site runs", ui.Name(deployed))
 		if digestOf(deployed) == "" {
@@ -443,6 +492,28 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		}}, nil
 	}
 	return nil, nil, unresolved(image, deployed, failed, r)
+}
+
+// resolve is the build want names now, as a reference with its digest: a
+// track is first put on the newest tag that matches it, then that tag is
+// resolved like any other.
+func resolve(want string, r Resolver) (string, error) {
+	tagged := want
+	if imagedigest.IsTrack(want) {
+		t, ok := r.(Tracker)
+		if !ok {
+			return "", fmt.Errorf("this resolver lists no tags")
+		}
+		var err error
+		if tagged, err = t.Track(want); err != nil {
+			return "", err
+		}
+	}
+	digest, err := r.Digest(tagged)
+	if err != nil {
+		return "", err
+	}
+	return tagged + "@" + digest, nil
 }
 
 // unresolved is the refusal for an image whose tag could not be resolved,
@@ -466,6 +537,19 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	named := imageLabel(image) + " " + ui.Name(want)
 	setting := ui.Name(image.Setting())
 	host := imagedigest.Host(want)
+	if image.Setting() == "" {
+		// No setting of the configuration decides it: it is the core
+		// catalog's foundation image, so the fix is the catalog's.
+		explain := fmt.Sprintf("Run apply again once this workstation reaches %s.", host)
+		if errors.Is(failed, imagedigest.ErrNotFound) || errors.Is(failed, imagedigest.ErrDenied) {
+			explain = "It is the core catalog's own image (foundation.yaml), and its track names nothing this registry publishes anonymously. A release of the core catalog fixes it; pinning core to an older release in `catalogs` works until then."
+		}
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("could not resolve %s (%s)", named, host),
+			Explain: explain,
+			Cause:   failed,
+		}
+	}
 	switch {
 	case errors.Is(failed, imagedigest.ErrNotFound):
 		return &ui.Problem{
@@ -709,7 +793,10 @@ func servicesNaming(mounts map[string]kinds.ServiceMounts, image string) []strin
 // says which of an app's images it is, and Setting names its service.
 func imageLabel(image render.ComposeImage) string {
 	if image.App == "" {
-		return "Caddy image"
+		if image.Setting() == "acme.image" {
+			return "Caddy image"
+		}
+		return ui.Name(strings.Join(image.Services, ",")) + " image"
 	}
 	return ui.Name(image.App) + " image"
 }

@@ -7,29 +7,48 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"gopkg.in/yaml.v3"
+
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// The core catalog. The binary carries only its pin, internal/blueprints/
-// core/pin.yaml: the commit and each blueprint's SHA-256. The first time a
-// core blueprint is asked for, every one at the pin is read from the
-// catalog cache, fetched into it when it is not there, and checked against
-// its SHA-256, which is what says the files are the ones the toolkit's
-// maintainers released (docs/specs/2026-10-13-core-catalog-fetched.md). A
-// configuration that pins core to a commit of its own replaces them all.
+// The core catalog. The binary carries only its URL. The first time a core
+// blueprint or the foundation is asked for, the newest release of the core
+// catalog this binary can read is chosen, fetched into the catalog cache when
+// it is not there, and every blueprint and the foundation in it are read
+// (docs/specs/2026-10-13-images-follow-tracks.md, "The core catalog follows
+// its newest release"). A configuration that pins core to a release of its
+// own replaces them all.
 
-// core is whether the core blueprints have been read, and what went wrong
-// if reading them failed. It is read once per process.
-var core struct {
-	sync.Mutex
-	done bool
-	err  error
+// CoreURL is where the core catalog is published. PAISANS_CORE_CATALOG
+// names another, for a fork's own core catalog and for tests.
+const CoreURL = "https://github.com/Paisans-Software/paisans-blueprints"
+
+// coreURL is CoreURL, or PAISANS_CORE_CATALOG when it is set.
+func coreURL() string {
+	if url := os.Getenv("PAISANS_CORE_CATALOG"); url != "" {
+		return url
+	}
+	return CoreURL
 }
 
-// LoadCore reads every core blueprint at the binary's pin from url, the
-// pin's own when empty, unless they have been read already. The answer of
-// the first call holds for the process.
+// coreTries is how many releases, newest first, are tried before giving up
+// on finding one this binary reads.
+const coreTries = 5
+
+// core is whether the core catalog has been read, which release, what was
+// skipped, and what went wrong if reading failed. It is read once per
+// process.
+var core struct {
+	sync.Mutex
+	done    bool
+	err     error
+	release config.Catalog
+	skipped []string
+}
+
+// LoadCore reads the core catalog from url, coreURL() when empty, unless it
+// has been read already. The answer of the first call holds for the process.
 func LoadCore(url string) error {
 	core.Lock()
 	defer core.Unlock()
@@ -37,53 +56,105 @@ func LoadCore(url string) error {
 		return core.err
 	}
 	core.done = true
-	core.err = readCore(url)
+	if url == "" {
+		url = coreURL()
+	}
+	core.release, core.skipped, core.err = readCore(url)
 	return core.err
 }
 
-func readCore(url string) error {
-	pin, err := blueprints.CorePin()
+// CoreRelease is the core catalog release this process read, and each newer
+// release it skipped with why, for the plan to name.
+func CoreRelease() (config.Catalog, []string) {
+	core.Lock()
+	defer core.Unlock()
+	return core.release, append([]string(nil), core.skipped...)
+}
+
+// readCore chooses the newest release at url whose blueprints and foundation
+// this binary reads, and records them. A forge that cannot be reached falls
+// back on the release this workstation last read, from its cache or from an
+// installed snapshot, since a release that rendered once still renders.
+func readCore(url string) (config.Catalog, []string, error) {
+	releases, err := Releases(url)
+	if err != nil {
+		last, ok := lastCore(url)
+		if !ok {
+			return config.Catalog{}, nil, fmt.Errorf("the core catalog: %w", err)
+		}
+		dir, ok := coreDir(last)
+		if !ok {
+			return config.Catalog{}, nil, fmt.Errorf("the core catalog: %w, and the release %s last read here is no longer in the cache", err, last.Tag)
+		}
+		if err := readCoreAt(dir, last); err != nil {
+			return config.Catalog{}, nil, err
+		}
+		return last, []string{fmt.Sprintf("the core catalog could not be listed (%v), so the release last read here, %s, was used", err, last.Tag)}, nil
+	}
+	var skipped []string
+	for i, rel := range releases {
+		if i == coreTries {
+			break
+		}
+		cat := config.Catalog{URL: url, Tag: rel.Tag, Commit: rel.Commit}
+		dir, err := Fetch(cat)
+		if err == nil {
+			err = readCoreAt(dir, cat)
+		}
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: %v", rel.Tag, err))
+			continue
+		}
+		rememberCore(cat)
+		return cat, skipped, nil
+	}
+	return config.Catalog{}, skipped, fmt.Errorf("the core catalog at %s has no release this toolkit reads: %s. A newer toolkit reads the newer releases", url, strings.Join(skipped, "; "))
+}
+
+// coreDir is where a core release can be read from: the cache, or an
+// installed snapshot.
+func coreDir(cat config.Catalog) (string, bool) {
+	cache, err := CacheDir()
+	if err == nil {
+		dir := filepath.Join(cache, cat.Commit)
+		if _, err := os.Stat(filepath.Join(dir, completeMark)); err == nil {
+			return dir, true
+		}
+	}
+	return snapshotDir(cat.Commit)
+}
+
+// readCoreAt reads every blueprint and the foundation of the core catalog
+// at dir, and records them only when every one reads: a release with one
+// wrong is skipped whole, not half known.
+func readCoreAt(dir string, cat config.Catalog) error {
+	// An installed snapshot holds only the blueprints and the foundation a
+	// configuration used, not the catalog's own file.
+	if fetched(dir) {
+		if _, err := ReadCatalog(dir); err != nil {
+			return err
+		}
+	}
+	f, err := readFoundation(dir)
 	if err != nil {
 		return err
-	}
-	if url == "" {
-		url = pin.URL
-	}
-	dir, err := Fetch(config.Catalog{URL: url, Commit: pin.Commit})
-	if err != nil {
-		// A snapshot of the commit holds the core blueprints a configuration
-		// uses, which is what a recovery with no forge needs.
-		snap, ok := snapshotDir(pin.Commit)
-		if !ok {
-			return fmt.Errorf("the core catalog: %w", err)
-		}
-		dir = snap
 	}
 	names, err := Blueprints(dir)
 	if err == nil {
 		err = Checkout(dir, names...)
 	}
 	if err != nil {
-		return fmt.Errorf("the core catalog at %s: %w", pin.Commit[:12], err)
+		return err
 	}
-	// Every blueprint is checked before any is recorded, so a core catalog
-	// with one wrong is not half known.
 	read := map[string]*Def{}
 	at := map[string]string{}
 	for _, name := range names {
 		if reservedName(name) {
-			return fmt.Errorf("the core catalog at %s ships %s, a reserved blueprint, which no catalog may provide", pin.Commit[:12], name)
-		}
-		want, ok := pin.Blueprints[name]
-		if !ok {
-			return fmt.Errorf("the core catalog at %s holds %s, which this toolkit's pin does not name", pin.Commit[:12], name)
-		}
-		if err := checkCoreDigest(dir, name, want); err != nil {
-			return err
+			return fmt.Errorf("it ships %s, a reserved blueprint, which no catalog may provide", name)
 		}
 		d, err := ReadFrom(dir, name)
 		if err != nil {
-			return fmt.Errorf("the core catalog: %w", err)
+			return err
 		}
 		// Recorded at its real path, so a cache reached through a link reads
 		// from where the files are.
@@ -93,35 +164,46 @@ func readCore(url string) error {
 		}
 		read[name], at[name] = d, bdir
 	}
+	dropCore()
 	for name, d := range read {
 		register(config.Kind(name), d, at[name])
 	}
+	setFoundation(f)
 	return nil
 }
 
-// checkCoreDigest refuses a core blueprint whose files are not the ones the
-// pin names. A checkout that does not match is checked out once more first,
-// since a cache can be damaged by more than a forge.
-func checkCoreDigest(dir, name, want string) error {
-	bdir := filepath.Join(dir, "blueprints", name)
-	got, err := blueprints.Digest(os.DirFS(bdir), ".")
-	if err == nil && got == want {
-		return nil
-	}
-	if fetched(dir) {
-		os.Remove(filepath.Join(dir, ".git", stateDir, "complete", name))
-		if err := Checkout(dir, name); err != nil {
-			return err
-		}
-		got, err = blueprints.Digest(os.DirFS(bdir), ".")
-		if err == nil && got == want {
-			return nil
-		}
-	}
+// lastCoreFile records, in the catalog cache, the core release this
+// workstation last read, for readCore's fallback.
+const lastCoreFile = "core-release.yaml"
+
+func rememberCore(cat config.Catalog) {
+	cache, err := CacheDir()
 	if err != nil {
-		return fmt.Errorf("the core blueprint %s: %w", name, err)
+		return
 	}
-	return fmt.Errorf("the core blueprint %s in %s has SHA-256 %s, and this toolkit's pin says %s. Delete that directory to fetch it again", name, dir, got, want)
+	raw, err := yaml.Marshal(cat)
+	if err != nil {
+		return
+	}
+	// Best effort: a fallback that is missing costs only an offline run.
+	_ = os.MkdirAll(cache, 0o755)
+	_ = os.WriteFile(filepath.Join(cache, lastCoreFile), raw, 0o644)
+}
+
+func lastCore(url string) (config.Catalog, bool) {
+	cache, err := CacheDir()
+	if err != nil {
+		return config.Catalog{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(cache, lastCoreFile))
+	if err != nil {
+		return config.Catalog{}, false
+	}
+	var cat config.Catalog
+	if yaml.Unmarshal(raw, &cat) != nil || cat.URL != url || cat.Commit == "" {
+		return config.Catalog{}, false
+	}
+	return cat, true
 }
 
 // isCore reports whether a kind is named as a core blueprint is: unqualified
@@ -130,13 +212,8 @@ func isCore(kind config.Kind) bool {
 	return !strings.Contains(string(kind), "/") && !reservedName(string(kind))
 }
 
-// replaceCore drops every core blueprint recorded so far, for a
-// configuration whose own core pin replaces them, and counts the core as
-// read so the binary's pin is not read over them.
-func replaceCore() {
-	core.Lock()
-	defer core.Unlock()
-	core.done, core.err = true, nil
+// dropCore drops every core blueprint recorded so far.
+func dropCore() {
 	mu.Lock()
 	defer mu.Unlock()
 	for k, d := range defs {
@@ -147,21 +224,33 @@ func replaceCore() {
 	}
 }
 
-// CorePin is the catalog a blueprint's catalog name stands for in cfg, with
-// the core catalog's URL and commit filled in from the binary's pin when the
-// configuration leaves them out.
+// overrideCore reads the core catalog a configuration pins, at dir, in place
+// of the newest release, and counts the core as read so the newest is not
+// read over it.
+func overrideCore(dir string, cat config.Catalog) []string {
+	core.Lock()
+	defer core.Unlock()
+	core.done, core.err, core.release, core.skipped = true, nil, cat, nil
+	if err := readCoreAt(dir, cat); err != nil {
+		core.err = fmt.Errorf("catalogs.core: %w", err)
+		return []string{core.err.Error() + "."}
+	}
+	return nil
+}
+
+// CorePin is the catalog a blueprint's catalog name stands for in cfg. For
+// the core catalog that is the configuration's own pin when it has one, and
+// else the release this process read, which it reads first if it has not.
 func CorePin(cfg *config.Config, catalog string) config.Catalog {
 	cat := cfg.Catalogs[catalog]
-	if catalog != config.CoreCatalog {
+	if catalog != config.CoreCatalog || cat.Commit != "" {
 		return cat
 	}
-	if pin, err := blueprints.CorePin(); err == nil {
-		if cat.URL == "" {
-			cat.URL = pin.URL
-		}
-		if cat.Commit == "" {
-			cat.Commit = pin.Commit
-		}
+	LoadCore(cat.URL)
+	release, _ := CoreRelease()
+	if cat.URL == "" {
+		cat.URL = release.URL
 	}
+	cat.Tag, cat.Commit = release.Tag, release.Commit
 	return cat
 }

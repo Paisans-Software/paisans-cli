@@ -6,13 +6,9 @@ services:
   # paisans-invite: member invites with the code of conduct before
   # the account (docs/specs/2026-10-12-invite-service.md). Cluster
   # placement only, so the PostgresService row is the cluster's role
-  # and database, never a container of its own.
-  #
-  # 0.1.0 (git tag v0.1.0, without the `v` here) was checked against
-  # ghcr.io on 2026-10-12 by requesting the manifest for that exact
-  # tag anonymously (amd64 and arm64), and inspected after a pull: it
-  # declares no VOLUME.
-  - {name: "app", image: "ghcr.io/paisans-software/paisans-invite:0.1.0", purpose: "the invite service"}
+  # and database, never a container of its own. Its image is the core
+  # catalog's foundation.yaml's.
+  - {name: "app", foundation: "invite", purpose: "the invite service"}
   - {name: "postgres", purpose: "its role and database on the cluster"}
 database: {engine: postgres}
 # Not the service's default 8080: Mbin publishes 8080, and both are

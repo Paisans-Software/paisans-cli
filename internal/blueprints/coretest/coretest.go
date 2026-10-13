@@ -1,15 +1,17 @@
 // Package coretest gives tests the core catalog without the network. It is
 // imported only from test files, once per test package that reads a core
-// blueprint, in a core_test.go:
+// blueprint or the foundation, in a core_test.go:
 //
 //	import _ "github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 //
-// At init it installs the test copy of the pinned commit,
-// internal/blueprints/testdata/core, as a catalog cache, points
-// PAISANS_CATALOG_CACHE there, and allows git only local repositories, so a
-// test takes the same path a workstation does, finds the commit already
-// fetched, and can never reach a forge. See docs/specs/2026-10-13-core-
-// catalog-fetched.md, "Tests".
+// At init it makes the test copy, internal/blueprints/testdata/core, into a
+// git repository with one commit, tagged with the release
+// internal/blueprints/testdata/core.release names, points
+// PAISANS_CORE_CATALOG at it, and allows git only local repositories. A test
+// then takes the same path a workstation does, listing the releases,
+// fetching the newest into a catalog cache and reading it, and can never
+// reach a forge. See docs/specs/2026-10-13-images-follow-tracks.md, "The core
+// catalog follows its newest release".
 package coretest
 
 import (
@@ -18,8 +20,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
@@ -28,29 +32,33 @@ import (
 // completeMark is the mark internal/kinds reads as a commit fetched in full.
 const completeMark = ".paisans-complete"
 
-// installed is the commit's directory, shared by every test in every
-// package: it is keyed by the pin, so a run never sees another pin's copy,
-// and is written once and never changed, so no test can disturb another.
+// installed is the release's directory in a catalog cache, shared by every
+// test in every package: it is keyed by the test copy's content, so a run
+// never sees another copy, and is written once and never changed, so no
+// test can disturb another.
 var installed string
 
 func init() {
-	dir, err := install()
+	if err := os.Setenv("GIT_ALLOW_PROTOCOL", "file"); err != nil {
+		panic(err)
+	}
+	repo, dir, err := install()
 	if err != nil {
 		panic("coretest: " + err.Error())
 	}
 	installed = dir
-	if err := os.Setenv("PAISANS_CATALOG_CACHE", filepath.Dir(dir)); err != nil {
+	if err := os.Setenv("PAISANS_CORE_CATALOG", "file://"+repo); err != nil {
 		panic(err)
 	}
-	if err := os.Setenv("GIT_ALLOW_PROTOCOL", "file"); err != nil {
+	if err := os.Setenv("PAISANS_CATALOG_CACHE", filepath.Dir(dir)); err != nil {
 		panic(err)
 	}
 }
 
-// Cache is a fresh catalog cache for one test, holding the core commit, and
-// points PAISANS_CATALOG_CACHE at it for the test's duration. The commit is
-// a link to the shared copy, so what a test fetches into its cache is its
-// own and the core blueprints are read from the same place in every test.
+// Cache is a fresh catalog cache for one test, holding the core release, and
+// points PAISANS_CATALOG_CACHE at it for the test's duration. The release is
+// a link to the shared copy, so what a test fetches into its cache is its own
+// and the core blueprints are read from the same place in every test.
 func Cache(t testing.TB) string {
 	t.Helper()
 	cache := t.TempDir()
@@ -61,20 +69,79 @@ func Cache(t testing.TB) string {
 	return cache
 }
 
-// install writes the test copy as the pinned commit's directory in a cache
-// under the system's temporary directory, unless an earlier run did.
-func install() (string, error) {
-	pin, err := blueprints.CorePin()
+// install makes the test copy a tagged repository under the system's
+// temporary directory, and installs its commit in a catalog cache beside it,
+// unless an earlier run made the same ones. It returns the repository and
+// the commit's directory in the cache.
+func install() (repo, dir string, err error) {
+	repo, err = repository()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repo
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("reading the test copy's commit: %w", err)
+	}
+	commit := strings.TrimSpace(string(out))
+	dir = filepath.Join(repo+"-cache", commit)
+	if _, err := os.Stat(filepath.Join(dir, completeMark)); err == nil {
+		return repo, dir, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", "", err
+	}
+	work, err := os.MkdirTemp(filepath.Dir(dir), ".install-")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(work)
+	err = filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(repo, p)
+		if rel == ".git" {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(work, rel), 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(work, rel), data, 0o644)
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(filepath.Join(work, completeMark), nil, 0o644); err != nil {
+		return "", "", err
+	}
+	if err := os.Rename(work, dir); err != nil {
+		if _, statErr := os.Stat(filepath.Join(dir, completeMark)); statErr != nil {
+			return "", "", err
+		}
+	}
+	return repo, dir, nil
+}
+
+// repository makes the test copy a tagged repository, unless an earlier run
+// made the same one, and returns its path.
+func repository() (string, error) {
 	_, self, _, ok := runtime.Caller(0)
 	if !ok {
 		return "", fmt.Errorf("cannot find the test copy")
 	}
-	src := filepath.Join(filepath.Dir(self), "..", "testdata", "core")
-	sum := sha256.New()
-	fmt.Fprintf(sum, "%s\n", pin.Commit)
+	testdata := filepath.Join(filepath.Dir(self), "..", "testdata")
+	raw, err := os.ReadFile(filepath.Join(testdata, "core.release"))
+	if err != nil {
+		return "", err
+	}
+	tag := strings.TrimSpace(string(raw))
+	src := filepath.Join(testdata, "core")
 	files := map[string][]byte{}
 	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -94,16 +161,16 @@ func install() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintln(sum, blueprints.DigestFiles(files))
-	cache := filepath.Join(os.TempDir(), "paisans-coretest", hex.EncodeToString(sum.Sum(nil))[:16])
-	dir := filepath.Join(cache, pin.Commit)
-	if _, err := os.Stat(filepath.Join(dir, completeMark)); err == nil {
-		return dir, nil
+	sum := sha256.Sum256([]byte(tag + "\n" + blueprints.DigestFiles(files)))
+	base := filepath.Join(os.TempDir(), "paisans-coretest")
+	repo := filepath.Join(base, hex.EncodeToString(sum[:])[:16])
+	if _, err := os.Stat(filepath.Join(repo, ".git", "refs", "tags", tag)); err == nil {
+		return repo, nil
 	}
-	if err := os.MkdirAll(cache, 0o755); err != nil {
+	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
-	work, err := os.MkdirTemp(cache, ".install-")
+	work, err := os.MkdirTemp(base, ".install-")
 	if err != nil {
 		return "", err
 	}
@@ -117,15 +184,25 @@ func install() (string, error) {
 			return "", err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(work, completeMark), nil, 0o644); err != nil {
-		return "", err
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"add", "--all"},
+		{"-c", "user.name=coretest", "-c", "user.email=coretest@example.org", "commit", "--quiet", "--no-gpg-sign", "-m", "test copy"},
+		{"tag", tag},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = work
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2026-10-13T00:00:00Z", "GIT_COMMITTER_DATE=2026-10-13T00:00:00Z", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), out)
+		}
 	}
-	if err := os.Rename(work, dir); err != nil {
+	if err := os.Rename(work, repo); err != nil {
 		// Another package's tests installed it first, which is as good.
-		if _, statErr := os.Stat(filepath.Join(dir, completeMark)); statErr == nil {
-			return dir, nil
+		if _, statErr := os.Stat(filepath.Join(repo, ".git", "refs", "tags", tag)); statErr == nil {
+			return repo, nil
 		}
 		return "", err
 	}
-	return dir, nil
+	return repo, nil
 }

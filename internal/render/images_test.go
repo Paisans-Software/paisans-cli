@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -21,28 +21,32 @@ func siteImage(plan *render.Plan, site, stack, image string) (render.ComposeImag
 }
 
 // Every site running Caddy names the image as the configuration decides it,
-// the published major version tag by default, and the plan lists it for
-// apply to resolve. A site running none has no entry for it.
+// the foundation's track by default, and the plan lists it for apply to
+// resolve. A site running none has no entry for it.
 func TestTheCaddyImageIsListedAsConfigured(t *testing.T) {
 	plan, err := render.Build(fixture(t), fixtureSecrets(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	published, err := kinds.FoundationImage(kinds.FoundationCaddy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	files := planFiles(plan)
 	for _, site := range []string{"vm", "watch"} {
-		img, n := siteImage(plan, site, "infra", acme.Published)
+		img, n := siteImage(plan, site, "infra", published)
 		if n != 1 || img.Lines != 1 || img.App != "" || strings.Join(img.Services, ",") != "caddy" {
-			t.Errorf("%s lists %+v (%d times), want Caddy's %s once on one line", site, img, n, acme.Published)
+			t.Errorf("%s lists %+v (%d times), want Caddy's %s once on one line", site, img, n, published)
 		}
 		if img.Path != site+"/srv/paisans/f2a9/infra/compose.yaml" {
 			t.Errorf("%s lists Caddy in %s", site, img.Path)
 		}
-		if !strings.Contains(files[img.Path], "    image: "+acme.Published+"\n") {
-			t.Errorf("%s's compose file does not name %s", site, acme.Published)
+		if !strings.Contains(files[img.Path], "    image: "+published+"\n") {
+			t.Errorf("%s's compose file does not name %s", site, published)
 		}
 	}
 	for _, img := range plan.Images["home-a"] {
-		if img.Stack == "infra" {
+		if img.Stack == "infra" && img.Setting() == "acme.image" {
 			t.Errorf("home-a runs no Caddy and lists %+v", img)
 		}
 	}
@@ -74,15 +78,25 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 	}
 	// The gate, which no file declares, is listed on the gateway like any
 	// other app, under its kind's default image.
-	gate, n := siteImage(plan, "vm", "gate", "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4")
+	gateImage, _ := kinds.FoundationImage(kinds.FoundationOAuth2Proxy)
+	gate, n := siteImage(plan, "vm", "gate", gateImage)
 	if n != 1 || gate.Lines != 1 || strings.Join(gate.Services, ",") != "app" {
 		t.Errorf("the gate lists %+v (%d times)", gate, n)
 	}
-	// The infrastructure stack's own images are not the configuration's.
+	// The infrastructure stack's images are listed too, since each follows
+	// a track apply resolves, and no setting of the configuration decides
+	// any but the gateway's Caddy.
+	infra := 0
 	for _, img := range plan.Images["home-a"] {
 		if img.Stack == "infra" {
-			t.Errorf("home-a lists its infrastructure's %s", img.Image)
+			infra++
+			if img.Setting() != "" || len(img.Services) == 0 {
+				t.Errorf("home-a lists its infrastructure's %+v, setting %q", img, img.Setting())
+			}
 		}
+	}
+	if infra == 0 {
+		t.Error("home-a lists none of its infrastructure's images")
 	}
 }
 

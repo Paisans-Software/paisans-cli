@@ -96,7 +96,7 @@ var helpCommands = []helpCommand{
 		name:    "catalog list",
 		summary: "List the catalogs and their pins.",
 		usage:   []string{"paisans catalog list [--config " + config.FileName + "]"},
-		detail:  "List the core catalog, with the commit the toolkit carries or the one pinned here, and every declared catalog with its URL, tag, commit and whether its tags are checked.",
+		detail:  "List the core catalog, with the release it reads, its newest one this toolkit can read or the one pinned here, and every declared catalog with its URL, tag, commit and whether its tags are checked.",
 	},
 	{
 		name:    "blueprint list",

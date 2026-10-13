@@ -189,6 +189,11 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if s.Port <= 0 || s.Port > 65535 {
 		return nil, fmt.Errorf("port: required, the port the app listens on in its container")
 	}
+	for i, svc := range s.Services {
+		if err := checkServiceImage(svc); err != nil {
+			return nil, fmt.Errorf("services[%d]: %w", i, err)
+		}
+	}
 	ports := map[int]string{s.Port: "app"}
 	for i, svc := range s.Services {
 		switch {
@@ -475,4 +480,22 @@ var reservedExtras = map[config.Kind]func(*Def){
 			d.SettingKeys = append(d.SettingKeys, SettingKey{Key: s.Env, File: ".env", Setting: s.Key})
 		}
 	},
+}
+
+// checkServiceImage checks what a service runs: an image, a track or a
+// reference to one build, or a foundation image, never both.
+func checkServiceImage(svc Service) error {
+	switch {
+	case svc.Image != "" && svc.Foundation != "":
+		return fmt.Errorf("names both image and foundation; a service runs one")
+	case svc.Foundation != "":
+		if !foundationNames[svc.Foundation] {
+			return fmt.Errorf("foundation: %q is not an image the foundation names", svc.Foundation)
+		}
+	case svc.Image != "":
+		if _, err := imageTag(svc.Image); err != nil {
+			return fmt.Errorf("image: %w", err)
+		}
+	}
+	return nil
 }

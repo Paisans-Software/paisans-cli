@@ -84,10 +84,11 @@ type ManifestPin struct {
 	// apps.<name>.images (Eg: app), or caddy.
 	Service string `json:"service"`
 	// Image is the reference as the configuration names it
-	// (Eg: ghcr.io/paisans-software/caddy:2).
+	// (Eg: ghcr.io/paisans-software/caddy:2.*.*).
 	Image string `json:"image"`
 	// Reference is what the compose file names and the host pulled: Image
-	// with the digest it resolved to (Eg: ghcr.io/paisans-software/caddy:2@sha256:...).
+	// on the tag and the digest it resolved to
+	// (Eg: ghcr.io/paisans-software/caddy:2.11.7@sha256:...).
 	Reference string `json:"reference"`
 	// ResolvedAt is when the apply that first deployed this Reference
 	// resolved it, RFC 3339. A later apply resolving the same build keeps it.

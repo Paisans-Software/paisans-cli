@@ -27,9 +27,25 @@ import (
 // v1.10.0-rc1 above v1.10.0 and follows each user's versionsort settings.
 // An annotated tag's commit is the one it points at.
 func Newest(url string) (tag, commit string, err error) {
+	releases, err := Releases(url)
+	if err != nil {
+		return "", "", err
+	}
+	return releases[0].Tag, releases[0].Commit, nil
+}
+
+// Release is one release of a catalog: its tag and the commit it names.
+type Release struct {
+	Tag    string
+	Commit string
+}
+
+// Releases is every release of the catalog at url, newest first, as Newest
+// orders them. A catalog with none is an error that says how to tag one.
+func Releases(url string) ([]Release, error) {
 	out, err := git("", "ls-remote", "--tags", url)
 	if err != nil {
-		return "", "", fmt.Errorf("listing the tags of %s: %s", url, out)
+		return nil, fmt.Errorf("listing the tags of %s: %s", url, strings.TrimSpace(out))
 	}
 	commits := map[string]string{}
 	var names []string
@@ -48,27 +64,37 @@ func Newest(url string) (tag, commit string, err error) {
 			names = append(names, name)
 		}
 	}
-	best, bestVersion := "", [3]int{}
+	type versioned struct {
+		Release
+		v [3]int
+	}
+	var found []versioned
 	for _, name := range names {
-		v, ok := releaseVersion(name)
-		if !ok {
-			continue
-		}
-		if best == "" || less(bestVersion, v) || (v == bestVersion && name < best) {
-			best, bestVersion = name, v
+		if v, ok := releaseVersion(name); ok {
+			found = append(found, versioned{Release{name, commits[name]}, v})
 		}
 	}
-	if best == "" {
+	if len(found) == 0 {
 		if len(names) == 0 {
-			return "", "", fmt.Errorf("%s has no tags. A catalog is pinned to a release: tag one, as vMAJOR.MINOR.PATCH", url)
+			return nil, fmt.Errorf("%s has no tags. A catalog is pinned to a release: tag one, as vMAJOR.MINOR.PATCH", url)
 		}
 		sort.Strings(names)
 		if len(names) > 10 {
 			names = append(names[:10], "...")
 		}
-		return "", "", fmt.Errorf("%s has no release tag, only %s. A release is tagged vMAJOR.MINOR.PATCH; a pre-release is pinned by naming it with --tag", url, strings.Join(names, ", "))
+		return nil, fmt.Errorf("%s has no release tag, only %s. A release is tagged vMAJOR.MINOR.PATCH; a pre-release is pinned by naming it with --tag", url, strings.Join(names, ", "))
 	}
-	return best, commits[best], nil
+	sort.SliceStable(found, func(i, j int) bool {
+		if found[i].v != found[j].v {
+			return less(found[j].v, found[i].v)
+		}
+		return found[i].Tag < found[j].Tag
+	})
+	releases := make([]Release, len(found))
+	for i, f := range found {
+		releases[i] = f.Release
+	}
+	return releases, nil
 }
 
 // releaseTag is a tag that is a release: MAJOR.MINOR.PATCH with an optional

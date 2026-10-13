@@ -14,7 +14,7 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.*.*
     restart: unless-stopped
     env_file:
       - .env

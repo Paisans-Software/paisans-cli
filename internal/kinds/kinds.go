@@ -27,10 +27,17 @@ type Service struct {
 	// writes under `images`.
 	Name string
 	// Image is the reference this service runs when the configuration does not
-	// override it. An empty value means the default is computed rather than
-	// fixed; postgres is the only such case, because it follows
-	// cluster.postgres_version.
+	// override it: a track (imagedigest.IsTrack), which apply resolves to the
+	// newest build on it, or a reference to one build. An empty value means
+	// the default is computed rather than fixed: postgres follows
+	// cluster.postgres_version, and a service naming Foundation takes the
+	// foundation's image.
 	Image string
+	// Foundation is the name of the core catalog's foundation image the
+	// service runs (FoundationPocketID and the rest), for a reserved
+	// blueprint, whose images are the toolkit's own. Services and
+	// DefaultImage fill Image from it.
+	Foundation string
 	// Purpose is one line, quoted back when an operator names a service that
 	// does not exist so the message can list what does.
 	Purpose string
@@ -84,7 +91,25 @@ func SendsMail(kind config.Kind) bool { return of(kind).SendsMail }
 // are declared in the kind's record rather than alphabetical: `app` first is what an operator
 // expects to read.
 func Services(kind config.Kind) []Service {
-	return append([]Service(nil), of(kind).Services...)
+	out := append([]Service(nil), of(kind).Services...)
+	for i := range out {
+		if out[i].Foundation != "" {
+			// A foundation that cannot be read leaves Image empty, and
+			// ServiceImage says why.
+			out[i].Image, _ = FoundationImage(out[i].Foundation)
+		}
+	}
+	return out
+}
+
+// ServiceImage is the image a kind's service runs when the configuration
+// says nothing, with why when the foundation that names it cannot be read.
+// Empty with no error for a default computed elsewhere (postgres).
+func ServiceImage(s Service) (string, error) {
+	if s.Foundation != "" {
+		return FoundationImage(s.Foundation)
+	}
+	return s.Image, nil
 }
 
 // Has reports whether a kind defines a service.
@@ -101,7 +126,7 @@ func Has(kind config.Kind, service string) bool {
 // says nothing. The second result is false when the kind computes it instead
 // of shipping one.
 func DefaultImage(kind config.Kind, service string) (string, bool) {
-	for _, s := range of(kind).Services {
+	for _, s := range Services(kind) {
 		if s.Name == service {
 			return s.Image, s.Image != ""
 		}

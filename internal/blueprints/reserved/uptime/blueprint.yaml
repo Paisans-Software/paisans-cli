@@ -3,26 +3,15 @@
 apiVersion: paisans.blueprint/v1
 name: uptime
 services:
-  # The Paisans-Software/uptime fork (josephquigley/uptime until
-  # 2026-10-07): OIDC sign in gated on a group, a seed file
-  # (SEED_FILE), TRUST_PROXY and an entrypoint that drops from root
-  # from 1.1.0-oidc.2; bulk channel actions and the SMTP lock when the
-  # seed supplies SMTP from 1.1.0-oidc.3, the first release published
-  # from the organisation; a seed entry's heartbeat_token taken as the
-  # monitor's token from 1.1.0-oidc.4, which the per site heartbeat
-  # in internal/render/heartbeat.go depends on. Its database is SQLite
-  # under /data, which is why the kind is pinned only: it has no
-  # Postgres service, so cluster-placement-without-a-cluster refuses
-  # it.
-  #
-  # NOTE THE MISSING `v`: the git tag is v1.1.0-oidc.4 and
-  # docker/metadata-action's semver pattern strips it. 1.1.0-oidc.3
-  # was checked against ghcr.io on 2026-10-07 by requesting the
-  # manifest for that exact tag anonymously (200) and run as root with
-  # a seed carrying SMTP (healthy, seed applied); 1.1.0-oidc.4 is the
-  # release carrying the heartbeat token, pinned ahead of its
-  # publication, and is to be checked the same way once published.
-  - {name: "app", image: "ghcr.io/paisans-software/uptime:1.1.0-oidc.4", purpose: "the monitor"}
+  # The Paisans-Software/uptime fork: OIDC sign in gated on a group, a
+  # seed file (SEED_FILE), TRUST_PROXY, an entrypoint that drops from
+  # root, and a seed entry's heartbeat_token taken as the monitor's
+  # token, which the per site heartbeat in internal/render/heartbeat.go
+  # depends on. Its database is SQLite under /data, which is why the
+  # kind is pinned only: it has no Postgres service, so
+  # cluster-placement-without-a-cluster refuses it. Its image is the
+  # core catalog's foundation.yaml's.
+  - {name: "app", foundation: "uptime", purpose: "the monitor"}
 database: {engine: sqlite}
 # Not the fork's default 3000: Outline publishes 3000, and two apps on
 # one site publish on the same mesh address.

@@ -9,16 +9,13 @@ services:
   # MAS rather than of Synapse.
   #
   # NOTE THE MISSING `v`. Synapse tags as vX.Y.Z and MAS tags as X.Y.Z.
-  # Checked against ghcr.io on 2026-09-15 by requesting the manifest for
-  # each: `1.24.0` resolved (200), `v1.24.0` did not (404), and neither
-  # did `1.25.0`. The registry's tag list was paged through in full and
-  # 1.24.0 is the newest release; 1.25.0-rc.0 exists but is a release
-  # candidate.
-  - {name: "app", image: "ghcr.io/element-hq/synapse:v1.160.0", purpose: "the homeserver, which only serves the API"}
+  # Both are tracks on their 1.x line, and a release candidate
+  # (v1.161.0rc1, 1.25.0-rc.0) matches neither.
+  - {name: "app", image: "ghcr.io/element-hq/synapse:v1.*.*", purpose: "the homeserver, which only serves the API"}
   # MAS listens on 8009, one above the homeserver's 8008, and the gateway
   # reaches it directly: the three compatibility login paths are split off
   # to it in front of the homeserver. mas.yaml binds the port explicitly.
-  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.24.0", purpose: "Matrix Authentication Service, which owns the login", port: 8009}
+  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.*.*", purpose: "Matrix Authentication Service, which owns the login", port: 8009}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 # MAS keeps its own database beside the homeserver's, <database>_mas, which
 # initdb.d creates.

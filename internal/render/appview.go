@@ -423,7 +423,9 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.PocketID = pid
 		v.AdminsHeartbeat = len(adminsHeartbeatTargets(p.cfg)) > 0
-		v.HeartbeatImage = HeartbeatImage
+		if v.HeartbeatImage, err = kinds.FoundationImage(kinds.FoundationHeartbeat); err != nil {
+			return appValues{}, err
+		}
 		dns, err := p.dnsValuesFor(planned.Name)
 		if err != nil {
 			return appValues{}, err

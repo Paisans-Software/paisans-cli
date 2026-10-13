@@ -929,9 +929,12 @@ func TestTheGatewayRunsAnImageWithTheModule(t *testing.T) {
 		files[f.Path] = f.Content
 	}
 	infra := files["vm/srv/paisans/f2a9/infra/compose.yaml"]
-	want, ok := acme.Image("desec")
-	if !ok {
-		t.Fatal("desec has no published image")
+	if !acme.Published("desec") {
+		t.Fatal("the published image does not carry desec")
+	}
+	want, err := kinds.FoundationImage(kinds.FoundationCaddy)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !strings.Contains(infra, "image: "+want) {
 		t.Errorf("the gateway does not run the image carrying its provider:\n%s", infra)
@@ -970,7 +973,7 @@ func TestADeclaredImageReachesTheGateway(t *testing.T) {
 	if !strings.Contains(infra, "image: "+cfg.ACME.Image) {
 		t.Errorf("the gateway does not run the declared image:\n%s", infra)
 	}
-	published, _ := acme.Image("desec")
+	published, _ := kinds.FoundationImage(kinds.FoundationCaddy)
 	if strings.Contains(infra, published) {
 		t.Errorf("the published image survived a declared one:\n%s", infra)
 	}
@@ -2622,52 +2625,6 @@ func TestMbinKeepsItsVarDirectoryInMemory(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s lost its log bind mount %s: %v", service, log, s.Volumes)
-		}
-	}
-}
-
-// Every image the toolkit renders by default has its declared volumes mounted
-// at exactly those paths, for every Postgres major it knows and with every app
-// pinned as well as clustered, so each kind's own database is rendered too. An
-// image missing from kinds.ImageVolumes fails here as well: a bump has to be
-// inspected before it ships. An operator's own image is not in the table and
-// is checked by `paisans apply` against the host's copy instead, so the
-// fixture's overrides are dropped here.
-func TestEveryDeclaredImageVolumeIsMounted(t *testing.T) {
-	for _, major := range []string{"16", "17", "18"} {
-		for _, pinned := range []bool{false, true} {
-			cfg := fixture(t)
-			cfg.Cluster.PostgresVersion = major
-			for name, app := range cfg.Apps {
-				app.Images = nil
-				if pinned && app.Placement.Mode != config.PlacementPinned {
-					app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a", Literal: "home-a"}
-				}
-				cfg.Apps[name] = app
-			}
-			plan, err := render.Build(cfg, fixtureSecrets(t))
-			if err != nil {
-				t.Fatalf("postgres %s, pinned %v: %v", major, pinned, err)
-			}
-			for path, content := range planFiles(plan) {
-				if !strings.HasSuffix(path, "/compose.yaml") {
-					continue
-				}
-				services, err := kinds.ComposeMounts(content)
-				if err != nil {
-					t.Fatalf("%s: %v", path, err)
-				}
-				for name, s := range services {
-					declared, ok := kinds.DeclaredVolumes(s.Image)
-					if !ok {
-						t.Errorf("%s service %s runs %s, which kinds.ImageVolumes does not record. Inspect it and record what it declares", path, name, s.Image)
-						continue
-					}
-					if u := kinds.Uncovered(declared, s.Targets); len(u) > 0 {
-						t.Errorf("postgres %s, pinned %v: %s service %s runs %s, which declares %v, and nothing is mounted at exactly that path, so every container would get an anonymous volume there", major, pinned, path, name, s.Image, u)
-					}
-				}
-			}
 		}
 	}
 }

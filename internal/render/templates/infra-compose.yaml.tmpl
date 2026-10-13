@@ -9,7 +9,7 @@ services:
   etcd:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: gcr.io/etcd-development/etcd:v3.5.16
+    image: {{ .EtcdImage }}
     restart: unless-stopped
     network_mode: host
     command:
@@ -48,7 +48,7 @@ services:
   patroni:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: ghcr.io/zalando/spilo-{{ .PostgresVersion }}:{{ .SpiloTag }}
+    image: {{ .SpiloImage }}
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -74,7 +74,7 @@ services:
   haproxy:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: haproxy:3.0-alpine
+    image: {{ .HAProxyImage }}
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -84,7 +84,7 @@ services:
   garage:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: dxflrs/garage:v1.0.1
+    image: {{ .GarageImage }}
     restart: unless-stopped
     network_mode: host
     volumes:

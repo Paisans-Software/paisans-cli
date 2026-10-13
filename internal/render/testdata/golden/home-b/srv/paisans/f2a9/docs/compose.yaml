@@ -8,7 +8,7 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: outlinewiki/outline:1.10.0
+    image: docker.io/outlinewiki/outline:1.*.*
     restart: unless-stopped
     env_file:
       - .env
@@ -35,7 +35,7 @@ services:
   valkey:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: docker.io/valkey/valkey:9.1.2-trixie
+    image: docker.io/valkey/valkey:9.*.*-trixie
     restart: unless-stopped
     # The password is on the command line, as Mbin's cache has it, so it is
     # visible to `ps` on the host. Snapshots are off and there is no data

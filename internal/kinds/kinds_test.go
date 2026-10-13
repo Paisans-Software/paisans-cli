@@ -1,9 +1,11 @@
 package kinds_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
@@ -150,16 +152,17 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 	}
 }
 
-// The two forks the toolkit runs default to a release of each, named by its
-// version tag, so a toolkit release renders for the fork build it was tested
-// against.
-func TestTheForksDefaultToAReleaseVersion(t *testing.T) {
-	for kind, want := range map[config.Kind]string{
-		config.Kind("mbin"):        "ghcr.io/paisans-software/mbin:1.15.1-paisans",
-		config.Kind("writefreely"): "ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp",
+// The two forks the toolkit runs default to a track on the fork's own
+// release tags, which carry the fork's suffix, so no upstream build of the
+// same version can match.
+func TestTheForksDefaultToATrackOnTheirReleases(t *testing.T) {
+	for kind, suffix := range map[config.Kind]string{
+		config.Kind("mbin"):        "-paisans",
+		config.Kind("writefreely"): "-wisp",
 	} {
-		if got, _ := kinds.DefaultImage(kind, "app"); got != want {
-			t.Errorf("%s app image is %s, want %s", kind, got, want)
+		got, _ := kinds.DefaultImage(kind, "app")
+		if !imagedigest.IsTrack(got) || !strings.HasSuffix(got, suffix) {
+			t.Errorf("%s app image is %s, want a track on tags ending %s", kind, got, suffix)
 		}
 	}
 }

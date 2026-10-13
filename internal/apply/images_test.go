@@ -10,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -17,7 +18,10 @@ const (
 	buildA = "sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186"
 	buildB = "sha256:0c5a1ad0b7e4b2c6f0d3d0e5a2b9e8f7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1"
 
-	caddyTag     = "ghcr.io/paisans-software/caddy:2"
+	// caddyTrack is the gateway's Caddy as the foundation names it, and
+	// caddyTag the tag every test registry puts it on.
+	caddyTrack   = "ghcr.io/paisans-software/caddy:2.*.*"
+	caddyTag     = "ghcr.io/paisans-software/caddy:2.0.0"
 	mbinTag      = "ghcr.io/example-org/mbin:v1.10.1-fork"
 	infraCompose = "/srv/paisans/f2a9/infra/compose.yaml"
 	talkCompose  = "/srv/paisans/f2a9/talk/compose.yaml"
@@ -52,6 +56,26 @@ func (r *registry) Digest(ref string) (string, error) {
 		return d, nil
 	}
 	return r.digest, nil
+}
+
+// A plan with no resolver of its own starts a track that runs nowhere yet
+// on its first tag, at one build, as `paisans` does through its registry.
+func init() {
+	apply.FreshImages = func() apply.Resolver {
+		return &registry{digest: buildA}
+	}
+}
+
+// Track puts a track on its first tag, the pattern with each `*` read as 0,
+// failing as Digest does for the track itself.
+func (r *registry) Track(ref string) (string, error) {
+	if err := r.fail[ref]; err != nil {
+		return "", err
+	}
+	if r.err != nil {
+		return "", r.err
+	}
+	return strings.ReplaceAll(ref, "*", "0"), nil
 }
 
 func (r *registry) Version(ref string) (string, error) {
@@ -155,7 +179,7 @@ func TestTheCaddyTagIsPinnedToTheBuildItNames(t *testing.T) {
 		t.Errorf("the compose file does not name the build:\n%s", host.files[infraCompose])
 	}
 	got := manifestCaddy(t, host)
-	if got == nil || *got != (render.ManifestPin{Stack: "infra", Service: "caddy", Image: caddyTag, Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
+	if got == nil || *got != (render.ManifestPin{Stack: "infra", Service: "caddy", Image: caddyTrack, Reference: want, ResolvedAt: "2026-10-11T17:00:00Z", Source: "registry"}) {
 		t.Errorf("the manifest records %+v", got)
 	}
 
@@ -252,7 +276,7 @@ func TestAnUnreachableRegistryWithNothingDeployedStops(t *testing.T) {
 	if err == nil {
 		t.Fatal("a gateway was planned with an unresolved Caddy tag")
 	}
-	for _, want := range []string{caddyTag, "no route to host", "acme.image"} {
+	for _, want := range []string{caddyTrack, "no route to host", "acme.image"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q:\n%v", want, err)
 		}
@@ -418,7 +442,8 @@ func TestASiteApplyHoldsAMultiSiteAppOnItsDeployedBuild(t *testing.T) {
 				t.Errorf("no warning says the app stays and a newer build exists: %+v", p.Notes)
 			}
 			// An app with no other site in the plan's word moves as usual.
-			if docs := pinOf(p, "docs", "outlinewiki/outline:1.10.0"); docs == nil || !strings.HasSuffix(docs.Reference, buildB) {
+			outline, _ := kinds.DefaultImage(config.Kind("outline"), "app")
+			if docs := pinOf(p, "docs", outline); docs == nil || !strings.HasSuffix(docs.Reference, buildB) {
 				t.Errorf("docs planned %+v", docs)
 			}
 		})
@@ -777,7 +802,7 @@ func TestCheckPlatformsRefusesFromTheRenderAlone(t *testing.T) {
 	images := []render.ComposeImage{
 		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"app"}},
 		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"messenger"}},
-		{Stack: "infra", Image: caddyTag, Services: []string{"caddy"}},
+		{Stack: "infra", Image: caddyTrack, Services: []string{"caddy"}},
 	}
 	notes, refusals := apply.CheckPlatforms("home-a", "arm64", images, r)
 	if len(notes) != 0 {

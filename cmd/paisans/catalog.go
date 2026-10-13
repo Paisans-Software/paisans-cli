@@ -297,17 +297,20 @@ func runCatalogList(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	pin, err := blueprints.CorePin()
-	if err != nil {
-		return err
-	}
 	core := cfg.Catalogs[config.CoreCatalog]
-	coreURL, coreCommit, coreHow := pin.URL, pin.Commit, "the toolkit's pin"
-	if core.URL != "" {
-		coreURL = core.URL
+	coreHow := "pinned here"
+	if core.Commit == "" {
+		coreHow = "its newest release"
 	}
-	if core.Commit != "" {
-		coreCommit, coreHow = core.Commit, "pinned here"
+	cat := kinds.CorePin(cfg, config.CoreCatalog)
+	if cat.Commit == "" {
+		if err := kinds.LoadCore(core.URL); err != nil {
+			return err
+		}
+	}
+	coreURL, coreCommit := cat.URL, cat.Commit
+	if cat.Tag != "" {
+		coreHow = cat.Tag + ", " + coreHow
 	}
 	fmt.Fprintf(stdout, "core\t%s\t%s\t%s\n", coreURL, coreCommit[:12], coreHow)
 	var names []string

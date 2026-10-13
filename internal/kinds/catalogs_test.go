@@ -149,7 +149,8 @@ func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := snap[commit+"/journal/blueprint.yaml"]; !ok || len(snap) != 2 {
+	// The journal's two files, and the core catalog's foundation.
+	if _, ok := snap[commit+"/journal/blueprint.yaml"]; !ok || len(snap) != 3 {
 		t.Fatalf("snapshot %v", snap)
 	}
 	// Another machine: a fresh cache, and the catalog deleted.
@@ -172,11 +173,11 @@ func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
 	}
 }
 
-// The core catalog pinned to a commit of its own replaces the built in core
-// blueprints with the ones that commit holds.
+// The core catalog pinned to a release of its own replaces the newest
+// release's blueprints with the ones that release holds.
 func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 	coretest.Cache(t)
-	url, commit := testCatalog(t, nil)
+	url, commit := testCatalog(t, map[string]string{"foundation.yaml": testFoundation(t)})
 	t.Cleanup(forgetCore)
 	cfg := &config.Config{
 		Catalogs: map[string]config.Catalog{"core": {URL: url, Tag: "v1.0.0", Commit: commit}},
@@ -185,7 +186,8 @@ func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 	if problems := resolve(cfg); len(problems) > 0 {
 		t.Fatalf("problems %v", problems)
 	}
-	if dir, ok := Source("journal"); !ok || !strings.HasPrefix(dir, os.Getenv("PAISANS_CATALOG_CACHE")) {
+	cache, _ := filepath.EvalSymlinks(os.Getenv("PAISANS_CATALOG_CACHE"))
+	if dir, ok := Source("journal"); !ok || !strings.HasPrefix(dir, cache) {
 		t.Errorf("journal was not read from the core pin: %q %v", dir, ok)
 	}
 	if _, ok := For("mbin"); ok {
@@ -193,13 +195,24 @@ func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 	}
 }
 
-// forgetCore drops the core blueprints read so far, so the next one asked
-// for is read again at the binary's pin.
+// forgetCore drops the core catalog read so far, so the next blueprint
+// asked for reads its newest release again.
 func forgetCore() {
-	replaceCore()
+	dropCore()
+	setFoundation(nil)
 	core.Lock()
 	defer core.Unlock()
-	core.done, core.err = false, nil
+	core.done, core.err, core.release, core.skipped = false, nil, config.Catalog{}, nil
+}
+
+// testFoundation is the test copy's foundation.yaml.
+func testFoundation(t testing.TB) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "blueprints", "testdata", "core", FoundationFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
 
 // A fetch takes the commit's trees and checks out only the blueprints in

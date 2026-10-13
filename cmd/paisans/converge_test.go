@@ -481,8 +481,13 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	}
 	// The refusal stops the run, so its count line stays.
 	// The deployment and the version open the run, with its five events
-	// (the section, and each line's start and end); the findings follow.
-	if rec.Index("section", "deployment") != 0 || rec.Index("section", "configuration") != 5 || !rec.Has("result", "1 refusal") {
+	// (the section, and each line's start and end), and the core catalog's
+	// two when the process has read it already; the findings follow.
+	opened := 5
+	if rec.Index("step", "core catalog") == 5 {
+		opened = 7
+	}
+	if rec.Index("section", "deployment") != 0 || rec.Index("section", "configuration") != opened || !rec.Has("result", "1 refusal") {
 		t.Errorf("not under configuration, or not counted:\n%s", rec.Lines())
 	}
 	if read {
@@ -948,13 +953,13 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init

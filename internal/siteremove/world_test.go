@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/apply/applytest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
@@ -1377,8 +1378,9 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			if !ok || rel == render.ManifestName {
 				continue
 			}
-			h.files["/"+rel] = f.Content
-			entries = append(entries, render.ManifestFile{Path: rel, SHA256: hexSum(f.Content), Mode: fmt.Sprintf("%04o", f.Mode)})
+			content := applytest.Pinned(f.Content)
+			h.files["/"+rel] = content
+			entries = append(entries, render.ManifestFile{Path: rel, SHA256: hexSum(content), Mode: fmt.Sprintf("%04o", f.Mode)})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		if running, ok := h.files[wgConf]; ok {

@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // identityLines is each deployment section's lines, in order, as kind and
-// result: what a log of the run names as its deployment and version.
+// result: what a log of the run names as its deployment and version. The
+// core catalog's line is left out; TestApplyNamesTheCoreRelease reads it.
 func identityLines(rec *ui.Recorder) [][]string {
 	var out [][]string
 	in := false
@@ -22,7 +24,7 @@ func identityLines(rec *ui.Recorder) [][]string {
 			if in {
 				out = append(out, nil)
 			}
-		case in && e.Kind != "step":
+		case in && e.Kind != "step" && e.Text != "core catalog":
 			out[len(out)-1] = append(out[len(out)-1], e.Kind+" "+e.Text+": "+e.Extra)
 		}
 	}
@@ -48,6 +50,20 @@ func TestApplyNamesTheDeploymentAndVersionFirst(t *testing.T) {
 		t.Fatalf("got %v\n%s", got, rec.Lines())
 	}
 	sameLines(t, got[0], want)
+}
+
+// The deployment section names the core catalog release the run reads.
+func TestApplyNamesTheCoreRelease(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	release, _ := kinds.CoreRelease()
+	if release.Commit == "" || rec.Index("done", "core catalog") < 0 || !strings.Contains(rec.Lines(), release.Tag+", "+release.Commit[:12]) {
+		t.Errorf("the run does not name the core release %+v:\n%s", release, rec.Lines())
+	}
 }
 
 // Edited files are no version until the run publishes them: the version is

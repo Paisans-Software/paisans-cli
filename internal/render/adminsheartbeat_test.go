@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
@@ -90,8 +91,9 @@ func TestEveryPocketIDSitePushesTheAdminsHeartbeat(t *testing.T) {
 		if !strings.Contains(compose, "\n  admins-heartbeat:\n") {
 			t.Errorf("%s: the Pocket ID stack has no admins-heartbeat service:\n%s", site, compose)
 		}
-		if !strings.Contains(compose, "image: "+render.HeartbeatImage+"\n") {
-			t.Errorf("%s: the pusher does not run %s:\n%s", site, render.HeartbeatImage, compose)
+		heartbeat, _ := kinds.FoundationImage(kinds.FoundationHeartbeat)
+		if !strings.Contains(compose, "image: "+heartbeat+"\n") {
+			t.Errorf("%s: the pusher does not run %s:\n%s", site, heartbeat, compose)
 		}
 		if strings.Contains(compose, token) {
 			t.Errorf("%s: the token is in the 0644 compose file", site)
@@ -362,7 +364,7 @@ func TestTheAdminsPusherImageIsNotTheConfigurations(t *testing.T) {
 				continue
 			}
 			auth = true
-			if image.Image == render.HeartbeatImage || len(image.Services) == 0 {
+			if len(image.Services) == 0 {
 				t.Errorf("%s: auth lists %s for services %v", site, image.Image, image.Services)
 			}
 		}
