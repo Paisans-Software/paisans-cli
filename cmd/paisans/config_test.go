@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -471,6 +472,39 @@ func TestConfigDryRunsDoNotSync(t *testing.T) {
 	}
 	if !synced(runs) {
 		t.Fatal("pull --execute did not sync")
+	}
+}
+
+// A dry run says the sites were not asked to sync with their peers only when
+// there are peers: a stack of one site has none for a sync to bring versions
+// from.
+func TestDryRunGatherNotesTheSkippedSyncOnlyWithPeers(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	a, err := l.Anchor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := config.LoadBytes(must(os.ReadFile(fixtureConfig())))
+	const note = "the sites were not asked to sync with their peers first"
+	for _, tc := range []struct {
+		sites []string
+		want  bool
+	}{
+		{[]string{"home-a"}, false},
+		{[]string{"home-a", "home-b"}, true},
+	} {
+		sites := map[string]apply.Transport{}
+		for _, n := range tc.sites {
+			sites[n] = &storeHost{name: n, answer: answer}
+		}
+		var b bytes.Buffer
+		if _, err := gatherAt(ui.NewPlain(&b, false), l, sites, len(sites), id.ID, a, gatherMode{}, noTerminalStdin(), io.Discard); err != nil {
+			t.Fatalf("%d sites: %v", len(sites), problemText(err))
+		}
+		if got := strings.Contains(b.String(), note); got != tc.want {
+			t.Errorf("%d sites: note shown %v, want %v:\n%s", len(sites), got, tc.want, b.String())
+		}
 	}
 }
 
