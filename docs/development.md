@@ -1447,6 +1447,7 @@ installed, on a workstation or anywhere else.
 | `internal/pocketid` | Pocket ID's REST API, called through curl on the host with everything variable on stdin, or over HTTP from beside it |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
 | `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
+| `internal/hostarch` | a host's architecture (`dpkg --print-architecture`): which are supported, the refusal when a host contradicts the one recorded for its site, and whether an image's platforms include it |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
 | `internal/ownership` | what of this deployment is left over on a host, and what foreign relies on its Caddy, from the host check's inventory |
 | `internal/appremove` | `app remove`: which of a host's things are a removed app's, the gate, the plan, and each idempotent step |
