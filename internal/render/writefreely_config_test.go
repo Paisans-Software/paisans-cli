@@ -169,3 +169,30 @@ func TestWriteFreelyRendersAuthorizedFetch(t *testing.T) {
 		}
 	}
 }
+
+// A clustered blog requires TLS to Postgres, because the cluster rejects
+// every connection without it (hostnossl all all all reject) and the HAProxy
+// it reaches may be on another site. A pinned blog talks to the Postgres
+// container in its own Compose project, which serves no TLS. The fork maps
+// true to sslmode=require and false to sslmode=disable.
+func TestTheBlogUsesTLSToTheClusterOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		placement config.Placement
+		want      string
+	}{
+		{"pinned", config.Placement{Mode: config.PlacementPinned, Site: "home-a", Literal: "pinned"}, "false"},
+		{"cluster", config.Placement{Mode: config.PlacementCluster, Literal: "cluster"}, "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ini := renderBlog(t, func(app *config.App) { app.Placement = tc.placement })
+			got, ok := iniValue(ini, "database", "tls")
+			if !ok {
+				t.Fatalf("[database] sets no tls:\n%s", ini)
+			}
+			if got != tc.want {
+				t.Errorf("a %s blog renders tls = %s, want %s", tc.name, got, tc.want)
+			}
+		})
+	}
+}
