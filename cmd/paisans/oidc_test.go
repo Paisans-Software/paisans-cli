@@ -46,11 +46,11 @@ func newIDPFake() *idpFake {
 	launch := func(s string) *string { return &s }
 	return &idpFake{groups: groups, others: map[string]*pocketid.OIDCClient{
 		"docs": {ID: "fixture-not-a-secret-docs-id", Name: "docs", CallbackURLs: []string{"https://docs.example.org/auth/oidc.callback"},
-			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://docs.example.org")},
+			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://docs.example.org"), SkipConsent: true},
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
-			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org")},
+			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org"), SkipConsent: true},
 		"invite": {ID: "fixture-not-a-secret-invite-id", Name: "invite", CallbackURLs: []string{"https://invite.example.org/auth/callback"},
-			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://invite.example.org")},
+			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://invite.example.org"), SkipConsent: true},
 	}}
 }
 
@@ -155,7 +155,8 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 			return reply(400, map[string]string{"error": "no launch URL"})
 		}
 		f.client = &pocketid.OIDCClient{ID: "c-1", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/oidc/verify"}, PkceEnabled: true, LaunchURL: &launch,
-			IsGroupRestricted: strings.Contains(stdin, `\"isGroupRestricted\":true`)}
+			IsGroupRestricted: strings.Contains(stdin, `\"isGroupRestricted\":true`),
+			SkipConsent:       strings.Contains(stdin, `\"skipConsent\":true`)}
 		return reply(201, f.client)
 	}
 	return reply(404, map[string]string{"error": "no route"})

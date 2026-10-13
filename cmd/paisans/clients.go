@@ -52,7 +52,11 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		PKCE:              spec.PKCE,
 		AdminGroup:        adminGroup,
 		MemberGroup:       memberGroup,
+		ExtraGroups:       spec.ExtraGroups(app),
 		RotateSecret:      rotate,
+		// Off unless the app asks for the screen; the gate has no settings
+		// and so skips it too. validate.Check has refused a non-boolean.
+		SkipConsent: app.Settings[kinds.ConsentSetting] != true,
 	}
 	// validate.Check has refused a malformed one already.
 	if link, ok := app.Settings[kinds.DashboardLinkSetting].(string); ok {
@@ -165,6 +169,11 @@ type clientStep struct {
 	// refused is every held app whose client was refused rather than merely
 	// unreachable. These fail the apply once the rest of the site is done.
 	refused map[string]error
+	// confirm asks a person at the terminal before apply creates a group an
+	// app names in its extra groups. Creating an identity provider group
+	// beyond an app's own takes explicit approval under the deployment agent
+	// rules. Nil when apply cannot ask, which refuses the app instead.
+	confirm func(what string) error
 	// steps counts the mutations the last ensure planned.
 	steps int
 	// heldOverwrites are --overwrite paths the last pass did not write,
@@ -411,6 +420,10 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 		if len(p.plan.Steps) == 0 {
 			continue
 		}
+		if err := c.approveExtraGroups(p.app, *p.plan); err != nil {
+			c.refuse(p.app, err)
+			continue
+		}
 		rec := &secretsRecorder{app: p.app, path: c.secretsPath, secrets: c.secrets, recipients: c.recipients}
 		p.plan.Report = r
 		if err := oidcclient.Execute(p.plan, api, rec, secretsgen.ClientSecret); err != nil {
@@ -531,6 +544,28 @@ func (c *clientStep) cannotAsk(apps []string, why string, waiting bool) {
 		c.held[app] = why
 		c.reporter().Warn(app+" held back: no client yet and Pocket ID not asked", why)
 	}
+}
+
+// approveExtraGroups asks once for every extra group plan p creates.
+func (c *clientStep) approveExtraGroups(app string, p oidcclient.Plan) error {
+	var groups []string
+	for _, s := range p.Steps {
+		if s.Kind == oidcclient.CreateGroup && s.Extra {
+			groups = append(groups, s.Group)
+		}
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	names := strings.Join(groups, ", ")
+	what := fmt.Sprintf("apply will create the group(s) %s at Pocket ID, which %s reads from the groups claim. They start empty.", names, app)
+	if c.confirm == nil {
+		return fmt.Errorf("%s names group(s) %s that Pocket ID does not have, and creating them asks at a terminal. Run apply from an interactive shell, or create them at Pocket ID first", app, names)
+	}
+	if err := c.confirm(what); err != nil {
+		return fmt.Errorf("group(s) %s for %s: %w", names, app, err)
+	}
+	return nil
 }
 
 // refuse holds an app back because its client was refused or could not be

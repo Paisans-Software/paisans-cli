@@ -154,7 +154,7 @@ func BackupOf(kind config.Kind) *BackupSpec { return of(kind).Backup }
 func NeedsDump(kind config.Kind) bool { return needsDump[of(kind).Engine] }
 
 // SettingSpec is the type of one `settings` key a blueprint reads: string,
-// bool, int, email, or enum with its values. Default, when set, is the value
+// bool, int, email, enum with its values, or list (of strings). Default, when set, is the value
 // the blueprint's templates and expressions see for an app that leaves the
 // key out (see SettingsSeen); nil means the key has none.
 type SettingSpec struct {
@@ -163,7 +163,7 @@ type SettingSpec struct {
 	Default any      `yaml:"default"`
 }
 
-var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "email": true, "enum": true}
+var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "email": true, "enum": true, "list": true}
 
 // SettingsOf is the settings a kind declares, nil for one that declares
 // none.
@@ -225,6 +225,18 @@ func (s SettingSpec) Problem(v any) string {
 		}
 		if s.Type == "enum" && !contains(s.Values, str) {
 			return fmt.Sprintf("is %q; it must be one of %s", str, strings.Join(s.Values, ", "))
+		}
+	case "list":
+		// A name that is blank cannot name anything, so it is refused here
+		// rather than rendered into a template as an empty entry.
+		items, ok := v.([]any)
+		if !ok {
+			return fmt.Sprintf("is %v, not a list", v)
+		}
+		for i, item := range items {
+			if str, ok := item.(string); !ok || strings.TrimSpace(str) == "" {
+				return fmt.Sprintf("item %d is %v, not a name", i, item)
+			}
 		}
 	}
 	return ""

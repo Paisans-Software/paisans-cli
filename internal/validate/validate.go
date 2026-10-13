@@ -23,6 +23,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
@@ -130,6 +131,7 @@ func Check(cfg *config.Config) Result {
 	c.undeclaredSites()
 	c.placementShape()
 	c.dashboardLinkIsAPath()
+	c.consentIsABoolean()
 	c.clusterSiteWithoutData()
 	c.dataSitesShareAnArch()
 	c.clusterAppWithoutAppsSite()
@@ -848,6 +850,20 @@ func (c *checker) dashboardLinkIsAPath() {
 		}
 		if err := kinds.CheckDashboardLink(v); err != nil {
 			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, kinds.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
+		}
+	}
+}
+
+// consentIsABoolean refuses an sso_consent that is not true or false. The
+// client is made from it, and a string such as "yes" would read as off, so a
+// member would never see the screen the operator asked for.
+func (c *checker) consentIsABoolean() {
+	for _, name := range c.cfg.AppNames() {
+		v, ok := c.cfg.Apps[name].Settings[kinds.ConsentSetting]
+		if _, isBool := v.(bool); ok && !isBool {
+			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.ConsentSetting),
+				"sso_consent is not true or false",
+				"is %v. Write true to show Pocket ID's consent screen on a member's first sign in, or leave it out.", v)
 		}
 	}
 }
@@ -1816,6 +1832,16 @@ func (c *checker) oidcMemberGroupNotAName() {
 			c.refuse("oidc-member-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"oidc member group is not a group name",
 				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the kind's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
+		}
+		// Extra groups are created at Pocket ID by apply, so a name it
+		// refuses would otherwise fail there, after validate passed.
+		for _, group := range spec.ExtraGroups(app) {
+			if pocketid.ValidGroupName(group) {
+				continue
+			}
+			c.refuse("oidc-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, spec.ExtraGroupsSetting),
+				"a group to create is not a group name",
+				"%q is not a name Pocket ID takes for a group. A group name is 2 to 50 characters.", group)
 		}
 	}
 }

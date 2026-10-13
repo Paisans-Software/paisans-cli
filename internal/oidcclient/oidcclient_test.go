@@ -99,7 +99,7 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 	case method == "POST" && path == "/api/oidc/clients":
 		var n pocketid.NewOIDCClient
 		_ = json.Unmarshal([]byte(body), &n)
-		c := &pocketid.OIDCClient{ID: fmt.Sprintf("c-%d", len(f.clients)+1), Name: n.Name, CallbackURLs: n.CallbackURLs, PkceEnabled: n.PkceEnabled, IsGroupRestricted: n.IsGroupRestricted, IsPublic: n.IsPublic}
+		c := &pocketid.OIDCClient{ID: fmt.Sprintf("c-%d", len(f.clients)+1), Name: n.Name, CallbackURLs: n.CallbackURLs, PkceEnabled: n.PkceEnabled, IsGroupRestricted: n.IsGroupRestricted, IsPublic: n.IsPublic, SkipConsent: n.SkipConsent}
 		if n.LaunchURL != "" {
 			c.LaunchURL = &n.LaunchURL
 		}
@@ -116,10 +116,12 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 			PkceEnabled       bool     `json:"pkceEnabled"`
 			IsGroupRestricted bool     `json:"isGroupRestricted"`
 			LaunchURL         *string  `json:"launchURL"`
+			SkipConsent       bool     `json:"skipConsent"`
 		}
 		_ = json.Unmarshal([]byte(body), &in)
 		c := f.client(parts[3])
 		c.Name, c.CallbackURLs, c.IsPublic, c.PkceEnabled, c.IsGroupRestricted, c.LaunchURL = in.Name, in.CallbackURLs, in.IsPublic, in.PkceEnabled, in.IsGroupRestricted, in.LaunchURL
+		c.SkipConsent = in.SkipConsent
 		if !in.IsGroupRestricted {
 			c.AllowedUserGroups = nil
 		}
@@ -288,7 +290,7 @@ func TestAFreshPlanShowsEverythingAndChangesNothing(t *testing.T) {
 	if fmt.Sprint(kinds(p)) != fmt.Sprint(want) {
 		t.Fatalf("planned %v, want %v", kinds(p), want)
 	}
-	if !strings.Contains(p.Steps[1].Detail, `{"name":"talk","callbackURLs":["https://talk.example.org/oauth/oidc/verify"],"isPublic":false,"pkceEnabled":true,"isGroupRestricted":false,"launchURL":"https://talk.example.org/oauth/oidc/connect"}`) {
+	if !strings.Contains(p.Steps[1].Detail, `{"name":"talk","callbackURLs":["https://talk.example.org/oauth/oidc/verify"],"isPublic":false,"pkceEnabled":true,"isGroupRestricted":false,"launchURL":"https://talk.example.org/oauth/oidc/connect","skipConsent":false}`) {
 		t.Errorf("the client line does not show the body: %s", p.Steps[1].Detail)
 	}
 	if len(f.mutations) != 0 {
@@ -885,5 +887,97 @@ func TestAnUnrecordedClientUnderAnotherNameIsNotRenamed(t *testing.T) {
 	p := plan(t, f, d, Recorded{})
 	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{CreateGroup, CreateClient, AddSecret}) {
 		t.Fatalf("planned %v", kinds(p))
+	}
+}
+
+// Extra groups are created when missing, and never join the client's
+// allowed groups, which stay the member and admin groups.
+func TestExtraGroupsAreCreatedButNotAllowed(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.MemberGroup = "members"
+	d.ExtraGroups = []string{"moderators"}
+	p := plan(t, f, d, Recorded{})
+	var extra []string
+	for _, s := range p.Steps {
+		if s.Kind == CreateGroup && s.Extra {
+			extra = append(extra, s.Group)
+		}
+	}
+	if fmt.Sprint(extra) != "[moderators]" {
+		t.Fatalf("extra group steps %v", extra)
+	}
+	rec := &memRecorder{}
+	if err := Execute(p, api(f), rec, secretSource("extra-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	var allowed []string
+	for _, g := range f.clients[0].AllowedUserGroups {
+		allowed = append(allowed, g.Name)
+	}
+	if fmt.Sprint(allowed) != "[members admins]" {
+		t.Errorf("allowed %v", allowed)
+	}
+}
+
+// An extra group Pocket ID already has plans nothing.
+func TestAnExistingExtraGroupIsPresent(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.MemberGroup = "members"
+	d.ExtraGroups = []string{"moderators"}
+	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("extra-secret-not-real-0002")); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan(t, f, d, Recorded{}).Steps {
+		if s.Kind == CreateGroup {
+			t.Errorf("planned %s again", s.Group)
+		}
+	}
+}
+
+// A new client is created with consent skipped when the app asks for no
+// consent screen.
+func TestANewClientSkipsConsent(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.SkipConsent = true
+	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("consent-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	if !f.clients[0].SkipConsent {
+		t.Errorf("client %+v", f.clients[0])
+	}
+}
+
+// An existing client whose consent setting differs is corrected, and nothing
+// else about it changes.
+func TestAnExistingClientsConsentIsCorrected(t *testing.T) {
+	f := newFake()
+	rec := &memRecorder{}
+	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("consent-secret-not-real-0002")); err != nil {
+		t.Fatal(err)
+	}
+	before := *f.clients[0]
+	d := talk()
+	d.SkipConsent = true
+	p := plan(t, f, d, rec.rec)
+	var ks []StepKind
+	for _, s := range p.Steps {
+		ks = append(ks, s.Kind)
+	}
+	if fmt.Sprint(ks) != fmt.Sprint([]StepKind{SetSkipConsent}) {
+		t.Fatalf("planned %v", ks)
+	}
+	if err := Execute(p, api(f), &memRecorder{}, secretSource("unused-not-real-0003")); err != nil {
+		t.Fatal(err)
+	}
+	if !f.clients[0].SkipConsent {
+		t.Error("consent not corrected")
+	}
+	after := *f.clients[0]
+	after.SkipConsent = before.SkipConsent
+	if a, b := marshal(after), marshal(before); a != b {
+		t.Errorf("something else changed: %s, was %s", a, b)
 	}
 }

@@ -129,6 +129,9 @@ type oidcSpec struct {
 	DefaultAdminGroup  string `yaml:"default_admin_group"`
 	DefaultMemberGroup string `yaml:"default_member_group"`
 	ReadsGroups        bool   `yaml:"reads_groups"`
+	// ExtraGroupsSetting names a list setting whose groups apply finds or
+	// creates at the identity provider beside the member and admin groups.
+	ExtraGroupsSetting string `yaml:"extra_groups_setting"`
 }
 
 type secretsSpec struct {
@@ -263,7 +266,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	}
 	for key, spec := range s.Settings {
 		if !settingTypes[spec.Type] {
-			return nil, fmt.Errorf("settings.%s.type: is %q; it must be string, bool, int, email or enum", key, spec.Type)
+			return nil, fmt.Errorf("settings.%s.type: is %q; it must be string, bool, int, email, enum or list", key, spec.Type)
 		}
 		if (spec.Type == "enum") != (len(spec.Values) > 0) {
 			return nil, fmt.Errorf("settings.%s: values go with type enum, and only with it", key)
@@ -466,6 +469,7 @@ func (o *oidcSpec) def() (*OIDCDef, error) {
 		DefaultAdminGroup:  o.DefaultAdminGroup,
 		DefaultMemberGroup: o.DefaultMemberGroup,
 		ReadsGroups:        o.ReadsGroups,
+		ExtraGroupsSetting: o.ExtraGroupsSetting,
 	}, nil
 }
 

@@ -2804,7 +2804,9 @@ signed copies of the configuration*).
 out.** Its `checks` are CEL conditions over the app's declaration and the
 sites it runs on, each run by `validate` under the blueprint's own rule id as a
 refusal or a warning, with a message that may name the value it refuses; its
-`settings` are checked by type, and a key it does not read is warned about. A
+`settings` are checked by type (string, bool, int, email, enum, or `list`,
+a list of names, for a setting such as a set of groups), and a key it does not
+read is warned about. A
 setting may declare a `default` of its own type, which the blueprint's
 templates and CEL expressions see for an app that leaves the key out; a value
 the app sets always wins. The default is never written into the
@@ -7091,7 +7093,10 @@ whose member group is not `members` is refused
 A `member_group` or `admin_group` that is blank or not a string is refused
 too (`oidc-member-group-not-a-name`): the default would hold and the client
 would still be restricted, but what the operator wrote reads as a restriction
-to a group that does not exist. And a gateable kind whose client would admit
+to a group that does not exist. A group an app has apply create (its
+extra groups setting) is refused when Pocket ID would not take the name,
+which is 2 to 50 characters (`oidc-group-not-a-name`); otherwise apply would
+fail on it after validate passed. And a gateable kind whose client would admit
 every account is refused outright (`oidc-client-unrestricted`); every such
 kind has a default member group today, so this is the floor under that.
 
@@ -7124,6 +7129,27 @@ apps:
 including a full URL. The host is always the app's own hostname; accepting a
 URL would be a second place to spell it, one that can disagree with
 `hostname`.
+
+**Pocket ID's consent screen is off for every client the toolkit makes.** The
+client is for the community's own app, so the screen would ask a member to
+approve something already theirs on their first sign in. `apply` and `oidc
+client create` therefore send `skipConsent: true`, and the gate's client
+likewise. An app that wants the screen sets `sso_consent: true`:
+
+```yaml
+apps:
+  talk:
+    settings:
+      sso_consent: true   # Pocket ID asks a member to consent on first sign in
+```
+
+`validate` refuses a value that is not true or false, because a string such as
+`"yes"` would read as off and the screen the operator asked for would never
+show. Unlike a launch URL, an existing client's consent setting is always made
+to match the configuration, in either direction: it is the configuration's to
+say and nothing else depends on the old value. A differing client plans `set
+consent screen for <app>`, a `PUT /api/oidc/clients/<id>` that sends every field
+back as read with only `skipConsent` changed, as the launch URL update does.
 
 **An existing client's launch URL is changed only when the toolkit put it
 there.** That means empty, which is a client made before this command set one,

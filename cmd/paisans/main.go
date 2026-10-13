@@ -649,6 +649,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if clients != nil {
+		clients.confirm = func(what string) error { return confirmWord(stdin, stdout, "create", what) }
+	}
 	options := []apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}
 	// An app this site shares with others stays on the build they run,
 	// unless the apply plans them all: as a step of apply without --site it
