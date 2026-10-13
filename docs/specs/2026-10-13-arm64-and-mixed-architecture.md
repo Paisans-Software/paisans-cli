@@ -98,7 +98,8 @@ file that carries the key; that is accepted.
 
 **The architecture is read from the host**, with `dpkg --print-architecture`,
 the same fact `host prepare` already reads for Docker's apt source
-(`internal/hostprep/ubuntu.go`). The probe is shared rather than run twice.
+(`internal/hostprep/ubuntu.go`). One function reads and checks it for apply,
+`host prepare`, `site add` and preflight (`internal/hostarch`).
 
 **A whole `apply` probes before it prepares.** It asks every site for its
 architecture, one site after another, before the host prepare stage. Every
