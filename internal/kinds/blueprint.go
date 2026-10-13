@@ -39,6 +39,8 @@ type spec struct {
 	Backup          *BackupSpec            `yaml:"backup"`
 	Checks          []checkSpec            `yaml:"checks"`
 	Settings        map[string]SettingSpec `yaml:"settings"`
+	Provides        []string               `yaml:"provides"`
+	Consumes        []Consume              `yaml:"consumes"`
 }
 
 type databaseSpec struct {
@@ -47,10 +49,11 @@ type databaseSpec struct {
 }
 
 type configSpec struct {
-	Format      Format       `yaml:"format"`
-	File        string       `yaml:"file"`
-	SettingKeys []SettingKey `yaml:"setting_keys"`
-	OmittedKeys []OmittedKey `yaml:"omitted_keys"`
+	Format         Format       `yaml:"format"`
+	File           string       `yaml:"file"`
+	SettingKeys    []SettingKey `yaml:"setting_keys"`
+	OmittedKeys    []OmittedKey `yaml:"omitted_keys"`
+	LockedSettings []lockedSpec `yaml:"locked_settings"`
 }
 
 type healthSpec struct {
@@ -115,8 +118,8 @@ type storageSpec struct {
 
 type oidcSpec struct {
 	// Callback is the redirect URI's path on the app's own hostname. It is a
-	// template, given .Hostname and .App and the helper
-	// masUpstreamProviderID, for a kind whose path depends on the app.
+	// template, given .Hostname and .App and the helper stableULID, for a
+	// kind whose path depends on the app.
 	Callback           string `yaml:"callback"`
 	NoLaunch           bool   `yaml:"no_launch"`
 	LaunchPath         string `yaml:"launch_path"`
@@ -144,7 +147,7 @@ var engines = map[string]bool{"postgres": true, "mysql": true, "sqlite": true, "
 var knownRoles = map[string]bool{MediaRole: true, WellknownRole: true}
 
 // callbackHelpers are the functions an OIDC callback template may call.
-var callbackHelpers = template.FuncMap{"masUpstreamProviderID": MASUpstreamProviderID}
+var callbackHelpers = template.FuncMap{"stableULID": StableULID, "masUpstreamProviderID": StableULID}
 
 // Parse reads one blueprint.yaml, from the directory named name, into a Def.
 // hasTemplate reports whether the blueprint ships a template, so a hostname
@@ -287,6 +290,13 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 			return nil, fmt.Errorf("hostname_roles: %s needs a template %s, which the blueprint does not ship", role, SnippetFor(role))
 		}
 	}
+	if err := checkLinks(s.Provides, s.Consumes); err != nil {
+		return nil, err
+	}
+	locked, err := lockedSettings(s.Config.LockedSettings)
+	if err != nil {
+		return nil, err
+	}
 	gate, settings, live, err := s.Gate.def()
 	if err != nil {
 		return nil, err
@@ -318,6 +328,9 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		LocalFilesOnly:  s.Storage.LocalOnly,
 		LocalOnlyReason: s.Storage.LocalOnlyReason,
 		ExtraDatabases:  s.Database.Extra,
+		LockedSettings:  locked,
+		Provides:        s.Provides,
+		Consumes:        s.Consumes,
 		LocalMediaPaths: s.Storage.LocalMediaPaths,
 		SendsMail:       s.Mail == "reads",
 		OIDC:            oidc,

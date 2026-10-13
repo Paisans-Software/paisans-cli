@@ -29,6 +29,27 @@ const mbinNullDSN = "null://null"
 // written, since a DSN without one makes Symfony guess from the scheme.
 func (v appValues) MailerDSN() string { return mailerDSN(v.SMTP) }
 
+// SMTPDSN is the app's resolved SMTP settings as a Symfony Mailer DSN, the
+// helper any blueprint whose software reads one uses: MailerDSN by the name
+// of what it is rather than of the app that first needed it.
+func (v appValues) SMTPDSN() string { return mailerDSN(v.SMTP) }
+
+// SMTPSender is the From address of the app's mail: the resolved
+// from_address, else noreply at the app's own hostname, an address nothing
+// sends from while no mail server resolves.
+func (v appValues) SMTPSender() string {
+	if v.SMTP.FromAddress != "" {
+		return v.SMTP.FromAddress
+	}
+	return mbinFallbackAddress(v.Hostname)
+}
+
+// LockedSettings is the settings the app's blueprint locks, those with a
+// condition only when it holds, joined by sep.
+func (v appValues) LockedSettings(sep string) string {
+	return strings.Join(kinds.LockedSettingsFor(v.decl, v.OIDC.Present), sep)
+}
+
 func mailerDSN(s smtpValues) string {
 	if s.Host == "" {
 		return mbinNullDSN

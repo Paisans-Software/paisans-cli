@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -186,6 +187,11 @@ type appValues struct {
 	// set is the app's settings as its blueprint sees them, with a catalog
 	// blueprint's defaults filled in (kinds.SettingsSeen).
 	set map[string]any
+	// decl is the app as the configuration declares it.
+	decl config.App
+	// links is what each role the app's blueprint consumes offers, keyed by
+	// role and then by value (Linked).
+	links map[string]map[string]string
 }
 
 type s3Values struct {
@@ -422,6 +428,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		MeshAddress:     p.meshAddress(planned.Site),
 		secrets:         p.secrets.Apps[planned.Name],
 		set:             kinds.SettingsSeen(app),
+		decl:            app,
 	}
 	v.TrustProxy = trustProxy(p.cfg, planned.Name)
 	v.WebServerListen = webServerListen(p.cfg, planned.Name)
@@ -434,6 +441,12 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	}
 	if planned.Kind == config.KindElement {
 		v.ServerName = p.homeserverServerName(v.Setting("homeserver", planned.Hostname))
+	}
+	for _, c := range kinds.Consumes(planned.Kind) {
+		if v.links == nil {
+			v.links = map[string]map[string]string{}
+		}
+		v.links[c.Role] = p.linked(c.Role, v.Setting(c.Setting, planned.Hostname))
 	}
 	v.LocalStorage = kinds.KeepsFilesLocally(p.cfg, app)
 	if kinds.InObjectStorage(p.cfg, app) {
@@ -484,9 +497,41 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.MASPort = masPort
 		v.MASUpstreams = p.upstreamsOnPort(planned.Name, masPort)
 		v.MASDBName = planned.DBName + "_mas"
-		v.MASUpstreamProviderID = kinds.MASUpstreamProviderID(planned.Name)
+		v.MASUpstreamProviderID = kinds.StableULID(planned.Name)
 	}
 	return v, nil
+}
+
+// Linked is a value the provider of a role the app's blueprint consumes
+// offers (kinds.LinkRoles), empty for a role it does not consume.
+func (v appValues) Linked(role, value string) string { return v.links[role][value] }
+
+// linked is what the provider of role at hostname offers. A hostname no
+// declared provider answers on is taken as the provider's own: a consumer
+// pointed at a server outside the deployment still gets its address.
+func (p *planner) linked(role, hostname string) map[string]string {
+	var provider *config.App
+	for _, name := range p.cfg.AppNames() {
+		app := p.cfg.Apps[name]
+		if app.Hostname == hostname && slices.Contains(kinds.Provides(app.Kind), role) {
+			provider = &app
+			break
+		}
+	}
+	switch role {
+	case "matrix-homeserver":
+		// base_url is where the client API is, the homeserver's primary
+		// hostname; server_name the name inside every identifier, its
+		// wellknown hostname when it delegates.
+		serverName := hostname
+		if provider != nil {
+			if delegated := provider.Hostnames[kinds.WellknownRole]; delegated != "" {
+				serverName = delegated
+			}
+		}
+		return map[string]string{"base_url": "https://" + hostname, "server_name": serverName}
+	}
+	return nil
 }
 
 // homeserverServerName is the server_name of the homeserver reached at a given
@@ -539,19 +584,11 @@ func (p *planner) oidcFor(planned plannedApp) oidcValues {
 		return oidcValues{}
 	}
 	issuer := p.identityProviderURL()
-	// The homeserver's client belongs to the authentication service in front
-	// of it, which serves one callback path per upstream provider rather than
-	// the /oauth/callback every other kind uses.
+	// The callback is the one the blueprint declares, which is also the one
+	// apply registers at the identity provider.
 	redirect := "https://" + planned.Hostname + "/oauth/callback"
-	switch planned.Kind {
-	case config.KindSynapse:
-		redirect = kinds.MASRedirectURI(planned.Hostname, planned.Name)
-	case config.KindMbin:
-		redirect = kinds.MbinRedirectURI(planned.Hostname)
-	case config.KindInvite:
-		if spec, ok := kinds.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
-			redirect = spec.CallbackURL
-		}
+	if spec, ok := kinds.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
+		redirect = spec.CallbackURL
 	}
 	return oidcValues{
 		Present:      true,

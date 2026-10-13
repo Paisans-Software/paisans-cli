@@ -146,7 +146,8 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 | `placement` | the placements it allows | `cluster-placement-without-a-cluster` and the pinned only kinds |
 | `storage` | `local`, `s3`, `public_reads`, and for `local_only` its `local_only_reason` | `UsesObjectStorage`, `ServesObjectsPublicly` |
 | `settings` | each `settings:` key it reads: type, default, allowed values | per kind constants such as `MbinQueueSetting` |
-| `config` | the passthrough file's name and format, and its lock list | `configFiles`, `mbinLockedSettings` |
+| `config` | the passthrough file's name and format, and its lock list, `locked_settings` | `configFiles`, `mbinLockedSettings` |
+| `provides`, `consumes` | the roles linking it to other apps, `matrix-homeserver` the first | `homeserverServerName` |
 | `oidc` | `none`, or the client spec: callback, launch path, PKCE, group settings, whether it reads groups | `OIDCClient` |
 | `gate` | what the gate leaves open, the settings that close it, the probe and the live read | `registerGateSettings`, `SignedFetchFor`, `MbinPrivateAPIProbe` |
 | `health` | the route and the status codes that mean healthy, or `tcp: true` | `HealthFor` |
@@ -385,7 +386,12 @@ an app's settings with `.Setting "key" "fallback"` and `.SettingBool "key"
 fallback`, which return what the app declares, else the blueprint's default,
 else the fallback. A service with a `port` of its own is reached at
 `index .ServiceUpstreams "<service>"`, on `index .ServicePorts "<service>"`,
-and an extra database is named `index .Databases "<name>"`. Values the toolkit
+an extra database is named `index .Databases "<name>"`, `.SMTPDSN` and
+`.SMTPSender` are the resolved mail settings as a Symfony DSN and a From
+address, `.LockedSettings "<separator>"` joins the blueprint's
+`config.locked_settings` that apply, `stableULID` derives a ULID from an
+app's name, and `.Linked "<role>" "<value>"` reads what the provider of a
+consumed role offers. Values the toolkit
 works out in Go for one blueprint, such as Mbin's mailer DSN (`.MailerDSN`),
 are that blueprint's, not helpers.
 

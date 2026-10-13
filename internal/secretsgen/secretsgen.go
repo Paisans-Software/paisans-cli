@@ -553,30 +553,21 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `paisans oidc client create --app " + name +
 			"` runs the same step alone. The client's redirect URI is " + spec.CallbackURL + ", with " + pkce
 		admin, member := spec.Groups(app)
-		switch app.Kind {
-		case config.KindMbin:
-			// The fork's OidcClient extends KnpU's OAuth2PKCEClient and always
-			// sends a code challenge (src/Security/Oidc/OidcClient.php:18 at
-			// tag v1.13.3+paisans).
-			why += ". It is restricted to the groups " + member + " and " + admin +
-				", which the fork reads from the groups claim as its member and admin groups"
-		case config.KindOutline, config.KindWriteFreely, config.KindSynapse:
-			// None of these reads a groups claim, so the client's restriction
-			// at Pocket ID is the whole control, and the reason says so
-			// where an operator checking an existing client will read it.
-			if app.Kind == config.KindSynapse {
-				why += ". The redirect URI is the authentication service's callback for this upstream provider, and the service is configured to send a challenge always"
-			}
-			why += ". It is restricted to the groups " + member + " and " + admin +
-				", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
-		case config.KindOAuth2Proxy:
+		switch {
+		case app.Kind == config.KindOAuth2Proxy:
 			why += ". It is restricted to the groups " + member + " and " + admin + ", the ones the gate admits"
-		case config.KindInvite:
-			why += ". It is restricted to the groups " + member + " and " + admin +
-				", which the service reads from the groups claim as its member and admin groups"
-		case config.KindUptime:
+		case app.Kind == config.KindUptime:
 			why += ". The redirect URI is the fork's own (src/lib/oidc.js:26 in the uptime fork). It is restricted to the group named in apps." +
 				name + ".settings.admin_group, so the identity provider refuses everyone else before the monitor does"
+		case spec.ReadsGroups:
+			why += ". It is restricted to the groups " + member + " and " + admin +
+				", which the app reads from the groups claim as its member and admin groups"
+		default:
+			// An app that reads no groups claim has the client's restriction
+			// at Pocket ID as the whole control, and the reason says so where
+			// an operator checking an existing client will read it.
+			why += ". It is restricted to the groups " + member + " and " + admin +
+				", and that restriction is the whole control: the app reads no groups claim, so a person outside them is refused at Pocket ID before the app sees them"
 		}
 		out = append(out, Pending{Name: "oidc_clients." + name, What: signInClient, App: name, Why: why})
 	}

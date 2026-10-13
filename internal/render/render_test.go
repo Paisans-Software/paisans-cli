@@ -2309,7 +2309,7 @@ func envValue(env, key string) string {
 // /oauth/callback, which no route in the fork serves.
 func TestMbinNamesTheCallbackItServes(t *testing.T) {
 	env := planFiles(build(t))["home-a/srv/paisans/f2a9/talk/.env"]
-	want := kinds.MbinRedirectURI("talk.example.org")
+	want := "https://talk.example.org/oauth/oidc/verify"
 	if !strings.Contains(env, want) {
 		t.Errorf("the Mbin .env does not name %s as the callback to register:\n%s", want, env)
 	}

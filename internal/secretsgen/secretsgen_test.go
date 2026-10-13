@@ -235,7 +235,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	if why == "" {
 		t.Fatal("the homeserver's client was not reported as pending at all")
 	}
-	want := kinds.MASRedirectURI(cfg.Apps["chat"].Hostname, "chat")
+	want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + kinds.StableULID("chat")
 	if !strings.Contains(why, want) {
 		t.Errorf("the pending client does not name the redirect URI to register (%s):\n%s", want, why)
 	}
@@ -309,7 +309,7 @@ func TestAnMbinPendingClientNamesItsRedirectURIAndPKCE(t *testing.T) {
 	if why == "" {
 		t.Fatal("the Mbin app's client was not reported as pending at all")
 	}
-	for _, want := range []string{kinds.MbinRedirectURI(cfg.Apps["talk"].Hostname), "PKCE", "paisans apply", "paisans oidc client create --app talk"} {
+	for _, want := range []string{"https://" + cfg.Apps["talk"].Hostname + "/oauth/oidc/verify", "PKCE", "paisans apply", "paisans oidc client create --app talk"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not name %q:\n%s", want, why)
 		}
