@@ -131,10 +131,12 @@ The DNS check runs inside the reconciler's existing pass, after the `admins`
 group step and on its schedule: every two hours, once at start, on the active
 instance only. A standby does nothing, as now.
 
-1. **Account.** `GET /zones?name=<zone>` with the members token, the zone the
-   deployment's records are in, rendered as `PAISANS_DNS_ZONE`. The zone's
-   `account.id` is the account. Found every pass, never configured, so a zone
-   moved between accounts is followed.
+1. **Account.** `GET /zones?name=<suffix>` with the members token, for each
+   suffix of `community.domain`, longest first, until a zone the token can
+   see answers: the way `internal/dns` finds a zone, because the domain need
+   not be a zone apex. The domain is rendered as `PAISANS_DNS_DOMAIN`, and the
+   zone's `account.id` is the account. Found every pass, never configured, so
+   a zone moved between accounts is followed.
 2. **Members.** `GET /accounts/{account_id}/members`, `per_page=50` (the
    maximum), paged with `page` up to `result_info.total_pages`, as the DNS
    client pages records. The reference lists `count`, `page`, `per_page` and
@@ -244,7 +246,7 @@ the whole of what it does with what it reads.
 * **Validate**: two admins mapped to one address, a mapping equal to another
   admin's `email`, and a key that is no declared admin are each refused.
 * **Render**: without the token, the golden tree is unchanged. With it, the
-  Pocket ID `.env` gains the zone, the key and the hashed map; the seed gains
+  Pocket ID `.env` gains the token, the domain, the key and the hashed map; the seed gains
   the two monitors; the pusher's env gains the two URL variables; and the
   pusher's script runs its new branches under `sh` against a fake curl.
 
