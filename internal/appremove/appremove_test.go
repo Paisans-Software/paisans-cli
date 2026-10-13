@@ -296,11 +296,12 @@ func TestTheClientIsDeletedOnlyByItsRecordedID(t *testing.T) {
 		delete string
 		kept   int
 	}{
-		"recorded and named":   {ClientState{Provider: "auth", RecordedID: "c-1", ByID: docs, ByName: docs}, "c-1", 0},
-		"named, not recorded":  {ClientState{Provider: "auth", ByName: other}, "", 1},
-		"recorded, other name": {ClientState{Provider: "auth", RecordedID: "c-1", ByID: renamed}, "", 1},
-		"recorded, gone":       {ClientState{Provider: "auth", RecordedID: "c-1", ByName: other}, "", 1},
-		"no pocket-id":         {ClientState{RecordedID: "c-1"}, "", 0},
+		"recorded and named":   {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByID: docs, ByName: docs}, "c-1", 0},
+		"named, not recorded":  {ClientState{Name: "docs", Provider: "auth", ByName: other}, "", 1},
+		"recorded, other name": {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByID: renamed}, "", 1},
+		"recorded, gone":       {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByName: other}, "", 1},
+		"no pocket-id":         {ClientState{Name: "docs", RecordedID: "c-1"}, "", 0},
+		"recorded, own name":   {ClientState{Name: "wiki", Provider: "auth", RecordedID: "c-1", ByID: renamed, ByName: renamed}, "c-1", 0},
 	} {
 		cp := planClient("docs", tc.st)
 		got := ""
@@ -356,7 +357,7 @@ func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
 	if in.Storage, err = ProbeStorage(cfg, secrets, "docs", a); err != nil {
 		t.Fatal(err)
 	}
-	in.Client = ClientState{Provider: "auth", Site: "home-a", RecordedID: "c-1", ByID: &pocketid.OIDCClient{ID: "c-1", Name: "docs"}}
+	in.Client = ClientState{Provider: "auth", Site: "home-a", Name: "docs", RecordedID: "c-1", ByID: &pocketid.OIDCClient{ID: "c-1", Name: "docs"}}
 	p, err := Build(cfg, "docs", in)
 	if err != nil {
 		t.Fatal(err)

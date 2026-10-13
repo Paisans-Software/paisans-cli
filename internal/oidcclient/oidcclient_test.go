@@ -89,7 +89,11 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 		}
 		return 200, page(out)
 	case method == "GET" && len(parts) == 4 && parts[2] == "clients":
-		return 200, marshal(f.client(parts[3]))
+		// As Pocket ID does: 404 for an ID it does not hold.
+		if c := f.client(parts[3]); c != nil {
+			return 200, marshal(c)
+		}
+		return 404, `{"error":"Record not found"}`
 	case method == "GET" && len(parts) == 5 && parts[4] == "secrets":
 		return 200, marshal(f.secrets[parts[3]])
 	case method == "POST" && path == "/api/oidc/clients":
@@ -243,7 +247,7 @@ const (
 )
 
 func talk() Desired {
-	return Desired{App: "talk", CallbackURL: "https://talk.example.org/oauth/oidc/verify", LaunchURL: connect, ToolkitLaunchURLs: []string{bare, connect}, PKCE: true, AdminGroup: "admins"}
+	return Desired{App: "talk", Name: "talk", CallbackURL: "https://talk.example.org/oauth/oidc/verify", LaunchURL: connect, ToolkitLaunchURLs: []string{bare, connect}, PKCE: true, AdminGroup: "admins"}
 }
 
 func secretSource(values ...string) func() (string, error) {
@@ -256,7 +260,7 @@ func secretSource(values ...string) func() (string, error) {
 
 func plan(t *testing.T, f *fakeIDP, d Desired, rec Recorded) *Plan {
 	t.Helper()
-	s, err := Probe(api(f), d)
+	s, err := Probe(api(f), d, rec.ClientID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +473,7 @@ func TestARecordFailureSendsNothing(t *testing.T) {
 func TestAnExistingClientThatDiffersIsRefused(t *testing.T) {
 	f := newFake()
 	f.clients = []*pocketid.OIDCClient{{ID: "c-9", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/callback"}}}
-	s, err := Probe(api(f), talk())
+	s, err := Probe(api(f), talk(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +666,7 @@ func TestAnOverPermissiveClientIsRefused(t *testing.T) {
 		AllowedUserGroups: []pocketid.Group{f.groups[0], f.groups[1], f.groups[2]}}}
 	d := talk()
 	d.MemberGroup = "members"
-	s, err := Probe(api(f), d)
+	s, err := Probe(api(f), d, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,8 +686,8 @@ func TestAnOverPermissiveClientIsRefused(t *testing.T) {
 func TestPKCEOnIsRefusedForAnAppThatSendsNoChallenge(t *testing.T) {
 	f := newFake()
 	f.clients = []*pocketid.OIDCClient{{ID: "c-9", Name: "docs", PkceEnabled: true, CallbackURLs: []string{"https://docs.example.org/auth/oidc.callback"}}}
-	d := Desired{App: "docs", CallbackURL: "https://docs.example.org/auth/oidc.callback", PKCE: false}
-	s, err := Probe(api(f), d)
+	d := Desired{App: "docs", Name: "docs", CallbackURL: "https://docs.example.org/auth/oidc.callback", PKCE: false}
+	s, err := Probe(api(f), d, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,5 +814,76 @@ func TestRetireReportsEachDeletion(t *testing.T) {
 	}
 	if !r.Has("done", "delete old client secret s-1 of talk") {
 		t.Errorf("reported:\n%s", r.Lines())
+	}
+}
+
+// A client is created under the desired name, which need not be the app's:
+// the gate's carries the community's.
+func TestTheClientIsCreatedUnderItsName(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.Name = "Example Community"
+	p := plan(t, f, d, Recorded{})
+	if !strings.Contains(p.Steps[1].Detail, `"name":"Example Community"`) {
+		t.Errorf("create line %s", p.Steps[1].Detail)
+	}
+	if err := Execute(p, api(f), &memRecorder{}, secretSource("named-secret-not-real-00001")); err != nil {
+		t.Fatal(err)
+	}
+	if f.clients[0].Name != "Example Community" {
+		t.Errorf("client named %q", f.clients[0].Name)
+	}
+}
+
+// The recorded client under another name than the desired one, as after the
+// community is renamed, is renamed in place: same ID, same secret, every
+// other field sent back as it was, and a second run plans nothing.
+func TestTheRecordedClientIsRenamed(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.MemberGroup = "members"
+	rec := &memRecorder{}
+	if err := Execute(plan(t, f, d, Recorded{}), api(f), rec, secretSource("rename-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	d.Name = "Example Community"
+	p := plan(t, f, d, rec.rec)
+	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{SetName}) {
+		t.Fatalf("planned %v", kinds(p))
+	}
+	want := `rename client talk to "Example Community": PUT /api/oidc/clients/c-1 with name "Example Community" and every other field sent back as it is now`
+	if p.Steps[0].Detail != want {
+		t.Errorf("line %q", p.Steps[0].Detail)
+	}
+	f.mutations = nil
+	if err := Execute(p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(f.mutations) != "[PUT /api/oidc/clients/c-1]" {
+		t.Errorf("mutations %v", f.mutations)
+	}
+	c := f.clients[0]
+	if c.Name != "Example Community" || c.LaunchURL == nil || *c.LaunchURL != connect || !c.IsGroupRestricted || len(c.AllowedUserGroups) != 2 || !c.PkceEnabled {
+		t.Errorf("client after the rename %+v", c)
+	}
+	if rec.rec.ClientID != "c-1" || len(f.secrets["c-1"]) != 1 {
+		t.Errorf("recorded %q, secrets %v", rec.rec.ClientID, f.secrets["c-1"])
+	}
+	if again := plan(t, f, d, rec.rec); len(again.Steps) != 0 {
+		t.Errorf("a second run plans %v", kinds(again))
+	}
+}
+
+// Without a recorded ID, a client under another name is not the app's: the
+// plan creates one under the desired name rather than renaming somebody
+// else's.
+func TestAnUnrecordedClientUnderAnotherNameIsNotRenamed(t *testing.T) {
+	f := newFake()
+	f.clients = []*pocketid.OIDCClient{{ID: "c-9", Name: "talk"}}
+	d := talk()
+	d.Name = "Example Community"
+	p := plan(t, f, d, Recorded{})
+	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{CreateGroup, CreateClient, AddSecret}) {
+		t.Fatalf("planned %v", kinds(p))
 	}
 }

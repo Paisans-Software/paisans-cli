@@ -544,6 +544,21 @@ const GateApp = "gate"
 // session cookie the gate writes covers every app.
 func (c *Config) GateHostname() string { return "gate." + c.Community.Domain }
 
+// ClientName is the name of app's OIDC client at the identity provider,
+// which is how the toolkit finds the client there and what the provider
+// shows a person signing in. Every app's client is named after the app,
+// except the gate's: the gate is the community's one sign in rather than an
+// app a member chose, so its client carries the community's name, and falls
+// back to the app's only when the configuration gives the community none.
+// It is decided by name rather than by kind so that `app remove gate`, run
+// after the gate has left the configuration, still finds the client.
+func (c *Config) ClientName(app string) string {
+	if app == GateApp && c.Community.Name != "" {
+		return c.Community.Name
+	}
+	return app
+}
+
 // NeedsGate reports whether any app sets gated or auto_login, which is when
 // the deployment runs the gate.
 func (c *Config) NeedsGate() bool {

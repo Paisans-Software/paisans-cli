@@ -104,16 +104,16 @@ func probeDir(h Host, dir string) (Dir, error) {
 }
 
 // ProbeClient reads the app's client at Pocket ID: by the ID the secrets
-// file records, and by the app's name.
-func ProbeClient(c Clients, app, provider, site, recordedID string) (ClientState, error) {
-	st := ClientState{Provider: provider, Site: site, RecordedID: recordedID}
+// file records, and by name, the client's name (config.Config.ClientName).
+func ProbeClient(c Clients, app, name, provider, site, recordedID string) (ClientState, error) {
+	st := ClientState{Provider: provider, Site: site, Name: name, RecordedID: recordedID}
 	var err error
 	if recordedID != "" {
 		if st.ByID, err = c.OIDCClientByID(recordedID); err != nil {
 			return st, fmt.Errorf("looking up client %s by its recorded ID: %w", app, err)
 		}
 	}
-	if st.ByName, err = c.FindOIDCClient(app); err != nil {
+	if st.ByName, err = c.FindOIDCClient(name); err != nil {
 		return st, fmt.Errorf("looking up client %s: %w", app, err)
 	}
 	return st, nil

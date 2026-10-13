@@ -34,9 +34,10 @@ func pocketIDApp(cfg *config.Config) string {
 	return idp
 }
 
-// clientDesired is the client an app needs at Pocket ID, from its kind and
+// clientDesired is the client app name needs at Pocket ID, from its kind and
 // its declaration, and whether this toolkit knows its kind's client.
-func clientDesired(name string, app config.App, rotate bool) (oidcclient.Desired, bool) {
+func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Desired, bool) {
+	app := cfg.Apps[name]
 	spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
 	if !ok {
 		return oidcclient.Desired{}, false
@@ -44,6 +45,7 @@ func clientDesired(name string, app config.App, rotate bool) (oidcclient.Desired
 	adminGroup, memberGroup := spec.Groups(app)
 	d := oidcclient.Desired{
 		App:               name,
+		Name:              cfg.ClientName(name),
 		CallbackURL:       spec.CallbackURL,
 		LaunchURL:         spec.LaunchURL,
 		ToolkitLaunchURLs: kinds.ToolkitLaunchURLs(app.Kind, app.Hostname),
@@ -85,17 +87,17 @@ func (e *probeError) Unwrap() error { return e.err }
 
 // planClient probes Pocket ID for one app's client and plans it.
 func planClient(api *pocketid.Client, d oidcclient.Desired, rec oidcclient.Recorded) (*oidcclient.Plan, error) {
-	state, err := probeClient(api, d)
+	state, err := probeClient(api, d, rec.ClientID)
 	if err != nil {
 		return nil, err
 	}
 	return buildClient(d, rec, state)
 }
 
-// probeClient reads what Pocket ID holds for one app's client. It only
-// reads, and a failure is a *probeError.
-func probeClient(api *pocketid.Client, d oidcclient.Desired) (oidcclient.State, error) {
-	state, err := oidcclient.Probe(api, d)
+// probeClient reads what Pocket ID holds for one app's client, by its name or
+// the client ID recordedID. It only reads, and a failure is a *probeError.
+func probeClient(api *pocketid.Client, d oidcclient.Desired, recordedID string) (oidcclient.State, error) {
+	state, err := oidcclient.Probe(api, d, recordedID)
 	if err != nil {
 		return state, &probeError{err}
 	}
@@ -344,9 +346,9 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 	// not asked about either.
 	down := ""
 	for i, app := range c.apps {
-		desired, _ := clientDesired(app, c.cfg.Apps[app], false)
+		desired, _ := clientDesired(c.cfg, app, false)
 		recorded := recordedClient(c.secrets, app)
-		state, err := probeClient(api, desired)
+		state, err := probeClient(api, desired, recorded.ClientID)
 		if err != nil {
 			down = unreachable(fmt.Errorf("Pocket ID on %s could not be asked: %w", where, err))
 			c.cannotAsk(c.apps[i:], down, waiting)

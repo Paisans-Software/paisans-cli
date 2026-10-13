@@ -777,13 +777,13 @@ func TestListClientPlanMarksWhatIsPresentDone(t *testing.T) {
 // apply and `oidc client create` make them, at the authentication service's
 // callback and at oauth2-proxy's, each with PKCE on, since both always send a
 // code challenge. The gate's client admits members and admins, as the gate
-// does.
+// does, and is named after the community.
 func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, ok := clientDesired("chat", cfg.Apps["chat"], false)
+	chat, ok := clientDesired(cfg, "chat", false)
 	if !ok {
 		t.Fatal("no client for the homeserver")
 	}
@@ -793,12 +793,17 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if chat.MemberGroup != kinds.MembersGroup || chat.AdminGroup != kinds.AdminsGroup || chat.LaunchURL != "" {
 		t.Errorf("chat's client: member %q admin %q launch URL %q", chat.MemberGroup, chat.AdminGroup, chat.LaunchURL)
 	}
-	gate, ok := clientDesired(config.GateApp, cfg.Apps[config.GateApp], true)
+	gate, ok := clientDesired(cfg, config.GateApp, true)
 	if !ok {
 		t.Fatal("no client for the gate")
 	}
 	if want := "https://" + cfg.Apps[config.GateApp].Hostname + "/oauth2/callback"; gate.CallbackURL != want || !gate.PKCE {
 		t.Errorf("the gate's client: callback %s PKCE %v, want %s with PKCE", gate.CallbackURL, gate.PKCE, want)
+	}
+	// The gate is the community's sign in, so its client carries the
+	// community's name; every other client carries its app's.
+	if cfg.Community.Name == "" || gate.Name != cfg.Community.Name || chat.Name != "chat" {
+		t.Errorf("client names: the gate's %q, chat's %q; want %q and chat", gate.Name, chat.Name, cfg.Community.Name)
 	}
 	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != kinds.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
 		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)

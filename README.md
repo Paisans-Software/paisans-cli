@@ -6813,15 +6813,15 @@ no recipient is refused before Pocket ID is sent anything.
 
 **`apply` creates a client when nothing is recorded for the app, or when what
 is recorded is a client Pocket ID does not have.** If the secrets file holds a
-client ID and secret and Pocket ID has no client named after the app, as after
+client ID and secret and Pocket ID has no client of that ID or the client's name, as after
 Pocket ID is started on a fresh database, `apply` creates the client and records
 its credentials over the stale ones, saying so in one line
 (`talk: recorded client <id> is not at Pocket ID; created a new one`); a dry
 run lists the create with the rest of the plan. Nothing can be signing in with a
 client that does not exist, so nothing is lost. Two cases are refused for that
 app instead, naming `oidc client create --app <name>`, which creates or
-re-records the client: credentials only partly recorded, and a client named
-after the app under another ID than the recorded one. That client may be what a
+re-records the client: credentials only partly recorded, and a client with
+the client's name under another ID than the recorded one. That client may be what a
 running app signs people in with, so replacing it is a decision, not a repair.
 
 `apply` never rotates a secret. The command stays for that and for running the
@@ -6863,6 +6863,21 @@ what lets an operator see what that approval does, in a dry run of either
 `apply` or the command, before `--execute`, and `--verbose` shows exactly what
 each request sends. The same probe runs
 again on `--execute`, so what executes is what a fresh probe plans.
+
+**A client is named after its app, except the gate's, which carries the
+community's name.** Pocket ID heads its sign in page "Sign in to" the
+client's name (`frontend/src/routes/interaction/+page.svelte:111,117` at
+v2.14.0), and the gate's sign in is the community's front door rather than an app a
+member picked, so `community.name` is what they should read there. When the
+configuration gives no `community.name`, the gate's client is named `gate`
+like any other app's. The name is also how the toolkit finds the client, so it
+is found under the name the configuration gives it, or, when Pocket ID holds
+no client of that name, under the client ID recorded for the app. A recorded
+client found that way under another name, as after `community.name` changes,
+is renamed in place: one `PUT` that sends every other field back as it is, so
+its ID, its secret and its group restriction are untouched and nobody's
+session is affected. A client of the old name with no recorded ID is never
+renamed, since nothing proves this deployment made it.
 
 The client is the app kind's, not a choice made at the command line, and
 **every member facing kind's client is restricted at Pocket ID to its member
@@ -7036,13 +7051,13 @@ different place:
 | rendered files | a manifest entry marked left over, under the app's stack directory or named for one of its routes | deleted when the content still hashes to the entry, which is then dropped; a file edited on the host is kept with its entry | the same |
 | the stack directory | its path, `/srv/paisans/<token>/<app>` | removed only once empty; what the app wrote there is kept | deleted, unless it holds a file edited on the host |
 | named volumes | the label and the project | kept | deleted |
-| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the app's name | deleted | deleted |
+| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the client's name (the app's, or the community's for the gate) | deleted | deleted |
 | its database and role | named `render.DBIdentifier(<app>)` on the cluster's leader, the database owned by that role | kept | dropped |
 | its Garage buckets and keys | the key IDs recorded under `apps.<app>`, and a bucket only those keys are granted on | kept | the bucket emptied and deleted, then the keys |
 
 A container or network without this deployment's label is never selected,
 whatever its name, because the selection is Docker's own label filter. A
-client named after the app with no recorded ID could have been made by hand,
+client with the client's name and no recorded ID could have been made by hand,
 so it is kept and named for an administrator to delete; nothing is deleted at
 Pocket ID by name alone. A database whose owner is another role, a name a
 declared app still uses, and a bucket another key can reach are kept the same
