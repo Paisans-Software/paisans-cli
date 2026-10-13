@@ -1557,7 +1557,7 @@ deployment record beside it), listing every deployment that has claimed it:
 
 Every command that writes to a host **claims it first**: `apply`,
 `host prepare`, `storage init`, `storage add`, `storage rotate-key`,
-`site add`, `site remove`, `prune`, `app admin create`, `app remove`, `oidc
+`site add`, `site remove`, `prune`, `admin magic-link`, `app remove`, `oidc
 client create`, `secrets rotate` and `failover test`, each with `--execute`,
 on every site it will write to. The
 claim is one remote shell command run under `flock` on
@@ -1617,7 +1617,7 @@ own forwarded to it; that is two machines and is accepted.
 
 Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
-reads it on the site being added. `app admin create` and `oidc client create`
+reads it on the site being added. `admin magic-link` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
 `--execute` they claim through sudo, since the registry is root's.
 
@@ -4328,7 +4328,7 @@ operator's terminal and a host must not write terminal escapes into the prompt
 for its own password.
 
 The prompt reads `/dev/tty` with echo off, not stdin, because stdin may
-already carry a value (`secrets set` and `app admin create` read one from it).
+already carry a value (`secrets set` reads one from it).
 
 While the prompt waits, the progress display is held. The first sudo command
 runs inside an open step, and that step's spinner redraws its line every tenth
@@ -5300,8 +5300,8 @@ two that is about it, in the order the run first applies each site, then a
 `storage` line for `storage init` or `storage add` when there is Garage. After
 them, a `pocket id` section asks each Pocket ID app whose sites' steps are all
 up to date, or have run, whether it has an admin (`check <app> for an admin`),
-since one not running yet cannot answer, and names `app admin create` for one
-that has none. Then, when an app is served behind the operator's own web
+since one not running yet cannot answer, and for one that has none says to
+declare an admin under `admins` and run apply. Then, when an app is served behind the operator's own web
 server, a `web server` section: with `--execute` a line for each site file
 written into `include_dir` and a line per app for its web server check, and in a
 dry run a line per app, `checked with --execute` (see *The monitor has a site
@@ -6149,7 +6149,7 @@ answers on its mesh address (the address and port the gateway dials), `down`
 otherwise, and `absent` before it has the stack. None active is waited for, up
 to three minutes, then fails: sign in is down. Two active fails at once,
 since waiting would leave both serving. A site that cannot be reached is shown
-and not counted. `app admin create` and `oidc client create` call the active
+and not counted. `admin magic-link` and `oidc client create` call the active
 site the same way unless `--site` names one, and so does `apply`'s client step.
 
 **The gateway needs nothing new.** The route lists every apps site in order
@@ -6465,9 +6465,10 @@ ID has no administrator, and its users sign in with passkeys, so there is no
 password to hand anyone. The `admins` section already says who the admins
 are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
 Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
-address, marked verified for the reason `app admin create` gives below, and
+address, marked verified for the reason *`admin magic-link` gives a declared
+admin a fresh sign-in link* gives, and
 `name` is split at its first space into a first and a last name. Each is put
-in every app's admin group, as `app admin create` does, and in every app's
+in every app's admin group, and in every app's
 member group as well. Declaring the admin is the approval for all of it.
 
 **A declared admin is a member of every app too**, because an app that gates
@@ -6533,120 +6534,56 @@ one `○` line per admin, and issues nothing.
 `docs/specs/2026-10-11-apply-admin-login-links.md` is the approved
 specification.
 
-### `app admin create` makes an app's first administrator
+### `admin magic-link` gives a declared admin a fresh sign-in link
 
-An app whose registrations are closed has no way to make its first account
-from a browser, and Pocket ID's own way to make its first administrator is a
-setup page open to whoever reaches it first. So the toolkit makes it, through
-Pocket ID's API; the commands are under *Pocket ID's administrator gets a
-login link, not a password*. `apply` does the same for every admin the
-`admins` section declares (see above); this command is for any other, and for
-a deployment that declares none.
+Pocket ID users sign in with passkeys, so there is no password to hand an
+admin, and an admin cannot sign in at all until they have registered one.
+`apply` makes every declared admin and gives each a one-time sign-in link
+until they register a passkey (see above). Two cases are left: a link that
+expired before it was used, when no apply is due, and an admin who lost their
+passkey, whom apply gives nothing more. Both are the same command:
 
-The result is a user that exists, is verified and is an administrator. The
-command probes first and plans only what is missing, one `○` line each; when
-there is nothing to do, `--verbose` marks the user `✓`. After `--execute` it probes again and
-fails unless the user is now all three, because a call that succeeds without
-doing its job is the failure nobody notices.
-
-It runs on one site: the app's pinned site, or for a Pocket ID on every apps
-site the one whose instance is active, as *Pocket ID runs on every apps site,
-and one of them is active* describes. `--site` picks another, but only one the
-app runs on.
-
-Admin creation is per kind, behind one small interface, and Pocket ID
-implements it. Any other kind is refused by name, with the list of kinds that
-are implemented, before any host is reached.
-
-**The administrator is also put in every app's admin group.** An app that
-signs its users in through Pocket ID makes an account an administrator when
-Pocket ID lists it in the group the app reads as its admin group (for Mbin,
-`settings.admin_group`, rendered as `OAUTH_OIDC_ADMIN_GROUP`). Pocket ID's own administrator flag does not reach
-an app at all. So the command reads every such group from the configuration,
-the same keys `oidc client create` reads, and plans one step that creates any
-group that does not exist yet and adds the user to the rest: `PUT
-/api/users/<id>/user-groups` with the groups the user is in now, plus these,
-since that route replaces the whole set. A group the user is already in plans
-nothing, and an app added later is picked up by running the command again.
-
-**An Mbin app's administrators come only through single sign on.** So the
-command refuses an `mbin` app before any host is reached, and points at
-itself run against the Pocket ID app.
-
-#### Pocket ID's administrator gets a login link, not a password
-
-Pocket ID users sign in with passkeys, so there is no password to pipe in, and
-a new administrator cannot sign in at all until they have registered one. For
-a `pocket-id` app the command therefore creates the user as an administrator
-and issues a **one-time login link**. How to run it, and its flags, are under
-*`paisans app admin create`* in [docs/commands.md](docs/commands.md).
-
-The dry run marks each step `○`, here for an administrator `founder` of the
-Pocket ID app `auth`, in a deployment whose Mbin app reads the admin group
-`admins`:
-
-```
-auth on home-a (pocket-id)
-  ○ create administrator founder
-  ○ add founder to admin groups admins
-  ○ issue login link for founder
-Nothing changed. Re-run with --execute to apply.
+```sh
+paisans admin magic-link alice              # finds alice's account, changes nothing
+paisans admin magic-link alice --execute    # issues the link, prints it once
 ```
 
-`--verbose` puts the request behind each step under it, including the exact
-body a create would send. A user who is already an administrator is marked
-`✓` under `--verbose`. Piped output says `todo` and `ok` instead. The link is
-printed once, and only with `--execute`.
+It issues a link and does nothing else. It takes an admin by their key under
+`admins`, and refuses any other name before a host is reached: an
+administrator is declared, never made on the side. The account, its groups
+and its administrator flag are apply's, so a declared admin with no account
+yet is pointed at apply, and a disabled account is refused rather than
+re-enabled. The link lives a day, as apply's do, and Pocket ID emails one too
+when it emails apply's. The flags are under *`paisans admin magic-link`* in
+[docs/commands.md](docs/commands.md).
 
 The link is Pocket ID's own mechanism: an admin issues a one-time access token
 for a user (`POST /api/users/:id/one-time-access-token`,
 `onetimeaccess/module.go:68` at `v2.14.0`), and `{APP_URL}/lc/{token}` signs
 that user in once, the same link the binary's `one-time-access-token`
-subcommand prints (`cmds/one_time_access_token.go:78`). The founder opens it
-and registers a passkey.
+subcommand prints (`cmds/one_time_access_token.go:78`). The admin opens it and
+registers a passkey. A link lives over fifteen minutes on purpose: a TTL of
+fifteen minutes or less gets a 6 character code
+(`onetimeaccess/service.go:271-274` at `v2.14.0`), which the login page accepts
+only when unauthenticated email login is enabled; on a host without it the
+page waits for 12 characters and the link is unusable.
 
 **The link is a credential, and it is handled like one.** It is printed once,
 to the terminal running the command, only with `--execute`, with its expiry.
 It never appears in a plan line or an error and is never written to the
-secrets file. It lives twenty minutes: long enough to open a link just
-printed, short enough that one left in scrollback is dead soon after. Not
-Pocket ID's own fifteen minute default for an admin issued token
-(`onetimeaccess/handler.go:17`), because a TTL of fifteen minutes or less gets
-a 6 character code (`onetimeaccess/service.go:271-274` at `v2.14.0`), which the
-login page accepts only when unauthenticated email login is enabled; on a host
-without it the page waits for 12 characters and the link is unusable. Over
-fifteen minutes gets the 12 character code. If it
-expires, `--login-link --execute` issues a fresh one for an account that
-exists; without `--login-link`, an existing administrator plans nothing. An
-existing account that is not an administrator plans `make <u> an
-administrator`, and a link only with `--login-link`; a disabled one is
-refused rather than re-enabled.
+secrets file.
 
-**The administrator's email is created verified** (`"emailVerified": true`,
+**An admin's email is created verified** (`"emailVerified": true`,
 `dto/user_dto.go:29`, stored as sent at `service/user_service.go:299`), and an
-existing account whose email is not verified plans `verify <u>`: a `PUT
+existing account whose email is not verified is marked so: a `PUT
 /api/users/<id>` that sends every field back as read with only
 `emailVerified` changed, since that update overwrites the whole user
 (`service/user_service.go:495-519`). Without it Pocket ID sends
 `email_verified: false`, and the paisans Mbin fork refuses an OIDC sign in whose
 email matches an existing local account unless the provider marked it
 verified. That guard stops anyone taking over an account by claiming its
-address at the provider, and it is right; the operator creating an
-administrator is vouching for the address they typed, which is the
-verification it asks for. The guard stays on in the fork because it
-protects every member who signs up at Pocket ID by themselves, and the
-founder's case is fixed where the vouching happens.
-
-**Creating an account needs `--email`.** The address is set only when the
-account is created, so the command refuses to plan a create without one, dry
-run included, rather than make an administrator that no app can match to an
-account and that this command cannot give an address later. An account that
-already exists is not asked for one, and if it has none it has nothing to
-verify.
-
-**A password piped to a `pocket-id` run is refused**, not ignored. Ignoring it
-would let an operator believe a password was set. Stdin is not read at all
-when it is a terminal, so an interactive run never waits on it.
+address at the provider, and it is right; declaring an admin is vouching for
+the address in `admins`, which is the verification it asks for.
 
 The calls go through Pocket ID's REST API with its static API key; see *The
 toolkit administers Pocket ID through its static API key*.
@@ -7010,8 +6947,8 @@ names rendered into Mbin's `.env` are the names the client admits, read from
 the same settings, and a passthrough `config` key for either is refused
 (`config-key-already-rendered`), because a second place to type the name is
 one that can disagree with the client. All four are confidential clients.
-Putting a user in the admin group is `app admin create`'s job, not this
-command's.
+Putting a user in the admin group is apply's job, for every declared admin,
+not this command's.
 
 **`validate` holds the groups to the gate.** The gate admits `members`, and
 `admins` as every client does by default, and

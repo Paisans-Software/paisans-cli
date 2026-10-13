@@ -10,7 +10,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
-	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 const adminPassword = "not-a-real-password-0002"
@@ -24,16 +23,16 @@ func TestAdminSite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := adminSite(cfg, "talk", "", "app admin create"); got != "home-a" {
+	if got, _ := adminSite(cfg, "talk", "", "admin magic-link"); got != "home-a" {
 		t.Errorf("cluster default %q, want the first apps site", got)
 	}
-	if got, _ := adminSite(cfg, "talk", "home-b", "app admin create"); got != "home-b" {
+	if got, _ := adminSite(cfg, "talk", "home-b", "admin magic-link"); got != "home-b" {
 		t.Errorf("override %q", got)
 	}
-	if _, err := adminSite(cfg, "talk", "vm", "app admin create"); err == nil {
+	if _, err := adminSite(cfg, "talk", "vm", "admin magic-link"); err == nil {
 		t.Error("a site the app does not run on was accepted")
 	}
-	if got, _ := adminSite(cfg, "chat", "", "app admin create"); got != "vm" {
+	if got, _ := adminSite(cfg, "chat", "", "admin magic-link"); got != "vm" {
 		t.Errorf("pinned %q, want vm", got)
 	}
 }
@@ -139,10 +138,6 @@ func TestSecretsFixtureIsComplete(t *testing.T) {
 	}
 }
 
-func pidArgs(extra ...string) []string {
-	return append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--app", "auth", "--username", "founder", "--email", "founder@example.org"}, extra...)
-}
-
 func fixtureAPIKey(t *testing.T) string {
 	t.Helper()
 	secrets, err := config.LoadSecrets(fixtureSecretsPath())
@@ -154,146 +149,4 @@ func fixtureAPIKey(t *testing.T) string {
 		t.Fatal("the fixture has no static API key")
 	}
 	return key
-}
-
-func TestPocketIDAdminDryRunPlansWithoutSudoAndChangesNothing(t *testing.T) {
-	fake := withPIDFake(t)
-	key := fixtureAPIKey(t)
-	rec := withRecorder(t, true)
-	var err error
-	stdout := captureStdout(t, func() {
-		err = runAppAdminCreate(pidArgs(), strings.NewReader(""))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	printed := rec.Lines() + stdout
-	if stdout != "" {
-		t.Errorf("a dry run wrote to stdout, which carries only the login link:\n%s", stdout)
-	}
-	for _, want := range []string{"section: auth on home-a (pocket-id)", "pending: create administrator founder", "pending: issue login link for founder", "detail: create user founder as an administrator", "result: Nothing changed"} {
-		if !strings.Contains(printed, want) {
-			t.Errorf("output lacks %q:\n%s", want, printed)
-		}
-	}
-	if fake.mutated {
-		t.Error("a dry run mutated")
-	}
-	if fake.sudo {
-		t.Error("curl was run through sudo")
-	}
-	if fake.registry.claims != 0 || fake.registry.reads != 0 {
-		t.Error("a dry run reached the host registry")
-	}
-	if strings.Contains(printed, key) {
-		t.Error("the output carries the API key")
-	}
-	for i, c := range fake.commands {
-		if strings.Contains(c, key) {
-			t.Errorf("a command line carries the API key: %s", c)
-		}
-		if !strings.Contains(fake.stdins[i], "http://10.44.0.1:1411/api/") {
-			t.Errorf("the request did not go to the mesh port on home-a")
-		}
-	}
-}
-
-func TestPocketIDAdminExecutePrintsTheLinkOnce(t *testing.T) {
-	fake := withPIDFake(t)
-	rec := withRecorder(t, true)
-	var err error
-	stdout := captureStdout(t, func() {
-		err = runAppAdminCreate(pidArgs("--execute"), strings.NewReader(""))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	link := "https://id.example.org/lc/tok-not-real-0009"
-	// The link is the only thing on stdout, so a script can read it, and it
-	// is nowhere in the report.
-	if strings.TrimSpace(stdout) != link {
-		t.Errorf("stdout is not the link alone:\n%s", stdout)
-	}
-	if strings.Contains(rec.Lines(), link) {
-		t.Errorf("the link reached the report:\n%s", rec.Lines())
-	}
-	if !rec.Has("warn", "20m0s") {
-		t.Errorf("the expiry is not stated:\n%s", rec.Lines())
-	}
-	if !rec.Has("result", "founder is an administrator of auth") {
-		t.Errorf("no result:\n%s", rec.Lines())
-	}
-	if fake.registry.claims != 1 || !fake.registry.sudo {
-		t.Errorf("--execute claimed the host %d time(s), sudo %v; want once, through sudo", fake.registry.claims, fake.registry.sudo)
-	}
-}
-
-func TestPocketIDAdminRefusesAPipedPassword(t *testing.T) {
-	fake := withPIDFake(t)
-	err := runAppAdminCreate(pidArgs(), strings.NewReader(adminPassword+"\n"))
-	if err == nil || !strings.Contains(err.Error(), "passkeys") {
-		t.Fatalf("got %v", err)
-	}
-	if strings.Contains(err.Error(), adminPassword) {
-		t.Error("the refusal carries what was piped")
-	}
-	if len(fake.commands) != 0 {
-		t.Error("a host was reached")
-	}
-}
-
-func TestAppAdminCreateRefusesAnUnimplementedKind(t *testing.T) {
-	fake := withPIDFake(t)
-	err := runAppAdminCreate([]string{"--config", fixtureConfig(), "--app", "web", "--username", "u", "--email", "u@example.org"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "element admin creation is not implemented yet. Implemented kinds: pocket-id") {
-		t.Errorf("got %v", err)
-	}
-	if len(fake.commands) != 0 {
-		t.Error("a host was reached")
-	}
-}
-
-// An Mbin app's administrators come only through single sign on, so it is
-// refused before a site is resolved, pointing at the command run against
-// Pocket ID.
-func TestAppAdminCreateRefusesMbinWithTheSSORoute(t *testing.T) {
-	fake := withPIDFake(t)
-	saved := standbyLook
-	looked := false
-	standbyLook = func(tr apply.SSHTransport) apply.Transport { looked = true; return tr }
-	t.Cleanup(func() { standbyLook = saved })
-	err := runAppAdminCreate([]string{"--config", fixtureConfig(), "--app", "talk", "--username", "founder", "--execute"}, strings.NewReader(""))
-	want := "talk is mbin, whose administrators come only through single sign on. Run `paisans app admin create --app auth --username founder --email <e>`"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("got %v", err)
-	}
-	if len(fake.commands) != 0 || looked {
-		t.Error("a host was reached")
-	}
-}
-
-// Default output names what will happen; the requests behind it show only
-// with --verbose, and neither carries the API key.
-func TestPocketIDAdminDryRunKeepsRequestBodiesForVerbose(t *testing.T) {
-	withPIDFake(t)
-	key := fixtureAPIKey(t)
-	for _, verbose := range []bool{false, true} {
-		var b strings.Builder
-		reporterOverride = ui.NewPlain(&b, verbose)
-		err := runAppAdminCreate(pidArgs(), strings.NewReader(""))
-		reporterOverride = nil
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := b.String()
-		if strings.Contains(out, key) {
-			t.Errorf("verbose=%v: the output carries the API key", verbose)
-		}
-		if got := strings.Contains(out, "POST "); got != verbose {
-			t.Errorf("verbose=%v: output has a POST request: %v\n%s", verbose, got, out)
-		}
-		if !strings.Contains(out, "create administrator founder") {
-			t.Errorf("verbose=%v: no short title:\n%s", verbose, out)
-		}
-	}
 }

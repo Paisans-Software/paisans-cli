@@ -225,9 +225,9 @@ func fixtureRuns(t *testing.T) map[string]string {
 	}
 
 	{
-		withPIDFake(t)
-		runs["app admin create dry run"] = runDefault(t, "app admin create", func() error {
-			return runAppAdminCreate([]string{"--config", cfg, "--secrets", secrets, "--app", "auth", "--username", "founder", "--email", "founder@example.org", "--first-name", "Fern"}, strings.NewReader(""))
+		withLinkFake(t)
+		runs["admin magic-link dry run"] = runDefault(t, "admin magic-link", func() error {
+			return runAdminMagicLink([]string{"--config", cfg, "--secrets", secrets, "alice"})
 		})
 	}
 

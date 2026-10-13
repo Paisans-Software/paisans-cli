@@ -127,7 +127,8 @@ func (p pocketID) Probe(t Transport, req Request) (State, error) {
 // in every app's admin group (and, when declared, every member group), and
 // given a link, since it cannot sign in without one. An existing one is only
 // made an administrator if it is not, has its email marked verified if it is
-// not, is put in the groups it is missing, and is given a link only if asked.
+// not, is put in the groups it is missing, and is given a link while it has no
+// passkey yet.
 func (pocketID) Steps(state State, req Request) []Action {
 	if !state.Exists {
 		out := []Action{ActionCreate}
@@ -146,7 +147,7 @@ func (pocketID) Steps(state State, req Request) []Action {
 	if len(state.MissingGroups) > 0 {
 		out = append(out, ActionJoinGroups)
 	}
-	if req.LoginLink || (req.Declared && !state.Passkey) {
+	if req.Declared && !state.Passkey {
 		out = withLink(out, req)
 	}
 	return out
@@ -163,8 +164,7 @@ func withLink(out []Action, req Request) []Action {
 
 // newUser is exactly what a create sends, and what the plan prints. A
 // declared admin always has a first and a last name, since validate refuses
-// one without; `app admin create` may leave the first name out, and the
-// username stands in for it.
+// one without; were the first name empty, the username would stand in.
 func (pocketID) newUser(req Request) pocketid.NewUser {
 	first := req.FirstName
 	if first == "" {
@@ -299,6 +299,37 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 		default:
 			return Outcome{}, fmt.Errorf("pocket-id has no step for %q", a)
 		}
+	}
+	return out, nil
+}
+
+// MagicLink issues a declared admin a one-time sign-in link at Pocket ID, has
+// Pocket ID email one as well when req.EmailLink is set, and does nothing
+// else: making the account, its groups and its administrator flag are
+// apply's. It serves a first sign in whose link expired and an admin who lost
+// their passkey alike. Without execute it only finds the account, so a dry run
+// says whether there is one to sign in to.
+func MagicLink(t Transport, req Request, execute bool) (Outcome, error) {
+	req.Declared = true
+	p := pocketID{}
+	c := p.client(t, req)
+	u, err := p.find(c, req)
+	if err != nil {
+		return Outcome{}, redact(fmt.Errorf("looking up %s in %s: %w", req.Username, req.App, err), req.APIKey)
+	}
+	if u == nil {
+		return Outcome{}, fmt.Errorf("%s has no account in %s yet. apply makes every declared admin's account, with a sign-in link of its own", req.Username, req.App)
+	}
+	if u.Disabled {
+		return Outcome{}, fmt.Errorf("%s's account in %s is disabled. Re-enabling an account is not something this command decides; do it deliberately, then run it again", req.Username, req.App)
+	}
+	if !execute {
+		return Outcome{}, nil
+	}
+	actions := withLink(nil, req)
+	out, err := p.Execute(t, req, actions)
+	if err != nil {
+		return Outcome{}, redact(err, req.APIKey, out.LoginLink)
 	}
 	return out, nil
 }

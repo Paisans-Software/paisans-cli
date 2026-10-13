@@ -1808,7 +1808,7 @@ func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up f
 			r.Section("pocket id")
 			section = true
 		}
-		command := "paisans app admin create --app " + app + " --username <name> --email <address>"
+		command := "Declare one under admins in " + config.FileName + " and run apply, which makes their account at " + app + " and gives them a sign-in link."
 		s := r.Step(adminCheckTitle(app))
 		has, err := convergeAdminCheck(cfg, app, o)
 		switch {
@@ -1833,8 +1833,8 @@ func errLine(err error) string {
 }
 
 // convergeAdminCheck asks a Pocket ID app whether any user is an admin, read
-// only, with the API key, the site and the API address `app admin create`
-// uses, reaching the host as every step of the run does, with its sudo. Why
+// only, with the API key, the site and the API address a declared admin is
+// made with, reaching the host as every step of the run does, with its sudo. Why
 // it fails is one line. Tests replace it.
 var convergeAdminCheck = func(cfg *config.Config, app string, o convergeOptions) (bool, error) {
 	// The admin check's own step is open, so the search reports nothing.

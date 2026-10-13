@@ -42,7 +42,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | `--config <path>` | `paisans-stack.yaml` | every command except `host deployments` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
-| `--sudo` | on | every command that reaches a host over ssh, except `app admin create` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
+| `--sudo` | on | every command that reaches a host over ssh, except `admin magic-link` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
 With `--execute`, a command first claims each host it writes to in
@@ -375,6 +375,30 @@ paisans admin register --key ~/.ssh/id_ed25519.pub --execute
   site is changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
+
+### `paisans admin magic-link`
+
+Gives an admin declared under `admins` a one-time link that signs them in to
+Pocket ID once, to register a passkey with: after a first link expired
+unused, or a passkey was lost. It changes nothing else.
+
+```sh
+paisans admin magic-link alice              # finds alice's account, changes nothing
+paisans admin magic-link alice --execute    # issues the link, prints it once
+```
+
+* **Alone:** always. apply gives a declared admin with no passkey a link on
+  every run already; this is for one with no apply due, or who lost a passkey.
+* **Flags:** `--app <pocket-id app>` (default: the only one), `--site`
+  (default: the pinned site, or the site whose instance is active), `--ssh`,
+  `--config`, `--secrets`, `--execute`.
+* **Hosts:** the one site whose Pocket ID it calls.
+* **`--execute`:** issues the link, valid a day and for one sign in, and has
+  Pocket ID email one when it emails apply's. A name not under `admins`, an
+  admin apply has not made yet, and a disabled account are refused.
+
+See *`admin magic-link` gives a declared admin a fresh sign-in link* in
+`README.md`.
 
 ### `paisans catalog`
 
@@ -1028,32 +1052,6 @@ paisans gateway move --execute    # record, serve, dns add, dns remove, wait, st
 See *Moving the gateway* in `README.md`.
 
 ## Apps
-
-### `paisans app admin create`
-
-Makes sure a user exists, is verified, is an administrator of Pocket ID, and
-is in every admin group the apps signing in through it read. A created account
-gets a one-time login link, printed once.
-
-```sh
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern     # shows what it would do
-paisans app admin create --app auth --username founder \
-    --email founder@example.org --first-name Fern --execute
-```
-
-* **Alone:** always. The whole apply names it for a Pocket ID app that has no
-  administrator yet.
-* **Flags:** `--app <pocket-id app>`, `--username`, `--email` (needed to create
-  the account), `--first-name` (default: the username), `--last-name`,
-  `--login-link` (off: issue a fresh link for an account that exists),
-  `--site` (default: the pinned site, or the site whose instance is active),
-  `--ssh`, `--config`, `--secrets`, `--execute`.
-* **Hosts:** the one site whose Pocket ID it calls.
-* **`--execute`:** creates, verifies and grants. It refuses anything piped to
-  it, since there is no password.
-
-See *`app admin create` makes an app's first administrator* in `README.md`.
 
 ### `paisans oidc client create`
 
