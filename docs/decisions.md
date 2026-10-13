@@ -2102,3 +2102,45 @@ registry_integration -run TestRecordedVolumesMatchEveryPlatform/ghcr
 rest of that test from running). The core copy was synced from
 `Paisans-Software/blueprints` with `scripts/sync-core-catalog.sh`. Nothing
 was run against a deployment, and no image was moved, deleted or retagged.
+
+## 2026-10-13: Catalogs are unsigned, trusted by their pin
+
+Founder decision, 2026-10-13. Amends *Applications are blueprints, read from
+signed catalogs* above.
+
+### What was decided
+
+* Nothing checks who published a catalog's release. The SSH tag signing
+  built for the blueprints rollout is removed: the pin's `signers` and
+  `unsigned` keys, `keys/allowed_signers`, `catalog add --trust` and
+  `--unsigned`, `catalog update --trust`, the walk of keys from release to
+  release, and the core release keys the binary was to carry.
+* A catalog is trusted by its pin. The pin is a commit the operator chose, a
+  tag beside it must still name that commit, `catalog add` and `catalog update`
+  show what a release changes for each app, and the grant review asks before
+  a moved pin renders on a site.
+* The core catalog stays the toolkit's built in copy unless a deployment pins
+  `catalogs.core` to a commit, which it now may, as it may any catalog.
+
+### Why
+
+The founder chose to rely on unsigned repositories for now. Signing asked a
+catalog's author to keep a key safe and move to a new one through a chain of
+signed releases, asked an operator to check a fingerprint by another channel,
+and left the core catalog unpinnable until the founder recorded a release key.
+What a deployment renders was never fixed by the signature: the commit pin
+fixes it, and the grant review gates every move of it.
+
+### What was weighed
+
+* **GitHub release attestations** in place of SSH keys, drafted as an
+  amendment spec and set aside with signing as a whole.
+* **Keeping signing optional**, with `unsigned: true` as the default. Code that
+  no pin uses is code that no deployment exercises.
+
+### What this gives up
+
+A compromised forge account, a transferred repository, or a deleted one whose
+name is registered again can publish a release that `catalog update` would
+offer. The operator still sees what it changes, and the grant review still
+asks, before it renders anywhere.

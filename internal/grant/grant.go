@@ -44,15 +44,14 @@ type Grant struct {
 }
 
 // Blueprint is one app's catalog blueprint as the render used it: the
-// blueprint, the release and commit it was read at, the SHA-256 of its files,
-// and whether its catalog's tags are checked against a signer.
+// blueprint, the release and commit it was read at, and the SHA-256 of its
+// files.
 type Blueprint struct {
 	App       string `json:"app"`
 	Blueprint string `json:"blueprint"`
 	Tag       string `json:"tag,omitempty"`
 	Commit    string `json:"commit"`
 	SHA256    string `json:"sha256"`
-	Unsigned  bool   `json:"unsigned,omitempty"`
 }
 
 // Key is one key the site authorises. A key is the same key when its
@@ -125,7 +124,7 @@ func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading the blueprint of apps.%s: %w", app, err)
 		}
-		out = append(out, Blueprint{App: app, Blueprint: string(kind), Tag: cat.Tag, Commit: cat.Commit, SHA256: sum, Unsigned: cat.Unsigned})
+		out = append(out, Blueprint{App: app, Blueprint: string(kind), Tag: cat.Tag, Commit: cat.Commit, SHA256: sum})
 	}
 	return out, nil
 }

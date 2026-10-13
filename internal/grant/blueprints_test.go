@@ -22,9 +22,9 @@ func TestCatalogBlueprintsAreReviewed(t *testing.T) {
 	}
 
 	moved := one
-	moved.Tag, moved.Commit, moved.SHA256, moved.Unsigned = "v1.1.0", strings.Repeat("b", 40), "s2", true
+	moved.Tag, moved.Commit, moved.SHA256 = "v1.1.0", strings.Repeat("b", 40), "s2"
 	r = Compare("vm", Grant{Blueprints: []Blueprint{moved}}, rec, ApplyScope())
-	if len(r.Changes) != 1 || r.Changes[0].Op != Changed || !strings.Contains(r.Changes[0].Text, "→ ex/journal at v1.1.0") || !strings.Contains(r.Changes[0].Text, "unsigned") {
+	if len(r.Changes) != 1 || r.Changes[0].Op != Changed || !strings.Contains(r.Changes[0].Text, "→ ex/journal at v1.1.0") {
 		t.Fatalf("a moved pin %+v", r.Changes)
 	}
 	if r.Pending() != 1 {
