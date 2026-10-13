@@ -818,3 +818,25 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 		t.Errorf("with a display name, chat's client is %q for app %q", chat.Name, chat.App)
 	}
 }
+
+// An extra group is created only once a person types the word. Without a
+// way to ask, the app is refused and Pocket ID is sent nothing.
+func TestExtraGroupCreationAsksFirst(t *testing.T) {
+	p := oidcclient.Plan{Steps: []oidcclient.Step{{Kind: oidcclient.CreateGroup, Group: "moderators", Extra: true}}}
+	c := &clientStep{}
+	if err := c.approveExtraGroups("wiki", p); err == nil || !strings.Contains(err.Error(), "moderators") {
+		t.Errorf("no way to ask, err = %v", err)
+	}
+	var asked string
+	c.confirm = func(what string) error { asked = what; return nil }
+	if err := c.approveExtraGroups("wiki", p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asked, "moderators") {
+		t.Errorf("asked %q", asked)
+	}
+	c.confirm = func(string) error { return errors.New("declined") }
+	if err := c.approveExtraGroups("wiki", p); err == nil {
+		t.Error("a declined answer let it through")
+	}
+}
