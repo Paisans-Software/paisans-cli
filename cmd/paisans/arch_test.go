@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -320,5 +321,81 @@ func TestAnExecutedApplySitePublishesTheRecordedArch(t *testing.T) {
 	}
 	if *gathered == nil || string((*gathered).paisans) != string(body) {
 		t.Fatal("the version gathered is not the file as recorded")
+	}
+}
+
+// platformsAt is a registry naming one build for every tag, published for
+// the platforms given by image name (before @), and for amd64 and arm64
+// otherwise.
+type platformsAt map[string][]string
+
+func (p platformsAt) Digest(string) (string, error) { return testCaddyDigest, nil }
+
+func (p platformsAt) Platforms(ref string) ([]string, error) {
+	name, _, _ := strings.Cut(ref, "@")
+	if got, ok := p[name]; ok {
+		return got, nil
+	}
+	return []string{"amd64", "arm64"}, nil
+}
+
+const amd64OnlyMbin = "ghcr.io/example-org/mbin:v1.10.1-fork"
+
+// armWithAmd64OnlyMbin is the setup of the runConverge tests on every site
+// being arm64, with home-a's render naming an Mbin published for amd64 alone.
+func armWithAmd64OnlyMbin(t *testing.T) {
+	t.Helper()
+	saved, savedRender, savedDigests := convergeHost, convergeRender, imageDigests
+	convergeHost = func(string, config.Site, bool) apply.Transport {
+		return archTransport{runningHost{failingHost{match: "\x00"}}, "arm64"}
+	}
+	convergeRender = func(*config.Config, *config.Secrets) (*render.Plan, error) {
+		return &render.Plan{Images: map[string][]render.ComposeImage{
+			"home-a": {{Stack: "talk", App: "talk", Image: amd64OnlyMbin, Services: []string{"app"}}},
+		}}, nil
+	}
+	imageDigests = platformsAt{amd64OnlyMbin: {"amd64"}}
+	t.Cleanup(func() { convergeHost, convergeRender, imageDigests = saved, savedRender, savedDigests })
+}
+
+// A whole apply checks every site's images against its architecture from
+// the render, before any host is prepared, so a dry run of a deployment no
+// host of which is prepared yet still names an image a site cannot run.
+func TestADryRunApplyRefusesAnImageWithoutTheSitesPlatform(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeChecks(t, map[string]any{
+		"host prepare --site home-a": "install docker", "host prepare --site home-b": "install docker",
+		"host prepare --site vm": "install docker", "host prepare --site watch": "install docker",
+	})
+	recordConverge(t)
+	armWithAmd64OnlyMbin(t)
+	r := &ui.Recorder{}
+	err := runConverge(r, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: false, Sudo: false})
+	if err == nil {
+		t.Fatalf("not refused:\n%s", r.Lines())
+	}
+	if !r.Has("refuse", "") || r.Events[r.Index("refuse", "")].Extra != "home-a (arm64): `"+amd64OnlyMbin+"` is published for linux/amd64 only." {
+		t.Fatalf("no refusal:\n%s", r.Lines())
+	}
+}
+
+func TestAnExecutedApplyRefusesAnImageBeforeAnyHostPrepare(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	rec := recordConverge(t)
+	armWithAmd64OnlyMbin(t)
+	var err error
+	captureStdout(t, func() {
+		err = runConverge(rec, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: true, Sudo: false, stdin: noTerminalStdin(), stdout: io.Discard})
+	})
+	if err == nil {
+		t.Fatalf("not refused:\n%s", rec.Lines())
+	}
+	for _, step := range *ran {
+		if strings.HasPrefix(step, "host prepare") {
+			t.Fatalf("prepared a host before refusing: %v", *ran)
+		}
+	}
+	if !rec.Has("refuse", "") {
+		t.Fatalf("no refusal:\n%s", rec.Lines())
 	}
 }

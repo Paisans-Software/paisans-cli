@@ -96,6 +96,52 @@ func platformCheck(site, arch string, image ImagePin, r Resolver) (*Note, error)
 	return nil, fmt.Errorf("%s (%s): %s is published for %s only.", site, arch, ui.Name(image.Image), strings.Join(named, ", "))
 }
 
+// CheckPlatforms is Build's platform check for the images a render names for
+// site (render.Plan.Images), made without reading its host. A whole apply
+// runs it on every site before it prepares any host, which a site's plan
+// waits on, so a dry run of a new deployment names an image with no build
+// for a site, and --execute refuses before the first host changes. Build
+// still checks each pin as it plans.
+//
+// Each tag is resolved first, since an index names the platforms of a build
+// and a tag is only a name for one; a reference pinned by digest is asked as
+// it is. A tag that cannot be resolved is a note, as an unreadable platform
+// list is: the plan or the pull says so.
+func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver) ([]Note, []error) {
+	if _, ok := r.(Platformer); !ok || arch == "" {
+		return nil, nil
+	}
+	var notes []Note
+	var refusals []error
+	seen := map[string]bool{}
+	for _, image := range images {
+		if seen[image.Image] {
+			continue
+		}
+		seen[image.Image] = true
+		pin := ImagePin{Image: image.Image, Reference: image.Image}
+		if ref := kinds.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
+			digest, err := r.Digest(image.Image)
+			if err != nil {
+				notes = append(notes, Note{
+					Hint: fmt.Sprintf("could not resolve %s", ui.Name(image.Image)),
+					Text: fmt.Sprintf("Resolving %s failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image.Image), err, arch, site),
+				})
+				continue
+			}
+			pin.Reference = image.Image + "@" + digest
+		}
+		note, err := platformCheck(site, arch, pin, r)
+		if err != nil {
+			refusals = append(refusals, err)
+		}
+		if note != nil {
+			notes = append(notes, *note)
+		}
+	}
+	return notes, refusals
+}
+
 // PeerCompose is an app's compose file as another site running the app
 // holds it, for a plan of one of its sites that does not cover that one.
 // Err is why it could not be read, nil when it was.

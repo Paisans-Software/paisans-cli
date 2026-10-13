@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
@@ -94,4 +96,40 @@ func recordArchitectures(r ui.Reporter, path string, cfg *config.Config, read ma
 		}
 	}
 	return cfg, nil
+}
+
+// checkPlatforms refuses an image the render names for one of sites that has
+// no build for the site's architecture (apply.CheckPlatforms), through the
+// run's resolver, so the tags it resolves are the builds the run's plans pin.
+// It reads no host, so it runs before the first change: apply's own check
+// comes only once a site's host is prepared, which on a new deployment, or
+// on the site site add joins, is after every other site has changed.
+//
+// Each refusal is shown on its own, as validate's are, and the run stops on
+// them, a dry run included: no step after it would succeed.
+func checkPlatforms(r ui.Reporter, cfg *config.Config, rendered *render.Plan, sites []string) error {
+	line := r.Step("check every image has a build for its site")
+	var notes []apply.Note
+	var refusals []error
+	for _, site := range sites {
+		n, refused := apply.CheckPlatforms(site, cfg.Sites[site].Arch, rendered.Images[site], imageDigests)
+		notes = append(notes, n...)
+		refusals = append(refusals, refused...)
+	}
+	if len(refusals) == 0 {
+		line.Done("")
+		for _, n := range notes {
+			r.Note(n.Hint, n.Text)
+		}
+		return nil
+	}
+	line.End(ui.Failed, plural(len(refusals), "image")+" without a build for its site")
+	for _, err := range refusals {
+		r.Refuse("no build for the site's architecture", err.Error())
+	}
+	return &ui.Problem{
+		Hint:    fmt.Sprintf("the plan was refused: %s above", plural(len(refusals), "refusal")),
+		Explain: "A site runs only images published for its architecture. Give the app to sites of an architecture its image is published for, or name an image that has a build for this one, then run the command again.",
+		Cause:   errors.Join(refusals...),
+	}
 }

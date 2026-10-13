@@ -789,6 +789,24 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if cfg, err = recordArchitectures(r, configPath, cfg, read, execute); err != nil {
 		return err
 	}
+	// Every site's images are checked against its architecture here, from
+	// the render: each site's apply checks them only once host prepare has
+	// run on every host. The render needs the secrets, so a dry run whose
+	// secrets init has yet to generate checks them once init has run, as
+	// its review does.
+	secrets, err := config.LoadDeploymentSecrets(convergeSecretsPath(configPath, secretsPath), cfg.ID)
+	var rendered *render.Plan
+	if err == nil {
+		rendered, err = convergeRender(cfg, secrets)
+	}
+	switch {
+	case err == nil:
+		if err := checkPlatforms(r, cfg, rendered, cfg.SiteNames()); err != nil {
+			return err
+		}
+	case execute:
+		return err
+	}
 	// An init that has just run warned about the secrets itself.
 	if !initRan {
 		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)

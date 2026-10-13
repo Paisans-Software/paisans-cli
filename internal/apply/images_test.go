@@ -768,3 +768,55 @@ func TestANonLinuxPlatformIsNamedAsItIs(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// CheckPlatforms is Build's check without a host: the images a render names
+// for a site, each tag resolved first, so a run can refuse before it
+// prepares any host.
+func TestCheckPlatformsRefusesFromTheRenderAlone(t *testing.T) {
+	r := &registry{digest: buildA, platforms: map[string][]string{mbinTag: {"amd64"}}}
+	images := []render.ComposeImage{
+		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"app"}},
+		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"messenger"}},
+		{Stack: "infra", Image: caddyTag, Services: []string{"caddy"}},
+	}
+	notes, refusals := apply.CheckPlatforms("home-a", "arm64", images, r)
+	if len(notes) != 0 {
+		t.Errorf("notes: %+v", notes)
+	}
+	if len(refusals) != 1 || !strings.Contains(refusals[0].Error(), "home-a (arm64): `"+mbinTag+"` is published for linux/amd64 only") {
+		t.Fatalf("got %v", refusals)
+	}
+	if r.times(mbinTag) != 1 {
+		t.Errorf("resolved %s %d times", mbinTag, r.times(mbinTag))
+	}
+}
+
+func TestCheckPlatformsAsksAPinnedImageDirectly(t *testing.T) {
+	r := &registry{err: errors.New("must not resolve a digest"), platforms: map[string][]string{mbinTag: {"amd64"}}}
+	_, refusals := apply.CheckPlatforms("home-a", "arm64", []render.ComposeImage{{Image: mbinTag + "@" + buildA}}, r)
+	if len(refusals) != 1 {
+		t.Fatalf("got %v", refusals)
+	}
+	if len(r.asked) != 0 {
+		t.Errorf("resolved %v", r.asked)
+	}
+}
+
+func TestCheckPlatformsNotesATagItCannotResolve(t *testing.T) {
+	r := &registry{err: errors.New("the registry answered 500")}
+	notes, refusals := apply.CheckPlatforms("home-a", "arm64", []render.ComposeImage{{Image: mbinTag}}, r)
+	if len(refusals) != 0 {
+		t.Fatalf("refused: %v", refusals)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0].Text, "500") {
+		t.Fatalf("notes: %+v", notes)
+	}
+}
+
+func TestCheckPlatformsWithoutAnArchAsksNothing(t *testing.T) {
+	r := &registry{digest: buildA, platformErr: errors.New("must not be asked")}
+	notes, refusals := apply.CheckPlatforms("home-a", "", []render.ComposeImage{{Image: mbinTag}}, r)
+	if len(notes)+len(refusals) != 0 || len(r.asked) != 0 {
+		t.Fatalf("asked: %v %+v %v", r.asked, notes, refusals)
+	}
+}
