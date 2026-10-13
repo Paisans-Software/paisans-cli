@@ -42,6 +42,9 @@ type registry struct {
 
 	platforms   map[string][]string
 	platformErr error
+	// platformsAsked counts Platforms calls, each a manifest GET on a real
+	// registry.
+	platformsAsked int
 }
 
 func (r *registry) Digest(ref string) (string, error) {
@@ -727,6 +730,7 @@ func TestABareTagBesideItsPinnedBuildIsNotADisagreement(t *testing.T) {
 // (before @) is a key is published for those platforms, and any other for
 // amd64 and arm64.
 func (r *registry) Platforms(ref string) ([]string, error) {
+	r.platformsAsked++
 	if r.platformErr != nil {
 		return nil, r.platformErr
 	}

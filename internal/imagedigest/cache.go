@@ -1,9 +1,12 @@
 package imagedigest
 
 import (
-	"errors"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -29,8 +32,10 @@ type Resolver interface {
 // the same answer, and a registry that took DefaultTimeout to fail once is not
 // waited on again for every image and every plan. A failure that never
 // reached the registry (a timeout, a refused connection, a name that does not
-// resolve) is kept for its whole host, so every other image on it fails at
-// once; a registry that answered, Eg: that a tag does not exist, fails that
+// resolve), or that the registry refused for rate limiting this address, is
+// kept for its whole host, so every other image on it fails at once: each
+// further request would be refused too, and would count against the same
+// limit. A registry that answered, Eg: that a tag does not exist, fails that
 // reference alone. The next run asks again. Calls for a reference that is
 // being resolved wait for that resolution rather than start their own, so
 // sites planned at the same time ask the registry once.
@@ -54,6 +59,14 @@ type Cache struct {
 	// tracks are the answers Track got, by track, kept the way digests are:
 	// every plan of a run puts a track on the same tag.
 	tracks map[string]string
+
+	// Store, when set, is a directory where Platforms keeps the answer for a
+	// reference pinned by digest across runs, one file each. A digest names
+	// one manifest, so its platform list never changes, and every apply
+	// asks it of every image: kept, a run that moves nothing asks the
+	// registry for no manifest, which is what Docker Hub counts against an
+	// address's anonymous allowance.
+	Store string
 }
 
 // Platformer names the platforms of a build, as Registry.Platforms does.
@@ -63,7 +76,7 @@ type Platformer interface {
 
 // Platforms is the wrapped resolver's Platforms for ref, asked once per run.
 // A build named by its digest never changes, so the answer is kept like a
-// digest is. A failure is returned and not kept, and a transport failure marks
+// digest is. A failure is returned and not kept, and an unreachable one marks
 // the host down as Digest does. A nil list with no error means the answer is
 // unknown: the wrapped resolver cannot say, or the host is down, and apply
 // skips the check rather than wait out a timeout per image.
@@ -82,10 +95,15 @@ func (c *Cache) Platforms(ref string) ([]string, error) {
 		return nil, nil
 	}
 	c.mu.Unlock()
+	if got, ok := c.stored(ref); ok {
+		c.mu.Lock()
+		c.platforms[ref] = got
+		c.mu.Unlock()
+		return got, nil
+	}
 	got, err := p.Platforms(ref)
 	if err != nil {
-		var transport *url.Error
-		if errors.As(err, &transport) {
+		if Unreachable(err) {
 			c.mu.Lock()
 			c.down[Host(ref)] = err
 			c.mu.Unlock()
@@ -95,7 +113,56 @@ func (c *Cache) Platforms(ref string) ([]string, error) {
 	c.mu.Lock()
 	c.platforms[ref] = got
 	c.mu.Unlock()
+	c.store(ref, got)
 	return got, nil
+}
+
+// storePath is where Store keeps ref's platforms, empty for a reference not
+// pinned by digest, whose answer can change.
+func (c *Cache) storePath(ref string) string {
+	if c.Store == "" || !strings.Contains(ref, "@sha256:") {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(ref)))
+	return filepath.Join(c.Store, hex.EncodeToString(sum[:])+".json")
+}
+
+func (c *Cache) stored(ref string) ([]string, bool) {
+	path := c.storePath(ref)
+	if path == "" {
+		return nil, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var kept struct {
+		Ref       string   `json:"ref"`
+		Platforms []string `json:"platforms"`
+	}
+	if json.Unmarshal(raw, &kept) != nil || kept.Ref != strings.TrimSpace(ref) || len(kept.Platforms) == 0 {
+		return nil, false
+	}
+	return kept.Platforms, true
+}
+
+// store keeps ref's platforms, best effort: one not kept is asked again.
+func (c *Cache) store(ref string, platforms []string) {
+	path := c.storePath(ref)
+	if path == "" || len(platforms) == 0 {
+		return
+	}
+	raw, err := json.Marshal(struct {
+		Ref       string   `json:"ref"`
+		Platforms []string `json:"platforms"`
+	}{strings.TrimSpace(ref), platforms})
+	if err != nil || os.MkdirAll(c.Store, 0o755) != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, raw, 0o644) == nil {
+		_ = os.Rename(tmp, path)
+	}
 }
 
 // Versioner reads the version label of a build named by its digest, as
@@ -151,8 +218,7 @@ func (c *Cache) Digest(ref string) (string, error) {
 		c.digests[ref] = res.digest
 	} else {
 		c.failed[ref] = res.err
-		var transport *url.Error
-		if errors.As(res.err, &transport) {
+		if Unreachable(res.err) {
 			c.down[host] = res.err
 		}
 	}
@@ -261,8 +327,7 @@ func (c *Cache) Track(ref string) (string, error) {
 	defer c.mu.Unlock()
 	if err != nil {
 		c.failed["track "+ref] = err
-		var transport *url.Error
-		if errors.As(err, &transport) {
+		if Unreachable(err) {
 			c.down[host] = err
 		}
 		return "", err

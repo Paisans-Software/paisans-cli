@@ -771,7 +771,15 @@ resolved through `apply.FreshImages`, which `paisans` sets to `imageDigests`,
 and Build refuses to write a compose file still naming a track. Tests of the
 packages built on apply set it with a blank import of
 `internal/apply/applytest`, whose `Pinned` also seeds a fake host with files
-as an apply leaves them. `ImagePin.FirstPin` is a bare tag pinned
+as an apply leaves them. `provenOn` skips the platform check for a build the
+host runs, by digest, on the architecture the manifest's `arch` recorded,
+because each check is a manifest GET Docker Hub counts against an anonymous
+allowance and a running build already proves its architecture; `CheckPlatforms`,
+which reads no host, relies on `imagedigest.Cache.Store` instead, the
+per-digest answers `cacheDigests` keeps under the catalog cache for the real
+registry only. `Registry.Platforms` reads the index alone. A 429 is
+`imagedigest.ErrRateLimited`, which `imagedigest.Unreachable` counts as a
+host down for the run. `ImagePin.FirstPin` is a bare tag pinned
 for the first time, which the dry run lists apart from `Plan.Moved`. Tests in
 `cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
 

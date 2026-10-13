@@ -39,6 +39,10 @@ import (
 var (
 	ErrNotFound = errors.New("not found")
 	ErrDenied   = errors.New("access denied")
+	// ErrRateLimited is a registry answering 429: it limits how often an
+	// address may ask (Docker Hub counts every manifest GET against an
+	// anonymous allowance), and has said so rather than failed.
+	ErrRateLimited = errors.New("rate limited")
 )
 
 // answer is a registry's answer that was not a digest, with which of
@@ -61,6 +65,28 @@ func answered(status int, text string) error {
 		return &answer{text, ErrDenied}
 	}
 	return errors.New(text)
+}
+
+// refused is answered for a response, adding to a 429 when the registry says
+// to ask again (its Retry-After header).
+func refused(resp *http.Response, text string) error {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if after := strings.TrimSpace(resp.Header.Get("Retry-After")); after != "" {
+			text += fmt.Sprintf(", and says to retry after %s", after)
+		}
+		return &answer{text, ErrRateLimited}
+	}
+	return answered(resp.StatusCode, text)
+}
+
+// Unreachable reports whether err means a registry will not answer again for
+// a while: it was not reached at all (a timeout, a refused connection, a name
+// that does not resolve), or it is rate limiting this address, when every
+// further request is refused as well. Cache marks such a host down for the
+// rest of the run, so it is not asked once per image.
+func Unreachable(err error) bool {
+	var transport *url.Error
+	return errors.As(err, &transport) || errors.Is(err, ErrRateLimited)
 }
 
 // Registry resolves a reference by asking its registry. The zero value is
@@ -115,6 +141,10 @@ func (r Registry) Digest(ref string) (string, error) {
 	if digest := contentDigest(resp); resp.StatusCode == http.StatusOK && digest != "" {
 		return digest, nil
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// A GET would be refused too, and would count against the limit.
+		return "", refused(resp, fmt.Sprintf("%s answered %s for %s", host, resp.Status, ref))
+	}
 	return getDigest(client, manifest, token, ref, host, resp.StatusCode)
 }
 
@@ -131,7 +161,7 @@ func getDigest(client *http.Client, manifest, token, ref, host string, headStatu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", answered(resp.StatusCode, fmt.Sprintf("%s answered %s for %s", host, resp.Status, ref))
+		return "", refused(resp, fmt.Sprintf("%s answered %s for %s", host, resp.Status, ref))
 	}
 	if digest := contentDigest(resp); digest != "" {
 		return digest, nil
@@ -206,6 +236,9 @@ func anonymousToken(client *http.Client, challenge, repo string) (string, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return "", refused(resp, fmt.Sprintf("the token service answered %s", resp.Status))
+		}
 		return "", answered(resp.StatusCode, fmt.Sprintf("the token service answered %s; a private image needs credentials this lookup does not use", resp.Status))
 	}
 	var body struct {

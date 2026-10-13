@@ -33,6 +33,11 @@ type Manifest struct {
 	// tag it was resolved from, in a form an operator can read on the host
 	// without parsing YAML.
 	Pins []ManifestPin `json:"pins,omitempty"`
+	// Arch is the site's architecture as the apply that wrote this manifest
+	// read it (Eg: amd64), empty when it read none. A build the site runs
+	// was proven on this architecture, so the next apply skips its platform
+	// check while the architecture is the same (see apply's platformCheck).
+	Arch string `json:"arch,omitempty"`
 	// Images is every image repository the site's stacks have rendered, with
 	// each reference rendered from it, accumulated over every apply: what
 	// the stack uses now and what it used before. A whole apply removes the

@@ -35,6 +35,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -974,7 +975,15 @@ func cacheDigests() (restore func()) {
 		return func() {}
 	}
 	saved := imageDigests
-	imageDigests = imagedigest.Cached(saved)
+	c := imagedigest.Cached(saved)
+	if _, real := saved.(imagedigest.Registry); real {
+		// Only the real registry's answers are kept across runs: a test's
+		// fake answers what the test needs.
+		if dir, err := kinds.CacheDir(); err == nil {
+			c.Store = filepath.Join(dir, "platforms")
+		}
+	}
+	imageDigests = c
 	return func() { imageDigests = saved }
 }
 

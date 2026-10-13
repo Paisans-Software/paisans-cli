@@ -213,6 +213,10 @@ type Plan struct {
 	// the site runs, kept for a stack whose compose file this plan does not
 	// settle.
 	recordedPins []render.ManifestPin
+	// recordedArch is the architecture the manifest Build read recorded,
+	// and Arch the one this plan was made for, which Execute records.
+	recordedArch string
+	Arch         string
 	// recordedWebServer is what the manifest Build read recorded of the files
 	// in the operator's web server's include directory. Apply writes them
 	// after every site is up, so every manifest write keeps them.
@@ -586,6 +590,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		return nil, err
 	}
 	out.recordedPins = manifest.Pins
+	out.recordedArch, out.Arch = manifest.Arch, o.arch
+	if out.Arch == "" {
+		// A plan made without reading the architecture keeps the record.
+		out.Arch = manifest.Arch
+	}
 	out.recordedWebServer = manifest.WebServer
 	out.imageHistory = manifest.Images
 	recorded := make(map[string]string, len(entries))
@@ -715,6 +724,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 			if !leftAlone {
 				for _, pin := range pins {
+					if provenOn(pin, o.arch, out.recordedArch) {
+						continue
+					}
 					note, err := platformCheck(site, o.arch, pin, r)
 					if err != nil {
 						finish(done, err)
@@ -1557,7 +1569,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
 	if err != nil {
 		return err
 	}
