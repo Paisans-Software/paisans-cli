@@ -141,10 +141,10 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 | `name` | the blueprint's name within its catalog | the `config.Kind` constant |
 | `requires_toolkit` | the oldest toolkit version that can render it | |
 | `port` | the port the app serves on | `appPort` in `internal/render/plan.go` |
-| `services` | each compose service, its default image, an optional `when` | `catalogue` in `internal/kinds/kinds.go` |
-| `database` | `engine` (`postgres`, `mysql`, `sqlite`, `none`) and, for a container of its own, `service` | `UsesPostgres`, `PostgresService` |
+| `services` | each compose service, its default image, an optional `when`, and a `port` for one the gateway routes to directly | `catalogue` in `internal/kinds/kinds.go` |
+| `database` | `engine` (`postgres`, `mysql`, `sqlite`, `none`), for a container of its own `service`, and `extra`, databases kept beside the app's own in the same Postgres | `UsesPostgres`, `PostgresService` |
 | `placement` | the placements it allows | `cluster-placement-without-a-cluster` and the pinned only kinds |
-| `storage` | `local`, `s3`, `public_reads` | `UsesObjectStorage`, `ServesObjectsPublicly` |
+| `storage` | `local`, `s3`, `public_reads`, and for `local_only` its `local_only_reason` | `UsesObjectStorage`, `ServesObjectsPublicly` |
 | `settings` | each `settings:` key it reads: type, default, allowed values | per kind constants such as `MbinQueueSetting` |
 | `config` | the passthrough file's name and format, and its lock list | `configFiles`, `mbinLockedSettings` |
 | `oidc` | `none`, or the client spec: callback, launch path, PKCE, group settings, whether it reads groups | `OIDCClient` |
@@ -383,8 +383,11 @@ and `gateSessionCookie`, `gateMarker` and `configFile`, which return the
 toolkit's own names so a template cannot disagree with them. A template reads
 an app's settings with `.Setting "key" "fallback"` and `.SettingBool "key"
 fallback`, which return what the app declares, else the blueprint's default,
-else the fallback. Values the toolkit works out in Go for one blueprint, such
-as Mbin's mailer DSN (`.MailerDSN`), are that blueprint's, not helpers.
+else the fallback. A service with a `port` of its own is reached at
+`index .ServiceUpstreams "<service>"`, on `index .ServicePorts "<service>"`,
+and an extra database is named `index .Databases "<name>"`. Values the toolkit
+works out in Go for one blueprint, such as Mbin's mailer DSN (`.MailerDSN`),
+are that blueprint's, not helpers.
 
 **In-app actions** run a command inside one of the app's own containers: a
 gate setting's live read (`env-lock-list`, which is today's `mbinLive`), a

@@ -86,11 +86,12 @@ func (c *checker) objectStorageApp(name string, app config.App) {
 // localOnlyReason is why a kind that keeps its files only on its own disk
 // has no S3 form, for the refusal of `storage: s3` on it.
 func localOnlyReason(kind config.Kind) string {
+	if why := kinds.LocalOnlyReason(kind); why != "" {
+		return why
+	}
 	switch kind {
 	case config.KindSynapse:
 		return "its S3 storage provider supplements the local media store rather than replacing it, so the media directory is always required"
-	case config.KindUptime:
-		return "the monitor keeps everything, its SQLite database included, under /data"
 	}
 	return "it keeps its files on local disk"
 }

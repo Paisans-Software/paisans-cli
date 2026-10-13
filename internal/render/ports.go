@@ -143,6 +143,9 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		} else if port := kinds.Port(kind); port != 0 {
 			add(owner, "apps."+name, "tcp", addr, port)
 		}
+		for _, svc := range kinds.ServicePorts(kind) {
+			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
+		}
 		switch kind {
 		case config.KindSynapse:
 			add(owner+" MAS", "apps."+name, "tcp", addr, masPort)

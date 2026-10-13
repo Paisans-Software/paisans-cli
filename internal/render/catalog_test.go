@@ -25,7 +25,9 @@ func TestACatalogBlueprintRenders(t *testing.T) {
 name: journal
 services:
   - {name: app, image: "ghcr.io/example/journal:2.4.1", purpose: the application}
-database: {engine: none}
+  - {name: search, image: "ghcr.io/example/journal-search:1", purpose: search, port: 8301}
+  - {name: postgres, purpose: the database}
+database: {engine: postgres, extra: [search]}
 port: 8300
 config: {format: env, file: .env}
 health: {path: /status, status: [200]}
@@ -39,7 +41,7 @@ services:
       - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
 `,
 		"blueprints/journal/.env.secret.tmpl":   "JOURNAL_URL=https://{{ .Hostname }}\n",
-		"blueprints/journal/caddy.snippet.tmpl": "reverse_proxy {{ range .Upstreams }}{{ . }} {{ end }}\n",
+		"blueprints/journal/caddy.snippet.tmpl": "reverse_proxy {{ range .Upstreams }}{{ . }} {{ end }}\nhandle /search* { reverse_proxy {{ range index .ServiceUpstreams \"search\" }}{{ . }} {{ end }} }\n# search db {{ index .Databases \"search\" }} on {{ index .ServicePorts \"search\" }}\n",
 	}
 	for name, content := range files {
 		p := filepath.Join(repo, filepath.FromSlash(name))
@@ -78,7 +80,9 @@ services:
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("refused: %v", refusals)
 	}
-	plan, err := render.Build(cfg, fixtureSecrets(t))
+	secrets := fixtureSecrets(t)
+	secrets.Apps["notes"] = map[string]any{"database_password": "fixture-notes-db"}
+	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +106,11 @@ services:
 	}
 	if !strings.Contains(caddy, "notes.example.org") {
 		t.Errorf("the gateway does not route notes.example.org")
+	}
+	// A second service on its own port is reached directly, and an extra
+	// database is named beside the app's own.
+	if !strings.Contains(caddy, "reverse_proxy 10.44.0.3:8301 ") || !strings.Contains(caddy, "# search db notes_search on 8301") {
+		t.Errorf("the search service is not routed, or its database is misnamed:\n%s", caddy)
 	}
 }
 
