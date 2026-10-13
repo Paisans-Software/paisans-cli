@@ -52,8 +52,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	by := create.Origin{Version: toolkitVersion(), Date: time.Now().Format("2006-01-02")}
 	p := create.NewPrompter(stdin, stdout)
 	w := create.NewWizard(p)
-	p.Say("paisans create writes %s for a new deployment. Enter takes the answer", ui.ShortPath(path))
-	p.Say("in brackets; nothing is written until you have read the file and said yes.")
+	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until you have read the file and said yes.", ui.ShortPath(path))
 	section := create.SectionAll
 	for {
 		if err := w.Ask(section); err != nil {
@@ -120,7 +119,7 @@ func againOrQuit(p *create.Prompter, result validate.Result) (create.Section, er
 		sections = append(sections, create.SectionAll)
 	}
 	options = append(options, "quit without writing anything")
-	i, err := p.Choose("Validate refused the file", options, 0)
+	i, err := p.Choose("Validate refused the file. What next?", options, 0)
 	if err != nil {
 		return 0, err
 	}

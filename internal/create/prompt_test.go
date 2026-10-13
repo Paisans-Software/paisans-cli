@@ -117,6 +117,72 @@ func TestChooseNumbersItsOptions(t *testing.T) {
 	}
 }
 
+func TestChooseAsksItsQuestionAsWritten(t *testing.T) {
+	p, out := prompter("\n")
+	if _, err := p.Choose("Where should it run?", []string{"here", "there"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "Where should it run?\n") {
+		t.Errorf("the question is not asked as written:\n%s", out)
+	}
+}
+
+// width fixes how wide the prompter's terminal is, as a terminal would.
+func width(p *Prompter, cols int) { p.width = func() int { return cols } }
+
+func TestSayWrapsAtTheTerminalsWidth(t *testing.T) {
+	p, out := prompter("")
+	width(p, 30)
+	p.Say("\nThe status page reports the other machines failing, so it is best on a machine of its own.")
+	want := "\n" +
+		"The status page reports the\n" +
+		"other machines failing, so it\n" +
+		"is best on a machine of its\n" +
+		"own.\n"
+	if out.String() != want {
+		t.Errorf("Say wrote\n%q\nwant\n%q", out, want)
+	}
+}
+
+func TestSayUsesTheWholeWidth(t *testing.T) {
+	line := strings.Repeat("word ", 30)
+	p, out := prompter("")
+	width(p, 200)
+	p.Say("%s", line)
+	if got := strings.Count(out.String(), "\n"); got != 1 {
+		t.Errorf("a %d character line on a 200 column terminal took %d lines:\n%s", len(line), got, out)
+	}
+}
+
+func TestSayWrapsNothingOffATerminal(t *testing.T) {
+	line := strings.Repeat("word ", 40)
+	p, out := prompter("")
+	p.Say("%s", line)
+	if got := strings.Count(out.String(), "\n"); got != 1 {
+		t.Errorf("Say broke a line for output that is not a terminal:\n%s", out)
+	}
+}
+
+func TestChooseOptionsWrapUnderTheirText(t *testing.T) {
+	p, out := prompter("\n")
+	width(p, 42)
+	if _, err := p.Choose("Where should it run?", []string{
+		"on a machine of its own (recommended)",
+		"on gateway (takes the monitor down with it, no alerts when the gateway fails)",
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	want := "Where should it run?\n" +
+		"  1) on a machine of its own (recommended)\n" +
+		"  2) on gateway (takes the monitor down\n" +
+		"     with it, no alerts when the gateway\n" +
+		"     fails)\n" +
+		"Choose [1]: "
+	if out.String() != want {
+		t.Errorf("Choose wrote\n%s\nwant\n%s", out, want)
+	}
+}
+
 func TestChooseTakesTheDefault(t *testing.T) {
 	p, _ := prompter("\n")
 	if got, err := p.Choose("Shape", []string{"one", "two"}, 1); err != nil || got != 1 {

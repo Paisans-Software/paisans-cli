@@ -13,6 +13,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
 // ErrAborted is input ending before every question was answered: Ctrl-D, a
@@ -26,16 +28,46 @@ var ErrAborted = errors.New("input ended before every question was answered")
 type Prompter struct {
 	in  *bufio.Reader
 	out io.Writer
+	// width is how wide prose is wrapped, read at each write so a terminal
+	// resized between questions is wrapped to its new width; 0 wraps nothing.
+	width func() int
 }
 
-// NewPrompter reads answers from in and writes questions to out.
+// NewPrompter reads answers from in and writes questions to out. Prose is
+// wrapped to out's width when out is a terminal.
 func NewPrompter(in io.Reader, out io.Writer) *Prompter {
-	return &Prompter{in: bufio.NewReader(in), out: out}
+	return &Prompter{in: bufio.NewReader(in), out: out, width: func() int { return ui.TerminalWidth(out) }}
 }
 
-// Say writes a line of explanation between questions.
+// Say writes explanation between questions, wrapped to the terminal's width:
+// each line of it is a paragraph, so it is written whole rather than broken
+// by hand at a width the terminal may not have. A blank line stays blank.
 func (p *Prompter) Say(format string, args ...any) {
-	fmt.Fprintf(p.out, format+"\n", args...)
+	for _, line := range strings.Split(fmt.Sprintf(format, args...), "\n") {
+		p.wrapped("", line)
+	}
+}
+
+// wrapped writes text wrapped to the terminal's width, after mark on its
+// first line and under its text on every other, so a numbered option keeps
+// its number to the left of all of it.
+func (p *Prompter) wrapped(mark, text string) {
+	if mark == "" && strings.TrimSpace(text) == "" {
+		fmt.Fprintln(p.out)
+		return
+	}
+	width := p.width()
+	if width > 0 {
+		width = max(width-len(mark), 1)
+	}
+	hang := strings.Repeat(" ", len(mark))
+	for i, line := range ui.Wrap(text, width) {
+		if i == 0 {
+			fmt.Fprintln(p.out, mark+line)
+		} else {
+			fmt.Fprintln(p.out, hang+line)
+		}
+	}
 }
 
 // line reads one answer, trimmed. A last line with no newline is still an
@@ -64,7 +96,7 @@ func (p *Prompter) ask(q, def string) {
 }
 
 func (p *Prompter) refuse(reason string) {
-	fmt.Fprintf(p.out, "  %s\n", reason)
+	p.wrapped("  ", reason)
 }
 
 // Text asks for a required answer. A blank line takes def, and with no def
@@ -140,12 +172,12 @@ func (p *Prompter) YesNo(q string, def bool) (bool, error) {
 	}
 }
 
-// Choose asks for one of options, listed by number from 1, and returns its
-// index. def is the index Enter takes.
+// Choose asks q, a question written as one, for one of options, listed by
+// number from 1, and returns its index. def is the index Enter takes.
 func (p *Prompter) Choose(q string, options []string, def int) (int, error) {
-	fmt.Fprintf(p.out, "%s:\n", q)
+	p.Say("%s", q)
 	for i, o := range options {
-		fmt.Fprintf(p.out, "  %d) %s\n", i+1, o)
+		p.wrapped(fmt.Sprintf("  %d) ", i+1), o)
 	}
 	for {
 		p.ask("Choose", strconv.Itoa(def+1))
@@ -171,9 +203,9 @@ func (p *Prompter) Choose(q string, options []string, def int) (int, error) {
 // dropped and said so, and the rest of the paste carries on.
 func (p *Prompter) Lines(q string, def []string, check func(string) error) ([]string, error) {
 	if len(def) > 0 {
-		fmt.Fprintf(p.out, "%s, one per line, then a blank line (a blank line now keeps the %d given):\n", q, len(def))
+		p.Say("%s, one per line, then a blank line (a blank line now keeps the %d given):", q, len(def))
 	} else {
-		fmt.Fprintf(p.out, "%s, one per line, then a blank line:\n", q)
+		p.Say("%s, one per line, then a blank line:", q)
 	}
 	var got []string
 	for {
