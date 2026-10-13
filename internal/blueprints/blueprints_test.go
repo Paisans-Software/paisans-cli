@@ -62,8 +62,8 @@ func TestABlueprintHasOneOrigin(t *testing.T) {
 }
 
 // The copy of the core catalog in the binary is exactly the commit its pin
-// names: a hand edit to the copy, or a sync that did not write the pin,
-// fails here rather than shipping as if it were the catalog's.
+// names: a hand edit to a blueprint's copy, or a sync that did not write the
+// pin, fails here rather than shipping as if it were the catalog's.
 func TestTheCoreCopyMatchesItsPin(t *testing.T) {
 	pin, err := CorePin()
 	if err != nil {
@@ -72,11 +72,38 @@ func TestTheCoreCopyMatchesItsPin(t *testing.T) {
 	if len(pin.Commit) != 40 || pin.URL == "" {
 		t.Fatalf("pin %+v names no commit", pin)
 	}
-	got, err := CoreDigest()
+	copied := map[string]bool{}
+	for _, b := range mustBuiltins(t) {
+		if b.Origin == Core {
+			copied[b.Name] = true
+		}
+	}
+	for name := range pin.Blueprints {
+		if !copied[name] {
+			t.Errorf("the pin names %s, which the core copy does not hold", name)
+		}
+	}
+	for name := range copied {
+		want, ok := pin.Blueprints[name]
+		if !ok {
+			t.Errorf("the core copy holds %s, which the pin does not name", name)
+			continue
+		}
+		got, err := CoreDigest(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("the core copy of %s has SHA-256 %s and its pin says %s. Change a core blueprint in the catalog and run scripts/pin-core-catalog.sh, rather than editing the copy", name, got, want)
+		}
+	}
+}
+
+func mustBuiltins(t *testing.T) []Builtin {
+	t.Helper()
+	builtins, err := Builtins()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != pin.SHA256 {
-		t.Errorf("the core copy's SHA-256 is %s and its pin says %s. Change a core blueprint in the catalog and run scripts/sync-core-catalog.sh, rather than editing the copy", got, pin.SHA256)
-	}
+	return builtins
 }

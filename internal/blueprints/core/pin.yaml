@@ -1,5 +1,10 @@
-# Written by scripts/sync-core-catalog.sh. The core catalog commit this
-# binary carries a copy of, and the SHA-256 of that copy.
+# Written by scripts/pin-core-catalog.sh. The core catalog commit this
+# binary is pinned to, and the SHA-256 of each of its blueprints.
 url: https://github.com/Paisans-Software/paisans-blueprints
 commit: 4ec37e324a348ef0e890dd38789f1f10e1782992
-sha256: ba6c11d6e3f039f32bb1e68e6807f80d6116431a21a842ceb46338fa202e393e
+blueprints:
+  element: db8569638e8baf150079261d14dd5d90ae51dcdeaea07d8bb9f31f0515a7dc23
+  mbin: f1d073291f1b43d6a9cfb19ace4bb70eb4d6bfad5826637ad13272d380ef9f92
+  outline: 427e124339013c53d7ef8a097cc65abc95b43ec5f1fd14cffd049144423077d6
+  synapse: 7963be53df2f8f8e9eabec7a72761470a369ece670bb290ac5a1165412d30e8d
+  writefreely: dcd96cac403e5cec24dbd0225bbf227c190b11508440ffd12095b7d3352ecbff

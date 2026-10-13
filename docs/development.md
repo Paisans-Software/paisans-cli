@@ -1467,9 +1467,9 @@ The first party blueprints in `internal/blueprints/core/` are a copy of the
 core catalog, [`Paisans-Software/paisans-blueprints`](https://github.com/Paisans-Software/paisans-blueprints),
 at the commit `internal/blueprints/core/pin.yaml` names. Change one there, in a
 pull request to that repository, then run
-`scripts/sync-core-catalog.sh <commit>` here, which replaces the copy and
-rewrites the pin; `TestTheCoreCopyMatchesItsPin` fails on a copy edited by
-hand. The reserved blueprints in `internal/blueprints/reserved/` are this
+`scripts/pin-core-catalog.sh <commit>` here, which replaces the copy and
+rewrites the pin with a SHA-256 per blueprint; `TestTheCoreCopyMatchesItsPin`
+fails on a copy edited by hand. The reserved blueprints in `internal/blueprints/reserved/` are this
 repository's own and are edited in place.
 
 A blueprint's directory, `internal/blueprints/<core or reserved>/<kind>/`, is
