@@ -231,6 +231,14 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		if (spec.Type == "enum") != (len(spec.Values) > 0) {
 			return nil, fmt.Errorf("settings.%s: values go with type enum, and only with it", key)
 		}
+		// A default is what a template renders for an app that leaves the
+		// key out, so one not of the key's own type would render a value
+		// validate refuses when an operator writes it.
+		if spec.Default != nil {
+			if problem := spec.Problem(spec.Default); problem != "" {
+				return nil, fmt.Errorf("settings.%s.default: %s", key, problem)
+			}
+		}
 	}
 	for _, open := range s.Gate.LeavesOpen {
 		if open != "activitypub" && open != "api_tokens" {

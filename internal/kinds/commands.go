@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
@@ -192,8 +194,9 @@ func BuiltinSpec(name string) ([]byte, bool) {
 }
 
 // Lint checks a blueprint directory as a catalog author writes it: the
-// blueprint.yaml parses, every other file is a template, and the two
-// templates every stack needs are there.
+// blueprint.yaml parses, every other file is a template, the two templates
+// every stack needs are there, and no template's fallback for a setting
+// disagrees with the default the blueprint declares for it.
 func Lint(dir string) (*Def, []string, error) {
 	name := filepath.Base(filepath.Clean(dir))
 	raw, err := os.ReadFile(filepath.Join(dir, blueprints.File))
@@ -217,6 +220,13 @@ func Lint(dir string) (*Def, []string, error) {
 		if rel != blueprints.File && !strings.HasSuffix(rel, ".tmpl") {
 			problems = append(problems, fmt.Sprintf("%s is not a template; every file but %s is rendered", filepath.ToSlash(rel), blueprints.File))
 		}
+		if strings.HasSuffix(rel, ".tmpl") {
+			content, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			problems = append(problems, fallbackProblems(filepath.ToSlash(rel), string(content), d.Settings)...)
+		}
 		return nil
 	})
 	if err != nil {
@@ -228,4 +238,50 @@ func Lint(dir string) (*Def, []string, error) {
 		}
 	}
 	return d, problems, nil
+}
+
+// settingCall and settingBoolCall find a template's literal calls of the
+// two setting helpers, with the key and the fallback each is given.
+var (
+	settingCall     = regexp.MustCompile(`\.Setting\s+("(?:[^"\\]|\\.)*")\s+("(?:[^"\\]|\\.)*")`)
+	settingBoolCall = regexp.MustCompile(`\.SettingBool\s+("(?:[^"\\]|\\.)*")\s+(true|false)\b`)
+)
+
+// fallbackProblems is every literal `.Setting "key" "fallback"` and
+// `.SettingBool "key" true|false` in a template whose fallback is not the
+// default the blueprint declares for key. A catalog blueprint's default is
+// filled in before the template runs (SettingsSeen), so the fallback is not
+// what renders and a reader of the template would be misled about the value
+// an app gets; the default is to be stated once.
+//
+// The calls are found by a regular expression over the template's text, so
+// only calls written with a literal key and a literal fallback are seen. A
+// key or a fallback that is a variable, a pipeline or a raw string is not
+// checked.
+func fallbackProblems(file, content string, settings map[string]SettingSpec) []string {
+	var out []string
+	check := func(rawKey, fallback, written, call string) {
+		key, err := strconv.Unquote(rawKey)
+		if err != nil {
+			return
+		}
+		spec, ok := settings[key]
+		if !ok || spec.Default == nil {
+			return
+		}
+		if want := fmt.Sprint(spec.Default); want != fallback {
+			out = append(out, fmt.Sprintf("%s: %s %q falls back to %s, but settings.%s.default is %v; state the default once, in %s", file, call, key, written, key, spec.Default, blueprints.File))
+		}
+	}
+	for _, m := range settingCall.FindAllStringSubmatch(content, -1) {
+		fallback, err := strconv.Unquote(m[2])
+		if err != nil {
+			continue
+		}
+		check(m[1], fallback, m[2], ".Setting")
+	}
+	for _, m := range settingBoolCall.FindAllStringSubmatch(content, -1) {
+		check(m[1], m[2], m[2], ".SettingBool")
+	}
+	return out
 }

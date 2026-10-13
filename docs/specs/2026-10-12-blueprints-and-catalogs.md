@@ -20,7 +20,16 @@ simpler form covered every blueprint there is:
 * A service has no `when`: a compose template renders a service or not itself.
 * A secret rotates by re-rendering its stack (`secrets.self_rotated`); a
   blueprint cannot yet declare rotation steps run in its containers.
-* `settings` declare types only, not defaults.
+* A setting's `default` is filled in only for a blueprint read from a
+  catalog, and only into what that blueprint's templates and CEL expressions
+  see, never into the configuration: the built in blueprints' Go code and
+  validate's rules give a setting that is absent a meaning of its own (an
+  absent `authorized_fetch` is on).
+* An expression sees no `app.name`, `app.oidc` or `deployment.sites`; the
+  variables are the ones `internal/kinds/cel.go` declares.
+* Mbin's lock list is not a key: `MBIN_LOCKED_SETTINGS` is rendered from Go
+  (`MbinLockedSettings` in `internal/render/mbin.go`), so `blueprint lint` has
+  no lock list to check it against.
 * `placement` is not a key: an engine other than postgres is pinned only, as
   the cluster rules already decide.
 * The core catalog's release key is not yet recorded, so a deployment cannot
@@ -147,10 +156,13 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 
 ### Example: Mbin, as the core catalog would ship it
 
-Every value below is one the toolkit renders today, from
-`internal/kinds/kinds.go`, `internal/kinds/mbin.go`,
-`internal/kinds/mbin_settings.go` and `internal/render/mbin.go`. Comments that
-cite the fork's source move with the values.
+The values below are the ones the toolkit renders, from
+`internal/blueprints/core/mbin/blueprint.yaml`, `internal/kinds/mbin.go` and
+`internal/render/mbin.go`, shortened: the gate's open paths and the comments
+that cite the fork's source are left out. The `settings` and `checks` are the
+ones Go keeps for Mbin today (`MbinQueueSetting`, `MbinContactEmailSetting`
+and the rules in `internal/validate`), written as a catalog blueprint would
+declare them.
 
 ```yaml
 apiVersion: paisans.blueprint/v1
@@ -159,65 +171,70 @@ requires_toolkit: ">= 0.1"
 port: 8080
 database: { engine: postgres }
 storage: { s3: true, public_reads: true }
+hostname_roles: [media]
+federation: { federates: true }
 health: { path: /healthz, status: [200] }
 mail: reads
 
 settings:
   queue:         { type: enum, values: [postgres, rabbitmq], default: postgres }
   contact_email: { type: email }
-  admin_group:   { type: group, default: admins }
-  member_group:  { type: group, default: members }
+  admin_group:   { type: string }
+  member_group:  { type: string }
 
+# app comes first; postgres is the app's own database when it is pinned. The
+# compose template renders rabbitmq and amqproxy only when settings.queue is
+# rabbitmq.
 services:
-  app:      { image: "ghcr.io/paisans-software/mbin:1.15.1-paisans" }
-  valkey:   { image: "docker.io/valkey/valkey:9.1.2-trixie" }
-  rabbitmq: { image: "docker.io/library/rabbitmq:3.13.7-management-alpine",
-              when: "app.settings.queue == 'rabbitmq'" }
-  amqproxy: { image: "docker.io/cloudamqp/amqproxy:3.2.0",
-              when: "app.settings.queue == 'rabbitmq'" }
+  - { name: app,      image: "ghcr.io/paisans-software/mbin:1.15.1-paisans" }
+  - { name: amqproxy, image: "docker.io/cloudamqp/amqproxy:3.2.0" }
+  - { name: rabbitmq, image: "docker.io/library/rabbitmq:3.13.7-management-alpine" }
+  - { name: valkey,   image: "docker.io/valkey/valkey:9.1.2-trixie" }
+  - { name: postgres, purpose: "its own database, when the app is pinned" }
 
 config:
   file: .env
   format: env
-  lock:
-    variable: MBIN_LOCKED_SETTINGS
-    separator: ","
-    keys:
-      - { name: KBIN_DOMAIN }
-      - { name: KBIN_SENDER_EMAIL }
-      - { name: KBIN_CONTACT_EMAIL }
-      - { name: MBIN_AUTHORIZED_FETCH, setting: authorized_fetch }
-      - { name: MBIN_SSO_ONLY_MODE, env: SSO_ONLY_MODE, when: "app.oidc" }
-      - { name: MBIN_PRIVATE_INSTANCE, when: "app.gated" }
-      - { name: MBIN_USE_FEDERATION_ALLOW_LIST, when: "app.gated" }
+  setting_keys:
+    - { key: MBIN_AUTHORIZED_FETCH,   file: .env, setting: authorized_fetch }
+    - { key: OAUTH_OIDC_ADMIN_GROUP,  file: .env, setting: admin_group }
+    - { key: OAUTH_OIDC_MEMBER_GROUP, file: .env, setting: member_group }
 
 oidc:
-  capability: oidc-client
   callback: /oauth/oidc/verify
-  launch: /oauth/oidc/connect
+  launch_path: /oauth/oidc/connect
   pkce: true
   reads_groups: true
   admin_group_setting: admin_group
   member_group_setting: member_group
+  default_admin_group: admins
+  default_member_group: members
 
 gate:
+  gateable: true
   leaves_open: [activitypub, api_tokens]
+  inbox_paths: ["/i/inbox", "/f/inbox", "/u/*/inbox", "/m/*/inbox"]
+  token_paths: ["/api/*"]
+  sign_in_path: /login
+  private_probe: { path: /api/entries, status: [401] }
   settings:
     - name: MBIN_PRIVATE_INSTANCE
       want: "true"
       when: "app.gated"
       why: "the gate lets a request with a bearer token reach /api/*"
+      config_key: MBIN_PRIVATE_INSTANCE
     - name: MBIN_USE_FEDERATION_ALLOW_LIST
       want: "true"
       when: "app.gated"
       why: "without the allow list Mbin answers a signed read from any instance"
+      config_key: MBIN_USE_FEDERATION_ALLOW_LIST
     - name: MBIN_AUTHORIZED_FETCH
       want: "true"
       when: "app.gated && app.federates"
-      setting: authorized_fetch
       why: "without authorized fetch Mbin answers an unsigned read"
-  live: { action: env-lock-list, service: app }
-  probe: { path: /api/entries, status: [401] }
+      config_key: MBIN_AUTHORIZED_FETCH
+      setting: authorized_fetch
+  live: { action: env-lock-list, service: app, lock_variable: MBIN_LOCKED_SETTINGS }
 
 checks:
   - id: mbin-smtp-from-not-an-email
@@ -232,27 +249,26 @@ checks:
     message: "no smtp host, so MAILER_DSN=null://null and every mail Mbin sends is discarded."
 
 secrets:
-  app_secret:         { generate: hex32, rotate: restart }
-  mercure_jwt_secret: { generate: hex32, rotate: restart }
-  valkey_password:    { generate: hex32, rotate: restart }
-  rabbitmq_password:
-    generate: hex32
-    when: "app.settings.queue == 'rabbitmq'"
-    rotate:
-      steps:
-        - { service: rabbitmq, run: [rabbitmqctl, change_password, mbin, "{{ .Secret.Next }}"] }
-        - restart
-
-templates: [compose.yaml.tmpl, caddy.snippet.tmpl, caddy.snippet.media.tmpl, env.secret.tmpl]
+  generate: [mercure_jwt_secret, rabbitmq_password, valkey_password, app_secret,
+             oauth_passphrase, oauth_encryption_key, oauth_private_key, oauth_public_key]
+  self_rotated: [app_secret, mercure_jwt_secret, valkey_password]
 ```
 
-The `.env` template calls helpers that any blueprint may call:
+Its `.env` template quotes each value with `envquote`, a helper any blueprint
+may call:
 
 ```
-MAILER_DSN={{ symfony_mailer_dsn .SMTP | envquote }}
-KBIN_CONTACT_EMAIL={{ .Settings.contact_email | default .SMTP.FromAddress | default (print "noreply@" .Hostname) | envquote }}
-MBIN_LOCKED_SETTINGS={{ .Config.Lock | join "," }}
+MAILER_DSN={{ envquote .MailerDSN }}
+KBIN_CONTACT_EMAIL={{ envquote .MbinContactEmail }}
+MBIN_LOCKED_SETTINGS={{ .MbinLockedSettings }}
 ```
+
+`.MailerDSN`, `.MbinContactEmail` and `.MbinLockedSettings` are Mbin only
+values, worked out in Go in `internal/render/mbin.go`: the mailer DSN is in
+Symfony's syntax, which only Mbin reads, and the other two follow Mbin's own
+rules. They are not general helpers and not part of the contract below. A
+blueprint of its own reads a setting with `.Setting`, Eg:
+`{{ envquote (.Setting "contact_email" "") }}`.
 
 ### Example: a third party blueprint with its own database and no OIDC
 
@@ -266,25 +282,19 @@ name: journal
 requires_toolkit: ">= 0.1"
 port: 8000
 services:
-  app: { image: "ghcr.io/example/journal:2.4.1@sha256:<digest>" }
-  db:  { image: "docker.io/library/mysql:8.4@sha256:<digest>" }
-database: { engine: mysql, service: db }
-oidc: none
-gate: { leaves_open: [] }
-storage: { local: true }
+  - { name: app, image: "ghcr.io/example/journal:2.4.1@sha256:<digest>" }
+  - { name: db,  image: "docker.io/library/mysql:8.4@sha256:<digest>" }
+database: { engine: mysql }
+config: { format: env, file: .env }
+gate: { gateable: true }
+storage: { local_only: true }
 mail: reads
 health: { path: /status, status: [200] }
 backup:
   dump:    { service: db, run: [mysqldump, --single-transaction, journal] }
   restore: { service: db, run: [mysql, journal] }
 secrets:
-  db_password:
-    generate: hex32
-    rotate:
-      steps:
-        - { service: db, run: [mysql, -e, "ALTER USER 'journal'@'%' IDENTIFIED BY '{{ .Secret.Next }}'"] }
-        - restart
-templates: [compose.yaml.tmpl, caddy.snippet.tmpl, env.secret.tmpl]
+  generate: [db_password]
 ```
 
 ```yaml
@@ -305,10 +315,10 @@ apps:
 
 `engine: mysql` makes the blueprint pinned only, the same way the uptime kind
 is today: the cluster is Patroni, and a database it does not run cannot fail
-over with it. `oidc: none` means its users sign in with the app's own accounts;
-`gated: true` still puts the member gate in front of it, which needs no OIDC
-support from the app at all. `leaves_open: []` says the app exposes nothing the
-gate passes through, so the gate alone is the whole control.
+over with it. With no `oidc` section its users sign in with the app's own
+accounts; `gated: true` still puts the member gate in front of it, which needs
+no OIDC support from the app at all. With no `leaves_open`, the app exposes
+nothing the gate passes through, so the gate alone is the whole control.
 
 ## Predicates and checks are CEL
 
@@ -327,7 +337,7 @@ An expression sees:
 | `app.federates` | what `kinds.Federates` answers today |
 | `app.oidc` | whether the app has a client |
 | `app.placement` | `cluster`, or the site it is pinned to |
-| `app.settings` | its `settings:` map, with the blueprint's defaults filled in |
+| `app.settings` | its `settings:` map, with the blueprint's defaults filled in for a blueprint from a catalog |
 | `app.smtp` | its resolved SMTP settings, without the password |
 | `deployment.sites` | site names and their roles |
 
@@ -353,10 +363,15 @@ makes the write, so the write is the same code whoever asked.
 | `gate` | puts the member gate in front of the app when it sets `gated` or `auto_login` |
 | `smtp` | gives the app the deployment's resolved mail settings |
 
-**Helpers** are template functions with no side effects: `envquote`,
-`yamlquote`, `toyaml`, `default`, `join`, and `symfony_mailer_dsn`, which is
-today's `mailerDSN` and `escapeUserinfo` from `internal/render/mbin.go`. A
-helper takes values and returns a string.
+**Helpers** are template functions with no side effects, the ones
+`templateFuncs` in `internal/render/site.go` lists: `quote`, `indent`,
+`regexquote`, `envquote` and `yesno`, which take values and return a string,
+and `gateSessionCookie`, `gateMarker` and `configFile`, which return the
+toolkit's own names so a template cannot disagree with them. A template reads
+an app's settings with `.Setting "key" "fallback"` and `.SettingBool "key"
+fallback`, which return what the app declares, else the blueprint's default,
+else the fallback. Values the toolkit works out in Go for one blueprint, such
+as Mbin's mailer DSN (`.MailerDSN`), are that blueprint's, not helpers.
 
 **In-app actions** run a command inside one of the app's own containers: a
 gate setting's live read (`env-lock-list`, which is today's `mbinLive`), a
@@ -497,7 +512,9 @@ with the real one.
 `blueprint lint` is how the cross checks the toolkit's own tests make today
 reach catalog authors. `TestMbinLockedSettingsAreRendered` checks Mbin's
 template against its lock list in both directions; the lint makes the same
-check of any blueprint with a lock list.
+check of any blueprint with a lock list. It also fails a template whose
+literal `.Setting` or `.SettingBool` fallback differs from the default the
+blueprint declares for that setting, so a default is stated once.
 
 ## Signing
 

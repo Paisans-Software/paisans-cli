@@ -167,3 +167,87 @@ func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 		t.Fatal("the fixture renders no monitor seed")
 	}
 }
+
+// A catalog blueprint's templates see the default it declares for a setting
+// an app leaves out, and the app's own value for one it sets.
+func TestACatalogBlueprintsTemplatesSeeItsDefaults(t *testing.T) {
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	repo := t.TempDir()
+	for name, content := range map[string]string{
+		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",
+		"blueprints/journal/blueprint.yaml": `apiVersion: paisans.blueprint/v1
+name: journal
+services:
+  - {name: app, image: "ghcr.io/example/journal:2.4.1"}
+database: {engine: none}
+port: 8300
+config: {format: env, file: .env}
+settings:
+  title: {type: string, default: Notes}
+  open: {type: bool, default: true}
+`,
+		"blueprints/journal/compose.yaml.tmpl":  "services: {}\n",
+		"blueprints/journal/caddy.snippet.tmpl": "\n",
+		"blueprints/journal/.env.tmpl":          "TITLE={{ .Setting \"title\" \"unset\" }}\nOPEN={{ .SettingBool \"open\" false }}\n",
+	} {
+		p := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.org", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	git("add", "-A")
+	git("commit", "-q", "-m", "catalog")
+	base, err := os.ReadFile(filepath.Join("testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apps := "\napps:\n" +
+		"  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n" +
+		"  diary:\n    blueprint: example/journal\n    hostname: diary.example.org\n    placement: { pinned: home-a }\n    settings: { title: Mine, open: false }\n"
+	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n    unsigned: true\n"+apps, 1)
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
+		t.Fatalf("refused: %v", refusals)
+	}
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"/notes/.env": "TITLE=Notes\nOPEN=true\n", "/diary/.env": "TITLE=Mine\nOPEN=false\n"}
+	got := planFiles(plan)
+	for suffix, content := range want {
+		found := false
+		for p, c := range got {
+			if strings.HasSuffix(p, suffix) {
+				found = true
+				if c != content {
+					t.Errorf("%s: %q, want %q", p, c, content)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no %s rendered", suffix)
+		}
+	}
+	if s := cfg.Apps["notes"].Settings; s != nil {
+		t.Errorf("the defaults were written into the configuration: %v", s)
+	}
+}

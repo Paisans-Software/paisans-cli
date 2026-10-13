@@ -174,7 +174,9 @@ type appValues struct {
 	HeartbeatImage  string
 
 	secrets map[string]any
-	set     map[string]any
+	// set is the app's settings as its blueprint sees them, with a catalog
+	// blueprint's defaults filled in (kinds.SettingsSeen).
+	set map[string]any
 }
 
 type s3Values struct {
@@ -253,7 +255,8 @@ func (v appValues) Secret(key string) string {
 	return value
 }
 
-// Setting returns a declared setting, or the fallback.
+// Setting returns a declared setting, or a catalog blueprint's default for
+// it, or the fallback.
 func (v appValues) Setting(key, fallback string) string {
 	if s, ok := v.set[key].(string); ok && s != "" {
 		return s
@@ -293,7 +296,8 @@ func (v appValues) WriteFreelyLockedSettings() string {
 	return strings.Join(writefreelyLockedSettings, ", ")
 }
 
-// SettingBool returns a declared boolean setting, or the fallback.
+// SettingBool returns a declared boolean setting, or a catalog blueprint's
+// default for it, or the fallback.
 func (v appValues) SettingBool(key string, fallback bool) bool {
 	if b, ok := v.set[key].(bool); ok {
 		return b
@@ -408,7 +412,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		DeploymentID:    p.dep().ID,
 		MeshAddress:     p.meshAddress(planned.Site),
 		secrets:         p.secrets.Apps[planned.Name],
-		set:             app.Settings,
+		set:             kinds.SettingsSeen(app),
 	}
 	v.TrustProxy = trustProxy(p.cfg, planned.Name)
 	v.WebServerListen = webServerListen(p.cfg, planned.Name)
