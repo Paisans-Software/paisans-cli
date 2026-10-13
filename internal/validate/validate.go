@@ -131,6 +131,7 @@ func Check(cfg *config.Config) Result {
 	c.undeclaredSites()
 	c.placementShape()
 	c.dashboardLinkIsAPath()
+	c.consentIsABoolean()
 	c.clusterSiteWithoutData()
 	c.dataSitesShareAnArch()
 	c.clusterAppWithoutAppsSite()
@@ -849,6 +850,20 @@ func (c *checker) dashboardLinkIsAPath() {
 		}
 		if err := kinds.CheckDashboardLink(v); err != nil {
 			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, kinds.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
+		}
+	}
+}
+
+// consentIsABoolean refuses an sso_consent that is not true or false. The
+// client is made from it, and a string such as "yes" would read as off, so a
+// member would never see the screen the operator asked for.
+func (c *checker) consentIsABoolean() {
+	for _, name := range c.cfg.AppNames() {
+		v, ok := c.cfg.Apps[name].Settings[kinds.ConsentSetting]
+		if _, isBool := v.(bool); ok && !isBool {
+			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.ConsentSetting),
+				"sso_consent is not true or false",
+				"is %v. Write true to show Pocket ID's consent screen on a member's first sign in, or leave it out.", v)
 		}
 	}
 }

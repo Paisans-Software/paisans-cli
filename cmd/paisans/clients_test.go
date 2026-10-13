@@ -809,6 +809,20 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)
 	}
 
+	// Consent is skipped unless the app asks for the screen; the gate has no
+	// settings and so skips it.
+	if !chat.SkipConsent || !gate.SkipConsent {
+		t.Errorf("consent: chat skips %v, the gate skips %v; both should", chat.SkipConsent, gate.SkipConsent)
+	}
+	original := cfg.Apps["chat"]
+	withConsent := original
+	withConsent.Settings = map[string]any{kinds.ConsentSetting: true}
+	cfg.Apps["chat"] = withConsent
+	if again, _ := clientDesired(cfg, "chat", false); again.SkipConsent {
+		t.Error("sso_consent: true still skips consent")
+	}
+	cfg.Apps["chat"] = original
+
 	// An app's display_name names its client, and the app stays its key in
 	// the secrets file.
 	app := cfg.Apps["chat"]

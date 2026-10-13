@@ -52,6 +52,9 @@ type Desired struct {
 	// operator evidently wants the tile to go somewhere it does not.
 	LaunchURLChosen bool
 	PKCE            bool
+	// SkipConsent is whether the client skips Pocket ID's consent screen.
+	// It is on unless the app's sso_consent setting is true.
+	SkipConsent bool
 	// AdminGroup is the group whose members the app makes administrators, and
 	// MemberGroup the group a member must be in to sign in at all. Each is
 	// empty when the app's configuration names none. A member group also
@@ -147,6 +150,8 @@ const (
 	// SetLaunchURL gives an existing client the launch URL it lacks, or moves
 	// it off a value the toolkit set by default.
 	SetLaunchURL
+	// SetSkipConsent corrects an existing client's consent setting.
+	SetSkipConsent
 	// SetName renames the client the secrets file records to the name the
 	// configuration gives it.
 	SetName
@@ -261,6 +266,17 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 		}
 	}
 
+	// Consent is corrected rather than refused: whether the screen shows
+	// harms no one and is the configuration's to say, so checkExisting does
+	// not compare it.
+	if client != nil {
+		if client.SkipConsent == d.SkipConsent {
+			p.Present = append(p.Present, fmt.Sprintf("client %s consent screen %s", d.App, consentWord(d.SkipConsent)))
+		} else {
+			p.Steps = append(p.Steps, Step{Kind: SetSkipConsent, Title: "set consent screen for " + d.App, Detail: fmt.Sprintf("set skipConsent %v for client %s: PUT /api/oidc/clients/%s with skipConsent %v and every other field sent back as it is now", d.SkipConsent, d.App, client.ID, d.SkipConsent)})
+		}
+	}
+
 	if d.restricted() {
 		var missing []string
 		for _, g := range d.groups() {
@@ -315,6 +331,13 @@ func (d Desired) setByToolkit(launchURL string) bool {
 	return false
 }
 
+func consentWord(skip bool) string {
+	if skip {
+		return "skipped"
+	}
+	return "shown"
+}
+
 // newClient is exactly what a create sends, and what the plan prints. A
 // confidential client: every app here holds a secret, and a public client
 // cannot have one (service/oidc_service.go:312 at v2.14.0).
@@ -325,6 +348,7 @@ func (d Desired) newClient() pocketid.NewOIDCClient {
 		PkceEnabled:       d.PKCE,
 		IsGroupRestricted: d.restricted(),
 		LaunchURL:         d.LaunchURL,
+		SkipConsent:       d.SkipConsent,
 	}
 }
 
@@ -429,6 +453,8 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 			}
 		case SetLaunchURL:
 			err = c.SetLaunchURL(client.ID, d.LaunchURL)
+		case SetSkipConsent:
+			err = c.SetSkipConsent(client.ID, d.SkipConsent)
 		case SetName:
 			err = c.SetClientName(client.ID, d.Name)
 		case AllowGroups:

@@ -602,6 +602,9 @@ type OIDCClient struct {
 	IsGroupRestricted bool     `json:"isGroupRestricted"`
 	AllowedUserGroups []Group  `json:"allowedUserGroups"`
 	LaunchURL         *string  `json:"launchURL"`
+	// SkipConsent is dto.OidcClientDto.SkipConsent (dto/oidc_dto.go:23 at
+	// v2.14.0).
+	SkipConsent bool `json:"skipConsent"`
 }
 
 // NewOIDCClient is dto.OidcClientCreateDto (dto/oidc_dto.go:41-65), the fields
@@ -615,6 +618,10 @@ type NewOIDCClient struct {
 	PkceEnabled       bool     `json:"pkceEnabled"`
 	IsGroupRestricted bool     `json:"isGroupRestricted"`
 	LaunchURL         string   `json:"launchURL,omitempty"`
+	// SkipConsent is dto.OidcClientCreateDto.SkipConsent (dto/oidc_dto.go:50),
+	// accepted on create as on update. It has no omitempty: false is a
+	// choice the plan shows, not an absence.
+	SkipConsent bool `json:"skipConsent"`
 }
 
 // FindOIDCClient returns the client with exactly this name, with its allowed
@@ -690,6 +697,14 @@ var clientUpdateFields = []string{
 	"refreshTokenDurationMinutes", "launchURL",
 }
 
+// SetSkipConsent sets whether the client skips Pocket ID's consent screen and
+// leaves the rest of it as it is (see updateClient). The update DTO takes
+// skipConsent (dto/oidc_dto.go:50 at v2.14.0) and writes it with the other
+// fields, so it travels in the same whole-client PUT.
+func (c *Client) SetSkipConsent(clientID string, skip bool) error {
+	return c.updateClient(clientID, "skipConsent", skip)
+}
+
 // SetLaunchURL sets a client's launch URL and leaves the rest of it as it is
 // (see updateClient).
 func (c *Client) SetLaunchURL(clientID, launchURL string) error {
@@ -719,7 +734,7 @@ func (c *Client) SetClientName(clientID, name string) error {
 //
 // One side effect is Pocket ID's own: a client with PKCE off has its "PKCE
 // supported" hint cleared (:277-280), as saving it in the admin UI does.
-func (c *Client) updateClient(clientID, field, value string) error {
+func (c *Client) updateClient(clientID, field string, value any) error {
 	path := "/api/oidc/clients/" + url.PathEscape(clientID)
 	var current map[string]json.RawMessage
 	if err := c.do("GET", path, nil, nil, &current, 200); err != nil {

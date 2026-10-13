@@ -22,6 +22,12 @@ func DashboardPath(kind config.Kind) string {
 	return "/"
 }
 
+// ConsentSetting is the app setting that asks Pocket ID to show its consent
+// screen on a person's first sign in through the app's client. Absent or
+// false, the client skips it: the toolkit made the client for the community's
+// own app, so the screen asks a member to approve something already theirs.
+const ConsentSetting = "sso_consent"
+
 // LaunchURL is the address the identity provider's dashboard opens for an
 // app: https://<hostname> plus link, or the kind's DashboardPath when link is
 // empty. A bare "/" gives https://<hostname> with no trailing slash, which is

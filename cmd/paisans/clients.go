@@ -54,6 +54,9 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		MemberGroup:       memberGroup,
 		ExtraGroups:       spec.ExtraGroups(app),
 		RotateSecret:      rotate,
+		// Off unless the app asks for the screen; the gate has no settings
+		// and so skips it too. validate.Check has refused a non-boolean.
+		SkipConsent: app.Settings[kinds.ConsentSetting] != true,
 	}
 	// validate.Check has refused a malformed one already.
 	if link, ok := app.Settings[kinds.DashboardLinkSetting].(string); ok {

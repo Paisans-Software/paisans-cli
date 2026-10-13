@@ -7130,6 +7130,27 @@ including a full URL. The host is always the app's own hostname; accepting a
 URL would be a second place to spell it, one that can disagree with
 `hostname`.
 
+**Pocket ID's consent screen is off for every client the toolkit makes.** The
+client is for the community's own app, so the screen would ask a member to
+approve something already theirs on their first sign in. `apply` and `oidc
+client create` therefore send `skipConsent: true`, and the gate's client
+likewise. An app that wants the screen sets `sso_consent: true`:
+
+```yaml
+apps:
+  talk:
+    settings:
+      sso_consent: true   # Pocket ID asks a member to consent on first sign in
+```
+
+`validate` refuses a value that is not true or false, because a string such as
+`"yes"` would read as off and the screen the operator asked for would never
+show. Unlike a launch URL, an existing client's consent setting is always made
+to match the configuration, in either direction: it is the configuration's to
+say and nothing else depends on the old value. A differing client plans `set
+consent screen for <app>`, a `PUT /api/oidc/clients/<id>` that sends every field
+back as read with only `skipConsent` changed, as the launch URL update does.
+
 **An existing client's launch URL is changed only when the toolkit put it
 there.** That means empty, which is a client made before this command set one,
 or one of the toolkit's own defaults (`kinds.ToolkitLaunchURLs`): the bare
