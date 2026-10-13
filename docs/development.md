@@ -1188,7 +1188,7 @@ README's *One connection per host, shared*), and is pinned by a test of the
 exact argument list (`internal/apply/transport_test.go`):
 
 ```
-ssh -o ControlMaster=auto -o ControlPath=/tmp/psns-XXXX/%C -o ControlPersist=60 -p 22 -o IdentitiesOnly=yes -i /tmp/paisans-ssh-XXXX/key-1.pub -i /tmp/paisans-ssh-XXXX/key-2.pub ubuntu@203.0.113.10 "sh -c 'eval \"\$(printf %s <command, base64> | base64 -d)\"'"
+ssh -o ControlMaster=auto -o ControlPath=/tmp/psns-XXXX/%C -o ControlPersist=60 -p 22 -o IdentitiesOnly=yes -o ConnectTimeout=10 -i /tmp/paisans-ssh-XXXX/key-1.pub -i /tmp/paisans-ssh-XXXX/key-2.pub ubuntu@203.0.113.10 "sh -c 'eval \"\$(printf %s <command, base64> | base64 -d)\"'"
 ```
 
 The `-i` files are the listed **public** keys, written per invocation into a

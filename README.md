@@ -4049,7 +4049,7 @@ Every command that reaches a site runs the operator's own `ssh` (see *Why ssh
 is shelled out to and sops is not* in `docs/development.md`) as:
 
 ```
-ssh -p <port> -o IdentitiesOnly=yes -i <key-1.pub> -i <key-2.pub> <user>@<host> <command>
+ssh -p <port> -o IdentitiesOnly=yes -o ConnectTimeout=10 -i <key-1.pub> -i <key-2.pub> <user>@<host> <command>
 ```
 
 Each listed key is written to a file of its own, 0600, in a fresh 0700
@@ -4062,6 +4062,16 @@ key file is not present locally", and ssh_config(5) adds that `IdentityFile`
 an agent are offered during authentication" (OpenSSH 9.9p2's pages). So each
 admin's ssh offers the listed keys, finds whichever one's private half is in
 that admin's agent, and signs with it there.
+
+`ConnectTimeout=10` bounds how long ssh waits for a site to answer. Without
+it ssh uses "the default system TCP timeout" (ssh_config(5)), which is 75
+seconds on macOS for a host that is switched off or a VM that has been
+deleted, and a connection that never opened is tried three times (see *A
+connection that never opened is tried again*): minutes, with nothing to show
+for them, before a command could say the site is gone. A host that is up opens
+its connection in well under a second. The timeout also covers the protocol
+handshake, but not an operator's answer to ssh's question about a new host
+key: an answer given after the timeout has passed still connects.
 
 `IdentitiesOnly=yes` is what makes it a selection. Without it ssh also offers
 every other key the agent holds, first, and a server that allows a handful of
@@ -8002,8 +8012,7 @@ the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
 check runs with the sites that did. Each ssh attempt gives up after ten
-seconds (`ConnectTimeout`), so a host that is switched off costs seconds
-rather than the operating system's connect timeout three times over. Like
+seconds, as every command's does (see *How the operator's ssh uses them*). Like
 `preflight` it takes no `--ssh`, since one override cannot name several hosts,
 and it runs its commands through sudo unless told `--sudo=false`.
 

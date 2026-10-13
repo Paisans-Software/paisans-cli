@@ -26,7 +26,7 @@ const (
 func TestSSHArgsForASection(t *testing.T) {
 	tr := apply.SSHTransport{User: "ubuntu", Host: "203.0.113.10", Port: 2222, PublicKeys: []string{keyA, keyB}}
 	got := tr.SSHArgs([]string{"/tmp/k/key-1.pub", "/tmp/k/key-2.pub"}, "uptime")
-	want := append(apply.MuxArgs(), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-i", "/tmp/k/key-1.pub", "-i", "/tmp/k/key-2.pub", "ubuntu@203.0.113.10", apply.RemoteCommand("uptime"))
+	want := append(apply.MuxArgs(), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "/tmp/k/key-1.pub", "-i", "/tmp/k/key-2.pub", "ubuntu@203.0.113.10", apply.RemoteCommand("uptime"))
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
@@ -35,13 +35,21 @@ func TestSSHArgsForASection(t *testing.T) {
 	}
 }
 
-// A connect timeout is one more option before the keys, and only when set.
+// A connect timeout is one more option before the keys. A host that is
+// switched off, or a VM that has been deleted, would otherwise cost the
+// operating system's TCP connect timeout on every attempt, so a transport
+// that sets none gets ten seconds; one that sets its own gets that.
 func TestSSHArgsConnectTimeout(t *testing.T) {
-	tr := apply.SSHTransport{User: "ubuntu", Host: "vm.example.org", PublicKeys: []string{keyA}, ConnectTimeout: 10}
-	got := tr.SSHArgs([]string{"k1"}, "true")
-	want := append(apply.MuxArgs(), "-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "k1", "ubuntu@vm.example.org", apply.RemoteCommand("true"))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
+	for _, c := range []struct {
+		timeout int
+		want    string
+	}{{0, "ConnectTimeout=10"}, {30, "ConnectTimeout=30"}} {
+		tr := apply.SSHTransport{User: "ubuntu", Host: "vm.example.org", PublicKeys: []string{keyA}, ConnectTimeout: c.timeout}
+		got := tr.SSHArgs([]string{"k1"}, "true")
+		want := append(apply.MuxArgs(), "-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", c.want, "-i", "k1", "ubuntu@vm.example.org", apply.RemoteCommand("true"))
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ConnectTimeout %d, ssh args:\n got %q\nwant %q", c.timeout, got, want)
+		}
 	}
 }
 
