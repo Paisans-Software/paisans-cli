@@ -203,7 +203,7 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	if err := convergeWith(t, answering(t, "approve\n"), &out, "--execute"); err == nil {
 		t.Fatal("the failing step passed")
 	}
-	if !strings.Contains(out.String(), "Type approve to proceed: ") {
+	if !strings.Contains(out.String(), "Type 'approve' (no quotes) to proceed: ") {
 		t.Fatalf("not asked: %q", out.String())
 	}
 	approved := hosts["home-a"].record(t).Approved
