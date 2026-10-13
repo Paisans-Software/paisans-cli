@@ -1,7 +1,31 @@
 # Blueprints and catalogs
 
-Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12. Not
-implemented.
+Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12.
+Implemented 2026-10-13, in pull requests #209, #211, #212, #213, #214, #215,
+#217, #218 and #221; the core catalog is
+[`Paisans-Software/blueprints`](https://github.com/Paisans-Software/blueprints).
+
+**Where the implementation differs from the design below**, each because the
+simpler form covered every blueprint there is:
+
+* The format is the keys `kinds.Parse` reads, which group as this design does
+  but are not all spelled as its examples are: `config.setting_keys` and
+  `config.omitted_keys`, `storage.s3` and `storage.local_only`,
+  `secrets.generate`, `secrets.required` and `secrets.self_rotated`,
+  `federation.federates` and `federation.setting`, and `oidc.launch_path` and
+  `oidc.no_launch`. A blueprint with no `oidc` signs nobody in; there is no
+  `oidc: none`.
+* A blueprint's templates are every file in its directory but
+  `blueprint.yaml`; there is no `templates` list.
+* A service has no `when`: a compose template renders a service or not itself.
+* A secret rotates by re-rendering its stack (`secrets.self_rotated`); a
+  blueprint cannot yet declare rotation steps run in its containers.
+* `settings` declare types only, not defaults.
+* `placement` is not a key: an engine other than postgres is pinned only, as
+  the cluster rules already decide.
+* The core catalog's release key is not yet recorded, so a deployment cannot
+  pin `catalogs.core` to another commit and renders the toolkit's copy
+  (`internal/blueprints/signers/core`).
 
 Every application the toolkit can run is compiled into the binary today. What
 the toolkit knows about a kind is spread over about thirty files: the service
