@@ -110,6 +110,10 @@ apps:
   {{.Key}}:
     blueprint: {{.Kind}}
     hostname: {{q .Hostname}}
+{{- if and .DisplayName (ne .DisplayName .Key)}}
+    # What a person signing in is shown, as the app's client name at Pocket ID.
+    display_name: {{q .DisplayName}}
+{{- end}}
     placement: {{.Placement}}
 {{- if .MembersOnly}}
     # Behind the gate, which admits members and admins. The toolkit runs the

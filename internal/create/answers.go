@@ -58,6 +58,10 @@ type App struct {
 	Key      string
 	Kind     config.Kind
 	Hostname string
+	// DisplayName is what a person signing in is shown for the app. Render
+	// writes it only when it differs from Key, the name the client has
+	// without one.
+	DisplayName string
 	// MembersOnly puts the app behind the gate, which admits members and
 	// admins. The toolkit runs the gate itself whenever an app is gated.
 	MembersOnly bool

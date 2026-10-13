@@ -756,4 +756,15 @@ func TestClientName(t *testing.T) {
 	if got := c.ClientName(config.GateApp); got != config.GateApp {
 		t.Errorf("with no community name, the gate's client is %q", got)
 	}
+
+	c.Apps = map[string]config.App{"docs": {DisplayName: "Wiki"}, "blog": {}}
+	if got := c.ClientName("docs"); got != "Wiki" {
+		t.Errorf("with a display name, docs's client is %q", got)
+	}
+	if got := c.ClientName("blog"); got != "blog" {
+		t.Errorf("with no display name, blog's client is %q", got)
+	}
+	if got := c.ClientName("gone"); got != "gone" {
+		t.Errorf("an app no longer declared has client %q", got)
+	}
 }

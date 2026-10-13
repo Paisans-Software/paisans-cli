@@ -303,6 +303,9 @@ apps:
   docs:
     blueprint: outline
     hostname: docs.example.org
+    # What Pocket ID's sign in page calls this app, as its client's name.
+    # Without it the client is named after the app's key, here "docs".
+    display_name: Wiki
     placement: cluster
     settings:
       # Non-AWS S3 endpoints need path style. Upstream bug: the bucket must

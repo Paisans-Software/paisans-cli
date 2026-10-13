@@ -444,9 +444,13 @@ const (
 )
 
 type App struct {
-	Kind      Kind      `yaml:"blueprint"`
-	Hostname  string    `yaml:"hostname"`
-	Placement Placement `yaml:"placement"`
+	Kind     Kind   `yaml:"blueprint"`
+	Hostname string `yaml:"hostname"`
+	// DisplayName is the name of the app's OIDC client at the identity
+	// provider, which is what a person signing in is shown. Empty names the
+	// client after the app (see ClientName).
+	DisplayName string    `yaml:"display_name"`
+	Placement   Placement `yaml:"placement"`
 	// Images overrides the container image a service runs, keyed by service
 	// name in the kind's compose template. Every key is optional and an unset
 	// one takes the default that kind ships.
@@ -546,13 +550,17 @@ func (c *Config) GateHostname() string { return "gate." + c.Community.Domain }
 
 // ClientName is the name of app's OIDC client at the identity provider,
 // which is how the toolkit finds the client there and what the provider
-// shows a person signing in. Every app's client is named after the app,
-// except the gate's: the gate is the community's one sign in rather than an
-// app a member chose, so its client carries the community's name, and falls
-// back to the app's only when the configuration gives the community none.
-// It is decided by name rather than by kind so that `app remove gate`, run
-// after the gate has left the configuration, still finds the client.
+// shows a person signing in. An app's display_name names its client when it
+// sets one. Otherwise the client is named after the app, except the gate's:
+// the gate is the community's one sign in rather than an app a member chose,
+// so its client carries the community's name, and falls back to the app's
+// only when the configuration gives the community none. The gate is decided
+// by name rather than by kind so that `app remove gate`, run after the gate
+// has left the configuration, still finds the client.
 func (c *Config) ClientName(app string) string {
+	if name := c.Apps[app].DisplayName; name != "" {
+		return name
+	}
 	if app == GateApp && c.Community.Name != "" {
 		return c.Community.Name
 	}

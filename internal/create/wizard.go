@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Section is a group of questions that can be answered again on its own.
@@ -352,6 +353,19 @@ func (w *Wizard) apps() error {
 		}
 		return w.p.Text("Hostname for the "+spec.what, def, checkHostname)
 	}
+	// displayName is asked only of an app whose blueprint has a client at
+	// Pocket ID, since that is all it names. The app's key is the default,
+	// which is the client's name when display_name is not set.
+	displayName := func(spec appSpec, host string) (string, error) {
+		if _, ok := kinds.OIDCClient(spec.kind, host, spec.key); !ok {
+			return "", nil
+		}
+		def := spec.key
+		if p, ok := prev[spec.key]; ok && p.DisplayName != "" {
+			def = p.DisplayName
+		}
+		return w.p.Text("Name shown at sign in for the "+spec.what, def, checkDisplayName)
+	}
 
 	w.p.Say("Sign in (Pocket ID) is always included: every other app signs in through it.")
 	host, err := hostname(signIn)
@@ -383,6 +397,9 @@ func (w *Wizard) apps() error {
 				return err
 			}
 			app := App{Key: spec.key, Kind: spec.kind, Hostname: host}
+			if app.DisplayName, err = displayName(spec, host); err != nil {
+				return err
+			}
 			if spec.gateable {
 				def := true
 				if p, ok := prev[spec.key]; ok {
