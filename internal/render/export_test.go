@@ -15,7 +15,7 @@ type SettingOwner struct {
 // SettingOwners is every kind's settings that own a rendered key.
 func SettingOwners() []SettingOwner {
 	var out []SettingOwner
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		for _, k := range kinds.SettingKeys(kind) {
 			out = append(out, SettingOwner{kind, k})
 		}

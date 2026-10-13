@@ -12,7 +12,7 @@ import (
 // gate settings and a way to read them; Outline and Element leave nothing to
 // a setting.
 func TestEveryFederatingGateableKindRecordsItsGateSettings(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		spec := kinds.GateFor(kind)
 		app := config.App{Kind: kind, Gated: true}
 		_, live := kinds.LiveSettingsFor(kind)

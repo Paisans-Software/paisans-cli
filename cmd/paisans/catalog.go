@@ -302,7 +302,7 @@ func runCatalogList(args []string, stdout io.Writer) error {
 		return err
 	}
 	core := cfg.Catalogs[config.CoreCatalog]
-	coreURL, coreCommit, coreHow := pin.URL, pin.Commit, "the toolkit's copy"
+	coreURL, coreCommit, coreHow := pin.URL, pin.Commit, "the toolkit's pin"
 	if core.URL != "" {
 		coreURL = core.URL
 	}

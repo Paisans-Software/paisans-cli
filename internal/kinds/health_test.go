@@ -11,7 +11,7 @@ import (
 // Every kind has a health route recorded, so a new kind cannot be seeded with
 // a guessed one: it fails here until somebody establishes it.
 func TestEveryKindHasAHealthRoute(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		h, ok := kinds.HealthFor(kind)
 		if !ok {
 			t.Errorf("%s has no health route recorded", kind)
@@ -35,7 +35,7 @@ func TestPocketIDAnswersNoContent(t *testing.T) {
 }
 
 func TestOnlyTheseKindsSendMail(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		if got, want := kinds.SendsMail(kind), kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin || kind == config.KindInvite; got != want {
 			t.Errorf("%s: SendsMail = %v", kind, got)
 		}

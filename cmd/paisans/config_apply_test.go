@@ -40,7 +40,7 @@ func newApplyStore(t *testing.T, n int) *applyStoreFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: secrets, SOPS: []byte("creation_rules: []\n")}
+	base := snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: secrets, SOPS: []byte("creation_rules: []\n")})
 	f := &applyStoreFixture{runs: &[]string{}}
 	for i := range n {
 		v := base

@@ -1,9 +1,9 @@
 package kinds
 
 import (
-	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -158,9 +158,9 @@ type RequiredSecret struct {
 	Why string
 }
 
-// defs is every kind's record, read from the blueprints built into the
-// binary (internal/blueprints). config.Kinds is the list of kind names the
-// configuration accepts; TestEveryKindHasARecord holds the two to each other.
+// defs is every kind's record: the reserved ones, read at init from the
+// blueprints built into the binary (internal/blueprints), and the core and
+// catalog ones as they are read.
 //
 // It is filled in init because a record holds functions that read records (a
 // gate setting's condition asks Federates), which Go's package initialisation
@@ -194,22 +194,30 @@ func loadBuiltins() (map[config.Kind]*Def, error) {
 		}
 		kind := config.Kind(b.Name)
 		if extra, ok := reservedExtras[kind]; ok {
-			if b.Origin != blueprints.Reserved {
-				return nil, fmt.Errorf("blueprint %s: has Go of its own, which only a reserved blueprint may", b.Name)
-			}
 			extra(d)
 		}
-		d.Reserved = b.Origin == blueprints.Reserved
+		d.Reserved = true
 		out[kind] = d
 	}
 	return out, nil
 }
 
 // For is a kind's record, and false for a kind this toolkit does not know.
+// A core blueprint is read from the catalog cache the first time any is
+// asked for.
 func For(kind config.Kind) (*Def, bool) {
 	mu.RLock()
-	defer mu.RUnlock()
 	d, ok := defs[kind]
+	mu.RUnlock()
+	if ok || strings.Contains(string(kind), "/") {
+		return d, ok
+	}
+	if LoadCore("") != nil {
+		return nil, false
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	d, ok = defs[kind]
 	return d, ok
 }
 
@@ -223,8 +231,22 @@ func of(kind config.Kind) *Def {
 	return &Def{}
 }
 
-// known is every kind with a record, sorted.
+// Builtin is every reserved and core blueprint, sorted, and none a
+// configuration's catalogs added.
+func Builtin() []config.Kind {
+	var out []config.Kind
+	for _, k := range known() {
+		if !strings.Contains(string(k), "/") {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// known is every kind with a record, sorted. The core blueprints are read
+// first, so it holds them.
 func known() []config.Kind {
+	LoadCore("")
 	mu.RLock()
 	defer mu.RUnlock()
 	out := make([]config.Kind, 0, len(defs))

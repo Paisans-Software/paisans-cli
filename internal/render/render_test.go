@@ -2937,7 +2937,7 @@ func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
 // HTML and API route unfiltered, so every kind that can be gated while it
 // federates must carry it.
 func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		spec := kinds.GateFor(kind)
 		if !spec.Gateable || spec.SignedFetch == nil {
 			continue

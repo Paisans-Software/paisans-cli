@@ -81,8 +81,8 @@ func TestEmptyBaselineReviewsEveryEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := grant.Compare("vm", g, grant.Record{}, grant.AllScope)
-	if r.Pending() != len(g.Keys)+len(g.Images) || r.Pending() == 0 {
-		t.Errorf("%d pending of %d keys and %d images", r.Pending(), len(g.Keys), len(g.Images))
+	if r.Pending() != len(g.Keys)+len(g.Images)+len(g.Blueprints) || r.Pending() == 0 {
+		t.Errorf("%d pending of %d keys, %d images and %d blueprints", r.Pending(), len(g.Keys), len(g.Images), len(g.Blueprints))
 	}
 	if r.Changes[0].Line() != fmt.Sprintf("+ key %s (alice, alice@example.org) may log in as ubuntu", g.Keys[0].Fingerprint) {
 		t.Errorf("keys first: %q", r.Changes[0].Line())
@@ -231,7 +231,7 @@ func TestAPinnedCaddyDigestIsTheReference(t *testing.T) {
 	}
 	// The same reference string is the same image; a different digest is
 	// a change.
-	was := grant.Record{Images: &grant.ImagesPart{Entries: g.Images}}
+	was := grant.Record{Images: &grant.ImagesPart{Entries: g.Images}, Blueprints: &grant.BlueprintsPart{Entries: g.Blueprints}}
 	if r := grant.Compare("vm", g, was, grant.ApplyScope()); len(r.Changes) != 0 {
 		t.Errorf("unchanged: %+v", r.Changes)
 	}

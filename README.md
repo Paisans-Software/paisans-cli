@@ -2672,8 +2672,10 @@ each app the leftovers belong to, which is the command that takes them off
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved four (`pocket-id`, the
-gate, `invite`, `uptime`) and a pinned copy of the core catalog. Any other
-comes from a **catalog**: a git repository of blueprints the deployment
+gate, `invite`, `uptime`). The first party ones, `mbin`, `outline` and the
+rest, are the **core catalog**'s, which the toolkit fetches at the commit its
+release pins and checks against the SHA-256 the release names for each
+blueprint. Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
 
 ```yaml
@@ -2704,7 +2706,9 @@ deployment must render the same bytes for every admin and on every run; a
 tag beside it must still name that commit, so a tag moved after the pin was
 written is refused. Loading the configuration fetches each catalog an app
 names once, with the `git` binary and the operator's own git credentials,
-into a cache keyed by the commit.
+into a cache keyed by the commit, one per machine. A fetch takes the commit's
+trees and the files of only the blueprints in use, so a catalog of many
+blueprints costs a deployment only the ones it runs.
 
 **A catalog is trusted by its pin, not by who published it.** Nothing checks
 a release's author: a pin is a commit the operator chose, and moving it is
@@ -2761,7 +2765,7 @@ blueprint with `blueprint:`; elsewhere in this document and in the code
 (`internal/kinds`, `config.Kind`) the same thing is called the app's kind.
 
 ```
-internal/blueprints/core/mbin/              internal/blueprints/core/writefreely/
+blueprints/mbin/                            blueprints/writefreely/
   blueprint.yaml                              blueprint.yaml
   compose.yaml.tmpl                           compose.yaml.tmpl
   .env.secret.tmpl                            config.ini.secret.tmpl
@@ -3718,7 +3722,8 @@ key, which is why *Rendered configuration is a build artifact* tells every
 deployment to add a second recipient to `.sops.yaml`.
 
 **A version is a signed git commit of exactly the three files**, and, when
-its apps use blueprints from a catalog, the snapshot of those blueprints under
+its apps use blueprints from a catalog, the core catalog included, the
+snapshot of those blueprints under
 `blueprints/<catalog commit>/<blueprint>/` with a `blueprints/SHA256SUMS`
 beside it. A commit holding anything else, or a snapshot whose files do not
 match its SHA256SUMS, is invalid. The snapshot is what lets a removal or a
@@ -4962,7 +4967,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
 | images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
-| blueprints | per app whose blueprint a catalog provides: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does |
+| blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new toolkit release moves the core pin of every deployment that does not pin core itself |
 
 A key is the same key when its fingerprint is, so a new comment or a new admin
 for it is a change of that key. An image is the same when its reference is,

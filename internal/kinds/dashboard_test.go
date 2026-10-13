@@ -12,7 +12,7 @@ import (
 // Mbin's tile starts the fork's OIDC flow; every other kind opens its front
 // page, which is the bare host with no trailing slash.
 func TestLaunchURLDefaultsPerKind(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		want := "https://app.example.org"
 		if kind == config.KindMbin {
 			want = "https://app.example.org/oauth/oidc/connect"

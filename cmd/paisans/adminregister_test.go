@@ -65,7 +65,7 @@ func TestAdminRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
 	_, alice := testKey(t)
 	_, bob := testKey(t)
 	yaml := withAdminBob(t, alice, bob)
-	f := configstore.Files{Paisans: []byte(yaml), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	f := snapshotted(configstore.Files{Paisans: []byte(yaml), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	var runs []string
 	l := registerWorkstation(t, "", f, &runs, alice, bob)
 	var out bytes.Buffer

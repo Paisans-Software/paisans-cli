@@ -101,8 +101,8 @@ func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	return g, nil
 }
 
-// BlueprintsOf is every app on site whose blueprint a catalog provides, with
-// the SHA-256 of the files it was read from.
+// BlueprintsOf is every app on site whose blueprint a catalog provides, the
+// core catalog included, with the SHA-256 of the files it was read from.
 func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
 	var out []Blueprint
 	placed := render.AppSites(cfg)
@@ -119,7 +119,7 @@ func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
 		if catalog == "" {
 			catalog = config.CoreCatalog
 		}
-		cat := cfg.Catalogs[catalog]
+		cat := kinds.CorePin(cfg, catalog)
 		sum, err := blueprints.Digest(os.DirFS(dir), ".")
 		if err != nil {
 			return nil, fmt.Errorf("reading the blueprint of apps.%s: %w", app, err)

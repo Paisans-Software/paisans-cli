@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
@@ -42,7 +43,7 @@ checks:
 // fixture with an app using it, and loads that.
 func loadWithCatalog(t *testing.T, settings string) *config.Config {
 	t.Helper()
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml":                        "apiVersion: paisans.catalog/v1\nname: example\n",

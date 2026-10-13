@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/validate"
@@ -16,7 +17,7 @@ import (
 // app's stack holds its templates, rendered with the same values, and the
 // gateway routes to it.
 func TestACatalogBlueprintRenders(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	repo := filepath.Join(t.TempDir(), "paisans-example")
 	files := map[string]string{
 		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",
@@ -108,7 +109,7 @@ services:
 // TCP connect on each site it runs on, and its front page answering below
 // 500, in every monitor's seed.
 func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml":                          "apiVersion: paisans.catalog/v1\nname: example\n",
@@ -171,7 +172,7 @@ func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 // A catalog blueprint's templates see the default it declares for a setting
 // an app leaves out, and the app's own value for one it sets.
 func TestACatalogBlueprintsTemplatesSeeItsDefaults(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",

@@ -3,8 +3,10 @@
 // See docs/specs/2026-10-12-blueprints-and-catalogs.md.
 //
 // reserved/ holds the blueprints no catalog may provide: the identity
-// provider, the gate, the invite service and the monitor. core/ holds the
-// first party blueprints every deployment can use.
+// provider, the gate, the invite service and the monitor. The first party
+// blueprints every deployment can use are the core catalog's, which the
+// binary does not carry: core/pin.yaml names the commit to fetch and each
+// blueprint's SHA-256 (docs/specs/2026-10-13-core-catalog-fetched.md).
 //
 // This package only carries the files. internal/kinds reads them.
 package blueprints
@@ -18,47 +20,39 @@ import (
 	"strings"
 )
 
-//go:embed all:core all:reserved
+//go:embed core/pin.yaml all:reserved
 var embedded embed.FS
 
 // File is the name of a blueprint's own description, in its directory.
 const File = "blueprint.yaml"
 
-// Origin is where a built in blueprint comes from.
-type Origin string
-
-const (
-	Core     Origin = "core"
-	Reserved Origin = "reserved"
-)
+// reserved is the directory in the binary holding the reserved blueprints.
+const reserved = "reserved"
 
 // Builtin is one blueprint directory in the binary.
 type Builtin struct {
-	Name   string
-	Origin Origin
+	Name string
 	// Spec is the content of its blueprint.yaml.
 	Spec []byte
 }
 
-// Builtins is every blueprint built into the binary, reserved ones first,
-// each in name order.
+// Builtins is every blueprint built into the binary, in name order. Each is
+// a reserved one.
 func Builtins() ([]Builtin, error) {
+	entries, err := fs.ReadDir(embedded, reserved)
+	if err != nil {
+		return nil, err
+	}
 	var out []Builtin
-	for _, origin := range []Origin{Reserved, Core} {
-		entries, err := fs.ReadDir(embedded, string(origin))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		spec, err := fs.ReadFile(embedded, path.Join(reserved, e.Name(), File))
 		if err != nil {
 			return nil, err
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			spec, err := fs.ReadFile(embedded, path.Join(string(origin), e.Name(), File))
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, Builtin{Name: e.Name(), Origin: origin, Spec: spec})
-		}
+		out = append(out, Builtin{Name: e.Name(), Spec: spec})
 	}
 	return out, nil
 }
@@ -71,14 +65,10 @@ var Templates fs.FS = templates{}
 
 type templates struct{}
 
-// locate finds which origin holds a blueprint.
-func locate(name string) (string, bool) {
-	for _, origin := range []Origin{Reserved, Core} {
-		if info, err := fs.Stat(embedded, path.Join(string(origin), name)); err == nil && info.IsDir() {
-			return string(origin), true
-		}
-	}
-	return "", false
+// locate reports whether the binary holds a blueprint.
+func locate(name string) bool {
+	info, err := fs.Stat(embedded, path.Join(reserved, name))
+	return err == nil && info.IsDir()
 }
 
 // resolve maps a path in Templates to one in the embedded filesystem.
@@ -87,14 +77,13 @@ func resolve(name string) (string, error) {
 		return "", fs.ErrNotExist
 	}
 	first, rest, _ := strings.Cut(name, "/")
-	origin, ok := locate(first)
-	if !ok {
+	if !locate(first) {
 		return "", fs.ErrNotExist
 	}
 	if rest == File {
 		return "", fs.ErrNotExist
 	}
-	return path.Join(origin, first, rest), nil
+	return path.Join(reserved, first, rest), nil
 }
 
 func (templates) Open(name string) (fs.File, error) {

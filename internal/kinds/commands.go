@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
 // What the catalog and blueprint commands need beyond resolution.
@@ -208,7 +209,8 @@ func minus(a, b []string) []string {
 	return out
 }
 
-// BuiltinNames is every built in blueprint's name, reserved ones marked.
+// BuiltinNames is every reserved and core blueprint's name, reserved ones
+// apart.
 func BuiltinNames() (reserved, core []string) {
 	for _, kind := range known() {
 		if _, fromCatalog := Source(kind); fromCatalog && strings.Contains(string(kind), "/") {
@@ -223,7 +225,7 @@ func BuiltinNames() (reserved, core []string) {
 	return reserved, core
 }
 
-// BuiltinSpec is a built in blueprint's blueprint.yaml.
+// BuiltinSpec is a reserved or core blueprint's blueprint.yaml.
 func BuiltinSpec(name string) ([]byte, bool) {
 	builtins, err := blueprints.Builtins()
 	if err != nil {
@@ -234,7 +236,15 @@ func BuiltinSpec(name string) ([]byte, bool) {
 			return b.Spec, true
 		}
 	}
-	return nil, false
+	if _, ok := For(config.Kind(name)); !ok || strings.Contains(name, "/") {
+		return nil, false
+	}
+	dir, ok := Source(config.Kind(name))
+	if !ok {
+		return nil, false
+	}
+	spec, err := os.ReadFile(filepath.Join(dir, blueprints.File))
+	return spec, err == nil
 }
 
 // Lint checks a blueprint directory as a catalog author writes it: the

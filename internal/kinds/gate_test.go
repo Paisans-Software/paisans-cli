@@ -12,7 +12,7 @@ import (
 // Every kind says whether it can be gated, so a new kind fails here until
 // somebody decides, rather than defaulting to a gate it might not survive.
 func TestEveryKindHasAGateRecord(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		if !kinds.GateRecorded(kind) {
 			t.Errorf("%s has no gate record", kind)
 		}
@@ -23,7 +23,7 @@ func TestEveryKindHasAGateRecord(t *testing.T) {
 // too: a target that did not start with / would be read by `redir` as a
 // matcher, and the redirect would silently become an empty 200.
 func TestGatePathsAreAbsolute(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		spec := kinds.GateFor(kind)
 		paths := slices.Concat(spec.OpenPaths, spec.InboxPaths, spec.TokenPaths)
 		for _, rule := range spec.AutoLogin {
@@ -44,7 +44,7 @@ func TestGatePathsAreAbsolute(t *testing.T) {
 // A kind that can be gated records nothing that would open it whole, and a
 // kind that cannot be gated records nothing at all.
 func TestNoGateRecordOpensTheFrontPage(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		spec := kinds.GateFor(kind)
 		open := kinds.OpenPathsFor(kind)
 		if slices.Contains(open, "/") || slices.Contains(open, "/*") || slices.Contains(spec.TokenPaths, "/*") {
@@ -144,7 +144,7 @@ func TestMbinOpensItsAPIToATokenOnly(t *testing.T) {
 // A kind with auto-login names the sign-in page a public app sends through the
 // gate's sign-in, and a kind without has none, since nothing would fire after.
 func TestAutoLoginNamesTheSignInPage(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		spec := kinds.GateFor(kind)
 		if (len(spec.AutoLogin) > 0) != (spec.SignInPath != "") {
 			t.Errorf("%s: %d auto-login rules, sign-in page %q", kind, len(spec.AutoLogin), spec.SignInPath)
