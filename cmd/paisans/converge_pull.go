@@ -178,6 +178,11 @@ func (p *puller) pullSite(line ui.Line, s convergeStep) ([]checkReport, error) {
 	errs := make([]error, len(refs))
 	slots := make(chan struct{}, pullsAtOnce)
 	var wg sync.WaitGroup
+	// A host's pulls take minutes, and a spinner with only a timer does not
+	// say whether they are moving: the line counts the images done.
+	done := 0
+	progress := func() { line.Progress(fmt.Sprintf("%d of %s pulled", done, plural(len(refs), "image"))) }
+	progress()
 	for i, ref := range refs {
 		slots <- struct{}{}
 		wg.Add(1)
@@ -193,6 +198,8 @@ func (p *puller) pullSite(line ui.Line, s convergeStep) ([]checkReport, error) {
 			}
 			mu.Lock()
 			line.Detail("%s", innerLine(mark, "pull "+ref, since(start)))
+			done++
+			progress()
 			mu.Unlock()
 		}()
 	}
