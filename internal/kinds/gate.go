@@ -55,6 +55,11 @@ type GateSpec struct {
 	// that makes it refuse. Nil for a kind with none.
 	PrivateProbe *Probe
 
+	// LeavesOpen is what the gate passes through to the app, so what the
+	// app must close itself while gated: activitypub, api_tokens. A gated
+	// app whose kind lists one and enforces no gate setting is warned about.
+	LeavesOpen []string
+
 	// SignedFetch is how a federating kind refuses an unsigned ActivityPub
 	// read. Nil for a kind that does not federate, or that cannot refuse one,
 	// in which case it cannot be gated while it federates.

@@ -20,21 +20,24 @@ const APIVersion = "paisans.blueprint/v1"
 // ignored, because a blueprint author's typo would otherwise render an app
 // without the thing they asked for.
 type spec struct {
-	APIVersion      string       `yaml:"apiVersion"`
-	Name            string       `yaml:"name"`
-	RequiresToolkit string       `yaml:"requires_toolkit"`
-	Services        []Service    `yaml:"services"`
-	Database        databaseSpec `yaml:"database"`
-	Port            int          `yaml:"port"`
-	Config          configSpec   `yaml:"config"`
-	Health          healthSpec   `yaml:"health"`
-	Gate            gateSpec     `yaml:"gate"`
-	Federation      federation   `yaml:"federation"`
-	HostnameRoles   []string     `yaml:"hostname_roles"`
-	Storage         storageSpec  `yaml:"storage"`
-	Mail            string       `yaml:"mail"`
-	OIDC            *oidcSpec    `yaml:"oidc"`
-	Secrets         secretsSpec  `yaml:"secrets"`
+	APIVersion      string                 `yaml:"apiVersion"`
+	Name            string                 `yaml:"name"`
+	RequiresToolkit string                 `yaml:"requires_toolkit"`
+	Services        []Service              `yaml:"services"`
+	Database        databaseSpec           `yaml:"database"`
+	Port            int                    `yaml:"port"`
+	Config          configSpec             `yaml:"config"`
+	Health          healthSpec             `yaml:"health"`
+	Gate            gateSpec               `yaml:"gate"`
+	Federation      federation             `yaml:"federation"`
+	HostnameRoles   []string               `yaml:"hostname_roles"`
+	Storage         storageSpec            `yaml:"storage"`
+	Mail            string                 `yaml:"mail"`
+	OIDC            *oidcSpec              `yaml:"oidc"`
+	Secrets         secretsSpec            `yaml:"secrets"`
+	Backup          *BackupSpec            `yaml:"backup"`
+	Checks          []checkSpec            `yaml:"checks"`
+	Settings        map[string]SettingSpec `yaml:"settings"`
 }
 
 type databaseSpec struct {
@@ -51,6 +54,7 @@ type configSpec struct {
 type healthSpec struct {
 	Path   string `yaml:"path"`
 	Status []int  `yaml:"status"`
+	TCP    bool   `yaml:"tcp"`
 }
 
 type probeSpec struct {
@@ -91,6 +95,7 @@ type gateSpec struct {
 	SignedFetch  *signedFetchSpec  `yaml:"signed_fetch"`
 	Settings     []gateSettingSpec `yaml:"settings"`
 	Live         *liveSpec         `yaml:"live"`
+	LeavesOpen   []string          `yaml:"leaves_open"`
 }
 
 type federation struct {
@@ -186,9 +191,51 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if s.Config.File == "" {
 		return nil, fmt.Errorf("config.file: required")
 	}
-	health, err := statusList(s.Health.Status)
-	if err != nil || !strings.HasPrefix(s.Health.Path, "/") {
-		return nil, fmt.Errorf("health: needs a path starting with / and at least one status")
+	var health Health
+	switch {
+	case s.Health.TCP:
+		if s.Health.Path != "" || len(s.Health.Status) > 0 {
+			return nil, fmt.Errorf("health: tcp is for an app that serves no HTTP, so it takes no path or status")
+		}
+		health.TCP = true
+	case s.Health.Path == "" && len(s.Health.Status) == 0:
+		// No route: the monitor checks only that the app answers.
+	default:
+		expect, err := statusList(s.Health.Status)
+		if err != nil || !strings.HasPrefix(s.Health.Path, "/") {
+			return nil, fmt.Errorf("health: needs a path starting with / and at least one status")
+		}
+		health = Health{Path: s.Health.Path, Expect: expect}
+	}
+	if err := requirement(s.RequiresToolkit); err != nil {
+		return nil, err
+	}
+	if s.Backup != nil && !needsDump[s.Database.Engine] {
+		return nil, fmt.Errorf("backup: only a database the backups cannot read as files is dumped, and %s is not one", s.Database.Engine)
+	}
+	if b := s.Backup; b != nil && (b.Dump.Service == "" || len(b.Dump.Run) == 0 || b.Restore.Service == "" || len(b.Restore.Run) == 0) {
+		return nil, fmt.Errorf("backup: dump and restore each need a service and a command to run")
+	}
+	var checks []Check
+	for i, cs := range s.Checks {
+		c, err := cs.check()
+		if err != nil {
+			return nil, fmt.Errorf("checks[%d]: %w", i, err)
+		}
+		checks = append(checks, c)
+	}
+	for key, spec := range s.Settings {
+		if !settingTypes[spec.Type] {
+			return nil, fmt.Errorf("settings.%s.type: is %q; it must be string, bool, int, email or enum", key, spec.Type)
+		}
+		if (spec.Type == "enum") != (len(spec.Values) > 0) {
+			return nil, fmt.Errorf("settings.%s: values go with type enum, and only with it", key)
+		}
+	}
+	for _, open := range s.Gate.LeavesOpen {
+		if open != "activitypub" && open != "api_tokens" {
+			return nil, fmt.Errorf("gate.leaves_open: %q is not something the gate passes through; it passes activitypub and api_tokens", open)
+		}
 	}
 	switch s.Mail {
 	case "", "none", "reads":
@@ -218,7 +265,12 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		ConfigFile:      s.Config.File,
 		SettingKeys:     s.Config.SettingKeys,
 		OmittedKeys:     s.Config.OmittedKeys,
-		Health:          Health{Path: s.Health.Path, Expect: health},
+		Health:          health,
+		Engine:          s.Database.Engine,
+		Backup:          s.Backup,
+		Checks:          checks,
+		Settings:        s.Settings,
+		RequiresToolkit: s.RequiresToolkit,
 		Gate:            gate,
 		GateSettings:    settings,
 		LiveSettings:    live,
@@ -260,6 +312,7 @@ func statusList(codes []int) (string, error) {
 func (g gateSpec) def() (GateSpec, []GateSetting, LiveSettings, error) {
 	out := GateSpec{
 		Gateable:   g.Gateable,
+		LeavesOpen: g.LeavesOpen,
 		OpenPaths:  g.OpenPaths,
 		InboxPaths: g.InboxPaths,
 		TokenPaths: g.TokenPaths,

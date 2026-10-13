@@ -50,6 +50,16 @@ func TestABlueprintMistakeIsRefused(t *testing.T) {
 		{"condition naming nothing", minimal + "gate:\n  settings:\n    - {name: X, want: \"true\", when: app.gatd, why: w}\n  live: {action: env-lock-list, service: app, lock_variable: L}\n", "when"},
 		{"condition that is not a boolean", minimal + "gate:\n  settings:\n    - {name: X, want: \"true\", when: app.hostname, why: w}\n  live: {action: env-lock-list, service: app, lock_variable: L}\n", "not a boolean"},
 		{"unknown action", minimal + "gate:\n  settings:\n    - {name: X, want: \"true\", when: app.gated, why: w}\n  live: {action: run-anything, service: app}\n", "gate.live.action"},
+		{"tcp with a path", strings.Replace(minimal, "health: {path: /status, status: [200]}", "health: {tcp: true, path: /x}", 1), "tcp is for an app"},
+		{"backup for a file database", minimal + "backup: {dump: {service: app, run: [x]}, restore: {service: app, run: [y]}}\n", "backup: only"},
+		{"backup without its commands", strings.Replace(minimal, "engine: none", "engine: mysql", 1) + "backup: {dump: {service: db}}\n", "dump and restore each need"},
+		{"a check with a bad level", minimal + "checks:\n  - {id: x, level: maybe, rule: \"true\", message: m}\n", "level"},
+		{"a check with a bad id", minimal + "checks:\n  - {id: Not An Id, level: warn, rule: \"true\", message: m}\n", "needs an id"},
+		{"a check naming nothing", minimal + "checks:\n  - {id: x, level: warn, rule: app.colour, message: m}\n", "rule"},
+		{"an enum with no values", minimal + "settings:\n  mode: {type: enum}\n", "values go with type enum"},
+		{"an unknown setting type", minimal + "settings:\n  mode: {type: colour}\n", "settings.mode.type"},
+		{"leaves open something else", minimal + "gate: {leaves_open: [ssh]}\n", "gate.leaves_open"},
+		{"a requirement in another form", minimal + "requires_toolkit: \"^1.0\"\n", "requires_toolkit"},
 	}
 	for _, c := range cases {
 		_, err := Parse("example", []byte(c.change), always)
@@ -91,5 +101,26 @@ func TestTheReservedBlueprintsAreTheFour(t *testing.T) {
 		if defs[kind].Reserved != want[kind] {
 			t.Errorf("%s reserved is %v", kind, defs[kind].Reserved)
 		}
+	}
+}
+
+// Health may be left out, or be a TCP check alone, and a database the
+// backups cannot read as files may say how to dump it.
+func TestOptionalHealthAndADumpParse(t *testing.T) {
+	noHealth := strings.Replace(minimal, "health: {path: /status, status: [200]}\n", "", 1)
+	d, err := Parse("example", []byte(noHealth), always)
+	if err != nil || d.Health.Path != "" || d.Health.TCP {
+		t.Errorf("no health: %+v, %v", d, err)
+	}
+	tcp := strings.Replace(minimal, "health: {path: /status, status: [200]}", "health: {tcp: true}", 1)
+	if d, err := Parse("example", []byte(tcp), always); err != nil || !d.Health.TCP {
+		t.Errorf("tcp: %+v, %v", d, err)
+	}
+	mysql := strings.Replace(minimal, "engine: none", "engine: mysql", 1) + "backup:\n  dump: {service: db, run: [mysqldump, x]}\n  restore: {service: db, run: [mysql, x]}\n"
+	if d, err := Parse("example", []byte(mysql), always); err != nil || d.Backup == nil || d.Engine != "mysql" {
+		t.Errorf("mysql: %+v, %v", d, err)
+	}
+	if err := requirement(">= 0.1"); err != nil {
+		t.Errorf("a development build meets every requirement: %v", err)
 	}
 }

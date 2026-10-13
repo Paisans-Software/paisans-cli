@@ -16,19 +16,23 @@ import (
 // buildPayload), because the fork feeds each entry through the same builder
 // and validator its API uses.
 type seedMonitor struct {
-	Name             string            `json:"name"`
-	MonitorType      string            `json:"monitor_type"`
-	URL              string            `json:"url,omitempty"`
-	Method           string            `json:"method,omitempty"`
-	CheckType        string            `json:"check_type,omitempty"`
-	ExpectedStatus   string            `json:"expected_status,omitempty"`
-	ExpectedString   string            `json:"expected_string,omitempty"`
-	FollowRedirects  *bool             `json:"follow_redirects,omitempty"`
-	RequestHeaders   map[string]string `json:"request_headers,omitempty"`
-	PingHost         string            `json:"ping_host,omitempty"`
-	IntervalSeconds  int               `json:"interval_seconds"`
-	TimeoutMS        int               `json:"timeout_ms"`
-	FailureThreshold int               `json:"failure_threshold"`
+	Name            string            `json:"name"`
+	MonitorType     string            `json:"monitor_type"`
+	URL             string            `json:"url,omitempty"`
+	Method          string            `json:"method,omitempty"`
+	CheckType       string            `json:"check_type,omitempty"`
+	ExpectedStatus  string            `json:"expected_status,omitempty"`
+	ExpectedString  string            `json:"expected_string,omitempty"`
+	FollowRedirects *bool             `json:"follow_redirects,omitempty"`
+	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
+	PingHost        string            `json:"ping_host,omitempty"`
+	// A TCP check's host and port (src/lib/sitePayload.js:127-134 at uptime
+	// fork b730e9b), for an app whose blueprint has no health route.
+	TCPHost          string `json:"tcp_host,omitempty"`
+	TCPPort          int    `json:"tcp_port,omitempty"`
+	IntervalSeconds  int    `json:"interval_seconds"`
+	TimeoutMS        int    `json:"timeout_ms"`
+	FailureThreshold int    `json:"failure_threshold"`
 	// A heartbeat's own fields (src/lib/sitePayload.js buildPayload and
 	// insertSite at 1.1.0-oidc.4): the token the fork sets the monitor to,
 	// rather than inventing one, the schedule kind, which is interval here
@@ -73,6 +77,53 @@ func privateAPICheckName(app, site string) string {
 
 func pingName(site string) string { return site + " — ping" }
 
+// reachableCheckName is the name of the TCP check of an app with no health
+// route on one site, in the format of directCheckName.
+func reachableCheckName(app, site string) string {
+	return fmt.Sprintf("%s \u2014 reachable (%s)", app, site)
+}
+
+// unroutedStatuses is every status below 500 an app's front page plausibly
+// answers, spelled out because the fork matches exact codes only: an app
+// that answers at all passes, and the edge answering 502, 503 or 504 because
+// the app is down fails.
+const unroutedStatuses = "200,301,302,303,307,308,401,403,404"
+
+// fallbackChecks watch an app whose blueprint has no health route
+// (docs/specs/2026-10-12-blueprints-and-catalogs.md, "Uptime watches every
+// blueprint"): a TCP connect to its port on each site it runs on, and, for an
+// app that serves HTTP, its front page at the public hostname answering
+// anything below 500, plus the gate check when it is gated. What this cannot
+// see is an app that is up and broken, which its check's name says.
+func (p *planner) fallbackChecks(name string, app config.App, sites []string) []seedMonitor {
+	noRedirects := false
+	var out []seedMonitor
+	if !kinds.HealthOf(app.Kind).TCP {
+		out = append(out, seedMonitor{
+			Name: PublicCheckName(name) + " (no health route)", MonitorType: "active", Method: "GET", CheckType: "status",
+			URL: "https://" + app.Hostname + "/", ExpectedStatus: unroutedStatuses, FollowRedirects: &noRedirects,
+			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+		})
+		if app.Gated {
+			out = append(out, seedMonitor{
+				Name: GateCheckName(name), MonitorType: "active", Method: "GET", CheckType: "string",
+				URL: "https://" + app.Hostname + "/", ExpectedString: GateMarker, FollowRedirects: &noRedirects,
+				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+			})
+		}
+	}
+	sorted := append([]string(nil), sites...)
+	sort.Strings(sorted)
+	for _, site := range sorted {
+		out = append(out, seedMonitor{
+			Name: reachableCheckName(name, site), MonitorType: "tcp",
+			TCPHost: p.sites[site].Address, TCPPort: kinds.Port(app.Kind),
+			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+		})
+	}
+	return out
+}
+
 func (p *planner) uptimeSeed(self string) (string, error) {
 	monitorSite := p.cfg.Apps[self].Placement.Site
 	placed := AppSites(p.cfg)
@@ -90,7 +141,8 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		}
 		health, ok := kinds.HealthFor(app.Kind)
 		if !ok {
-			return "", fmt.Errorf("apps.%s: kind %s has no health route recorded in internal/kinds, so the monitor cannot check it", name, app.Kind)
+			monitors = append(monitors, p.fallbackChecks(name, app, placed[name])...)
+			continue
 		}
 		// A gated app is checked three ways through the edge. The public
 		// check reaches the app only when its health route is one of the
