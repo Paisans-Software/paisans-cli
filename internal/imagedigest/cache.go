@@ -51,6 +51,9 @@ type Cache struct {
 	platforms map[string][]string
 	// newest are the answers NewestVersion got, by reference.
 	newest map[string]string
+	// tracks are the answers Track got, by track, kept the way digests are:
+	// every plan of a run puts a track on the same tag.
+	tracks map[string]string
 }
 
 // Platformer names the platforms of a build, as Registry.Platforms does.
@@ -111,7 +114,7 @@ type resolution struct {
 
 // Cached is a Cache in front of r.
 func Cached(r Resolver) *Cache {
-	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, platforms: map[string][]string{}, newest: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
+	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, platforms: map[string][]string{}, newest: map[string]string{}, tracks: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
 }
 
 // Digest is the digest ref was first resolved to, resolving it now if it has
@@ -222,6 +225,54 @@ func (c *Cache) NewestVersion(ref string) (string, error) {
 	c.newest[ref] = newest
 	c.mu.Unlock()
 	return newest, nil
+}
+
+// Tracker names the newest tag on a track, as Registry.Track does.
+type Tracker interface {
+	Track(ref string) (string, error)
+}
+
+// Track is the wrapped resolver's Track for ref, asked once per run, so that
+// every plan of the run, and every site in it, puts a track on the same tag.
+// A failure is kept for the run, and one that never reached the registry
+// marks its host down, as Digest does.
+func (c *Cache) Track(ref string) (string, error) {
+	t, ok := c.r.(Tracker)
+	if !ok {
+		return "", fmt.Errorf("resolving the track %s: this resolver lists no tags", ref)
+	}
+	c.mu.Lock()
+	if got, ok := c.tracks[ref]; ok {
+		c.mu.Unlock()
+		return got, nil
+	}
+	if err, ok := c.failed["track "+ref]; ok {
+		c.mu.Unlock()
+		return "", err
+	}
+	host := Host(ref)
+	if err, ok := c.down[host]; ok {
+		c.mu.Unlock()
+		return "", fmt.Errorf("%s was not asked about %s, since it could not be reached earlier in this run: %w", host, ref, err)
+	}
+	c.mu.Unlock()
+	got, err := t.Track(ref)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err != nil {
+		c.failed["track "+ref] = err
+		var transport *url.Error
+		if errors.As(err, &transport) {
+			c.down[host] = err
+		}
+		return "", err
+	}
+	if first, ok := c.tracks[ref]; ok {
+		// Another plan asked at the same time and was answered first.
+		return first, nil
+	}
+	c.tracks[ref] = got
+	return got, nil
 }
 
 // Host is the registry host a reference is pulled from, by Docker's

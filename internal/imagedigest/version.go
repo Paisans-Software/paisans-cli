@@ -2,6 +2,7 @@ package imagedigest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -245,4 +246,37 @@ func (f *fetcher) get(target, accepts string) (*http.Response, error) {
 		req.Header.Set("Authorization", "Bearer "+f.token)
 	}
 	return f.client.Do(req)
+}
+
+// errNotFoundStatus is a 404 from jsonLink.
+var errNotFoundStatus = errors.New("the registry answered 404 Not Found")
+
+// jsonLink is json for a listing that may run to several pages: it also
+// returns the response's Link header, which names the next one.
+func (f *fetcher) jsonLink(path string, into any) (string, error) {
+	resp, err := f.get(f.base+path, "application/json")
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && f.token == "" {
+		challenge := resp.Header.Get("WWW-Authenticate")
+		resp.Body.Close()
+		if f.token, err = anonymousToken(f.client, challenge, f.repo); err != nil {
+			return "", err
+		}
+		if resp, err = f.get(f.base+path, "application/json"); err != nil {
+			return "", err
+		}
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "", errNotFoundStatus
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "", fmt.Errorf("the registry answered %s: %w", resp.Status, ErrDenied)
+	default:
+		return "", fmt.Errorf("the registry answered %s", resp.Status)
+	}
+	return resp.Header.Get("Link"), json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(into)
 }
