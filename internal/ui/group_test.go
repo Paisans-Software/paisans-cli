@@ -142,7 +142,7 @@ func TestAGroupRedrawsItsBlockInPlace(t *testing.T) {
 		t.Errorf("a frame drew after every line ended:\n%s", strings.Join(s.lines(), "\n"))
 	}
 	r.Result("done")
-	if got := s.lines(); got[len(got)-1] != "done" || len(got) != 9 {
+	if got := s.lines(); got[len(got)-1] != "done" || got[len(got)-2] != "" || len(got) != 10 {
 		t.Errorf("after the result:\n%s", strings.Join(got, "\n"))
 	}
 }

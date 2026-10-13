@@ -463,10 +463,15 @@ func (r *writer) Trace(label, output string) {
 	r.detailLocked(text)
 }
 
+// Result is the run's last word, set off by a blank line from anything
+// drawn above it.
 func (r *writer) Result(format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.interruptLocked()
+	if t, ok := r.w.(*tracked); ok && t.wrote {
+		fmt.Fprintln(r.w)
+	}
 	fmt.Fprintf(r.w, format+"\n", args...)
 }
 
