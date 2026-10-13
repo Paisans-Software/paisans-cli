@@ -501,6 +501,11 @@ check of any blueprint with a lock list.
 
 ## Signing
 
+*Superseded 2026-10-13* by `docs/specs/2026-10-13-catalog-attestation.md`: a
+catalog on GitHub is trusted by its release attestation, SSH-signed tags are
+dropped, and any other catalog is pinned unsigned. What follows is the design
+it replaces, kept as the record of what was built first.
+
 Catalogs are signed at their release tags, with git's SSH signatures. A
 commit is not required to be signed. `catalog update` moves to the newest
 signed tag, never to a branch head, so catalogs have real versions.

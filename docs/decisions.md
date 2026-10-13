@@ -2056,3 +2056,51 @@ reviewable and recoverable without the catalog.
 
 Nothing: a design. The uptime fork's TCP monitor type was read from its source
 (`src/lib/sitePayload.js:18,127-134` at `b730e9b`).
+
+## 2026-10-13: Catalogs are trusted by GitHub release attestations
+
+Founder decision. Design: `docs/specs/2026-10-13-catalog-attestation.md`. Not
+implemented.
+
+### What was decided
+
+* A catalog on GitHub is trusted by an attestation its release workflow makes
+  of the catalog's digest at the tag (Sigstore, through GitHub Actions' OIDC
+  token). A pin names the workflow it trusts, `attested_by`, instead of keys.
+* SSH-signed tags are dropped, with `signers`, `keys/allowed_signers`,
+  `--trust`, key rotation and the core release key file.
+* Any other catalog is pinned `unsigned: true`.
+* The core catalog is trusted by the identity of
+  `Paisans-Software/blueprints`'s release workflow, built into the binary.
+
+### Why
+
+Keys were the fragile part: an author had to keep one and rotate it through a
+chain of signed releases, operators were asked to check fingerprints by
+another channel, trusted keys only accumulated, and the core catalog needed a
+key the founder holds. An attestation pins an identity anyone can read, needs
+no key kept, and puts every release in a public log. The commit pin, the
+snapshot's SHA-256 and the grant review are what make a deployment's
+blueprints fixed and reviewed; an attestation only answers whether a release
+came from where the pin says.
+
+### What was weighed
+
+* **Keeping SSH-signed tags beside attestations, for catalogs not on GitHub.**
+  Two trust mechanisms to maintain for catalogs that, so far, do not exist.
+  Founder decision: drop them.
+* **GitHub's verified commit badge.** It shows that a commit was signed by a
+  key registered to the committer's account, or by GitHub's own key for web
+  edits and merges, so whoever takes over the account can add a key and be
+  verified, and a merge's badge says nothing of its author.
+* **Shelling out to `gh attestation verify`.** It would make the GitHub CLI a
+  requirement of every operator's workstation; `sigstore-go` is the library
+  it is built on.
+
+### What was run
+
+`gh attestation verify --help` in gh 2.91.0, for the identity checks it
+makes; `actions/attest-build-provenance`'s `action.yml` at v4.2.2, for
+`subject-digest`, `subject-name` and the `bundle-path` output; `go list -m`
+for `github.com/sigstore/sigstore-go` v1.3.0. No attestation was made or
+verified.
