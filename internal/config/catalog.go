@@ -78,6 +78,9 @@ func DefaultCatalogName(url string) (string, bool) {
 	return name, ok && rest != "" && catalogName.MatchString(name)
 }
 
+// BlueprintName reports whether name can be a blueprint's, unqualified.
+func BlueprintName(name string) bool { return blueprintName.MatchString(name) }
+
 // SplitBlueprint is a blueprint name's catalog and its name in that catalog,
 // split at the last slash: `example/blueprints/journal` is
 // ("example/blueprints", "journal"), `notes/journal` is ("notes", "journal"),

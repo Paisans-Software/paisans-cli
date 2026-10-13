@@ -193,3 +193,89 @@ func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 		t.Errorf("journal was not read from the core pin: %q %v", dir, ok)
 	}
 }
+
+// A fetch takes the commit's trees and checks out only the blueprints in
+// use: a blueprint no app names is listed but its files are never fetched,
+// and one a later configuration names is added to the same checkout.
+func TestAFetchTakesOnlyTheBlueprintsInUse(t *testing.T) {
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	src, commit := testCatalog(t, map[string]string{
+		"blueprints/diary/blueprint.yaml":    strings.Replace(minimal, "name: example", "name: diary", 1),
+		"blueprints/diary/compose.yaml.tmpl": "services: {}\n# diary\n",
+	})
+	// A local path is copied whole; file:// with filters allowed is fetched
+	// as a forge would serve it.
+	if out, err := exec.Command("git", "-C", src, "config", "uploadpack.allowFilter", "true").CombinedOutput(); err != nil {
+		t.Fatalf("%s", out)
+	}
+	url := "file://" + src
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(defs, "example/diary")
+		delete(sources, "example/diary")
+	})
+	if p := resolve(catalogConfig(url, commit, "v1.0.0", "example/journal")); len(p) > 0 {
+		t.Fatal(p)
+	}
+	dir, err := Fetch(config.Catalog{URL: url, Commit: commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := Blueprints(dir)
+	if err != nil || strings.Join(names, ",") != "diary,journal" {
+		t.Fatalf("blueprints %v, %v", names, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blueprints", "diary")); err == nil {
+		t.Error("diary, which no app names, was checked out")
+	}
+	blob, err := exec.Command("git", "-C", src, "rev-parse", commit+":blueprints/diary/compose.yaml.tmpl").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	present := exec.Command("git", "-C", dir, "cat-file", "-e", strings.TrimSpace(string(blob)))
+	present.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1")
+	if err := present.Run(); err == nil {
+		t.Error("diary's files were fetched, though no app names it")
+	}
+	if p := resolve(catalogConfig(url, commit, "v1.0.0", "example/diary")); len(p) > 0 {
+		t.Fatal(p)
+	}
+	if got, ok := Source("example/diary"); !ok || got != filepath.Join(dir, "blueprints", "diary") {
+		t.Errorf("diary resolved from %q, want the same checkout", got)
+	}
+	for _, name := range []string{"journal", "diary"} {
+		if !checkedOut(dir, name) {
+			t.Errorf("%s has no mark", name)
+		}
+	}
+}
+
+// A blueprint whose checkout was interrupted, so has no mark, is checked
+// out again rather than used half done.
+func TestAnUnmarkedBlueprintIsCheckedOutAgain(t *testing.T) {
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	url, commit := testCatalog(t, nil)
+	dir, err := Fetch(config.Catalog{URL: url, Commit: commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Checkout(dir, "journal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "blueprints", "journal", "compose.yaml.tmpl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, ".git", stateDir, "complete", "journal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadFrom(dir, "journal"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blueprints", "journal", "compose.yaml.tmpl")); err != nil {
+		t.Errorf("the interrupted checkout was not redone: %v", err)
+	}
+	if err := Checkout(dir, "../journal"); err == nil {
+		t.Error("a name leaving blueprints/ was checked out")
+	}
+}
