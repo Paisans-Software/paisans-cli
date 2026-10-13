@@ -2291,3 +2291,61 @@ release and for every operator to upgrade.
   files were the ones a release was tested with. With catalogs unsigned and
   images chosen at apply time, a binary no longer fixes what a deployment
   runs, so the pin bought little beyond a delay.
+
+## 2026-10-13: Every Pocket ID administrator is a Cloudflare Super Administrator, and the reconciler reports it
+
+Founder decision. The design is `docs/specs/2026-10-13-dns-admin-continuity.md`.
+
+### What was decided
+
+* Every enabled Pocket ID administrator must be an accepted Super
+  Administrator of every Cloudflare account holding the zone or a zone above
+  it, and there must be at least two. Only active zones count. Administrator with access to the zone does not count. Extra
+  Cloudflare members are allowed.
+* The admin reconciler checks it on its existing pass, reading Cloudflare and
+  writing nothing there, and reports it through two heartbeat monitors per
+  Pocket ID app: `admin continuity: dns super admins` and
+  `admin continuity: dns 2fa`.
+* The admins heartbeat is renamed `admin continuity`, named for the community
+  rather than the app; with more than one `pocket-id` app each name is
+  prefixed by its app key.
+* Their bodies are counts, naming nobody.
+* An admin whose Cloudflare address differs is mapped in the secrets file,
+  `admins.<id>.dns_provider_email`, one to one, and only keyed hashes of
+  addresses reach a host.
+* The reconciler reads with its own token, `external.dns_members_token`,
+  Account Settings Read and Zone Read only. Without it nothing is rendered.
+
+### Why
+
+An account whose Super Administrators are all gone keeps resolving, but
+nobody can add the next administrator, and when the last Administrator goes
+the zone is recovered only at the registrar. A Super Administrator can also
+revoke every other, so the requirement is that each community administrator
+holds that power, not that some do. Counts are enough to tell admins and
+members that the community is at risk; who is missing is in the log.
+
+### What was weighed
+
+* **Requiring any membership with access to the zone.** It keeps records
+  editable and lets succession lapse unseen.
+* **Requiring only two Super Administrators among the administrators.** It
+  leaves administrators who cannot add a successor, which the one-rule form
+  reports.
+* **Reusing `external.acme_dns_token`**, rescoped. A token that edits the zone
+  would sit on every apps site.
+* **The mapping in `paisans-stack.yaml`**, copied in plaintext to every site,
+  or **as a Pocket ID custom claim**, carried to every app that signs in.
+* **Masked or full addresses in the bodies.**
+* **Reporting Cloudflare members who match no administrator.** Extra members
+  are a community's own choice.
+
+### What was run
+
+`GET /accounts/{id}/members` and `GET /zones?name=<domain>&status=active`
+against a real free account, values withheld (the spec's *Observed*). The
+image `ghcr.io/paisans-software/admin-reconciler:0.2.0` was published by
+tagging `admin-reconciler-v0.2.0`, resolved to its digest with an anonymous
+pull token, pulled by that digest and run: it refused a members token set
+without its domain and key, which only this release checks. The pocket-id
+blueprint names it by that digest.

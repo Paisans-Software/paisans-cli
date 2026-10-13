@@ -245,6 +245,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.invite.database_password",
 		"apps.talk.database_password",
 		"apps.talk.rabbitmq_password",
+		"apps.auth.dns_email_hash_key",
 		"apps.docs.redis_password",
 		"apps.docs.utils_secret",
 		"apps.talk.mercure_jwt_secret",
@@ -256,6 +257,8 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"sites.vm.heartbeat_token",
 		"sites.watch.heartbeat_token",
 		"apps.auth.admins_heartbeat_token",
+		"apps.auth.dns_super_admins_heartbeat_token",
+		"apps.auth.dns_2fa_heartbeat_token",
 	}
 	if got := paths(rs); !slices.Equal(got, want) {
 		t.Errorf("--all order:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(want, "\n      "))

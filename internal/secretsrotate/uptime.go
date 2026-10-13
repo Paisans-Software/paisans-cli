@@ -152,7 +152,7 @@ const adminsHeartbeatGap = "the admins heartbeat, which the monitors may refuse 
 // admins group's health with.
 type adminsHeartbeat struct {
 	Generated
-	app string
+	app, key string
 }
 
 // AdminsHeartbeat is the rotation of apps.<app>.admins_heartbeat_token, the
@@ -169,7 +169,22 @@ type adminsHeartbeat struct {
 // deployment with no monitor has no user: no pusher is rendered, and the
 // token is replaced in the file and handed to nobody.
 func AdminsHeartbeat(app string) Rotator {
-	return adminsHeartbeat{Generated: Generated{SecretPath: "apps." + app + ".admins_heartbeat_token"}, app: app}
+	return ContinuityHeartbeat(app, "admins_heartbeat_token")
+}
+
+// ContinuityHeartbeats is every token a Pocket ID app's instances push a
+// continuity monitor with: the admins heartbeat's and the DNS continuity
+// check's two (internal/render/dnscontinuity.go).
+var ContinuityHeartbeats = []string{"admins_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token"}
+
+// ContinuityHeartbeat is the rotation of one of ContinuityHeartbeats. Each
+// is handed out exactly as the admins heartbeat's is: every monitor seeds
+// it, and the pusher beside every instance pushes with it from
+// admins-heartbeat/heartbeat.env. A DNS token in a deployment that renders
+// no DNS check is replaced in the file and handed to monitors that do not
+// seed it, which costs a restart of each and nothing else.
+func ContinuityHeartbeat(app, key string) Rotator {
+	return adminsHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
 }
 
 func (r adminsHeartbeat) Cost() Cost { return Cost{Downtime: adminsHeartbeatGap} }
@@ -182,7 +197,7 @@ func (r adminsHeartbeat) Precheck(e Env) error {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
 	if app.Kind != config.KindPocketID {
-		return fmt.Errorf("apps.%s is %s, and admins_heartbeat_token is a secret of %s", r.app, app.Kind, config.KindPocketID)
+		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Kind, r.key, config.KindPocketID)
 	}
 	return runsSomewhere(e, r.app)
 }

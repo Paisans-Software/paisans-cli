@@ -295,10 +295,26 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			return "", err
 		}
 		monitors = append(monitors, seedMonitor{
-			Name: adminsHeartbeatName(name), MonitorType: "heartbeat",
+			Name: p.continuityName(name, ""), MonitorType: "heartbeat",
 			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})
+		// The DNS check's two heartbeats, beside it, with its fields
+		// (dnscontinuity.go), when the deployment renders the check.
+		if !p.dnsContinuity() {
+			continue
+		}
+		for _, m := range dnsMonitors {
+			token, err := p.dnsHeartbeatToken(name, m.Secret)
+			if err != nil {
+				return "", err
+			}
+			monitors = append(monitors, seedMonitor{
+				Name: p.continuityName(name, m.Function), MonitorType: "heartbeat",
+				HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
+				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+			})
+		}
 	}
 
 	settings := map[string]any{"status_page_enabled": false}

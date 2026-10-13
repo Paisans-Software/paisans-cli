@@ -5,11 +5,13 @@ name: pocket-id
 services:
   - {name: "app", image: "ghcr.io/pocket-id/pocket-id:v2.14.0", purpose: "the application"}
   # Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml
-  # and published by the tag admin-reconciler-v0.1.0. Checked against
-  # ghcr.io on 2026-10-08 with an anonymous pull token, which resolved
-  # the tag to this digest: an OCI image index for linux/amd64 and
-  # linux/arm64.
-  - {name: "reconciler", image: "ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d", purpose: "the admin reconciler"}
+  # and published by the tag admin-reconciler-v0.2.0, which adds the DNS
+  # continuity check. Checked against ghcr.io on 2026-10-13 with an
+  # anonymous pull token, which resolved the tag to this digest: an OCI
+  # image index for linux/amd64 and linux/arm64. Pulled by this digest and
+  # run the same day, it refused a members token set without its domain and
+  # key, which only 0.2.0 checks.
+  - {name: "reconciler", image: "ghcr.io/paisans-software/admin-reconciler:0.2.0@sha256:4693e287c86ec4053209a96b8355542c67d220302c476e6925088ce87ceeb0be", purpose: "the admin reconciler"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 port: 1411
@@ -67,4 +69,14 @@ secrets:
     # 16 random bytes, hex, the shape the uptime fork's seed takes a push
     # token in (src/lib/sitePayload.js insertSite at 1.1.0-oidc.4).
     - {name: admins_heartbeat_token, format: hex16}
-  self_rotated: ["static_api_key"]
+    # The DNS continuity check's (internal/render/dnscontinuity.go): the key
+    # every address is hashed under, so that no DNS provider address reaches
+    # a host, and the tokens its two heartbeats push with, one per app as
+    # the admins heartbeat's is. Generated whether or not the deployment
+    # checks its DNS provider, so that adding the members token later needs
+    # no init. The key is read only by this app's reconciler, which the
+    # rendered .env restarts with it.
+    - {name: dns_email_hash_key, format: hex32, rotation_cost: restart}
+    - {name: dns_super_admins_heartbeat_token, format: hex16}
+    - {name: dns_2fa_heartbeat_token, format: hex16}
+  self_rotated: ["static_api_key", "dns_email_hash_key"]

@@ -63,7 +63,7 @@ var ImageVolumes = map[string][]string{
 	// Distroless, declares none.
 	"ghcr.io/paisans-software/paisans-invite:0.1.0": nil,
 	// Declares none: cmd/admin-reconciler/Dockerfile has no VOLUME.
-	"ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d": nil,
+	"ghcr.io/paisans-software/admin-reconciler:0.2.0@sha256:4693e287c86ec4053209a96b8355542c67d220302c476e6925088ce87ceeb0be": nil,
 	// A pinned app's own database, one per postgres_version the toolkit
 	// knows. The path moved in 18; see PostgresDataMount. The Debian trixie
 	// tags are the default (render.appImages); their VOLUME and PGDATA were

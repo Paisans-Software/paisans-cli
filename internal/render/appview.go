@@ -169,6 +169,10 @@ type appValues struct {
 	AdminsHeartbeat bool
 	HeartbeatImage  string
 
+	// DNS is a Pocket ID app's DNS continuity check, its Enabled false when
+	// the deployment renders none (dnscontinuity.go).
+	DNS dnsValues
+
 	secrets map[string]any
 	// set is the app's settings as its blueprint sees them, with a catalog
 	// blueprint's defaults filled in (kinds.SettingsSeen).
@@ -420,6 +424,11 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.PocketID = pid
 		v.AdminsHeartbeat = len(adminsHeartbeatTargets(p.cfg)) > 0
 		v.HeartbeatImage = HeartbeatImage
+		dns, err := p.dnsValuesFor(planned.Name)
+		if err != nil {
+			return appValues{}, err
+		}
+		v.DNS = dns
 	}
 	if planned.Kind == config.KindUptime {
 		seed, err := p.uptimeSeed(planned.Name)

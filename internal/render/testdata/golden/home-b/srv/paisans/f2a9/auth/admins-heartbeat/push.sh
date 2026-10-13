@@ -25,46 +25,52 @@
 # and the cadence holds. Only errors are logged, naming the host but never the
 # URL, so the token stays out of the log.
 set -u
-healthz=http://reconciler:1412/healthz
+reconciler=http://reconciler:1412
 agent="paisans-admins-heartbeat (auth@home-b)"
 
-# push sends one push to every monitor: $1 is the status segment, empty for
-# success, and $2 the body of a failure.
+# push sends one push to every monitor in $1: $2 is the status segment, empty
+# for success, and $3 the body of a failure.
 push() {
-	for url in $ADMINS_HEARTBEAT_URLS; do
-		if [ -z "$1" ]; then
+	for url in $1; do
+		if [ -z "$2" ]; then
 			curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" "$url" \
 				|| echo "admins-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
 		else
 			# Plain text, so the monitor's form and JSON parsers leave the
 			# body alone and it is kept as sent; from stdin, so a reason
 			# starting with @ is never read as a file name.
-			printf '%s' "$2" | curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" \
-				-H 'Content-Type: text/plain' --data-binary @- "$url/$1" \
+			printf '%s' "$3" | curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" \
+				-H 'Content-Type: text/plain' --data-binary @- "$url/$2" \
 				|| echo "admins-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
 		fi
 	done
 }
 
-while true; do
-	sleep 60 &
+# relay asks the reconciler's path $1 and passes its answer to the monitors
+# in $2.
+relay() {
 	# The body, a newline, and the status curl writes last: 000 when nothing
 	# answered.
-	reply=$(curl -s -m 10 -A "$agent" -w '\n%{http_code}' "$healthz" 2>/dev/null) || reply='
+	reply=$(curl -s -m 10 -A "$agent" -w '\n%{http_code}' "$reconciler$1" 2>/dev/null) || reply='
 000'
 	code=${reply##*
 }
 	body=$(printf '%s\n' "$reply" | head -n 1)
 	case "$code" in
 	200)
-		[ "$body" = standby ] || push "" ""
+		[ "$body" = standby ] || push "$2" "" ""
 		;;
 	503)
-		push fail "$body"
+		push "$2" fail "$body"
 		;;
 	*)
-		echo "admins-heartbeat: the reconciler did not answer (status $code) at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+		echo "admins-heartbeat: the reconciler did not answer $1 (status $code) at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 		;;
 	esac
+}
+
+while true; do
+	sleep 60 &
+	relay /healthz "$ADMINS_HEARTBEAT_URLS"
 	wait
 done

@@ -34,10 +34,6 @@ import (
 // failure (exit 1)" (src/monitor.js:552-554), so an alert says that the group
 // is short and the monitor's page says why.
 
-// adminsHeartbeatName is the seed's name for a Pocket ID app's admins
-// heartbeat, built from the app key so a renamed hostname updates it in place.
-func adminsHeartbeatName(app string) string { return app + " — admin continuity" }
-
 // adminsHeartbeatService is the pusher's compose service, and the directory
 // of the app's stack its two files sit in.
 const adminsHeartbeatService = "admins-heartbeat"
@@ -64,10 +60,16 @@ func adminsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 // by name when it is missing or not what the fork accepts, as a site's
 // heartbeat token is (heartbeatToken).
 func (p *planner) adminsHeartbeatToken(app string) (string, error) {
-	const key = "admins_heartbeat_token"
+	return p.dnsHeartbeatToken(app, "admins_heartbeat_token")
+}
+
+// dnsHeartbeatToken is one of a Pocket ID app's continuity tokens from the
+// secrets, the admins heartbeat's or one of the DNS check's, refused by name
+// as adminsHeartbeatToken is.
+func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 	token := p.appSecret(app, key)
 	if token == "" {
-		return "", fmt.Errorf("secrets apps.%s.%s: required for a deployment with a monitor, which expects every instance of %s to push the admins group's health. Run `paisans init` to generate it", app, key, app)
+		return "", fmt.Errorf("secrets apps.%s.%s: required for a deployment with a monitor, which expects every instance of %s to push with it. Run `paisans init` to generate it", app, key, app)
 	}
 	if !heartbeatTokenShape.MatchString(token) {
 		return "", fmt.Errorf("secrets apps.%s.%s: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and every instance would push at a URL the monitor answers 404 to. Run `paisans init` after removing it, which generates one in the right shape", app, key)
@@ -96,7 +98,23 @@ func (p *planner) adminsHeartbeatFiles(base string, app plannedApp) ([]File, err
 	for _, t := range targets {
 		urls = append(urls, HeartbeatURL(t.Hostname, token))
 	}
-	data := map[string]any{"App": app, "URLs": strings.Join(urls, " "), "ReconcilerPort": reconcilerPort}
+	// The DNS check's heartbeats, when the deployment renders it: the same
+	// monitors, each under its own token (dnscontinuity.go).
+	var dns []map[string]string
+	if p.dnsContinuity() {
+		for _, m := range dnsMonitors {
+			token, err := p.dnsHeartbeatToken(app.Name, m.Secret)
+			if err != nil {
+				return nil, err
+			}
+			var mURLs []string
+			for _, t := range targets {
+				mURLs = append(mURLs, HeartbeatURL(t.Hostname, token))
+			}
+			dns = append(dns, map[string]string{"Var": m.Var, "Path": m.Path, "URLs": strings.Join(mURLs, " ")})
+		}
+	}
+	data := map[string]any{"App": app, "URLs": strings.Join(urls, " "), "ReconcilerPort": reconcilerPort, "DNS": dns}
 	env, err := p.renderTemplate("admins-heartbeat.env.tmpl", data)
 	if err != nil {
 		return nil, err

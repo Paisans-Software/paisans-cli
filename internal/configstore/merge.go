@@ -190,6 +190,9 @@ func flatten(s *config.Secrets) map[string]string {
 	for name, v := range s.PocketIDGroups {
 		out["pocket_id_groups."+name] = v
 	}
+	for name, a := range s.Admins {
+		put("admins."+name+".dns_provider_email", a.DNSProviderEmail)
+	}
 	return out
 }
 
@@ -222,6 +225,10 @@ func clone(s *config.Secrets) *config.Secrets {
 	c.PocketIDGroups = make(map[string]string, len(s.PocketIDGroups))
 	for k, v := range s.PocketIDGroups {
 		c.PocketIDGroups[k] = v
+	}
+	c.Admins = make(map[string]config.AdminSecrets, len(s.Admins))
+	for k, v := range s.Admins {
+		c.Admins[k] = v
 	}
 	return &c
 }
@@ -350,7 +357,7 @@ func Flatten(s *config.Secrets) map[string]string { return flatten(s) }
 // from a deeper key, so it is refused rather than written somewhere else.
 // Pocket ID group names are the one section whose name is the rest of the path.
 func routable(parts []string) bool {
-	want := map[string]int{"cluster": 2, "storage": 3, "sites": 3, "apps": 3, "external": 2, "oidc_clients": 3}
+	want := map[string]int{"cluster": 2, "storage": 3, "sites": 3, "apps": 3, "external": 2, "oidc_clients": 3, "admins": 3}
 	if parts[0] == "pocket_id_groups" {
 		return len(parts) >= 2
 	}

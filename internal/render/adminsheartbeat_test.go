@@ -31,7 +31,7 @@ func adminsToken(t *testing.T, secrets *config.Secrets) string {
 func TestTheSeedExpectsAnAdminsHeartbeatPerPocketID(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
-	m := monitors["auth — admin continuity"]
+	m := monitors["admin continuity"]
 	if m == nil {
 		t.Fatal("no admins heartbeat for auth")
 	}
@@ -48,8 +48,8 @@ func TestTheSeedExpectsAnAdminsHeartbeatPerPocketID(t *testing.T) {
 		t.Errorf("auth admins heartbeat carries a url: %v", m)
 	}
 	for name := range monitors {
-		if strings.HasSuffix(name, " — admin continuity") && name != "auth — admin continuity" {
-			t.Errorf("an admins heartbeat for something other than Pocket ID: %s", name)
+		if strings.Contains(name, "admin continuity") && name != "admin continuity" {
+			t.Errorf("a continuity monitor with no DNS check, or for something other than Pocket ID: %s", name)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func TestTwoMonitorsBothExpectTheAdminsHeartbeat(t *testing.T) {
 	token := adminsToken(t, secrets)
 	for self, site := range map[string]string{"health": "watch", "health-b": "watch-b"} {
 		monitors := byName(renderSeedAt(t, cfg, secrets, site+"/srv/paisans/f2a9/"+self+"/monitors.json"))
-		if m := monitors["auth — admin continuity"]; m == nil || m["heartbeat_token"] != token {
+		if m := monitors["admin continuity"]; m == nil || m["heartbeat_token"] != token {
 			t.Errorf("%s does not expect auth's admins heartbeat: %v", self, m)
 		}
 	}
@@ -187,7 +187,7 @@ const fakePusherCurl = `#!/bin/sh
 [ "$(cat "$FAKE_CYCLES")" = 1 ] || exit 7
 for last; do :; done
 case "$last" in
-*/healthz)
+*/healthz|*/healthz/*)
 	[ "$FAKE_CODE" = 000 ] && { printf '\n000'; exit 7; }
 	printf '%s\n\n%s' "$FAKE_BODY" "$FAKE_CODE"
 	exit 0 ;;
@@ -213,6 +213,14 @@ exit 0
 func runAdminsPusher(t *testing.T, code, body string) []string {
 	t.Helper()
 	cfg, secrets := withTwoMonitors(t)
+	return runPusher(t, cfg, secrets, []string{"ADMINS_HEARTBEAT_URLS=https://one.example.org/ping/t1 https://two.example.org/ping/t1"}, code, body)
+}
+
+// runPusher runs home-a's rendered push.sh for cfg for one cycle against the
+// fakes, with env added to its environment, and returns the pushes it made.
+// Every path of the reconciler's answers with code and body.
+func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []string, code, body string) []string {
+	t.Helper()
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
@@ -242,11 +250,10 @@ func runAdminsPusher(t *testing.T, code, body string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", push)
-	cmd.Env = []string{
+	cmd.Env = append([]string{
 		"PATH=" + bin + ":/usr/bin:/bin",
-		"ADMINS_HEARTBEAT_URLS=https://one.example.org/ping/t1 https://two.example.org/ping/t1",
 		"FAKE_CODE=" + code, "FAKE_BODY=" + body, "FAKE_CYCLES=" + cycles, "FAKE_LOG=" + log,
-	}
+	}, env...)
 	out, _ := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("the script ran past one cycle: %s", out)

@@ -59,7 +59,7 @@ services:
   reconciler:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/paisans-software/admin-reconciler:0.1.0@sha256:008ca36e1637062bc1bde592b3a3997d9e0642e9fabed6264ce473be6ed6574d
+    image: ghcr.io/paisans-software/admin-reconciler:0.2.0@sha256:4693e287c86ec4053209a96b8355542c67d220302c476e6925088ce87ceeb0be
     restart: unless-stopped
     env_file:
       - .env
