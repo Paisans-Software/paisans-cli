@@ -51,15 +51,34 @@ type Result struct {
 	Generated []string
 	// Kept names the secrets that already had a value and were left alone.
 	Kept []string
-	// Owed names secrets the toolkit cannot generate, because somebody else
-	// issues them or a running service mints them.
+	// Owed names secrets only the operator can provide, because somebody
+	// outside the deployment issues them: a DNS token, a mail password, a
+	// backup provider's keys. Each is something to do.
 	Owed []Owed
+	// Pending names secrets a running service of the deployment issues, which
+	// apply records before the app that needs one starts. None is the
+	// operator's to do, so none is in Owed. A pending secret is a key absent
+	// from the file, never a placeholder, so render still reads the file as
+	// it is.
+	Pending []Pending
 }
 
-// Owed is a secret that has to come from outside, with the reason it cannot be
-// generated here.
+// Owed is a secret only the operator can provide, with the reason it cannot
+// be generated here and who issues it.
 type Owed struct {
 	Name string
+	Why  string
+}
+
+// Pending is a secret apply obtains from a running service and records
+// itself. What is the kind of thing it is, the same for every pending secret
+// one service issues (Eg: "sign in client"), so a report can name them
+// together; App is the app that needs it; Why says what apply makes, for an
+// operator checking an existing one.
+type Pending struct {
+	Name string
+	What string
+	App  string
 	Why  string
 }
 
@@ -223,6 +242,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 	}
 
 	result.Owed = owed(cfg, secrets)
+	result.Pending = pending(cfg, secrets)
 	sort.Strings(result.Generated)
 	sort.Strings(result.Kept)
 	return result, nil
@@ -460,7 +480,7 @@ func publicKeyPEM(key *rsa.PublicKey) (string, error) {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})), nil
 }
 
-// owed lists what this package will not invent, with the reason, so that an
+// owed lists what only the operator can provide, with the reason, so that an
 // operator finishing an install knows exactly what is left and who issues it.
 func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 	var out []Owed
@@ -489,6 +509,19 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 			}
 		}
 	}
+	return out
+}
+
+// signInClient is what a pending OIDC client is, in a report.
+const signInClient = "sign in client"
+
+// pending lists what apply obtains from a running service and records
+// itself: today, the sign in client of every app that has one, which apply
+// creates at the deployment's Pocket ID. Declaring the app is the approval
+// for its client (founder decision, 2026-10-08), so nothing here is the
+// operator's to do.
+func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
+	var out []Pending
 	for _, name := range cfg.AppNames() {
 		if _, ok := secrets.OIDCClients[name]; ok {
 			continue
@@ -501,12 +534,10 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 		if !ok {
 			continue
 		}
-		// Apply creates the client itself, since declaring the app is the
-		// approval for it (founder decision, 2026-10-08). The redirect URI
-		// and PKCE are still named, because they are what apply creates and
-		// what an operator checking an existing client needs to see; for a
-		// homeserver, the rendered configuration that also names them is
-		// 0600 and does not exist until apply.
+		// The redirect URI and PKCE are named, because they are what apply
+		// creates and what an operator checking an existing client needs to
+		// see; for a homeserver, the rendered configuration that also names
+		// them is 0600 and does not exist until apply.
 		pkce := "PKCE off: the app sends no code challenge, and a Pocket ID client with PKCE on refuses a request without one"
 		if spec.PKCE {
 			pkce = "PKCE enabled: the app always sends a code challenge"
@@ -524,7 +555,7 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 				", which the fork reads from the groups claim as its member and admin groups"
 		case config.KindOutline, config.KindWriteFreely, config.KindSynapse:
 			// None of these reads a groups claim, so the client's restriction
-			// at Pocket ID is the whole control, and the owed text says so
+			// at Pocket ID is the whole control, and the reason says so
 			// where an operator checking an existing client will read it.
 			if app.Kind == config.KindSynapse {
 				why += ". The redirect URI is the authentication service's callback for this upstream provider, and the service is configured to send a challenge always"
@@ -540,7 +571,7 @@ func owed(cfg *config.Config, secrets *config.Secrets) []Owed {
 			why += ". The redirect URI is the fork's own (src/lib/oidc.js:26 in the uptime fork). It is restricted to the group named in apps." +
 				name + ".settings.admin_group, so the identity provider refuses everyone else before the monitor does"
 		}
-		out = append(out, Owed{Name: "oidc_clients." + name, Why: why})
+		out = append(out, Pending{Name: "oidc_clients." + name, What: signInClient, App: name, Why: why})
 	}
 	return out
 }
@@ -752,12 +783,23 @@ func OwedSecrets(cfg *config.Config, secrets *config.Secrets) []Owed {
 }
 
 // OwedNames is the names Fill would report as owed, without generating
-// anything. `secrets set` uses it to accept exactly the keys an operator has
-// been told to supply.
+// anything.
 func OwedNames(cfg *config.Config, secrets *config.Secrets) []string {
 	var out []string
 	for _, o := range owed(cfg, secrets) {
 		out = append(out, o.Name)
+	}
+	return out
+}
+
+// ExpectedNames is the names Fill would report as owed or pending: every
+// secret that comes from outside this package and is not in the file yet.
+// `secrets set` accepts exactly these, besides keys already set, so an
+// operator can supply an owed secret or record a client made by hand.
+func ExpectedNames(cfg *config.Config, secrets *config.Secrets) []string {
+	out := OwedNames(cfg, secrets)
+	for _, p := range pending(cfg, secrets) {
+		out = append(out, p.Name)
 	}
 	return out
 }

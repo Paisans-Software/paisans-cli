@@ -109,7 +109,11 @@ See *`paisans create` writes a new deployment's file, and only that* in
 Gives the declaration an `id` if it has none, settles `mesh.subnet` against
 every site while the deployment is on none of them, generates every secret the
 declaration needs into the secrets file (filling only what is missing), and
-says what is still owed from elsewhere.
+says what is still owed from elsewhere. Each owed secret is a warning, since
+only the operator can provide it. The sign in clients `apply` creates are
+pending rather than owed, and are one line, Eg: `4 sign in clients (blog,
+docs, gate, status) are created by apply`, with what apply makes for each
+under `--verbose`.
 
 * **Alone:** the whole apply runs it whenever it has work, so it is typed on
   its own to see what is owed before any host is changed, or to generate the

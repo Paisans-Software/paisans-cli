@@ -178,11 +178,15 @@ about it are load bearing:
 * **It generates only what it can.** A DNS token is issued by a provider, a
   mail password by the mail provider (`external.smtp_password`, when an app
   sends mail through a host and has no password of its own), and an OIDC
-  client lives at a running identity provider. Each is reported as owed,
-  with the reason, rather than invented or left silent. An owed client
-  (every kind with a client shape, `kinds.OIDCClient`) says that `apply
-  --execute` creates it, since declaring the app is the approval for its
-  client, and names its redirect URI and PKCE.
+  client lives at a running identity provider. None is invented or left
+  silent, and `secretsgen.Result` sorts them by who acts. `Owed` is what only
+  the operator can provide, each a warning with its reason. `Pending` is what
+  a running service of the deployment issues and `apply --execute` records
+  before the app that needs it starts: today the client of every kind with a
+  client shape (`kinds.OIDCClient`), since declaring the app is the approval
+  for its client. Pending clients are one line, not warnings, and `--verbose`
+  names each one's redirect URI and PKCE. A pending secret is a key absent
+  from the file, never a placeholder, so `render` reads the file as it is.
 * **Without an age recipient it writes plaintext and says so loudly.** Refusing
   would leave an operator holding generated secrets that went nowhere, and a
   first look at the tool must not require a key.
@@ -190,14 +194,14 @@ about it are load bearing:
 `secrets set <dotted.key>` writes one value read from stdin into the secrets
 file, re-encrypted to the recipients in `.sops.yaml`, and prints only `set
 <key>`. It strips one trailing newline, refuses an empty value, refuses a
-terminal on stdin, and accepts a key only if it is already set, owed by `init`
-(`external.acme_dns_token`, `oidc_clients.<app>.*`), or under `external`. It
-exists so a credential issued elsewhere never touches an echoing terminal or an
+terminal on stdin, and accepts a key only if it is already set, reported by
+`init` as owed or pending (`external.acme_dns_token`, `oidc_clients.<app>.*`,
+through `secretsgen.ExpectedNames`), or under `external`. It exists so a credential issued elsewhere never touches an echoing terminal or an
 editor: an argument is in shell history and `ps`, an echoed prompt is in
 scrollback, and `sops` opens the whole decrypted file in an editor.
 
-`secrets set` with no key, at a terminal, walks `secretsgen.OwedSecrets` less
-the `oidc_clients` entries, which `apply` creates, and reads each answer on the
+`secrets set` with no key, at a terminal, walks `secretsgen.OwedSecrets`, which
+holds no pending client, and reads each answer on the
 controlling terminal with echo off through `readOwedSecret`, which tests
 replace. Each answer is written before the next prompt, so an interruption
 keeps what was typed; an empty answer skips the key.
