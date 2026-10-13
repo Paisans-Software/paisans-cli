@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -91,10 +92,10 @@ func runCatalogAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(pos) != 2 {
-		return &ui.Problem{Hint: "catalog add takes a name and a URL", Explain: "paisans catalog add <name> <url>"}
+	name, url, err := catalogAddArgs(pos)
+	if err != nil {
+		return err
 	}
-	name, url := pos[0], pos[1]
 	if name == config.CoreCatalog {
 		return &ui.Problem{Hint: "core is the toolkit's own catalog", Explain: "It is always there. Point it at a mirror by writing catalogs.core.url by hand."}
 	}
@@ -152,6 +153,43 @@ func runCatalogAdd(args []string) error {
 	r.Result("%s pinned at %s; its blueprints are %s", name, cat.Tag, qualify(name, names))
 	return nil
 }
+
+// catalogAddArgs is the name and URL catalog add was given. With a URL alone
+// the name is <owner>/<name>, its repository's name without the paisans-
+// prefix; <owner>/<name> alone is the GitHub repository
+// github.com/<owner>/paisans-<name>, as `brew tap user/repo` is
+// github.com/user/homebrew-repo.
+func catalogAddArgs(pos []string) (string, string, error) {
+	usage := &ui.Problem{Hint: "catalog add takes a URL, or <owner>/<name>, with a name before it if you want another", Explain: "paisans catalog add https://github.com/example/paisans-blueprints\npaisans catalog add example/blueprints\npaisans catalog add notes https://github.com/example/paisans-blueprints"}
+	switch len(pos) {
+	case 2:
+		if !config.ValidCatalogName(pos[0]) {
+			return "", "", &ui.Problem{Hint: pos[0] + " is not a catalog name", Explain: "A catalog name is lowercase letters, digits and hyphens, or two such words as <owner>/<name>."}
+		}
+		if _, repo, ok := config.CatalogRepo(pos[1]); !ok || !strings.HasPrefix(strings.ToLower(repo), config.CatalogRepoPrefix) {
+			return "", "", &ui.Problem{Hint: pos[1] + " is not a catalog's repository", Explain: "A catalog's repository is named " + config.CatalogRepoPrefix + "<name>."}
+		}
+		return pos[0], pos[1], nil
+	case 1:
+	default:
+		return "", "", usage
+	}
+	arg := pos[0]
+	if shorthand.MatchString(arg) {
+		owner, name, _ := strings.Cut(arg, "/")
+		return strings.ToLower(arg), "https://github.com/" + owner + "/" + config.CatalogRepoPrefix + name, nil
+	}
+	name, ok := config.DefaultCatalogName(arg)
+	if !ok {
+		_, repo, _ := config.CatalogRepo(arg)
+		return "", "", &ui.Problem{Hint: arg + " is not a catalog's repository", Explain: "A catalog's repository is named " + config.CatalogRepoPrefix + "<name>, and " + repo + " is not. A catalog is added by its URL, or by <owner>/<name> for github.com/<owner>/" + config.CatalogRepoPrefix + "<name>."}
+	}
+	return name, arg, nil
+}
+
+// shorthand is <owner>/<name>, which catalog add reads as a GitHub
+// repository rather than as a URL or a path.
+var shorthand = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func qualify(catalog string, names []string) string {
 	out := make([]string, len(names))

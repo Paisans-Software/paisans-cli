@@ -239,10 +239,12 @@ backup:
       prune: false
 
 # Optional. Git repositories of blueprints beyond the built in ones, each
-# pinned to a commit; an app names one as <catalog>/<blueprint>. The core
-# catalog, which every unqualified name such as mbin means, is always there.
+# named paisans-<name> and pinned to a commit; `paisans catalog add
+# example/blueprints` writes this one, and an app names a blueprint in it as
+# example/blueprints/<blueprint>. The core catalog, which every unqualified
+# name such as mbin means, is always there.
 # catalogs:
-#   example:
+#   example/blueprints:
 #     url: https://github.com/example/paisans-blueprints
 #     tag: v1.0.0
 #     commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a

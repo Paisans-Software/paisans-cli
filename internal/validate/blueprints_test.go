@@ -43,7 +43,7 @@ checks:
 func loadWithCatalog(t *testing.T, settings string) *config.Config {
 	t.Helper()
 	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	repo := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml":                        "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/notes/blueprint.yaml":     notesBlueprint,
