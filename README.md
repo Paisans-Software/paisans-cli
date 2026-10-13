@@ -1754,14 +1754,14 @@ incoherent rather than risky, so it takes a refusal by the rule above. A digest
 names points at now, and renders that digest beside the tag on every line
 naming it (Eg: `ghcr.io/example-org/mbin:v1.2.3@sha256:...`). A tag written
 into a compose file never changes, and `apply` recreates a stack only when its
-file changes, so without this a new build behind a tag, a release promoted to
-a fork's channel or a version tag rebuilt for a security fix, would never
-reach a host. With it, a new build is a changed compose file: the dry run
+file changes, so without this a new build behind a tag, a series tag moved to
+a new release or a version tag rebuilt for a security fix, would never reach a
+host. With it, a new build is a changed compose file: the dry run
 lists it, by app and service, with the builds it goes between and their
 versions where the image carries the `org.opencontainers.image.version` label,
 
 ```
-talk  app  ghcr.io/paisans-software/mbin:stack-1  1.15.0-paisans (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)
+talk  app  ghcr.io/example-org/mbin:v1-fork  1.15.0-fork (sha256:1a2b3c4d5e6f) -> 1.16.0-fork (sha256:3c4d5e6f7a8b)
 ```
 
 and the apply pulls, checks, validates and health gates the stack as for any
@@ -1793,7 +1793,7 @@ changes it. Commands that rewrite a compose file for a narrower reason
 (`site add`, `site remove`, `storage add`, `storage rotate-key`, `secrets
 rotate`) resolve
 nothing and keep whatever each stack runs, whatever the configuration now
-names (another tag, a moved channel, another repository), so none of them
+names (another tag, a moved tag, another repository), so none of them
 moves an image nobody planned; the next `apply` shows and makes that move.
 
 **An app on several sites moves to a new build on all of them at once.** A
@@ -1808,12 +1808,14 @@ an apply that covers all of them. A site still on a bare tag beside one pinned
 to a build of that tag is not a disagreement: both are held on the pinned
 build.
 
-**An app may follow another channel than its kind's, with a warning.** A fork
-the toolkit runs can publish a channel tag, `stack-<N>`, naming its latest
-release vetted for the toolkit's template contract `N`. Naming another channel
-in `images` (Eg: `stack-2` ahead of a toolkit release that renders it) is
-accepted, and validate warns (`image-channel-differs`) that this toolkit
-renders its own channel's contract, naming both.
+**The forks' kinds name a release by its version tag.** The `mbin` and
+`writefreely` kinds default to one release of each fork
+(`ghcr.io/paisans-software/mbin:1.15.1-paisans`,
+`ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp`), the release this
+toolkit's templates were tested against, so a toolkit release renders for a
+known build. A newer release arrives with a toolkit release that names it, or
+sooner by naming it in `images`, which runs it against templates written for
+the one before.
 
 **A version change is not verified to be safe.** Many of these applications run
 schema migrations at boot, against live member data, and a downgrade after one
@@ -2004,7 +2006,7 @@ software: `go test -tags writefreely_integration ./internal/render/` boots the
 pinned fork against the `config.ini` this toolkit renders, with a Postgres
 beside it, and reads the value back with `writefreely settings get`, along with
 the same file less that one line as a control. `PAISANS_WF_IMAGE` runs it
-against another build, such as a release not yet promoted to `stack-1`. The yaml and json merges are
+against another build, such as a release newer than the one the kind names. The yaml and json merges are
 proven against Go's parsers only. Nothing here runs Synapse or Element, so the
 tests show that the rendered file parses and carries the value at the path
 asked for, not that those applications accept it.
@@ -5971,10 +5973,10 @@ session and no redirect, on a private instance too. It is a dedicated route,
 so on a gated hostname it is open past the gate and the monitor's public check
 reaches the app (see *Monitoring*).
 
-These three are the `stack-1` template contract: what the kinds render and
-what a release promoted to `stack-1` must read (see
-`docs/specs/2026-10-11-stack-channels.md`). The first promotions are Mbin
-1.15.0+paisans and WriteFreely 0.21.1+wisp.
+These three are what the kinds render and what any release they name must
+read. The forks have carried them since Mbin 1.15.0+paisans and WriteFreely
+0.21.1+wisp, and the kinds name Mbin 1.15.1+paisans and WriteFreely
+0.21.1+wisp.
 
 The known limit: **WriteFreely logs a warning on every start that it could not
 add `settings_location = database` to `config.ini`.** The file is mounted
@@ -6295,14 +6297,14 @@ for linux/amd64 alone:
 
 | Image | Declares | Mounted as |
 |-------|----------|------------|
-| mbin 1.15.0-paisans, the first `stack-1` promotion (app, messenger) | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
+| mbin 1.15.1-paisans (app, messenger), inspected 2026-10-13 | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
 | rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` (already) |
 | outline 1.10.0 | `/var/lib/outline/data` | bind, `/srv/paisans/<token>/<app>/data`, which was mounted at `/data`, a path nothing reads |
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | invite (`paisans-invite`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-invite/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.0-wisp, oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.1-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
