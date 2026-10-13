@@ -621,13 +621,20 @@ func TestAFailedHandOffNamesTheApplyThatFinishesIt(t *testing.T) {
 	}
 }
 
-// A dry run lists the hand-off and applies nothing.
+// A dry run builds and shows the plan: neither the hand-off's apply nor its
+// dry run is called, and nothing but the read-only probe runs on any host.
 func TestADryRunAppliesNothing(t *testing.T) {
 	sw := sharedWorld(t)
+	sw.applySite = func(site string) error { t.Errorf("applied %s", site); return nil }
+	sw.checkSite = func(site string) error { t.Errorf("tried the hand-off of %s", site); return nil }
 	p := sw.mustBuild()
 	p.Show(&ui.Recorder{})
-	if len(sw.applied) != 0 {
-		t.Errorf("a dry run applied %v", sw.applied)
+	for name, h := range sw.hosts {
+		for _, c := range h.ran {
+			if !strings.Contains(c, "docker ps -a") {
+				t.Errorf("a dry run ran on %s: %s", name, c)
+			}
+		}
 	}
 }
 
@@ -709,5 +716,49 @@ func TestAPlainMoveTriesNoHandOff(t *testing.T) {
 	w.checkSite = func(site string) error { t.Errorf("tried a hand-off of %s", site); return nil }
 	if err := w.run(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A plain move leaves the old Caddy's files on the host. A site that later
+// gains the monitor role, before its first apply as one, holds that
+// Caddyfile with no Caddy running: it is not a hand-off waiting to finish.
+func TestALeftoverCaddyfileIsNotAHandOff(t *testing.T) {
+	sw := sharedWorld(t)
+	a := sw.hosts["home-a"]
+	a.caddy = nil
+	delete(a.files, deployrecord.Path(sw.cfg.Deployment()))
+	for i, r := range sw.zone.InZone["zone-1"] {
+		if r.Content == oldIP && strings.HasPrefix(r.ID, "old-") {
+			sw.zone.InZone["zone-1"][i].Content = newIP
+		}
+	}
+	if p := sw.mustBuild(); p.From != "" {
+		t.Errorf("a leftover Caddyfile was taken for a hand-off from %s", p.From)
+	}
+	if held, err := gatewaymove.Departing(a, sw.cfg); err != nil || held {
+		t.Errorf("Departing: %v %v", held, err)
+	}
+}
+
+// A comment in the Caddyfile is not a site block.
+func TestACommentInTheCaddyfileIsNotARoute(t *testing.T) {
+	sw := sharedWorld(t)
+	a := sw.hosts["home-a"]
+	delete(a.files, deployrecord.Path(sw.cfg.Deployment()))
+	a.files[gatewaymove.CaddyfilePath(sw.cfg.Deployment())] = "# talk.example.org {\nstatus.example.org {\n\timport snippets/status.caddy\n}\n"
+	if held, err := gatewaymove.Departing(a, sw.cfg); err != nil || held {
+		t.Errorf("a commented hostname reads as a route: %v %v", held, err)
+	}
+}
+
+// The host owner's sites stop a hand-off as they stop a plain move, and the
+// note says so in the hand-off's terms: the shared site's Caddy is never
+// stopped.
+func TestTheHostOwnersSitesNoteSpeaksOfTheHandOff(t *testing.T) {
+	sw := sharedWorld(t)
+	sw.hosts["home-a"].sites = []string{"/srv/caddy.d/blog.caddy"}
+	notes := strings.Join(sw.mustBuild().Notes, "\n")
+	if strings.Contains(notes, "not stopped") || !strings.Contains(notes, "not handed off") {
+		t.Errorf("notes:\n%s", notes)
 	}
 }
