@@ -1360,8 +1360,11 @@ over the binary: standing by and then serving, a prompt stop that reaches the
 child, any other exit passed on, and the 50 line window. The fifth runs two
 real instances against a `postgres:17-trixie` and stops the active one. Rerun
 it whenever the Pocket ID image is bumped: it is what proves the marker
-against the binary. The image is `linux/amd64`, emulated on an arm64
-workstation.
+against the binary. It runs the image for the workstation's own platform;
+on 2026-10-13 all seven passed on arm64 as well as amd64. Docker reuses
+whatever build it already holds under a tag, so a workstation that once
+pulled the image with `--platform linux/amd64` keeps running that one under
+emulation: `docker pull` the tag first to get the native build.
 
 The admin reconciler has a Docker test of its own, behind its own tag:
 
