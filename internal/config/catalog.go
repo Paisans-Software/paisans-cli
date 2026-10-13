@@ -38,19 +38,62 @@ type Catalog struct {
 var ResolveBlueprints func(*Config) []string
 
 var (
-	catalogName   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	// catalogName is a catalog's name: one word, or <owner>/<name> as
+	// `catalog add` names a catalog by default.
+	catalogName   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}(/[a-z0-9][a-z0-9-]{0,62})?$`)
 	blueprintName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	fullCommit    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
-// SplitBlueprint is a blueprint name's catalog and its name in that catalog:
-// `example/journal` is ("example", "journal"), and an unqualified `mbin` is
-// ("", "mbin"), which always means the built in blueprints.
-func SplitBlueprint(kind Kind) (catalog, name string) {
-	if c, n, ok := strings.Cut(string(kind), "/"); ok {
-		return c, n
+// CatalogRepoPrefix starts the name of every catalog's repository, as
+// homebrew- starts every tap's: paisans-blueprints, paisans-media. It is what
+// lets a catalog's name leave it out (example/blueprints for
+// example/paisans-blueprints) and still say, read on its own, where it comes
+// from.
+const CatalogRepoPrefix = "paisans-"
+
+// ValidCatalogName reports whether name is one a catalog may be declared
+// under.
+func ValidCatalogName(name string) bool { return catalogName.MatchString(name) }
+
+// CatalogRepo is the owner and repository a catalog URL names: the last two
+// parts of its path, with any .git dropped. It reads an https or ssh URL, a
+// scp-like git@host:owner/repo, and a local path alike. ok is false for a URL
+// with fewer than two parts.
+func CatalogRepo(url string) (owner, repo string, ok bool) {
+	u := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(url), "/"), ".git")
+	parts := strings.FieldsFunc(u, func(r rune) bool { return r == '/' || r == ':' })
+	if len(parts) < 2 {
+		return "", "", false
 	}
-	return "", string(kind)
+	return parts[len(parts)-2], parts[len(parts)-1], true
+}
+
+// DefaultCatalogName is the name `catalog add` gives a catalog at url when
+// none is given: <owner>/<repository without its paisans- prefix>, lowercased.
+// ok is false for a URL whose repository is not named with the prefix, or
+// whose name would not be a catalog name.
+func DefaultCatalogName(url string) (string, bool) {
+	owner, repo, ok := CatalogRepo(url)
+	if !ok {
+		return "", false
+	}
+	rest, ok := strings.CutPrefix(strings.ToLower(repo), CatalogRepoPrefix)
+	name := strings.ToLower(owner) + "/" + rest
+	return name, ok && rest != "" && catalogName.MatchString(name)
+}
+
+// SplitBlueprint is a blueprint name's catalog and its name in that catalog,
+// split at the last slash: `example/blueprints/journal` is
+// ("example/blueprints", "journal"), `notes/journal` is ("notes", "journal"),
+// and an unqualified `mbin` is ("", "mbin"), which always means the built in
+// blueprints.
+func SplitBlueprint(kind Kind) (catalog, name string) {
+	s := string(kind)
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	return "", s
 }
 
 // catalogProblems checks `catalogs` and every app's blueprint name against it.
@@ -61,11 +104,14 @@ func (c *Config) catalogProblems() []string {
 		cat := c.Catalogs[name]
 		key := "catalogs." + name
 		if !catalogName.MatchString(name) {
-			add("%s: %q is not a catalog name: lowercase letters, digits and hyphens, starting with a letter or digit.", key, name)
+			add("%s: %q is not a catalog name: lowercase letters, digits and hyphens, starting with a letter or digit, or two such words as <owner>/<name>.", key, name)
 			continue
 		}
 		if strings.TrimSpace(cat.URL) == "" && name != CoreCatalog {
 			add("%s.url: required, the git repository the catalog is fetched from.", key)
+		}
+		if _, repo, ok := CatalogRepo(cat.URL); name != CoreCatalog && cat.URL != "" && (!ok || !strings.HasPrefix(strings.ToLower(repo), CatalogRepoPrefix)) {
+			add("%s.url: %q is not a catalog's repository. A catalog's repository is named %s<name>, as in https://github.com/example/%sblueprints.", key, cat.URL, CatalogRepoPrefix, CatalogRepoPrefix)
 		}
 		if cat.Commit != "" && !fullCommit.MatchString(cat.Commit) {
 			add("%s.commit: %q is not a full 40 character lowercase commit id. A pin names exactly what renders; `paisans catalog add` writes it.", key, cat.Commit)
@@ -102,8 +148,8 @@ func (c *Config) catalogProblems() []string {
 		catalog, bp := SplitBlueprint(kind)
 		key := "apps." + name + ".blueprint"
 		switch {
-		case strings.Count(string(kind), "/") > 1 || !blueprintName.MatchString(bp):
-			add("%s: %q is not a blueprint name. Write a built in one (mbin) or one from a declared catalog (example/journal).", key, kind)
+		case strings.Count(string(kind), "/") > 2 || !blueprintName.MatchString(bp):
+			add("%s: %q is not a blueprint name. Write a built in one (mbin) or one from a declared catalog (example/blueprints/journal).", key, kind)
 		case catalog == "":
 			if !knownKinds[kind] {
 				add("%s: unknown blueprint %q. The ones built into this toolkit are element, mbin, oauth2-proxy, outline, pocket-id, synapse, uptime and writefreely; one from a catalog is written <catalog>/<name>.", key, kind)
@@ -112,7 +158,11 @@ func (c *Config) catalogProblems() []string {
 			add("%s: %q names the core catalog, whose blueprints are written unqualified: %s.", key, kind, bp)
 		default:
 			if _, ok := c.Catalogs[catalog]; !ok {
-				add("%s: %q names the catalog %q, which catalogs does not declare. Add it with `paisans catalog add %s <url>`.", key, kind, catalog, catalog)
+				how := "paisans catalog add " + catalog + " <url>"
+				if strings.Contains(catalog, "/") {
+					how = "paisans catalog add " + catalog + "`, which reads https://github.com/" + strings.Replace(catalog, "/", "/"+CatalogRepoPrefix, 1) + ", or `paisans catalog add " + catalog + " <url>"
+				}
+				add("%s: %q names the catalog %q, which catalogs does not declare. Add it with `%s`.", key, kind, catalog, how)
 			}
 		}
 	}

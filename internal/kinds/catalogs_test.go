@@ -15,7 +15,7 @@ import (
 // journal, and returns its path and the commit.
 func testCatalog(t *testing.T, extra map[string]string) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "paisans-example")
 	files := map[string]string{
 		"catalog.yaml":                         "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/journal/blueprint.yaml":    strings.Replace(minimal, "name: example", "name: journal", 1),

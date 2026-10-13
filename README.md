@@ -2625,17 +2625,25 @@ declares and pins to a commit, and an app names it qualified:
 
 ```yaml
 catalogs:
-  example:
+  example/blueprints:
     url: https://github.com/example/paisans-blueprints
     tag: v1.0.0
     commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a
     unsigned: true
 apps:
   notes:
-    blueprint: example/journal
+    blueprint: example/blueprints/journal
     hostname: notes.example.org
     placement: { pinned: vm }
 ```
+
+**A catalog's repository is named `paisans-<name>`**, as a Homebrew tap's is
+named `homebrew-<name>`, and the catalog is named `<owner>/<name>` with the
+prefix left out: `example/paisans-blueprints` is the catalog
+`example/blueprints`, and `paisans catalog add example/blueprints` reads it
+from GitHub. The name says where a blueprint comes from wherever it is read,
+and two authors' catalogs cannot share one. A catalog may be given a name of
+its own instead; its repository is still `paisans-<name>`.
 
 **An unqualified name is never a catalog's.** `mbin` is always the core
 catalog's, and a reserved name is refused from every catalog, so no catalog

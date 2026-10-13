@@ -17,7 +17,7 @@ import (
 // gateway routes to it.
 func TestACatalogBlueprintRenders(t *testing.T) {
 	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	repo := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
 	files := map[string]string{
 		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/journal/blueprint.yaml": `apiVersion: paisans.blueprint/v1
@@ -109,7 +109,7 @@ services:
 // 500, in every monitor's seed.
 func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	repo := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml":                          "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/journal/blueprint.yaml":     "apiVersion: paisans.blueprint/v1\nname: journal\nservices:\n  - {name: app, image: \"ghcr.io/example/journal:2.4.1\"}\ndatabase: {engine: none}\nport: 8300\nconfig: {format: env, file: .env}\n",
@@ -172,7 +172,7 @@ func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 // an app leaves out, and the app's own value for one it sets.
 func TestACatalogBlueprintsTemplatesSeeItsDefaults(t *testing.T) {
 	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	repo := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml": "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/journal/blueprint.yaml": `apiVersion: paisans.blueprint/v1

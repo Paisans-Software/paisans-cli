@@ -1464,7 +1464,7 @@ inherited, per the language decision in `docs/decisions.md`.
 ### A kind ships a blueprint directory
 
 The first party blueprints in `internal/blueprints/core/` are a copy of the
-core catalog, [`Paisans-Software/blueprints`](https://github.com/Paisans-Software/blueprints),
+core catalog, [`Paisans-Software/paisans-blueprints`](https://github.com/Paisans-Software/paisans-blueprints),
 at the commit `internal/blueprints/core/pin.yaml` names. Change one there, in a
 pull request to that repository, then run
 `scripts/sync-core-catalog.sh <commit>` here, which replaces the copy and
