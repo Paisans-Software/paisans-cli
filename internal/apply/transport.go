@@ -90,13 +90,14 @@ type SSHTransport struct {
 	// the transport so a site is asked once. Nil runs sudo as it is, which
 	// works only where it asks for no password.
 	Auth *SudoAuth
-	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero leaves
-	// ssh's own, which is the operating system's TCP connect timeout and can
-	// be over a minute for a host that is switched off. A command that asks
-	// every site whether it is up (`paisans doctor`) sets it, so a dead
-	// site costs seconds rather than minutes per attempt. It is given on the
-	// command line, so it takes precedence over ~/.ssh/config. Like every
-	// other field here it is not used with Destination, which stays verbatim.
+	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero is
+	// DefaultConnectTimeout. ssh's own is the operating system's TCP connect
+	// timeout, which is 75 seconds on macOS for a host that is switched off
+	// or a VM that has been deleted, and a connection is tried three times,
+	// so without one a dead site holds a command for minutes before it can
+	// say so. It is given on the command line, so it takes precedence over
+	// ~/.ssh/config. Like every other field here it is not used with
+	// Destination, which stays verbatim.
 	ConnectTimeout int
 	// RetryLog, when set, receives this transport's retry notices in place
 	// of the package's (SetRetryLog), so commands run at once on several
@@ -113,6 +114,19 @@ func (t SSHTransport) Describe() string {
 		out += fmt.Sprintf(" port %d", p)
 	}
 	return out
+}
+
+// DefaultConnectTimeout is the ConnectTimeout, in seconds, of a transport
+// that sets none. A host that answers at all opens its TCP connection in well
+// under a second, so ten is room for a slow link and still lets a dead site be
+// reported, after three attempts, within a minute.
+const DefaultConnectTimeout = 10
+
+func (t SSHTransport) connectTimeout() int {
+	if t.ConnectTimeout == 0 {
+		return DefaultConnectTimeout
+	}
+	return t.ConnectTimeout
 }
 
 func (t SSHTransport) port() int {
@@ -164,10 +178,7 @@ func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
 	}
-	args = append(args, "-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes")
-	if t.ConnectTimeout > 0 {
-		args = append(args, "-o", "ConnectTimeout="+strconv.Itoa(t.ConnectTimeout))
-	}
+	args = append(args, "-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout="+strconv.Itoa(t.connectTimeout()))
 	for _, f := range keyFiles {
 		args = append(args, "-i", f)
 	}

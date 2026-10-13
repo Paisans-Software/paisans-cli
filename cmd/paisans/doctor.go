@@ -28,12 +28,6 @@ var doctorTransport = func(t apply.SSHTransport) apply.Transport { return t }
 // doctorNow is the workstation's clock, for the clock check. Tests replace it.
 var doctorNow = time.Now
 
-// doctorConnectTimeout bounds each ssh connection attempt, in seconds. doctor
-// is run when something is down, and a host that is switched off would
-// otherwise cost the operating system's TCP timeout on each of ssh's three
-// attempts before the report could be printed.
-const doctorConnectTimeout = 10
-
 // runDoctor reads every site, or the ones --site names, and prints what is
 // stuck and how to recover. It changes nothing and has no --execute: see
 // internal/doctor for why. A site that does not answer is a finding, and
@@ -78,9 +72,7 @@ func runDoctor(args []string) error {
 	}
 	transports := map[string]apply.Transport{}
 	for _, name := range sites {
-		t := siteTransport(name, cfg.Sites[name], "", *sudo)
-		t.ConnectTimeout = doctorConnectTimeout
-		transports[name] = doctorTransport(t)
+		transports[name] = doctorTransport(siteTransport(name, cfg.Sites[name], "", *sudo))
 	}
 
 	in, _ := ui.Get(r, "read every site", func() (doctor.Input, error) {

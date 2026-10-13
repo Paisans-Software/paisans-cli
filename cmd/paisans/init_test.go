@@ -232,6 +232,22 @@ func TestInitRefusesWhenASiteIsUnreachable(t *testing.T) {
 	}
 }
 
+// Each site's ssh connection can take as long as its connect timeout, and
+// longer when it is retried, so while init settles the subnet its step says
+// which site it is reading: a site that does not answer is named while it is
+// waited on, not only in the refusal after.
+func TestInitSaysWhichSiteItIsReading(t *testing.T) {
+	path, rec := initWorld(t, nil, fakeSites(), nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range []string{"health", "home-a", "home-b", "vm"} {
+		if !rec.Has("progress", "read "+site) || !rec.Has("progress", "read the networks on "+site) {
+			t.Errorf("settle mesh subnet did not say it was reading %s:\n%s", site, rec.Lines())
+		}
+	}
+}
+
 // Once any site's registry records this deployment, its subnet is deployed:
 // init leaves it alone even where it now overlaps something, and an
 // unreachable site no longer matters to it.

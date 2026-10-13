@@ -96,7 +96,9 @@ func holder(h mesh.Host, site string, clash []mesh.Taken) string {
 // only when it rolled, and says why. It reports whether it wrote.
 //
 // The decision is one step, "settle mesh subnet", whose result is what
-// happened to the subnet; why is its details.
+// happened to the subnet; why is its details. Its progress names the site
+// being read, since a site that does not answer is waited on for its connect
+// timeout on each of ssh's attempts.
 func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, random io.Reader) (bool, error) {
 	s := r.Step("settle mesh subnet")
 	wrote, result, err := chooseMesh(s, cfg, path, hosts, random)
@@ -116,6 +118,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	var unreachable []string
 	var claimedOn []string
 	for _, name := range sites {
+		s.Progress("read " + name)
 		reg, err := registry.Read(hosts[name])
 		if err != nil {
 			unreachable = append(unreachable, fmt.Sprintf("%s: %v", name, err))
@@ -147,6 +150,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	var taken []mesh.Taken
 	for _, name := range sites {
 		taken = append(taken, registry.Meshes(registries[name], cfg.ID, name)...)
+		s.Progress("read the networks on " + name)
 		probed, err := mesh.Probe(hosts[name])
 		if err != nil {
 			return false, "", fmt.Errorf("%v. Nothing was written", err)

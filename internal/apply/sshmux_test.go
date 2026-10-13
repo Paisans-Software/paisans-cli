@@ -78,7 +78,7 @@ func TestTheSocketDirectoryFallsBack(t *testing.T) {
 		t.Fatalf("want no sharing without a usable base, got %q", args)
 	}
 	tr := apply.SSHTransport{User: "ubuntu", Host: "203.0.113.10"}
-	if got, want := tr.SSHArgs([]string{"k1"}, "true"), []string{"-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-i", "k1", "ubuntu@203.0.113.10", apply.RemoteCommand("true")}; !reflect.DeepEqual(got, want) {
+	if got, want := tr.SSHArgs([]string{"k1"}, "true"), []string{"-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "k1", "ubuntu@203.0.113.10", apply.RemoteCommand("true")}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unshared args:\n got %q\nwant %q", got, want)
 	}
 }
@@ -101,8 +101,8 @@ func TestCloseConnectionsExitsEveryMasterAndRemovesTheDirectory(t *testing.T) {
 	apply.CloseConnections()
 
 	want := map[string]bool{
-		strings.Join(append(append([]string(nil), mux...), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-O", "exit", "ubuntu@203.0.113.10"), " "): true,
-		strings.Join(append(append([]string(nil), mux...), "-T", "-O", "exit", "ssh://admin@[2001:db8::1]:2200"), " "):                                true,
+		strings.Join(append(append([]string(nil), mux...), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-O", "exit", "ubuntu@203.0.113.10"), " "): true,
+		strings.Join(append(append([]string(nil), mux...), "-T", "-O", "exit", "ssh://admin@[2001:db8::1]:2200"), " "):                                                           true,
 	}
 	if len(exits) != len(want) {
 		t.Fatalf("want %d exits, got %q", len(want), exits)
