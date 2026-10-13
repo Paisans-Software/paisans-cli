@@ -410,7 +410,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		}
 		files = append(files, File{Path: base + p.dep().RelPath("infra", "caddy", "Caddyfile"), Content: caddyfile, Mode: 0o644})
 
-		snippets, err := p.renderSnippets(base, routes)
+		snippets, err := p.renderSnippets(base, site, routes)
 		if err != nil {
 			return nil, err
 		}
@@ -496,7 +496,7 @@ func (p *planner) dep() deployment.Deployment { return p.cfg.Deployment() }
 // which is the usual case. One route renders one snippet, from the template
 // its role selects, because two hostnames on the same app can serve entirely
 // different things.
-func (p *planner) renderSnippets(base string, routes []route) ([]File, error) {
+func (p *planner) renderSnippets(base string, site *siteView, routes []route) ([]File, error) {
 	var files []File
 	for _, r := range routes {
 		app := p.cfg.Apps[r.App]
@@ -513,6 +513,11 @@ func (p *planner) renderSnippets(base string, routes []route) ([]File, error) {
 		// name, or its own comments would lie about which name reaches it.
 		values.Hostname = r.Hostname
 		values.PublicURL = "https://" + r.Hostname
+		// Whether an upstream is elsewhere depends on whose Caddy this is:
+		// the gateway's, a monitor's, or a gateway being handed off, which
+		// reaches the new gateway's apps over the mesh.
+		values.UpstreamElsewhere = elsewhere(site, values.Upstreams)
+		values.S3.GarageElsewhere = elsewhere(site, values.S3.GarageAddresses)
 
 		path := string(app.Kind) + "/" + kinds.SnippetFor(r.Role)
 		content, err := p.renderFile(path, values)
@@ -915,10 +920,11 @@ func (p *planner) upstreams(name string) []string {
 }
 
 // elsewhere reports whether a route has exactly one upstream and it is on a
-// machine other than the gateway's. Addresses are host or host:port, compared
-// by host. Several upstreams import upstream_failover instead, and a single
-// upstream on the gateway itself dies with the gateway, so neither needs it.
-func (p *planner) elsewhere(upstreams []string) bool {
+// machine other than site, whose Caddy renders the route. Addresses are host
+// or host:port, compared by host. Several upstreams import upstream_failover
+// instead, and a single upstream on site itself dies with this Caddy, so
+// neither needs it.
+func elsewhere(site *siteView, upstreams []string) bool {
 	if len(upstreams) != 1 {
 		return false
 	}
@@ -926,13 +932,7 @@ func (p *planner) elsewhere(upstreams []string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	for _, name := range p.cfg.SiteNames() {
-		site := p.cfg.Sites[name]
-		if site.Has(config.RoleGateway) && site.Address == host {
-			return false
-		}
-	}
-	return true
+	return host != site.Address
 }
 
 // upstreamsOnPort is upstreams with the port supplied rather than looked up,

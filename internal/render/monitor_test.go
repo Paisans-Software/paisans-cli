@@ -375,3 +375,27 @@ func TestAMonitorOnOneOfTwoGatewaysIsServedByThatOneAlone(t *testing.T) {
 		t.Errorf("home-b serves the monitor on vm:\n%s", other)
 	}
 }
+
+// A departing gateway reaches an app pinned to the new gateway over the
+// mesh, so that route takes upstream_single's bounds there: the new gateway
+// can go down while the departing one still answers visitors. On the new
+// gateway itself the same app is local, and takes none. The gate is pinned
+// to the gateway.
+func TestADepartingGatewayBoundsItsRoutesToTheNewGateway(t *testing.T) {
+	cfg := monitorConfig(t, nil)
+	plan, err := render.Build(cfg, fixtureSecrets(t), render.WithDepartingGateway("watch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := planFiles(plan)
+	departing := files["watch/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]
+	if departing == "" {
+		t.Fatal("the departing gateway renders no route to the gate")
+	}
+	if !strings.Contains(departing, "import upstream_single") {
+		t.Errorf("the departing gateway's route to the gate, on vm, is unbounded:\n%s", departing)
+	}
+	if local := files["vm/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]; local == "" || strings.Contains(local, "import upstream_single") {
+		t.Errorf("the new gateway bounds the gate, which runs beside it:\n%s", local)
+	}
+}
