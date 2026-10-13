@@ -2302,3 +2302,13 @@ members that the community is at risk; who is missing is in the log.
 * **Masked or full addresses in the bodies.**
 * **Reporting Cloudflare members who match no administrator.** Extra members
   are a community's own choice.
+
+### What was run
+
+`GET /accounts/{id}/members` and `GET /zones?name=<domain>&status=active`
+against a real free account, values withheld (the spec's *Observed*). The
+image `ghcr.io/paisans-software/admin-reconciler:0.2.0` was published by
+tagging `admin-reconciler-v0.2.0`, resolved to its digest with an anonymous
+pull token, pulled by that digest and run: it refused a members token set
+without its domain and key, which only this release checks. The pocket-id
+blueprint names it by that digest.
