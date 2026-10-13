@@ -9,19 +9,24 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Links between apps. A blueprint may provide a named role, and another
-// consume it: the consumer's templates then read what the toolkit works out
-// about the provider with .Linked "<role>" "<value>". The roles are a closed
-// set, because what each one offers is worked out in Go from the deployment,
-// the same way whichever blueprint provides it. A role is named for what it
-// is, so a second blueprint can provide the same one.
+// Links between apps. A blueprint may provide a named role, saying what it
+// offers as CEL expressions over the app (each a string: a provider of
+// matrix-homeserver offers base_url and server_name), and another consume
+// it: the consumer's templates then read those values with
+// .Linked "<role>" "<value>". A role is named for what it is, so a second
+// blueprint can provide the same one, and the toolkit knows no role itself.
 
-// LinkRoles are the roles a blueprint may provide or consume, with the values
-// a consumer reads of each.
-var LinkRoles = map[string][]string{
-	// A Matrix homeserver: base_url is where its client API is, and
-	// server_name the name inside every user identifier it mints.
-	"matrix-homeserver": {"base_url", "server_name"},
+// Provide is one role a blueprint provides, with the expression for each
+// value it offers.
+type Provide struct {
+	Role   string            `yaml:"role"`
+	Values map[string]string `yaml:"values"`
+}
+
+// provided is a Provide compiled.
+type provided struct {
+	role   string
+	values map[string]cel.Program
 }
 
 // Consume is one role a blueprint consumes. Setting is the app setting
@@ -34,26 +39,93 @@ type Consume struct {
 }
 
 // Provides is the roles a kind provides.
-func Provides(kind config.Kind) []string { return append([]string(nil), of(kind).Provides...) }
+func Provides(kind config.Kind) []string {
+	var out []string
+	for _, p := range of(kind).Provides {
+		out = append(out, p.role)
+	}
+	return out
+}
 
 // Consumes is the roles a kind consumes.
 func Consumes(kind config.Kind) []Consume { return append([]Consume(nil), of(kind).Consumes...) }
 
-func checkLinks(provides []string, consumes []Consume) error {
-	for _, role := range provides {
-		if _, ok := LinkRoles[role]; !ok {
-			return fmt.Errorf("provides: %q is not a role the toolkit links; it links matrix-homeserver", role)
+// LinkValues is what the app called name in cfg offers as a provider of
+// role: each value its blueprint declares, evaluated over the app.
+func LinkValues(cfg *config.Config, name, role string) (map[string]string, error) {
+	return linkValues(cfg.Apps[name].Kind, celAppIn(cfg, name), role)
+}
+
+// LinkValuesAt is what a provider of role outside the deployment, at
+// hostname, offers, as any blueprint that provides role says: the values of
+// an app at that hostname with nothing else declared. It is how a consumer
+// pointed at a server the deployment does not run still gets its address.
+func LinkValuesAt(role, hostname string) (map[string]string, error) {
+	for _, kind := range known() {
+		for _, p := range of(kind).Provides {
+			if p.role == role {
+				return linkValues(kind, celApp(config.App{Kind: kind, Hostname: hostname}), role)
+			}
 		}
+	}
+	return nil, fmt.Errorf("no blueprint provides the role %s", role)
+}
+
+func linkValues(kind config.Kind, vars map[string]any, role string) (map[string]string, error) {
+	for _, p := range of(kind).Provides {
+		if p.role != role {
+			continue
+		}
+		out := map[string]string{}
+		for value, prg := range p.values {
+			v, _, err := prg.Eval(vars)
+			if err != nil {
+				return nil, fmt.Errorf("%s's provides %s.%s: %w", kind, role, value, err)
+			}
+			s, ok := v.Value().(string)
+			if !ok {
+				return nil, fmt.Errorf("%s's provides %s.%s is not a string", kind, role, value)
+			}
+			out[value] = s
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("%s does not provide the role %s", kind, role)
+}
+
+func checkLinks(provides []Provide, consumes []Consume) ([]provided, error) {
+	var out []provided
+	seen := map[string]bool{}
+	for i, p := range provides {
+		if !config.BlueprintName(p.Role) {
+			return nil, fmt.Errorf("provides[%d].role: %q is not a role name: lowercase words joined by dashes", i, p.Role)
+		}
+		if seen[p.Role] {
+			return nil, fmt.Errorf("provides[%d].role: %s is provided twice", i, p.Role)
+		}
+		seen[p.Role] = true
+		if len(p.Values) == 0 {
+			return nil, fmt.Errorf("provides[%d].values: required, what a consumer of %s reads", i, p.Role)
+		}
+		compiled := provided{role: p.Role, values: map[string]cel.Program{}}
+		for _, value := range sortedKeys(p.Values) {
+			prg, err := compileString(p.Values[value])
+			if err != nil {
+				return nil, fmt.Errorf("provides[%d].values.%s: %w", i, value, err)
+			}
+			compiled.values[value] = prg
+		}
+		out = append(out, compiled)
 	}
 	for i, c := range consumes {
-		if _, ok := LinkRoles[c.Role]; !ok {
-			return fmt.Errorf("consumes[%d].role: %q is not a role the toolkit links; it links matrix-homeserver", i, c.Role)
+		if !config.BlueprintName(c.Role) {
+			return nil, fmt.Errorf("consumes[%d].role: %q is not a role name: lowercase words joined by dashes", i, c.Role)
 		}
 		if c.Setting == "" {
-			return fmt.Errorf("consumes[%d].setting: required, the setting naming the provider's hostname", i)
+			return nil, fmt.Errorf("consumes[%d].setting: required, the setting naming the provider's hostname", i)
 		}
 	}
-	return nil
+	return out, nil
 }
 
 // LockedSetting is one name a blueprint's `config.locked_settings` lists:

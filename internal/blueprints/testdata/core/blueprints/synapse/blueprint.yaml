@@ -20,8 +20,15 @@ services:
 # MAS keeps its own database beside the homeserver's, <database>_mas, which
 # initdb.d creates.
 database: {engine: postgres, extra: [mas]}
-# Element and any other Matrix client link to it by this role.
-provides: [matrix-homeserver]
+# Element and any other Matrix client link to it by this role. base_url is
+# where the client API is, the homeserver's primary hostname; server_name
+# is the name inside every user identifier, its wellknown hostname when it
+# delegates.
+provides:
+  - role: matrix-homeserver
+    values:
+      base_url: "'https://' + app.hostname"
+      server_name: "'wellknown' in app.hostnames ? app.hostnames['wellknown'] : app.hostname"
 port: 8008
 config:
   # It also renders a `.env`, but only for its Postgres container's

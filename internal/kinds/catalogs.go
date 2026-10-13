@@ -48,6 +48,64 @@ type catalogFile struct {
 	APIVersion      string `yaml:"apiVersion"`
 	Name            string `yaml:"name"`
 	RequiresToolkit string `yaml:"requires_toolkit"`
+	// Wizard is what `paisans create` offers, read from the core catalog
+	// alone.
+	Wizard []WizardEntry `yaml:"wizard"`
+}
+
+// WizardEntry is one question `paisans create` asks, and the apps a yes
+// declares.
+type WizardEntry struct {
+	Question string `yaml:"question"`
+	// Name is what the entry is called when it cannot be offered, for an
+	// entry with SeparateSites.
+	Name    string `yaml:"name"`
+	Default bool   `yaml:"default"`
+	// SeparateSites is an entry whose apps need machines of their own, not
+	// offered to a deployment of one machine.
+	SeparateSites bool        `yaml:"separate_sites"`
+	Apps          []WizardApp `yaml:"apps"`
+}
+
+// WizardApp is one app a wizard entry declares: its key, its blueprint, the
+// label its hostname is under, what it is in a few words, and where it may
+// go: On are roles its site must hold, Avoid roles its site must not.
+type WizardApp struct {
+	Key       string        `yaml:"key"`
+	Blueprint string        `yaml:"blueprint"`
+	Subdomain string        `yaml:"subdomain"`
+	What      string        `yaml:"what"`
+	On        []config.Role `yaml:"on"`
+	Avoid     []config.Role `yaml:"avoid"`
+}
+
+// checkWizard refuses a wizard entry the wizard could not ask.
+func checkWizard(entries []WizardEntry) error {
+	keys := map[string]bool{}
+	for i, e := range entries {
+		if e.Question == "" || len(e.Apps) == 0 {
+			return fmt.Errorf("wizard[%d]: needs a question and at least one app", i)
+		}
+		if e.SeparateSites && e.Name == "" {
+			return fmt.Errorf("wizard[%d].name: required with separate_sites, for the line saying it is not offered", i)
+		}
+		for j, app := range e.Apps {
+			at := fmt.Sprintf("wizard[%d].apps[%d]", i, j)
+			if !config.BlueprintName(app.Key) || keys[app.Key] {
+				return fmt.Errorf("%s.key: %q is not an app name, or is used twice", at, app.Key)
+			}
+			keys[app.Key] = true
+			if !config.BlueprintName(app.Blueprint) || app.Subdomain == "" || app.What == "" {
+				return fmt.Errorf("%s: needs a blueprint of this catalog, a subdomain and what it is", at)
+			}
+			for _, r := range append(append([]config.Role(nil), app.On...), app.Avoid...) {
+				if !config.KnownRole(r) {
+					return fmt.Errorf("%s: %q is not a site role", at, r)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // CacheDir is where fetched catalogs are kept, one directory per commit: the
@@ -279,6 +337,9 @@ func ReadCatalog(dir string) (catalogFile, error) {
 	}
 	if c.APIVersion != CatalogAPIVersion {
 		return catalogFile{}, fmt.Errorf("catalog.yaml: apiVersion is %q, and this toolkit reads %s", c.APIVersion, CatalogAPIVersion)
+	}
+	if err := checkWizard(c.Wizard); err != nil {
+		return catalogFile{}, fmt.Errorf("catalog.yaml: %w", err)
 	}
 	return c, nil
 }

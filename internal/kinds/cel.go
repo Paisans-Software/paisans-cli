@@ -27,6 +27,7 @@ const celCostLimit = 10000
 // expression sees what the app's declaration decides:
 //
 //   - app.hostname, its hostname
+//   - app.hostnames, its additional hostnames by role (Eg: wellknown)
 //   - app.gated and app.auto_login, the two gate booleans
 //   - app.federates, whether it answers ActivityPub (Federates)
 //   - app.placement, "cluster" or the site it is pinned to
@@ -59,6 +60,7 @@ var celEnv = func() *cel.Env {
 	env, err := cel.NewEnv(
 		ext.Strings(),
 		cel.Variable("app.hostname", cel.StringType),
+		cel.Variable("app.hostnames", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("app.gated", cel.BoolType),
 		cel.Variable("app.auto_login", cel.BoolType),
 		cel.Variable("app.federates", cel.BoolType),
@@ -98,12 +100,17 @@ func celApp(app config.App) map[string]any {
 	for k, v := range SettingsSeen(app) {
 		settings[k] = v
 	}
+	hostnames := map[string]string{}
+	for role, h := range app.Hostnames {
+		hostnames[role] = h
+	}
 	placement := "cluster"
 	if app.Placement.Mode == config.PlacementPinned {
 		placement = app.Placement.Site
 	}
 	return map[string]any{
 		"app.hostname":     app.Hostname,
+		"app.hostnames":    hostnames,
 		"app.gated":        app.Gated,
 		"app.auto_login":   app.AutoLogin,
 		"app.federates":    Federates(app),

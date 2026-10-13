@@ -3,3 +3,34 @@
 # (`blueprint: mbin`) here.
 apiVersion: paisans.catalog/v1
 name: core
+# What `paisans create` offers, in this order, after sign in and before the
+# health page, which are the toolkit's own. Each entry is one question, and
+# the apps a yes declares: the app's key, its blueprint, the label its
+# hostname is under and what it is, in a few words. An app may say where it
+# goes: `on`, roles its site must hold, and `avoid`, roles its site must not
+# hold, for an app whose ports collide with another role's. An entry with
+# `separate_sites` needs its apps on machines of their own, and is not
+# offered to a deployment of one machine.
+wizard:
+  - question: "Forums and social (Mbin)?"
+    default: true
+    apps:
+      - {key: talk, blueprint: mbin, subdomain: talk, what: "forums and social"}
+  - question: "A wiki (Outline)?"
+    default: true
+    apps:
+      - {key: docs, blueprint: outline, subdomain: docs, what: "wiki"}
+  - question: "Blogs (WriteFreely)?"
+    default: true
+    apps:
+      - {key: blog, blueprint: writefreely, subdomain: blog, what: "blog"}
+  - question: "Chat (Matrix: Synapse and the Element web client)?"
+    name: "Chat"
+    default: false
+    separate_sites: true
+    apps:
+      # The homeserver binds the ports Patroni and bg_mon do, so it goes
+      # where no data is.
+      - {key: chat, blueprint: synapse, subdomain: chat, what: "chat server", avoid: [data]}
+      # The web client binds 80, which the gateway's Caddy holds.
+      - {key: web, blueprint: element, subdomain: web, what: "chat web client", on: [apps], avoid: [gateway]}

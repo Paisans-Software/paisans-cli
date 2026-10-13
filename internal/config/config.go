@@ -56,6 +56,9 @@ const (
 
 var knownRoles = map[Role]bool{RoleData: true, RoleApps: true, RoleGateway: true, RoleWitness: true, RoleStorage: true, RoleMonitor: true}
 
+// KnownRole reports whether r is a site role.
+func KnownRole(r Role) bool { return knownRoles[r] }
+
 // Kind is an application the toolkit knows how to render: a blueprint's
 // name, qualified by its catalog unless it is the core catalog's.
 type Kind string

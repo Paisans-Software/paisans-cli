@@ -374,10 +374,14 @@ func (w *Wizard) apps() error {
 	}
 	apps := []App{{Key: signIn.key, Kind: signIn.kind, Hostname: host}}
 
+	offered, err := capabilities()
+	if err != nil {
+		return err
+	}
 	health := false
-	for _, c := range capabilities {
-		if c.twoSites && len(a.Sites) < 2 {
-			w.p.Say("Chat needs a second machine: its server shares ports with the database and its web client shares one with the gateway, so it is not offered here.")
+	for _, c := range offered {
+		if c.separateSites && len(a.Sites) < 2 {
+			w.p.Say("%s needs a second machine: its apps share ports with the roles one machine holds, so it is not offered here.", c.name)
 			continue
 		}
 		def := c.def

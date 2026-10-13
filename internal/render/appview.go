@@ -405,7 +405,11 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		if v.links == nil {
 			v.links = map[string]map[string]string{}
 		}
-		v.links[c.Role] = p.linked(c.Role, v.Setting(c.Setting, planned.Hostname))
+		links, err := p.linked(c.Role, v.Setting(c.Setting, planned.Hostname))
+		if err != nil {
+			return appValues{}, fmt.Errorf("%s: %w", planned.Name, err)
+		}
+		v.links[c.Role] = links
 	}
 	v.LocalStorage = kinds.KeepsFilesLocally(p.cfg, app)
 	if kinds.InObjectStorage(p.cfg, app) {
@@ -463,35 +467,32 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 }
 
 // Linked is a value the provider of a role the app's blueprint consumes
-// offers (kinds.LinkRoles), empty for a role it does not consume.
-func (v appValues) Linked(role, value string) string { return v.links[role][value] }
+// offers, as the provider's blueprint declares it. A value the provider does
+// not declare, or a role the blueprint does not consume, fails the render,
+// naming it, rather than rendering an empty string.
+func (v appValues) Linked(role, value string) (string, error) {
+	values, ok := v.links[role]
+	if !ok {
+		return "", fmt.Errorf("the blueprint reads .Linked %q, a role it does not consume", role)
+	}
+	got, ok := values[value]
+	if !ok {
+		return "", fmt.Errorf("a provider of %s offers no value %q", role, value)
+	}
+	return got, nil
+}
 
 // linked is what the provider of role at hostname offers. A hostname no
 // declared provider answers on is taken as the provider's own: a consumer
 // pointed at a server outside the deployment still gets its address.
-func (p *planner) linked(role, hostname string) map[string]string {
-	var provider *config.App
+func (p *planner) linked(role, hostname string) (map[string]string, error) {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
 		if app.Hostname == hostname && slices.Contains(kinds.Provides(app.Kind), role) {
-			provider = &app
-			break
+			return kinds.LinkValues(p.cfg, name, role)
 		}
 	}
-	switch role {
-	case "matrix-homeserver":
-		// base_url is where the client API is, the homeserver's primary
-		// hostname; server_name the name inside every identifier, its
-		// wellknown hostname when it delegates.
-		serverName := hostname
-		if provider != nil {
-			if delegated := provider.Hostnames[kinds.WellknownRole]; delegated != "" {
-				serverName = delegated
-			}
-		}
-		return map[string]string{"base_url": "https://" + hostname, "server_name": serverName}
-	}
-	return nil
+	return kinds.LinkValuesAt(role, hostname)
 }
 
 // dsn is the app's connection URL, empty for a kind that uses no Postgres so

@@ -113,7 +113,7 @@ type Def struct {
 	LockedSettings []LockedSetting
 
 	// Provides and Consumes are the roles linking the kind to other apps.
-	Provides []string
+	Provides []provided
 	Consumes []Consume
 
 	// LocalMediaPaths are the paths on its own hostname a kind serves its
