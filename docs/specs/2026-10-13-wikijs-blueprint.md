@@ -18,7 +18,7 @@ Four repositories change:
 |---|---|
 | `Paisans-Software/wikijs-bootstrap` | new: the bootstrap, a one shot program that finishes Wiki.js's setup and keeps its sign-in, site settings and groups as the configuration says |
 | `Paisans-Software/paisans-blueprints` | `blueprints/wikijs/` added, `blueprints/outline/` removed |
-| `Paisans-Software/paisans-stack` | the `create` wizard, help and error text, the volume registry, the core pin, the test fixtures and the README |
+| `Paisans-Software/paisans-stack` | a `list` setting type, an OIDC key naming further groups to create at Pocket ID, the `create` wizard, help and error text, the volume registry, the core pin, the test fixtures and the README |
 | none | the deployment agent rules, if the founder widens the exception in *Groups at Pocket ID* |
 
 Every citation of Wiki.js below is at `v2.5.316`, the newest 2.x release, which
@@ -70,6 +70,16 @@ Postgres `LISTEN/NOTIFY` and reloads configuration, authentication and pages
 when another instance changes them (`server/core/db.js:229-264`). Pinned, it
 sets `HA_ACTIVE=false`. Every `DB_*` variable is set explicitly, because an
 unset one becomes the string `"undefined"` (`server/helpers/config.js:22`).
+
+A clustered wiki connects over TLS, because the cluster's `pg_hba.conf`
+rejects every connection without it (`hostnossl all all all reject`) and the
+proxy's backend may be on another site. Wiki.js takes the connection as
+`DATABASE_URL` when it is set (`server/core/db.js:32`), and node-postgres reads
+`sslmode` from it, so a clustered wiki renders the DSN with
+`sslmode=no-verify`: encrypted, without checking the cluster's certificate,
+which is what `sslmode=require` means to the other apps on the cluster. A
+pinned wiki talks to the Postgres container in its own project, which serves no
+TLS, and renders the DSN without it. The bootstrap uses the same DSN.
 
 Two instances against one empty database is the hard case, and *The bootstrap*
 handles it.
@@ -161,7 +171,7 @@ the one exception of the admin group below. Gating a collection of pages by
 path, Eg: `/admin/` for the admin group only, is a page rule an admin writes.
 
 **The admin group gets every permission except `manage:system`.** Founder
-decision. That keeps the settings the bootstrap owns out of every member's
+decision; `manage:api` is withheld with it, below. That keeps the settings the bootstrap owns out of every member's
 reach, enforced by Wiki.js itself: each of them is a `manage:system` mutation
 (`site.graphql:69`, `authentication.graphql:70-91`), and someone holding
 `manage:groups` without `manage:system` cannot grant `manage:system`, change a
@@ -169,11 +179,26 @@ group that has it, or put anyone in one (`server/graph/resolvers/group.js:50-64,
 Only the built in `Administrators` group (ID 1) has it, and only the break
 glass local admin is in it.
 
+**Nor `manage:api`.** The API key mutations accept either permission
+(`authentication.graphql`, `createApiKey` and `setApiState`), and a key made
+with full access acts as `Administrators` (`server/models/apiKeys.js`,
+`grp: fullAccess ? 1 : group`), so `manage:api` is `manage:system` by another
+route. The break glass admin itself is out of reach: nobody without
+`manage:system` may change users 1 and 2 (`server/core/auth.js:388-391`).
+
 ### At Pocket ID
 
 A `synced_groups` entry with no Pocket ID group of that name is created at
 Pocket ID by `apply`, empty, with the toolkit's existing group creation. An
 empty group grants nothing until an admin adds people to it. Founder decision.
+
+Two generic additions to the toolkit carry this, so that no Go names the
+blueprint. Blueprint settings gain a `list` type, a list of strings, which
+`synced_groups` is, with `.SettingList` to read one in a template. The `oidc`
+block gains `extra_groups_setting`, naming a `list` setting whose groups `apply`
+finds or creates at Pocket ID beside the member and admin groups. They are
+created only: they are not added to the client's allowed groups, which stay the
+member and admin groups, and `apply` never deletes one.
 
 **Provisional:** creating a group is a mutation of the identity provider's
 groups, which `docs/deployment-agent-rules.md` puts behind explicit approval
@@ -225,16 +250,25 @@ how that behaviour runs.
 
 ### When it runs
 
-Once per start of its container, then it exits: `restart: on-failure`, so a
-failed run is retried and a finished one stays finished. Every `apply` that
-recreates the stack runs it again, which is when a configuration change reaches
-Wiki.js. It reaches Wiki.js by service name on the stack's own network, never
+Once per start of its container. It then stays up, idle, and serves the
+result on `GET /healthz` on its own port, which its Docker healthcheck reads:
+healthy once a run has converged, unhealthy while one is in progress or after
+one failed. `apply`'s health gate counts any exited container as failed,
+whatever its exit status (`internal/apply/health.go:90-115`), and waits on a
+container that is starting, so a bootstrap that stays up is one `apply` waits
+for until Wiki.js is configured. A failed run is retried after a minute, the
+same pass again. Its restart policy is `unless-stopped`, like every other
+service. Every `apply` that recreates the stack runs it again, which is when a
+configuration change reaches Wiki.js. It reaches Wiki.js by service name on the stack's own network, never
 through the gateway, and the database through the same host and port Wiki.js
 uses, with the same credentials.
 
 It shares the app's process namespace (`pid: "service:app"`, which the compose
 policy allows because it reaches no further than the stack) and runs as the
 app's user, uid 1000, so that it can stop a stale instance (step 3 below).
+Stopping the app's process ends that namespace, which ends the bootstrap with
+it; both come back under their restart policy, and the bootstrap's next run
+finds an instance that has left setup mode.
 
 ### What one run does
 
@@ -281,7 +315,8 @@ app's user, uid 1000, so that it can stop a stale instance (step 3 below).
      `securityTrustProxy: true`, `uploadMaxFileSize`;
    * the `Guests` group (ID 2): no permissions and no page rules, so the wiki
      is sign in only (`server/controllers/common.js:465-471`);
-   * the admin group's permissions: every one except `manage:system`;
+   * the admin group's permissions: every one except `manage:system` and
+     `manage:api`;
    * every `synced_groups` group missing from Wiki.js, created with Wiki.js's
      defaults.
 
@@ -290,7 +325,8 @@ app's user, uid 1000, so that it can stop a stale instance (step 3 below).
    (`server/models/authentication.js:94-122`). *To verify before building*
    asks whether its reload event covers them; until that is observed, the
    bootstrap restarts its own instance after changing them, as in step 3.
-6. **Release** the lock and exit 0.
+6. **Release** the lock and report healthy. Nothing more happens until the
+   container restarts.
 
 ### What it writes, and only that
 
@@ -421,9 +457,10 @@ Each through a pull request; `main` and `develop` take nothing else.
 Each of these is reasoned from source, not observed, and the design depends on
 it:
 
-* That `apply`'s health gate treats a service that exits 0 as done rather than
-  as a failed container, and waits for it. If it does not, the gate needs to
-  learn one shot services before this ships.
+* That the bootstrap, sharing the app's process namespace, comes back after
+  it stops the app, and rejoins the restarted app's namespace.
+* That node-postgres in the Wiki.js image honours `sslmode=no-verify` in
+  `DATABASE_URL` against the cluster's Postgres.
 * That `pg-pubsub` reconnects its `LISTEN` after a Patroni failover moves the
   primary. If it does not, instances stop hearing each other until restarted.
 * Whether a strategy change made on one instance reaches the others through
