@@ -16,13 +16,15 @@ import (
 )
 
 // ensureAgeKey makes the age key of a deployment built from scratch: no
-// secrets file and no .sops.yaml beside it. It keeps the key in the keystore
-// under the deployment id, or in keyFile when one is named, reads it back,
-// and only then writes .sops.yaml, so nothing is ever encrypted to a key
-// that was not kept. Any other deployment already answered where its key
-// lives, and is left as it is. The private key is never shown: a secret
-// printed to a terminal is in a scrollback buffer, and this one opens every
-// other. README, "Rendered configuration is a build artifact".
+// secrets file and no .sops.yaml beside it. When a SOPS_AGE_* variable is
+// set it uses that key instead (useVariableKey). Otherwise it keeps the key
+// in the keystore under the deployment id, or in keyFile when one is named,
+// reads it back, and only then writes .sops.yaml, so nothing is ever
+// encrypted to a key that was not kept. Any other deployment already
+// answered where its key lives, and is left as it is. The private key is
+// never shown: a secret printed to a terminal is in a scrollback buffer, and
+// this one opens every other. README, "Rendered configuration is a build
+// artifact".
 func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) error {
 	dir := filepath.Dir(secretsPath)
 	sopsPath := filepath.Join(dir, config.SOPSConfigName)
@@ -46,6 +48,9 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 			}
 		}
 		return nil
+	}
+	if variables := config.AgeVariablesSet(); len(variables) > 0 {
+		return useVariableKey(r, variables, dir, sopsPath, secretsPath, keyFile)
 	}
 
 	step := r.Step("make age key")
@@ -90,18 +95,47 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	}
 	step.Detail("public key %s, written to %s", recipient, ui.ShortPath(sopsPath))
 	step.Done(shown)
-	variable, variableSet := config.AgeVariableSet()
 	switch {
 	case keyFile != "":
 		// paisans does not look for a key file on its own, so without this
 		// line the next command cannot decrypt.
 		r.Note("set this before running paisans or sops", "export "+export)
-	case variableSet:
-		r.Detail("%s is set, so paisans uses it instead of %s until it is unset", variable, where)
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}
 	r.Warn("this is the only copy of the age key", "Losing it loses every secret in "+ui.ShortPath(secretsPath)+". Add a second recipient to "+config.SOPSConfigName+", another admin's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
+	return nil
+}
+
+// useVariableKey is ensureAgeKey for an operator who brings the key through
+// a SOPS_AGE_* variable: every later command decrypts with what the
+// variables name, so a key made and saved here would never be used. Its
+// public key is written to .sops.yaml and nothing is kept, since the key is
+// already wherever the variable finds it. A variable that gives no key, or
+// variables that give several, are refused rather than answered with a new
+// key the operator did not choose. The private key is never shown.
+func useVariableKey(r ui.Reporter, variables []string, dir, sopsPath, secretsPath, keyFile string) error {
+	if keyFile != "" {
+		return &ui.Problem{
+			Hint:    "--age-private-key-file asks for a new key, and " + andList(variables) + " names one",
+			Explain: "init makes a key only when no SOPS_AGE_* variable names one, since every later command decrypts with the variable's key. Drop the flag to use that key, or unset " + andList(variables) + " to have a new key kept in the file.",
+		}
+	}
+	step := r.Step("age key")
+	key, err := config.ReadVariableKey()
+	if err == nil {
+		err = config.WriteSOPSConfig(dir, key.Recipient)
+	}
+	if err != nil {
+		step.Fail(err)
+		return err
+	}
+	step.Detail("public key written to %s", ui.ShortPath(sopsPath))
+	step.Done("from " + andList(key.Variables) + ", public key " + key.Recipient)
+	// Where the variable's key comes from, and whether anything else holds
+	// it, is the operator's to know: the toolkit can say only that the file
+	// is encrypted to this one key.
+	r.Warn(ui.ShortPath(secretsPath)+" is encrypted to this one age key", "If what "+andList(key.Variables)+" reads is the only copy of the key, losing it loses every secret in the file. Add a second recipient to "+config.SOPSConfigName+", another admin's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
 	return nil
 }
 

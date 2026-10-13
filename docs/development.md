@@ -318,15 +318,24 @@ the operator.
 Service through `secret-tool`, an item per deployment id under service
 `paisans-age`, the key on stdin and never in argv. Tests never reach a real
 keystore: `cmd/paisans` and `internal/config` replace `config.AgeKeystore` in
-`TestMain`.
+`TestMain`. With a `SOPS_AGE_*` variable set it makes no key
+(`useVariableKey`): `config.ReadVariableKey` reads every set variable the way
+the embedded sops (v3.13.3, `age/keysource.go`) does, parsing age identities
+with sops' own `age.ParsedIdentities` and SSH keys with `x/crypto/ssh`, and
+returns the one public key they hold together, or refuses. Tests set the
+variables with `t.Setenv`, and a command variable runs `cat` on a key file.
 
 `config.LoadDeploymentSecrets` reads that item when no `SOPS_AGE_*` variable
 is set and hands its key to the file's age recipients in memory, through
 `age.ParsedIdentities` in the embedded sops (v3.13.3). Otherwise, and when
-there is no item or its key is not a recipient, sops' own search runs:
-`SOPS_AGE_KEY_CMD` first, then `SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY` and
-`sops/age/keys.txt` under the user's config directory. A failure names every
-one of those places, and the keystore item when one was looked for.
+there is no item or its key is not a recipient, sops' own search runs, which
+reads `SOPS_AGE_KEY_CMD`, `SOPS_AGE_KEY_FILE`, `SOPS_AGE_KEY`, the SSH pair and
+`sops/age/keys.txt` under the user's config directory, and tries every key it
+finds. A failure names every one of those places, and the keystore item when
+one was looked for. When a variable decrypted the file and the keystore holds
+the deployment's key, which the variables do not name, `dataKey` calls
+`config.KeystoreBypassed`; `routeKeyNotices` points it at the command's
+reporter, which shows it once as a note.
 
 `web-server show --app <name>` and `web-server check --app <name>` are for an app
 pinned to a monitor site (`render.ServedBy`); every other app is the
