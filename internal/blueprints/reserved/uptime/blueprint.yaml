@@ -71,5 +71,10 @@ secrets:
   # to the literal "admin" when it is unset, so it is generated rather than
   # optional. SESSION_SECRET signs the session cookie; unset, the fork
   # invents one per boot and every restart signs everyone out.
-  generate: ["admin_password", "session_secret"]
+  generate:
+    - admin_password
+    # The fork passes it to express-session as `secret`, which signs the
+    # uptime.sid cookie, and keeps sessions in memory, so the restart ends
+    # them as well.
+    - {name: session_secret, rotation_cost: signs-out}
   self_rotated: ["session_secret"]

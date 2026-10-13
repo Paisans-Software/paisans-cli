@@ -236,7 +236,7 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 	}
 
 	docs := files["home-a/srv/paisans/f2a9/docs/compose.yaml"]
-	fallback, ok := kinds.DefaultImage(config.KindOutline, "app")
+	fallback, ok := kinds.DefaultImage(config.Kind("outline"), "app")
 	if !ok {
 		t.Fatal("outline ships no default image")
 	}
@@ -865,8 +865,8 @@ func walk(t *testing.T, root string) map[string]string {
 // filesystem catches it, because embed sees exactly what git checked out.
 func TestEveryKindShipsACommittedTemplateSet(t *testing.T) {
 	for _, kind := range []config.Kind{
-		config.KindMbin, config.KindOutline, config.KindPocketID,
-		config.KindSynapse, config.KindWriteFreely, config.KindInvite,
+		config.Kind("mbin"), config.Kind("outline"), config.KindPocketID,
+		config.Kind("synapse"), config.Kind("writefreely"), config.KindInvite,
 	} {
 		files, err := render.TemplateSet(kind)
 		if err != nil {
@@ -2406,7 +2406,7 @@ func TestMbinOAuthKeypairIsRenderedForEveryAppsSite(t *testing.T) {
 		if !strings.Contains(private.Content, "Proc-Type: 4,ENCRYPTED") {
 			t.Errorf("%s is 0644 and not encrypted", private.Path)
 		}
-		key, err := secretsgen.OpenOAuthPrivateKey(private.Content, passphrase)
+		key, err := secretsgen.OpenPrivateKey(private.Content, passphrase)
 		if err != nil {
 			t.Errorf("%s does not open with the rendered OAUTH_PASSPHRASE: %v", private.Path, err)
 			continue

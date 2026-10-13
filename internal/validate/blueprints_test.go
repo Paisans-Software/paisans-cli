@@ -40,7 +40,7 @@ checks:
   - id: notes-mode-on-a-small-deployment
     level: warn
     hint: notes runs loud on a small deployment
-    key_expr: "'settings.' + 'mode'"
+    key_expr: "'apps.' + app.name + '.settings.mode'"
     rule: "!has(app.settings.mode) || app.settings.mode != 'loud' || size(deployment.sites) > 9"
     message_expr: "app.name + ' is loud on ' + app.sites.join(', ') + ', one of ' + string(size(deployment.sites)) + ' sites, keeping files ' + app.storage.mode"
 `

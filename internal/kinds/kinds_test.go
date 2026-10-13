@@ -12,13 +12,13 @@ import (
 // owns, not a bucket. The other kinds have no uploads at all.
 func TestUsesObjectStorage(t *testing.T) {
 	cases := map[config.Kind]bool{
-		config.KindMbin:        true,
-		config.KindOutline:     true,
-		config.KindSynapse:     false,
-		config.KindElement:     false,
-		config.KindOAuth2Proxy: false,
-		config.KindPocketID:    false,
-		config.KindWriteFreely: true,
+		config.Kind("mbin"):        true,
+		config.Kind("outline"):     true,
+		config.Kind("synapse"):     false,
+		config.Kind("element"):     false,
+		config.KindOAuth2Proxy:     false,
+		config.KindPocketID:        false,
+		config.Kind("writefreely"): true,
 	}
 	for kind, want := range cases {
 		if got := kinds.UsesObjectStorage(kind); got != want {
@@ -33,12 +33,12 @@ func TestUsesObjectStorage(t *testing.T) {
 // be.
 func TestMbinAndTheBlogServeObjectsPubliclyAndOutlineDoesNot(t *testing.T) {
 	for _, kind := range kinds.Builtin() {
-		want := kind == config.KindMbin || kind == config.KindWriteFreely
+		want := kind == config.Kind("mbin") || kind == config.Kind("writefreely")
 		if got := kinds.ServesObjectsPublicly(kind); got != want {
 			t.Errorf("%s: ServesObjectsPublicly is %v, want %v", kind, got, want)
 		}
 	}
-	if kinds.ServesObjectsPublicly(config.KindOutline) {
+	if kinds.ServesObjectsPublicly(config.Kind("outline")) {
 		t.Fatal("outline's bucket holds document attachments and must never be world readable")
 	}
 }
@@ -48,17 +48,17 @@ func TestMbinAndTheBlogServeObjectsPubliclyAndOutlineDoesNot(t *testing.T) {
 // only: it writes images and never serves them, so a reader with no credential
 // has to be able to read its bucket.
 func TestWriteFreelyUsesPostgresAndPublicObjectStorage(t *testing.T) {
-	if !kinds.UsesPostgres(config.KindWriteFreely) {
+	if !kinds.UsesPostgres(config.Kind("writefreely")) {
 		t.Error("the wisp fork keeps its data in Postgres")
 	}
-	if !kinds.UsesObjectStorage(config.KindWriteFreely) {
+	if !kinds.UsesObjectStorage(config.Kind("writefreely")) {
 		t.Error("the wisp fork keeps uploaded images in S3")
 	}
-	if !kinds.ServesObjectsPublicly(config.KindWriteFreely) {
+	if !kinds.ServesObjectsPublicly(config.Kind("writefreely")) {
 		t.Fatal("the fork never serves its own images under S3, so its bucket must be readable by a reader with no credential")
 	}
 	var sawPostgres bool
-	for _, s := range kinds.Services(config.KindWriteFreely) {
+	for _, s := range kinds.Services(config.Kind("writefreely")) {
 		if s.Name == kinds.PostgresService {
 			sawPostgres = true
 		}
@@ -91,27 +91,27 @@ func TestMediaHostnameIsDerivedAsASiblingAndCanBeOverridden(t *testing.T) {
 		app  config.App
 		want string
 	}{
-		{"mbin", config.App{Kind: config.KindMbin, Hostname: "talk.example.org"}, "talk-media.example.org"},
-		{"outline", config.App{Kind: config.KindOutline, Hostname: "docs.example.org"}, "docs-media.example.org"},
-		{"writefreely", config.App{Kind: config.KindWriteFreely, Hostname: "blog.example.org"}, "blog-media.example.org"},
+		{"mbin", config.App{Kind: config.Kind("mbin"), Hostname: "talk.example.org"}, "talk-media.example.org"},
+		{"outline", config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org"}, "docs-media.example.org"},
+		{"writefreely", config.App{Kind: config.Kind("writefreely"), Hostname: "blog.example.org"}, "blog-media.example.org"},
 		// The label is the first one, and the result is under the domain
 		// rather than under whatever the rest of the app's hostname was.
-		{"deeper hostname", config.App{Kind: config.KindMbin, Hostname: "talk.eu.example.org"}, "talk-media.example.org"},
-		{"declared", config.App{Kind: config.KindOutline, Hostname: "docs.example.org", Hostnames: map[string]string{"media": "attachments.example.org"}}, "attachments.example.org"},
+		{"deeper hostname", config.App{Kind: config.Kind("mbin"), Hostname: "talk.eu.example.org"}, "talk-media.example.org"},
+		{"declared", config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org", Hostnames: map[string]string{"media": "attachments.example.org"}}, "attachments.example.org"},
 		{"stores nothing", config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}, ""},
-		{"synapse keeps media on disk", config.App{Kind: config.KindSynapse, Hostname: "chat.example.org"}, ""},
+		{"synapse keeps media on disk", config.App{Kind: config.Kind("synapse"), Hostname: "chat.example.org"}, ""},
 		// An app keeping its files on its own disk serves them on its own
 		// hostname, and has no media hostname to derive or declare.
-		{"local storage", config.App{Kind: config.KindMbin, Hostname: "talk.example.org", Storage: config.StorageLocal}, ""},
+		{"local storage", config.App{Kind: config.Kind("mbin"), Hostname: "talk.example.org", Storage: config.StorageLocal}, ""},
 	} {
 		if got := kinds.MediaHostname(withGarage, tc.app); got != tc.want {
 			t.Errorf("%s: MediaHostname = %q, want %q", tc.name, got, tc.want)
 		}
 	}
-	if !kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.KindMbin, Hostname: "talk.example.org"}) {
+	if !kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.Kind("mbin"), Hostname: "talk.example.org"}) {
 		t.Error("an app with no hostnames.media has a derived media hostname")
 	}
-	if kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.KindMbin, Hostname: "talk.example.org", Hostnames: map[string]string{"media": "m.example.org"}}) {
+	if kinds.MediaHostnameIsDerived(withGarage, config.App{Kind: config.Kind("mbin"), Hostname: "talk.example.org", Hostnames: map[string]string{"media": "m.example.org"}}) {
 		t.Error("an app that declares hostnames.media does not have a derived one")
 	}
 }
@@ -125,15 +125,15 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 		format kinds.Format
 		file   string
 	}{
-		config.KindMbin:        {kinds.ConfigEnv, ".env"},
-		config.KindOutline:     {kinds.ConfigEnv, ".env"},
-		config.KindPocketID:    {kinds.ConfigEnv, ".env"},
-		config.KindOAuth2Proxy: {kinds.ConfigEnv, ".env"},
-		config.KindWriteFreely: {kinds.ConfigINI, "config.ini"},
-		config.KindSynapse:     {kinds.ConfigYAML, "homeserver.yaml"},
-		config.KindElement:     {kinds.ConfigJSON, "config.json"},
-		config.KindUptime:      {kinds.ConfigEnv, ".env"},
-		config.KindInvite:      {kinds.ConfigEnv, ".env"},
+		config.Kind("mbin"):        {kinds.ConfigEnv, ".env"},
+		config.Kind("outline"):     {kinds.ConfigEnv, ".env"},
+		config.KindPocketID:        {kinds.ConfigEnv, ".env"},
+		config.KindOAuth2Proxy:     {kinds.ConfigEnv, ".env"},
+		config.Kind("writefreely"): {kinds.ConfigINI, "config.ini"},
+		config.Kind("synapse"):     {kinds.ConfigYAML, "homeserver.yaml"},
+		config.Kind("element"):     {kinds.ConfigJSON, "config.json"},
+		config.KindUptime:          {kinds.ConfigEnv, ".env"},
+		config.KindInvite:          {kinds.ConfigEnv, ".env"},
 	}
 	for _, kind := range kinds.Builtin() {
 		want, known := cases[kind]
@@ -155,8 +155,8 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 // against.
 func TestTheForksDefaultToAReleaseVersion(t *testing.T) {
 	for kind, want := range map[config.Kind]string{
-		config.KindMbin:        "ghcr.io/paisans-software/mbin:1.15.1-paisans",
-		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp",
+		config.Kind("mbin"):        "ghcr.io/paisans-software/mbin:1.15.1-paisans",
+		config.Kind("writefreely"): "ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp",
 	} {
 		if got, _ := kinds.DefaultImage(kind, "app"); got != want {
 			t.Errorf("%s app image is %s, want %s", kind, got, want)

@@ -46,5 +46,10 @@ secrets:
     - {key: "session_key", why: "paisans-invite refuses to start without INVITE_SESSION_KEY"}
   # email_hash_key keys the hash of a declined address; session_key signs
   # the sign-in cookie (docs/specs/2026-10-12-invite-service.md).
-  generate: ["email_hash_key", "session_key"]
+  generate:
+    # The service stores only the keyed hash of a declined address, so a new
+    # key forgets every one.
+    - {name: email_hash_key, never_rotate: "rotating it forgets every declined address"}
+    # It signs the service's sign-in cookie, and nothing else.
+    - {name: session_key, rotation_cost: signs-out}
   self_rotated: ["session_key"]

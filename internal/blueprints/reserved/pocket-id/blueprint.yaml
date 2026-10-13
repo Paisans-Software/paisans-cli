@@ -58,5 +58,13 @@ secrets:
   # seed names for the app (internal/render/adminsheartbeat.go). One per
   # app rather than per site, so that the one monitor follows whichever
   # instance is active.
-  generate: ["encryption_key", "static_api_key", "admins_heartbeat_token"]
+  generate:
+    - name: encryption_key
+      never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Pocket ID offers no re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
+    # Its users are the toolkit, the admin reconciler and the invite
+    # services, not members.
+    - static_api_key
+    # 16 random bytes, hex, the shape the uptime fork's seed takes a push
+    # token in (src/lib/sitePayload.js insertSite at 1.1.0-oidc.4).
+    - {name: admins_heartbeat_token, format: hex16}
   self_rotated: ["static_api_key"]

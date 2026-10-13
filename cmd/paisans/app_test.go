@@ -244,8 +244,8 @@ func TestPocketIDAdminRefusesAPipedPassword(t *testing.T) {
 
 func TestAppAdminCreateRefusesAnUnimplementedKind(t *testing.T) {
 	fake := withPIDFake(t)
-	err := runAppAdminCreate([]string{"--config", fixtureConfig(), "--app", "docs", "--username", "u", "--email", "u@example.org"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "outline admin creation is not implemented yet. Implemented kinds: pocket-id") {
+	err := runAppAdminCreate([]string{"--config", fixtureConfig(), "--app", "web", "--username", "u", "--email", "u@example.org"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "element admin creation is not implemented yet. Implemented kinds: pocket-id") {
 		t.Errorf("got %v", err)
 	}
 	if len(fake.commands) != 0 {

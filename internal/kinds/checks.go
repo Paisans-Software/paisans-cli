@@ -106,11 +106,16 @@ func (c Check) Holds(cfg *config.Config, name string) bool {
 	return ok && v
 }
 
-// Failure is the key, relative to apps.<name>, and the message of the check
-// failing for the app called name. A key or message expression that cannot
-// be worked out for the app gives the check's own key, or says so.
+// Failure is the key and the message of the check failing for the app
+// called name. The key is the whole key a key expression gives, which may be
+// the deployment's rather than the app's, or apps.<name> and the check's
+// relative key. A key or message expression that cannot be worked out for the
+// app gives the relative key, or says so.
 func (c Check) Failure(cfg *config.Config, name string) (key, message string) {
-	key, message = c.Key, c.Message
+	key, message = "apps."+name, c.Message
+	if c.Key != "" {
+		key += "." + c.Key
+	}
 	vars := celAppIn(cfg, name)
 	eval := func(prg cel.Program) (string, bool) {
 		out, _, err := prg.Eval(vars)

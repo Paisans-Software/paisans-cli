@@ -15,9 +15,16 @@ services:
   # 1.24.0 is the newest release; 1.25.0-rc.0 exists but is a release
   # candidate.
   - {name: "app", image: "ghcr.io/element-hq/synapse:v1.160.0", purpose: "the homeserver, which only serves the API"}
-  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.24.0", purpose: "Matrix Authentication Service, which owns the login"}
+  # MAS listens on 8009, one above the homeserver's 8008, and the gateway
+  # reaches it directly: the three compatibility login paths are split off
+  # to it in front of the homeserver. mas.yaml binds the port explicitly.
+  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.24.0", purpose: "Matrix Authentication Service, which owns the login", port: 8009}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
-database: {engine: postgres}
+# MAS keeps its own database beside the homeserver's, <database>_mas, which
+# initdb.d creates.
+database: {engine: postgres, extra: [mas]}
+# Element and any other Matrix client link to it by this role.
+provides: [matrix-homeserver]
 port: 8008
 config:
   # It also renders a `.env`, but only for its Postgres container's
@@ -60,9 +67,10 @@ storage:
   # store is a directory the homeserver owns, which is also why the kind is
   # pinned to one node.
   local_only: true
+  local_only_reason: "its S3 storage provider supplements the local media store rather than replacing it, so the media directory is always required"
 # The relying party is the homeserver's authentication service, MAS
-# at tag v1.24.0, so the callback is its upstream provider's,
-# MASRedirectURI (crates/router/src/endpoints.rs:742-762). PKCE is on:
+# at tag v1.24.0, so the callback is its upstream provider's, ending in
+# the provider's ULID (crates/router/src/endpoints.rs:742-762). PKCE is on:
 # mas.yaml sets pkce_method: always, the S256 mode
 # (crates/config/src/sections/upstream_oauth2.rs:420-436,
 # crates/cli/src/sync.rs:289-298), whose methods are S256 alone
@@ -74,7 +82,7 @@ storage:
 # the homeserver's hostname serves no page for a member, and a Matrix
 # client is where they go.
 oidc:
-  callback: "/upstream/callback/{{ masUpstreamProviderID .App }}"
+  callback: "/upstream/callback/{{ stableULID .App }}"
   no_launch: true
   pkce: true
   member_group_setting: "member_group"
@@ -83,5 +91,32 @@ oidc:
 secrets:
   # Three, because the homeserver no longer authenticates anyone and Matrix
   # Authentication Service in front of it needs its own.
-  generate: ["mas_encryption_secret", "mas_matrix_secret", "mas_signing_key"]
+  generate:
+    # MAS states the form: "This must be a 32-byte long hex-encoded key",
+    # from its configuration reference at tag v1.24.0, checked 2026-09-15.
+    - name: mas_encryption_secret
+      format: hex32
+      never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Matrix Authentication Service offers no re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
+    # Shared with the homeserver, which carries the same value in
+    # matrix_authentication_service.secret. MAS's reference does not say
+    # whether Matrix sessions survive it or the signing key changing, and
+    # that has not been checked against a running MAS, so both are taken
+    # to sign members out, the stricter reading.
+    - {name: mas_matrix_secret, rotation_cost: signs-out}
+    # "At least one RSA key must be configured", so an RSA key and not one
+    # of the elliptic curve types MAS also accepts.
+    - {name: mas_signing_key, format: rsa-pem, rotation_cost: signs-out}
   self_rotated: ["mas_signing_key", "mas_matrix_secret"]
+# The rules validate holds a homeserver to, by the ids they have always had.
+checks:
+  # Its media store cannot follow a failover, and the blueprint renders its
+  # own Postgres and the hook that creates MAS's database beside it, neither
+  # of which exists under cluster placement. A stack pinned for its database
+  # and clustered for its app is less available than either, so this is a
+  # refusal.
+  - id: homeserver-must-be-pinned
+    level: refuse
+    hint: synapse app must be pinned to a site
+    key: placement
+    rule: app.placement != 'cluster'
+    message: "is cluster, and the synapse kind has no clustered form. Its media store cannot follow a failover, because the S3 storage provider supplements a local media directory rather than replacing it, and the kind renders its own Postgres plus the hook that creates the authentication service's database beside it. Pin it: placement: { pinned: <site> }."

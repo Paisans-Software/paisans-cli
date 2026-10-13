@@ -147,7 +147,7 @@ var engines = map[string]bool{"postgres": true, "mysql": true, "sqlite": true, "
 var knownRoles = map[string]bool{MediaRole: true, WellknownRole: true}
 
 // callbackHelpers are the functions an OIDC callback template may call.
-var callbackHelpers = template.FuncMap{"stableULID": StableULID, "masUpstreamProviderID": StableULID}
+var callbackHelpers = template.FuncMap{"stableULID": StableULID}
 
 // Parse reads one blueprint.yaml, from the directory named name, into a Def.
 // hasTemplate reports whether the blueprint ships a template, so a hostname

@@ -618,7 +618,7 @@ func TestARolelessSiteStillHostsOtherKinds(t *testing.T) {
 	watch := cfg.Sites["watch"]
 	watch.Roles = nil
 	cfg.Sites["watch"] = watch
-	web := config.App{Kind: config.KindElement, Hostname: "web.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	web := config.App{Kind: config.Kind("element"), Hostname: "web.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
 	cfg.Apps["web"] = web
 	result := validate.Check(cfg)
 	if !refusedFor(result, "uptime-needs-a-monitor-site", "apps.health.placement") {

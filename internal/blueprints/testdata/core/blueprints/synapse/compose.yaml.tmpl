@@ -52,7 +52,7 @@ services:
     # public address is reachable from the internet whatever ufw says. The
     # gateway, over the mesh, is the only thing that should reach it.
     ports:
-      - "{{ .MeshAddress }}:{{ .MASPort }}:{{ .MASPort }}"
+      - "{{ .MeshAddress }}:{{ (index .ServicePorts "mas") }}:{{ (index .ServicePorts "mas") }}"
     volumes:
       # 0600, and for a stronger reason than the homeserver's file: this one
       # carries the signing key, the encryption secret and the identity

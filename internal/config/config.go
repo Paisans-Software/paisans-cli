@@ -56,17 +56,15 @@ const (
 
 var knownRoles = map[Role]bool{RoleData: true, RoleApps: true, RoleGateway: true, RoleWitness: true, RoleStorage: true, RoleMonitor: true}
 
-// Kind is an application the toolkit knows how to render.
+// Kind is an application the toolkit knows how to render: a blueprint's
+// name, qualified by its catalog unless it is the core catalog's.
 type Kind string
 
+// The reserved blueprints, the only ones Go names: no catalog may provide
+// them, so their names never change with a catalog commit.
 const (
-	KindElement     Kind = "element"
-	KindMbin        Kind = "mbin"
 	KindOAuth2Proxy Kind = "oauth2-proxy"
-	KindOutline     Kind = "outline"
 	KindPocketID    Kind = "pocket-id"
-	KindSynapse     Kind = "synapse"
-	KindWriteFreely Kind = "writefreely"
 	KindUptime      Kind = "uptime"
 	KindInvite      Kind = "invite"
 )

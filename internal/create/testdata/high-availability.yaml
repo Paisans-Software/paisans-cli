@@ -154,7 +154,7 @@ apps:
     # gate itself, at gate.example.org on the gateway.
     gated: true
     settings:
-      # The chat server's API hostname, which becomes base_url.
+      # The hostname of the app it is a client of.
       homeserver: chat.example.org
       brand: Example Community
   health:

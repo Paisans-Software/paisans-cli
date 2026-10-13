@@ -93,7 +93,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org", SMTP: &config.SMTP{FromAddress: "noreply@Talk.Example.org"}}
 	// An app that sends no mail has no say, even with a block (validate
 	// refuses one, but this must not depend on it).
-	cfg.Apps["docs"] = config.App{Kind: config.KindOutline, Hostname: "docs.example.org", SMTP: &config.SMTP{FromAddress: "x@docs.example.org"}}
+	cfg.Apps["docs"] = config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org", SMTP: &config.SMTP{FromAddress: "x@docs.example.org"}}
 
 	names := MailNames(cfg)
 	if s := names["example.org"]; len(s) != 1 || s[0] != "smtp.from_address" {
@@ -124,7 +124,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 // Mbin sends mail, so an Mbin app's own sender is a mail name the same way.
 func TestMbinSenderIsAMailDomain(t *testing.T) {
 	cfg := declared()
-	cfg.Apps["forum"] = config.App{Kind: config.KindMbin, Hostname: "forum.example.org", SMTP: &config.SMTP{FromAddress: "noreply@forum.example.org"}}
+	cfg.Apps["forum"] = config.App{Kind: config.Kind("mbin"), Hostname: "forum.example.org", SMTP: &config.SMTP{FromAddress: "noreply@forum.example.org"}}
 	names := MailNames(cfg)
 	if s := names["forum.example.org"]; len(s) != 1 || s[0] != "apps.forum.smtp.from_address" {
 		t.Errorf("an mbin app's sender: %v", names)

@@ -28,7 +28,7 @@ func denied(ref string) error {
 // mbinDefault is the fixture with talk on the mbin kind's default image.
 func mbinDefault(t *testing.T) (*render.Plan, string) {
 	t.Helper()
-	def, ok := kinds.DefaultImage(config.KindMbin, "app")
+	def, ok := kinds.DefaultImage(config.Kind("mbin"), "app")
 	if !ok || kinds.ParseReference(def).Tag == "" {
 		t.Fatalf("the mbin kind's default %q names no tag", def)
 	}

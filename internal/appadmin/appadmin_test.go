@@ -68,14 +68,14 @@ func TestExecuteRefusesWhenTheResultIsNotAnAdmin(t *testing.T) {
 }
 
 func TestUnsupportedKind(t *testing.T) {
-	_, err := Build(config.KindOutline, nullTransport{}, Request{Username: "founder"})
+	_, err := Build(config.Kind("outline"), nullTransport{}, Request{Username: "founder"})
 	if err == nil || err.Error() != "outline admin creation is not implemented yet. Implemented kinds: pocket-id" {
 		t.Errorf("got %v", err)
 	}
 }
 
 func TestMbinHasNoCreator(t *testing.T) {
-	if _, err := For(config.KindMbin); err == nil {
+	if _, err := For(config.Kind("mbin")); err == nil {
 		t.Error("mbin has a Creator; its administrators come only through single sign on")
 	}
 }

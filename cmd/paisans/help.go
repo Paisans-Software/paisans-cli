@@ -345,7 +345,7 @@ var helpCommands = []helpCommand{
 		name:    "secrets rotate",
 		summary: "Replace secrets, one at a time, in gated stages.",
 		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--sudo=false] [--execute]"},
-		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.oauth for Mbin's OAuth2 keys), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
+		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
 			"A pasted secret (the DNS token or an SMTP password) is handed on once it is replaced at its issuer and set with secrets set, and refused while every host using it runs the value the file holds, read line by line; --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +

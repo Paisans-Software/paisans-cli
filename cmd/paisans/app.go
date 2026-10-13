@@ -99,10 +99,10 @@ func runAppAdminCreate(args []string, stdin io.Reader) error {
 		return fmt.Errorf("app admin create: %s declares no app %q. Declared apps are %s", *configPath, *appName, strings.Join(cfg.AppNames(), ", "))
 	}
 	// Refuse a kind with no Creator before resolving a site or reaching a host.
-	if app.Kind == config.KindMbin {
-		return mbinAdminRefusal(cfg, *appName, *username)
-	}
 	if _, err := appadmin.For(app.Kind); err != nil {
+		if spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, *appName); ok && (spec.AdminGroupSetting != "" || spec.DefaultAdminGroup != "") {
+			return ssoAdminRefusal(cfg, *appName, app.Kind, *username)
+		}
 		return fmt.Errorf("app admin create: %w", err)
 	}
 	if err := refuseStdin(stdin, app.Kind); err != nil {
@@ -184,11 +184,13 @@ func runAppAdminCreate(args []string, stdin io.Reader) error {
 	return nil
 }
 
-// mbinAdminRefusal is the answer for an Mbin app. Its administrators come
-// only through single sign on: the user is made at Pocket ID, and the same
-// command puts them in every group an app reads as its administrators. The
-// Pocket ID app is named when the configuration has exactly one.
-func mbinAdminRefusal(cfg *config.Config, appName, username string) error {
+// ssoAdminRefusal is the answer for an app with no creator of its own whose
+// blueprint reads an admin group from the identity provider. Its
+// administrators come only through single sign on: the user is made at
+// Pocket ID, and the same command puts them in every group an app reads as
+// its administrators. The Pocket ID app is named when the configuration has
+// exactly one.
+func ssoAdminRefusal(cfg *config.Config, appName string, kind config.Kind, username string) error {
 	var pids []string
 	for _, name := range cfg.AppNames() {
 		if cfg.Apps[name].Kind == config.KindPocketID {
@@ -199,8 +201,8 @@ func mbinAdminRefusal(cfg *config.Config, appName, username string) error {
 	if len(pids) == 1 {
 		pid = pids[0]
 	}
-	return fmt.Errorf("app admin create: %s is mbin, whose administrators come only through single sign on. Run `paisans app admin create --app %s --username %s --email <e>`: it makes the user at Pocket ID and puts them in every app's admin group, %s's included. Nothing was changed",
-		appName, pid, username, appName)
+	return fmt.Errorf("app admin create: %s is %s, whose administrators come only through single sign on. Run `paisans app admin create --app %s --username %s --email <e>`: it makes the user at Pocket ID and puts them in every app's admin group, %s's included. Nothing was changed",
+		appName, kind, pid, username, appName)
 }
 
 // adminGroups is every admin group an app that signs in through Pocket ID

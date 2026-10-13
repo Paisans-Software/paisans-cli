@@ -25,11 +25,7 @@ func (c *checker) blueprintRules() {
 			if check.Holds(c.cfg, name) {
 				continue
 			}
-			rel, message := check.Failure(c.cfg, name)
-			key := prefix
-			if rel != "" {
-				key += "." + rel
-			}
+			key, message := check.Failure(c.cfg, name)
 			hint := check.Hint
 			if hint == "" {
 				hint = "a check of the app's blueprint fails"

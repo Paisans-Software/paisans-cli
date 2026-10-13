@@ -51,19 +51,10 @@ type Plan struct {
 func AppPort(kind config.Kind) int { return kinds.Port(kind) }
 
 // reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
-// the mesh address for the uptime monitor. A literal, like masPort:
+// the mesh address for the uptime monitor. A literal:
 // the reconciler's own binary and the kind's compose template name the same
 // number.
 const reconcilerPort = 1412
-
-// masPort is where Matrix Authentication Service listens, one port above the
-// homeserver's 8008. MAS's own documented example binds 8080, and that is not
-// used here: 8080 is already the port two other kinds in this toolkit publish,
-// and a stack whose two containers sit on adjacent ports is easier to read on
-// a host than one that borrows a number from somewhere else. The port is not
-// a default being relied on either way, because the listener in mas.yaml binds
-// it explicitly.
-const masPort = 8009
 
 // patroniAPIPort is where Patroni answers the health check HAProxy uses to
 // find the primary. It is fixed by Spilo.

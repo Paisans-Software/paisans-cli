@@ -20,12 +20,12 @@ func TestInObjectStorageDefaultsToGarageWhereThereIsOne(t *testing.T) {
 		app  config.App
 		want bool
 	}{
-		{"default with garage", withGarage, config.App{Kind: config.KindMbin}, true},
-		{"default without garage", without, config.App{Kind: config.KindMbin}, false},
-		{"local with garage", withGarage, config.App{Kind: config.KindOutline, Storage: config.StorageLocal}, false},
-		{"s3 says so", withGarage, config.App{Kind: config.KindWriteFreely, Storage: config.StorageS3}, true},
+		{"default with garage", withGarage, config.App{Kind: config.Kind("mbin")}, true},
+		{"default without garage", without, config.App{Kind: config.Kind("mbin")}, false},
+		{"local with garage", withGarage, config.App{Kind: config.Kind("outline"), Storage: config.StorageLocal}, false},
+		{"s3 says so", withGarage, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageS3}, true},
 		// No S3 form at all, whatever the key says; validate refuses the s3.
-		{"synapse", withGarage, config.App{Kind: config.KindSynapse, Storage: config.StorageS3}, false},
+		{"synapse", withGarage, config.App{Kind: config.Kind("synapse"), Storage: config.StorageS3}, false},
 		{"uptime", withGarage, config.App{Kind: config.KindUptime}, false},
 		{"pocket-id", withGarage, config.App{Kind: config.KindPocketID}, false},
 	} {
@@ -40,16 +40,16 @@ func TestInObjectStorageDefaultsToGarageWhereThereIsOne(t *testing.T) {
 func TestLocalMediaPaths(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Storage.Garage.Sites = []string{"home-a"}
-	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.KindMbin, Storage: config.StorageLocal}); !slices.Equal(got, []string{"/media/*"}) {
+	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("mbin"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/media/*"}) {
 		t.Errorf("mbin local: %v", got)
 	}
-	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.KindWriteFreely, Storage: config.StorageLocal}); !slices.Equal(got, []string{"/uploads/*"}) {
+	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/uploads/*"}) {
 		t.Errorf("writefreely local: %v", got)
 	}
-	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.KindMbin}); got != nil {
+	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("mbin")}); got != nil {
 		t.Errorf("mbin in garage: %v", got)
 	}
-	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.KindOutline, Storage: config.StorageLocal}); got != nil {
+	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("outline"), Storage: config.StorageLocal}); got != nil {
 		t.Errorf("outline local is private: %v", got)
 	}
 }

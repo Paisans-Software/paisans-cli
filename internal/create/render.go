@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 //go:embed paisans-stack.yaml.tmpl
@@ -80,8 +81,9 @@ type appView struct {
 	App
 	// Placement is the value written after `placement:`.
 	Placement string
-	// Homeserver is the chat server's hostname, for the web client.
-	Homeserver string
+	// Links is, for each role the app's blueprint consumes, the setting it
+	// names and the hostname of the app providing the role.
+	Links map[string]string
 }
 
 func build(a Answers, id string) view {
@@ -144,27 +146,38 @@ func build(a Answers, id string) view {
 		web = pinTo
 	}
 
-	homeserver := ""
+	// An app whose blueprint consumes a role is pointed at the app that
+	// provides it, through the setting the blueprint names.
+	providers := map[string]string{}
 	for _, app := range a.Apps {
-		if app.Kind == config.KindSynapse {
-			homeserver = app.Hostname
+		for _, role := range kinds.Provides(app.Kind) {
+			providers[role] = app.Hostname
 		}
 	}
 	objects := false
 	for _, app := range a.Apps {
-		av := appView{App: app, Homeserver: homeserver}
+		av := appView{App: app}
+		for _, c := range kinds.Consumes(app.Kind) {
+			if host, ok := providers[c.Role]; ok {
+				if av.Links == nil {
+					av.Links = map[string]string{}
+				}
+				av.Links[c.Setting] = host
+			}
+		}
 		switch {
 		case app.Kind == config.KindUptime && monitor != "":
 			av.Placement = pinned(monitor)
-		case app.Kind == config.KindSynapse:
+		case app.Key == chatApp:
 			av.Placement = pinned(chat)
-		case app.Kind == config.KindElement:
+		case app.Key == webApp:
 			av.Placement = pinned(web)
-		case clusterable(app.Kind) && len(data) > 0:
+		case kinds.UsesPostgres(app.Kind) && len(data) > 0:
 			// Clustered whenever any site holds data, so that adding a data
-			// site later is an addition rather than a move.
+			// site later is an addition rather than a move. A clustered app
+			// keeps its files in object storage when its blueprint can.
 			av.Placement = "cluster"
-			if storesObjects(app.Kind) {
+			if kinds.UsesObjectStorage(app.Kind) {
 				objects = true
 			}
 		default:
@@ -182,27 +195,6 @@ func build(a Answers, id string) view {
 }
 
 func pinned(site string) string { return "{ pinned: " + site + " }" }
-
-// clusterable is a kind with a Postgres database, which may join the
-// cluster. The rest keep nothing in Postgres and are refused cluster
-// placement (cluster-placement-without-a-cluster), or must be pinned.
-func clusterable(k config.Kind) bool {
-	switch k {
-	case config.KindPocketID, config.KindMbin, config.KindOutline, config.KindWriteFreely:
-		return true
-	}
-	return false
-}
-
-// storesObjects is a kind whose files go to object storage when it is
-// clustered.
-func storesObjects(k config.Kind) bool {
-	switch k {
-	case config.KindMbin, config.KindOutline, config.KindWriteFreely:
-		return true
-	}
-	return false
-}
 
 // quote is s as a YAML scalar that reads back as exactly s: marshalled by
 // the same library that will read it, so a name holding `:` or `#`, a quote

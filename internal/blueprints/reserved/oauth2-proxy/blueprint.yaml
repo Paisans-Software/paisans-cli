@@ -49,5 +49,9 @@ oidc:
   default_member_group: "members"
   reads_groups: true
 secrets:
-  generate: ["cookie_secret"]
+  generate:
+    # The kind renders no session store, so oauth2-proxy keeps the whole
+    # session in the cookie, encrypted with this secret: a cookie sealed with
+    # the old one no longer opens.
+    - {name: cookie_secret, rotation_cost: signs-out}
   self_rotated: ["cookie_secret"]

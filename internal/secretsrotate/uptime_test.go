@@ -52,7 +52,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}},
 		Apps: map[string]config.App{
 			"auth":   {Kind: config.KindPocketID, Hostname: "id.example.org", Placement: config.Placement{Mode: config.PlacementCluster}},
-			"forum":  {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}},
+			"forum":  {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
 			"health": {Kind: config.KindUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
 			"watch":  {Kind: config.KindUptime, Hostname: "watch.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},

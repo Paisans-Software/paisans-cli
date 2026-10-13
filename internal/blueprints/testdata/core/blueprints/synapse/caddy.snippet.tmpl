@@ -55,7 +55,7 @@
 internal/validate refuses any other placement, so both containers are at one
 named site and there is nothing to load balance across. */}}
 {{- define "mas" }}
-	reverse_proxy{{ range .MASUpstreams }} {{ . }}{{ end }} {
+	reverse_proxy{{ range (index .ServiceUpstreams "mas") }} {{ . }}{{ end }} {
 		header_up X-Forwarded-Proto https
 	}
 {{- end }}

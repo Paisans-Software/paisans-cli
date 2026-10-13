@@ -138,7 +138,7 @@ func TestAnInAppRotationRunsTheBlueprintsCommands(t *testing.T) {
 // is refused at promotion.
 func TestASecretUnitRotatesTogether(t *testing.T) {
 	w := declaredWorld(t)
-	priv, pub, err := secretsgen.ReplacementOAuthKeypair("pass-old")
+	priv, pub, err := secretsgen.ReplacementKeypair("pass-old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestASecretUnitRotatesTogether(t *testing.T) {
 	if pass == "pass-old" || key == priv {
 		t.Fatal("the unit was not replaced")
 	}
-	if _, err := secretsgen.OpenOAuthPrivateKey(key, pass); err != nil {
+	if _, err := secretsgen.OpenPrivateKey(key, pass); err != nil {
 		t.Errorf("the new key does not open with the new passphrase: %v", err)
 	}
 	var values map[string]string

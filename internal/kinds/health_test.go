@@ -36,7 +36,7 @@ func TestPocketIDAnswersNoContent(t *testing.T) {
 
 func TestOnlyTheseKindsSendMail(t *testing.T) {
 	for _, kind := range kinds.Builtin() {
-		if got, want := kinds.SendsMail(kind), kind == config.KindUptime || kind == config.KindPocketID || kind == config.KindMbin || kind == config.KindInvite; got != want {
+		if got, want := kinds.SendsMail(kind), kind == config.KindUptime || kind == config.KindPocketID || kind == config.Kind("mbin") || kind == config.KindInvite; got != want {
 			t.Errorf("%s: SendsMail = %v", kind, got)
 		}
 	}
@@ -45,7 +45,7 @@ func TestOnlyTheseKindsSendMail(t *testing.T) {
 // Both forks carry a status-only /healthz, which answers 200 when
 // healthy on a private instance too.
 func TestMbinAndWriteFreelyHaveADedicatedHealthRoute(t *testing.T) {
-	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("writefreely")} {
 		if h, _ := kinds.HealthFor(kind); h.Path != "/healthz" || h.Expect != "200" {
 			t.Errorf("%s health is %+v, want /healthz 200", kind, h)
 		}

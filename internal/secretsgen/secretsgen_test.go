@@ -254,7 +254,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 // identity provider itself and a Matrix client, has none.
 func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	cfg := load(t)
-	for _, kind := range []config.Kind{config.KindMbin, config.KindOutline, config.KindWriteFreely, config.KindUptime, config.KindSynapse, config.KindOAuth2Proxy, config.KindElement, config.KindPocketID} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("outline"), config.Kind("writefreely"), config.KindUptime, config.Kind("synapse"), config.KindOAuth2Proxy, config.Kind("element"), config.KindPocketID} {
 		cfg.Apps["k-"+string(kind)] = config.App{Kind: kind, Hostname: string(kind) + ".example.org", Settings: map[string]any{"admin_group": "admins"}}
 	}
 	pending := pendingBy(t, cfg, &config.Secrets{})
@@ -480,14 +480,14 @@ func TestMbinOAuthKeypairIsGeneratedOnceAndOpens(t *testing.T) {
 	if !strings.Contains(private, "Proc-Type: 4,ENCRYPTED") {
 		t.Errorf("the private key is not encrypted, and it is rendered 0644:\n%s", strings.SplitN(private, "\n", 4)[:3])
 	}
-	key, err := secretsgen.OpenOAuthPrivateKey(private, passphrase)
+	key, err := secretsgen.OpenPrivateKey(private, passphrase)
 	if err != nil {
 		t.Fatalf("the private key does not open with oauth_passphrase: %v", err)
 	}
 	if key.N.BitLen() != 4096 {
 		t.Errorf("the key is %d bits; upstream documents 4096", key.N.BitLen())
 	}
-	if _, err := secretsgen.OpenOAuthPrivateKey(private, "not-the-passphrase"); err == nil {
+	if _, err := secretsgen.OpenPrivateKey(private, "not-the-passphrase"); err == nil {
 		t.Error("the private key opened with the wrong passphrase")
 	}
 	block, _ := pem.Decode([]byte(public))

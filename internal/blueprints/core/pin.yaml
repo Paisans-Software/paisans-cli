@@ -1,10 +1,10 @@
 # Written by scripts/pin-core-catalog.sh. The core catalog commit this
 # binary is pinned to, and the SHA-256 of each of its blueprints.
 url: https://github.com/Paisans-Software/paisans-blueprints
-commit: 4ec37e324a348ef0e890dd38789f1f10e1782992
+commit: 8cf4533b00868071cc6fc481b3d330c7eff0ff6b
 blueprints:
-  element: db8569638e8baf150079261d14dd5d90ae51dcdeaea07d8bb9f31f0515a7dc23
-  mbin: f1d073291f1b43d6a9cfb19ace4bb70eb4d6bfad5826637ad13272d380ef9f92
-  outline: 427e124339013c53d7ef8a097cc65abc95b43ec5f1fd14cffd049144423077d6
-  synapse: 7963be53df2f8f8e9eabec7a72761470a369ece670bb290ac5a1165412d30e8d
-  writefreely: dcd96cac403e5cec24dbd0225bbf227c190b11508440ffd12095b7d3352ecbff
+  element: 0b1f2ea99e1e5502ae93f6919f36c6e4c278cbadc1a83bf4343114b2f632c6dc
+  mbin: 0126984e8a8871ed970f8bc0f8ec37a39fea051fb8a52be2d843405fbbb6a111
+  outline: 9fa0b2b5a02b65d1dc6f7cacf78b91911e42b80c625cfc91a5a523763a64d6b2
+  synapse: a5a8cd039cbf8e36fac4b0177abf82be93afc531a817648d39c46bc46915854f
+  writefreely: 9cf4eb8345e15cdae297d996945d21a6b4de20ac009213afc730e2f7067ebd80

@@ -21,13 +21,11 @@ import (
 // a group of secrets replaced as one unit, and a secret changed inside the
 // running app by an in-app action.
 
-// CostOf is what rotating an app's secret costs, as its blueprint says, or
-// as AppSelfCost has it for a blueprint that says nothing.
+// CostOf is what rotating an app's secret costs, as its blueprint says:
+// nothing a member notices, for a secret it says nothing of.
 func CostOf(cfg *config.Config, app, key string) Cost {
-	if spec, ok := kinds.SecretOf(cfg.Apps[app].Kind, key); ok && spec.RotationCost != "" {
-		return declaredCost(app, spec.RotationCost)
-	}
-	return AppSelfCost(key)
+	spec, _ := kinds.SecretOf(cfg.Apps[app].Kind, key)
+	return declaredCost(app, spec.RotationCost)
 }
 
 func declaredCost(app, cost string) Cost {
@@ -110,7 +108,7 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 		if m.Format != kinds.FormatRSAKeypair {
 			continue
 		}
-		priv, pub, err := secretsgen.ReplacementOAuthKeypair(next[m.Passphrase])
+		priv, pub, err := secretsgen.ReplacementKeypair(next[m.Passphrase])
 		if err != nil {
 			return "", err
 		}
@@ -153,7 +151,7 @@ func (r appGroup) parse(next string) (map[string]string, error) {
 		if m.Format != kinds.FormatRSAKeypair {
 			continue
 		}
-		key, err := secretsgen.OpenOAuthPrivateKey(values[m.Name], values[m.Passphrase])
+		key, err := secretsgen.OpenPrivateKey(values[m.Name], values[m.Passphrase])
 		if err != nil {
 			return nil, fmt.Errorf("the next %s does not open with the next %s, and the app could not sign with it", m.Name, m.Passphrase)
 		}
