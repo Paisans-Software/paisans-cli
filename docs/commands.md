@@ -409,9 +409,9 @@ paisans catalog list
   gate's openings, storage, secrets. A release that drops a blueprint an app
   uses is refused, and nothing changes.
 * **`remove <name>`:** refused while an app names one of its blueprints.
-* **`list`:** the core catalog with the commit the toolkit carries (or the one
-  pinned under `catalogs.core`), then every declared catalog with its URL, tag
-  and commit.
+* **`list`:** the core catalog with the commit the toolkit release pins (or
+  the one pinned under `catalogs.core`), then every declared catalog with its
+  URL, tag and commit.
 
 ### `paisans blueprint`
 
