@@ -96,14 +96,12 @@ func (w *Wizard) community() error {
 	if err != nil {
 		return err
 	}
-	w.p.Say("The domain is permanent once the community federates: other servers")
-	w.p.Say("know its members by it, so changing it later is a rebuild, not a rename.")
+	w.p.Say("The domain is permanent once the community federates: other servers know its members by it, so changing it later is a rebuild, not a rename.")
 	domain, err := w.p.Text("Domain", a.Domain, checkHostname)
 	if err != nil {
 		return err
 	}
-	w.p.Say("Certificates are issued through the domain's DNS, so the toolkit needs")
-	w.p.Say("to know where it is hosted. Its API token is asked for later, by init.")
+	w.p.Say("Certificates are issued through the domain's DNS, so the toolkit needs to know where it is hosted. Its API token is asked for later, by init.")
 	providers := []string{"cloudflare", "desec"}
 	def := 0
 	for i, p := range providers {
@@ -111,7 +109,7 @@ func (w *Wizard) community() error {
 			def = i
 		}
 	}
-	i, err := w.p.Choose("Where the domain's DNS is hosted", providers, def)
+	i, err := w.p.Choose("Where is the domain's DNS hosted?", providers, def)
 	if err != nil {
 		return err
 	}
@@ -130,8 +128,7 @@ func (w *Wizard) community() error {
 
 func (w *Wizard) admins() error {
 	a := &w.Answers
-	w.p.Say("\nAdmins: the people who log in to the machines and administer the apps.")
-	w.p.Say("Each becomes a sign in administrator on the first apply.")
+	w.p.Say("\nAdmins: the people who log in to the machines and administer the apps. Each becomes a sign in administrator on the first apply.")
 	prev := a.Admins
 	var admins []Admin
 	for i := 0; ; i++ {
@@ -180,7 +177,7 @@ func (w *Wizard) sites() error {
 		labels[i] = s.label
 	}
 	before := len(a.Sites) > 0
-	i, err := w.p.Choose("How many machines, and what each does", labels, int(a.Shape))
+	i, err := w.p.Choose("How many machines, and what does each do?", labels, int(a.Shape))
 	if err != nil {
 		return err
 	}
@@ -249,7 +246,7 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 		for _, r := range ss.roles {
 			w.p.Say("  - %s", roleWhat[r])
 		}
-		name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
+		name, err := w.p.Text("Machine name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
 		if err != nil {
 			return nil, err
 		}
@@ -262,8 +259,7 @@ func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 			return nil, err
 		}
 		if ss.endpoint {
-			w.p.Say("The other home dials this one directly, so losing the VPS does not")
-			w.p.Say("leave each home alone: give a dynamic DNS name and a forwarded UDP port.")
+			w.p.Say("The other home dials this one directly, so losing the VPS does not leave each home alone: give a dynamic DNS name and a forwarded UDP port.")
 			site.Endpoint, err = w.p.Text("Endpoint (host:port)", d.Endpoint, checkEndpoint)
 			if err != nil {
 				return nil, err
@@ -282,7 +278,7 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 	if len(prev) > 0 {
 		def = strconv.Itoa(len(prev))
 	}
-	n, err := w.p.Text("How many machines", def, checkCount)
+	n, err := w.p.Text("How many machines?", def, checkCount)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +291,7 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 			d = prev[i]
 		}
 		w.p.Say("\nMachine %d", i+1)
-		name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
+		name, err := w.p.Text("Machine name", d.Name, notIn(w.siteNames(sites), "machine", checkSiteName))
 		if err != nil {
 			return nil, err
 		}
@@ -367,8 +363,7 @@ func (w *Wizard) apps() error {
 	status := false
 	for _, c := range capabilities {
 		if c.twoSites && len(a.Sites) < 2 {
-			w.p.Say("Chat needs a second machine: its server shares ports with the database")
-			w.p.Say("and its web client shares one with the gateway, so it is not offered here.")
+			w.p.Say("Chat needs a second machine: its server shares ports with the database and its web client shares one with the gateway, so it is not offered here.")
 			continue
 		}
 		def := c.def
@@ -394,10 +389,8 @@ func (w *Wizard) apps() error {
 					def = p.MembersOnly
 				}
 				w.p.Say("Who can see the %s?", spec.what)
-				w.p.Say("  yes: members only. Anyone else is sent to sign in first;")
-				w.p.Say("       other communities still federate with it.")
-				w.p.Say("  no:  public. Anyone, including search engines and bots, can read what")
-				w.p.Say("       the app shows to visitors who are not signed in.")
+				w.p.Say("  - yes: members only. Anyone else is sent to sign in first; other communities still federate with it.")
+				w.p.Say("  - no: public. Anyone, including search engines and bots, can read what the app shows to visitors who are not signed in.")
 				if app.MembersOnly, err = w.p.YesNo("Members only?", def); err != nil {
 					return err
 				}
@@ -433,15 +426,14 @@ func (w *Wizard) monitor() (bool, error) {
 			return true, nil
 		}
 	}
-	w.p.Say("\nThe status page reports the other machines failing, so it is best on a")
-	w.p.Say("machine of its own.")
+	w.p.Say("\nThe status page reports the other machines failing, so it is best on a machine of its own.")
 	if gateway := w.publicGateway(); gateway != "" {
 		def := 0
 		if a.MonitorOnGateway {
 			def = 1
 		}
-		i, err := w.p.Choose("Where it runs", []string{
-			"a machine of its own (recommended)",
+		i, err := w.p.Choose("Where should it run?", []string{
+			"on a machine of its own (recommended)",
 			"on " + gateway + " (takes the monitor down with it, no alerts when the gateway fails)",
 		}, def)
 		if err != nil {
@@ -458,7 +450,7 @@ func (w *Wizard) monitor() (bool, error) {
 	if a.Monitor != nil {
 		d = *a.Monitor
 	}
-	name, err := w.p.Text("Name", d.Name, notIn(w.siteNames(a.Sites), "machine", checkSiteName))
+	name, err := w.p.Text("Machine name", d.Name, notIn(w.siteNames(a.Sites), "machine", checkSiteName))
 	if err != nil {
 		return false, err
 	}
@@ -492,9 +484,7 @@ func (w *Wizard) publicGateway() string {
 func (w *Wizard) mail() error {
 	a := &w.Answers
 	d := a.SMTP
-	w.p.Say("\nMail. The apps send sign in links and codes, alerts, notifications and")
-	w.p.Say("account mail, so a server to send through is required. Its password is")
-	w.p.Say("set afterwards, with secrets set, so it is never written here.")
+	w.p.Say("\nMail. The apps send sign in links and codes, alerts, notifications and account mail, so a server to send through is required. Its password is set afterwards, with secrets set, so it is never written here.")
 	host, err := w.p.Text("SMTP host", d.Host, checkHostname)
 	if err != nil {
 		return err
@@ -504,7 +494,7 @@ func (w *Wizard) mail() error {
 	if d.Security == config.SMTPTLS {
 		def = 1
 	}
-	i, err := w.p.Choose("SMTP security", modes, def)
+	i, err := w.p.Choose("Which security does the SMTP server use?", modes, def)
 	if err != nil {
 		return err
 	}

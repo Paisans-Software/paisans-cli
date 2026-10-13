@@ -170,9 +170,8 @@ func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
 	for _, want := range []string{
 		"Who can see the forums and social?",
 		"Who can see the wiki?",
-		"  yes: members only. Anyone else is sent to sign in first;",
-		"  no:  public. Anyone, including search engines and bots, can read what\n" +
-			"       the app shows to visitors who are not signed in.",
+		"  - yes: members only. Anyone else is sent to sign in first; other communities still federate with it.",
+		"  - no: public. Anyone, including search engines and bots, can read what the app shows to visitors who are not signed in.",
 		"Members only? [Y/n]",
 	} {
 		if !strings.Contains(out, want) {
@@ -334,7 +333,7 @@ func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
-		if !strings.Contains(out, "Name ["+tc.want+"]") || w.Answers.Sites[0].Name != tc.want {
+		if !strings.Contains(out, "Machine name ["+tc.want+"]") || w.Answers.Sites[0].Name != tc.want {
 			t.Errorf("community %q: site = %q, want %q", tc.name, w.Answers.Sites[0].Name, tc.want)
 		}
 	}

@@ -173,6 +173,10 @@ func danger(terminal bool, text string) string {
 	return bold + red + text + reset
 }
 
+// TerminalWidth is the width Wrap takes for text written to w: its width in
+// columns when it is a terminal, or 0.
+func TerminalWidth(w io.Writer) int { return terminalWidth(w) }
+
 // terminalWidth is w's width in columns when w is a terminal, or 0. A
 // terminal drawn on without colour (NO_COLOR, TERM=dumb) is still as wide as
 // it is.
