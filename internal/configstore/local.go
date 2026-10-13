@@ -268,6 +268,32 @@ func (l Local) Cache() (Repo, error) {
 	return InitRepo(l.state(cacheDir))
 }
 
+// Current is the version the files beside paisans-stack.yaml are, as this
+// workstation alone knows it: its head and the head's revision, when the
+// files on disk are that version's. It reaches no site, so a run can name
+// what it applies before it asks for anything. An empty sha is files that
+// are no version this workstation holds: none published yet, or edited
+// since the last.
+func (l Local) Current() (sha string, revision int, err error) {
+	head, err := l.Head()
+	if err != nil || head == "" {
+		return "", 0, err
+	}
+	files, err := l.Files()
+	if err != nil {
+		return "", 0, err
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return "", 0, err
+	}
+	held, err := cache.Files(head)
+	if err != nil || !held.Equal(files) {
+		return "", 0, err
+	}
+	return head, cache.revision(head), nil
+}
+
 func (l Local) path(name string) string { return filepath.Join(l.Dir, name) }
 
 // Files reads the three files beside paisans-stack.yaml.

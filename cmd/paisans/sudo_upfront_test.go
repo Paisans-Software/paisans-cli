@@ -99,7 +99,8 @@ func sudoLines(rec *ui.Recorder) []string {
 }
 
 // apply without --site asks every host for its sudo password before any
-// step: the sudo section comes first, one ✓ line per site in name order,
+// step: the sudo section comes first after the deployment and the version
+// the run names, one ✓ line per site in name order,
 // and a host that wants no password is never asked but still has its line.
 func TestConvergeAsksEverySudoPasswordFirst(t *testing.T) {
 	for _, args := range [][]string{nil, {"--execute"}} {
@@ -124,6 +125,9 @@ func TestConvergeAsksEverySudoPasswordFirst(t *testing.T) {
 			if strings.HasPrefix(l, "prompt") {
 				t.Errorf("%v: asked after the first step:\n%s", args, strings.Join(*log, "\n"))
 			}
+		}
+		if d, s := rec.Index("section", "deployment"), rec.Index("section", "sudo"); d != 0 || s < d {
+			t.Errorf("%v: the deployment is not named ahead of sudo:\n%s", args, rec.Lines())
 		}
 		if s, e := rec.Index("section", "sudo"), rec.Index("section", "etcd members"); s < 0 || s > e {
 			t.Errorf("%v: the sudo section is not before the etcd reads:\n%s", args, rec.Lines())
