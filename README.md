@@ -2535,6 +2535,9 @@ because a secret on a terminal is in a scrollback buffer and this one opens
 every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
 `paisans-stack.yaml`, since that directory is usually a git repository.
+`init` names the keystore item or file it kept the key in, without
+`--verbose`, since the operator has to know where the only copy is; with a
+file, it also prints the `export SOPS_AGE_KEY_FILE=` line later commands need.
 
 **The keystore, or the file you named, then holds the only copy.** Losing it
 loses every secret in the file, so add a second recipient to `.sops.yaml`,
