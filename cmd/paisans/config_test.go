@@ -233,7 +233,7 @@ func TestConfigRecoverWithoutAMajorityAsksPartial(t *testing.T) {
 	if err := runConfig(args, answering(t, "partial\n"), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Type partial") {
+	if !strings.Contains(out.String(), "Type 'partial'") {
 		t.Fatalf("prompt: %q", out.String())
 	}
 	got, err := l.Files()
@@ -718,7 +718,7 @@ func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
 	}
 	var out bytes.Buffer
 	err := runConfig([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
-	if err == nil || !strings.Contains(out.String(), "Type rollback") {
+	if err == nil || !strings.Contains(out.String(), "Type 'rollback'") {
 		t.Fatalf("got %v\n%s", err, out.String())
 	}
 	if b, _ := os.ReadFile(seenPath); string(b) != seen {
