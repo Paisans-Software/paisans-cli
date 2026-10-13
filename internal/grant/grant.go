@@ -12,9 +12,12 @@ package grant
 
 import (
 	"fmt"
+	"os"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
@@ -34,6 +37,22 @@ type Grant struct {
 	// WebServer is the directory apply writes the operator's web server's
 	// files into, nil on a site with none.
 	WebServer *WebServer
+	// Blueprints is one entry per app on the site whose blueprint comes from
+	// a catalog, sorted by app: what decides the rest of that stack, since a
+	// catalog's author wrote its templates.
+	Blueprints []Blueprint
+}
+
+// Blueprint is one app's catalog blueprint as the render used it: the
+// blueprint, the release and commit it was read at, the SHA-256 of its files,
+// and whether its catalog's tags are checked against a signer.
+type Blueprint struct {
+	App       string `json:"app"`
+	Blueprint string `json:"blueprint"`
+	Tag       string `json:"tag,omitempty"`
+	Commit    string `json:"commit"`
+	SHA256    string `json:"sha256"`
+	Unsigned  bool   `json:"unsigned,omitempty"`
 }
 
 // Key is one key the site authorises. A key is the same key when its
@@ -74,8 +93,41 @@ func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 			return Grant{}, err
 		}
 		g.Images = images
+		blueprints, err := BlueprintsOf(cfg, site)
+		if err != nil {
+			return Grant{}, err
+		}
+		g.Blueprints = blueprints
 	}
 	return g, nil
+}
+
+// BlueprintsOf is every app on site whose blueprint a catalog provides, with
+// the SHA-256 of the files it was read from.
+func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
+	var out []Blueprint
+	placed := render.AppSites(cfg)
+	for _, app := range cfg.AppNames() {
+		if !slices.Contains(placed[app], site) {
+			continue
+		}
+		kind := cfg.Apps[app].Kind
+		dir, fromCatalog := kinds.Source(kind)
+		if !fromCatalog {
+			continue
+		}
+		catalog, _ := config.SplitBlueprint(kind)
+		if catalog == "" {
+			catalog = config.CoreCatalog
+		}
+		cat := cfg.Catalogs[catalog]
+		sum, err := blueprints.Digest(os.DirFS(dir), ".")
+		if err != nil {
+			return nil, fmt.Errorf("reading the blueprint of apps.%s: %w", app, err)
+		}
+		out = append(out, Blueprint{App: app, Blueprint: string(kind), Tag: cat.Tag, Commit: cat.Commit, SHA256: sum, Unsigned: cat.Unsigned})
+	}
+	return out, nil
 }
 
 // KeysOf is every key s authorises. A key validate would refuse is left
