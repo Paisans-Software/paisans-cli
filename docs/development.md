@@ -803,7 +803,7 @@ ensures first and applies once. An app with no recorded client is held back
 when Pocket ID cannot be asked, which exits 0; a refused client holds its app
 back and exits 1 once the rest is applied, and so does an app whose recorded
 credentials apply will not replace (`keepsRecorded`): partly recorded, or a
-client named after the app under another ID. Fully recorded credentials for a
+client with the client's name (`config.Config.ClientName`) under another ID. Fully recorded credentials for a
 client Pocket ID does not have are replaced, with `oidcclient.Plan.Replaces`
 naming the recorded ID. The second pass gets `apply.After(first)`, so an
 `--overwrite` or `--recreate` the first pass carried out is not repeated, and

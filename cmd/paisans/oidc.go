@@ -70,7 +70,7 @@ func runOIDCClientCreate(args []string) error {
 	if !ok {
 		return fmt.Errorf("oidc client create: %s declares no app %q. Declared apps are %s", *configPath, *appName, strings.Join(cfg.AppNames(), ", "))
 	}
-	desired, ok := clientDesired(*appName, app, *rotate)
+	desired, ok := clientDesired(cfg, *appName, *rotate)
 	if !ok {
 		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: mbin, outline, writefreely, uptime, synapse, oauth2-proxy", app.Kind)
 	}

@@ -31,9 +31,12 @@ import (
 
 // Desired is the client an app needs, from its kind and its configuration.
 type Desired struct {
-	// App is the app's name, which is also the client's name at Pocket ID and
-	// its key under oidc_clients in the secrets file.
-	App         string
+	// App is the app's name, the client's key under oidc_clients in the
+	// secrets file.
+	App string
+	// Name is the client's name at Pocket ID (config.Config.ClientName): what
+	// a person signing in is shown, and how the client is found.
+	Name        string
 	CallbackURL string
 	// LaunchURL is what the app's tile on Pocket ID's dashboard opens, and a
 	// client without one is not listed there. Empty plans nothing for it.
@@ -79,12 +82,21 @@ type State struct {
 	Groups  map[string]*pocketid.Group
 }
 
-// Probe reads everything the plan depends on.
-func Probe(c *pocketid.Client, d Desired) (State, error) {
+// Probe reads everything the plan depends on. The client is the one with the
+// desired name or, when Pocket ID has none, the one with recordedID, the
+// client ID the secrets file records: a client this toolkit made under a name
+// the configuration has since changed, such as the gate's after the community
+// is renamed. Build plans the rename.
+func Probe(c *pocketid.Client, d Desired, recordedID string) (State, error) {
 	var s State
 	var err error
-	if s.Client, err = c.FindOIDCClient(d.App); err != nil {
-		return s, fmt.Errorf("looking up client %s: %w", d.App, err)
+	if s.Client, err = c.FindOIDCClient(d.Name); err != nil {
+		return s, fmt.Errorf("looking up client %s: %w", d.Name, err)
+	}
+	if s.Client == nil && recordedID != "" {
+		if s.Client, err = c.OIDCClientByID(recordedID); err != nil {
+			return s, fmt.Errorf("looking up client %s by its recorded ID: %w", d.App, err)
+		}
 	}
 	if s.Client != nil {
 		if s.Secrets, err = c.ClientSecrets(s.Client.ID); err != nil {
@@ -132,6 +144,9 @@ const (
 	// SetLaunchURL gives an existing client the launch URL it lacks, or moves
 	// it off a value the toolkit set by default.
 	SetLaunchURL
+	// SetName renames the client the secrets file records to the name the
+	// configuration gives it.
+	SetName
 )
 
 // Step is one mutation. Title is the short line an operator sees by
@@ -192,6 +207,9 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 			return nil, err
 		}
 		p.Present = append(p.Present, fmt.Sprintf("client %s (id %s)", d.App, client.ID))
+		if client.Name != d.Name {
+			p.Steps = append(p.Steps, Step{Kind: SetName, Title: "rename client for " + d.App + " to " + d.Name, Detail: fmt.Sprintf("rename client %s to %q: PUT /api/oidc/clients/%s with name %q and every other field sent back as it is now", client.Name, d.Name, client.ID, d.Name)})
+		}
 	}
 
 	for _, g := range d.groups() {
@@ -288,7 +306,7 @@ func (d Desired) setByToolkit(launchURL string) bool {
 // cannot have one (service/oidc_service.go:312 at v2.14.0).
 func (d Desired) newClient() pocketid.NewOIDCClient {
 	return pocketid.NewOIDCClient{
-		Name:              d.App,
+		Name:              d.Name,
 		CallbackURLs:      []string{d.CallbackURL},
 		PkceEnabled:       d.PKCE,
 		IsGroupRestricted: d.restricted(),
@@ -397,6 +415,8 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 			}
 		case SetLaunchURL:
 			err = c.SetLaunchURL(client.ID, d.LaunchURL)
+		case SetName:
+			err = c.SetClientName(client.ID, d.Name)
 		case AllowGroups:
 			// Exactly the app's groups. checkExisting has refused a client
 			// allowing any other, so nothing is dropped here that was not
@@ -456,7 +476,7 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 	// A rotation is done once its secret is sent; asking the fresh plan for
 	// another would make the check below fail on its own success.
 	d.RotateSecret = false
-	after, err := Probe(c, d)
+	after, err := Probe(c, d, recorded.ClientID)
 	if err != nil {
 		return pocketid.Redact(err, secretsToHide...)
 	}

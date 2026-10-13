@@ -741,3 +741,19 @@ func TestControlCharactersAreRefused(t *testing.T) {
 		})
 	}
 }
+
+// The gate's client carries the community's name, falling back to the app's
+// when the community has none; every other app's carries its own.
+func TestClientName(t *testing.T) {
+	c := &config.Config{Community: config.Community{Name: "Example Community"}}
+	if got := c.ClientName(config.GateApp); got != "Example Community" {
+		t.Errorf("the gate's client is %q", got)
+	}
+	if got := c.ClientName("talk"); got != "talk" {
+		t.Errorf("talk's client is %q", got)
+	}
+	c.Community.Name = ""
+	if got := c.ClientName(config.GateApp); got != config.GateApp {
+		t.Errorf("with no community name, the gate's client is %q", got)
+	}
+}

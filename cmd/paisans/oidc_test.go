@@ -107,7 +107,11 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 		}
 		return reply(200, out)
 	case get && strings.Contains(stdin, "/api/oidc/clients/"):
-		return reply(200, f.byID(idOf("/api/oidc/clients/")))
+		// As Pocket ID does: 404 for an ID it does not hold.
+		if c := f.byID(idOf("/api/oidc/clients/")); c != nil {
+			return reply(200, c)
+		}
+		return reply(404, map[string]string{"error": "Record not found"})
 	case get && strings.Contains(stdin, "/api/user-groups"):
 		var data []pocketid.Group
 		for _, g := range f.groups {

@@ -159,18 +159,21 @@ type ClientState struct {
 	// none, and Site where it was asked.
 	Provider string
 	Site     string
+	// Name is the name apply gives the app's client
+	// (config.Config.ClientName): the app's, or the community's for the gate.
+	Name string
 	// RecordedID is oidc_clients.<app>.client_id in the secrets file.
 	RecordedID string
-	// ByID is the client with RecordedID, ByName the client named after
-	// the app. Either is nil when Pocket ID holds none.
+	// ByID is the client with RecordedID, ByName the client with Name.
+	// Either is nil when Pocket ID holds none.
 	ByID   *pocketid.OIDCClient
 	ByName *pocketid.OIDCClient
 }
 
 // ClientPlan is the client's fate. A client is this deployment's app's only
 // when the secrets file records its ID under oidc_clients.<app> and Pocket ID
-// holds a client with that ID and the app's name: `oidc client create` and
-// apply name the client after the app and record the ID Pocket ID gave it.
+// holds a client with that ID and the client's name: `oidc client create` and
+// apply give the client that name and record the ID Pocket ID gave it.
 // A client with the name and no recorded ID could be anybody's, so it is
 // kept and named for an operator to delete by hand.
 type ClientPlan struct {
@@ -460,10 +463,10 @@ func planClient(app string, st ClientState) ClientPlan {
 		return clientKept(app, c.Name, c.ID, st.Provider, why)
 	}
 	switch {
-	case st.ByID != nil && st.ByID.Name == app:
+	case st.ByID != nil && st.ByID.Name == st.Name:
 		cp.Delete = st.ByID
 	case st.ByID != nil:
-		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s", app, app)))
+		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s", app, st.Name)))
 	}
 	if st.ByName != nil && (cp.Delete == nil || st.ByName.ID != cp.Delete.ID) && (st.ByID == nil || st.ByName.ID != st.ByID.ID) {
 		why := "no ID is recorded for it under oidc_clients." + app + ", so nothing proves this deployment made it"

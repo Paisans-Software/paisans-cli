@@ -123,7 +123,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		clients = removeClients(cfg, where, key)
 		if in.Client, err = ui.Get(r, "read "+app+"'s client", func() (appremove.ClientState, error) {
-			return appremove.ProbeClient(clients, app, idp, where, secrets.OIDCClients[app].ClientID)
+			return appremove.ProbeClient(clients, app, cfg.ClientName(app), idp, where, secrets.OIDCClients[app].ClientID)
 		}); err != nil {
 			return fmt.Errorf("app remove: %w. Nothing was changed", err)
 		}
