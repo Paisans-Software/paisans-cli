@@ -73,15 +73,16 @@ var helpCommands = []helpCommand{
 	{
 		name:    "catalog add",
 		summary: "Pin a catalog of blueprints at its newest release.",
-		usage:   []string{"paisans catalog add <name> <url> [--tag <tag>] --unsigned [--config " + config.FileName + "]"},
-		detail: "Read the catalog at <url>, pin its newest tag (or --tag) and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>. " +
-			"Without a signer to check, --unsigned is required. Edits only " + config.FileName + ".",
+		usage:   []string{"paisans catalog add <name> <url> [--tag <tag>] [--trust <fingerprint> | --unsigned]\n                    [--config " + config.FileName + "]"},
+		detail: "Read the catalog at <url>, pin its newest tag (or --tag) and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>.\n\n" +
+			"A signed release is pinned to its key only with --trust and that key's fingerprint, which the command prints: check it with the catalog's author first. --unsigned pins a catalog whose tags are checked for nothing. Edits only " + config.FileName + ".",
 	},
 	{
 		name:    "catalog update",
 		summary: "Move catalogs' pins to their newest releases.",
-		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--config " + config.FileName + "]"},
+		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--trust <fingerprint>] [--config " + config.FileName + "]"},
 		detail: "For each declared catalog, or the one named: read its newest tag (or --tag), and when it names another commit, say what it changes for each app using one of its blueprints (images, port, sign-in, the gate's openings, storage, secrets) and move the pin. " +
+			"Every release between the pin and the new one must be signed by a key the pin trusts; a release the trusted key signed may list a new key in keys/allowed_signers, which is how a catalog moves to it. Any other new key stops the update until --trust names its fingerprint. " +
 			"Refuses a move that would leave an app without its blueprint. Edits only " + config.FileName + ".",
 	},
 	{
