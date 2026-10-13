@@ -25,6 +25,7 @@ sites:
   home-a:
     roles: [data, apps]
     address: 10.44.0.1
+    arch: amd64
     ssh:
       host: home-a.local
       user: ubuntu
@@ -32,6 +33,7 @@ sites:
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
+    arch: amd64
     # Dialled, so the two homes peer directly and vm is not the one path
     # between them: validate refuses three voters of which only one is dialled.
     endpoint: 198.51.100.2:51820
@@ -42,6 +44,7 @@ sites:
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
+    arch: amd64
     endpoint: vm.example.org:51820
     ssh:
       host: vm.example.org
@@ -52,6 +55,7 @@ sites:
   watch:
     roles: [monitor]
     address: 10.44.0.4
+    arch: amd64
     endpoint: watch.example.org:51820
     public_address: 203.0.113.20
     ssh:

@@ -32,6 +32,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -543,6 +544,25 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := requireACMEToken(cfg, secrets, []string{*site}); err != nil {
 		return err
 	}
+	// The site's architecture is read first of all that reaches the host,
+	// once nothing above refuses the files. As a step of apply without
+	// --site the run recorded it already, and the read only compares; on
+	// its own, apply --site records it, and the next apply without --site
+	// publishes it. The bytes applied are read again after a write.
+	archHost := siteTransport(*site, declared, *destination, *sudo)
+	read, err := readArchitectures(r, cfg, []string{*site}, func(string) hostarch.Runner { return archHost })
+	if err != nil {
+		return err
+	}
+	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
+		return err
+	}
+	if *execute && reviewedByRun == nil {
+		if _, loaded.Paisans, err = config.LoadWithBytes(*configPath); err != nil {
+			return err
+		}
+	}
+	declared = cfg.Sites[*site]
 	// The version this applies is gathered before the review, so a fork or
 	// a stale base is refused before the operator is asked anything. As a
 	// step of apply without --site the run did this once for every site.
@@ -1001,7 +1021,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests)}, options...)
+	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch)}, options...)
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err
@@ -1199,6 +1219,17 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
+	// See runApply: host prepare records its own site's architecture, which
+	// the next apply publishes. As a step of apply without --site, where
+	// every host prepares at once, the run recorded every key already and
+	// this never writes.
+	read, err := readArchitectures(r, cfg, []string{o.site}, func(string) hostarch.Runner { return transport })
+	if err != nil {
+		return err
+	}
+	if cfg, err = recordArchitectures(r, o.config, cfg, read, o.execute && reviewedByRun == nil); err != nil {
+		return err
+	}
 	done := r.Step("check mesh subnet")
 	err = checkMeshLive(cfg, o.site, transport)
 	if err != nil {

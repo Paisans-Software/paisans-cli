@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -51,6 +52,94 @@ type Versioner interface {
 // build nobody planned.
 func ResolveImages(r Resolver) Option {
 	return func(o *options) { o.resolver = r }
+}
+
+// Platformer is a Resolver that can also name the platforms a build was
+// published for. imagedigest.Registry and imagedigest.Cache are both.
+type Platformer interface {
+	Platforms(ref string) ([]string, error)
+}
+
+// goArchs are the architecture names an image index uses (Go's GOARCH),
+// for telling an architecture from an OS in Build.Platform.
+var goArchs = map[string]bool{"amd64": true, "arm64": true, "arm": true, "386": true, "ppc64le": true, "s390x": true, "riscv64": true, "mips64le": true}
+
+// platformCheck refuses a pin whose build has no Linux platform for arch,
+// before anything is pulled, so a dry run names it. A list that cannot be
+// read is a note rather than a refusal: the pull on the host still says so,
+// and a registry's bad moment should not stop an apply that would succeed.
+func platformCheck(site, arch string, image ImagePin, r Resolver) (*Note, error) {
+	p, ok := r.(Platformer)
+	if !ok || arch == "" {
+		return nil, nil
+	}
+	platforms, err := p.Platforms(image.Reference)
+	if err != nil {
+		return &Note{
+			Hint: fmt.Sprintf("could not read the platforms of %s", ui.Name(image.Image)),
+			Text: fmt.Sprintf("Reading which platforms %s was published for failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image.Image), err, arch, site),
+		}, nil
+	}
+	if platforms == nil || hostarch.Runs(platforms, arch) {
+		return nil, nil
+	}
+	// Build.Platform names the OS only when it is not linux (windows/amd64),
+	// so linux is put back where the first segment is an architecture.
+	named := make([]string, len(platforms))
+	for i, pl := range platforms {
+		first, _, _ := strings.Cut(pl, "/")
+		named[i] = pl
+		if goArchs[first] {
+			named[i] = "linux/" + pl
+		}
+	}
+	return nil, fmt.Errorf("%s (%s): %s is published for %s only.", site, arch, ui.Name(image.Image), strings.Join(named, ", "))
+}
+
+// CheckPlatforms is Build's platform check for the images a render names for
+// site (render.Plan.Images), made without reading its host. A whole apply
+// runs it on every site before it prepares any host, which a site's plan
+// waits on, so a dry run of a new deployment names an image with no build
+// for a site, and --execute refuses before the first host changes. Build
+// still checks each pin as it plans.
+//
+// Each tag is resolved first, since an index names the platforms of a build
+// and a tag is only a name for one; a reference pinned by digest is asked as
+// it is. A tag that cannot be resolved is a note, as an unreadable platform
+// list is: the plan or the pull says so.
+func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver) ([]Note, []error) {
+	if _, ok := r.(Platformer); !ok || arch == "" {
+		return nil, nil
+	}
+	var notes []Note
+	var refusals []error
+	seen := map[string]bool{}
+	for _, image := range images {
+		if seen[image.Image] {
+			continue
+		}
+		seen[image.Image] = true
+		pin := ImagePin{Image: image.Image, Reference: image.Image}
+		if ref := kinds.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
+			digest, err := r.Digest(image.Image)
+			if err != nil {
+				notes = append(notes, Note{
+					Hint: fmt.Sprintf("could not resolve %s", ui.Name(image.Image)),
+					Text: fmt.Sprintf("Resolving %s failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image.Image), err, arch, site),
+				})
+				continue
+			}
+			pin.Reference = image.Image + "@" + digest
+		}
+		note, err := platformCheck(site, arch, pin, r)
+		if err != nil {
+			refusals = append(refusals, err)
+		}
+		if note != nil {
+			notes = append(notes, *note)
+		}
+	}
+	return notes, refusals
 }
 
 // PeerCompose is an app's compose file as another site running the app
@@ -743,4 +832,11 @@ func siteNames(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Arch has Build refuse an image with no build for the site's architecture
+// (amd64, arm64), before anything is pulled. Empty, or not given, checks
+// nothing, which is a site whose architecture is not known yet.
+func Arch(arch string) Option {
+	return func(o *options) { o.arch = arch }
 }

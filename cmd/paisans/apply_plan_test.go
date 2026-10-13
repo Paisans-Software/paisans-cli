@@ -10,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -21,6 +22,9 @@ type emptyHost struct{}
 
 func (emptyHost) Describe() string { return "home-a.local" }
 func (emptyHost) Run(command string) (string, error) {
+	if command == hostarch.Command {
+		return "amd64\n", nil
+	}
 	if out, ok := absentNetworks(command); ok {
 		return out, nil
 	}

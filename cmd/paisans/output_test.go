@@ -85,6 +85,7 @@ case "$cmd" in
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
 *"id -u") echo 0;;
+"dpkg --print-architecture") echo amd64;;
 *"print-architecture"*) echo "arch amd64";;
 *"/etc/os-release"*) printf 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';;
 *"docker volume ls"*) echo end;;

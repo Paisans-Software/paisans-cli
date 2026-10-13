@@ -389,7 +389,13 @@ Backups still centralise to Garage. Only replication and failover are given up.
 
 #### Moving a pinned app
 
-Because a pinned stack is self-contained, relocating it is ordinary work:
+Because a pinned stack is self-contained, relocating it is ordinary work.
+
+**Both hosts need the same architecture** (`sites.<name>.arch`). The tar
+carries the app's Postgres data directory, which only a host of the same
+architecture can read. Between amd64 and arm64, move the database with
+`pg_dump` on the old site and a restore on the new one, and move the files as
+below.
 
 ```
 docker compose down                     # stop first — see below
@@ -1205,6 +1211,9 @@ other way out: `etcd.members` written with one site, which gives up automatic
 failover. The toolkit never demands the witness; it refuses only the two
 voters (see *Nothing here is permanent*).
 
+A new data site must also have the data sites' architecture, which preflight
+compares along with the OS and glibc release (see *Architectures*).
+
 ## The witness is a third location, not a cloud account
 
 A witness is a voting member that stores no data and serves no traffic. It
@@ -1416,6 +1425,50 @@ Nothing about current state belongs in these files — not which node is primary
 not replication lag. `paisans doctor` asks Patroni for both, which keeps them
 in etcd. A config file that starts recording status drifts, and someone
 trusts a stale value during an incident.
+
+### Architectures
+
+A site may be amd64 or arm64. The toolkit reads each host's architecture
+(`dpkg --print-architecture`) the first time apply, `host prepare` or `site
+add` reaches it, and records it as `sites.<name>.arch`. An operator never
+needs to write the line; one written by hand is checked against the host
+exactly as a recorded one is. It exists so that `validate` can check the
+rule below without reaching a host, and so that a host replaced under the
+same name by one of another architecture is refused rather than joined. To
+accept new hardware, delete the line, and the next run records what the host
+reports.
+
+A whole apply reads every site's architecture before it plans, and records
+the missing keys before it publishes the signed configuration. `apply
+--site`, `host prepare --site` and `site add` record their own site's key
+when run on their own, not as a step of a whole apply. A dry run records
+nothing. A host that contradicts its recorded value is refused: "<site>:
+paisans-stack.yaml records arch <a>, and the host reports <b>. If this is new
+hardware, delete the arch line from <site> and run again." Any other
+architecture is refused by name.
+
+**Every data site has the same architecture, whichever it is.** Postgres's
+data directory and its WAL are written in the host's byte order and
+alignment, and Patroni's replication, a failover and `site add`'s
+`pg_basebackup` copy them byte for byte. Everything else may differ: apps
+sites, an app on SQLite or pinned to its own site, Pocket ID, Garage, etcd,
+the gateway, the monitor and the witness. Each of them talks over the
+network and copies no database between machines. `validate` refuses data
+sites that differ (`data-sites-differ-in-arch`), and apply checks again after
+it records the keys. Either refusal says what to do: give the data role only
+to sites of one architecture, or, if a recorded value is wrong, delete that
+site's arch line and run again.
+
+**Every image must have a build for its site.** Apply reads which platforms
+each image was published for when it plans, and refuses one with no build
+for the site's architecture before anything is pulled; a variant such as
+arm64/v8 counts as arm64. A platform list it cannot read, or a tag it cannot
+resolve, becomes a note, not a refusal: the pull says so if the image does
+not run. A clustered app needs a build for every apps site's architecture.
+A whole apply checks every site's images right after it reads the
+architectures, before it prepares any host, so a dry run of a deployment no
+host of which is prepared yet still shows the refusal, and `site add` checks
+the new site's images before it changes any site.
 
 ### `etcd.members` and `cluster.sites` follow from the roles
 
@@ -7905,8 +7958,9 @@ will eventually be violated:
 
 * SSH reachable; privilege escalation works
 * Docker present and recent enough
-* **OS and glibc major version match the existing sites** — mismatched collation
-  libraries between replicas risk corruption
+* **OS, glibc major version and architecture match the existing sites** —
+  mismatched collation libraries between replicas risk corruption, and a data
+  directory is not portable between architectures
 * Kernel WireGuard available; `/dev/watchdog` present
 * Ports free: 51820, 2379/2380, 5000
 * The mesh subnet does not collide with anything the host already routes
@@ -7935,7 +7989,7 @@ at, and "could not look" is not "looked and it was fine".
 | Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan, without the firewall's defaults on a shared host | it has any step left |
 | Registry | new site | `/var/lib/paisans/registry.json`, read and never claimed | another deployment there holds this one's token, root, interface or listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims |
-| Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, and the release at the end of `ldd --version`'s first line | any of the three differs |
+| Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, the release at the end of `ldd --version`'s first line, and `dpkg --print-architecture` | any of the four differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
 | Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in `managed_by: paisans`; `listen` for a monitor in `managed_by: external`; each app's published port |

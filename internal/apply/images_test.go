@@ -35,6 +35,9 @@ type registry struct {
 	fail     map[string]error
 	versions map[string]string
 	asked    []string
+
+	platforms   map[string][]string
+	platformErr error
 }
 
 func (r *registry) Digest(ref string) (string, error) {
@@ -692,5 +695,128 @@ func TestABareTagBesideItsPinnedBuildIsNotADisagreement(t *testing.T) {
 				t.Errorf("planned %+v, want the known build held", pin)
 			}
 		})
+	}
+}
+
+// Platforms makes the fake an apply.Platformer: each reference whose name
+// (before @) is a key is published for those platforms, and any other for
+// amd64 and arm64.
+func (r *registry) Platforms(ref string) ([]string, error) {
+	if r.platformErr != nil {
+		return nil, r.platformErr
+	}
+	name, _, _ := strings.Cut(ref, "@")
+	if p, ok := r.platforms[name]; ok {
+		return p, nil
+	}
+	return []string{"amd64", "arm64"}, nil
+}
+
+func TestAnImageWithoutTheSitesPlatformIsRefusedInThePlan(t *testing.T) {
+	host := newHost()
+	r := &registry{digest: buildA, platforms: map[string][]string{mbinTag: {"amd64"}}}
+	_, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(r), apply.Arch("arm64"))
+	if err == nil || !strings.Contains(err.Error(), "home-a (arm64): `"+mbinTag+"`") || !strings.Contains(err.Error(), "linux/amd64 only") {
+		t.Fatalf("got %v", err)
+	}
+	for _, c := range host.commands {
+		if strings.Contains(c, "docker pull") {
+			t.Fatalf("pulled before refusing: %s", c)
+		}
+	}
+}
+
+func TestAVariantCountsAsItsArchitecture(t *testing.T) {
+	r := &registry{digest: buildA, platforms: map[string][]string{mbinTag: {"amd64", "arm64/v8"}}}
+	if _, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r), apply.Arch("arm64")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnUnreadablePlatformListIsANoteNotARefusal(t *testing.T) {
+	r := &registry{digest: buildA, platformErr: errors.New("the registry answered 500")}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r), apply.Arch("arm64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, n := range p.Notes {
+		found = found || strings.Contains(n.Hint, "platforms")
+	}
+	if !found {
+		t.Fatalf("no note: %+v", p.Notes)
+	}
+}
+
+func TestWithoutAnArchNoPlatformIsAsked(t *testing.T) {
+	r := &registry{digest: buildA, platformErr: errors.New("must not be asked")}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range p.Notes {
+		if strings.Contains(n.Hint, "platforms") {
+			t.Fatal("asked without an arch")
+		}
+	}
+}
+
+func TestANonLinuxPlatformIsNamedAsItIs(t *testing.T) {
+	r := &registry{digest: buildA, platforms: map[string][]string{mbinTag: {"windows/amd64"}}}
+	_, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r), apply.Arch("amd64"))
+	if err == nil || !strings.Contains(err.Error(), "published for windows/amd64 only") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// CheckPlatforms is Build's check without a host: the images a render names
+// for a site, each tag resolved first, so a run can refuse before it
+// prepares any host.
+func TestCheckPlatformsRefusesFromTheRenderAlone(t *testing.T) {
+	r := &registry{digest: buildA, platforms: map[string][]string{mbinTag: {"amd64"}}}
+	images := []render.ComposeImage{
+		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"app"}},
+		{Stack: "talk", App: "talk", Image: mbinTag, Services: []string{"messenger"}},
+		{Stack: "infra", Image: caddyTag, Services: []string{"caddy"}},
+	}
+	notes, refusals := apply.CheckPlatforms("home-a", "arm64", images, r)
+	if len(notes) != 0 {
+		t.Errorf("notes: %+v", notes)
+	}
+	if len(refusals) != 1 || !strings.Contains(refusals[0].Error(), "home-a (arm64): `"+mbinTag+"` is published for linux/amd64 only") {
+		t.Fatalf("got %v", refusals)
+	}
+	if r.times(mbinTag) != 1 {
+		t.Errorf("resolved %s %d times", mbinTag, r.times(mbinTag))
+	}
+}
+
+func TestCheckPlatformsAsksAPinnedImageDirectly(t *testing.T) {
+	r := &registry{err: errors.New("must not resolve a digest"), platforms: map[string][]string{mbinTag: {"amd64"}}}
+	_, refusals := apply.CheckPlatforms("home-a", "arm64", []render.ComposeImage{{Image: mbinTag + "@" + buildA}}, r)
+	if len(refusals) != 1 {
+		t.Fatalf("got %v", refusals)
+	}
+	if len(r.asked) != 0 {
+		t.Errorf("resolved %v", r.asked)
+	}
+}
+
+func TestCheckPlatformsNotesATagItCannotResolve(t *testing.T) {
+	r := &registry{err: errors.New("the registry answered 500")}
+	notes, refusals := apply.CheckPlatforms("home-a", "arm64", []render.ComposeImage{{Image: mbinTag}}, r)
+	if len(refusals) != 0 {
+		t.Fatalf("refused: %v", refusals)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0].Text, "500") {
+		t.Fatalf("notes: %+v", notes)
+	}
+}
+
+func TestCheckPlatformsWithoutAnArchAsksNothing(t *testing.T) {
+	r := &registry{digest: buildA, platformErr: errors.New("must not be asked")}
+	notes, refusals := apply.CheckPlatforms("home-a", "", []render.ComposeImage{{Image: mbinTag}}, r)
+	if len(notes)+len(refusals) != 0 || len(r.asked) != 0 {
+		t.Fatalf("asked: %v %+v %v", r.asked, notes, refusals)
 	}
 }

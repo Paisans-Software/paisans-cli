@@ -177,3 +177,36 @@ func TestVersionReadsASinglePlatformImage(t *testing.T) {
 		t.Errorf("got %q, %v; want 3.1.0", got, err)
 	}
 }
+
+// An image published as a single manifest rather than an index has no
+// platform list of its own, so it is judged by its configuration's
+// architecture.
+func TestPlatformsJudgesASinglePlatformImageByItsConfiguration(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base := "/v2/paisans-software/mbin/"
+		switch r.URL.Path {
+		case base + "manifests/" + indexDigest:
+			fmt.Fprintf(w, `{"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"digest":%q}}`, configOf("arm64"))
+		case base + "blobs/" + configOf("arm64"):
+			fmt.Fprint(w, `{"architecture":"arm64","os":"linux","config":{}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	got, err := imagedigest.Registry{Client: srv.Client()}.Platforms(mbinRef(srv))
+	if err != nil || strings.Join(got, ",") != "arm64" {
+		t.Errorf("got %v, %v; want arm64", got, err)
+	}
+}
+
+func TestPlatformsNamesEveryLinuxBuild(t *testing.T) {
+	srv, _ := published(t, build{arch: "amd64"}, build{arch: "arm64"})
+	got, err := imagedigest.Registry{Client: srv.Client()}.Platforms(mbinRef(srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "amd64,arm64" {
+		t.Errorf("got %v", got)
+	}
+}

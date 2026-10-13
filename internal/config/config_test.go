@@ -768,3 +768,23 @@ func TestClientName(t *testing.T) {
 		t.Errorf("an app no longer declared has client %q", got)
 	}
 }
+
+// The toolkit writes arch itself, so a value it would never write is a
+// hand edit gone wrong, refused at load rather than compared with a host.
+func TestUnknownArchIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    arch: armhf\n", 1)
+	_, err := config.Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "sites.home-a.arch") {
+		t.Fatalf("an unknown arch loaded: %v", err)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    arch: "+arch+"\n", 1)
+		cfg, err := config.Load(write(t, body))
+		if err != nil {
+			t.Fatalf("arch %s was refused: %v", arch, err)
+		}
+		if cfg.Sites["home-a"].Arch != arch {
+			t.Errorf("arch %s read as %q", arch, cfg.Sites["home-a"].Arch)
+		}
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
@@ -322,10 +323,12 @@ func (r *runner) hostPrepare(t apply.Transport) {
 
 // platform is what osMatch compares.
 type platform struct {
-	id, version, glibc string
+	id, version, glibc, arch string
 }
 
-func (p platform) String() string { return fmt.Sprintf("%s %s, glibc %s", p.id, p.version, p.glibc) }
+func (p platform) String() string {
+	return fmt.Sprintf("%s, %s %s, glibc %s", p.arch, p.id, p.version, p.glibc)
+}
 
 // readPlatform reads /etc/os-release and the version `ldd --version` prints
 // at the end of its first line ("ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39").
@@ -346,7 +349,11 @@ func readPlatform(t apply.Transport) (platform, error) {
 	if len(fields) == 0 {
 		return platform{}, fmt.Errorf("ldd --version printed nothing")
 	}
-	return platform{id: host.ID, version: host.VersionID, glibc: glibcRelease(fields[len(fields)-1])}, nil
+	arch, err := hostarch.Read("this site", t)
+	if err != nil {
+		return platform{}, err
+	}
+	return platform{id: host.ID, version: host.VersionID, glibc: glibcRelease(fields[len(fields)-1]), arch: arch}, nil
 }
 
 // glibcRelease keeps the "2.N" of a glibc version. glibc has been 2.x since
@@ -364,7 +371,9 @@ func glibcRelease(v string) string {
 // osMatch compares the new data site's platform with every existing data
 // site. A replica's indexes are the primary's bytes, sorted by the primary's
 // collation library; a replica whose glibc sorts differently reads them as
-// corrupt once it is promoted.
+// corrupt once it is promoted. Its data directory is also the primary's
+// bytes, in the primary's byte order and word size, so the architecture must
+// match too.
 func (r *runner) osMatch(t apply.Transport) {
 	if !r.site.Has(config.RoleData) {
 		return
@@ -388,6 +397,8 @@ func (r *runner) osMatch(t apply.Transport) {
 		switch {
 		case err != nil:
 			r.refuse(r.newSite, "platform", "could not read %s's: %v", name, err)
+		case mine.arch != theirs.arch:
+			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's architecture, or Postgres cannot read the data directory it copies", mine.arch, name, theirs.arch)
 		case mine != theirs:
 			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's OS and glibc release, or indexes built under one collation are read under another", mine, name, theirs)
 		default:

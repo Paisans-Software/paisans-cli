@@ -47,8 +47,52 @@ type Cache struct {
 	// named by its digest never changes, so an answer is kept for the run
 	// like a digest is.
 	versions map[string]string
+	// platforms are the platform lists Platforms read, kept the same way.
+	platforms map[string][]string
 	// newest are the answers NewestVersion got, by reference.
 	newest map[string]string
+}
+
+// Platformer names the platforms of a build, as Registry.Platforms does.
+type Platformer interface {
+	Platforms(ref string) ([]string, error)
+}
+
+// Platforms is the wrapped resolver's Platforms for ref, asked once per run.
+// A build named by its digest never changes, so the answer is kept like a
+// digest is. A failure is returned and not kept, and a transport failure marks
+// the host down as Digest does. A nil list with no error means the answer is
+// unknown: the wrapped resolver cannot say, or the host is down, and apply
+// skips the check rather than wait out a timeout per image.
+func (c *Cache) Platforms(ref string) ([]string, error) {
+	p, ok := c.r.(Platformer)
+	if !ok {
+		return nil, nil
+	}
+	c.mu.Lock()
+	if got, ok := c.platforms[ref]; ok {
+		c.mu.Unlock()
+		return got, nil
+	}
+	if _, down := c.down[Host(ref)]; down {
+		c.mu.Unlock()
+		return nil, nil
+	}
+	c.mu.Unlock()
+	got, err := p.Platforms(ref)
+	if err != nil {
+		var transport *url.Error
+		if errors.As(err, &transport) {
+			c.mu.Lock()
+			c.down[Host(ref)] = err
+			c.mu.Unlock()
+		}
+		return nil, err
+	}
+	c.mu.Lock()
+	c.platforms[ref] = got
+	c.mu.Unlock()
+	return got, nil
 }
 
 // Versioner reads the version label of a build named by its digest, as
@@ -67,7 +111,7 @@ type resolution struct {
 
 // Cached is a Cache in front of r.
 func Cached(r Resolver) *Cache {
-	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, newest: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
+	return &Cache{r: r, digests: map[string]string{}, asking: map[string]*resolution{}, versions: map[string]string{}, platforms: map[string][]string{}, newest: map[string]string{}, failed: map[string]error{}, down: map[string]error{}}
 }
 
 // Digest is the digest ref was first resolved to, resolving it now if it has

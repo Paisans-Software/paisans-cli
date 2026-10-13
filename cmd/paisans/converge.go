@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -771,6 +772,39 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 	}
 	if err := settle(cfg); err != nil {
+		return err
+	}
+	// Every site's architecture is read before anything is planned, and a
+	// missing one is recorded before the file is gathered and published:
+	// each step of the run refuses bytes changed after the publish. See
+	// recordArchitectures. The read has a section of its own, as the sudo
+	// before it does, rather than ending whichever section came last.
+	r.Section("architecture")
+	read, err := readArchitectures(r, cfg, cfg.SiteNames(), func(name string) hostarch.Runner {
+		return convergeHost(name, cfg.Sites[name], sudo)
+	})
+	if err != nil {
+		return err
+	}
+	if cfg, err = recordArchitectures(r, configPath, cfg, read, execute); err != nil {
+		return err
+	}
+	// Every site's images are checked against its architecture here, from
+	// the render: each site's apply checks them only once host prepare has
+	// run on every host. The render needs the secrets, so a dry run whose
+	// secrets init has yet to generate checks them once init has run, as
+	// its review does.
+	secrets, err := config.LoadDeploymentSecrets(convergeSecretsPath(configPath, secretsPath), cfg.ID)
+	var rendered *render.Plan
+	if err == nil {
+		rendered, err = convergeRender(cfg, secrets)
+	}
+	switch {
+	case err == nil:
+		if err := checkPlatforms(r, cfg, rendered, cfg.SiteNames()); err != nil {
+			return err
+		}
+	case execute:
 		return err
 	}
 	// An init that has just run warned about the secrets itself.

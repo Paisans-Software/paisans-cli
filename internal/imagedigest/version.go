@@ -188,6 +188,22 @@ func (r Registry) Builds(ref string) ([]Build, error) {
 	return builds, nil
 }
 
+// Platforms names the platforms the build ref names was published for, as
+// Build.Platform does (amd64, arm64/v8), sorted. Apply refuses an image with
+// none for a site's architecture before anything is pulled.
+func (r Registry) Platforms(ref string) ([]string, error) {
+	builds, err := r.Builds(ref)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(builds))
+	for _, b := range builds {
+		out = append(out, b.Platform)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // fetcher reads one repository's documents, following the registry's
 // anonymous challenge once and keeping the token it hands out.
 type fetcher struct {

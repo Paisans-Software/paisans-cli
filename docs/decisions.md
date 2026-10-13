@@ -2144,3 +2144,45 @@ A compromised forge account, a transferred repository, or a deleted one whose
 name is registered again can publish a release that `catalog update` would
 offer. The operator still sees what it changes, and the grant review still
 asks, before it renders anywhere.
+
+## 2026-10-13: Sites may be arm64, and only physical database copies need one architecture
+
+Founder decision. Spec: `docs/specs/2026-10-13-arm64-and-mixed-architecture.md`.
+
+### What was decided
+
+* amd64 and arm64 hosts are supported for every role. Any other architecture
+  is refused by name.
+* Each site's architecture is read from the host when apply, `host prepare`
+  or `site add` first reaches it, and recorded by the toolkit as
+  `sites.<name>.arch` in `paisans-stack.yaml`. A whole apply records every
+  missing key before it prepares hosts and publishes the signed copy.
+* A host that reports a different architecture from the recorded one is
+  refused before anything on it changes. Deleting the line is how an operator
+  accepts new hardware.
+* Every data site must share one architecture, whichever it is: `validate`
+  checks the recorded keys, apply checks again after recording, and `site add`
+  preflight compares it with OS and glibc. The same holds for a pinned app's
+  move by tar and for a WAL-G restore, whose base backups record their
+  architecture.
+* Everything else may mix: SQLite and pinned apps, Pocket ID, Garage, etcd,
+  apps sites, the gateway, the monitor and the witness.
+* Apply refuses, at plan time and before any pull, an image with no build for
+  the architecture of a site it is planned on.
+* Building images for arm64 is out of scope for the toolkit.
+
+### Why
+
+Postgres's data directory and WAL are machine-specific binary formats, so only
+the paths that copy them byte for byte need matching hosts; everything else
+talks over the network and has nothing to match. Recording the architecture
+lets `validate` check those rules without reaching a host, and turns a host
+replaced under the same name into a refusal instead of a broken replica.
+Checking the image platforms in the plan names the gap (today, the Mbin fork's
+amd64-only build) before a pull fails on the host.
+
+### What was run
+
+Nothing beyond reading the code; this records a design. Every image the
+toolkit names was checked for linux/arm64 with `docker buildx imagetools
+inspect` on 2026-10-13: all have it except `ghcr.io/paisans-software/mbin:1.15.1-paisans`.
