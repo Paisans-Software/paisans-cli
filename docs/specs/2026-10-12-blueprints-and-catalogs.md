@@ -152,7 +152,7 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 | `gate` | what the gate leaves open, the settings that close it, the probe and the live read | `registerGateSettings`, `SignedFetchFor`, `MbinPrivateAPIProbe` |
 | `health` | the route and the status codes that mean healthy, or `tcp: true` | `HealthFor` |
 | `mail` | whether it reads the deployment's SMTP settings | `SendsMail` |
-| `secrets` | each secret: how it is generated and how it is rotated | `internal/secretsgen`, `internal/secretsrotate` |
+| `secrets` | each secret: its `format` (`password`, `hex16`, `hex32`, `rsa-pem`, `rsa-keypair` under a `passphrase`, `rsa-public` `of` one), its `rotation_cost` (`signs-out`, `restart`), `never_rotate` with why, the `group` it rotates with as `apps.<app>.<group>`, and a `rotate` step run in one of its services (`change` and `check` with the value on stdin, `refused` output, a `when` condition and why it is `kept` otherwise) | `internal/secretsgen`, `internal/secretsrotate` |
 | `backup` | for an engine other than Postgres, the dump and restore commands | |
 | `checks` | CEL rules `validate` runs, each a refusal or a warning | per kind checks in `internal/validate` |
 | `templates` | the files it renders | `internal/render/templates/<kind>/` |

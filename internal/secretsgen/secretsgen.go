@@ -218,23 +218,24 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 		if entries == nil {
 			entries = map[string]any{}
 		}
+		pairs := keypairs(app.Kind)
 		for _, key := range appSecretKeys(cfg, app) {
-			if key == oauthPrivateKey || key == oauthPublicKey {
-				continue // a pair, derived from the passphrase; see below
+			if pairs.has(key) {
+				continue // a pair, derived from its passphrase; see below
 			}
 			if existing, ok := entries[key].(string); ok && existing != "" {
 				note(false, "apps."+name+"."+key)
 				continue
 			}
-			value, err := appSecret(key)
+			value, err := appSecret(app.Kind, key)
 			if err != nil {
 				return result, err
 			}
 			entries[key] = value
 			note(true, "apps."+name+"."+key)
 		}
-		if hasKey(appSecretKeys(cfg, app), oauthPrivateKey) {
-			if err := fillOAuthKeypair(name, entries, note); err != nil {
+		for _, pair := range pairs {
+			if err := fillKeypair(name, entries, pair, note); err != nil {
 				return result, err
 			}
 		}
@@ -310,7 +311,10 @@ const outlineSecretKey = "outline_secret_key"
 // service that will not start. Garage is stricter still: it refuses a base64
 // key ID or secret outright rather than merely failing to start with one, so
 // the two S3 credential keys get their own generators too.
-func appSecret(key string) (string, error) {
+func appSecret(kind config.Kind, key string) (string, error) {
+	if spec, ok := kinds.SecretOf(kind, key); ok && spec.Format != "" {
+		return generate(spec.Format)
+	}
 	switch key {
 	case masEncryptionSecret, outlineSecretKey:
 		return hexSecret(32)
@@ -367,7 +371,62 @@ const (
 	oauthPublicKey  = "oauth_public_key"
 )
 
-// fillOAuthKeypair generates Mbin's keypair when the private key is unset.
+// generate is a new value of a format a blueprint names. The keypair
+// formats are made with their passphrase, by keypairOf.
+func generate(format string) (string, error) {
+	switch format {
+	case kinds.FormatHex16:
+		return hexSecret(16)
+	case kinds.FormatHex32:
+		return hexSecret(32)
+	case kinds.FormatRSAPEM:
+		return rsaPrivateKeyPEM()
+	case kinds.FormatPassword, "":
+		return password()
+	}
+	return "", fmt.Errorf("a %s secret is made with the secret it depends on", format)
+}
+
+// keypair names the three secrets of an encrypted RSA keypair: the private
+// key, its public half and the passphrase it is encrypted under.
+type keypair struct{ private, public, passphrase string }
+
+type keypairList []keypair
+
+func (l keypairList) has(key string) bool {
+	for _, p := range l {
+		if p.private == key || p.public == key {
+			return true
+		}
+	}
+	return false
+}
+
+// keypairs is the encrypted keypairs a kind's blueprint declares, or Mbin's
+// OAuth2 pair for a blueprint that declares none.
+func keypairs(kind config.Kind) keypairList {
+	var out keypairList
+	for _, s := range kinds.AppSecrets(kind) {
+		spec, _ := kinds.SecretOf(kind, s)
+		if spec.Format != kinds.FormatRSAKeypair {
+			continue
+		}
+		p := keypair{private: spec.Name, passphrase: spec.Passphrase}
+		for _, t := range kinds.AppSecrets(kind) {
+			if half, _ := kinds.SecretOf(kind, t); half.Format == kinds.FormatRSAPublic && half.Of == spec.Name {
+				p.public = half.Name
+			}
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 && hasKey(kinds.AppSecrets(kind), oauthPrivateKey) {
+		out = append(out, keypair{private: oauthPrivateKey, public: oauthPublicKey, passphrase: "oauth_passphrase"})
+	}
+	return out
+}
+
+// fillKeypair generates an encrypted keypair when its private key is unset:
+// Mbin's OAuth2 pair, and any a blueprint declares.
 //
 // The private key is never replaced: every token Mbin has issued is signed by
 // it, so a new one logs out every API client and app at once. The public key
@@ -375,10 +434,11 @@ const (
 // counted as a reason to make a new pair. Deriving it means opening the
 // private key, and one the passphrase beside it cannot open is refused rather
 // than regenerated, because Mbin would refuse it too, on the host.
-func fillOAuthKeypair(app string, entries map[string]any, note func(bool, string)) error {
-	passphrase, _ := entries["oauth_passphrase"].(string)
+func fillKeypair(app string, entries map[string]any, pair keypair, note func(bool, string)) error {
+	oauthPrivateKey, oauthPublicKey := pair.private, pair.public
+	passphrase, _ := entries[pair.passphrase].(string)
 	if passphrase == "" {
-		return fmt.Errorf("apps.%s.oauth_passphrase is empty, and the OAuth2 private key is encrypted with it", app)
+		return fmt.Errorf("apps.%s.%s is empty, and the private key %s is encrypted with it", app, pair.passphrase, pair.private)
 	}
 	privateName := "apps." + app + "." + oauthPrivateKey
 	publicName := "apps." + app + "." + oauthPublicKey
@@ -390,12 +450,17 @@ func fillOAuthKeypair(app string, entries map[string]any, note func(bool, string
 			return err
 		}
 		entries[oauthPrivateKey] = private
-		entries[oauthPublicKey] = public
 		note(true, privateName)
-		note(true, publicName)
+		if oauthPublicKey != "" {
+			entries[oauthPublicKey] = public
+			note(true, publicName)
+		}
 		return nil
 	}
 	note(false, privateName)
+	if oauthPublicKey == "" {
+		return nil
+	}
 	if current, _ := entries[oauthPublicKey].(string); current != "" {
 		note(false, publicName)
 		return nil
@@ -403,7 +468,7 @@ func fillOAuthKeypair(app string, entries map[string]any, note func(bool, string
 
 	key, err := OpenOAuthPrivateKey(existing, passphrase)
 	if err != nil {
-		return fmt.Errorf("oauth-key-does-not-open: %s cannot be opened with apps.%s.oauth_passphrase, so its public half cannot be derived and Mbin could not sign a token with it either: %w", privateName, app, err)
+		return fmt.Errorf("oauth-key-does-not-open: %s cannot be opened with apps.%s.%s, so its public half cannot be derived and the app could not sign a token with it either: %w", privateName, app, pair.passphrase, err)
 	}
 	public, err := publicKeyPEM(&key.PublicKey)
 	if err != nil {

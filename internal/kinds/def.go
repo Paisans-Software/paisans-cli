@@ -137,6 +137,10 @@ type Def struct {
 	// storage keys, which every app in object storage has.
 	AppSecrets []string
 
+	// Secrets is how each of AppSecrets is generated, and what rotating it
+	// costs and needs.
+	Secrets []SecretSpec
+
 	// RequiredSecrets are the app secrets without which the application will
 	// not start, and why. Render refuses an app missing one.
 	RequiredSecrets []RequiredSecret
@@ -296,6 +300,12 @@ func AppSecrets(kind config.Kind) []string {
 // RequiredSecrets is the app secrets a kind cannot start without.
 func RequiredSecrets(kind config.Kind) []RequiredSecret {
 	return append([]RequiredSecret(nil), of(kind).RequiredSecrets...)
+}
+
+// SelfRotated is the app secrets of a kind that `secrets rotate` replaces by
+// re-rendering the app's own stack.
+func SelfRotated(kind config.Kind) []string {
+	return append([]string(nil), of(kind).SelfRotated...)
 }
 
 // SelfRotatedKind is the kind whose secret key is, for each key `secrets

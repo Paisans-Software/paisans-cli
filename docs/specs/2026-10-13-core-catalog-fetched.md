@@ -205,9 +205,10 @@ formats, costs and the keys never rotated are chosen by key name in Go
 today (`secretsgen`, `secretsrotate`, `cmd/paisans/secretsrotate.go`). Each
 generated secret in a blueprint gains:
 
-* `format`, one of a closed set the toolkit implements: `password`, `hex32`,
-  `rsa-pem`, and `rsa-keypair` for a private and public key encrypted under
-  another of the app's secrets.
+* `format`, one of a closed set the toolkit implements: `password`, `hex16`,
+  `hex32`, `rsa-pem`, `rsa-keypair` for a private key encrypted under another
+  of the app's secrets (its `passphrase`), and `rsa-public` for the public
+  half `of` one.
 * `rotation_cost`: `signs-out` or `restart`, which `secrets rotate` states
   before it asks.
 * `never_rotate`, with the reason, for a key whose rotation would lose data,
@@ -218,8 +219,10 @@ generated secret in a blueprint gains:
 **A rotation that needs the running app is an in-app action.** Only one does
 today: Mbin's RabbitMQ password, which `rabbitmqctl` changes inside the
 `rabbitmq` service before the stack is given the new value. Its blueprint
-declares the step under the secret: the service to run in, the command, the
-value on stdin, and the command that says the new value is accepted, with the
+declares the step under the secret, `rotate`: the `service` to run in, the
+`change` command, the `check` command that says the new value is accepted and
+the `refused` output that means not yet, each with the value on stdin, and a
+`when` condition with why the secret is `kept` when it does not hold, with the
 boundary the blueprints spec sets for every in-app action (*Capabilities,
 helpers and in-app actions*). The toolkit keeps the stages, the gates between
 them and the order across sites.

@@ -90,7 +90,7 @@ type Generated struct {
 func (g Generated) Path() string { return g.SecretPath }
 
 func (g Generated) Next(e Env, s *config.Secrets) (string, error) {
-	return secretsgen.Replacement(g.SecretPath, s)
+	return secretsgen.ReplacementIn(e.Cfg, g.SecretPath, s)
 }
 
 func (g Generated) Promote(s *config.Secrets, next string) error {
