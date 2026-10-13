@@ -76,10 +76,23 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
 		t.Errorf("mode %v, want 0644: the file holds no secret and is meant to be committed", info.Mode().Perm())
 	}
-	for _, want := range []string{"paisans secrets set external.smtp_password", "paisans init", "paisans apply"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("next steps lack %q", want)
+	// init creates secrets.enc.yaml, so it comes first; secrets set with no
+	// key then asks for each secret only the operator can give.
+	next := out.String()[strings.Index(out.String(), "Next:"):]
+	at := -1
+	for _, want := range []string{"  paisans init ", "  paisans secrets set ", "  paisans apply "} {
+		i := strings.Index(next, want)
+		if i < 0 {
+			t.Errorf("next steps lack %q:\n%s", want, next)
+			continue
 		}
+		if i < at {
+			t.Errorf("%q is out of order:\n%s", want, next)
+		}
+		at = i
+	}
+	if strings.Contains(next, "external.") {
+		t.Errorf("next steps name a secret's key rather than asking for each:\n%s", next)
 	}
 }
 

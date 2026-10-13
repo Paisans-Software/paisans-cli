@@ -98,9 +98,12 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		p.Say("")
 		r.Result("Wrote %s.", path)
 		p.Say("\nNext:")
-		p.Say("  paisans secrets set external.smtp_password   # the SMTP password, read from stdin")
-		p.Say("  paisans init                                 # checks the subnet, generates every secret")
-		p.Say("  paisans apply                                # shows every step; --execute runs them")
+		// init creates secrets.enc.yaml, which secrets set writes into, so it
+		// comes first. With no key, at a terminal, secrets set asks for each
+		// secret only the operator can give, whichever the file declares.
+		p.Say("  paisans init          # checks the subnet, creates secrets.enc.yaml, generates every secret")
+		p.Say("  paisans secrets set   # asks for each secret only you can give, such as the SMTP password")
+		p.Say("  paisans apply         # shows every step; --execute runs them")
 		return nil
 	}
 }
