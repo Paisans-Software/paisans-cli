@@ -55,6 +55,9 @@ var templateFuncs = template.FuncMap{
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,
+	// stableULID is a ULID derived from an app's name (kinds.StableULID),
+	// for software that must be told one and given the same one every run.
+	"stableULID": kinds.StableULID,
 	"yesno": func(b bool) string {
 		if b {
 			return "true"

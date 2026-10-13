@@ -787,7 +787,7 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if !ok {
 		t.Fatal("no client for the homeserver")
 	}
-	if want := kinds.MASRedirectURI(cfg.Apps["chat"].Hostname, "chat"); chat.CallbackURL != want || !chat.PKCE {
+	if want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + kinds.StableULID("chat"); chat.CallbackURL != want || !chat.PKCE {
 		t.Errorf("chat's client: callback %s PKCE %v, want %s with PKCE", chat.CallbackURL, chat.PKCE, want)
 	}
 	if chat.MemberGroup != kinds.MembersGroup || chat.AdminGroup != kinds.AdminsGroup || chat.LaunchURL != "" {

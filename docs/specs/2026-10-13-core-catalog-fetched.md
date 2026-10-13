@@ -181,18 +181,23 @@ blueprint already declares, and the core catalog's templates change with it:
 | Today | Becomes |
 |---|---|
 | `MailerDSN` | `SMTPDSN`, the same Symfony DSN encoding |
-| `MbinSenderEmail`, `MbinContactEmail` | `SMTPSender` and `ContactEmail`, with the fallbacks they have today |
-| `MbinLockedSettings`, `WriteFreelyLockedSettings` | `LockedSettings`, read from the blueprint's `gate_settings` |
-| `MbinQueue` | `.Setting "queue"`, with the default the blueprint declares |
+| `MbinSenderEmail` | `SMTPSender`, with the fallback it has today |
+| `MbinContactEmail` | `.Setting "contact_email" .SMTPSender` |
+| `MbinLockedSettings`, `WriteFreelyLockedSettings` | `.LockedSettings "<separator>"`, read from the blueprint's `config.locked_settings`: each a name, or `{name, when}` with a CEL condition, which sees `app.oidc` |
+| `MbinQueue` | `.Setting "queue" "postgres"` |
 | `masUpstreamProviderID` | `stableULID`, a ULID derived from the app's name, so rendering stays deterministic |
+| `.MASPort`, `.MASUpstreams`, `.MASDBName` | `index .ServicePorts "mas"`, `index .ServiceUpstreams "mas"`, `index .Databases "mas"` |
 
 **Links between apps become a capability.** Element finds its homeserver, and
 a homeserver's `server_name` depends on whether it delegates to a well known
 host. A blueprint may now **provide** a named role and another may **consume**
 it: synapse provides `matrix-homeserver`, with its `base_url` and
 `server_name` worked out by the toolkit from the deployment as `appview.go`
-does today, and element consumes it. A template reads the consumed values as
-`.Linked "matrix-homeserver" "server_name"`. The role is named for what it is,
+does today, and element consumes it, naming the setting that holds its
+provider's hostname (`consumes: [{role: matrix-homeserver, setting:
+homeserver}]`). A template reads the consumed values as `.Linked
+"matrix-homeserver" "server_name"`; a hostname no declared provider answers
+on is taken as the provider's own. The role is named for what it is,
 so a second homeserver blueprint provides the same one.
 
 **Secrets say how they are made and what rotating them costs.** Value

@@ -108,6 +108,14 @@ type Def struct {
 	// Postgres, each named <database>_<name>, which its templates create.
 	ExtraDatabases []string
 
+	// LockedSettings are the settings the configuration is the only source
+	// of, which the app's own admin pages refuse to change.
+	LockedSettings []LockedSetting
+
+	// Provides and Consumes are the roles linking the kind to other apps.
+	Provides []string
+	Consumes []Consume
+
 	// LocalMediaPaths are the paths on its own hostname a kind serves its
 	// stored files from when it keeps them locally, for a kind whose files
 	// must be readable with no credential.

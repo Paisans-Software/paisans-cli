@@ -133,7 +133,7 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 	if !ok {
 		t.Fatal("the toolkit does not know a synapse client")
 	}
-	if spec.CallbackURL != kinds.MASRedirectURI("matrix.example.org", "chat") {
+	if spec.CallbackURL != "https://matrix.example.org/upstream/callback/"+kinds.StableULID("chat") {
 		t.Errorf("callback %s, want the authentication service's", spec.CallbackURL)
 	}
 	if !spec.PKCE {

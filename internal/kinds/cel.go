@@ -36,6 +36,8 @@ const celCostLimit = 10000
 //   - app.smtp, its resolved mail settings (host, port, security, username,
 //     from_address, from_name), without the password, empty in a condition
 //   - app.name, its name under apps, empty in a condition
+//   - app.oidc, whether its blueprint signs members in through the identity
+//     provider
 //   - app.sites, the sites it runs on, empty in a condition
 //   - app.storage, where its files go: mode ("object" or "local"), bucket
 //     (its bucket's name, when in object storage) and media_hostname (the
@@ -61,6 +63,7 @@ var celEnv = func() *cel.Env {
 		cel.Variable("app.settings", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("app.smtp", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("app.name", cel.StringType),
+		cel.Variable("app.oidc", cel.BoolType),
 		cel.Variable("app.sites", cel.ListType(cel.StringType)),
 		cel.Variable("app.storage", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("deployment.sites", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
@@ -104,6 +107,7 @@ func celApp(app config.App) map[string]any {
 		"app.settings":     settings,
 		"app.smtp":         map[string]any{},
 		"app.name":         "",
+		"app.oidc":         of(app.Kind).OIDC != nil,
 		"app.sites":        []string{},
 		"app.storage":      map[string]string{},
 		"deployment.sites": []map[string]any{},
