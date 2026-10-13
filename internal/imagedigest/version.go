@@ -15,7 +15,7 @@ import (
 const VersionLabel = "org.opencontainers.image.version"
 
 // Version returns the version label of the build ref names, which must carry
-// its digest (Eg: ghcr.io/paisans-software/mbin:stack-1@sha256:...), empty
+// its digest (Eg: ghcr.io/paisans-software/mbin:1.15.1-paisans@sha256:...), empty
 // when the build has no such label. It reads the build's image configuration,
 // anonymously as Digest does, for every linux platform an index lists. One
 // release labels every platform alike, and that label is the answer; when

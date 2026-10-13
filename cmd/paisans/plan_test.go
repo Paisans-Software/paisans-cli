@@ -137,19 +137,19 @@ func TestListPlanNamesEachMovedImage(t *testing.T) {
 	const (
 		old = "sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
 		new = "sha256:3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
-		tag = "ghcr.io/paisans-software/mbin:stack-1"
+		tag = "ghcr.io/example-org/mbin:v1-fork"
 	)
 	plan := &apply.Plan{
 		Site: "home-a", Transport: "ubuntu@192.0.2.10",
 		Pins: []apply.ImagePin{
-			{Stack: "talk", App: "talk", Services: []string{"app"}, Image: tag, Reference: tag + "@" + new, Deployed: tag + "@" + old, Source: "registry", Version: "1.16.0-paisans", DeployedVersion: "1.15.0-paisans"},
+			{Stack: "talk", App: "talk", Services: []string{"app"}, Image: tag, Reference: tag + "@" + new, Deployed: tag + "@" + old, Source: "registry", Version: "1.16.0-fork", DeployedVersion: "1.15.0-fork"},
 			{Stack: "talk", App: "talk", Services: []string{"valkey"}, Image: "docker.io/valkey/valkey:9.1.2-trixie", Reference: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Deployed: "docker.io/valkey/valkey:9.1.2-trixie@" + old, Source: "registry"},
 			{Stack: "talk", App: "talk", Services: []string{"rabbitmq"}, Image: "docker.io/library/rabbitmq:3.13.7-management-alpine", Reference: "docker.io/library/rabbitmq:3.13.7-management-alpine@" + new, Deployed: "docker.io/library/rabbitmq:3.13.7-management-alpine", Source: "registry"},
 		},
 	}
 	rec := &ui.Recorder{}
 	listPlan(rec, plan)
-	want := "talk  app  " + tag + "  1.15.0-paisans (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)"
+	want := "talk  app  " + tag + "  1.15.0-fork (sha256:1a2b3c4d5e6f) -> 1.16.0-fork (sha256:3c4d5e6f7a8b)"
 	if !rec.Has("pending", want) {
 		t.Errorf("the moved image is not listed as %q:\n%s", want, rec.Lines())
 	}

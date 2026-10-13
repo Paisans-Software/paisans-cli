@@ -10,9 +10,9 @@ import (
 // a service rather than the word.
 func TestNameSetsANameOffInBackticks(t *testing.T) {
 	for in, want := range map[string]string{
-		"talk":                         "`talk`",
-		"apps.talk.images.app":         "`apps.talk.images.app`",
-		"ghcr.io/example/mbin:stack-1": "`ghcr.io/example/mbin:stack-1`",
+		"talk":                        "`talk`",
+		"apps.talk.images.app":        "`apps.talk.images.app`",
+		"ghcr.io/example/mbin:v1.2.3": "`ghcr.io/example/mbin:v1.2.3`",
 	} {
 		if got := ui.Name(in); got != want {
 			t.Errorf("Name(%q) = %q, want %q", in, got, want)

@@ -82,7 +82,7 @@ func labelled(t *testing.T, labels string) (*httptest.Server, *[]string) {
 }
 
 func mbinRef(srv *httptest.Server) string {
-	return strings.TrimPrefix(srv.URL, "https://") + "/paisans-software/mbin:stack-1@" + indexDigest
+	return strings.TrimPrefix(srv.URL, "https://") + "/paisans-software/mbin:develop@" + indexDigest
 }
 
 func TestVersionIsTheLabelEveryPlatformAgreesOn(t *testing.T) {
@@ -135,7 +135,7 @@ func TestVersionIsEmptyWithoutTheLabel(t *testing.T) {
 }
 
 func TestVersionNeedsADigest(t *testing.T) {
-	if _, err := (imagedigest.Registry{}).Version("ghcr.io/paisans-software/mbin:stack-1"); err == nil {
+	if _, err := (imagedigest.Registry{}).Version("ghcr.io/paisans-software/mbin:develop"); err == nil {
 		t.Error("a tag was read as a build")
 	}
 }

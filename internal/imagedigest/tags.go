@@ -10,7 +10,7 @@ import (
 // versionTag is a tag shaped like a version: three numbers, an optional v
 // before them and an optional suffix after a dash (Eg: 1.15.0-paisans, the
 // form a fork's release `1.15.0+paisans` is published under, with the `+`
-// written `-`, per docs/specs/2026-10-11-stack-channels.md).
+// written `-` because a tag cannot hold one).
 var versionTag = regexp.MustCompile(`^v?([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$`)
 
 // NewestVersion is the newest version-shaped tag of the repository ref is

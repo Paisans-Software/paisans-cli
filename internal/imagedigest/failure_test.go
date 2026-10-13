@@ -55,7 +55,7 @@ func TestDigestTellsTheFailuresApart(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := answering(t, c.token, c.manifest)
-			_, err := imagedigest.Registry{Client: srv.Client()}.Digest(reference(srv, "stack-1"))
+			_, err := imagedigest.Registry{Client: srv.Client()}.Digest(reference(srv, "develop"))
 			if err == nil {
 				t.Fatal("resolved")
 			}

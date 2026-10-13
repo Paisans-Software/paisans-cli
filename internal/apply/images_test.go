@@ -572,7 +572,7 @@ func TestOnlyAndExceptPinOnlyTheStacksTheyMove(t *testing.T) {
 }
 
 // Without a resolver the build the host runs is kept whatever the
-// configuration now names, a moved channel or another repository, since a
+// configuration now names, a moved tag or another repository, since a
 // narrower command must not move an image.
 func TestWithoutAResolverAnyDeployedBuildIsKept(t *testing.T) {
 	for _, image := range []string{"ghcr.io/example-org/mbin:v2.0.0-fork", "ghcr.io/other-org/mbin:v1.10.1-fork"} {

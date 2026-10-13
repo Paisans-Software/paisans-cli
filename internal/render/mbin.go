@@ -99,8 +99,8 @@ func mbinFallbackAddress(hostname string) string { return "noreply@" + hostname 
 // the configuration is their only source. The paisans fork reads each one
 // named in MBIN_LOCKED_SETTINGS from the environment on every read, never
 // writes it when an admin saves, shows it disabled in the admin form, and
-// refuses it through the settings API. Every stack-1 image carries the
-// feature, and a name it cannot lock makes it answer every request with an
+// refuses it through the settings API. Every release since 1.15.0+paisans
+// carries the feature, and a name it cannot lock makes it answer every request with an
 // error, so each name here must be one the fork lists as lockable.
 //
 // Each name is both a key the template renders and a field of the fork's

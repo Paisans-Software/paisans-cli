@@ -35,8 +35,8 @@ type Versioner interface {
 // every line naming it. `paisans apply` passes it on every plan.
 //
 // A tag in a compose file never changes, and apply recreates a stack only
-// when its file changes, so a new build behind a tag (a fork's stack-1 moved
-// to a new release, Caddy's 2 rebuilt for a fix, a version tag a publisher
+// when its file changes, so a new build behind a tag (a series tag moved to a
+// new release, Caddy's 2 rebuilt for a fix, a version tag a publisher
 // rebuilt) would never reach a host. Pinning the digest at plan time turns a
 // new build into a changed compose file: the dry run shows it, and the apply
 // pulls, checks, validates and health gates the stack exactly as for any
@@ -152,8 +152,8 @@ func (p ImagePin) FirstPin() bool {
 // Describe is the pin as the dry run lists a moved image: the app (or infra),
 // the services, the reference as configured, then the build it leaves and
 // the build it moves to, each by its version label when the build has one
-// (Eg: talk  app  ghcr.io/paisans-software/mbin:stack-1  1.15.0-paisans
-// (sha256:1a2b3c4d5e6f) -> 1.16.0-paisans (sha256:3c4d5e6f7a8b)).
+// (Eg: talk  app  ghcr.io/example-org/mbin:v1-fork  1.15.0-fork
+// (sha256:1a2b3c4d5e6f) -> 1.16.0-fork (sha256:3c4d5e6f7a8b)).
 //
 // A first pin reads `<stack>  <services>  <image>  pins <image> to <build>`.
 func (p ImagePin) Describe() string {
@@ -296,7 +296,7 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 	if r == nil {
 		// No resolver is a command with a narrower purpose than moving
 		// images: it keeps whatever the host runs, whatever the
-		// configuration now names (another tag, a channel moved, another
+		// configuration now names (another tag, a tag moved, another
 		// repository), so it never moves an image to a build nobody
 		// planned. The next apply shows and makes that move.
 		if deployed != "" {
@@ -378,20 +378,6 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	setting := ui.Name(image.Setting())
 	host := imagedigest.Host(want)
 	switch {
-	case errors.Is(failed, imagedigest.ErrNotFound) && image.Default && kinds.Channel(want) != "":
-		// The kind's default follows a channel (its record in internal/kinds),
-		// which exists only once the fork's promote workflow has moved it
-		// to a release the toolkit was verified against
-		// (docs/specs/2026-10-11-stack-channels.md, "Promotion"). Until
-		// then no build of it exists to resolve. Pinning an unverified
-		// release instead is allowed: the message says what it is, and
-		// nothing refuses it.
-		return &ui.Problem{
-			Hint: fmt.Sprintf("%s is not published (%s: not found)", named, host),
-			Explain: fmt.Sprintf("The %s channel has no paisans-verified release yet. Set %s to a published tag (Eg: %s) or a digest to run one anyway; it will not be a paisans-verified release.",
-				ui.Name(kinds.Channel(want)), setting, ui.Name(exampleTag(want, r))),
-			Cause: failed,
-		}
 	case errors.Is(failed, imagedigest.ErrNotFound):
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("%s does not exist (%s: not found)", named, host),
