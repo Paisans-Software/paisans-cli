@@ -96,7 +96,7 @@ grant as last applied, plus when.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "keys":   {"applied_at": "2026-10-11T23:10:04Z", "login": "ubuntu", "entries": [ … ]},
   "images": {"applied_at": "2026-10-11T23:12:40Z", "entries": [ … ]},
   "web_server": {"applied_at": "…", "include_dir": "/srv/caddy.d"},
@@ -107,15 +107,24 @@ grant as last applied, plus when.
 * **`config` is the signed configuration version last applied**, its hash and
   revision (docs/specs/2026-10-12-config-store.md, *Rollback*), written by
   `apply` with the other parts. A record of version 1 has no `config` part and
-  is read as one that has had no version applied; it is written back as
-  version 2.
+  is read as one that has had no version applied. Version 3 added the
+  `approved` part. An older record is written back as version 3.
 * **Readable by anyone, written by root.** It holds fingerprints and image
   references, nothing secret, so a plan reads it without `sudo`. Only root
   writes it, so the login user alone cannot rewrite the baseline.
 * **Each part is written by the command that applies it**, after that
   command's steps for the site have all succeeded: `keys` and `login` by `host
   prepare`, `images` and `web_server` by `apply`. A run that fails part way
-  writes nothing, and the next run reviews the same changes again.
+  leaves those parts as they were.
+* **What the operator approved is written first**, in an `approved` part, as
+  soon as they type approve and before the first change: each entry's subject
+  and what it becomes, with when and by whom. The next run does not ask for an
+  entry it holds again, so a run that stopped part way is not approved twice;
+  the review counts those entries on the site's line instead of listing them.
+  An entry granted as something other than what was approved is asked about
+  again. Applying an entry moves it from `approved` to its part. Changed
+  2026-10-13, at the founder's direction, from a record written only after
+  success, which asked for the same approval again after any failed step.
 * **Written under `/var/lib/paisans/registry.lock`**, the lock the registry and
   the deployment record already take, by a temporary file and a rename.
 * **Removed with the deployment**: `site remove` deletes it in stage 3, with the
@@ -139,6 +148,7 @@ claim. Each entry of the grant is compared with the record:
 | in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
 | in both, different | `~ image talk/mbin: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
 | in the record only | `- key SHA256:… (carol)` | no |
+| in `approved`, the same | counted on the site's line | no |
 
 A removal is shown and not approved, because it only takes away. The review is
 grouped by site, keys first, and printed in full at every verbosity, with
@@ -261,7 +271,8 @@ does, so tests drive the prompt through a pipe.
 * `apply` with no `--site`: one prompt for several sites; nothing runs when it
   is refused.
 * The record: written only after success, under the lock; a failed step leaves
-  the old one.
+  the old one, with what was approved in `approved`, and the next run asks
+  nothing for it.
 * The allowlist: no file; a file without the key (append refused, share,
   rename and removals allowed); a swapped key under a listed admin's name
   refused; `host allow` seeding a new file from the sidecars; `host disallow`

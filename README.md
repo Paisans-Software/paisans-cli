@@ -4925,8 +4925,14 @@ fingerprints and image references, nothing secret, so it is readable without
 `sudo`; only root writes it, so the login user alone cannot rewrite the
 baseline. Each part is written by the command that applies it, once that
 command's steps for the site have all succeeded: the login and keys by `host
-prepare`, the images and the web server's directory by `apply`. A run that
-fails part way writes nothing, and the next run reviews the same changes again.
+prepare`, the images and the web server's directory by `apply`. What the
+operator approves is written earlier, as soon as they type approve and before
+the first change, in the record's `approved` part: a run that fails part way
+leaves the applied parts as they were, and the next run applies what was
+approved without asking again, because the operator saw exactly those entries
+and approving is not undone by a step that failed after it. Applying an entry
+moves it from the approvals to its part. An entry approved as one thing and
+now granted as another (Eg: an image moved on again) is asked about again.
 It is written under `/var/lib/paisans/registry.lock`, by a temporary file and
 a rename, and only over the file that was read, so two commands writing
 different parts lose neither. A host with no record, which is every host of a
@@ -4943,6 +4949,7 @@ run review everything again. `site remove` deletes it with the registry entry.
 | in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
 | in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
 | in the record only | `- key SHA256:… (carol, carol@desk)` | no |
+| approved on the host earlier, not applied yet | counted on the site's line: `3 approved earlier, not applied yet` | no |
 
 A removal is shown and not approved, because it only takes away. The review
 is one line per site, pending when anything needs approval, with every change

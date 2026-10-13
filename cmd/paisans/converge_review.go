@@ -32,7 +32,8 @@ var convergeRender = func(cfg *config.Config, secrets *config.Secrets) (*render.
 // convergeReview is apply with no --site's review: one for every site, under
 // a section of its own, keys, images and the web server alike, since the run
 // prepares and applies them all. With execute it asks once, before the first
-// step, and records what was approved for the steps to check against; a dry
+// step, records what was approved on each site, so a run that stops part
+// way does not ask for it again, and for the steps to check against; a dry
 // run asks nothing and ends with what --execute will ask for. It returns
 // each site's review, for the web server's part the run records at its end.
 //
@@ -106,6 +107,11 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	}
 	if pending > 0 {
 		run.approvedBy = approver(cfg)
+	}
+	for _, site := range sites {
+		if err := recordApproval(r, out[site], cfg.Deployment(), run.approvedBy); err != nil {
+			return nil, 0, err
+		}
 	}
 	reviewedByRun = run
 	return out, pending, nil

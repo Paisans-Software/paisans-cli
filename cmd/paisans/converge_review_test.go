@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -172,5 +174,55 @@ func TestConvergeRecordsTheWebServerDirectory(t *testing.T) {
 	rec := host.record(t)
 	if rec.WebServer == nil || rec.WebServer.IncludeDir != "/srv/caddy.d" || rec.WebServer.ApprovedBy != "alice" || rec.Keys != nil || rec.Images != nil {
 		t.Errorf("record %+v %+v", rec.WebServer, rec)
+	}
+}
+
+// apply with no --site records what was approved on each site before its
+// first step, so a run that stops part way asks nothing when it runs again,
+// terminal or not, and says what it approved earlier.
+func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
+	cfg := fixture(t)
+	hosts := map[string]*memGrant{}
+	held := grantedAlready(t, fixtureConfig(), fixtureSecretsPath())
+	for _, site := range cfg.SiteNames() {
+		hosts[site] = &memGrant{}
+		if site != "home-a" {
+			hosts[site].content, hosts[site].found = grant.Encode(*held(site)), true
+		}
+	}
+	ran := fakeConverge(t, map[string]error{"apply --site home-a": errors.New("home-a: boom")})
+	convergeGrantHost = func(_ *config.Config, site string, _ bool) registry.Runner { return hosts[site] }
+	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant, _ bool) (grant.Record, error) {
+		rec, _, _, err := grant.Read(hosts[site], cfg.Deployment())
+		return rec, err
+	}
+	convergeRender = func(cfg *config.Config, secrets *config.Secrets) (*render.Plan, error) {
+		return render.Build(cfg, secrets)
+	}
+	var out bytes.Buffer
+	if err := convergeWith(t, answering(t, "approve\n"), &out, "--execute"); err == nil {
+		t.Fatal("the failing step passed")
+	}
+	if !strings.Contains(out.String(), "Type approve to proceed: ") {
+		t.Fatalf("not asked: %q", out.String())
+	}
+	approved := hosts["home-a"].record(t).Approved
+	if approved == nil || len(approved.Entries) == 0 {
+		t.Fatalf("nothing recorded as approved on home-a")
+	}
+	for _, site := range cfg.SiteNames() {
+		if site != "home-a" && hosts[site].writes != 0 {
+			t.Errorf("%s, with nothing to approve, was written", site)
+		}
+	}
+	*ran = nil
+	out.Reset()
+	rec := recordConverge(t)
+	if err := convergeWith(t, noTerminalStdin(), &out, "--execute"); err != nil || out.Len() != 0 {
+		t.Fatalf("err %v, asked %q\n%s", err, out.String(), rec.Lines())
+	}
+	want := fmt.Sprintf("done: home-a %d approved earlier, not applied yet, nothing new to approve", len(approved.Entries))
+	if !strings.Contains(rec.Lines(), want) || strings.Contains(rec.Lines(), "explain: + ") {
+		t.Errorf("the review, wanting %q:\n%s", want, rec.Lines())
 	}
 }

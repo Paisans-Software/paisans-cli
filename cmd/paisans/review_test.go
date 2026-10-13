@@ -318,6 +318,39 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 	}
 }
 
+// What the operator approved is recorded before the first change, so a run
+// that stops part way does not ask for it again: the next run, even without
+// a terminal, goes on without asking, and records the keys with who approved
+// them once it succeeds.
+func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
+	cfg := fixture(t)
+	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	loggingSSH(t, "awk -v fp=")
+	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
+	agentFingerprints = func() []string { return []string{alice.Fingerprint} }
+	if _, err := prepare(t, answering(t, "approve\n"), io.Discard, "--execute"); err == nil {
+		t.Fatal("the failing step passed")
+	}
+	got := hosts["home-a"].record(t)
+	if got.Keys != nil || got.Approved == nil || len(got.Approved.Entries) != 1 || got.Approved.Entries[0].Subject != "key "+alice.Fingerprint || got.Approved.Entries[0].ApprovedBy != "alice" {
+		t.Fatalf("record after the failed run %+v %+v", got.Keys, got.Approved)
+	}
+	loggingSSH(t, "")
+	agentFingerprints = func() []string { return nil }
+	var out bytes.Buffer
+	rec, err := prepare(t, noTerminalStdin(), &out, "--execute")
+	if err != nil || out.Len() != 0 {
+		t.Fatalf("err %v, asked %q\n%s", err, out.String(), rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "1 approved earlier, not applied yet, nothing new to approve") {
+		t.Errorf("the review does not say what was approved earlier:\n%s", rec.Lines())
+	}
+	got = hosts["home-a"].record(t)
+	if got.Keys == nil || got.Keys.ApprovedBy != "alice" || got.Approved != nil {
+		t.Errorf("record after the second run %+v %+v", got.Keys, got.Approved)
+	}
+}
+
 // Refused at the prompt, nothing on the host changes.
 func TestHostPrepareNotApprovedChangesNothing(t *testing.T) {
 	for name, answer := range map[string]string{"refused": "no\n", "end of input": ""} {

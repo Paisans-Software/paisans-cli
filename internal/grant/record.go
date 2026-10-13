@@ -17,15 +17,17 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/registry"
 )
 
-// Version is the record's layout. Version 2 added the configuration part;
-// a version 1 record is read as one with no configuration part yet, and
-// written back as version 2.
-const Version = 2
+// Version is the record's layout. Version 2 added the configuration part
+// and version 3 the approvals; an older record is read as one with neither
+// yet, and written back as version 3.
+const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
 // all succeeded: the keys part by host prepare, the images, web server and
-// configuration parts by apply. A part that was never written is nil.
+// configuration parts by apply. Approved is the one written before any step:
+// what an operator approved there and no command has applied yet. A part
+// that was never written is nil.
 type Record struct {
 	Version    int             `json:"version"`
 	Keys       *KeysPart       `json:"keys,omitempty"`
@@ -33,6 +35,26 @@ type Record struct {
 	WebServer  *WebServerPart  `json:"web_server,omitempty"`
 	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
 	Config     *ConfigPart     `json:"config,omitempty"`
+	Approved   *ApprovedPart   `json:"approved,omitempty"`
+}
+
+// ApprovedPart is each entry an operator approved on the host that the
+// command applying it has not recorded yet. It is written as soon as the
+// operator types approve, before the first change, so a run that stops part
+// way, at a step that fails or an interrupt, does not ask for the same entries
+// again: the operator approved them, and the host has not changed since.
+// Applying an entry moves it to the part it belongs to (Update).
+type ApprovedPart struct {
+	Entries []Approval `json:"entries"`
+}
+
+// Approval is one entry approved: a review change's subject and what it
+// becomes, which together are what the operator saw and approved.
+type Approval struct {
+	Subject    string `json:"subject"`
+	To         string `json:"to"`
+	ApprovedAt string `json:"approved_at"`
+	ApprovedBy string `json:"approved_by,omitempty"`
 }
 
 // ConfigPart is the version of the configuration apply last applied: its
@@ -122,8 +144,8 @@ func Parse(content string) (Record, error) {
 	if err := dec.Decode(&rec); err != nil {
 		return Record{}, err
 	}
-	if rec.Version != 1 && rec.Version != Version {
-		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 and %d", rec.Version, Version)
+	if rec.Version < 1 || rec.Version > Version {
+		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 to %d", rec.Version, Version)
 	}
 	return rec, nil
 }
@@ -242,6 +264,88 @@ func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
 }
 
+// covers reports whether subject, a review change's, is in a part s
+// covers.
+func (s Scope) covers(subject string) bool {
+	kind, rest, _ := strings.Cut(subject, " ")
+	switch kind {
+	case "login", "key":
+		return s.Keys
+	case "image":
+		stack, _, _ := strings.Cut(rest, "/")
+		return s.Images && s.stack(stack)
+	case "blueprint":
+		return s.Images && s.stack(rest)
+	case "web":
+		return s.WebServer
+	}
+	return false
+}
+
+// Approve is rec with each change needing approval recorded as approved at
+// now, by approvedBy. An entry approved before as something else is
+// replaced, so each holds the latest approval.
+func (rec Record) Approve(changes []Change, now time.Time, approvedBy string) Record {
+	out := rec
+	out.Version = Version
+	var entries []Approval
+	if rec.Approved != nil {
+		entries = append(entries, rec.Approved.Entries...)
+	}
+	at := now.UTC().Format(time.RFC3339)
+	for _, c := range changes {
+		if !c.NeedsApproval() {
+			continue
+		}
+		i := slices.IndexFunc(entries, func(a Approval) bool { return a.Subject == c.Subject })
+		switch {
+		case i < 0:
+			entries = append(entries, Approval{Subject: c.Subject, To: c.To, ApprovedAt: at, ApprovedBy: approvedBy})
+		case entries[i].To != c.To:
+			entries[i] = Approval{Subject: c.Subject, To: c.To, ApprovedAt: at, ApprovedBy: approvedBy}
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Subject < entries[j].Subject })
+	if len(entries) > 0 {
+		out.Approved = &ApprovedPart{Entries: entries}
+	}
+	return out
+}
+
+// approved reports whether c is what rec holds approved.
+func (rec Record) approved(c Change) bool {
+	if rec.Approved == nil || !c.NeedsApproval() {
+		return false
+	}
+	return slices.ContainsFunc(rec.Approved.Entries, func(a Approval) bool { return a.Subject == c.Subject && a.To == c.To })
+}
+
+// applied is rec without the approvals s covers, which the command applying
+// s has just applied or replaced, and who approved them when one admin did.
+func (rec Record) applied(s Scope) (Record, string) {
+	if rec.Approved == nil {
+		return rec, ""
+	}
+	var kept []Approval
+	var by []string
+	for _, a := range rec.Approved.Entries {
+		if !s.covers(a.Subject) {
+			kept = append(kept, a)
+		} else if a.ApprovedBy != "" && !slices.Contains(by, a.ApprovedBy) {
+			by = append(by, a.ApprovedBy)
+		}
+	}
+	out := rec
+	out.Approved = nil
+	if len(kept) > 0 {
+		out.Approved = &ApprovedPart{Entries: kept}
+	}
+	if len(by) != 1 {
+		return out, ""
+	}
+	return out, by[0]
+}
+
 func (s Scope) blueprints(list []Blueprint) []Blueprint {
 	var out []Blueprint
 	for _, b := range list {
@@ -266,9 +370,16 @@ func (s Scope) images(list []Image) []Image {
 // whose content is unchanged is kept as it was, applied_at and all, so a run
 // that changed nothing leaves the record as it is. approvedBy is recorded on
 // a part that adds or changes an entry, since it names who approved that; a
-// part that only lost entries keeps the name it had.
+// part that only lost entries keeps the name it had. The approvals s covers
+// are dropped, since what s covers is now the record itself, and when
+// approvedBy is empty, because the run applied entries approved by an
+// earlier one, the name those approvals hold is recorded instead.
 func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Record {
 	at := now.UTC().Format(time.RFC3339)
+	rec, earlier := rec.applied(s)
+	if approvedBy == "" {
+		approvedBy = earlier
+	}
 	out := rec
 	out.Version = Version
 	if s.Keys {
