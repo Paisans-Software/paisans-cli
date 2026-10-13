@@ -130,7 +130,10 @@ func secretValues(s *config.Secrets) []string {
 			}
 		}
 	}
-	walk(reflect.ValueOf(*s))
+	// The id is the deployment's name, not a secret: every run prints it.
+	without := *s
+	without.ID = ""
+	walk(reflect.ValueOf(without))
 	return out
 }
 

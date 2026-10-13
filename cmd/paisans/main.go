@@ -493,12 +493,20 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
 	}
 
+	// The deployment and the version open the apply. As a step of apply
+	// without --site the run named them once for every site.
+	identity := &runIdentity{}
+	if reviewedByRun == nil {
+		identity = openIdentity(r, *configPath)
+		defer identity.closeIdentity(r)
+	}
 	// The files are read once: the bytes loaded here are what is applied and
 	// what is published as the version applied.
 	cfg, paisansBytes, err := config.LoadWithBytes(*configPath)
 	if err != nil {
 		return err
 	}
+	identity.id = cfg.ID
 	result := validate.Check(cfg)
 	reportFindings(r, *configPath, result)
 	if result.Refused() {
@@ -543,6 +551,7 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, stdin, stdout); err != nil {
 			return err
 		}
+		identity.applied(store.held())
 	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
 		// The run published one version and every step applies it: files
 		// edited since are not what the store holds.
@@ -600,6 +609,9 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		if review.version, err = store.publish(r, *execute); err != nil {
 			return err
+		}
+		if review.version != nil {
+			identity.applied(review.version.sha, review.version.revision)
 		}
 	case reviewedByRun != nil && review != nil:
 		review.version = reviewedByRun.version

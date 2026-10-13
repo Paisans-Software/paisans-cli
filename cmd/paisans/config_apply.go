@@ -52,6 +52,9 @@ type storeVersion interface {
 	// publish signs and pushes the version with execute; a dry run says
 	// it would, and returns nil.
 	publish(r ui.Reporter, execute bool) (*appliedVersion, error)
+	// held is the version the sites hold already when the files are it,
+	// "" when the run has still to publish them.
+	held() (sha string, revision int)
 }
 
 // applyStore gathers the versions every site holds for an apply, before its
@@ -171,6 +174,13 @@ func (v *gathered) what() string {
 		return describe(v.g, v.same)
 	}
 	return fmt.Sprintf("revision %d", v.revision)
+}
+
+func (v *gathered) held() (string, int) {
+	if v.same == "" {
+		return "", 0
+	}
+	return v.same, v.revision
 }
 
 func (v *gathered) check(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) error {

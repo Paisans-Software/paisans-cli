@@ -197,7 +197,36 @@ left for the operator, not about a step. No key, token or secret is printed.
 
 ## Progress
 
-The `configuration` section comes first: its header once, then the
+The `deployment` section comes first, ahead of the sudo passwords: the
+deployment id and the configuration version the run applies, its revision and
+short hash. They are what a log of the run is traced by, so they are its first
+lines, and `apply --site` opens with them too. Both are read from the
+workstation alone, since nothing has reached a host yet: the id from
+`paisans-stack.yaml`, the version from the workstation's head when the files on
+disk are that version.
+
+| Line | Named |
+|---|---|
+| `✓ id` | the deployment id |
+| `○ id` `pending: init writes it` | a file with no id yet |
+| `✓ configuration` | `revision <n>, <hash>`, the version the files are |
+| `○ configuration` `pending: published by apply --execute` | files no version holds yet: none published, or edited since |
+
+A run that opens with either pending names both again as it ends, whether it
+finished or stopped, with what it learned on the way: the id init wrote, the
+version it found the sites hold, or the one it published. A dry run publishes
+nothing, so its version stays pending. The second `deployment` section comes
+after the result line, and ahead of any login links.
+
+```
+deployment
+  ✓ id                f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+  ✓ configuration     revision 4, 3e1a9c07b2d4
+sudo
+  ✓ home-a
+```
+
+Then the `configuration` section: its header once, then the
 validation findings, then, in a dry run, the `init` step when it has work.
 The findings are not under the file's path, and a count line follows them
 only when there is a refusal (see the installer output spec, *Validate

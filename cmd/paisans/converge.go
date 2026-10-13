@@ -669,6 +669,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	reviewedByRun = &runReview{}
 	defer func() { reviewedByRun = savedReview }()
 	configPath, secretsPath, execute, sudo := o.Config, o.Secrets, o.Execute, o.Sudo
+	// The deployment and the version open the run, ahead of sudo. See
+	// apply_identity.go.
+	identity := openIdentity(r, configPath)
+	defer identity.closeIdentity(r)
 	cfg, st, err := convergeRead(configPath, secretsPath)
 	if err != nil {
 		return err
@@ -710,6 +714,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 		st.NeedsInit = false
 		initRan = true
+	}
+	if cfg != nil {
+		identity.id = cfg.ID
 	}
 	if cfg == nil {
 		r.Section("configuration")
@@ -784,6 +791,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if err != nil {
 		return err
 	}
+	identity.applied(store.held())
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's admin problem is shown on its line; it stops nothing.
@@ -830,6 +838,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	publish := func() (err error) {
 		reviewedByRun.version, err = store.publish(r, true)
+		if v := reviewedByRun.version; v != nil {
+			identity.applied(v.sha, v.revision)
+		}
 		return err
 	}
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
@@ -842,7 +853,11 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	links, adminErr := convergeAdmins(r, cfg, o, true, func(string) bool { return true })
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
-	defer printLoginLinks(links)
+	// The deployment and the version are named again ahead of them.
+	defer func() {
+		identity.closeIdentity(r)
+		printLoginLinks(links)
+	}()
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
 	end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{})
