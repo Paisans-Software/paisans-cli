@@ -100,6 +100,14 @@ type Def struct {
 	PublicObjects  bool
 	LocalFilesOnly bool
 
+	// LocalOnlyReason is why a kind with LocalFilesOnly has no object
+	// storage form, for the refusal of `storage: s3` on it.
+	LocalOnlyReason string
+
+	// ExtraDatabases are databases the kind keeps beside its own in the same
+	// Postgres, each named <database>_<name>, which its templates create.
+	ExtraDatabases []string
+
 	// LocalMediaPaths are the paths on its own hostname a kind serves its
 	// stored files from when it keeps them locally, for a kind whose files
 	// must be readable with no credential.

@@ -3,6 +3,7 @@ package kinds
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -41,7 +42,8 @@ type spec struct {
 }
 
 type databaseSpec struct {
-	Engine string `yaml:"engine"`
+	Engine string   `yaml:"engine"`
+	Extra  []string `yaml:"extra"`
 }
 
 type configSpec struct {
@@ -107,6 +109,7 @@ type storageSpec struct {
 	S3              bool     `yaml:"s3"`
 	PublicReads     bool     `yaml:"public_reads"`
 	LocalOnly       bool     `yaml:"local_only"`
+	LocalOnlyReason string   `yaml:"local_only_reason"`
 	LocalMediaPaths []string `yaml:"local_media_paths"`
 }
 
@@ -182,6 +185,32 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	}
 	if s.Port <= 0 || s.Port > 65535 {
 		return nil, fmt.Errorf("port: required, the port the app listens on in its container")
+	}
+	ports := map[int]string{s.Port: "app"}
+	for i, svc := range s.Services {
+		switch {
+		case svc.Port == 0:
+			continue
+		case i == 0:
+			return nil, fmt.Errorf("services[0].port: the app's port is the blueprint's port, not its service's")
+		case svc.Port < 0 || svc.Port > 65535:
+			return nil, fmt.Errorf("services[%d].port: is %d, not a port", i, svc.Port)
+		}
+		if other, taken := ports[svc.Port]; taken {
+			return nil, fmt.Errorf("services[%d].port: %d is %s's port too", i, svc.Port, other)
+		}
+		ports[svc.Port] = svc.Name
+	}
+	for i, extra := range s.Database.Extra {
+		if s.Database.Engine != "postgres" {
+			return nil, fmt.Errorf("database.extra: only a postgres database keeps others beside it")
+		}
+		if !config.BlueprintName(extra) || slices.Contains(s.Database.Extra[:i], extra) {
+			return nil, fmt.Errorf("database.extra[%d]: %q is not a database name of lowercase letters, digits and hyphens, or is listed twice", i, extra)
+		}
+	}
+	if s.Storage.LocalOnlyReason != "" && !s.Storage.LocalOnly {
+		return nil, fmt.Errorf("storage.local_only_reason: says why the files are only local, so it goes with local_only: true")
 	}
 	switch s.Config.Format {
 	case ConfigEnv, ConfigINI, ConfigYAML, ConfigJSON:
@@ -287,6 +316,8 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		ObjectStorage:   s.Storage.S3,
 		PublicObjects:   s.Storage.PublicReads,
 		LocalFilesOnly:  s.Storage.LocalOnly,
+		LocalOnlyReason: s.Storage.LocalOnlyReason,
+		ExtraDatabases:  s.Database.Extra,
 		LocalMediaPaths: s.Storage.LocalMediaPaths,
 		SendsMail:       s.Mail == "reads",
 		OIDC:            oidc,

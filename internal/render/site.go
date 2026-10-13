@@ -936,10 +936,10 @@ func elsewhere(site *siteView, upstreams []string) bool {
 }
 
 // upstreamsOnPort is upstreams with the port supplied rather than looked up,
-// for the one case where an app answers on a second, explicitly declared
-// port: the synapse kind's Matrix Authentication Service. It exists so that
-// finding that upstream never computes a port from another kind's port, only
-// from the literal masPort.
+// for a service that answers on a second, explicitly declared port, such as
+// the homeserver's authentication service. It exists so that finding that
+// upstream never computes a port from another kind's port, only from the one
+// the blueprint declares.
 func (p *planner) upstreamsOnPort(name string, port int) []string {
 	app, ok := p.cfg.Apps[name]
 	if !ok {

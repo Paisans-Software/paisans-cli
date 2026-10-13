@@ -43,8 +43,8 @@ health: {path: "/healthz", status: [200]}
 # access control, only a dependency.
 gate: {gateable: false}
 storage:
-  # The fork keeps everything, its SQLite database included, under /data.
   local_only: true
+  local_only_reason: the monitor keeps everything, its SQLite database included, under /data
 mail: reads
 # The Paisans-Software/uptime fork at 1.1.0-oidc.2: the callback is
 # /login/oidc/callback (src/lib/oidc.js:26), and every sign in sends

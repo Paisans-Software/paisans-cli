@@ -143,6 +143,18 @@ func Changes(old, new *Def) []string {
 	if old.Port != new.Port {
 		out = append(out, fmt.Sprintf("listens on %d, was %d", new.Port, old.Port))
 	}
+	op, np := servicePorts(old), servicePorts(new)
+	for _, name := range sortedUnion(op, np) {
+		switch o, n := op[name], np[name]; {
+		case o == n:
+		case o == "":
+			out = append(out, fmt.Sprintf("its service %s listens on %s for the gateway", name, n))
+		case n == "":
+			out = append(out, fmt.Sprintf("its service %s no longer listens for the gateway, was on %s", name, o))
+		default:
+			out = append(out, fmt.Sprintf("its service %s listens on %s, was %s", name, n, o))
+		}
+	}
 	if !reflect.DeepEqual(old.HostnameRoles, new.HostnameRoles) {
 		out = append(out, fmt.Sprintf("hostname roles %v, were %v", new.HostnameRoles, old.HostnameRoles))
 	}
@@ -245,6 +257,17 @@ func BuiltinSpec(name string) ([]byte, bool) {
 	}
 	spec, err := os.ReadFile(filepath.Join(dir, blueprints.File))
 	return spec, err == nil
+}
+
+// servicePorts is the port of each service of d that has one of its own.
+func servicePorts(d *Def) map[string]string {
+	out := map[string]string{}
+	for _, svc := range d.Services {
+		if svc.Port != 0 {
+			out[svc.Name] = strconv.Itoa(svc.Port)
+		}
+	}
+	return out
 }
 
 // Lint checks a blueprint directory as a catalog author writes it: the

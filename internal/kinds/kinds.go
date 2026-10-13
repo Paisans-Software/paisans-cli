@@ -34,7 +34,34 @@ type Service struct {
 	// Purpose is one line, quoted back when an operator names a service that
 	// does not exist so the message can list what does.
 	Purpose string
+	// Port is where a service other than app listens, for one the gateway
+	// routes to directly: it is published on the site's mesh address, given
+	// upstreams of its own and checked for collisions as the app's port is.
+	// Zero for a service only its own stack reaches.
+	Port int
 }
+
+// ServicePorts is the services of a kind that listen on a port of their
+// own, in compose order.
+func ServicePorts(kind config.Kind) []Service {
+	var out []Service
+	for _, svc := range of(kind).Services {
+		if svc.Port != 0 {
+			out = append(out, svc)
+		}
+	}
+	return out
+}
+
+// ExtraDatabases is the names of the databases a kind keeps beside its
+// own, each <database>_<name> in the same Postgres.
+func ExtraDatabases(kind config.Kind) []string {
+	return append([]string(nil), of(kind).ExtraDatabases...)
+}
+
+// LocalOnlyReason is why a kind that keeps its files only on its own disk
+// has no object storage form, as its blueprint says, empty when it does not.
+func LocalOnlyReason(kind config.Kind) string { return of(kind).LocalOnlyReason }
 
 // PostgresService is the database container a pinned app runs beside itself. A
 // clustered app has no such service: it connects to the local HAProxy, so

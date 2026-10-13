@@ -136,6 +136,15 @@ type appValues struct {
 	// for TCP to give up. Set per Caddy site, by renderSnippets.
 	UpstreamElsewhere bool
 
+	// ServicePorts and ServiceUpstreams are, for each service other than app
+	// that its blueprint gives a port of its own, that port and the addresses
+	// the gateway reaches it at, keyed by the service's name. Databases is the
+	// name of each extra database the blueprint keeps, keyed by its name in
+	// the blueprint.
+	ServicePorts     map[string]int
+	ServiceUpstreams map[string][]string
+	Databases        map[string]string
+
 	// MASPort, MASUpstreams, MASDBName and MASUpstreamProviderID describe the
 	// synapse kind's second container, Matrix Authentication Service. They are
 	// populated only for that kind, for the same reason the two fields above
@@ -457,6 +466,19 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.Invite = invite
+	}
+	for _, svc := range kinds.ServicePorts(planned.Kind) {
+		if v.ServicePorts == nil {
+			v.ServicePorts, v.ServiceUpstreams = map[string]int{}, map[string][]string{}
+		}
+		v.ServicePorts[svc.Name] = svc.Port
+		v.ServiceUpstreams[svc.Name] = p.upstreamsOnPort(planned.Name, svc.Port)
+	}
+	for _, extra := range kinds.ExtraDatabases(planned.Kind) {
+		if v.Databases == nil {
+			v.Databases = map[string]string{}
+		}
+		v.Databases[extra] = planned.DBName + "_" + extra
 	}
 	if planned.Kind == config.KindSynapse {
 		v.MASPort = masPort
