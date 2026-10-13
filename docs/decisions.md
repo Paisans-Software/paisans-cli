@@ -2254,3 +2254,40 @@ passkey and lost it, and a link is all that takes.
 * **The names** `restore-access`, `recover` and `onboard` each fit one of the
   two cases only; `sign-in-link` and `auth-link`, where "auth" is also the
   wizard's name for the Pocket ID app and reads as authorization too.
+
+## 2026-10-13: Images follow tracks in the core catalog, and the core catalog follows its newest release
+
+Founder decision, 2026-10-13. Spec: `docs/specs/2026-10-13-images-follow-tracks.md`.
+
+### What was decided
+
+* The binary names no image. The core catalog names a track for each, a
+  repository and a tag pattern, and `apply` and `init` run the newest tag on
+  it at that moment.
+* The toolkit's own services take their tracks from `foundation.yaml` in the
+  core catalog; there is no second repository.
+* The core catalog follows its newest release this binary can read, and the
+  binary's pin of it goes.
+* Go declares the majors its code speaks to, and refuses a track beyond them.
+
+### Why
+
+Pocket ID, Postgres, Spilo and Caddy ship security fixes on their own
+schedules. With every image fixed at build time, each fix waited for a toolkit
+release and for every operator to upgrade.
+
+### What was weighed
+
+* **Keeping the core pin and resolving tracks under it:** patches would flow,
+  but a new track, such as a new Postgres major or Pocket ID's next API, would
+  still wait for a toolkit release.
+* **Exact references in a floating catalog, bumped by hand or by a bot:** the
+  most predictable, and the slowest, since nothing reaches a deployment until
+  someone bumps it.
+* **A separate foundation repository:** a second place to bump and a second
+  release to tag, for images the core catalog can hold beside its blueprints.
+* This reverses the per blueprint digest pin of
+  `docs/specs/2026-10-13-core-catalog-fetched.md`, which was what said core
+  files were the ones a release was tested with. With catalogs unsigned and
+  images chosen at apply time, a binary no longer fixes what a deployment
+  runs, so the pin bought little beyond a delay.
