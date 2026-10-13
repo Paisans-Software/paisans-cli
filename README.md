@@ -2804,7 +2804,9 @@ signed copies of the configuration*).
 out.** Its `checks` are CEL conditions over the app's declaration and the
 sites it runs on, each run by `validate` under the blueprint's own rule id as a
 refusal or a warning, with a message that may name the value it refuses; its
-`settings` are checked by type, and a key it does not read is warned about. A
+`settings` are checked by type (string, bool, int, email, enum, or `list`,
+a list of names, for a setting such as a set of groups), and a key it does not
+read is warned about. A
 setting may declare a `default` of its own type, which the blueprint's
 templates and CEL expressions see for an app that leaves the key out; a value
 the app sets always wins. The default is never written into the

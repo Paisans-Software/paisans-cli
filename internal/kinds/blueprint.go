@@ -263,7 +263,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	}
 	for key, spec := range s.Settings {
 		if !settingTypes[spec.Type] {
-			return nil, fmt.Errorf("settings.%s.type: is %q; it must be string, bool, int, email or enum", key, spec.Type)
+			return nil, fmt.Errorf("settings.%s.type: is %q; it must be string, bool, int, email, enum or list", key, spec.Type)
 		}
 		if (spec.Type == "enum") != (len(spec.Values) > 0) {
 			return nil, fmt.Errorf("settings.%s: values go with type enum, and only with it", key)

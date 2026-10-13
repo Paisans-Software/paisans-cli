@@ -286,6 +286,31 @@ func (v appValues) SettingBool(key string, fallback bool) bool {
 	return fallback
 }
 
+// SettingList returns a declared list setting, or a catalog blueprint's
+// default for it, as strings; nil when there is neither.
+func (v appValues) SettingList(key string) []string {
+	items, ok := v.set[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// SettingInt returns a declared whole number setting, or a catalog
+// blueprint's default for it, or the fallback.
+func (v appValues) SettingInt(key string, fallback int) int {
+	if n, ok := v.set[key].(int); ok {
+		return n
+	}
+	return fallback
+}
+
 // OIDCAdminGroup and OIDCMemberGroup are the groups the app's client at
 // Pocket ID admits, from the kind's client spec, so that the template renders
 // the same names the client is restricted to and never repeats a default.
