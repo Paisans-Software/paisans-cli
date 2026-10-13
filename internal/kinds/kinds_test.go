@@ -128,7 +128,7 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 		file   string
 	}{
 		config.Kind("mbin"):        {kinds.ConfigEnv, ".env"},
-		config.Kind("outline"):     {kinds.ConfigEnv, ".env"},
+		config.Kind("wikijs"):      {kinds.ConfigEnv, ".env"},
 		config.KindPocketID:        {kinds.ConfigEnv, ".env"},
 		config.KindOAuth2Proxy:     {kinds.ConfigEnv, ".env"},
 		config.Kind("writefreely"): {kinds.ConfigINI, "config.ini"},

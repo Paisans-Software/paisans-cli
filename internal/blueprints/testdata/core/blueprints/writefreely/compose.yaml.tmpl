@@ -24,9 +24,9 @@ services:
     # writes config.ini as root at 0600, and Docker creates data/ as root,
     # so as uid 1000 the fork can neither read its configuration nor write
     # its keys into /data, and exits at startup. Dropping to uid 1000 after a
-    # chown, as the outline blueprint does, cannot work here: config.ini is a
-    # read-only bind, so it cannot be chowned from inside, and it has to stay
-    # 0600 because it holds the database password and the SSO client secret.
+    # chown cannot work here: config.ini is a read-only bind, so it cannot be
+    # chowned from inside, and it has to stay 0600 because it holds the
+    # database password and the SSO client secret.
     user: "0:0"
     # The mesh address only. Docker's own iptables rules bypass a host
     # firewall, so a port published on every interface of a host with a
