@@ -150,7 +150,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		dryRunFound(count(plan.PendingStages(), "stage"), nil)
 		reportOwedApplies(r, plan.Owed)
 		if pending > 0 {
-			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above before its first change.", approveWord)
+			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above.", approveWord)
 			return nil
 		}
 		r.Result("Nothing changed. Re-run with --execute to apply.")

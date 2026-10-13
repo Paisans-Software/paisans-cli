@@ -128,30 +128,26 @@ func showReview(r ui.Reporter, title string, rev grant.Review, execute bool) {
 }
 
 // endReview ends line with what a review comes to, and lists its changes
-// under it. A first review says so, and why every entry is new: a host with
-// no record of what was granted is reviewed once in full, which is the
-// record being made, and an operator meeting a long list should know that
-// it is that and not a change of everything.
+// under it. A first review says so: a host with no record of what was
+// granted is reviewed once in full, which is the record being made, and an
+// operator meeting a long list should know that it is that and not a change
+// of everything. What --execute asks is said once, by the run's last line.
 func endReview(r ui.Reporter, line ui.Step, rev grant.Review, execute bool) {
 	n := rev.Pending()
 	what := entries(n)
 	if rev.First && n > 0 {
-		// Every entry of a first review is to approve, which the line
-		// below it says, so the result stays one short line.
-		what = "first review, " + strings.TrimSuffix(entries(n), " to approve")
+		what = fmt.Sprintf("%d new entries (first review)", n)
+		if n == 1 {
+			what = "1 new entry (first review)"
+		}
 	}
 	switch {
-	case n > 0 && execute:
-		line.End(ui.Pending, what)
 	case n > 0:
-		line.End(ui.Pending, what+"; --execute asks for "+approveWord)
+		line.End(ui.Pending, what)
 	case len(rev.Changes) > 0:
 		line.End(ui.OK, "only removals, nothing to approve")
 	default:
 		line.End(ui.OK, "")
-	}
-	if rev.First && n > 0 {
-		r.Explain(rev.Site + " has no record of what this deployment granted there yet, so every entry below is new. Approving it makes the record; later runs show only what changes from it.")
 	}
 	for _, c := range rev.Changes {
 		r.Explain(c.Line())
@@ -177,7 +173,7 @@ func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []
 	}
 	resume := ui.Hold(r)
 	defer resume()
-	what := fmt.Sprintf("The review above is what "+config.FileName+" grants that this host, or these hosts, did not have: %s. Check each key with its admin and each image with whoever chose it before you approve.", grant.Summary(reviews))
+	what := grant.Summary(reviews) + ". Check each key with its owner and each image with whoever chose it."
 	if err := confirmWord(stdin, stdout, approveWord, what); err != nil {
 		return &ui.Problem{Hint: "not approved", Explain: sentence(err.Error())}
 	}

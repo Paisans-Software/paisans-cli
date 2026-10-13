@@ -159,7 +159,7 @@ func TestApproveReviews(t *testing.T) {
 			case c.want != "" && (err == nil || !strings.Contains(err.Error()+" "+problemText(err), c.want)):
 				t.Errorf("got %v, want %q", err, c.want)
 			}
-			if name != "no terminal" && !strings.HasSuffix(out.String(), "Type approve to proceed: ") {
+			if name != "no terminal" && !strings.HasSuffix(out.String(), "Type 'approve' (no quotes) to proceed: ") {
 				t.Errorf("the prompt: %q", out.String())
 			}
 		})
@@ -260,7 +260,7 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 		t.Errorf("the review is not shown:\n%s", rec.Lines())
 	}
 	rec, err = prepare(t, noTerminalStdin(), io.Discard)
-	if err != nil || !strings.Contains(rec.Lines(), "--execute asks for approve") {
+	if err != nil || !strings.Contains(rec.Lines(), "it asks you to type approve") {
 		t.Errorf("dry run: %v\n%s", err, rec.Lines())
 	}
 }
@@ -295,7 +295,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 			agentFingerprints = func() []string { return []string{alice.Fingerprint} }
 			var out bytes.Buffer
 			rec, err := prepare(t, answering(t, "approve\n"), &out, "--execute")
-			if !strings.Contains(out.String(), "Type approve to proceed: ") {
+			if !strings.Contains(out.String(), "Type 'approve' (no quotes) to proceed: ") {
 				t.Errorf("not asked: %q", out.String())
 			}
 			got := hosts["home-a"].record(t)
@@ -437,7 +437,7 @@ func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
 
 	rec = recordConverge(t)
 	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}, noTerminalStdin(), io.Discard)
-	if !strings.Contains(rec.Lines(), "--execute asks for approve") {
+	if !rec.Has("pending", "review what paisans-stack.yaml grants") {
 		t.Errorf("the dry run does not show the review:\n%s", rec.Lines())
 	}
 }

@@ -598,7 +598,7 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err := store.check(r, map[string]grant.Record{*site: review.record}, *execute, stdin, stdout); err != nil {
 			return err
 		}
-		if review.version, err = store.publish(r, *execute, "before the first change"); err != nil {
+		if review.version, err = store.publish(r, *execute); err != nil {
 			return err
 		}
 	case reviewedByRun != nil && review != nil:
@@ -740,6 +740,8 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 			r.Result("%s is up to date. Nothing to apply.", *site)
 		case changes == 0 && len(plan.Sweep) == 0:
 			r.Result("%s is up to date. Nothing changed; --execute asks you to approve the review above and records it.", *site)
+		case pending > 0:
+			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above.", approveWord)
 		default:
 			r.Result("Nothing changed. Re-run with --execute to apply.")
 		}
@@ -1247,6 +1249,8 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 			r.Result("%s is prepared. Nothing to do.", o.site)
 		case len(plan.Steps) == 0:
 			r.Result("%s is prepared. Nothing changed; --execute asks you to approve the review above and records it.", o.site)
+		case pending > 0:
+			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above.", approveWord)
 		default:
 			r.Result("Nothing changed. Re-run with --execute to apply.")
 		}

@@ -134,7 +134,7 @@ func confirmWord(stdin io.Reader, stdout io.Writer, word, what string) error {
 // own, so the answer is typed where the eye lands. The explanation is not
 // wrapped: the terminal wraps it to its own width.
 func prompt(stdout io.Writer, what, word string) {
-	fmt.Fprintf(stdout, "\n%s\nType %s to proceed: ", ui.Redact(what), word)
+	fmt.Fprintf(stdout, "\n%s\nType '%s' (no quotes) to proceed: ", ui.Redact(what), word)
 }
 
 // recordApplied adds what paisans-stack.yaml declares to the deployment record on

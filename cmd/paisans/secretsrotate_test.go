@@ -380,7 +380,7 @@ func TestSecretsRotateListsKeptSecrets(t *testing.T) {
 	if rec.Index("section", "rotate apps.talk.rabbitmq_password") >= 0 {
 		t.Errorf("a kept secret is planned for rotation:\n%s", rec.Lines())
 	}
-	if strings.Contains(out.String(), "Type sign out") {
+	if strings.Contains(out.String(), "Type 'sign out'") {
 		t.Error("a dry run asked for sign out")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
@@ -431,7 +431,7 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "sign out") {
 		t.Errorf("err = %v\n%s", err, rec.Lines())
 	}
-	if !strings.Contains(out.String(), "Type sign out") {
+	if !strings.Contains(out.String(), "Type 'sign out'") {
 		t.Errorf("sign out was not asked:\n%s", out.String())
 	}
 	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")

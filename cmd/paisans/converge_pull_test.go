@@ -375,3 +375,44 @@ func TestRealPullPlansRunTogether(t *testing.T) {
 		}
 	}
 }
+
+// progressLine is a ui.Line that keeps what its spinner would show.
+type progressLine struct {
+	mu       sync.Mutex
+	progress []string
+	result   string
+}
+
+func (l *progressLine) Done(result string)           { l.result = result }
+func (l *progressLine) Fail(error)                   {}
+func (l *progressLine) End(_ ui.Mark, result string) { l.result = result }
+func (l *progressLine) Detail(string, ...any)        {}
+func (l *progressLine) Explain(string)               {}
+func (l *progressLine) Note(string, string)          {}
+func (l *progressLine) Progress(text string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.progress = append(l.progress, text)
+}
+
+// A site's pull line counts the images pulled while they pull, so a long
+// pull shows it is moving and not only how long it has run.
+func TestAPullLineCountsTheImagesPulled(t *testing.T) {
+	fakeConverge(t, nil)
+	refs := []string{"ghcr.io/example/a:1", "ghcr.io/example/b:1", "ghcr.io/example/c:1", "ghcr.io/example/d:1"}
+	fakePulls(t, map[string]*apply.Plan{"home-a": toPull("home-a", gib(20), refs...)}, nil)
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newPuller(cfg, convergeOptions{})
+	p.once.Do(func() {})
+	var line progressLine
+	if _, err := p.pullSite(&line, step(stagePull, "pull", "--site", "home-a")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"0 of 4 images pulled", "1 of 4 images pulled", "2 of 4 images pulled", "3 of 4 images pulled", "4 of 4 images pulled"}
+	if !slices.Equal(line.progress, want) || line.result != "4 images pulled" {
+		t.Errorf("progress %q, result %q", line.progress, line.result)
+	}
+}

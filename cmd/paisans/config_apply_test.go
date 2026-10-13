@@ -171,7 +171,7 @@ func TestApplyWithNoBasePublishesTheRoot(t *testing.T) {
 	if head == "" || root != head || !f.pushed() || !claimed(logged(t, log)) {
 		t.Fatalf("head %q, root %q, pushed %v, claimed %v\n%s", head, root, f.pushed(), claimed(logged(t, log)), rec.Lines())
 	}
-	if !publishedBeforeClaim(rec, "publish revision 1, the first version") {
+	if !publishedBeforeClaim(rec, "publish revision 1") {
 		t.Errorf("not published before the claim:\n%s", rec.Lines())
 	}
 }
@@ -191,7 +191,7 @@ func TestApplyPublishesTheNextRevisionFirst(t *testing.T) {
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	head, _ := f.l.Head()
-	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2, a new version on "+f.shas[0][:12]) {
+	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2") {
 		t.Errorf("head %s, pushed %v\n%s", head, f.pushed(), rec.Lines())
 	}
 	if b, _ := os.ReadFile(filepath.Join(f.l.Dir, ".paisans", "config-seen")); string(b) != "2 "+head+"\n" {
@@ -219,7 +219,7 @@ func TestApplyPublishesWhatSecretsRotateLeft(t *testing.T) {
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	head, _ := f.l.Head()
-	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2, a new version on "+f.shas[0][:12]) {
+	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2") {
 		t.Errorf("head %s, pushed %v\n%s", head, f.pushed(), rec.Lines())
 	}
 }
@@ -305,7 +305,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type rollback to proceed: ") || !claimed(logged(t, log)) {
+	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 
@@ -447,7 +447,7 @@ func TestApplyPublishesTheFilesItLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, err := v.publish(ui.Discard, true, "")
+	applied, err := v.publish(ui.Discard, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type rollback to proceed: ") || !claimed(logged(t, log)) || !f.pushed() {
+	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) || !f.pushed() {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 }

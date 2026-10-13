@@ -107,9 +107,9 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 
 	if !*execute {
 		if own {
-			r.Step("attest "+describe(g, head)).End(ui.Pending, "your key signed it already; --execute records it as your anchor and pushes it again")
+			r.Step("attest "+describe(g, head)).End(ui.Pending, "your key signed it already")
 		} else {
-			r.Step("attest "+describe(g, head)).End(ui.Pending, fmt.Sprintf("revision %d, signed with %s; --execute signs and pushes it, and records the key", g.Versions[head].Revision+1, k.Fingerprint))
+			r.Step("attest "+describe(g, head)).End(ui.Pending, fmt.Sprintf("revision %d, signed with %s", g.Versions[head].Revision+1, k.Fingerprint))
 		}
 		if write {
 			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
@@ -137,7 +137,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 		s.Fail(err)
 		return err
 	default:
-		s.Done(fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+		s.Done(sha[:12])
 	}
 	r.Result("registered %s; version %s is your anchor", k.Fingerprint, sha)
 	return nil

@@ -410,7 +410,7 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	if err == nil {
 		t.Fatal("an eviction with no secrets file went on")
 	}
-	if !strings.Contains(out.String(), "Type revoked") {
+	if !strings.Contains(out.String(), "Type 'revoked'") {
 		t.Errorf("the secrets were read before revoked was asked: %v\n%s", err, out.String())
 	}
 }
