@@ -1,6 +1,6 @@
 # The core catalog is fetched, not embedded
 
-Date: 2026-10-13. Status: draft, for the founder's approval. Not implemented.
+Date: 2026-10-13. Status: approved by the founder, 2026-10-13. Not implemented.
 Amends *The core catalog* in `docs/specs/2026-10-12-blueprints-and-catalogs.md`.
 
 The binary carries a copy of the core catalog today: `scripts/sync-core-catalog.sh`
@@ -26,6 +26,8 @@ Founder decisions, 2026-10-13, in session:
 * **The reserved blueprints stay embedded:** `pocket-id`, the gate, `invite`
   and `uptime`.
 * **One cache per machine**, the one third party catalogs already use.
+* **No core blueprint is named in Go** outside tests; see *Core blueprints are
+  rules in the catalog, not names in Go*.
 
 ## What the binary carries
 
@@ -171,7 +173,7 @@ does today, and element consumes it. A template reads the consumed values as
 `.Linked "matrix-homeserver" "server_name"`. The role is named for what it is,
 so a second homeserver blueprint provides the same one.
 
-**Rotation steps become in-app actions** (proposed, see *Open*). Rotating Mbin's RabbitMQ password
+**Rotation steps become in-app actions.** Rotating Mbin's RabbitMQ password
 and OAuth2 keys, and Synapse's and Outline's self rotated secrets, runs
 commands in their containers from Go today (`secretsrotate/rabbitmq.go`,
 `appsecret.go`, `cmd/paisans/secretsrotate.go`). Each moves to the blueprint
@@ -181,7 +183,7 @@ action (*Capabilities, helpers and in-app actions*).
 
 **What resolves from the blueprint instead of a name:**
 
-* **`app admin create`** (proposed, see *Open*) refuses an app whose administrators come from an
+* **`app admin create`** refuses an app whose administrators come from an
   OIDC admin group, the ones whose blueprint sets `oidc.admin_group_setting`
   or `oidc.default_admin_group`, and points at the Pocket ID app. Only Mbin
   gets that message today.
@@ -214,8 +216,3 @@ warnings from the blueprints.
 6. README, `docs/commands.md`, `docs/development.md`, and the blueprints spec's
    status.
 
-## Open
-
-* **Rotation steps as in-app actions, and `app admin create` resolved from
-  the blueprint**, await the founder's decision; both were explained in
-  session first.
