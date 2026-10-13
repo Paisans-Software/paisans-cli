@@ -1,5 +1,5 @@
 # Written by scripts/sync-core-catalog.sh. The core catalog commit this
 # binary carries a copy of, and the SHA-256 of that copy.
 url: https://github.com/Paisans-Software/blueprints
-commit: c7f4000734e6430bd668c85052969c847f4ebcc8
-sha256: 9c515e9dde96068e4d413835012433b0bc1bd8fb1530a2bf14e38231f1fd3c40
+commit: 35adcdddb539d6fb4770418f5d18e2e13494e456
+sha256: b6fe539ff13fda820190e15bd96e2f8f879d92788ac23e1c1ddaf8e942c15f3d
