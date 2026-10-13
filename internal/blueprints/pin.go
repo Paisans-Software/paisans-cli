@@ -16,13 +16,16 @@ import (
 // there came from.
 const PinFile = "pin.yaml"
 
-// Pin is the core catalog commit this binary carries a copy of
-// (scripts/sync-core-catalog.sh writes it). A deployment that does not pin
+// Pin is the core catalog commit this binary is pinned to
+// (scripts/pin-core-catalog.sh writes it). A deployment that does not pin
 // the core catalog itself uses this commit.
 type Pin struct {
 	URL    string `yaml:"url"`
 	Commit string `yaml:"commit"`
-	SHA256 string `yaml:"sha256"`
+	// Blueprints is the SHA-256 of each blueprint at the commit, as Digest
+	// computes it over the blueprint's directory, so a checkout of one
+	// blueprint can be checked alone.
+	Blueprints map[string]string `yaml:"blueprints"`
 }
 
 // CorePin is the pin the binary was built with.
@@ -38,16 +41,17 @@ func CorePin() (Pin, error) {
 	return p, nil
 }
 
-// CoreDigest is the SHA-256 of the copy of the core catalog in the binary,
-// computed as scripts/sync-core-catalog.sh computes it: each file's SHA-256
-// and its path relative to core/, one per line in bytewise order, hashed.
-// pin.yaml itself is left out.
-func CoreDigest() (string, error) {
-	return Digest(embedded, string(Core))
+// CoreDigest is the SHA-256 of one core blueprint's copy in the binary,
+// computed as scripts/pin-core-catalog.sh computes it: each file's SHA-256
+// and its path relative to the blueprint's directory, one per line in
+// bytewise order, hashed.
+func CoreDigest(name string) (string, error) {
+	return Digest(embedded, path.Join(string(Core), name))
 }
 
-// Digest is that SHA-256 for the blueprints under dir in fsys, the same
-// whether they came from the binary or from a catalog's checkout.
+// Digest is that SHA-256 for the files under dir in fsys, the same whether
+// they came from the binary or from a catalog's checkout. A pin.yaml
+// directly under dir is left out.
 func Digest(fsys fs.FS, dir string) (string, error) {
 	files := map[string][]byte{}
 	err := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
