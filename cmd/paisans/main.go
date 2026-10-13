@@ -103,6 +103,10 @@ func main() {
 		err = runOIDC(os.Args[2:])
 	case "web-server":
 		err = runWebServer(os.Args[2:])
+	case "catalog":
+		err = runCatalog(os.Args[2:], os.Stdout)
+	case "blueprint":
+		err = runBlueprint(os.Args[2:], os.Stdout)
 	case "storage":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "init":
