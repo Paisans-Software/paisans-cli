@@ -50,7 +50,7 @@ func ExtraRoles() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, kind := range known() {
-		for _, role := range defs[kind].HostnameRoles {
+		for _, role := range of(kind).HostnameRoles {
 			if !seen[role] {
 				seen[role] = true
 				out = append(out, role)

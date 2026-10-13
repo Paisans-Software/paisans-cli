@@ -185,6 +185,8 @@ func loadBuiltins() (map[config.Kind]*Def, error) {
 
 // For is a kind's record, and false for a kind this toolkit does not know.
 func For(kind config.Kind) (*Def, bool) {
+	mu.RLock()
+	defer mu.RUnlock()
 	d, ok := defs[kind]
 	return d, ok
 }
@@ -193,7 +195,7 @@ func For(kind config.Kind) (*Def, bool) {
 // know, so that every question asked of an unknown kind has the zero answer.
 // validate refuses the unknown kind itself.
 func of(kind config.Kind) *Def {
-	if d, ok := defs[kind]; ok {
+	if d, ok := For(kind); ok {
 		return d
 	}
 	return &Def{}
@@ -201,6 +203,8 @@ func of(kind config.Kind) *Def {
 
 // known is every kind with a record, sorted.
 func known() []config.Kind {
+	mu.RLock()
+	defer mu.RUnlock()
 	out := make([]config.Kind, 0, len(defs))
 	for k := range defs {
 		out = append(out, k)
@@ -240,7 +244,7 @@ func RequiredSecrets(kind config.Kind) []RequiredSecret {
 // so the answer is one kind.
 func SelfRotatedKind(key string) (config.Kind, bool) {
 	for _, kind := range known() {
-		for _, k := range defs[kind].SelfRotated {
+		for _, k := range of(kind).SelfRotated {
 			if k == key {
 				return kind, true
 			}

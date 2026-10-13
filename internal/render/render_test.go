@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -2943,7 +2942,7 @@ func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
 		if !spec.Gateable || spec.SignedFetch == nil {
 			continue
 		}
-		body, err := fs.ReadFile(blueprints.Templates, string(kind)+"/caddy.snippet.tmpl")
+		body, err := fs.ReadFile(kinds.Templates, string(kind)+"/caddy.snippet.tmpl")
 		if err != nil {
 			t.Fatal(err)
 		}
