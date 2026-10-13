@@ -129,6 +129,9 @@ type oidcSpec struct {
 	DefaultAdminGroup  string `yaml:"default_admin_group"`
 	DefaultMemberGroup string `yaml:"default_member_group"`
 	ReadsGroups        bool   `yaml:"reads_groups"`
+	// ExtraGroupsSetting names a list setting whose groups apply finds or
+	// creates at the identity provider beside the member and admin groups.
+	ExtraGroupsSetting string `yaml:"extra_groups_setting"`
 }
 
 type secretsSpec struct {
@@ -466,6 +469,7 @@ func (o *oidcSpec) def() (*OIDCDef, error) {
 		DefaultAdminGroup:  o.DefaultAdminGroup,
 		DefaultMemberGroup: o.DefaultMemberGroup,
 		ReadsGroups:        o.ReadsGroups,
+		ExtraGroupsSetting: o.ExtraGroupsSetting,
 	}, nil
 }
 

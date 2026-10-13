@@ -59,6 +59,9 @@ type Desired struct {
 	// a refused member is stopped before the app sees them.
 	AdminGroup  string
 	MemberGroup string
+	// ExtraGroups are further groups the app reads from the groups claim.
+	// Each is found or created, and none is allowed on the client.
+	ExtraGroups []string
 	// RotateSecret adds a new secret even when the recorded one is live.
 	RotateSecret bool
 }
@@ -104,7 +107,7 @@ func Probe(c *pocketid.Client, d Desired, recordedID string) (State, error) {
 		}
 	}
 	s.Groups = map[string]*pocketid.Group{}
-	for _, name := range d.groups() {
+	for _, name := range append(d.groups(), d.ExtraGroups...) {
 		if s.Groups[name], err = c.FindGroup(name); err != nil {
 			return s, fmt.Errorf("looking up group %s: %w", name, err)
 		}
@@ -153,8 +156,10 @@ const (
 // default; Detail is what it sends, the request and its body, shown with
 // --verbose, since a body is what explains a step and is noise when it works.
 type Step struct {
-	Kind   StepKind
-	Group  string
+	Kind  StepKind
+	Group string
+	// Extra marks a CreateGroup step for one of Desired.ExtraGroups, which apply confirms before it runs.
+	Extra  bool
 	Title  string
 	Detail string
 }
@@ -216,6 +221,15 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 		if s.Groups[g] == nil {
 			body, _ := json.Marshal(map[string]string{"name": g, "friendlyName": g})
 			p.Steps = append(p.Steps, Step{Kind: CreateGroup, Group: g, Title: "create group " + g, Detail: fmt.Sprintf("create group %s: POST /api/user-groups %s", g, body)})
+		} else {
+			p.Present = append(p.Present, "group "+g)
+		}
+	}
+
+	for _, g := range d.ExtraGroups {
+		if s.Groups[g] == nil {
+			body, _ := json.Marshal(map[string]string{"name": g, "friendlyName": g})
+			p.Steps = append(p.Steps, Step{Kind: CreateGroup, Group: g, Extra: true, Title: "create group " + g, Detail: fmt.Sprintf("create group %s, which %s reads from the groups claim: POST /api/user-groups %s", g, d.App, body)})
 		} else {
 			p.Present = append(p.Present, "group "+g)
 		}

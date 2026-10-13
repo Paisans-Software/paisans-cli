@@ -1,6 +1,7 @@
 package kinds_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -180,5 +181,13 @@ func TestTheGatesClientAdmitsMembersAndAdmins(t *testing.T) {
 	admin, member := spec.Groups(app)
 	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
 		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, kinds.AdminsGroup, kinds.MembersGroup)
+	}
+}
+
+func TestExtraGroupsDropTheClientsOwnGroups(t *testing.T) {
+	s := kinds.OIDCClientSpec{AdminGroupSetting: "admin_group", MemberGroupSetting: "member_group", DefaultAdminGroup: "admins", DefaultMemberGroup: "members", ExtraGroupsSetting: "synced_groups"}
+	app := config.App{Settings: map[string]any{"synced_groups": []any{"admins", "members", "moderators", "moderators"}}}
+	if got := fmt.Sprint(s.ExtraGroups(app)); got != "[moderators]" {
+		t.Errorf("ExtraGroups = %s", got)
 	}
 }

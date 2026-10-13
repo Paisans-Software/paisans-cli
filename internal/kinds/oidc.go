@@ -36,6 +36,11 @@ type OIDCClientSpec struct {
 	// the member group. For a kind that does not, the restriction at Pocket
 	// ID is the whole control.
 	ReadsGroups bool
+	// ExtraGroupsSetting names an app `settings` key, a list, of further
+	// groups the app reads from the groups claim. apply finds or creates each
+	// at Pocket ID. They are not added to the client's allowed groups: who
+	// may sign in stays the member and admin groups.
+	ExtraGroupsSetting string
 }
 
 // Groups is the admin group and the member group an app's client admits:
@@ -76,6 +81,8 @@ type OIDCDef struct {
 	DefaultAdminGroup  string
 	DefaultMemberGroup string
 	ReadsGroups        bool
+	// ExtraGroupsSetting is OIDCClientSpec's field of the same name.
+	ExtraGroupsSetting string
 }
 
 // OIDCClient is the client spec for app, an app of a kind served at
@@ -93,9 +100,31 @@ func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 		DefaultAdminGroup:  o.DefaultAdminGroup,
 		DefaultMemberGroup: o.DefaultMemberGroup,
 		ReadsGroups:        o.ReadsGroups,
+		ExtraGroupsSetting: o.ExtraGroupsSetting,
 	}
 	if !o.NoLaunch {
 		spec.LaunchURL = LaunchURL(kind, hostname, "")
 	}
 	return spec, true
+}
+
+// ExtraGroups is the app's further groups, from the setting
+// ExtraGroupsSetting names, or the blueprint's default for it, without the
+// member and admin groups and without repeats, in the order written.
+func (s OIDCClientSpec) ExtraGroups(app config.App) []string {
+	if s.ExtraGroupsSetting == "" {
+		return nil
+	}
+	items, _ := SettingsSeen(app)[s.ExtraGroupsSetting].([]any)
+	admin, member := s.Groups(app)
+	seen := map[string]bool{admin: true, member: true, "": true}
+	var out []string
+	for _, item := range items {
+		name, _ := item.(string)
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }

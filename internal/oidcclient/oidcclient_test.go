@@ -887,3 +887,49 @@ func TestAnUnrecordedClientUnderAnotherNameIsNotRenamed(t *testing.T) {
 		t.Fatalf("planned %v", kinds(p))
 	}
 }
+
+// Extra groups are created when missing, and never join the client's
+// allowed groups, which stay the member and admin groups.
+func TestExtraGroupsAreCreatedButNotAllowed(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.MemberGroup = "members"
+	d.ExtraGroups = []string{"moderators"}
+	p := plan(t, f, d, Recorded{})
+	var extra []string
+	for _, s := range p.Steps {
+		if s.Kind == CreateGroup && s.Extra {
+			extra = append(extra, s.Group)
+		}
+	}
+	if fmt.Sprint(extra) != "[moderators]" {
+		t.Fatalf("extra group steps %v", extra)
+	}
+	rec := &memRecorder{}
+	if err := Execute(p, api(f), rec, secretSource("extra-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	var allowed []string
+	for _, g := range f.clients[0].AllowedUserGroups {
+		allowed = append(allowed, g.Name)
+	}
+	if fmt.Sprint(allowed) != "[members admins]" {
+		t.Errorf("allowed %v", allowed)
+	}
+}
+
+// An extra group Pocket ID already has plans nothing.
+func TestAnExistingExtraGroupIsPresent(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.MemberGroup = "members"
+	d.ExtraGroups = []string{"moderators"}
+	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("extra-secret-not-real-0002")); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan(t, f, d, Recorded{}).Steps {
+		if s.Kind == CreateGroup {
+			t.Errorf("planned %s again", s.Group)
+		}
+	}
+}

@@ -52,6 +52,7 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		PKCE:              spec.PKCE,
 		AdminGroup:        adminGroup,
 		MemberGroup:       memberGroup,
+		ExtraGroups:       spec.ExtraGroups(app),
 		RotateSecret:      rotate,
 	}
 	// validate.Check has refused a malformed one already.
