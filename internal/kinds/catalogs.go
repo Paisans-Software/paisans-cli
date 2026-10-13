@@ -2,6 +2,7 @@ package kinds
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,9 +10,11 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 
@@ -66,9 +69,16 @@ func CacheDir() (string, error) {
 // fetch that was interrupted is fetched again rather than used half done.
 const completeMark = ".paisans-complete"
 
+// stateDir is, inside a fetched catalog's .git, what the toolkit records
+// about the checkout: a mark per blueprint whose files are on disk, the tags
+// checked to name the commit, and the lock. It sits inside .git so that the
+// checkout holds only the catalog's own files.
+const stateDir = "paisans"
+
 // Fetch is the directory holding a catalog at its pinned commit, fetched
-// into the cache when it is not there yet. A tag, when given, must name that
-// commit.
+// into the cache when it is not there yet. A fetch takes the commit's trees
+// and no file contents, and checks out only catalog.yaml: Checkout adds the
+// blueprints in use. A tag, when given, must name the commit.
 func Fetch(cat config.Catalog) (string, error) {
 	cache, err := CacheDir()
 	if err != nil {
@@ -86,11 +96,32 @@ func Fetch(cat config.Catalog) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(work)
-	if out, err := git("", "clone", "--quiet", "--no-checkout", cat.URL, work); err != nil {
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", cat.URL},
+	} {
+		if out, err := git(work, args...); err != nil {
+			return "", fmt.Errorf("preparing a checkout of %s: %s", cat.URL, out)
+		}
+	}
+	if out, err := git(work, "fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", cat.Commit); err != nil {
+		// A forge that answers but refuses the commit has no such commit;
+		// one that does not answer could not be fetched at all.
+		if _, lsErr := git("", "ls-remote", cat.URL, "HEAD"); lsErr == nil {
+			return "", fmt.Errorf("%s has no commit %s: %s", cat.URL, cat.Commit, out)
+		}
 		return "", fmt.Errorf("fetching %s: %s", cat.URL, out)
 	}
-	if out, err := git(work, "-c", "advice.detachedHead=false", "checkout", "--quiet", cat.Commit); err != nil {
-		return "", fmt.Errorf("%s has no commit %s: %s", cat.URL, cat.Commit, out)
+	for _, args := range [][]string{
+		{"sparse-checkout", "set", "--no-cone", "/catalog.yaml"},
+		{"-c", "advice.detachedHead=false", "checkout", "--quiet", cat.Commit},
+	} {
+		if out, err := git(work, args...); err != nil {
+			return "", fmt.Errorf("checking out %s at %s: %s", cat.URL, cat.Commit, out)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(work, ".git", stateDir, "complete"), 0o755); err != nil {
+		return "", err
 	}
 	if err := checkTag(work, cat); err != nil {
 		return "", err
@@ -101,27 +132,124 @@ func Fetch(cat config.Catalog) (string, error) {
 	if err := os.Rename(work, dir); err != nil {
 		// Another fetch of the same commit finished first, which is as good.
 		if _, statErr := os.Stat(filepath.Join(dir, completeMark)); statErr == nil {
-			return dir, nil
+			return dir, checkTag(dir, cat)
 		}
 		return "", err
 	}
 	return dir, nil
 }
 
-// checkTag refuses a pin whose tag, as the fetch saw it, does not name its
-// commit.
-func checkTag(dir string, cat config.Catalog) error {
-	if cat.Tag == "" {
+// fetched reports whether dir is a catalog Fetch made, rather than an
+// installed snapshot, which holds its blueprints' files already.
+func fetched(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git", stateDir))
+	return err == nil
+}
+
+// Checkout makes sure the named blueprints' files are in a fetched catalog,
+// fetching the contents of the ones that are not. A name the catalog does
+// not hold is left for ReadFrom to refuse.
+func Checkout(dir string, names ...string) error {
+	if !fetched(dir) {
 		return nil
 	}
-	out, err := git(dir, "rev-parse", "refs/tags/"+cat.Tag+"^{commit}")
-	if err != nil {
-		return fmt.Errorf("%s has no tag %s", cat.URL, cat.Tag)
+	var missing []string
+	for _, name := range names {
+		if !config.BlueprintName(name) {
+			return fmt.Errorf("%q is not a blueprint name", name)
+		}
+		if !checkedOut(dir, name) {
+			missing = append(missing, name)
+		}
 	}
-	if got := strings.TrimSpace(out); got != cat.Commit {
-		return fmt.Errorf("%s's tag %s names %s, not the pinned %s. A tag that moved is refused; `paisans catalog update` moves a pin on purpose", cat.URL, cat.Tag, got, cat.Commit)
+	if len(missing) == 0 {
+		return nil
+	}
+	unlock, err := lock(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	held, err := Blueprints(dir)
+	if err != nil {
+		return err
+	}
+	var patterns, paths []string
+	for _, name := range missing {
+		if !checkedOut(dir, name) && slices.Contains(held, name) {
+			patterns = append(patterns, "/blueprints/"+name+"/")
+			paths = append(paths, "blueprints/"+name)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	// Adding a pattern checks out what it covers; checking the paths out
+	// again restores a blueprint whose files an interrupted checkout left
+	// partly written, which git would otherwise keep as local changes.
+	if out, err := git(dir, append([]string{"sparse-checkout", "add"}, patterns...)...); err != nil {
+		return fmt.Errorf("checking out %s: %s", strings.Join(missing, ", "), out)
+	}
+	if out, err := git(dir, append([]string{"checkout", "--quiet", "HEAD", "--"}, paths...)...); err != nil {
+		return fmt.Errorf("checking out %s: %s", strings.Join(missing, ", "), out)
+	}
+	for _, p := range paths {
+		if err := os.WriteFile(filepath.Join(dir, ".git", stateDir, "complete", path.Base(p)), nil, 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// checkedOut reports whether a blueprint's files are on disk in a fetched
+// catalog. Its mark is written only once git has finished, so a checkout
+// that was interrupted is checked out again.
+func checkedOut(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git", stateDir, "complete", name))
+	return err == nil
+}
+
+// lock takes a fetched catalog's lock, which two processes adding
+// blueprints to one checkout need: git sparse-checkout rewrites one file for
+// the whole checkout. The lock is released when the process exits, however
+// it exits, so a crash leaves nothing to clean up.
+func lock(dir string) (func(), error) {
+	f, err := os.OpenFile(filepath.Join(dir, ".git", stateDir, "lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("locking %s: %w", dir, err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
+// checkTag refuses a pin whose tag does not name its commit. A depth 1 fetch
+// of a commit brings no tags, so the forge is asked, once per tag: a tag
+// checked is recorded in the checkout and not asked about again.
+func checkTag(dir string, cat config.Catalog) error {
+	if cat.Tag == "" || !fetched(dir) {
+		return nil
+	}
+	mark := filepath.Join(dir, ".git", stateDir, "tags", hex.EncodeToString([]byte(cat.Tag)))
+	if _, err := os.Stat(mark); err == nil {
+		return nil
+	}
+	got, err := TagCommit(cat.URL, cat.Tag)
+	if err != nil {
+		return err
+	}
+	if got != cat.Commit {
+		return fmt.Errorf("%s's tag %s names %s, not the pinned %s. A tag that moved is refused; `paisans catalog update` moves a pin on purpose", cat.URL, cat.Tag, got, cat.Commit)
+	}
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(mark, []byte(cat.Tag+"\n"), 0o644)
 }
 
 // git runs git, in dir when it is not empty, and returns its combined output.
@@ -156,7 +284,26 @@ func ReadCatalog(dir string) (catalogFile, error) {
 }
 
 // Blueprints is the names of the blueprints a fetched catalog holds, sorted.
+// They are read from the commit's trees, so no blueprint's files need be on
+// disk; an installed snapshot is read from its directory.
 func Blueprints(dir string) ([]string, error) {
+	if fetched(dir) {
+		out, err := git(dir, "ls-tree", "-d", "--name-only", "HEAD", "blueprints/")
+		if err != nil {
+			return nil, fmt.Errorf("listing its blueprints: %s", out)
+		}
+		var names []string
+		for _, line := range strings.Split(out, "\n") {
+			if name, ok := strings.CutPrefix(line, "blueprints/"); ok && name != "" {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			return nil, fmt.Errorf("it has no blueprints directory")
+		}
+		sort.Strings(names)
+		return names, nil
+	}
 	entries, err := os.ReadDir(filepath.Join(dir, "blueprints"))
 	if err != nil {
 		return nil, fmt.Errorf("it has no blueprints directory")
@@ -171,8 +318,12 @@ func Blueprints(dir string) ([]string, error) {
 	return out, nil
 }
 
-// ReadFrom reads one blueprint from a fetched catalog.
+// ReadFrom reads one blueprint from a fetched catalog, checking it out
+// first.
 func ReadFrom(dir, name string) (*Def, error) {
+	if err := Checkout(dir, name); err != nil {
+		return nil, err
+	}
 	bdir := filepath.Join(dir, "blueprints", name)
 	raw, err := os.ReadFile(filepath.Join(bdir, blueprints.File))
 	if err != nil {
@@ -262,6 +413,9 @@ func resolve(cfg *config.Config) []string {
 // them: a core catalog that ships one is refused.
 func overrideCore(dir string) []string {
 	names, err := Blueprints(dir)
+	if err == nil {
+		err = Checkout(dir, names...)
+	}
 	if err != nil {
 		return []string{fmt.Sprintf("catalogs.core: %v.", err)}
 	}

@@ -399,7 +399,8 @@ paisans catalog list
   `vMAJOR.MINOR.PATCH` (or the same without the `v`), compared number by
   number; a pre-release such as `v2.0.0-rc1` is pinned only by naming it with
   `--tag`, and a tag that is not a version is ignored. It then fetches that
-  commit into the catalog cache, refuses a repository with no `catalog.yaml`,
+  commit's trees into the catalog cache, with no file contents but
+  `catalog.yaml`, refuses a repository with no `catalog.yaml`,
   and writes the pin as `catalogs.<name>`. An app then names a blueprint as
   `<name>/<blueprint>`, Eg: `example/blueprints/journal`.
 * **`update [<name>]`:** for each declared catalog, or the one named, moves the
