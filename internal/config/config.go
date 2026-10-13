@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -220,6 +221,13 @@ type Site struct {
 	// toolkit's Caddy, and every other site is reached through the gateway.
 	// Absent means managed_by paisans; read it through WebServerManagedBy.
 	WebServer *WebServer `yaml:"web_server"`
+	// Arch is the host's architecture, amd64 or arm64, as `dpkg
+	// --print-architecture` reported it the first time the toolkit reached
+	// the site. The toolkit writes it (SetArch), so validate can check which
+	// sites must share one without reaching a host, and a host replaced by one
+	// of another architecture is refused rather than joined. Deleting it is
+	// how an operator accepts new hardware.
+	Arch string `yaml:"arch"`
 }
 
 // ManagedBy is what serves a monitor site's apps to the internet.
@@ -1066,6 +1074,9 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
 			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required, softdog and off.", name, site.Watchdog)
+		}
+		if site.Arch != "" && !hostarch.Supported(site.Arch) {
+			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
 		problems = append(problems, sshProblems(name, site, c.Admins)...)
 	}
