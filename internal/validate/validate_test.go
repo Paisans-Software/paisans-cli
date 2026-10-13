@@ -135,9 +135,6 @@ func TestRulesFire(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {
-			if tc.fixture == "oidc-extra-groups-not-names" {
-				t.Skip("needs the wikijs testdata blueprint, Task 15")
-			}
 			result := validate.Check(load(t, tc.fixture))
 			if !result.Has(tc.rule) {
 				t.Fatalf("rule %s did not fire. findings: %v", tc.rule, result.Findings)

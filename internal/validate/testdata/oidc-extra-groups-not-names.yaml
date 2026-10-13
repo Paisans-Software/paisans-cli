@@ -1,4 +1,5 @@
-# valid.yaml with a wikijs app whose synced_groups holds a name too short for Pocket ID.
+# valid.yaml with a wikijs app in place of its outline app, whose synced_groups
+# holds a name too short for Pocket ID.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -62,12 +63,6 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
-    placement: cluster
-    settings:
-      s3_bucket: docs-uploads
   auth:
     blueprint: pocket-id
     hostname: id.example.org
