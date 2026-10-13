@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/configstore"
+	"github.com/paisans-software/paisans-stack/internal/grant"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -170,17 +173,7 @@ func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
 		return archTransport{runningHost{failingHost{match: "\x00"}}, "arm64"}
 	}
 	t.Cleanup(func() { convergeHost = saved })
-	body, err := os.ReadFile(fixtureConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The fixture records every site's arch, so this copy drops them, as
-	// a file written before the key existed lacks them.
-	body = []byte(strings.ReplaceAll(string(body), "    arch: amd64\n", ""))
-	path := filepath.Join(t.TempDir(), config.FileName)
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := fixtureWithoutArch(t)
 	secrets := fixtureSecretsPath()
 	r := &ui.Recorder{}
 	_ = runConverge(r, convergeOptions{Config: path, Secrets: secrets, Execute: false, Sudo: false})
@@ -196,5 +189,136 @@ func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
 	before, _ := os.ReadFile(path)
 	if strings.Contains(string(before), "arch:") {
 		t.Fatal("a dry run wrote arch")
+	}
+}
+
+// fixtureWithoutArch is a copy of the fixture configuration without its arch
+// lines, as a file written before the key existed lacks them.
+func fixtureWithoutArch(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = []byte(strings.ReplaceAll(string(body), "    arch: amd64\n", ""))
+	if strings.Contains(string(body), "arch:") {
+		t.Fatal("the fixture's arch lines changed shape; the copy still records one")
+	}
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// gatheredStore is applyStore's version as a test sees it: the paisans-stack.yaml
+// bytes it was gathered from, and published as they were.
+type gatheredStore struct {
+	paisans, secrets []byte
+}
+
+func (s *gatheredStore) check(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.Writer) error {
+	return nil
+}
+
+func (s *gatheredStore) publish(_ ui.Reporter, execute bool) (*appliedVersion, error) {
+	if !execute {
+		return nil, nil
+	}
+	return &appliedVersion{sha: strings.Repeat("d", 40), revision: 1, files: configstore.Files{Paisans: s.paisans, Secrets: s.secrets}}, nil
+}
+
+func (s *gatheredStore) held() (string, int) { return "", 0 }
+
+// gatherFiles replaces applyStore with one that takes the bytes the real one
+// would: those the caller loaded, or, given none, the files on disk at the
+// gather, as apply without --site gathers them.
+func gatherFiles(t *testing.T) **gatheredStore {
+	t.Helper()
+	var got *gatheredStore
+	saved := applyStore
+	applyStore = func(_ ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, _ *config.Config, _ bool, _ io.Reader, _ io.Writer) (storeVersion, error) {
+		s := &gatheredStore{}
+		if loaded != nil {
+			s.paisans, s.secrets = loaded.Paisans, loaded.Secrets
+		} else {
+			var err error
+			if s.paisans, err = os.ReadFile(configPath); err != nil {
+				return nil, err
+			}
+			if s.secrets, err = os.ReadFile(secretsPath); err != nil {
+				return nil, err
+			}
+		}
+		got = s
+		return s, nil
+	}
+	t.Cleanup(func() { applyStore = saved })
+	return &got
+}
+
+// A whole apply records every site's architecture before it gathers the
+// version it publishes, so the published bytes carry the keys and no
+// apply step finds its file changed after the publish.
+func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
+	path := fixtureWithoutArch(t)
+	fakeConverge(t, nil)
+	rec := recordConverge(t)
+	gathered := gatherFiles(t)
+	// Each apply step runs for real up to the host, which answers only
+	// the architecture read, so the step's check of the published bytes
+	// runs and the step then stops at the host.
+	failingSSH(t)
+	fake := convergeRun
+	var stepErrs []error
+	convergeRun = func(args []string) error {
+		if args[0] == "apply" {
+			if err := runStep(args); err != nil {
+				stepErrs = append(stepErrs, err)
+			}
+			return nil
+		}
+		return fake(args)
+	}
+	var err error
+	captureStdout(t, func() {
+		err = runConverge(rec, convergeOptions{Config: path, Secrets: fixtureSecretsPath(), Execute: true, Sudo: false, stdin: noTerminalStdin(), stdout: io.Discard})
+	})
+	if err != nil {
+		t.Fatalf("%v %s\n%s", err, problemText(err), rec.Lines())
+	}
+	body, _ := os.ReadFile(path)
+	if n := strings.Count(string(body), "arch: amd64"); n != 4 {
+		t.Fatalf("%d sites record arch:\n%s", n, body)
+	}
+	if *gathered == nil || strings.Count(string((*gathered).paisans), "arch: amd64") != 4 {
+		t.Fatalf("the version published lacks the recorded keys")
+	}
+	if len(stepErrs) == 0 {
+		t.Fatal("no apply step ran")
+	}
+	for _, e := range stepErrs {
+		if strings.Contains(e.Error()+problemText(e), "changed after the run published it") {
+			t.Errorf("a step found the file changed after the publish: %v", problemText(e))
+		}
+	}
+}
+
+// apply --site on its own records its site's architecture, and the version
+// it publishes is the file as written, not as first loaded.
+func TestAnExecutedApplySitePublishesTheRecordedArch(t *testing.T) {
+	path := fixtureWithoutArch(t)
+	gathered := gatherFiles(t)
+	failingSSH(t)
+	withRecorder(t, false)
+	captureStdout(t, func() {
+		_ = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", "vm", "--execute"}, noTerminalStdin(), io.Discard)
+	})
+	body, _ := os.ReadFile(path)
+	if strings.Count(string(body), "arch: amd64") != 1 {
+		t.Fatalf("vm's arch not recorded alone:\n%s", body)
+	}
+	if *gathered == nil || string((*gathered).paisans) != string(body) {
+		t.Fatal("the version gathered is not the file as recorded")
 	}
 }
