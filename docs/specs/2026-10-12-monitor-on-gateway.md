@@ -1,6 +1,6 @@
 # The monitor may share the gateway's machine
 
-Status: design approved in session on 2026-10-12, not implemented.
+Status: design approved in session on 2026-10-12, implemented (pull requests #207 and #210; the hand-off in #208).
 
 This amends `2026-10-08-monitor-role-and-host-check.md`, Part 1, where a
 monitor is never the gateway and never the witness. Founder decision,

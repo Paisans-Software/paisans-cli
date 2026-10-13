@@ -1,6 +1,6 @@
 # Handing the gateway off a site that keeps the monitor
 
-Status: design approved in session on 2026-10-12, not implemented.
+Status: design approved in session on 2026-10-12, implemented (pull request #208).
 
 This is the second step of `2026-10-12-monitor-on-gateway.md`, *Moving the
 gateway off a shared site*. The first step made `paisans gateway move` and
