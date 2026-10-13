@@ -206,6 +206,10 @@ func resolve(cfg *config.Config) []string {
 			}
 			cat.URL = pin.URL
 		}
+		if dir, ok := snapshotDir(cat.Commit); ok {
+			fetched[name] = dir
+			return dir, true
+		}
 		dir, err := Fetch(cat)
 		if err == nil {
 			_, err = ReadCatalog(dir)
@@ -386,4 +390,146 @@ func (h hidden) Open(name string) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: errors.New("a blueprint's description is not a template")}
 	}
 	return h.FS.Open(name)
+}
+
+// The snapshot. Every version of the configuration store carries the catalog
+// blueprints its apps use (configstore.Files.Blueprints), keyed
+// <catalog commit>/<blueprint>/<file>. Installing it makes those blueprints
+// resolvable with no fetch: a checked out or recovered version renders, and a
+// removal reads the blueprint of what it removes, even when a catalog has
+// gone. A snapshot holds only the blueprints the apps use, so a catalog read
+// from one has exactly those.
+
+// snapshotsDir is where installed snapshots are kept, one directory per
+// catalog commit with a blueprints/ directory inside, the shape of a fetched
+// catalog.
+func snapshotsDir() (string, error) {
+	cache, err := CacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "snapshots"), nil
+}
+
+// snapshotDir is an installed snapshot of a catalog commit, if there is one.
+func snapshotDir(commit string) (string, bool) {
+	base, err := snapshotsDir()
+	if err != nil {
+		return "", false
+	}
+	dir := filepath.Join(base, commit)
+	if _, err := os.Stat(filepath.Join(dir, completeMark)); err != nil {
+		return "", false
+	}
+	return dir, true
+}
+
+// Snapshot is the snapshot of every catalog blueprint the configuration's
+// apps use, read from where each was resolved. A configuration that uses no
+// catalog has an empty one.
+func Snapshot(cfg *config.Config) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	for _, app := range cfg.AppNames() {
+		kind := cfg.Apps[app].Kind
+		catalog, name := config.SplitBlueprint(kind)
+		if catalog == "" {
+			catalog = config.CoreCatalog
+		}
+		cat, declared := cfg.Catalogs[catalog]
+		dir, fromCatalog := Source(kind)
+		if !declared || !fromCatalog || cat.Commit == "" {
+			continue
+		}
+		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(dir, p)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			out[cat.Commit+"/"+name+"/"+filepath.ToSlash(rel)] = data
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// SnapshotOf is Snapshot for a configuration held as bytes, which is how the
+// configuration store reads one. A configuration that does not load has no
+// snapshot rather than an error: the store reads local files to compare them
+// as well as to publish them, and publishing loads the file itself first, so
+// an invalid one never reaches a signature.
+func SnapshotOf(paisans []byte) (map[string][]byte, error) {
+	cfg, err := config.LoadBytes(paisans)
+	if err != nil {
+		return nil, nil
+	}
+	return Snapshot(cfg)
+}
+
+// InstallSnapshot writes a snapshot where resolution finds it. A commit
+// already installed is left as it is: its content is the commit's, and the
+// configuration store checked the snapshot's SHA-256 before handing it over.
+func InstallSnapshot(files map[string][]byte) error {
+	base, err := snapshotsDir()
+	if err != nil {
+		return err
+	}
+	byCommit := map[string]map[string][]byte{}
+	for p, data := range files {
+		commit, rest, ok := strings.Cut(p, "/")
+		if !ok {
+			return fmt.Errorf("snapshot path %s has no commit", p)
+		}
+		if byCommit[commit] == nil {
+			byCommit[commit] = map[string][]byte{}
+		}
+		byCommit[commit][rest] = data
+	}
+	for commit, rel := range byCommit {
+		if _, ok := snapshotDir(commit); ok {
+			continue
+		}
+		if err := os.MkdirAll(base, 0o755); err != nil {
+			return err
+		}
+		work, err := os.MkdirTemp(base, ".install-")
+		if err != nil {
+			return err
+		}
+		for p, data := range rel {
+			dest := filepath.Join(work, "blueprints", filepath.FromSlash(p))
+			if !strings.HasPrefix(dest, filepath.Join(work, "blueprints")+string(filepath.Separator)) {
+				os.RemoveAll(work)
+				return fmt.Errorf("snapshot path %s leaves its directory", p)
+			}
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				os.RemoveAll(work)
+				return err
+			}
+			if err := os.WriteFile(dest, data, 0o644); err != nil {
+				os.RemoveAll(work)
+				return err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(work, completeMark), nil, 0o644); err != nil {
+			os.RemoveAll(work)
+			return err
+		}
+		if err := os.Rename(work, filepath.Join(base, commit)); err != nil {
+			os.RemoveAll(work)
+			if _, ok := snapshotDir(commit); !ok {
+				return err
+			}
+		}
+	}
+	return nil
 }

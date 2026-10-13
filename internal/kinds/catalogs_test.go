@@ -133,3 +133,40 @@ func TestAMovedTagIsRefused(t *testing.T) {
 		t.Errorf("got %q", problems)
 	}
 }
+
+// A snapshot taken from a resolved configuration, installed on a machine
+// that has never fetched the catalog, resolves the same blueprints with the
+// catalog gone.
+func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	url, commit := testCatalog(t, nil)
+	cfg := catalogConfig(url, commit, "", "example/journal")
+	if p := resolve(cfg); len(p) > 0 {
+		t.Fatal(p)
+	}
+	snap, err := Snapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := snap[commit+"/journal/blueprint.yaml"]; !ok || len(snap) != 2 {
+		t.Fatalf("snapshot %v", snap)
+	}
+	// Another machine: a fresh cache, and the catalog deleted.
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	if err := os.RemoveAll(url); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if p := resolve(cfg); len(p) > 0 {
+		t.Fatalf("with the snapshot installed: %v", p)
+	}
+	if dir, ok := Source("example/journal"); !ok || !strings.Contains(dir, "snapshots") {
+		t.Errorf("resolved from %s", dir)
+	}
+	// A snapshot path that leaves its directory is refused.
+	if err := InstallSnapshot(map[string][]byte{strings.Repeat("b", 40) + "/../../x": nil}); err == nil {
+		t.Error("a path leaving the snapshot was installed")
+	}
+}

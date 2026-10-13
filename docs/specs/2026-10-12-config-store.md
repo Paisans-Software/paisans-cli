@@ -94,7 +94,10 @@ themselves as an admin.
 that passes all of these:
 
 1. **Shape.** Its tree holds exactly the three files, its signature is good, and
-   its revision is one more than its highest parent's.
+   its revision is one more than its highest parent's. *Amended 2026-10-13*
+   (`docs/specs/2026-10-12-blueprints-and-catalogs.md`): the tree may also hold
+   the snapshot of the catalog blueprints its apps use, under `blueprints/`,
+   with a `blueprints/SHA256SUMS` its files must match.
 2. **The signer.** Every parent is trusted, and the signing key belongs to an
    admin listed in every parent's `paisans-stack.yaml`. Someone who is not an admin
    cannot extend the history, however many sites they control.
