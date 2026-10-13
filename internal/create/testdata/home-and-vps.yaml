@@ -143,9 +143,9 @@ apps:
       # Only members of this group may sign in.
       admin_group: admins
 
-# How the apps that send mail send it: Pocket ID's login links and codes, the
-# status page's alerts, Mbin's account mail. The password is a secret, set
-# with `paisans secrets set external.smtp_password`.
+# How the apps send mail: sign in links and codes, alerts, notifications and
+# account mail. The password is a secret, set with
+# `paisans secrets set external.smtp_password`.
 smtp:
   host: smtp.example.org
   port: 587
