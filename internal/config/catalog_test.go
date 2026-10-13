@@ -24,6 +24,10 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 		{nil, "core/mbin", "written unqualified"},
 		{nil, "a/b/c", "is not a blueprint name"},
 		{nil, "gopher", "unknown blueprint"},
+		{map[string]Catalog{"example": {URL: "u", Commit: commit}}, "example/journal", "names no signers and is not unsigned"},
+		{map[string]Catalog{"example": {URL: "u", Commit: commit, Tag: "v1", Signers: []string{"ssh-ed25519 AAAA"}, Unsigned: true}}, "example/journal", "one or the other"},
+		{map[string]Catalog{"example": {URL: "u", Commit: commit, Signers: []string{"not a key"}}}, "example/journal", "tag: required with signers"},
+		{map[string]Catalog{"example": {URL: "u", Commit: commit, Tag: "v1", Signers: []string{"not a key"}}}, "example/journal", "is not an SSH public key"},
 	}
 	for _, c := range cases {
 		cfg := &Config{Catalogs: c.catalogs, Apps: map[string]App{"notes": {Kind: c.kind}}}
@@ -32,7 +36,7 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 			t.Errorf("%v %s: want %q, got %q", c.catalogs, c.kind, c.want, got)
 		}
 	}
-	ok := &Config{Catalogs: map[string]Catalog{"example": {URL: "u", Commit: commit}}, Apps: map[string]App{"notes": {Kind: "example/journal"}, "talk": {Kind: "mbin"}}}
+	ok := &Config{Catalogs: map[string]Catalog{"example": {URL: "u", Commit: commit, Unsigned: true}}, Apps: map[string]App{"notes": {Kind: "example/journal"}, "talk": {Kind: "mbin"}}}
 	if p := ok.catalogProblems(); len(p) > 0 {
 		t.Errorf("a sound declaration was refused: %v", p)
 	}

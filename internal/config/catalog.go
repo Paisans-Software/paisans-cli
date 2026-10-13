@@ -73,6 +73,20 @@ func (c *Config) catalogProblems() []string {
 		if cat.Commit == "" && name != CoreCatalog {
 			add("%s.commit: required, the commit the catalog is pinned to. `paisans catalog add` writes it.", key)
 		}
+		if name != CoreCatalog && len(cat.Signers) == 0 && !cat.Unsigned {
+			add("%s: names no signers and is not unsigned. A pin trusts the keys its tags are signed by: `paisans catalog add` records the key you accept, or write unsigned: true to check nothing.", key)
+		}
+		if name != CoreCatalog && len(cat.Signers) > 0 && cat.Unsigned {
+			add("%s: names signers and is unsigned; it is one or the other.", key)
+		}
+		if name != CoreCatalog && len(cat.Signers) > 0 && cat.Tag == "" {
+			add("%s.tag: required with signers, since the signature is on the tag.", key)
+		}
+		for i, s := range cat.Signers {
+			if _, _, err := ParseKeyLine(s); err != nil {
+				add("%s.signers[%d]: is not an SSH public key: %v.", key, i, err)
+			}
+		}
 		if name == CoreCatalog && len(cat.Signers) > 0 {
 			add("%s.signers: the core catalog's keys are built into the toolkit and cannot be replaced; a mirror must carry tags they signed.", key)
 		}

@@ -51,9 +51,10 @@ func runBlueprint(args []string, stdout io.Writer) error {
 	return &ui.Problem{Hint: fmt.Sprintf("blueprint has no subcommand %q", args[0]), Explain: "It takes list, show or lint."}
 }
 
-// catalogPin is the pin for a catalog at url: the tag asked for, or the
-// newest, and the commit it names, fetched and checked to be a catalog.
-func catalogPin(url, tag string, unsigned bool, signers []string) (config.Catalog, []string, error) {
+// catalogRelease is the release of the catalog at url to pin: the tag asked
+// for, or the newest, the commit it names, and a checkout of it fetched
+// before any of its keys is trusted, checked to be a catalog.
+func catalogRelease(url, tag string) (config.Catalog, string, []string, error) {
 	var commit string
 	var err error
 	if tag == "" {
@@ -62,30 +63,21 @@ func catalogPin(url, tag string, unsigned bool, signers []string) (config.Catalo
 		commit, err = kinds.TagCommit(url, tag)
 	}
 	if err != nil {
-		return config.Catalog{}, nil, &ui.Problem{Hint: "the catalog's release cannot be read", Explain: err.Error() + "."}
+		return config.Catalog{}, "", nil, &ui.Problem{Hint: "the catalog's release cannot be read", Explain: err.Error() + "."}
 	}
-	cat := config.Catalog{URL: url, Tag: tag, Commit: commit, Signers: signers, Unsigned: unsigned}
-	dir, err := kinds.Fetch(cat)
+	cat := config.Catalog{URL: url, Tag: tag, Commit: commit}
+	dir, err := kinds.FetchUnchecked(cat)
 	if err == nil {
 		_, err = kinds.ReadCatalog(dir)
 	}
+	var names []string
+	if err == nil {
+		names, err = kinds.Blueprints(dir)
+	}
 	if err != nil {
-		return config.Catalog{}, nil, &ui.Problem{Hint: url + " at " + tag + " is not a catalog this toolkit can read", Explain: err.Error() + "."}
+		return config.Catalog{}, "", nil, &ui.Problem{Hint: url + " at " + tag + " is not a catalog this toolkit can read", Explain: err.Error() + "."}
 	}
-	names, err := kinds.Blueprints(dir)
-	if err != nil {
-		return config.Catalog{}, nil, &ui.Problem{Hint: url + " at " + tag + " is not a catalog this toolkit can read", Explain: err.Error() + "."}
-	}
-	return cat, names, nil
-}
-
-// unsignedRefusal is the refusal for a catalog added or updated without
-// --unsigned, until a signature can be checked.
-func unsignedRefusal(name string) error {
-	return &ui.Problem{
-		Hint:    "catalogs." + name + " would have no signer to check",
-		Explain: "A pin trusts whoever can push a tag to the catalog unless its tags are signed by a key the pin names. Pass --unsigned to accept a catalog whose tags are not checked; the grant review says so every time the pin moves.",
-	}
+	return cat, dir, names, nil
 }
 
 func runCatalogAdd(args []string) error {
@@ -94,6 +86,7 @@ func runCatalogAdd(args []string) error {
 	configPath := fs.String("config", config.FileName, configHelp)
 	tag := fs.String("tag", "", "the release to pin (default: the newest tag)")
 	unsigned := fs.Bool("unsigned", false, "accept a catalog whose tags are not checked against a signer")
+	trust := fs.String("trust", "", "the SHA256 fingerprint of the key the release is signed by, once you have checked it with the catalog's author")
 	pos, err := parseAll(fs, args)
 	if err != nil {
 		return err
@@ -112,25 +105,50 @@ func runCatalogAdd(args []string) error {
 	if _, ok := cfg.Catalogs[name]; ok {
 		return &ui.Problem{Hint: "catalogs." + name + " is already declared", Explain: "Move its pin with `paisans catalog update " + name + "`."}
 	}
-	if !*unsigned {
-		return unsignedRefusal(name)
-	}
 	r := reporter()
 	r.Section("catalog " + name)
 	s := r.Step("read " + url)
-	cat, names, err := catalogPin(url, *tag, *unsigned, nil)
+	cat, dir, names, err := catalogRelease(url, *tag)
 	if err != nil {
 		s.Fail(err)
 		return err
 	}
 	s.Done(fmt.Sprintf("%s, %s", cat.Tag, cat.Commit[:12]))
 	r.Detail("blueprints: %s", strings.Join(names, ", "))
+	sig, err := kinds.VerifyTag(dir, cat.Tag, nil)
+	if err != nil {
+		return err
+	}
+	how := "unsigned"
+	switch {
+	case *unsigned:
+		cat.Unsigned = true
+		if sig.Fingerprint != "" {
+			r.Note("pinned unsigned, as asked", fmt.Sprintf("%s's tags are signed by %s, which this pin will not check", cat.Tag, sig.Fingerprint))
+		}
+	case sig.Fingerprint == "":
+		return &ui.Problem{Hint: url + "'s tag " + cat.Tag + " is not signed", Explain: "A pin trusts the keys its tags are signed by, and this one is signed by none. Pass --unsigned to pin it checked for nothing; the grant review says so every time the pin moves."}
+	default:
+		published, err := kinds.PublishedKeys(dir, cat.Tag)
+		if err != nil {
+			return err
+		}
+		line, ok := published[sig.Fingerprint]
+		if !ok {
+			return &ui.Problem{Hint: cat.Tag + " is signed by " + sig.Fingerprint + ", which the catalog does not publish", Explain: "A catalog lists the keys its tags are signed by in " + kinds.KeysFile + ", so the pin can record the key itself. Ask its author to add it."}
+		}
+		if *trust != sig.Fingerprint {
+			return &ui.Problem{Hint: cat.Tag + " is signed by " + sig.Fingerprint, Explain: "Trust starts from you: check that fingerprint with the catalog's author, by a channel other than the catalog, then run this again with --trust " + sig.Fingerprint + "."}
+		}
+		cat.Signers = []string{line}
+		how = "signed by " + sig.Fingerprint
+	}
 	s = r.Step("pin catalogs." + name + " in " + *configPath)
 	if err := config.SetCatalog(*configPath, name, cat); err != nil {
 		s.Fail(err)
 		return err
 	}
-	s.Done("unsigned")
+	s.Done(how)
 	r.Result("%s pinned at %s; its blueprints are %s", name, cat.Tag, qualify(name, names))
 	return nil
 }
@@ -148,12 +166,13 @@ func runCatalogUpdate(args []string) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	tag := fs.String("tag", "", "the release to move to (default: the newest tag); needs one catalog named")
+	trust := fs.String("trust", "", "the SHA256 fingerprint of a new signing key you have checked with the catalog's author; needs one catalog named")
 	pos, err := parseAll(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) > 1 || (*tag != "" && len(pos) != 1) {
-		return &ui.Problem{Hint: "catalog update takes at most one catalog, and --tag only with one", Explain: "paisans catalog update [<name>] [--tag <tag>]"}
+	if len(pos) > 1 || ((*tag != "" || *trust != "") && len(pos) != 1) {
+		return &ui.Problem{Hint: "catalog update takes at most one catalog, and --tag and --trust only with one", Explain: "paisans catalog update [<name>] [--tag <tag>] [--trust <fingerprint>]"}
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -178,11 +197,8 @@ func runCatalogUpdate(args []string) error {
 	for _, name := range names {
 		old := cfg.Catalogs[name]
 		r.Section("catalog " + name)
-		if !old.Unsigned {
-			return unsignedRefusal(name)
-		}
 		s := r.Step("read " + old.URL)
-		next, _, err := catalogPin(old.URL, *tag, old.Unsigned, old.Signers)
+		next, dir, _, err := catalogRelease(old.URL, *tag)
 		if err != nil {
 			s.Fail(err)
 			return err
@@ -192,7 +208,22 @@ func runCatalogUpdate(args []string) error {
 			continue
 		}
 		s.Done(fmt.Sprintf("%s, %s, was %s", next.Tag, next.Commit[:12], old.Tag))
-		dir, _ := kinds.Fetch(next)
+		if old.Unsigned {
+			next.Unsigned = true
+			r.Note(name+" is unsigned", "Nothing checked who published "+next.Tag+".")
+		} else {
+			rot, err := kinds.Rotate(dir, old, next.Tag, *trust)
+			if err != nil {
+				return &ui.Problem{Hint: "the signatures from " + old.Tag + " to " + next.Tag + " cannot be checked", Explain: err.Error() + ". Nothing was changed."}
+			}
+			if rot.Stopped != "" {
+				if rot.Fingerprint == "" {
+					return &ui.Problem{Hint: name + "'s tag " + rot.Stopped + " is not signed", Explain: "Every release after the pin must be signed by a key it trusts. Nothing was changed."}
+				}
+				return &ui.Problem{Hint: name + "'s tag " + rot.Stopped + " is signed by " + rot.Fingerprint + ", a key the pin does not trust", Explain: "No release signed by a trusted key lists it in " + kinds.KeysFile + ". If the catalog's author has moved to that key, check the fingerprint with them by a channel other than the catalog, then run paisans catalog update " + name + " --trust " + rot.Fingerprint + ". Nothing was changed."}
+			}
+			next.Signers = rot.Signers
+		}
 		for _, app := range cfg.AppNames() {
 			catalog, bp := config.SplitBlueprint(cfg.Apps[app].Kind)
 			if catalog != name {

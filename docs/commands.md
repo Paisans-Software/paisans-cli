@@ -369,7 +369,8 @@ Pins the catalogs of blueprints the deployment's apps may name, in
 `paisans-stack.yaml`. None of its subcommands reaches a host.
 
 ```sh
-paisans catalog add example https://github.com/example/paisans-blueprints --unsigned
+paisans catalog add example https://github.com/example/paisans-blueprints   # prints the signing key
+paisans catalog add example https://github.com/example/paisans-blueprints --trust SHA256:...
 paisans catalog update            # every catalog; or name one, with --tag
 paisans catalog remove example
 paisans catalog list
@@ -388,8 +389,16 @@ paisans catalog list
 * **`list`:** the core catalog with the commit the toolkit carries (or the one
   pinned under `catalogs.core`), then every declared catalog with its URL, tag,
   commit and whether its tags are checked.
-* **Unsigned:** until a signer can be checked, `add` needs `--unsigned`, and
-  `update` moves only a catalog declared `unsigned: true`.
+* **Signing:** a release is signed at its tag with git's SSH signatures, and
+  a catalog lists the keys it signs with in `keys/allowed_signers`. `add` on a
+  signed release prints the key's fingerprint and records the key only when
+  run again with `--trust <fingerprint>`, after you have checked it with the
+  catalog's author. `update` checks every release between the pin and the new
+  one against the trusted keys; a release a trusted key signed may list a new
+  key, which becomes trusted for the releases after it. Any other new key stops
+  the update until `--trust` names its fingerprint. `--unsigned` on `add` pins
+  a catalog whose tags are checked for nothing, and every `update` of it says
+  so.
 
 ### `paisans blueprint`
 

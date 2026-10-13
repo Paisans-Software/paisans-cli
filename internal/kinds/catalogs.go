@@ -69,14 +69,30 @@ const completeMark = ".paisans-complete"
 // Fetch is the directory holding a catalog at its pinned commit, fetched
 // into the cache when it is not there yet. A tag, when given, must name that
 // commit.
-func Fetch(cat config.Catalog) (string, error) {
+func Fetch(cat config.Catalog) (string, error) { return fetch(cat, false) }
+
+// FetchCore is Fetch for a core catalog pin, checked against the core release
+// keys built into the binary rather than the pin's own.
+func FetchCore(cat config.Catalog) (string, error) { return fetch(cat, true) }
+
+// FetchUnchecked is Fetch without the signature check, for reading the tags
+// and keys of a catalog before any of its keys is trusted.
+func FetchUnchecked(cat config.Catalog) (string, error) {
+	cat.Unsigned, cat.Signers = true, nil
+	return fetch(cat, false)
+}
+
+func fetch(cat config.Catalog, core bool) (string, error) {
 	cache, err := CacheDir()
 	if err != nil {
 		return "", err
 	}
 	dir := filepath.Join(cache, cat.Commit)
 	if _, err := os.Stat(filepath.Join(dir, completeMark)); err == nil {
-		return dir, checkTag(dir, cat)
+		if err := checkTag(dir, cat); err != nil {
+			return "", err
+		}
+		return dir, checkTrust(dir, cat, core)
 	}
 	if err := os.MkdirAll(cache, 0o755); err != nil {
 		return "", err
@@ -93,6 +109,9 @@ func Fetch(cat config.Catalog) (string, error) {
 		return "", fmt.Errorf("%s has no commit %s: %s", cat.URL, cat.Commit, out)
 	}
 	if err := checkTag(work, cat); err != nil {
+		return "", err
+	}
+	if err := checkTrust(work, cat, core); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(work, completeMark), nil, 0o644); err != nil {
@@ -210,7 +229,13 @@ func resolve(cfg *config.Config) []string {
 			fetched[name] = dir
 			return dir, true
 		}
-		dir, err := Fetch(cat)
+		var dir string
+		var err error
+		if name == config.CoreCatalog {
+			dir, err = FetchCore(cat)
+		} else {
+			dir, err = Fetch(cat)
+		}
 		if err == nil {
 			_, err = ReadCatalog(dir)
 		}

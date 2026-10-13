@@ -1,0 +1,3 @@
+# The keys the core catalog's release tags are signed by, one SSH public key
+# per line. Until one is recorded here, a deployment cannot pin the core
+# catalog to a commit of its own and renders the toolkit's copy.

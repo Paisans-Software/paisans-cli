@@ -2609,9 +2609,22 @@ deployment must render the same bytes for every admin and on every run; a
 tag beside it must still name that commit, so a tag moved after the pin was
 written is refused. Loading the configuration fetches each catalog an app
 names once, with the `git` binary and the operator's own git credentials,
-into a cache keyed by the commit. Signing, the snapshot every site keeps, and
-the commands that add and move a pin are in
-`docs/specs/2026-10-12-blueprints-and-catalogs.md`.
+into a cache keyed by the commit.
+
+**A pin trusts the keys its catalog's tags are signed by.** Releases are
+signed tags, with git's SSH signatures, and a catalog lists its keys in
+`keys/allowed_signers`. Every fetch checks the pinned tag against the pin's
+`signers`, so a compromised forge account, a transferred repository or a
+re-registered name can publish a tag but not one the trusted key signed. Trust
+starts from the operator: `catalog add` records a key only when given its
+fingerprint, and a catalog moves to a new key only through a release the old
+key signed that lists it. A catalog may be pinned `unsigned: true`, which checks
+nothing and is said wherever the pin moves. The core catalog pinned to a commit
+of its own is checked against release keys built into the toolkit, and with
+none recorded there yet it can only be the toolkit's copy. The sites never check
+a catalog's signature: they trust the operator's signature on the configuration
+version that carries the blueprints (see *Every site keeps signed copies of the
+configuration*).
 
 #### A blueprint ships a template set, not a single `.env`
 
