@@ -154,18 +154,3 @@ func TestRepositoryDropsTagAndDigest(t *testing.T) {
 		}
 	}
 }
-
-// The forks' channel tags move by design, so they are recorded by repository
-// too, and the build apply pins beside a channel tag finds the same entry.
-func TestDeclaredVolumesMatchesTheForkChannelsByRepository(t *testing.T) {
-	for ref, want := range map[string][]string{
-		"ghcr.io/paisans-software/mbin:stack-1": {"/app/var/"},
-		"ghcr.io/paisans-software/mbin:stack-1@sha256:bb53cba4aaab5ca6ed973940830e985f6c149022936ceb2c5eca640205386d57": {"/app/var/"},
-		"ghcr.io/josephquigley/writefreely-wisp:stack-1":                                                                nil,
-	} {
-		got, ok := kinds.DeclaredVolumes(ref)
-		if !ok || !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: declared volumes %v (recorded %v), want %v", ref, got, ok, want)
-		}
-	}
-}

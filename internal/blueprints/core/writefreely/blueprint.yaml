@@ -11,16 +11,14 @@ services:
   # section at all, so it will reject the configuration this kind
   # renders; do not point this kind at ghcr.io/writefreely/writefreely.
   #
-  # stack-1 is the fork's toolkit channel: the latest release a
-  # maintainer has promoted as working with what this toolkit renders
-  # (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
-  # this kind's templates: config.ini's locked_settings, [app]
-  # authorized_fetch, the S3 storage with image_url_base, and the
-  # /healthz route the monitor checks. Its first promotion is
-  # 0.21.1+wisp, the first release carrying locked settings, published
-  # as the image tag 0.21.1-wisp. The tag moves by design, so
-  # RepositoryVolumes records what the image declares.
-  - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:stack-1", purpose: "the application"}
+  # The fork's latest release, named by its version tag: 0.21.1+wisp,
+  # published as the image tag 0.21.1-wisp, the first release carrying
+  # everything this kind's templates need: config.ini's
+  # locked_settings, [app] authorized_fetch, the S3 storage with
+  # image_url_base, and the /healthz route the monitor checks. A newer
+  # release is taken by changing this tag, and paisans-stack's
+  # kinds.ImageVolumes records what each tag declares.
+  - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp", purpose: "the application"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 # Not WriteFreely's default 8080: Mbin publishes 8080, and a pinned blog
@@ -46,15 +44,15 @@ config:
   # The template's [uploads] comment says "dir is deliberately absent".
   omitted_keys:
     - {key: "uploads.dir", why: "uploads are stored in S3 through [storage], and dir names a path on one node that only the local image store reads, so it would do nothing here and suggest that it did"}
-# The writefreely-wisp fork's status-only route, from v0.21.1+wisp, the
-# first stack-1 release: GET or HEAD, 200 with an empty body when the
-# database answers SELECT 1, an empty 503 when it does not, with no
-# session or private mode check (healthz.go:19-50 at develop f95d840).
+# The writefreely-wisp fork's status-only route, from v0.21.1+wisp: GET
+# or HEAD, 200 with an empty body when the database answers SELECT 1,
+# an empty 503 when it does not, with no session or private mode check
+# (healthz.go:19-50 at develop f95d840).
 # healthz is a reserved username, so no blog can claim the path
 # (author/author.go:59).
 health: {path: "/healthz", status: [200]}
 # Cited at writefreely-wisp ff9dceb, except signed fetch, which is cited
-# at v0.21.1+wisp, the first stack-1 release.
+# at v0.21.1+wisp.
 gate:
   gateable: true
   open_paths:

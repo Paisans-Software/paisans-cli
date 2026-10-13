@@ -42,7 +42,7 @@ func TestOnlyTheseKindsSendMail(t *testing.T) {
 	}
 }
 
-// The stack-1 images carry a status-only /healthz, which answers 200 when
+// Both forks carry a status-only /healthz, which answers 200 when
 // healthy on a private instance too.
 func TestMbinAndWriteFreelyHaveADedicatedHealthRoute(t *testing.T) {
 	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {

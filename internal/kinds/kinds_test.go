@@ -1,7 +1,6 @@
 package kinds_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -151,24 +150,16 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 	}
 }
 
-// The two forks the toolkit runs default to their stack-1 channel, the
-// template contract these kinds render, and no other kind names a channel.
-func TestTheForksDefaultToStackOne(t *testing.T) {
-	want := map[config.Kind]string{
-		config.KindMbin:        "ghcr.io/paisans-software/mbin:stack-1",
-		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:stack-1",
-	}
-	for _, kind := range config.Kinds() {
-		for _, service := range kinds.Services(kind) {
-			if service.Name == "app" && want[kind] != "" {
-				if service.Image != want[kind] {
-					t.Errorf("%s app image is %s, want %s", kind, service.Image, want[kind])
-				}
-				continue
-			}
-			if strings.Contains(service.Image, ":stack-") {
-				t.Errorf("%s %s names a channel, %s", kind, service.Name, service.Image)
-			}
+// The two forks the toolkit runs default to a release of each, named by its
+// version tag, so a toolkit release renders for the fork build it was tested
+// against.
+func TestTheForksDefaultToAReleaseVersion(t *testing.T) {
+	for kind, want := range map[config.Kind]string{
+		config.KindMbin:        "ghcr.io/paisans-software/mbin:1.15.1-paisans",
+		config.KindWriteFreely: "ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp",
+	} {
+		if got, _ := kinds.DefaultImage(kind, "app"); got != want {
+			t.Errorf("%s app image is %s, want %s", kind, got, want)
 		}
 	}
 }

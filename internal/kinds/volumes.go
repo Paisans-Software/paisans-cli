@@ -28,7 +28,7 @@ import (
 // changes its reference, the new one has no entry, and a test fails until
 // somebody inspects it and records what it declares here, which is the
 // moment a new VOLUME has to be noticed. The one image whose reference moves
-// by design is recorded in RepositoryVolumes instead. `paisans apply` makes
+// by design, the gateway's Caddy, is recorded in RepositoryVolumes instead. `paisans apply` makes
 // the same check against the host's copy of every image, which is what covers
 // an operator's own `images` override; this table covers what the toolkit
 // ships.
@@ -52,6 +52,12 @@ var ImageVolumes = map[string][]string{
 	"ghcr.io/element-hq/matrix-authentication-service:1.24.0": nil,
 	"ghcr.io/element-hq/element-web:v1.12.27":                 nil,
 	"quay.io/oauth2-proxy/oauth2-proxy:v7.15.4":               nil,
+	// The forks: Mbin's /app/var/ is docker/Dockerfile:9 at
+	// Paisans-Software/mbin v1.15.0+paisans, and its build is published for
+	// linux/amd64 only; WriteFreely's declares none on linux/amd64 and
+	// linux/arm64.
+	"ghcr.io/paisans-software/mbin:1.15.1-paisans":       {"/app/var/"},
+	"ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp": nil,
 	// /data, the Dockerfile's only VOLUME.
 	"ghcr.io/paisans-software/uptime:1.1.0-oidc.4": {"/data"},
 	// Distroless, declares none.
@@ -80,34 +86,21 @@ var ImageVolumes = map[string][]string{
 	"docker.io/curlimages/curl:8.11.1": nil,
 }
 
-// RepositoryVolumes is ImageVolumes for the images whose reference moves by
+// RepositoryVolumes is ImageVolumes for the image whose reference moves by
 // design, keyed by repository rather than by reference, so any tag or digest
-// of one answers.
+// of it answers.
 //
-// The gateway's Caddy is one such image: the toolkit names
+// The gateway's Caddy is that image: the toolkit names
 // ghcr.io/paisans-software/caddy:2 and apply renders whichever build that tag
 // names when it plans (see acme.Published), so no reference to it stays fixed
 // for long enough to be a key. Every build comes from the same Dockerfile in
 // Paisans-Software/caddy-dns, and the build the tag named on 2026-10-11
 // (sha256:b401d1cb...) declared none; the registry test reads the highest
-// version tag of the repository, on every platform. `paisans apply` inspects the exact
-// build it deploys against the host's copy all the same, so a later build
-// that declared a path is still refused before it runs.
-//
-// The two forks' channel tags are the others: the mbin and writefreely kinds
-// name stack-1, which a maintainer moves to each promoted release
-// (docs/specs/2026-10-11-stack-channels.md). Each fork builds every release
-// from one Dockerfile. Mbin's declares /app/var/ (docker/Dockerfile:9 at
-// Paisans-Software/mbin v1.15.0+paisans), and 1.15.0-paisans, its first
-// promotion, declared exactly that when inspected for linux/amd64, its only
-// platform, on 2026-10-11. WriteFreely's declares none (Dockerfile at
-// writefreely-wisp develop f95d840), and 0.21.0-wisp printed null inspected
-// the same way. The registry test checks each fork's highest version tag on
-// every platform it is published for.
+// version tag of the repository, on every platform. `paisans apply` inspects
+// the exact build it deploys against the host's copy all the same, so a later
+// build that declared a path is still refused before it runs.
 var RepositoryVolumes = map[string][]string{
-	acme.Repository:                          nil,
-	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
-	"ghcr.io/josephquigley/writefreely-wisp": nil,
+	acme.Repository: nil,
 }
 
 // DeclaredVolumes is what an image declares, as far as the toolkit has
