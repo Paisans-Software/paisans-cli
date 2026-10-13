@@ -23,6 +23,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
@@ -1816,6 +1817,16 @@ func (c *checker) oidcMemberGroupNotAName() {
 			c.refuse("oidc-member-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"oidc member group is not a group name",
 				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the kind's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
+		}
+		// Extra groups are created at Pocket ID by apply, so a name it
+		// refuses would otherwise fail there, after validate passed.
+		for _, group := range spec.ExtraGroups(app) {
+			if pocketid.ValidGroupName(group) {
+				continue
+			}
+			c.refuse("oidc-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, spec.ExtraGroupsSetting),
+				"a group to create is not a group name",
+				"%q is not a name Pocket ID takes for a group. A group name is 2 to 50 characters.", group)
 		}
 	}
 }

@@ -7093,7 +7093,10 @@ whose member group is not `members` is refused
 A `member_group` or `admin_group` that is blank or not a string is refused
 too (`oidc-member-group-not-a-name`): the default would hold and the client
 would still be restricted, but what the operator wrote reads as a restriction
-to a group that does not exist. And a gateable kind whose client would admit
+to a group that does not exist. A group an app has apply create (its
+extra groups setting) is refused when Pocket ID would not take the name,
+which is 2 to 50 characters (`oidc-group-not-a-name`); otherwise apply would
+fail on it after validate passed. And a gateable kind whose client would admit
 every account is refused outright (`oidc-client-unrestricted`); every such
 kind has a default member group today, so this is the floor under that.
 

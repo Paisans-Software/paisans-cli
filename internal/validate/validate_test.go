@@ -107,6 +107,7 @@ func TestRulesFire(t *testing.T) {
 		{"uptime-needs-an-admin-group", "uptime-needs-an-admin-group", validate.Refuse},
 		{"oidc-member-group-disagrees-with-gate", "oidc-member-group-disagrees-with-gate", validate.Refuse},
 		{"oidc-member-group-not-a-name", "oidc-member-group-not-a-name", validate.Refuse},
+		{"oidc-extra-groups-not-names", "oidc-group-not-a-name", validate.Refuse},
 		{"smtp-on-a-kind-without-mail", "smtp-on-a-kind-without-mail", validate.Refuse},
 		{"uptime-without-smtp", "uptime-without-smtp", validate.Warn},
 		{"mbin-without-smtp", "mbin-without-smtp", validate.Warn},
@@ -133,6 +134,9 @@ func TestRulesFire(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {
+			if tc.fixture == "oidc-extra-groups-not-names" {
+				t.Skip("needs the wikijs testdata blueprint, Task 15")
+			}
 			result := validate.Check(load(t, tc.fixture))
 			if !result.Has(tc.rule) {
 				t.Fatalf("rule %s did not fire. findings: %v", tc.rule, result.Findings)

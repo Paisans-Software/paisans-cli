@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Transport is the part of an ssh transport this package uses. It is declared
@@ -557,6 +558,19 @@ func (c *Client) FindGroup(name string) (*Group, error) {
 		}
 	}
 	return nil, nil
+}
+
+// ValidGroupName is whether CreateGroup's request would pass Pocket ID
+// v2.14.0 for name. The group DTO binds the name to `required,min=2,max=255`
+// and the friendly name to `required,min=2,max=50`
+// (dto/user_group_dto.go:36-37), with no character pattern on either, and
+// CreateGroup sends name as both, so the tighter bound governs. The validator
+// counts characters, not bytes. Pocket ID normalises to NFC before it checks
+// (`unorm:"nfc"`); a name that is not in NFC is judged here as written, which
+// differs only for a name whose composed form is shorter by a character.
+func ValidGroupName(name string) bool {
+	n := utf8.RuneCountInString(name)
+	return n >= 2 && n <= 50
 }
 
 // CreateGroup creates a group whose name and friendly name are both name.
