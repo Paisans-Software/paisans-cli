@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
@@ -13,17 +15,23 @@ import (
 
 // What the catalog and blueprint commands need beyond resolution.
 
-// Newest is the newest tag the catalog at url has, by version order, and the
-// commit it names, read with `git ls-remote` so nothing is cloned. An
-// annotated tag's commit is the one it points at. A catalog with no tag has
-// no release to pin, and is refused.
+// Newest is the catalog at url's newest release and the commit it names,
+// read with `git ls-remote` so nothing is cloned. A release is a tag that is
+// a semantic version and nothing more, vMAJOR.MINOR.PATCH or the same without
+// the v, compared number by number. A pre-release (v2.0.0-rc1) or a build
+// (v2.0.0+abc) is not one: it is pinned only by naming it with --tag, so a
+// catalog's release candidate never reaches a deployment by default. Any
+// other tag (latest, release-2026) is not a version and is ignored. The order
+// is computed here rather than by git's version sort, which ranks
+// v1.10.0-rc1 above v1.10.0 and follows each user's versionsort settings.
+// An annotated tag's commit is the one it points at.
 func Newest(url string) (tag, commit string, err error) {
-	out, err := git("", "ls-remote", "--tags", "--sort=-v:refname", url)
+	out, err := git("", "ls-remote", "--tags", url)
 	if err != nil {
 		return "", "", fmt.Errorf("listing the tags of %s: %s", url, out)
 	}
-	peeled := map[string]string{}
-	var order []string
+	commits := map[string]string{}
+	var names []string
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) != 2 || !strings.HasPrefix(f[1], "refs/tags/") {
@@ -31,18 +39,56 @@ func Newest(url string) (tag, commit string, err error) {
 		}
 		name := strings.TrimPrefix(f[1], "refs/tags/")
 		if base, ok := strings.CutSuffix(name, "^{}"); ok {
-			peeled[base] = f[0]
+			commits[base] = f[0]
 			continue
 		}
-		if _, seen := peeled[name]; !seen {
-			peeled[name] = f[0]
+		if _, seen := commits[name]; !seen {
+			commits[name] = f[0]
+			names = append(names, name)
 		}
-		order = append(order, name)
 	}
-	if len(order) == 0 {
-		return "", "", fmt.Errorf("%s has no tags. A catalog is pinned to a release: tag one", url)
+	best, bestVersion := "", [3]int{}
+	for _, name := range names {
+		v, ok := releaseVersion(name)
+		if !ok {
+			continue
+		}
+		if best == "" || less(bestVersion, v) || (v == bestVersion && name < best) {
+			best, bestVersion = name, v
+		}
 	}
-	return order[0], peeled[order[0]], nil
+	if best == "" {
+		if len(names) == 0 {
+			return "", "", fmt.Errorf("%s has no tags. A catalog is pinned to a release: tag one, as vMAJOR.MINOR.PATCH", url)
+		}
+		sort.Strings(names)
+		if len(names) > 10 {
+			names = append(names[:10], "...")
+		}
+		return "", "", fmt.Errorf("%s has no release tag, only %s. A release is tagged vMAJOR.MINOR.PATCH; a pre-release is pinned by naming it with --tag", url, strings.Join(names, ", "))
+	}
+	return best, commits[best], nil
+}
+
+// releaseTag is a tag that is a release: MAJOR.MINOR.PATCH with an optional
+// leading v, no leading zeros, and no pre-release or build part.
+var releaseTag = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// releaseVersion is a release tag's version, and false for any other tag.
+func releaseVersion(tag string) ([3]int, bool) {
+	m := releaseTag.FindStringSubmatch(tag)
+	if m == nil {
+		return [3]int{}, false
+	}
+	var v [3]int
+	for i := range v {
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return [3]int{}, false
+		}
+		v[i] = n
+	}
+	return v, true
 }
 
 // TagCommit is the commit a tag of the catalog at url names.
