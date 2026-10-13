@@ -2303,6 +2303,7 @@ Finishing either command first costs nothing but its resume.
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
+| Outline `redis_password`, `utils_secret` | Valkey, Outline | Outline | a restart of the Outline stack on each site in turn |
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
@@ -2393,10 +2394,10 @@ includes it (Founder decision).
 
 **Some secrets are kept, and the plan lists each with why:**
 
-* **Pocket ID's `encryption_key` and Matrix Authentication Service's
-  `mas_encryption_secret`** encrypt data already stored. Changing either makes
-  that data unreadable, and neither project offers a re-encryption the toolkit
-  could drive. An admin who held one also holds a copy of the data it
+* **Pocket ID's `encryption_key`, Matrix Authentication Service's
+  `mas_encryption_secret` and Outline's `outline_secret_key`** encrypt data
+  already stored. Changing any of them makes that data unreadable, and none of
+  those projects offers a re-encryption the toolkit could drive. An admin who held one also holds a copy of the data it
   protects, so rotating it would take nothing back.
 * **`cluster.admin_password`, where the admin role cannot log in.** Spilo
   creates it `NOLOGIN` at the Spilo 4 tags `render` pins, which run Patroni 4,

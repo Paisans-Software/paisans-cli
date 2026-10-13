@@ -33,10 +33,10 @@ const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--restart]
 // --replaced.
 const replacedEarlier = "replaced earlier, hosts already run it: the value the secrets file holds is what every host using it runs, so there is nothing to hand out"
 
-// encryptsStoredData is why Pocket ID's encryption_key and MAS's
-// mas_encryption_secret are kept (docs/specs/2026-10-12-secrets-rotate.md,
-// Scope).
-const encryptsStoredData = "it encrypts data already stored, so changing it makes that data unreadable, and neither Pocket ID nor Matrix Authentication Service offers a re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
+// encryptsStoredData is why Pocket ID's encryption_key, MAS's
+// mas_encryption_secret and Outline's outline_secret_key are kept
+// (docs/specs/2026-10-12-secrets-rotate.md, Scope).
+const encryptsStoredData = "it encrypts data already stored, so changing it makes that data unreadable, and none of Pocket ID, Matrix Authentication Service and Outline offers a re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
 
 // forgetsDeclines is why the invite service's email_hash_key is kept: the
 // service stores only the keyed hash of a declined address
@@ -519,7 +519,7 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		switch last {
 		case "oauth":
 			return secretsrotate.MbinOAuth(app), nil
-		case "encryption_key", "mas_encryption_secret":
+		case "encryption_key", "mas_encryption_secret", "outline_secret_key":
 			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, encryptsStoredData)
 		case "email_hash_key":
 			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, forgetsDeclines)
@@ -659,6 +659,8 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	self("valkey_password")
 	self("mercure_jwt_secret")
+	self("redis_password")
+	self("utils_secret")
 	if len(cfg.Storage.Garage.Sites) > 0 {
 		if has("storage.garage.admin_token") {
 			rs = append(rs, secretsrotate.GarageAdminToken())
@@ -685,6 +687,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	for _, app := range appsOf(config.KindSynapse) {
 		if path := "apps." + app + ".mas_encryption_secret"; has(path) {
+			kept = append(kept, keptSecret{path, encryptsStoredData})
+		}
+	}
+	for _, app := range appsOf(config.KindOutline) {
+		if path := "apps." + app + ".outline_secret_key"; has(path) {
 			kept = append(kept, keptSecret{path, encryptsStoredData})
 		}
 	}

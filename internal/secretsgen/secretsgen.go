@@ -296,16 +296,23 @@ const (
 	masSigningKey = "mas_signing_key"
 )
 
+// outlineSecretKey is Outline's SECRET_KEY, which it refuses unless it is
+// exactly 64 hex characters (server/env.ts at 65be53c, the commit
+// outlinewiki/outline:1.10.0 is built from). It encrypts fields in Outline's
+// database, so, like masEncryptionSecret, nothing here ever replaces one that
+// is set.
+const outlineSecretKey = "outline_secret_key"
+
 // appSecret produces the value for one app secret key.
 //
-// Most are a generated password. MAS parses its encryption secret as hex and
-// its signing key as PEM, so a base64 password in either position is a
+// Most are a generated password. MAS and Outline parse their encryption secret
+// as hex and MAS its signing key as PEM, so a base64 password in either position is a
 // service that will not start. Garage is stricter still: it refuses a base64
 // key ID or secret outright rather than merely failing to start with one, so
 // the two S3 credential keys get their own generators too.
 func appSecret(key string) (string, error) {
 	switch key {
-	case masEncryptionSecret:
+	case masEncryptionSecret, outlineSecretKey:
 		return hexSecret(32)
 	case masSigningKey:
 		return rsaPrivateKeyPEM()

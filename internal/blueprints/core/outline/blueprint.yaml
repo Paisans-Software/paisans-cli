@@ -4,6 +4,11 @@ apiVersion: paisans.blueprint/v1
 name: outline
 services:
   - {name: "app", image: "outlinewiki/outline:1.10.0", purpose: "the application"}
+  # Outline will not start without Redis: REDIS_URL is required, its
+  # queues and collaboration run through it, and /_health pings it
+  # (server/env.ts and server/main.ts at 65be53c). The same Valkey
+  # release Mbin's cache runs.
+  - {name: "valkey", image: "docker.io/valkey/valkey:9.1.2-trixie", purpose: "the queue and cache Outline requires"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 port: 3000
@@ -65,3 +70,21 @@ oidc:
   member_group_setting: "member_group"
   default_admin_group: "admins"
   default_member_group: "members"
+secrets:
+  # Outline refuses to start without SECRET_KEY, exactly 64 hex
+  # characters, or without UTILS_SECRET (server/env.ts at 65be53c).
+  # SECRET_KEY encrypts fields in the database, so replacing it makes
+  # them unreadable: it is generated once and never rotated.
+  # redis_password is Valkey's, named apart from Mbin's
+  # valkey_password because a self rotated key belongs to one kind.
+  generate:
+    - "outline_secret_key"
+    - "utils_secret"
+    - "redis_password"
+  required:
+    - {key: "outline_secret_key", why: "Outline will not start without SECRET_KEY"}
+    - {key: "utils_secret", why: "Outline will not start without UTILS_SECRET"}
+    - {key: "redis_password", why: "Outline will not start without REDIS_URL, which carries it"}
+  # Each is checked by the stack that presents it, so re-rendering
+  # the stack is the whole rotation.
+  self_rotated: ["redis_password", "utils_secret"]

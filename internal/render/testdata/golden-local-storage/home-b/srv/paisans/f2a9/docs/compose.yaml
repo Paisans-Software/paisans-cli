@@ -40,7 +40,23 @@ services:
       # FILE_STORAGE is local in .env, so this holds every attachment.
       - /srv/paisans/f2a9/docs/data:/var/lib/outline/data
     depends_on:
-      - postgres
+      valkey:
+        condition: service_started
+      postgres:
+        condition: service_started
+
+  valkey:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: docker.io/valkey/valkey:9.1.2-trixie
+    restart: unless-stopped
+    # The password is on the command line, as Mbin's cache has it, so it is
+    # visible to `ps` on the host. Snapshots are off and there is no data
+    # directory: a restart loses queued background jobs, not documents,
+    # which live in Postgres.
+    command: ["valkey-server", "--save", "", "--requirepass", "${VALKEY_PASSWORD:?set in .env}"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
 
   postgres:
     labels:

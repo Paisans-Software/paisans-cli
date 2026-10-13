@@ -35,6 +35,10 @@ func AppSelfKind(key string) (config.Kind, bool) { return kinds.SelfRotatedKind(
 // mbinRestart is the downtime of a rotation that restarts the Mbin stack.
 const mbinRestart = "the Mbin stack, for one restart on each site in turn"
 
+// outlineRestart is the downtime of a rotation that restarts the Outline
+// stack.
+const outlineRestart = "the Outline stack, for one restart on each site in turn"
+
 // AppSelfCost is what rotating key costs the members, for each key AppSelf
 // rotates; a key it does not rotate costs nothing here, and AppSelf refuses
 // it at Precheck.
@@ -69,6 +73,12 @@ const mbinRestart = "the Mbin stack, for one restart on each site in turn"
 //     and the cache hold no session (sessions are in Postgres, above). Their
 //     cost is a restart of the Mbin stack on each site, as the spec's cost
 //     table gives it.
+//   - Outline redis_password and utils_secret sign nobody out: Outline signs
+//     a session with a per-user secret it keeps in Postgres
+//     (server/models/User.ts, getJwtToken, at 65be53c, the commit
+//     outlinewiki/outline:1.10.0 is built from), and UTILS_SECRET only
+//     authorizes its own scheduled tasks. Their cost is a restart of the
+//     Outline stack on each site.
 //   - invite session_key signs members out of the invite service and nothing
 //     else: it signs the service's sign-in cookie
 //     (docs/specs/2026-10-12-invite-service.md, Secrets), so a cookie signed
@@ -83,6 +93,8 @@ func AppSelfCost(key string) Cost {
 		return Cost{SignsOut: true}
 	case "mercure_jwt_secret", "valkey_password":
 		return Cost{Downtime: mbinRestart}
+	case "redis_password", "utils_secret":
+		return Cost{Downtime: outlineRestart}
 	}
 	return Cost{}
 }
@@ -98,7 +110,8 @@ type appSelf struct {
 // stack that uses it: Mbin's app_secret, mercure_jwt_secret and
 // valkey_password, oauth2-proxy's cookie_secret, uptime's session_secret,
 // the invite service's session_key, MAS's mas_signing_key and
-// mas_matrix_secret, and Pocket ID's static_api_key. cost is what the plan says it costs; AppSelfCost has each
+// mas_matrix_secret, Outline's redis_password and utils_secret, and Pocket
+// ID's static_api_key. cost is what the plan says it costs; AppSelfCost has each
 // one, with its source.
 func AppSelf(app, key string, cost Cost) Rotator {
 	return appSelf{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key, cost: cost}
