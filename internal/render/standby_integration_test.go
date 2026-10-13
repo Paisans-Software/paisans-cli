@@ -110,7 +110,7 @@ func startStandbyBox(t *testing.T, label string, env ...string) *standbyBox {
 	}
 
 	box := &standbyBox{t: t, name: fmt.Sprintf("paisans-standby-%s-%d", label, time.Now().UnixNano()), dir: dir}
-	args := []string{"run", "-d", "--name", box.name, "--platform", "linux/amd64",
+	args := []string{"run", "-d", "--name", box.name,
 		"-v", dir + "/paisans-standby.sh:/paisans/pocket-id-standby.sh:ro",
 		"-v", dir + "/pocket-id:/app/pocket-id:ro",
 		"-v", fake + ":/fake",
@@ -300,7 +300,7 @@ func TestStandbyWrapperWithTwoRealInstances(t *testing.T) {
 
 	start := func(name string) *standbyBox {
 		box := &standbyBox{t: t, name: "paisans-standby-" + name + "-" + suffix, dir: dir}
-		docker("run", "-d", "--name", box.name, "--network", network, "--platform", "linux/amd64",
+		docker("run", "-d", "--name", box.name, "--network", network,
 			"-e", "APP_URL=http://localhost:1411",
 			"-e", "ENCRYPTION_KEY=fixture-encryption-key-not-a-secret",
 			"-e", "DB_CONNECTION_STRING=postgres://pid:pid@pg:5432/pid?sslmode=disable",

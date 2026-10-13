@@ -675,13 +675,16 @@ gives every new container an anonymous volume for a `VOLUME` nothing mounts,
 and Compose abandons it on the next recreate; a real apps site collected 18
 under Mbin's `/app/var/`. Three pieces, each easy to undo by accident:
 
-* `kinds.ImageVolumes` records what every pinned reference declares, read
-  with `docker image inspect --platform linux/amd64` (the platform matters on
-  an arm64 workstation: the containerd image store answered null for images
-  that declare volumes). `TestEveryDeclaredImageVolumeIsMounted` in
-  `internal/render` renders every app pinned and clustered at Postgres 16, 17
-  and 18 and fails on an unrecorded image or an unmounted path. Bumping an
-  image means inspecting the new reference and adding its row.
+* `kinds.ImageVolumes` records what every pinned reference declares on every
+  platform it is published for. `TestRecordedVolumesMatchEveryPlatform`,
+  behind the `registry_integration` tag (below), reads each entry's
+  configuration from the registry for every platform and fails on any that
+  disagrees. `TestEveryDeclaredImageVolumeIsMounted` in `internal/render`
+  renders every app pinned and clustered at Postgres 16, 17 and 18 and fails
+  on an unrecorded image or an unmounted path. Bumping an image means adding
+  its row and running the registry test. Do not read it with `docker image
+  inspect`: that answers for one platform, and on an arm64 workstation the
+  containerd image store printed null for images that declare volumes.
 * `Build` inspects every image of every acted on stack (`VolumeCheck`, in
   `internal/apply/volumes.go`) with `kinds.ComposeMounts` and
   `kinds.Uncovered`. Only an exact path counts, because a bind at a parent was
@@ -1332,6 +1335,19 @@ through both nodes. A second grows to three nodes at replication 3, one a
 the Docker tests run alone and at real timing: the fake-cluster tests, whose
 `TestMain` makes every wait instant, are left out of that build. It runs its probe in `curlimages/curl`, which it pulls.
 
+**Registry tests** read published images over the network, anonymously and
+without Docker, behind their own tag:
+
+```
+go test -tags registry_integration ./internal/kinds/
+```
+
+`TestRecordedVolumesMatchEveryPlatform` checks `kinds.ImageVolumes`, and each
+repository `kinds.RepositoryVolumes` covers (the gateway's Caddy and the two
+forks) at its highest version tag, against what every linux platform of each
+image declares. A moving tag such as `stack-1` or Caddy's `2` is not checked
+itself: a specific release is what a table row can vouch for.
+
 Pocket ID's standby wrapper has Docker tests of its own, behind their own tag:
 
 ```
@@ -1344,8 +1360,11 @@ over the binary: standing by and then serving, a prompt stop that reaches the
 child, any other exit passed on, and the 50 line window. The fifth runs two
 real instances against a `postgres:17-trixie` and stops the active one. Rerun
 it whenever the Pocket ID image is bumped: it is what proves the marker
-against the binary. The image is `linux/amd64`, emulated on an arm64
-workstation.
+against the binary. It runs the image for the workstation's own platform;
+on 2026-10-13 all seven passed on arm64 as well as amd64. Docker reuses
+whatever build it already holds under a tag, so a workstation that once
+pulled the image with `--platform linux/amd64` keeps running that one under
+emulation: `docker pull` the tag first to get the native build.
 
 The admin reconciler has a Docker test of its own, behind its own tag:
 

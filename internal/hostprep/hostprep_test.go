@@ -349,6 +349,33 @@ func TestAFreshDataSitePlansEveryStep(t *testing.T) {
 	}
 }
 
+// An arm64 host gets Docker's repository for arm64: the architecture is the
+// one dpkg reports, never assumed.
+func TestAnArm64HostGetsDockersArm64Repository(t *testing.T) {
+	host := freshHost()
+	host.responses[probePackages] = strings.Replace(host.responses[probePackages], "arch amd64", "arch arm64", 1)
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := printed(plan); !strings.Contains(got, "docker: add Docker's apt repository for noble/arm64 at /etc/apt/sources.list.d/docker.sources") {
+		t.Errorf("no arm64 repository step:\n%s", got)
+	}
+	want := strings.Replace(dockerSources, "Architectures: amd64", "Architectures: arm64", 1)
+	found := false
+	for _, s := range plan.Steps {
+		if s.File != nil && s.File.Path == "/etc/apt/sources.list.d/docker.sources" {
+			found = true
+			if s.File.Content != want {
+				t.Errorf("the apt source is:\n%s", s.File.Content)
+			}
+		}
+	}
+	if !found {
+		t.Error("no apt source was written")
+	}
+}
+
 // The order is the safety property. The SSH allow lands before ufw is enabled,
 // and the firewall comes after the package step that installs ufw.
 func TestSSHIsAllowedBeforeTheFirewallIsEnabled(t *testing.T) {

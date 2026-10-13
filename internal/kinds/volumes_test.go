@@ -18,7 +18,7 @@ func TestEveryDefaultImageHasItsVolumesRecorded(t *testing.T) {
 				continue
 			}
 			if _, ok := kinds.DeclaredVolumes(service.Image); !ok {
-				t.Errorf("%s %s runs %s, whose declared volumes are not in kinds.ImageVolumes. Pull it, run `docker image inspect --platform linux/amd64 --format '{{json .Config.Volumes}}'` on it, and record the answer", kind, service.Name, service.Image)
+				t.Errorf("%s %s runs %s, whose declared volumes are not in kinds.ImageVolumes. Record what it declares, then run `go test -tags registry_integration -run TestRecordedVolumesMatchEveryPlatform ./internal/kinds/`, which reads every platform from the registry and fails until the entry is right", kind, service.Name, service.Image)
 			}
 		}
 	}

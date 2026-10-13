@@ -6288,9 +6288,10 @@ trailing slash is not a difference.
 
 **Every kind's template mounts every path its images declare.** State gets a
 bind under `/srv/paisans/<token>/<stack>/`; throwaway gets a tmpfs. Each pinned image was
-pulled for linux/amd64 and inspected on 2026-10-07, except where
-`kinds.ImageVolumes` records otherwise beside the entry (the uptime monitor,
-the admin reconciler and the heartbeat's curl image):
+inspected on 2026-10-07. On 2026-10-13 every one but the two forks' was read
+from the registry for each platform it is published for, amd64 and arm64
+among them, and every platform declared the same paths. Mbin's is published
+for linux/amd64 alone:
 
 | Image | Declares | Mounted as |
 |-------|----------|------------|
