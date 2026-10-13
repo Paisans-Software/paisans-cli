@@ -1,8 +1,6 @@
 package kinds
 
-import "github.com/paisans-software/paisans-stack/internal/config"
-
-// PocketIDStandbyMarker records, per Pocket ID image, the text its log carries
+// PocketIDStandbyMarker is the text a Pocket ID v2 log carries
 // when it refuses to start because another instance already holds the
 // database. The standby wrapper the pocket-id kind renders (README, "Pocket ID
 // runs on every apps site, and one of them is active") stands by on an exit
@@ -16,24 +14,19 @@ import "github.com/paisans-software/paisans-stack/internal/config"
 // kept here has no apostrophe, so neither slog's quoting nor the wrapper's own
 // single quotes can change it.
 //
-// Keyed by the whole reference, as ImageVolumes is: a bump changes the
-// reference, the new one has no entry, and a test fails until somebody reads
-// the new release's bootstrap.go and records its text. A marker that stops
-// matching fails safe, not silently: the wrapper exits, Docker's restart
-// policy retries the container more slowly, and apply's gate reports it as
-// restarting.
-var PocketIDStandbyMarker = map[string]string{
-	"ghcr.io/pocket-id/pocket-id:v2.14.0": "already one instance of Pocket ID running",
-}
+// One text serves every image on the foundation's track, which stays on v2
+// (supportedTags). A release that changes it fails safe, not silently: the
+// wrapper exits, Docker's restart policy retries the container more slowly,
+// and apply's gate reports it as restarting. Moving the track to another
+// major is a toolkit change, which is when this text is read again.
+const PocketIDStandbyMarker = "already one instance of Pocket ID running"
 
 // StandbyMarker is the refusal text for a Pocket ID image, and whether the
-// table knows that image. An image it does not know, such as an operator's
-// own `images.app`, gets the default image's text: the most likely to match,
-// and harmless when it does not.
+// image is the foundation's own repository, which is the one the text was
+// read from. Any other, such as an operator's own `images.app`, gets the same
+// text: the most likely to match, and harmless when it does not.
 func StandbyMarker(image string) (string, bool) {
-	if marker, ok := PocketIDStandbyMarker[image]; ok {
-		return marker, true
-	}
-	def, _ := DefaultImage(config.KindPocketID, "app")
-	return PocketIDStandbyMarker[def], false
+	def, err := FoundationImage(FoundationPocketID)
+	known := err == nil && ParseReference(image).Repository() == ParseReference(def).Repository()
+	return PocketIDStandbyMarker, known
 }

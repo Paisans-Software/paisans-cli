@@ -55,11 +55,11 @@ func TestIsTrackAndOnTrack(t *testing.T) {
 	}
 	track := "ghcr.io/pocket-id/pocket-id:v2.*.*"
 	for ref, want := range map[string]bool{
-		"ghcr.io/pocket-id/pocket-id:v2.14.0":                true,
+		"ghcr.io/pocket-id/pocket-id:v2.14.0":               true,
 		"ghcr.io/pocket-id/pocket-id:v2.14.0@sha256:abcdef": true,
 		"ghcr.io/pocket-id/pocket-id:v3.0.0@sha256:abcdef":  false,
-		"ghcr.io/example/pocket-id:v2.14.0":                  false,
-		"ghcr.io/pocket-id/pocket-id":                        false,
+		"ghcr.io/example/pocket-id:v2.14.0":                 false,
+		"ghcr.io/pocket-id/pocket-id":                       false,
 	} {
 		if got := imagedigest.OnTrack(track, ref); got != want {
 			t.Errorf("OnTrack(%s) = %v, want %v", ref, got, want)

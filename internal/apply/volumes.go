@@ -22,9 +22,11 @@ import (
 // a named volume or a tmpfs, at exactly that path) refuses the apply before
 // anything is written. Build inspects the images the host has; the ones it
 // does not are owed, and Execute pulls and inspects them before its first
-// write. kinds.ImageVolumes is the same check made at test time for the
-// images the toolkit ships; this one is what covers an operator's own
-// `images` override, and an image whose tag moved.
+// write. Every image follows a track or an operator's own reference, so the
+// build a host runs is known only once apply resolves it: this check, on the
+// host's own copy, is the one that sees every build. A registry test,
+// TestEveryDeclaredImageVolumeIsMounted in internal/render, makes the same
+// check for the builds the tracks name today.
 type VolumeCheck struct {
 	// Checked are the references inspected so far.
 	Checked []string

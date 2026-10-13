@@ -8,19 +8,16 @@ services:
   # or auto_login. It listens on 4180, this record's Port, spelled out
   # in the compose and Caddy snippet templates too, because a Service
   # here carries no port field and a port nobody declared is a port
-  # nobody can route to.
-  #
-  # v7.15.4 checked against quay.io on 2026-09-15 by requesting the tag
-  # through quay.io's API, which resolved (an OCI image index with ten
-  # child manifests).
-  - {name: "app", image: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4", purpose: "the gate, admitting members, listening on 4180"}
+  # nobody can route to. Its image is the core catalog's
+  # foundation.yaml's.
+  - {name: "app", foundation: "oauth2-proxy", purpose: "the gate, admitting members, listening on 4180"}
 database: {engine: none}
 port: 4180
 config:
   format: env
   file: ".env"
 # /ping answers before any auth and needs no Host
-# (pkg/middleware/healthcheck.go:44-53 at v7.15.4); ran the image: 200
+# (pkg/middleware/healthcheck.go:44-53 at v7.15.4, and on every v7); ran the image: 200
 # OK.
 health: {path: "/ping", status: [200]}
 # Part of the sign-in flow itself: gating it would gate the login. The

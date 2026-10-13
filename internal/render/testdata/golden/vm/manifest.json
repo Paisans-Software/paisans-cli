@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/chat/compose.yaml",
-      "sha256": "e5013e70ce8989367c4c27cac523c461e326aed49f0709cbe9df35c4727fc5e5",
+      "sha256": "dc31c6fa7754dd6307c03ffe311efd9e885c49db3ab283f03f4f64017005791f",
       "mode": "0644"
     },
     {
@@ -38,7 +38,7 @@
     },
     {
       "path": "srv/paisans/f2a9/gate/compose.yaml",
-      "sha256": "a0803fb54cca18b62b93e426729c2f096d3a0abfdefdc5d615dadc4047de3d15",
+      "sha256": "0baab12007faabee38f2a98b5bf64706d18cc789a2083e85798023acd02405d8",
       "mode": "0644"
     },
     {
@@ -118,7 +118,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "8dd084ee960eac21d37e1379b3d139e1ea6198691708649bd1ae70e6ab2a71f2",
+      "sha256": "abec7333c3ecad32b0cd3c290cf7f41dfb228051b4f41181a0f55436b11f139a",
       "mode": "0644"
     },
     {

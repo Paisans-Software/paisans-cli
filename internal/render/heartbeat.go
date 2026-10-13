@@ -18,13 +18,6 @@ import (
 // the host. README, "Monitoring", has the table; docs/specs/
 // 2026-10-07-uptime-monitoring.md, the amendment of 2026-10-09, the design.
 
-// HeartbeatImage is what the heartbeat service runs: curl's own image, which
-// is Alpine with curl and a shell and nothing else, pinned by tag like every
-// other infrastructure image in infra-compose.yaml.tmpl. 8.11.1 is the
-// release of 2024-12-11 as published on Docker Hub; see kinds.ImageVolumes
-// for what it declares.
-const HeartbeatImage = "docker.io/curlimages/curl:8.11.1"
-
 // heartbeatGraceSeconds is added to the interval by the fork before a
 // heartbeat is stale (src/lib/checker.js evaluateHeartbeat at 1.1.0-oidc.4:
 // tolerated = interval_seconds + heartbeat_grace_seconds). With the seed's

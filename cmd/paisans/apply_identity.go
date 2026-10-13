@@ -6,6 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -77,6 +78,22 @@ func (v *runIdentity) report(r ui.Reporter) {
 		version.End(ui.Pending, "pending: published by apply --execute")
 	} else {
 		version.End(ui.OK, fmt.Sprintf("revision %d, %s", v.revision, v.sha[:12]))
+	}
+	reportCore(r)
+}
+
+// reportCore names the core catalog release the run reads, the blueprints
+// and the foundation's tracks, and each newer release it skipped with why.
+// Nothing when the core catalog has not been read.
+func reportCore(r ui.Reporter) {
+	release, skipped := kinds.CoreRelease()
+	if release.Commit == "" {
+		return
+	}
+	core := r.Step("core catalog")
+	core.End(ui.OK, fmt.Sprintf("%s, %s", release.Tag, release.Commit[:12]))
+	for _, why := range skipped {
+		r.Warn("a core catalog release was not used", why)
 	}
 }
 

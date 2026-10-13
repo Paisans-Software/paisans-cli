@@ -668,14 +668,12 @@ gives every new container an anonymous volume for a `VOLUME` nothing mounts,
 and Compose abandons it on the next recreate; a real apps site collected 18
 under Mbin's `/app/var/`. Three pieces, each easy to undo by accident:
 
-* `kinds.ImageVolumes` records what every pinned reference declares on every
-  platform it is published for. `TestRecordedVolumesMatchEveryPlatform`,
-  behind the `registry_integration` tag (below), reads each entry's
-  configuration from the registry for every platform and fails on any that
-  disagrees. `TestEveryDeclaredImageVolumeIsMounted` in `internal/render`
-  renders every app pinned and clustered at Postgres 16, 17 and 18 and fails
-  on an unrecorded image or an unmounted path. Bumping an image means adding
-  its row and running the registry test. Do not read it with `docker image
+* `TestEveryDeclaredImageVolumeIsMounted` in `internal/render`, behind the
+  `registry_integration` tag (below), renders every app pinned and clustered
+  at Postgres 16, 17 and 18, resolves every track to the build it names
+  today, reads that build's configuration from the registry for every
+  platform, and fails on an unmounted path. Run it when a core catalog
+  release moves a track. Do not read a build's volumes with `docker image
   inspect`: that answers for one platform, and on an arm64 workstation the
   containerd image store printed null for images that declare volumes.
 * `Build` inspects every image of every acted on stack (`VolumeCheck`, in
@@ -742,17 +740,20 @@ no module answers to both produce a gateway that cannot load its own
 configuration, and neither is visible in an image reference. This check runs
 before the configuration check because its error says what to fix.
 
-**Every image the configuration names is resolved to a build while apply
-plans.** The gateway's Caddy is named by a tag that moves (`acme.Published`,
-`ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and so may an app's
-image (a series tag, or a version tag its publisher rebuilds). `render`
-renders each tag as configured, listing each app stack's images and the
-gateway's Caddy per site and compose file in `Plan.Images`, with the
-configuration's names for each and the number of lines naming it, since
-render reaches no network.
+**Every image is resolved to a build while apply plans.** No image is named
+in Go: the core catalog names each as a track (`imagedigest.IsTrack`, a tag
+pattern whose `*` each match one run of digits), an app's in its blueprint and
+the toolkit's own services' in `foundation.yaml` (`kinds.FoundationImage`,
+`kinds.SpiloImage`, `kinds.PostgresImage`; a reserved blueprint's service
+names its image with `foundation:`). An operator's `images` entry or
+`acme.image` may name a tag that moves too. `render` renders each as
+configured, listing every image of every compose file per site in
+`Plan.Images`, with the configuration's names for each and the number of
+lines naming it, since render reaches no network.
 `planSiteApply` passes `apply.ResolveImages` with `imageDigests`, an
 `imagedigest.Registry`, which asks the registry's HTTP API, anonymously and
-from the workstation, for the digest each tag names; `apply.Build` pins it
+from the workstation, for the newest tag on each track (`Registry.Track`,
+every page of `tags/list`) and the digest each tag names; `apply.Build` pins it
 into every line naming the tag with `render.PinImages` before the file is
 compared, and stops when the lines it rewrote differ from the count render
 reported. A new build is therefore a changed file, and goes through every gate
@@ -765,7 +766,12 @@ version labels `imagedigest.Registry.Version` reads. `apply --site` passes
 (`readPeers`), so the app stays on the build they run, and sites on different
 builds are refused; a step of apply without `--site` (`planningEverySite`)
 passes none. Without a resolver, or for a stack outside `--only` or held back,
-Build keeps whatever the host runs. `ImagePin.FirstPin` is a bare tag pinned
+Build keeps whatever the host runs; a track that runs nowhere on the host is
+resolved through `apply.FreshImages`, which `paisans` sets to `imageDigests`,
+and Build refuses to write a compose file still naming a track. Tests of the
+packages built on apply set it with a blank import of
+`internal/apply/applytest`, whose `Pinned` also seeds a fake host with files
+as an apply leaves them. `ImagePin.FirstPin` is a bare tag pinned
 for the first time, which the dry run lists apart from `Plan.Moved`. Tests in
 `cmd/paisans` stand a fixed digest in for the registry (`TestMain`).
 
@@ -1333,14 +1339,13 @@ the Docker tests run alone and at real timing: the fake-cluster tests, whose
 without Docker, behind their own tag:
 
 ```
-go test -tags registry_integration ./internal/kinds/
+go test -tags registry_integration ./internal/render/
 ```
 
-`TestRecordedVolumesMatchEveryPlatform` checks `kinds.ImageVolumes`, and each
-repository `kinds.RepositoryVolumes` covers (the gateway's Caddy) at its
-highest version tag, against what every linux platform of each image
-declares. A moving tag such as Caddy's `2` is not checked itself: a specific
-release is what a table row can vouch for.
+`TestEveryDeclaredImageVolumeIsMounted` resolves each track the test copy of
+the core catalog names and checks what every linux platform of its build
+declares against the rendered mounts. Docker Hub limits anonymous reads, so a
+run soon after another may answer 429; wait and run it again.
 
 Pocket ID's standby wrapper has Docker tests of its own, behind their own tag:
 
@@ -1458,19 +1463,28 @@ inherited, per the language decision in `docs/decisions.md`.
 
 ### A kind ships a blueprint directory
 
-The first party blueprints are the core catalog's,
+The first party blueprints, and the images of the toolkit's own services in
+`foundation.yaml`, are the core catalog's,
 [`Paisans-Software/paisans-blueprints`](https://github.com/Paisans-Software/paisans-blueprints),
-fetched at the commit `internal/blueprints/core/pin.yaml` names; the binary
-carries only that pin. Change one there, in a pull request to that
-repository, then run `scripts/pin-core-catalog.sh <commit>` here, which
-rewrites the pin with a SHA-256 per blueprint and replaces the test copy in
-`internal/blueprints/testdata/core/`; `TestTheTestCopyMatchesThePin` fails on
-a copy edited by hand.
+fetched at its newest release this binary reads (`kinds.LoadCore`,
+`kinds.CoreRelease`); the binary carries only its URL, `kinds.CoreURL`, which
+`PAISANS_CORE_CATALOG` overrides. Change one there, in a pull request to that
+repository, and tag a release; deployments take it on their next run. Run
+`scripts/fetch-core-testdata.sh <tag>` here to replace the test copy in
+`internal/blueprints/testdata/core/` and its tag in `core.release`; with
+`CORE_CATALOG_DIR` it copies a local checkout instead, for a change made to
+both repositories before the release exists.
 
-Tests never fetch. A test package that reads a core blueprint carries a
-`core_test.go` importing `internal/blueprints/coretest` blank, which installs
-the test copy as the pinned commit in a catalog cache and allows git only
-local repositories. A test that needs a cache of its own calls
+A change to the catalog that an older binary cannot read changes the
+`apiVersion` of what it changes, a blueprint's or the foundation's: an older
+binary then skips that release for the newest it reads. A new key counts,
+since both are decoded strictly.
+
+Tests never fetch. A test package that reads a core blueprint or the
+foundation carries a `core_test.go` importing `internal/blueprints/coretest`
+blank, which makes the test copy a local repository tagged with the release
+`core.release` names, points `PAISANS_CORE_CATALOG` at it, installs its commit
+in a catalog cache, and allows git only local repositories. A test that needs a cache of its own calls
 `coretest.Cache(t)`, which holds the same core copy. The reserved blueprints in `internal/blueprints/reserved/` are this
 repository's own and are edited in place.
 

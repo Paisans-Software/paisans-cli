@@ -211,8 +211,9 @@ const (
 )
 
 // snapshotPath is the one shape a snapshot path may have:
-// <catalog commit>/<blueprint>/<file>, with no empty, dot or dot-dot part.
-var snapshotPath = regexp.MustCompile(`^[0-9a-f]{40}/[a-z0-9][a-z0-9-]{0,62}/([A-Za-z0-9_.+@-]+/)*[A-Za-z0-9_.+@-]+$`)
+// <catalog commit>/<blueprint>/<file>, with no empty, dot or dot-dot part,
+// or <core catalog commit>/foundation.yaml, the core catalog's own images.
+var snapshotPath = regexp.MustCompile(`^[0-9a-f]{40}/([a-z0-9][a-z0-9-]{0,62}/([A-Za-z0-9_.+@-]+/)*[A-Za-z0-9_.+@-]+|foundation\.yaml)$`)
 
 // snapshotSums is blueprints/SHA256SUMS: for each blueprint in the snapshot,
 // in order, its SHA-256 as blueprints.DigestFiles computes it and its
@@ -222,11 +223,16 @@ func snapshotSums(files map[string][]byte) []byte {
 	groups := map[string]map[string][]byte{}
 	for p, data := range files {
 		parts := strings.SplitN(p, "/", 3)
-		dir := parts[0] + "/" + parts[1]
+		// The foundation is a file of the commit, not of a blueprint, and
+		// is summed as the commit's own.
+		dir, file := parts[0], parts[1]
+		if len(parts) == 3 {
+			dir, file = parts[0]+"/"+parts[1], parts[2]
+		}
 		if groups[dir] == nil {
 			groups[dir] = map[string][]byte{}
 		}
-		groups[dir][parts[2]] = data
+		groups[dir][file] = data
 	}
 	var b strings.Builder
 	for _, dir := range sortedPaths(groups) {

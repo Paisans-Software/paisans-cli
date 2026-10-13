@@ -1,9 +1,9 @@
 // Package imagedigest asks a container registry which build a tag names now.
 //
-// The gateway's Caddy follows a tag that moves (acme.Published), and a host
-// must still run a build that was shown to the operator and recorded. apply
-// therefore turns the tag into the digest it names while it plans, and this
-// package is how.
+// Every image the toolkit names follows a track (see Track), and an operator
+// may name a tag that moves, and a host must still run a build that was shown
+// to the operator and recorded. apply therefore turns each into the digest it
+// names while it plans, and this package is how.
 //
 // It asks the registry itself, over the distribution API's HTTP interface,
 // from the workstation running `paisans`. The answer is the registry's own

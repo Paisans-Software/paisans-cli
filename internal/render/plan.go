@@ -281,33 +281,45 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),
 	}
-	planned.Images = p.appImages(app)
+	images, err := p.appImages(app)
+	if err != nil {
+		return plannedApp{}, err
+	}
+	planned.Images = images
 	return planned, nil
 }
 
 // appImages resolves what each of the kind's services runs.
 //
-// A declared reference wins, and an absent one takes the default the kind
-// ships, so an adopter who never opens the stanza runs a tested set. The
+// A declared reference wins, and an absent one takes the default the kind's
+// blueprint names, usually a track apply resolves to its newest build. The
 // database is the one service with no fixed default: every database in the
 // deployment is the same major version, declared once in cluster, so it is
-// derived rather than repeated per app. It is Debian's image, with the Debian
-// release in the tag: the C library decides how Postgres sorts text, so an
-// index is only valid under the C library that built it, and naming the
-// release keeps a pull from changing it under an existing data directory.
-func (p *planner) appImages(app config.App) map[string]string {
+// derived rather than repeated per app, from the foundation's image for that
+// major. That image's tag names the Debian release (Eg: 17.*-trixie): the C
+// library decides how Postgres sorts text, so an index is only valid under
+// the C library that built it, and naming the release keeps a pull from
+// changing it under an existing data directory.
+func (p *planner) appImages(app config.App) (map[string]string, error) {
 	out := map[string]string{}
 	for _, service := range kinds.Services(app.Kind) {
+		image, err := kinds.ServiceImage(service)
 		switch {
 		case app.Images[service.Name] != "":
 			out[service.Name] = app.Images[service.Name]
-		case service.Image != "":
-			out[service.Name] = service.Image
+		case err != nil:
+			return nil, fmt.Errorf("the image of %s's %s: %w", app.Kind, service.Name, err)
+		case image != "":
+			out[service.Name] = image
 		case service.Name == kinds.PostgresService:
-			out[service.Name] = fmt.Sprintf("postgres:%s-trixie", p.postgresVersion())
+			pg, err := kinds.PostgresImage(p.postgresVersion())
+			if err != nil {
+				return nil, err
+			}
+			out[service.Name] = pg
 		}
 	}
-	return out
+	return out, nil
 }
 
 // dbIdentifier keeps app names usable as Postgres identifiers without

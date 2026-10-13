@@ -1,7 +1,11 @@
 # Images follow tracks in the core catalog
 
 Date: 2026-10-13. Status: approved in conversation by the founder,
-2026-10-13; this written spec awaits review.
+2026-10-13. Implemented 2026-10-13; the sections below describe what was
+built, which differs from the first draft in four places: a track is written
+as one reference, the volume check stays on the host, a command narrower than
+apply keeps what runs and resolves only what runs nowhere, and a workstation
+that cannot reach the forge falls back on the release it last read.
 Amends *What the binary carries* in `docs/specs/2026-10-13-core-catalog-fetched.md`.
 
 Every image a deployment runs is fixed when the toolkit is built today. The
@@ -41,36 +45,40 @@ templates stay in the binary (the infrastructure stack, and the reserved
 blueprints `pocket-id`, the gate, `invite` and `uptime`), so the file holds
 images only.
 
+A track is written as one image reference whose tag is the pattern, so it
+reads like the reference it resolves to and every place that takes an image
+takes a track:
+
 ```yaml
 apiVersion: paisans.foundation/v1
 images:
-  etcd:             {repository: gcr.io/etcd-development/etcd, tags: "v3.5.*"}
-  haproxy:          {repository: docker.io/library/haproxy, tags: "3.0.*-alpine"}
-  garage:           {repository: docker.io/dxflrs/garage, tags: "v1.*.*"}
-  caddy:            {repository: ghcr.io/paisans-software/caddy, tags: "2.*.*"}
-  heartbeat:        {repository: docker.io/curlimages/curl, tags: "8.*.*"}
-  pocket-id:        {repository: ghcr.io/pocket-id/pocket-id, tags: "v2.*.*"}
-  admin-reconciler: {repository: ghcr.io/paisans-software/admin-reconciler, tags: "0.1.*"}
-  oauth2-proxy:     {repository: quay.io/oauth2-proxy/oauth2-proxy, tags: "v7.*.*"}
-  uptime:           {repository: ghcr.io/paisans-software/uptime, tags: "1.1.*-oidc.*"}
-  invite:           {repository: ghcr.io/paisans-software/paisans-invite, tags: "0.1.*"}
+  etcd: "gcr.io/etcd-development/etcd:v3.5.*"
+  haproxy: "docker.io/library/haproxy:3.0.*-alpine"
+  garage: "docker.io/dxflrs/garage:v1.*.*"
+  caddy: "ghcr.io/paisans-software/caddy:2.*.*"
+  heartbeat: "docker.io/curlimages/curl:8.*.*"
+  pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
+  oauth2-proxy: "quay.io/oauth2-proxy/oauth2-proxy:v7.*.*"
+  admin-reconciler: "ghcr.io/paisans-software/admin-reconciler:0.1.*"
+  uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
+  invite: "ghcr.io/paisans-software/paisans-invite:0.1.*"
 postgres:
   # Keyed by Postgres major. A major is data, so the deployment's
   # postgres_version chooses it and a track never moves it.
-  "16": {spilo: {repository: ghcr.io/zalando/spilo-16, tags: "3.3-p*"},
-         app:   {repository: ghcr.io/paisans-software/postgres-walg, tags: "16.*"}}
-  "17": {spilo: {repository: ghcr.io/zalando/spilo-17, tags: "4.0-p*"},
-         app:   {repository: ghcr.io/paisans-software/postgres-walg, tags: "17.*"}}
+  "17":
+    spilo: "ghcr.io/zalando/spilo-17:4.0-p*"
+    app: "docker.io/library/postgres:17.*-trixie"
 ```
 
-The values above illustrate the shape. The real tracks are written when the
-file is, each checked against its registry's published tags.
+Every image is required, and a key the toolkit does not know is refused, as a
+blueprint's is. A reserved blueprint's service names its image by its key here
+(`foundation: pocket-id`) instead of an `image`.
 
-A core blueprint's `services[].image` becomes the same kind of track:
+A core blueprint's `services[].image` is a track the same way:
 
 ```yaml
 services:
-  - {name: "app", image: {repository: ghcr.io/paisans-software/mbin, tags: "1.15.*-paisans"}, purpose: "..."}
+  - {name: "app", image: "ghcr.io/paisans-software/mbin:1.*.*-paisans", purpose: "..."}
 ```
 
 A blueprint from any other catalog may write either a track or an exact
@@ -94,22 +102,26 @@ Resolution, once per plan:
 3. Turn it into a digest and render `repository:tag@sha256:...`, as the
    gateway's Caddy is rendered today. The digest is what a host pulls, so the
    build shown in the plan is the build that runs.
-4. Read each resolved build's configuration for every platform the
-   deployment's sites run, with `Registry.Builds`. A build missing a platform a
-   site needs is refused, as today.
+4. Check the resolved build's platforms against each site's, as apply checks
+   every image today. A build missing a platform a site needs is refused.
 
 Only `apply` and `init` move a deployment to newer builds. A command that
-changes part of a running deployment, such as `site add` or `failover`,
-renders the builds the deployment record says are running, because a new site
-on a newer etcd or Spilo than the rest of its cluster is not a state anyone
-tested.
+writes a compose file for a narrower reason, such as `site add` or `storage
+add`, keeps whatever each stack runs on the host, as it does today, so it
+never moves an image nobody planned. The one image it resolves is a track that
+runs nowhere on that host yet, a new site's etcd in `site add` for one, since a
+host cannot pull a pattern: it starts on the newest build on the track, which
+for etcd and Spilo is a patch release at most from the rest of the cluster,
+inside the line the track allows. A compose file still naming a track is never
+written.
 
 The dry run reports each build that moves, through the image move report apply
-already prints: `pocket-id v2.14.0 → v2.15.1`. The deployment record keeps the
-resolved reference of every service, and the core catalog commit it came from.
+already prints: `pocket-id v2.14.0 → v2.15.1`. Each site's manifest keeps the
+resolved reference of every service, and the deployment section of the run
+names the core catalog release it read.
 
-An operator's own `apps.<name>.images` entry, or `acme.image`, is exact and
-wins over the track. It is also how an operator holds a deployment on one
+An operator's own `apps.<name>.images` entry, or `acme.image`, wins over the
+track; it may be exact or a track of its own. It is also how an operator holds a deployment on one
 build when a new release on a track misbehaves.
 
 ## What Go keeps
@@ -142,7 +154,7 @@ skipped, as `catalog add` already chooses for any catalog, whose blueprints
 carry an `apiVersion` this binary reads, whose `foundation.yaml` does too, and
 whose foundation tracks sit inside the majors Go supports. A newer release
 that fails any of those is skipped, and the plan says which release it used
-and which it skipped and why. An older binary therefore keeps working on the
+and which it skipped and why. At most five releases are tried, newest first. An older binary therefore keeps working on the
 releases it understands instead of failing on one it does not.
 
 A change an older binary cannot read changes the `apiVersion`, so that rule is
@@ -157,33 +169,44 @@ their tracks.
 `Paisans-Software/paisans-blueprints` starts tagging releases, `v1.0.0` first,
 because a catalog with no release has nothing for this rule to choose.
 
-Tests keep the committed copy in `internal/blueprints/testdata/core/`.
+Tests keep the committed copy in `internal/blueprints/testdata/core/`, and the
+release it is in `internal/blueprints/testdata/core.release`.
 `scripts/fetch-core-testdata.sh <tag>` replaces the pin script and refreshes
-it, so a test reads a known release and never the network.
+both. `internal/blueprints/coretest` makes the copy a local repository tagged
+with that release and points `PAISANS_CORE_CATALOG`, which also names a
+fork's own core catalog, at it, so a test takes the path a workstation takes
+and never the network.
 
-## The volume check reads the registry
+A configuration store version's snapshot carries the foundation beside the
+blueprints, as `<commit>/foundation.yaml`, so a recovered version renders its
+infrastructure with no forge.
+
+## The volume check stays on the host
 
 `ImageVolumes` and `RepositoryVolumes` go: no table keyed by a reference can
 hold a reference that is chosen at apply time.
 
-The `VOLUME` paths a build declares are already in the configuration step 4
-of *Resolving a track* reads. Apply refuses, before it reaches a host, a
-rendered compose file that does not mount each one, as the table's render test
-did. The check on the host's own copy of each image stays, for a reference the
-registry would not answer for.
-
-`TestRecordedVolumesMatchEveryPlatform` goes with the table. Its registry
-reading is already `Registry.Builds`, which apply now calls.
+`apply` already inspects every image of every stack it acts on, on the host,
+and refuses before anything is written when a declared `VOLUME` is not
+mounted; an image the host does not have is pulled and inspected before the
+first write. That check sees every build, whatever chose it, so it stays the
+guard. `TestEveryDeclaredImageVolumeIsMounted`, behind the
+`registry_integration` tag, now resolves every track and reads what its build
+declares from the registry, so a catalog release that moves a track can be
+checked before it ships. `TestRecordedVolumesMatchEveryPlatform` goes with the
+table.
 
 ## When the registry or the forge does not answer
 
 * **A running deployment.** A track that cannot be resolved keeps the build
-  the deployment record says runs, and the plan warns, naming the registry and
-  the error. A core catalog that cannot be fetched keeps the release the
-  record names. Apply goes on, because a registry outage is not a reason to
-  stop correcting everything else.
+  the host runs, when it is on the same track, and the plan warns, naming the
+  registry and the error. A core catalog whose releases cannot be listed is
+  read at the release this workstation last read, from its cache or an
+  installed snapshot, and the run says so. Apply goes on, because a registry
+  outage is not a reason to stop correcting everything else.
 * **A deployment's first apply, or `init`.** There is no running build to
-  keep, so apply refuses, naming what it could not reach.
+  keep, so apply refuses, naming what it could not reach. A workstation that
+  never read the core catalog cannot read it offline either.
 
 There is no copy of the catalog in the binary to fall back on. A host pulls
 every image it runs from the same registries, so a deployment that cannot
@@ -199,11 +222,9 @@ reach them could not start anyway.
    majors Go supports, and the infrastructure template and reserved
    blueprints taking their images from it. Caddy's `acme.Published` and
    `SpiloTag`'s table go.
-3. **The volume check** reads the registry; the tables and their registry test
-   go.
-4. **Builds stay put outside apply.** `site add`, `failover` and the other
-   commands that render part of a deployment read the running builds from the
-   deployment record.
+3. **The volume tables go**, and the render test reads the registry.
+4. **Builds stay put outside apply**, and a track that runs nowhere on a host
+   is resolved for the command that starts it.
 5. **The core catalog floats.** The pin goes, the newest readable release is
    chosen, `fetch-core-testdata.sh` replaces the pin script.
 6. **paisans-blueprints.** `foundation.yaml`, tracks in every core blueprint,

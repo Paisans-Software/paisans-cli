@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Every provider the toolkit claims to support needs both halves: a module
@@ -21,25 +20,9 @@ func TestSupportedProvidersAreComplete(t *testing.T) {
 		if module := acme.Module(provider); !strings.HasPrefix(module, "dns.providers.") {
 			t.Errorf("%s has module %q, which is not a Caddy DNS module identifier", provider, module)
 		}
-		image, ok := acme.Image(provider)
-		if !ok {
-			t.Errorf("%s is supported but has no published image", provider)
-			continue
+		if !acme.Published(provider) {
+			t.Errorf("%s is supported but the published image does not carry it", provider)
 		}
-		if image != acme.Published {
-			t.Errorf("%s runs %q, but one published image carries every module", provider, image)
-		}
-	}
-}
-
-// The default follows Caddy's major version and names no build. A digest in
-// the code would make every security rebuild of the image a toolkit release,
-// and `latest` would cross a major version unasked; apply resolves the tag to
-// a digest while it plans instead.
-func TestPublishedImageTracksTheMajorVersion(t *testing.T) {
-	ref := kinds.ParseReference(acme.Published)
-	if ref.Name != "ghcr.io/paisans-software/caddy" || ref.Tag != "2" || ref.Digest != "" {
-		t.Errorf("published image is %q, want ghcr.io/paisans-software/caddy:2 with no digest", acme.Published)
 	}
 }
 
@@ -47,7 +30,7 @@ func TestPublishedImageTracksTheMajorVersion(t *testing.T) {
 // configuration may declare its own image. This package reports what it knows,
 // and validate decides what that means.
 func TestUnknownProviderIsReportedNotRefused(t *testing.T) {
-	if _, ok := acme.Image("route53"); ok {
+	if acme.Published("route53") {
 		t.Error("an image was claimed for a provider this toolkit does not publish")
 	}
 }

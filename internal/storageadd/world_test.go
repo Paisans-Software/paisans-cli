@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/apply/applytest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
@@ -482,7 +483,7 @@ func newWorld(t *testing.T, cfg *config.Config, secrets *config.Secrets) *world 
 		if rel == render.ManifestName {
 			continue
 		}
-		w.hosts[site].files["/"+rel] = f.Content
+		w.hosts[site].files["/"+rel] = applytest.Pinned(f.Content)
 	}
 	for _, h := range w.hosts {
 		h.recordManifest()

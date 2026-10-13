@@ -32,7 +32,7 @@ func TestApplyPlansCaddyAtTheResolvedBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ghcr.io/paisans-software/caddy:2@" + testCaddyDigest
+	want := "ghcr.io/paisans-software/caddy:2.0.0@" + testCaddyDigest
 	if c := plan.Caddy(); c == nil || c.Reference != want {
 		t.Fatalf("planned %+v, want %s", c, want)
 	}

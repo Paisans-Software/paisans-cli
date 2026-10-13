@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/apply/applytest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
@@ -35,7 +36,7 @@ func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 		if !ok || rel == render.ManifestName || !strings.HasPrefix(rel, "srv/paisans/f2a9/health/") {
 			continue
 		}
-		watch.files["/"+rel] = f.Content
+		watch.files["/"+rel] = applytest.Pinned(f.Content)
 		entries = append(entries, watch.entry("/"+rel, false))
 	}
 	watch.manifest(t, entries...)

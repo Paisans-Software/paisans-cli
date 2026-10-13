@@ -893,7 +893,7 @@ func (c *checker) acmeProviderHasAnImage() {
 	if len(c.cfg.CaddySites()) == 0 || c.cfg.ACME.Provider == "" {
 		return // no Caddy needs certificates; a missing provider is structural
 	}
-	if _, ok := acme.Image(c.cfg.ACME.Provider); ok {
+	if acme.Published(c.cfg.ACME.Provider) {
 		return
 	}
 	if c.cfg.ACME.Image != "" {

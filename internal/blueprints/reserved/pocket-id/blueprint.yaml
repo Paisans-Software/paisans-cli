@@ -3,15 +3,11 @@
 apiVersion: paisans.blueprint/v1
 name: pocket-id
 services:
-  - {name: "app", image: "ghcr.io/pocket-id/pocket-id:v2.14.0", purpose: "the application"}
-  # Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml
-  # and published by the tag admin-reconciler-v0.2.0, which adds the DNS
-  # continuity check. Checked against ghcr.io on 2026-10-13 with an
-  # anonymous pull token, which resolved the tag to this digest: an OCI
-  # image index for linux/amd64 and linux/arm64. Pulled by this digest and
-  # run the same day, it refused a members token set without its domain and
-  # key, which only 0.2.0 checks.
-  - {name: "reconciler", image: "ghcr.io/paisans-software/admin-reconciler:0.2.0@sha256:4693e287c86ec4053209a96b8355542c67d220302c476e6925088ce87ceeb0be", purpose: "the admin reconciler"}
+  - {name: "app", foundation: "pocket-id", purpose: "the application"}
+  # Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml.
+  # The DNS continuity check needs 0.2.0 or later, which the foundation's
+  # track names.
+  - {name: "reconciler", foundation: "admin-reconciler", purpose: "the admin reconciler"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 port: 1411

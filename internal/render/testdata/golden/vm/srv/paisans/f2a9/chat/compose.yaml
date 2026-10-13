@@ -17,7 +17,7 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/element-hq/synapse:v1.160.0
+    image: ghcr.io/element-hq/synapse:v1.*.*
     restart: unless-stopped
     env_file:
       - .env
@@ -40,7 +40,7 @@ services:
   mas:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/element-hq/matrix-authentication-service:1.24.0
+    image: ghcr.io/element-hq/matrix-authentication-service:1.*.*
     restart: unless-stopped
     # The image's entrypoint is mas-cli, so the subcommand is the command.
     # `server` migrates its database and syncs the upstream provider out of

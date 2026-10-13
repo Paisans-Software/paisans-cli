@@ -1,5 +1,5 @@
 // Package acme records what the toolkit knows about ACME DNS providers: the
-// Caddy module each one needs, the image that carries it, and the Caddyfile
+// Caddy module each one needs, whether the toolkit's gateway image carries it, and the Caddyfile
 // directive that configures it.
 //
 // It is its own package because two callers need the same answer and neither
@@ -21,23 +21,12 @@ type Provider struct {
 	// apply greps for exactly this string, so it is the identifier rather than
 	// the Go import path.
 	Module string
-	// Image is the reference a deployment using this provider runs, as the
-	// configuration would name it: a repository and a major version tag,
-	// with no digest.
-	//
-	// The tag moves on purpose. Paisans-Software/caddy-dns rebuilds the image
-	// whenever upstream Caddy or its base image ships a fix, and `2` follows
-	// every such build within Caddy's second major version, which is the
-	// promise a deployment wants: security rebuilds arrive without a toolkit
-	// release, and nothing crosses a major version unasked.
-	//
-	// A tag is not what reaches a host. `paisans apply` asks the registry,
-	// while it plans, which build the tag names now, and renders that digest
-	// beside the tag (see internal/imagedigest and apply.ResolveImages), so the
-	// compose file changes exactly when a new build exists, the dry run shows
-	// it, and every gate the gateway has runs on it. The manifest each apply
-	// leaves on the host records which build that was.
-	Image string
+	// Published reports whether the gateway image the toolkit publishes,
+	// from Paisans-Software/caddy-dns, carries the module. Which build of it
+	// a deployment runs is the core catalog's foundation.yaml's caddy track,
+	// which apply resolves while it plans, so a rebuild for a Caddy fix
+	// reaches a gateway without a toolkit release.
+	Published bool
 	// directive is the Caddyfile lines that configure this provider inside
 	// Caddy's global options block, indented for that block (one tab). The
 	// providers do not share one syntax:
@@ -55,27 +44,18 @@ type Provider struct {
 	directive string
 }
 
-// Published is the image this toolkit publishes, carrying every module in
-// supported below. One image serves every provider, because a module the
-// configuration does not name costs nothing in a binary that never loads it.
-const Published = Repository + ":2"
-
-// Repository is where Paisans-Software/caddy-dns publishes that image, every
-// build of it under one repository.
-const Repository = "ghcr.io/paisans-software/caddy"
-
 // supported is every provider this toolkit publishes an image for. A provider
 // absent here is not refused outright: a deployment may declare its own image,
 // and the module it claims is verified at apply time rather than assumed.
 var supported = map[string]Provider{
 	"cloudflare": {
 		Module:    "dns.providers.cloudflare",
-		Image:     Published,
+		Published: true,
 		directive: "\tacme_dns cloudflare {env.ACME_DNS_TOKEN}",
 	},
 	"desec": {
-		Module: "dns.providers.desec",
-		Image:  Published,
+		Module:    "dns.providers.desec",
+		Published: true,
 		directive: "\tacme_dns desec {\n" +
 			"\t\ttoken {env.ACME_DNS_TOKEN}\n" +
 			"\t}",
@@ -114,10 +94,10 @@ func Module(name string) string {
 	return "dns.providers." + name
 }
 
-// Image returns the published image for a provider, and whether one exists.
-func Image(name string) (string, bool) {
-	provider, ok := supported[name]
-	return provider.Image, ok
+// Published reports whether the toolkit's own gateway image carries the
+// provider's module.
+func Published(name string) bool {
+	return supported[name].Published
 }
 
 // Directive returns the Caddyfile lines that configure a provider inside

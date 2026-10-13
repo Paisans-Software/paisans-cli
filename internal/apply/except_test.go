@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -197,9 +198,10 @@ func TestAHeldAppKeepsItsOwedRestartWhileHeld(t *testing.T) {
 func TestPruneKeepsTheImagesAHeldStackRenders(t *testing.T) {
 	host := supersededHost()
 	rendered := plan(t)
+	outline, _ := kinds.DefaultImage(config.Kind("outline"), "app")
 	for i, file := range rendered.Files {
 		if file.Path == "home-a/srv/paisans/f2a9/docs/compose.yaml" {
-			rendered.Files[i].Content = strings.Replace(file.Content, "outlinewiki/outline:1.10.0", "ghcr.io/example-org/mbin:v1.9.0", 1)
+			rendered.Files[i].Content = strings.Replace(file.Content, outline, "ghcr.io/example-org/mbin:v1.9.0", 1)
 		}
 	}
 	p, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.Except("docs"))

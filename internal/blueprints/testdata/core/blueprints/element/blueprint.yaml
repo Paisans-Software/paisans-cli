@@ -5,13 +5,9 @@ name: element
 services:
   # No database: Element is a static client that talks to a homeserver
   # the browser reaches directly.
-  #
-  # v1.12.27 checked against ghcr.io on 2026-09-15 by requesting the
-  # manifest for that exact tag, which resolved (200, an OCI image
-  # index). The registry's tag list was paged through in full and
-  # v1.12.27 is the newest non release candidate tag; v1.12.28-rc.1
-  # exists but is a release candidate, not a release.
-  - {name: "app", image: "ghcr.io/element-hq/element-web:v1.12.27", purpose: "the web client"}
+  # A track on the 1.x line; a release candidate (v1.12.28-rc.1)
+  # does not match it.
+  - {name: "app", image: "ghcr.io/element-hq/element-web:v1.*.*", purpose: "the web client"}
 database: {engine: none}
 port: 80
 # The homeserver it is a client of: the one at the hostname in

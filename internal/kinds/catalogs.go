@@ -113,7 +113,7 @@ func Fetch(cat config.Catalog) (string, error) {
 		return "", fmt.Errorf("fetching %s: %s", cat.URL, out)
 	}
 	for _, args := range [][]string{
-		{"sparse-checkout", "set", "--no-cone", "/catalog.yaml"},
+		{"sparse-checkout", "set", "--no-cone", "/catalog.yaml", "/" + FoundationFile},
 		{"-c", "advice.detachedHead=false", "checkout", "--quiet", cat.Commit},
 	} {
 		if out, err := git(work, args...); err != nil {
@@ -367,7 +367,7 @@ func resolve(cfg *config.Config) []string {
 
 	if core, ok := cfg.Catalogs[config.CoreCatalog]; ok && core.Commit != "" {
 		if dir, ok := fetch(config.CoreCatalog); ok {
-			problems = append(problems, overrideCore(dir)...)
+			problems = append(problems, overrideCore(dir, core)...)
 		}
 	} else if err := LoadCore(core.URL); err != nil {
 		problems = append(problems, fmt.Sprintf("catalogs.core: %v.", err))
@@ -398,34 +398,6 @@ func resolve(cfg *config.Config) []string {
 			continue
 		}
 		register(kind, d, filepath.Join(dir, "blueprints", name))
-	}
-	return problems
-}
-
-// overrideCore replaces the core blueprints at the binary's pin with the
-// ones a configuration's own core pin holds. A reserved blueprint is never
-// among them: a core catalog that ships one is refused.
-func overrideCore(dir string) []string {
-	replaceCore()
-	names, err := Blueprints(dir)
-	if err == nil {
-		err = Checkout(dir, names...)
-	}
-	if err != nil {
-		return []string{fmt.Sprintf("catalogs.core: %v.", err)}
-	}
-	var problems []string
-	for _, name := range names {
-		if reservedName(name) {
-			problems = append(problems, fmt.Sprintf("catalogs.core: ships %s, a reserved blueprint, which no catalog may provide.", name))
-			continue
-		}
-		d, err := ReadFrom(dir, name)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("catalogs.core: %v.", err))
-			continue
-		}
-		register(config.Kind(name), d, filepath.Join(dir, "blueprints", name))
 	}
 	return problems
 }
@@ -608,6 +580,16 @@ func Snapshot(cfg *config.Config) (map[string][]byte, error) {
 			return nil, err
 		}
 	}
+	// The foundation is the core catalog's too, and every deployment runs
+	// it, whether or not an app uses a core blueprint.
+	cat := CorePin(cfg, config.CoreCatalog)
+	if dir, ok := coreDir(cat); ok && cat.Commit != "" {
+		data, err := os.ReadFile(filepath.Join(dir, FoundationFile))
+		if err != nil {
+			return nil, err
+		}
+		out[cat.Commit+"/"+FoundationFile] = data
+	}
 	return out, nil
 }
 
@@ -656,7 +638,9 @@ func InstallSnapshot(files map[string][]byte) error {
 		}
 		for p, data := range rel {
 			dest := filepath.Join(work, "blueprints", filepath.FromSlash(p))
-			if !strings.HasPrefix(dest, filepath.Join(work, "blueprints")+string(filepath.Separator)) {
+			if p == FoundationFile {
+				dest = filepath.Join(work, FoundationFile)
+			} else if !strings.HasPrefix(dest, filepath.Join(work, "blueprints")+string(filepath.Separator)) {
 				os.RemoveAll(work)
 				return fmt.Errorf("snapshot path %s leaves its directory", p)
 			}

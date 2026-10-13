@@ -9,31 +9,26 @@ services:
   # settings.queue (postgres) needs: on an image without it,
   # MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
   #
-  # The fork's latest release, named by its version tag: 1.15.1+paisans,
-  # published as the image tag 1.15.1-paisans (linux/amd64 only, so an
-  # arm64 apps site cannot run it). This kind's templates need four
-  # things the fork has carried since 1.15.0+paisans:
-  # MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH, MBIN_PRIVATE_INSTANCE
-  # read from the environment, and the /healthz route the monitor
-  # checks. A newer release is taken by changing this tag, and
-  # paisans-stack's kinds.ImageVolumes records what each tag declares.
-  - {name: "app", image: "ghcr.io/paisans-software/mbin:1.15.1-paisans", purpose: "the application, and its messenger consumers"}
+  # A track: paisans-stack runs the newest of the fork's 1.x releases,
+  # published as image tags like 1.15.1-paisans for the release
+  # 1.15.1+paisans (linux/amd64 only, so an arm64 apps site cannot run
+  # it). This kind's templates need four things the fork has carried
+  # since 1.15.0+paisans: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
+  # MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
+  # route the monitor checks. The newest 1.x always carries them.
+  - {name: "app", image: "ghcr.io/paisans-software/mbin:1.*.*-paisans", purpose: "the application, and its messenger consumers"}
   # The three sidecars upstream's compose.yaml runs beside it. The
   # messenger consumers are not here: they run the application's own
   # code, so they always take the app's image, and a key that let them
   # diverge would only be a way to run two versions of one schema.
   #
-  # Upstream names a floating tag for each; these are the releases
-  # those tags resolved to when checked against Docker Hub on
-  # 2026-10-06, by requesting the manifest for each tag and comparing
-  # digests. 3-management-alpine and 3.13.7-management-alpine returned
-  # the same OCI image index, as did trixie and 9.1.2-trixie, and
-  # latest and 3.2.0. RabbitMQ 3.13 is the last 3.x series and upstream
-  # still runs it; a move to 4.x is a broker upgrade to make
-  # deliberately, not a default to drift into.
-  - {name: "amqproxy", image: "docker.io/cloudamqp/amqproxy:3.2.0", purpose: "the AMQP connection pool in front of the broker"}
-  - {name: "rabbitmq", image: "docker.io/library/rabbitmq:3.13.7-management-alpine", purpose: "the message broker for federation and background work"}
-  - {name: "valkey", image: "docker.io/valkey/valkey:9.1.2-trixie", purpose: "the cache"}
+  # Each is a track on the line upstream's own compose.yaml floats on.
+  # RabbitMQ stays on 3.13, the last 3.x series, which upstream still
+  # runs: a move to 4.x is a broker upgrade to make deliberately, not a
+  # default to drift into.
+  - {name: "amqproxy", image: "docker.io/cloudamqp/amqproxy:3.*.*", purpose: "the AMQP connection pool in front of the broker"}
+  - {name: "rabbitmq", image: "docker.io/library/rabbitmq:3.13.*-management-alpine", purpose: "the message broker for federation and background work"}
+  - {name: "valkey", image: "docker.io/valkey/valkey:9.*.*-trixie", purpose: "the cache"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 port: 8080

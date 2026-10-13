@@ -94,20 +94,34 @@ func indent(n int, value string) string {
 // start.
 const secretSuffix = ".secret"
 
-// spiloTag is the Spilo image tag for a Postgres major version.
-//
-// Spilo publishes one repository per major version and the tags do not run in
-// step across them, so a single tag cannot serve every version and `latest`
-// cannot serve any: the toolkit refuses a floating tag in an operator's
-// configuration and must not render one itself. Each was checked against ghcr
-// on 2026-09-08.
-//
-// A major version with no entry is an error rather than a guess, because
-// guessing produces a compose file that pulls nothing and fails on the host.
-var spiloTag = map[string]string{
-	"16": "3.3-p3",
-	"17": "4.0-p3",
-	"18": "4.1-p2",
+// infraImages are the images the infrastructure stack runs, each the core
+// catalog foundation's: a track apply resolves while it plans, or a
+// reference to one build. Spilo's is the deployment's Postgres major's,
+// since Spilo publishes one repository per major.
+type infraImages struct {
+	etcd, spilo, haproxy, garage, heartbeat string
+}
+
+func (p *planner) infraImages() (infraImages, error) {
+	var out infraImages
+	var err error
+	for _, image := range []struct {
+		name string
+		into *string
+	}{
+		{kinds.FoundationEtcd, &out.etcd},
+		{kinds.FoundationHAProxy, &out.haproxy},
+		{kinds.FoundationGarage, &out.garage},
+		{kinds.FoundationHeartbeat, &out.heartbeat},
+	} {
+		if *image.into, err = kinds.FoundationImage(image.name); err != nil {
+			return infraImages{}, err
+		}
+	}
+	if out.spilo, err = kinds.SpiloImage(p.postgresVersion()); err != nil {
+		return infraImages{}, fmt.Errorf("cluster.postgres_version: %w", err)
+	}
+	return out, nil
 }
 
 // caddyImage is the image the gateway runs, as the configuration names it.
@@ -125,8 +139,7 @@ func (p *planner) caddyImage() (string, error) {
 	if declared := p.cfg.ACME.Image; declared != "" {
 		return declared, nil
 	}
-	image, ok := acme.Image(p.cfg.ACME.Provider)
-	if !ok {
+	if !acme.Published(p.cfg.ACME.Provider) {
 		// Kept rather than deleted, and unreachable through the CLI: `paisans`
 		// runs validate first, and acme-provider-needs-an-image refuses this
 		// configuration there with a message written for an operator. This is
@@ -138,7 +151,7 @@ func (p *planner) caddyImage() (string, error) {
 			"acme.provider %q has no image in this toolkit and acme.image declares none. A DNS provider is a module compiled into Caddy, so an image carrying it is the only way it reaches a gateway. Published providers: %s",
 			p.cfg.ACME.Provider, strings.Join(acme.Providers(), ", "))
 	}
-	return image, nil
+	return kinds.FoundationImage(kinds.FoundationCaddy)
 }
 
 type clusterMember struct {
@@ -247,11 +260,9 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 	}
 	files = append(files, File{Path: base + p.cfg.Deployment().WireGuardConf(), Content: wg, Mode: 0o600})
 
-	spilo, ok := spiloTag[p.postgresVersion()]
-	if !ok {
-		return nil, fmt.Errorf(
-			"cluster.postgres_version: %q has no Spilo image known to this toolkit. Spilo publishes one repository per major version with its own tags, so there is nothing to fall back to. Use one of %s, or add the tag",
-			p.postgresVersion(), strings.Join(sortedKeys(spiloTag), ", "))
+	images, err := p.infraImages()
+	if err != nil {
+		return nil, err
 	}
 	// Resolved only where Caddy runs, a gateway or a monitor serving its own
 	// apps: any other site needs no Caddy image, and acme.provider is not
@@ -279,7 +290,10 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"HeartbeatMS":             p.heartbeatMS(),
 		"ElectionTimeoutMS":       p.electionTimeoutMS(),
 		"PostgresVersion":         p.postgresVersion(),
-		"SpiloTag":                spilo,
+		"SpiloImage":              images.spilo,
+		"EtcdImage":               images.etcd,
+		"HAProxyImage":            images.haproxy,
+		"GarageImage":             images.garage,
 		"CaddyImage":              caddy,
 		"HostSites":               HostSitesMount,
 		"HostSitesSource":         HostSitesDir,
@@ -287,7 +301,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"EtcdPeerPort":            etcdPeerPort,
 		"EtcdCompactionRetention": etcdCompactionRetention,
 		"EtcdQuotaBackendBytes":   etcdQuotaBackendBytes,
-		"HeartbeatImage":          HeartbeatImage,
+		"HeartbeatImage":          images.heartbeat,
 	})
 	if err != nil {
 		return nil, err
@@ -597,6 +611,10 @@ func (p *planner) gateSnippetMounts() []string {
 // plannedFor rebuilds an app's planned form for the gateway, which needs its
 // hostname and port without caring where it runs.
 func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
+	images, err := p.appImages(app)
+	if err != nil {
+		return plannedApp{}, err
+	}
 	return plannedApp{
 		Name:     name,
 		Dir:      p.dep().Dir(name),
@@ -607,7 +625,7 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 		Port:     kinds.Port(app.Kind),
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),
-		Images:   p.appImages(app),
+		Images:   images,
 	}, nil
 }
 

@@ -5,8 +5,8 @@
 // reserved/ holds the blueprints no catalog may provide: the identity
 // provider, the gate, the invite service and the monitor. The first party
 // blueprints every deployment can use are the core catalog's, which the
-// binary does not carry: core/pin.yaml names the commit to fetch and each
-// blueprint's SHA-256 (docs/specs/2026-10-13-core-catalog-fetched.md).
+// binary does not carry: internal/kinds fetches its newest release
+// (docs/specs/2026-10-13-images-follow-tracks.md).
 //
 // This package only carries the files. internal/kinds reads them.
 package blueprints
@@ -20,7 +20,7 @@ import (
 	"strings"
 )
 
-//go:embed core/pin.yaml all:reserved
+//go:embed all:reserved
 var embedded embed.FS
 
 // File is the name of a blueprint's own description, in its directory.

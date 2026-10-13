@@ -11,16 +11,16 @@ services:
   # section at all, so it will reject the configuration this kind
   # renders; do not point this kind at ghcr.io/writefreely/writefreely.
   #
-  # The fork's latest release, named by its version tag: 0.21.2+wisp,
-  # published as the image tag 0.21.2-wisp. 0.21.1+wisp was the first
+  # A track on the fork's 0.21 line, published as image tags like
+  # 0.21.2-wisp for the release 0.21.2+wisp. 0.21.1+wisp was the first
   # release carrying everything this kind's templates need: config.ini's
   # locked_settings, [app] authorized_fetch, the S3 storage with
   # image_url_base, and the /healthz route the monitor checks. 0.21.2
   # creates the schema whenever the database has none, so a first start
-  # that failed after generating its keys recovers on the next. A newer
-  # release is taken by changing this tag, and paisans-stack's
-  # kinds.ImageVolumes records what each tag declares.
-  - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp", purpose: "the application"}
+  # that failed after generating its keys recovers on the next. The
+  # track stops at 0.21 because a 0.x minor may change config.ini, which
+  # this kind renders; a new minor is taken by a catalog release.
+  - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:0.21.*-wisp", purpose: "the application"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 # Not WriteFreely's default 8080: Mbin publishes 8080, and a pinned blog

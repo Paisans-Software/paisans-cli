@@ -23,7 +23,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "b9aaa47b2cf299dd82d84c40b3cb450b4cc895f8d714d0fc04662748894d09cc",
+      "sha256": "53c67cff709d6c98560c04599d4666dd3285e5ed27541a0cb208cd6018ef984b",
       "mode": "0644"
     },
     {
@@ -38,12 +38,12 @@
     },
     {
       "path": "srv/paisans/f2a9/docs/compose.yaml",
-      "sha256": "66583745f423ba00c5cd831c9e947a0ce8ccf9d25a346e14f3f7624e17025592",
+      "sha256": "0f78d53950f0d121b572e8f5624ded94fcda476f042bd0a06e58412bb49ba25b",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "0158c7bef70b602ea62c0aca4572c2dc638ee97618fd40050609327f692c189c",
+      "sha256": "0c3be05a214081b2144e2718c96ec9401d2fabc6ab5a5c228a24fa71a5d7d712",
       "mode": "0644"
     },
     {
@@ -88,7 +88,7 @@
     },
     {
       "path": "srv/paisans/f2a9/invite/compose.yaml",
-      "sha256": "88fccc92f8e941dfa8408a81adbdd991eac1975b1448fee0bda3315aa14fb426",
+      "sha256": "b0dc3d380165019addc7f608b6e483f4795225382bdb12fa167ddd4ef2e147fd",
       "mode": "0644"
     },
     {
@@ -98,7 +98,7 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/compose.yaml",
-      "sha256": "1dbd956096ad1155805c09f263e02dcb877175d2542a60ca95018e2e5804f1ab",
+      "sha256": "4294bdbd636ae069e62449cc18c560a28c201040c7a5a2e0b2a0bcecf1fe81de",
       "mode": "0644"
     },
     {
@@ -118,7 +118,7 @@
     },
     {
       "path": "srv/paisans/f2a9/web/compose.yaml",
-      "sha256": "bf35270301178a1bec73e0c98729378c928b72ac8188f0a3f58baa5ad6593f42",
+      "sha256": "e83e582beb943b418f54df1bb52b396fdbb6e04f502d50c63a620bbd3766207e",
       "mode": "0644"
     },
     {

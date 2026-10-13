@@ -13,8 +13,8 @@ import (
 // ComposeImage is one image reference a site's compose file names, as the
 // configuration decides it, and the services that run it.
 //
-// A reference here may be a tag that moves (Eg: the gateway's caddy:2, or an
-// operator's series tag), and is rendered as written: render reaches no network,
+// A reference here may be a track (Eg: ghcr.io/paisans-software/caddy:2.*.*)
+// or a tag that moves (an operator's series tag), and is rendered as written: render reaches no network,
 // so it cannot know which build a tag names today. apply does, and pins the
 // digest into every line naming the reference before it compares the file
 // with the host's (see PinImages).
@@ -35,29 +35,33 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
+
+	// kind is the app's kind, for Setting.
+	kind config.Kind
 }
 
 // Setting is the configuration key that decides Image, for a message that
-// tells the operator where to pin it.
+// tells the operator where to pin it: acme.image for the gateway's Caddy,
+// apps.<name>.images.<service> for a service of an app's kind, and empty for
+// an image only the core catalog's foundation decides (the rest of the
+// infrastructure stack, and the admins heartbeat).
 func (c ComposeImage) Setting() string {
 	if c.App == "" {
-		return "acme.image"
+		if len(c.Services) == 1 && c.Services[0] == "caddy" {
+			return "acme.image"
+		}
+		return ""
 	}
-	service := "<service>"
-	if len(c.Services) > 0 {
-		service = c.Services[0]
+	if len(c.Services) == 0 || !kinds.Has(c.kind, c.Services[0]) {
+		return ""
 	}
-	return fmt.Sprintf("apps.%s.images.%s", c.App, service)
+	return fmt.Sprintf("apps.%s.images.%s", c.App, c.Services[0])
 }
 
-// listImages is Plan.Images: for each site, every image an app stack's
-// compose file names, and the gateway's Caddy image in the infrastructure
-// stack's. Those are the images whose references the configuration decides,
-// by the kind's default or an apps.<name>.images entry, and by acme.image.
-// The rest of the infrastructure stack (etcd, Spilo, HAProxy, Garage, the
-// heartbeat) is the toolkit's own, rendered at exact versions, and is not
-// listed; nor is the admins heartbeat in a Pocket ID stack, which runs the
-// heartbeat's image and is no service of the kind's.
+// listImages is Plan.Images: for each site, every image a compose file
+// names, the infrastructure stack's and every app stack's. Each may be a
+// track, which apply resolves to the newest build on it, so every one is
+// listed for apply to pin.
 //
 // It reads the compose files as rendered rather than the templates' inputs,
 // so the count of lines is what the file holds, which is what apply checks
@@ -75,38 +79,42 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			return nil, fmt.Errorf("reading the images %s names: %w", file.Path, err)
 		}
 		lines := map[string]int{}
+		running := map[string][]string{}
 		for name, service := range services {
-			if image := strings.TrimSpace(service.Image); image != "" && (stack != "infra" || name == "caddy") {
+			if image := strings.TrimSpace(service.Image); image != "" {
 				lines[image]++
+				running[image] = append(running[image], name)
 			}
 		}
-		named := map[string][]string{}
 		app := ""
-		var declared config.App
-		if stack == "infra" {
-			if image := strings.TrimSpace(services["caddy"].Image); image != "" {
-				named[image] = []string{"caddy"}
-			}
-		} else {
-			var isApp bool
-			declared, isApp = p.cfg.Apps[stack]
+		named := map[string][]string{}
+		if stack != "infra" {
+			declared, isApp := p.cfg.Apps[stack]
 			if !isApp {
 				continue
 			}
 			app = stack
-			for service, image := range p.appImages(declared) {
+			images, err := p.appImages(declared)
+			if err != nil {
+				return nil, err
+			}
+			for service, image := range images {
 				if lines[image] > 0 {
 					named[image] = append(named[image], service)
 				}
 			}
 		}
 		for image, n := range lines {
+			// An image no service of the kind declares (the admins
+			// heartbeat in a Pocket ID stack), and every image of the
+			// infrastructure stack, is named by the compose services
+			// that run it.
 			names := named[image]
-			if app != "" && len(names) == 0 {
-				continue
+			if len(names) == 0 {
+				names = running[image]
 			}
 			sort.Strings(names)
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, kind: p.cfg.Apps[app].Kind})
 		}
 	}
 	for site := range out {

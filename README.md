@@ -1079,8 +1079,8 @@ gateway, so a dead gateway shows as every public check failing while the
 direct checks stay green.
 
 **The heartbeat is a service, not a cron job.** Each watched site's
-infrastructure stack runs `heartbeat`: curl's own image, pinned by tag like
-every other image the stack runs, around a rendered `heartbeat/push.sh` that
+infrastructure stack runs `heartbeat`: curl's own image, on a track like
+every other image the stack runs (see *Images follow tracks*), around a rendered `heartbeat/push.sh` that
 once a minute requests `https://<monitor hostname>/ping/<token>` for every
 monitor off the site and sleeps beside the requests, so a monitor that is slow
 or gone stretches nothing. It is rendered, applied, reconciled and removed with
@@ -1798,8 +1798,9 @@ apps:
       app: ghcr.io/example-org/mbin:v1.2.3
 ```
 
-Every key is optional and an unset one takes the default its blueprint ships, so an
-adopter who never opens this stanza runs a tested set.
+Every key is optional and an unset one takes the default its blueprint names,
+usually a track (see *Images follow tracks*), so an adopter who never opens this
+stanza runs the newest release on it.
 
 **A map, not a single `image`.** A stack is several containers, and naming only
 the application one would work until the first operator needed a different
@@ -1868,6 +1869,51 @@ rotate`) resolve
 nothing and keep whatever each stack runs, whatever the configuration now
 names (another tag, a moved tag, another repository), so none of them
 moves an image nobody planned; the next `apply` shows and makes that move.
+The one image they resolve is a track that runs nowhere on the host yet,
+such as a new site's etcd in `site add`, since a host cannot pull a pattern:
+it starts on the newest build on the track.
+
+### Images follow tracks
+
+The toolkit names no image itself. Every image a deployment runs by default is
+named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
+in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
+gateway's Caddy, the heartbeat, Pocket ID and its admin reconciler, the gate,
+the invite service and the monitor) in its `foundation.yaml`. Each is a
+**track**: a repository and a tag pattern in which each `*` matches one run of
+digits.
+
+```yaml
+pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
+haproxy: "docker.io/library/haproxy:3.0.*-alpine"
+```
+
+`apply` and `init` list the repository's tags, take the newest that matches the
+whole pattern, and render it with its digest, once per run, so every site in a
+run gets the same build. A patch or a minor release therefore reaches a
+deployment on its next apply, with no toolkit release and nobody editing
+anything; the dry run names each image that moves, from the build it leaves to
+the one it moves to. `3.0.*-alpine` matches `3.0.11-alpine` and neither
+`3.1.0-alpine` nor `3.0.11-alpine3.20`, so a pattern says exactly how far a
+track may move, and the catalog stops each one where an upgrade stops being
+routine: etcd at 3.5, RabbitMQ at 3.13, a Postgres major never, since a major
+is data and `cluster.postgres_version` chooses it.
+
+**The core catalog follows its newest release too.** Every run lists the
+catalog's release tags (`vMAJOR.MINOR.PATCH`, pre-releases never) and reads the
+newest one this toolkit can: one whose blueprints and foundation it parses, and
+whose tracks stay inside the versions its own code is written against (Pocket
+ID's API v2, etcd v3, Garage v1, HAProxy 3, Caddy 2, oauth2-proxy v7). A newer
+release it cannot read is skipped, and the run says which and why, so an older
+toolkit keeps working on the releases it understands. The deployment section of
+the run names the release it read. A deployment that pins `catalogs.core` to a
+tag and commit keeps that release until `catalog update` moves it; its images
+still follow their tracks. When the catalog's forge cannot be reached, the run
+uses the release this workstation last read.
+
+**Holding one image back** is an `images` entry, or `acme.image` for the
+gateway: an operator's own reference wins over the track, exact or a track of
+its own.
 
 **An app on several sites moves to a new build on all of them at once.** A
 clustered app runs one database from every site it is on, and two builds
@@ -1881,14 +1927,13 @@ an apply that covers all of them. A site still on a bare tag beside one pinned
 to a build of that tag is not a disagreement: both are held on the pinned
 build.
 
-**The forks' kinds name a release by its version tag.** The `mbin` and
-`writefreely` kinds default to one release of each fork
-(`ghcr.io/paisans-software/mbin:1.15.1-paisans`,
-`ghcr.io/josephquigley/writefreely-wisp:0.21.2-wisp`), the release this
-toolkit's templates were tested against, so a toolkit release renders for a
-known build. A newer release arrives with a toolkit release that names it, or
-sooner by naming it in `images`, which runs it against templates written for
-the one before.
+**The forks' blueprints follow their own release tags.** The `mbin` and
+`writefreely` blueprints default to a track on each fork's releases
+(`ghcr.io/paisans-software/mbin:1.*.*-paisans`,
+`ghcr.io/josephquigley/writefreely-wisp:0.21.*-wisp`), whose tags carry the
+fork's suffix, so no upstream build can match. A release outside the track
+arrives with a core catalog release that moves it, or sooner by naming it in
+`images`, which runs it against templates written for the one before.
 
 **A version change is not verified to be safe.** Many of these applications run
 schema migrations at boot, against live member data, and a downgrade after one
@@ -2690,9 +2735,8 @@ each app the leftovers belong to, which is the command that takes them off
 
 The blueprints built into the toolkit are the reserved four (`pocket-id`, the
 gate, `invite`, `uptime`). The first party ones, `mbin`, `outline` and the
-rest, are the **core catalog**'s, which the toolkit fetches at the commit its
-release pins and checks against the SHA-256 the release names for each
-blueprint. Any other comes from a **catalog**: a git repository of blueprints the deployment
+rest, are the **core catalog**'s, which the toolkit fetches at its newest
+release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
 
 ```yaml
@@ -2733,7 +2777,9 @@ reviewed. `catalog add` and `catalog update` show the release they read and,
 for each app, what it changes, and the grant review asks for approval before
 a moved pin renders on a site (see *`apply` and `host prepare` review what
 `paisans-stack.yaml` grants*). The
-core catalog may be pinned to a commit of its own or a mirror, like any other.
+core catalog may be pinned to a release of its own or a mirror, like any other;
+unpinned, it moves to each new release it can read, and the grant review shows
+that move as it shows any moved pin.
 The sites never fetch a catalog: they trust the operator's signature on the
 configuration version that carries the blueprints (see *Every site keeps
 signed copies of the configuration*).
@@ -4985,7 +5031,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
 | images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
-| blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new toolkit release moves the core pin of every deployment that does not pin core itself |
+| blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new core catalog release moves the core blueprints of every deployment that does not pin core itself |
 
 A key is the same key when its fingerprint is, so a new comment or a new admin
 for it is a change of that key. An image is the same when its reference is,
@@ -6141,11 +6187,11 @@ registration takes to age plus a retry. Both were observed with two real
 v2.14.0 instances against one Postgres: a clean stop handed over in about two
 seconds at a 3 s retry, and a `docker kill` of the active one in 49 s.
 
-**The refusal text is pinned per image**, in `kinds.PocketIDStandbyMarker`,
-keyed by the whole reference as `kinds.ImageVolumes` is, so an image bump
-fails a test until somebody rereads `bootstrap.go`, and `validate` warns
-(`pocket-id-standby-marker-unknown`) for an operator's own image the table
-does not know. **It fails safe**: a marker that stops matching makes the
+**The refusal text is recorded once for Pocket ID v2**, in
+`kinds.PocketIDStandbyMarker`. The foundation's track cannot leave v2, so a
+release that changes the text is a toolkit change, made when the next major
+is, and `validate` warns (`pocket-id-standby-marker-unknown`) for an
+operator's own image from another repository. **It fails safe**: a marker that stops matching makes the
 wrapper exit like any other failure, Docker's restart policy retries it more
 slowly, and the standby site's stack reads `restarting`, which `apply`'s gate
 reports. Nothing runs twice; francis refuses the second instance either way.
@@ -6481,12 +6527,12 @@ has no value across a restart: the entrypoint clears it each time.
 
 Three things keep it from happening again:
 
-* **A test table.** `kinds.ImageVolumes` records what each pinned reference
-  declares, with the date, and a render test fails when a rendered service
-  runs an image missing from it or leaves a recorded path unmounted. Bumping an
-  image changes its reference, so the bump fails until somebody inspects it.
-* **A refusal in `apply`.** The table cannot see an operator's own `images`
-  override, or a tag that moved on the registry. So `apply` inspects every image
+* **A registry test.** `TestEveryDeclaredImageVolumeIsMounted`, run with
+  `-tags registry_integration`, resolves every track to the build it names
+  today, reads what that build declares on every platform it is published
+  for, and fails when a rendered service leaves a declared path unmounted.
+* **A refusal in `apply`.** A track moves, and an operator's own `images`
+  override is not the catalog's. So `apply` inspects every image
   of every stack it acts on (`docker image inspect --format '{{json
   .Config.Volumes}}'`) and compares each declared path with the binds, named
   volumes and tmpfs mounts of that service's rendered compose file. An
@@ -8401,16 +8447,16 @@ Caddyfile, and which image the gateway runs.
 suggested topology, and etcd's stability is a function of fsync latency, so a
 compile there competes for exactly the resource that placement was chosen
 around. Images with the modules compiled in are published at
-`ghcr.io/paisans-software/caddy`, and the default is its major version tag,
-`ghcr.io/paisans-software/caddy:2`.
+`ghcr.io/paisans-software/caddy`, and the default is the core catalog
+foundation's track on Caddy 2, `ghcr.io/paisans-software/caddy:2.*.*`.
 
-**The tag moves, and what a host runs does not move with it unplanned.** The
+**The track moves, and what a host runs does not move with it unplanned.** The
 image is rebuilt whenever upstream Caddy or its base image ships a fix, and the
-major version tag follows every rebuild, so a security fix reaches a deployment
-without a toolkit release, and nothing crosses a major version unasked. `apply`
-asks the registry, while it plans, which build the tag names now, and renders
-that digest beside the tag in the gateway's compose file (Eg:
-`ghcr.io/paisans-software/caddy:2@sha256:...`). A new build is therefore a
+track follows every release, so a security fix reaches a deployment without a
+toolkit release, and nothing crosses a major version unasked. `apply` asks the
+registry, while it plans, for the newest tag on the track and the build it
+names, and renders both in the gateway's compose file (Eg:
+`ghcr.io/paisans-software/caddy:2.11.7@sha256:...`). A new build is therefore a
 changed compose file: the dry run shows it, naming the build that replaces the
 running one, and the apply pulls it, asks it for its DNS module, validates the
 configuration on it and waits for it to be healthy, as for any image change.

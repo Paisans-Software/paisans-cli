@@ -6,6 +6,8 @@ and #260, and Paisans-Software/paisans-blueprints#5; the work list below
 was done in that order, with the test copy and `coretest` moving from the
 first step to the third, where core is first read from the cache.
 Amends *The core catalog* in `docs/specs/2026-10-12-blueprints-and-catalogs.md`.
+Amended by `docs/specs/2026-10-13-images-follow-tracks.md`: the binary no
+longer pins the core catalog, which is read at its newest release.
 
 The binary carries a copy of the core catalog today: `scripts/sync-core-catalog.sh`
 copies one commit into `internal/blueprints/core/`, and `go:embed` builds it in.
