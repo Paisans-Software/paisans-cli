@@ -49,6 +49,10 @@ type Review struct {
 	// covers: the host has no record of them yet, every entry is new, and
 	// approving it is the record being made.
 	First bool
+	// Approved is each change an operator approved on the host earlier and
+	// no command has applied yet. It is not asked about again, and not
+	// listed: the operator saw it when they approved it.
+	Approved []Change
 }
 
 // Pending is how many changes need approval.
@@ -105,6 +109,15 @@ func Compare(site string, g Grant, rec Record, s Scope) Review {
 	if s.WebServer {
 		r.Changes = append(r.Changes, compareWebServer(g.WebServer, rec.WebServer)...)
 	}
+	var asked []Change
+	for _, c := range r.Changes {
+		if rec.approved(c) {
+			r.Approved = append(r.Approved, c)
+		} else {
+			asked = append(asked, c)
+		}
+	}
+	r.Changes = asked
 	return r
 }
 

@@ -141,11 +141,28 @@ func endReview(r ui.Reporter, line ui.Step, rev grant.Review, execute bool) {
 			what = "1 new entry (first review)"
 		}
 	}
+	// Entries approved by an earlier run, which stopped before applying
+	// them, are counted and not listed or asked about again.
+	earlier := ""
+	if k := len(rev.Approved); k > 0 {
+		earlier = fmt.Sprintf("%d approved earlier, not applied yet", k)
+	}
+	join := func(parts ...string) string {
+		var out []string
+		for _, p := range parts {
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		return strings.Join(out, "; ")
+	}
 	switch {
 	case n > 0:
-		line.End(ui.Pending, what)
+		line.End(ui.Pending, join(what, earlier))
 	case len(rev.Changes) > 0:
-		line.End(ui.OK, "only removals, nothing to approve")
+		line.End(ui.OK, join("only removals, nothing to approve", earlier))
+	case earlier != "":
+		line.End(ui.OK, earlier+", nothing new to approve")
 	default:
 		line.End(ui.OK, "")
 	}
@@ -180,6 +197,28 @@ func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []
 	return nil
 }
 
+// recordApproval writes on a site what the operator just approved there,
+// before the command's first change, so a run that stops part way does not
+// ask for the same entries again. A site with nothing approved is not
+// written.
+func recordApproval(r ui.Reporter, s *siteReview, d deployment.Deployment, approvedBy string) error {
+	if s == nil || s.review.Pending() == 0 {
+		return nil
+	}
+	_, err := grant.Write(s.host, d, func(rec grant.Record) grant.Record {
+		return rec.Approve(s.review.Changes, grantNow(), approvedBy)
+	})
+	if err != nil {
+		r.Step("record what was approved").Fail(err)
+		return &ui.Problem{
+			Hint:    "could not record what was approved on " + s.review.Site,
+			Explain: errLine(err) + ". Nothing was changed on " + s.review.Site + ". Make the record writable and run again; the review asks for the same entries again.",
+			Cause:   err,
+		}
+	}
+	return nil
+}
+
 // recordGrant writes the parts of a site's grant its command covers, once
 // the command's steps for the site have all succeeded, and the configuration
 // version it applied. A record already holding them is left as it is, and
@@ -200,7 +239,7 @@ func recordGrant(r ui.Reporter, s *siteReview, d deployment.Deployment, approved
 		r.Step("record what was granted").Fail(err)
 		return &ui.Problem{
 			Hint:    "could not record what was granted",
-			Explain: errLine(err) + ". What was applied is in place; the next run reviews the same entries again, and records them once it can.",
+			Explain: errLine(err) + ". What was applied is in place; the next run applies it again without asking, since it was approved, and records it once it can.",
 			Cause:   err,
 		}
 	}
@@ -270,6 +309,9 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 	by := ""
 	if s.review.Pending() > 0 {
 		by = approver(cfg)
+	}
+	if err := recordApproval(r, s, cfg.Deployment(), by); err != nil {
+		return nil, "", err
 	}
 	return s, by, nil
 }
