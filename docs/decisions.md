@@ -2186,3 +2186,40 @@ amd64-only build) before a pull fails on the host.
 Nothing beyond reading the code; this records a design. Every image the
 toolkit names was checked for linux/arm64 with `docker buildx imagetools
 inspect` on 2026-10-13: all have it except `ghcr.io/paisans-software/mbin:1.15.1-paisans`.
+
+## 2026-10-13: Core blueprints carry their own rules, links and secret recipes
+
+Founder decision, 2026-10-13. Amends
+`docs/specs/2026-10-13-core-catalog-fetched.md`.
+
+### What was decided
+
+* A blueprint check may give its message, and its key, as CEL expressions,
+  so a rule moved out of `internal/validate` names the value it refuses as it
+  does today.
+* A blueprint may declare a second listening service (`services[].port`) and
+  extra databases (`database.extra`); the homeserver's authentication service
+  uses both.
+* Template helpers named for one app become generic helpers of the contract,
+  or read data the blueprint declares, and the core catalog's templates change
+  with them.
+* A generated secret declares its format, its rotation cost, whether it may
+  ever be rotated, and the group it rotates with. Only a rotation that needs
+  the running app is an in-app action.
+
+### Why
+
+The core catalog can now change with a catalog commit, and Go that names one
+of its blueprints cannot. Each of these lets a blueprint say what Go says
+today, so a third party blueprint can say it too.
+
+### What was weighed
+
+* **Fixed check messages**, which lose the value an operator has to change.
+* **`ports.served_by_web_server`**, proposed in the spec before the code was
+  read: the homeserver's second port is a second service, not a port nothing
+  dials.
+* **Keeping the named helpers** as part of the contract, which keeps Go naming
+  core blueprints.
+* **Moving only the RabbitMQ rotation**, which keeps formats and costs keyed
+  by name in Go.
