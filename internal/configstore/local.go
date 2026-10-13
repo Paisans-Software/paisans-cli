@@ -283,6 +283,15 @@ func (l Local) Files() (Files, error) {
 		}
 		*e.dst = data
 	}
+	if SnapshotBlueprints != nil {
+		snap, err := SnapshotBlueprints(f.Paisans)
+		if err != nil {
+			return Files{}, err
+		}
+		if len(snap) > 0 {
+			f.Blueprints = snap
+		}
+	}
 	return f, nil
 }
 
@@ -312,6 +321,9 @@ func writeFiles(dir string, f Files) error {
 		if err := writeAtomic(filepath.Join(dir, e.name), e.data, e.mode); err != nil {
 			return err
 		}
+	}
+	if len(f.Blueprints) > 0 && InstallBlueprints != nil {
+		return InstallBlueprints(f.Blueprints)
 	}
 	return nil
 }
@@ -368,10 +380,18 @@ func (l Local) WriteIncomingFor(sha string) error {
 	return writeFiles(l.IncomingFor(sha), f)
 }
 
-// Equal reports whether two sets of the three files are byte for byte the
-// same.
+// Equal reports whether two sets of the three files, and their blueprint
+// snapshots, are byte for byte the same.
 func (f Files) Equal(o Files) bool {
-	return bytes.Equal(f.Paisans, o.Paisans) && bytes.Equal(f.Secrets, o.Secrets) && bytes.Equal(f.SOPS, o.SOPS)
+	if !bytes.Equal(f.Paisans, o.Paisans) || !bytes.Equal(f.Secrets, o.Secrets) || !bytes.Equal(f.SOPS, o.SOPS) || len(f.Blueprints) != len(o.Blueprints) {
+		return false
+	}
+	for p, data := range f.Blueprints {
+		if other, ok := o.Blueprints[p]; !ok || !bytes.Equal(data, other) {
+			return false
+		}
+	}
+	return true
 }
 
 // Reached is one site a gather tried. Direct is a site that answered over

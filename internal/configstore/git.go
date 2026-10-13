@@ -3,15 +3,18 @@ package configstore
 import (
 	"bytes"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/config"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
 // The three files of a version, by their names in the tree, sorted as git's
@@ -46,7 +49,7 @@ type Version struct {
 	Signed    bool
 	SignerFP  string    // %GF, the signing key's SHA256 fingerprint
 	Committed time.Time // for display only
-	TreeOK    bool      // the tree holds exactly the three files
+	TreeOK    bool      // the tree holds exactly the three files, and a sound snapshot
 }
 
 // git runs git in the repository with the user's and the system's
@@ -106,32 +109,21 @@ func (r Repo) Commit(f Files, parents []string, revision int, signingKey string,
 			return "", err
 		}
 	}
-	var tree strings.Builder
-	for _, e := range []struct {
-		name string
-		data []byte
-	}{{nameSOPS, f.SOPS}, {namePaisans, f.Paisans}, {nameSecrets, f.Secrets}} {
-		out, err := r.git(bytes.NewReader(e.data), nil, "hash-object", "-w", "--stdin")
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&tree, "100644 blob %s\t%s\n", strings.TrimSpace(string(out)), e.name)
-	}
-	out, err := r.git(strings.NewReader(tree.String()), nil, "mktree")
+	tree, err := r.writeTree(f)
 	if err != nil {
 		return "", err
 	}
 	args := []string{
 		"-c", "gpg.format=ssh", "-c", "user.signingKey=" + signingKey,
 		"-c", "user.name=paisans", "-c", "user.email=paisans@invalid",
-		"commit-tree", strings.TrimSpace(string(out)), "-S",
+		"commit-tree", tree, "-S",
 	}
 	for _, p := range parents {
 		args = append(args, "-p", p)
 	}
 	args = append(args, "-m", fmt.Sprintf("paisans configuration\n\nPaisans-Revision: %d\n", revision))
 	date := when.UTC().Format(time.RFC3339)
-	out, err = r.git(nil, []string{"GIT_COMMITTER_DATE=" + date, "GIT_AUTHOR_DATE=" + date}, args...)
+	out, err := r.git(nil, []string{"GIT_COMMITTER_DATE=" + date, "GIT_AUTHOR_DATE=" + date}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -140,6 +132,95 @@ func (r Repo) Commit(f Files, parents []string, revision int, signingKey string,
 		return "", err
 	}
 	return sha, nil
+}
+
+// writeTree stores f's files and returns its tree: the three files at the
+// top, and the blueprint snapshot under blueprints/ with blueprints/SHA256SUMS
+// beside it. A version with no snapshot has exactly the three files, as every
+// version before snapshots did.
+func (r Repo) writeTree(f Files) (string, error) {
+	entries := []struct {
+		path string
+		data []byte
+	}{{nameSOPS, f.SOPS}, {namePaisans, f.Paisans}, {nameSecrets, f.Secrets}}
+	if len(f.Blueprints) > 0 {
+		for _, p := range sortedPaths(f.Blueprints) {
+			if !snapshotPath.MatchString(p) {
+				return "", fmt.Errorf("blueprints/%s is not a path a snapshot holds", p)
+			}
+			entries = append(entries, struct {
+				path string
+				data []byte
+			}{blueprintsDir + "/" + p, f.Blueprints[p]})
+		}
+		entries = append(entries, struct {
+			path string
+			data []byte
+		}{blueprintsDir + "/" + sumsFile, snapshotSums(f.Blueprints)})
+	}
+	index, err := os.CreateTemp("", "paisans-index-")
+	if err != nil {
+		return "", err
+	}
+	index.Close()
+	os.Remove(index.Name())
+	defer os.Remove(index.Name())
+	env := []string{"GIT_INDEX_FILE=" + index.Name()}
+	for _, e := range entries {
+		out, err := r.git(bytes.NewReader(e.data), nil, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return "", err
+		}
+		if _, err := r.git(nil, env, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(out))+","+e.path); err != nil {
+			return "", err
+		}
+	}
+	out, err := r.git(nil, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// blueprintsDir is where a version keeps its blueprint snapshot, and sumsFile
+// the SHA-256 of each blueprint in it.
+const (
+	blueprintsDir = "blueprints"
+	sumsFile      = "SHA256SUMS"
+)
+
+// snapshotPath is the one shape a snapshot path may have:
+// <catalog commit>/<blueprint>/<file>, with no empty, dot or dot-dot part.
+var snapshotPath = regexp.MustCompile(`^[0-9a-f]{40}/[a-z0-9][a-z0-9-]{0,62}/([A-Za-z0-9_.+@-]+/)*[A-Za-z0-9_.+@-]+$`)
+
+// snapshotSums is blueprints/SHA256SUMS: for each blueprint in the snapshot,
+// in order, its SHA-256 as blueprints.DigestFiles computes it and its
+// <commit>/<name>. Git names a version's files by SHA-1, so this is what a
+// snapshot's integrity rests on beyond the signature.
+func snapshotSums(files map[string][]byte) []byte {
+	groups := map[string]map[string][]byte{}
+	for p, data := range files {
+		parts := strings.SplitN(p, "/", 3)
+		dir := parts[0] + "/" + parts[1]
+		if groups[dir] == nil {
+			groups[dir] = map[string][]byte{}
+		}
+		groups[dir][parts[2]] = data
+	}
+	var b strings.Builder
+	for _, dir := range sortedPaths(groups) {
+		fmt.Fprintf(&b, "%s  %s\n", blueprints.DigestFiles(groups[dir]), dir)
+	}
+	return []byte(b.String())
+}
+
+func sortedPaths[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // versionRefs returns the commits that refs/versions/ names correctly.
@@ -165,27 +246,72 @@ func (r Repo) namedVersions(prefix string) ([]string, error) {
 }
 
 // treeOK reports whether the tree of sha holds exactly the three files, each a
-// regular non-executable blob. Entries are read NUL-delimited so that no name
-// can pass for several.
+// regular non-executable blob, and at most a blueprint snapshot beside them
+// whose every file has the one shape a snapshot path may have and whose
+// SHA256SUMS matches what it holds. Entries are read NUL-delimited so that no
+// name can pass for several.
 func (r Repo) treeOK(sha string) (bool, error) {
-	out, err := r.git(nil, nil, "ls-tree", "-z", sha)
+	out, err := r.git(nil, nil, "ls-tree", "-r", "-z", sha)
 	if err != nil {
 		return false, err
 	}
 	want := map[string]bool{nameSOPS: true, namePaisans: true, nameSecrets: true}
-	entries := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
-	if len(entries) != len(want) {
-		return false, nil
-	}
-	for _, e := range entries {
+	snapshot := map[string]string{}
+	hasSums := false
+	for _, e := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
 		meta, name, ok := strings.Cut(e, "\t")
 		f := strings.Fields(meta)
-		if !ok || len(f) != 3 || f[0] != "100644" || f[1] != "blob" || !want[name] {
+		if !ok || len(f) != 3 || f[0] != "100644" || f[1] != "blob" {
 			return false, nil
 		}
-		delete(want, name)
+		switch {
+		case want[name]:
+			delete(want, name)
+		case name == blueprintsDir+"/"+sumsFile:
+			hasSums = true
+		case strings.HasPrefix(name, blueprintsDir+"/") && snapshotPath.MatchString(strings.TrimPrefix(name, blueprintsDir+"/")):
+			snapshot[strings.TrimPrefix(name, blueprintsDir+"/")] = f[2]
+		default:
+			return false, nil
+		}
 	}
-	return len(want) == 0, nil
+	if len(want) != 0 || hasSums != (len(snapshot) > 0) {
+		return false, nil
+	}
+	if len(snapshot) == 0 {
+		return true, nil
+	}
+	files, err := r.snapshot(sha)
+	if err != nil {
+		return false, err
+	}
+	sums, err := r.git(nil, nil, "cat-file", "blob", sha+":"+blueprintsDir+"/"+sumsFile)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(sums, snapshotSums(files)), nil
+}
+
+// snapshot reads the blueprint snapshot of the version sha, empty when it has
+// none.
+func (r Repo) snapshot(sha string) (map[string][]byte, error) {
+	out, err := r.git(nil, nil, "ls-tree", "-r", "-z", "--name-only", sha, blueprintsDir+"/")
+	if err != nil {
+		return nil, err
+	}
+	files := map[string][]byte{}
+	for _, name := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		rel := strings.TrimPrefix(name, blueprintsDir+"/")
+		if name == "" || rel == sumsFile || !snapshotPath.MatchString(rel) {
+			continue
+		}
+		data, err := r.git(nil, nil, "cat-file", "blob", sha+":"+name)
+		if err != nil {
+			return nil, err
+		}
+		files[rel] = data
+	}
+	return files, nil
 }
 
 // revision reads the Paisans-Revision trailer of a commit on its own, so that
@@ -251,6 +377,13 @@ func (r Repo) Files(sha string) (Files, error) {
 			return Files{}, err
 		}
 		*e.dst = out
+	}
+	snap, err := r.snapshot(sha)
+	if err != nil {
+		return Files{}, err
+	}
+	if len(snap) > 0 {
+		f.Blueprints = snap
 	}
 	return f, nil
 }

@@ -49,7 +49,7 @@ func CoreDigest() (string, error) {
 // Digest is that SHA-256 for the blueprints under dir in fsys, the same
 // whether they came from the binary or from a catalog's checkout.
 func Digest(fsys fs.FS, dir string) (string, error) {
-	var files []string
+	files := map[string][]byte{}
 	err := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -61,21 +61,31 @@ func Digest(fsys fs.FS, dir string) (string, error) {
 		if rel == PinFile {
 			return nil
 		}
-		files = append(files, rel)
+		raw, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		files[rel] = raw
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(files)
-	list := sha256.New()
-	for _, f := range files {
-		raw, err := fs.ReadFile(fsys, path.Join(dir, f))
-		if err != nil {
-			return "", err
-		}
-		sum := sha256.Sum256(raw)
-		fmt.Fprintf(list, "%s  %s\n", hex.EncodeToString(sum[:]), f)
+	return DigestFiles(files), nil
+}
+
+// DigestFiles is that SHA-256 for files held in memory, keyed by their path
+// relative to the directory the digest is of.
+func DigestFiles(files map[string][]byte) string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
 	}
-	return hex.EncodeToString(list.Sum(nil)), nil
+	sort.Strings(names)
+	list := sha256.New()
+	for _, name := range names {
+		sum := sha256.Sum256(files[name])
+		fmt.Fprintf(list, "%s  %s\n", hex.EncodeToString(sum[:]), name)
+	}
+	return hex.EncodeToString(list.Sum(nil))
 }

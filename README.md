@@ -3590,8 +3590,16 @@ newest version. The one loss this cannot protect is every admin losing their age
 key, which is why *Rendered configuration is a build artifact* tells every
 deployment to add a second recipient to `.sops.yaml`.
 
-**A version is a signed git commit of exactly the three files.** A commit
-holding anything else is invalid. It is signed with the publishing admin's SSH
+**A version is a signed git commit of exactly the three files**, and, when
+its apps use blueprints from a catalog, the snapshot of those blueprints under
+`blueprints/<catalog commit>/<blueprint>/` with a `blueprints/SHA256SUMS`
+beside it. A commit holding anything else, or a snapshot whose files do not
+match its SHA256SUMS, is invalid. The snapshot is what lets a removal or a
+recovery read a blueprint whose catalog has gone, and what makes every admin
+and every site render the same bytes; publishing takes it from where the
+blueprints were resolved, and checking a version out installs it where they are
+resolved from. Git names a version's files by SHA-1, so the SHA-256 list is
+what the snapshot's integrity rests on beyond the signature. It is signed with the publishing admin's SSH
 key by git's `gpg.format=ssh`, so signing goes through the operator's ssh-agent
 and needs no new key. The signature covers the tree, and so the files, because
 nothing in the files can prove who wrote them: encrypting to an age recipient
@@ -3620,7 +3628,7 @@ closes a forgery:
 
 | Rule | Because |
 |------|---------|
-| Shape: the tree holds exactly the three files, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
+| Shape: the tree holds exactly the three files and at most a sound blueprint snapshot, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
 | The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans-stack.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
 | Removal is final, key by key: when a trusted version drops a key a parent listed (an admin removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an admin removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real admin |
 
