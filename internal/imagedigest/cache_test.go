@@ -163,3 +163,67 @@ func TestTheCacheAsksForTheNewestVersionOnce(t *testing.T) {
 		t.Errorf("a registry that lists nothing answered %q, %v", got, err)
 	}
 }
+
+// platformed is a resolver that answers Platforms and counts the questions,
+// failing every Digest with a transport error when down is set.
+type platformed struct {
+	down  bool
+	asked atomic.Int32
+	err   error
+}
+
+func (p *platformed) Digest(ref string) (string, error) {
+	if p.down {
+		return "", &url.Error{Op: "Get", URL: ref, Err: errors.New("no route to host")}
+	}
+	return "sha256:1", nil
+}
+
+func (p *platformed) Platforms(string) ([]string, error) {
+	p.asked.Add(1)
+	return []string{"amd64", "arm64"}, p.err
+}
+
+// A platform list is asked once per reference, and a registry already known
+// to be unreachable is not asked at all: its answer is unknown.
+func TestThePlatformsAreAskedOncePerRefAndNeverOfADownHost(t *testing.T) {
+	const ref = "ghcr.io/paisans-software/mbin:1@sha256:1"
+	p := &platformed{}
+	c := imagedigest.Cached(p)
+	for range 2 {
+		if got, err := c.Platforms(ref); err != nil || len(got) != 2 {
+			t.Fatalf("got %v, %v", got, err)
+		}
+	}
+	if n := p.asked.Load(); n != 1 {
+		t.Errorf("asked %d times", n)
+	}
+
+	down := &platformed{down: true}
+	c = imagedigest.Cached(down)
+	if _, err := c.Digest(ref); err == nil {
+		t.Fatal("digest should have failed")
+	}
+	if got, err := c.Platforms(ref); got != nil || err != nil {
+		t.Errorf("got %v, %v", got, err)
+	}
+	if n := down.asked.Load(); n != 0 {
+		t.Errorf("asked a host known to be down %d times", n)
+	}
+}
+
+// A transport failure of Platforms itself marks the host down, so the next
+// reference on it is not asked.
+func TestAPlatformsTransportFailureMarksTheHostDown(t *testing.T) {
+	p := &platformed{err: &url.Error{Op: "Get", URL: "x", Err: errors.New("timeout")}}
+	c := imagedigest.Cached(p)
+	if _, err := c.Platforms("ghcr.io/paisans-software/mbin:1@sha256:1"); err == nil {
+		t.Fatal("expected the failure")
+	}
+	if got, err := c.Platforms("ghcr.io/paisans-software/caddy:2@sha256:2"); got != nil || err != nil {
+		t.Errorf("got %v, %v", got, err)
+	}
+	if n := p.asked.Load(); n != 1 {
+		t.Errorf("asked %d times", n)
+	}
+}
