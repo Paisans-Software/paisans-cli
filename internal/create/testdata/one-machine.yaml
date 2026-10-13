@@ -111,7 +111,7 @@ apps:
     # Federation still works: ActivityPub goes to the app, which checks
     # every signature.
     gated: true
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }

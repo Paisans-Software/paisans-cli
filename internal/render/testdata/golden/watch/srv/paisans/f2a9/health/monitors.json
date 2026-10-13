@@ -438,7 +438,7 @@
   ],
   "settings": {
     "smtp_from_address": "hello@example.org",
-    "smtp_from_name": "Example Status",
+    "smtp_from_name": "Example Health",
     "smtp_host": "smtp.example.org",
     "smtp_pass": "fixture-not-a-secret-smtp",
     "smtp_port": 587,

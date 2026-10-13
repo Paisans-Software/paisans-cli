@@ -11,7 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
-const siteFile = webDir + "paisans.d/paisans-f2a9-status.caddy"
+const siteFile = webDir + "paisans.d/paisans-f2a9-health.caddy"
 
 // webOn gives the site's host a Caddy in a container whose include
 // directory holds the toolkit's site file, recorded in the manifest, and a
@@ -20,14 +20,14 @@ func webOn(t *testing.T, w *world, site string) *webservertest.Server {
 	t.Helper()
 	h := w.hosts[site]
 	h.web = webservertest.New("import /etc/caddy/paisans.d/*\n")
-	content := "status.example.org {\n\treverse_proxy 127.0.0.1:8480\n}\n"
+	content := "health.example.org {\n\treverse_proxy 127.0.0.1:8480\n}\n"
 	h.web.Files[siteFile] = content
 	h.web.Files[webDir+"paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
 		t.Fatal(err)
 	}
-	m.WebServer = []render.ManifestWebServer{{App: "status", Path: siteFile, SHA256: sum(content), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
+	m.WebServer = []render.ManifestWebServer{{App: "health", Path: siteFile, SHA256: sum(content), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
 	data, _ := json.Marshal(m)
 	h.files[dep.Manifest()] = string(data)
 	return h.web
@@ -73,7 +73,7 @@ func TestSiteRemoveDeletesItsSiteFileOnly(t *testing.T) {
 func TestSiteRemoveStopsWhenTheWebServerRefuses(t *testing.T) {
 	w := setup(t)
 	web := webOn(t, w, "watch")
-	web.Validate = "Error: adapting config using caddyfile: File to import not found: /etc/caddy/paisans.d/paisans-f2a9-status.caddy"
+	web.Validate = "Error: adapting config using caddyfile: File to import not found: /etc/caddy/paisans.d/paisans-f2a9-health.caddy"
 	err := siteremove.Execute(forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{}))
 	if err == nil || !strings.Contains(err.Error(), "File to import not found") {
 		t.Fatalf("err %v", err)
@@ -102,7 +102,7 @@ func TestHostGoneSaysWhatTheWebServerStillIncludes(t *testing.T) {
 	w.cfg.Sites["watch"] = watch
 	// Its app was removed first, as app remove does, while the host was
 	// still there.
-	delete(w.cfg.Apps, "status")
+	delete(w.cfg.Apps, "health")
 	p, err := w.build("watch", siteremove.Options{HostGone: true})
 	if err != nil {
 		t.Fatal(err)

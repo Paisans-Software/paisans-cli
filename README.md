@@ -658,7 +658,7 @@ rather than stopping its Caddy: until the hand-off, that site keeps every
 gateway route, and then its Caddy reloads with the monitor's alone (see
 *Moving the gateway*, "A site that keeps the monitor"). Moving the monitor
 with the gateway works too, but the move changes only the gateway's
-hostnames: it refuses while the status page's record still points at the old
+hostnames: it refuses while the health page's record still points at the old
 machine, so change that record first, as in *Moving an existing monitor*
 below.
 
@@ -708,7 +708,7 @@ sites:
   a configuration it does not own. A machine that was the gateway and
   switches to `managed_by: external` in the same edit that moves the gateway
   off it no longer runs the toolkit's Caddy, so `paisans gateway move` treats
-  it as an ordinary old gateway and stops that Caddy: the status page is down
+  it as an ordinary old gateway and stops that Caddy: the health page is down
   until the operator's web server serves it. Move the gateway first, then
   switch the web server in an apply of its own. `paisans apply` without `--site` runs
   `paisans web-server check` for each such app once every step has run, and
@@ -1166,7 +1166,7 @@ operator's own web server. The app is Express with its default routing, which
 ignores case and a trailing slash, so every refusal does too: `/metrics/` and
 `/STATUS` are refused as well. The
 UI's own session authenticated JSON under `/api/sites` passes, because the
-dashboard's live refresh and the response time chart fetch it. The status page would
+dashboard's live refresh and the response time chart fetch it. The health page would
 list every monitor, mesh addresses included, and `/metrics` is public whenever
 no API token exists, which here is always. `/ping/*` stays open: it is where
 every site's heartbeat arrives, and where a heartbeat monitor added by hand
@@ -1377,7 +1377,7 @@ data sites are home connections nothing can dial.
 The example declares four sites, eight apps and object storage, and someone
 starting a community has to work out which of it they need and which role
 combinations validate refuses. `paisans create` asks instead, in the words of
-what a community needs (forums, a wiki, a blog, chat, a status page), and
+what a community needs (forums, a wiki, a blog, chat, a health page), and
 writes a commented `paisans-stack.yaml`.
 
 It offers three shapes, each a role layout validate accepts with no refusal:
@@ -1399,7 +1399,7 @@ makes an app's client at Pocket ID*). Enter takes the app's key, which is
 what the client is named without one, and then nothing is written.
 
 Mail is required in it, although validate only warns without it: sign in
-mails each admin's login link and members' codes, and the status page alerts
+mails each admin's login link and members' codes, and the health page alerts
 by mail, so a deployment with no mail has admins who sign in only through a
 printed link and outages nobody hears of.
 

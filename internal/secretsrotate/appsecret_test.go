@@ -31,7 +31,7 @@ type selfWorld struct {
 var selfKeysFor = map[string][]string{
 	"forum":  {"app_secret", "mercure_jwt_secret", "valkey_password", "oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key"},
 	"gate":   {"cookie_secret"},
-	"status": {"session_secret"},
+	"health": {"session_secret"},
 	"chat":   {"mas_signing_key", "mas_matrix_secret"},
 	"id":     {"static_api_key"},
 }
@@ -49,7 +49,7 @@ func newSelfWorld(t *testing.T) *selfWorld {
 		Apps: map[string]config.App{
 			"forum":  {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}},
 			"gate":   {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
-			"status": {Kind: config.KindUptime, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
+			"health": {Kind: config.KindUptime, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
 			"chat":   {Kind: config.KindSynapse, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
 			"id":     {Kind: config.KindPocketID, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
@@ -70,7 +70,7 @@ func newSelfWorld(t *testing.T) *selfWorld {
 	}
 	s.Apps["forum"]["oauth_private_key"], s.Apps["forum"]["oauth_public_key"] = priv, pub
 	// Every stack presents what the file holds, as the last apply left it.
-	for app, sites := range map[string][]string{"forum": {"home-a", "home-b"}, "gate": {"home-a"}, "status": {"home-c"}, "chat": {"home-b"}, "id": {"home-a"}} {
+	for app, sites := range map[string][]string{"forum": {"home-a", "home-b"}, "gate": {"home-a"}, "health": {"home-c"}, "chat": {"home-b"}, "id": {"home-a"}} {
 		for _, site := range sites {
 			for _, key := range selfKeysFor[app] {
 				v, _ := s.Get("apps." + app + "." + key)
@@ -232,7 +232,7 @@ func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
 		{"forum", "mercure_jwt_secret", ""},
 		{"forum", "valkey_password", ""},
 		{"gate", "cookie_secret", "home-a:gate"},
-		{"status", "session_secret", "home-c:status"},
+		{"health", "session_secret", "home-c:health"},
 		{"chat", "mas_signing_key", "home-b:chat"},
 		{"chat", "mas_matrix_secret", "home-b:chat"},
 		{"id", "static_api_key", "home-a:id"},

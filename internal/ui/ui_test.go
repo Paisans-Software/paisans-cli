@@ -413,12 +413,12 @@ func TestPlainEndMarksAreWords(t *testing.T) {
 	r.Step("apply --site a").End(ui.Pending, "3 changes")
 	r.Step("apply --site b").End(ui.Waiting, "after host prepare --site b")
 	r.Step("dns init").End(ui.Failed, "the provider did not answer")
-	r.Step("site file for status").End(ui.Warned, "no directory to write in")
+	r.Step("site file for health").End(ui.Warned, "no directory to write in")
 	want := "  ok   host prepare --site a\n" +
 		"  todo apply --site a: 3 changes\n" +
 		"  wait apply --site b: after host prepare --site b\n" +
 		"  FAIL dns init: the provider did not answer\n" +
-		"  WARN site file for status: no directory to write in\n"
+		"  WARN site file for health: no directory to write in\n"
 	if b.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", b.String(), want)
 	}

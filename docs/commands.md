@@ -112,7 +112,7 @@ declaration needs into the secrets file (filling only what is missing), and
 says what is still owed from elsewhere. Each owed secret is a warning, since
 only the operator can provide it. The sign in clients `apply` creates are
 pending rather than owed, and are one line, Eg: `4 sign in clients (blog,
-docs, gate, status) are created by apply`, with what apply makes for each
+docs, gate, health) are created by apply`, with what apply makes for each
 under `--verbose`.
 
 * **Alone:** the whole apply runs it whenever it has work, so it is typed on
@@ -1116,8 +1116,8 @@ published port is closed from outside; when a check fails, it names the web
 server it finds there.
 
 ```sh
-paisans web-server show  --app status   # the hand-off sheet, for the web server it finds
-paisans web-server check --app status   # from your machine, as a visitor would
+paisans web-server show  --app health   # the hand-off sheet, for the web server it finds
+paisans web-server check --app health   # from your machine, as a visitor would
 ```
 
 * **Alone:** `show` always, to hand the snippet to whoever runs the web

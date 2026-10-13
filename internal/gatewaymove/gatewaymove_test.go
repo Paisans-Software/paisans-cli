@@ -159,7 +159,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		w.old = append(w.old, id)
 	}
 	// Records the move must leave alone, one reason each.
-	add(dns.Record{ID: "keep-status", Type: "A", Name: "status.example.org", Content: "203.0.113.20", Comment: comment})
+	add(dns.Record{ID: "keep-health", Type: "A", Name: "health.example.org", Content: "203.0.113.20", Comment: comment})
 	add(dns.Record{ID: "keep-endpoint", Type: "A", Name: "vm.example.org", Content: newIP, Comment: comment})
 	add(dns.Record{ID: "keep-gone", Type: "A", Name: "gone.example.org", Content: oldIP, Comment: comment})
 	add(dns.Record{ID: "keep-other", Type: "A", Name: "other.example.org", Content: oldIP, Comment: "paisans-0c1d: created by paisans dns init"})
@@ -311,7 +311,7 @@ func TestDeletionTouchesOnlyTheOldGatewaysRecordsAtGatewayHostnames(t *testing.T
 	if !slices.Equal(got, want) {
 		t.Errorf("deleted %v, want exactly the old gateway's records %v", got, want)
 	}
-	for _, id := range []string{"keep-status", "keep-endpoint", "keep-gone", "keep-other"} {
+	for _, id := range []string{"keep-health", "keep-endpoint", "keep-gone", "keep-other"} {
 		if !slices.Contains(w.zone.IDs("zone-1"), id) {
 			t.Errorf("%s was deleted", id)
 		}
@@ -495,9 +495,9 @@ func TestAnotherMovesMarkerDoesNotSkipTheWait(t *testing.T) {
 }
 
 // sharedWorld is the world with home-a, the old gateway, keeping the
-// monitor: its roles run Caddy for the status page, its Caddy serves every
+// monitor: its roles run Caddy for the health page, its Caddy serves every
 // gateway hostname, and the hand-off's apply rewrites its Caddyfile to the
-// status page alone. applied lists each site applied; failApply makes the
+// health page alone. applied lists each site applied; failApply makes the
 // next apply fail.
 type shared struct {
 	*world
@@ -517,7 +517,7 @@ func sharedWorld(t *testing.T) *shared {
 	for _, h := range dns.GatewayHostnames(w.cfg) {
 		fmt.Fprintf(&b, "%s {\n\timport snippets/app.caddy\n}\n", h.Name)
 	}
-	b.WriteString("status.example.org {\n\timport snippets/status.caddy\n}\n")
+	b.WriteString("health.example.org {\n\timport snippets/health.caddy\n}\n")
 	w.hosts["home-a"].files[path] = b.String()
 	w.applySite = func(site string) error {
 		sw.applied = append(sw.applied, site)
@@ -525,7 +525,7 @@ func sharedWorld(t *testing.T) *shared {
 			sw.failApply = false
 			return errors.New("apply failed")
 		}
-		w.hosts[site].files[path] = "status.example.org {\n\timport snippets/status.caddy\n}\n"
+		w.hosts[site].files[path] = "health.example.org {\n\timport snippets/health.caddy\n}\n"
 		return nil
 	}
 	return sw
@@ -644,7 +644,7 @@ func TestAPlainMonitorIsNeverAnOldGateway(t *testing.T) {
 	w := newWorld(t)
 	d := w.cfg.Deployment()
 	w.hosts["watch"].caddy = []string{"face"}
-	w.hosts["watch"].files[gatewaymove.CaddyfilePath(d)] = "status.example.org {\n}\n"
+	w.hosts["watch"].files[gatewaymove.CaddyfilePath(d)] = "health.example.org {\n}\n"
 	applied := false
 	w.applySite = func(string) error { applied = true; return nil }
 	p := w.mustBuild()
@@ -661,8 +661,8 @@ func TestAPlainMonitorIsNeverAnOldGateway(t *testing.T) {
 }
 
 // The gateway and the monitor moved together, from home-a to vm, and the
-// status page's record still points at home-a. The move moves only the
-// gateway's hostnames, so stopping home-a's Caddy would take the status page
+// health page's record still points at home-a. The move moves only the
+// gateway's hostnames, so stopping home-a's Caddy would take the health page
 // down: the move is refused until that record is changed.
 func TestAMoveLeavingAStatusRecordBehindIsRefused(t *testing.T) {
 	w := newWorld(t, func(s string) string {
@@ -670,13 +670,13 @@ func TestAMoveLeavingAStatusRecordBehindIsRefused(t *testing.T) {
 		return strings.Replace(s, "placement: { pinned: watch }", "placement: { pinned: vm }", 1)
 	})
 	for i, r := range w.zone.InZone["zone-1"] {
-		if r.ID == "keep-status" {
+		if r.ID == "keep-health" {
 			w.zone.InZone["zone-1"][i].Content = oldIP
 		}
 	}
 	_, err := w.build()
-	if err == nil || !strings.Contains(err.Error(), "status.example.org") {
-		t.Fatalf("want a refusal naming status.example.org, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "health.example.org") {
+		t.Fatalf("want a refusal naming health.example.org, got %v", err)
 	}
 	if len(w.hosts["home-a"].caddy) != 1 {
 		t.Error("home-a's Caddy was touched")
@@ -745,7 +745,7 @@ func TestACommentInTheCaddyfileIsNotARoute(t *testing.T) {
 	sw := sharedWorld(t)
 	a := sw.hosts["home-a"]
 	delete(a.files, deployrecord.Path(sw.cfg.Deployment()))
-	a.files[gatewaymove.CaddyfilePath(sw.cfg.Deployment())] = "# talk.example.org {\nstatus.example.org {\n\timport snippets/status.caddy\n}\n"
+	a.files[gatewaymove.CaddyfilePath(sw.cfg.Deployment())] = "# talk.example.org {\nhealth.example.org {\n\timport snippets/health.caddy\n}\n"
 	if held, err := gatewaymove.Departing(a, sw.cfg); err != nil || held {
 		t.Errorf("a commented hostname reads as a route: %v %v", held, err)
 	}

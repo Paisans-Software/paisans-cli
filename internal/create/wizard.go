@@ -201,9 +201,9 @@ func (w *Wizard) sites() error {
 	return nil
 }
 
-// settleMonitor drops the status page's place beside the gateway when the
+// settleMonitor drops the health page's place beside the gateway when the
 // machines answered again no longer give it one: exactly one gateway with a
-// public address, and no machine holding the monitor role already. The status
+// public address, and no machine holding the monitor role already. The health
 // page then goes to the machine that holds the role, or to none, which
 // validate refuses and answering the apps again settles.
 func (w *Wizard) settleMonitor() {
@@ -374,7 +374,7 @@ func (w *Wizard) apps() error {
 	}
 	apps := []App{{Key: signIn.key, Kind: signIn.kind, Hostname: host}}
 
-	status := false
+	health := false
 	for _, c := range capabilities {
 		if c.twoSites && len(a.Sites) < 2 {
 			w.p.Say("Chat needs a second machine: its server shares ports with the database and its web client shares one with the gateway, so it is not offered here.")
@@ -414,17 +414,17 @@ func (w *Wizard) apps() error {
 			}
 			apps = append(apps, app)
 		}
-		status = status || c.apps[0].key == statusApp
+		health = health || c.apps[0].key == healthApp
 	}
 	w.asked = true
 
-	if status {
+	if health {
 		keep, err := w.monitor()
 		if err != nil {
 			return err
 		}
 		if !keep {
-			apps = slices.DeleteFunc(apps, func(app App) bool { return app.Key == statusApp })
+			apps = slices.DeleteFunc(apps, func(app App) bool { return app.Key == healthApp })
 		}
 	} else {
 		a.Monitor, a.MonitorOnGateway = nil, false
@@ -433,8 +433,8 @@ func (w *Wizard) apps() error {
 	return nil
 }
 
-// monitor places the status page, on a machine of its own or beside the
-// gateway, and reports whether the status page is kept.
+// monitor places the health page, on a machine of its own or beside the
+// gateway, and reports whether the health page is kept.
 func (w *Wizard) monitor() (bool, error) {
 	a := &w.Answers
 	for _, s := range a.Sites {
@@ -443,7 +443,7 @@ func (w *Wizard) monitor() (bool, error) {
 			return true, nil
 		}
 	}
-	w.p.Say("\nThe status page reports the other machines failing, so it is best on a machine of its own.")
+	w.p.Say("\nThe health page reports the other machines failing, so it is best on a machine of its own.")
 	if gateway := w.publicGateway(); gateway != "" {
 		def := 0
 		if a.MonitorOnGateway {
@@ -483,7 +483,7 @@ func (w *Wizard) monitor() (bool, error) {
 }
 
 // publicGateway is the one site holding the gateway role with a public
-// address, which the status page needs to sit beside it, or "" when there is
+// address, which the health page needs to sit beside it, or "" when there is
 // not exactly one.
 func (w *Wizard) publicGateway() string {
 	var found []string

@@ -7,8 +7,23 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/health/.env",
+      "sha256": "8f166c396cdfcd0f84b6aa5d8388f52a806f1a147acceb1c7113a4aeb2ea1c69",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/health/compose.yaml",
+      "sha256": "d0f09ef3c074152b2e7d01607193c418d7525beaae6b5ffb515d4b36f92703d1",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/health/monitors.json",
+      "sha256": "6ff4c37421c556840cc9eec66ea6c0e3fae5c7d8a3895a40303d2a3f417f22fe",
+      "mode": "0600"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "7e965f866c3eb6142d822330f993fb94968aa3040a9dc0475bd065c0711d9bbe",
+      "sha256": "a791e3f416ac770b430ed3c89c93be71de368fa31bf338de548c044dbc6615ea",
       "mode": "0644"
     },
     {
@@ -17,29 +32,14 @@
       "mode": "0600"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/status.caddy",
-      "sha256": "6cafc0d06abd5895704dce83dd58d4f1f2a84d9f841388dc9c803019efb44308",
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/health.caddy",
+      "sha256": "8727c8870e0d8431a8dff8e742b3c7bfce5031d160b12f27db4abece4b72f8bf",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
       "sha256": "4e31a9c6a88bda147532b296bd5e1b27a285ad31d4ad2b93d373064125860b56",
       "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/status/.env",
-      "sha256": "ae4afa01eec16de4cbf463ad07e03498f95ccb82deea1031e1fc8d458c3d7463",
-      "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/status/compose.yaml",
-      "sha256": "84bae207b34714fe6161f51e4155d334bbc6924b01fc89f802b57ae1604bdadf",
-      "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/status/monitors.json",
-      "sha256": "8936077826a5f13d991def12e2e22a7aee6c9da048d1b48ec5e40fdaca566e3f",
-      "mode": "0600"
     }
   ]
 }

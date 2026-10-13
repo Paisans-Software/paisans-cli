@@ -89,9 +89,9 @@ apps:
     blueprint: mbin
     hostname: talk.example.org
     placement: cluster
-  status:
+  health:
     blueprint: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     placement: { pinned: watch }
     settings:
       admin_group: admins

@@ -603,7 +603,7 @@ func TestALocalStorageAppGetsNoMediaRecord(t *testing.T) {
 func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
 	cfg := declared()
 	cfg.Sites["watch"] = config.Site{Roles: []config.Role{config.RoleMonitor}, Address: "10.44.0.4", PublicAddress: "203.0.113.20", PublicAddress6: "2001:db8::20"}
-	cfg.Apps["status"] = config.App{Kind: config.KindUptime, Hostname: "status.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
 	wants, err := Desired(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -612,7 +612,7 @@ func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
 	for _, w := range wants {
 		got[w.Type+" "+w.Name] = w.Content
 	}
-	if got["A status.example.org"] != "203.0.113.20" || got["AAAA status.example.org"] != "2001:db8::20" {
+	if got["A health.example.org"] != "203.0.113.20" || got["AAAA health.example.org"] != "2001:db8::20" {
 		t.Errorf("the monitor: %v", got)
 	}
 	if got["A talk.example.org"] != "203.0.113.10" {

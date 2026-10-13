@@ -7,7 +7,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/siteadd"
 )
 
-const seed = "/srv/paisans/f2a9/status/monitors.json"
+const seed = "/srv/paisans/f2a9/health/monitors.json"
 
 // The last stage reseeds the monitor: once home-b has joined, watch's
 // monitors.json names it, and the monitor is restarted on the new file. A
@@ -29,7 +29,7 @@ func TestTheJoinReseedsTheMonitorLast(t *testing.T) {
 	if !strings.Contains(w.hosts["watch"].files[seed], `"home-b — ping"`) {
 		t.Errorf("the monitor was not reseeded with home-b:\n%s", w.hosts["watch"].files[seed])
 	}
-	if w.hosts["watch"].ran("/srv/paisans/f2a9/status/compose.yaml restart") != 1 {
+	if w.hosts["watch"].ran("/srv/paisans/f2a9/health/compose.yaml restart") != 1 {
 		t.Error("the monitor was not restarted on the new seed")
 	}
 	again := build(t, w)
@@ -46,9 +46,9 @@ func TestTheJoinReseedsTheMonitorLast(t *testing.T) {
 func TestAFailedReseedNamesTheApplyAndKeepsTheJoin(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
-	w.failOnce = "/srv/paisans/f2a9/status/compose.yaml restart"
+	w.failOnce = "/srv/paisans/f2a9/health/compose.yaml restart"
 	err := siteadd.Execute(build(t, w))
-	if err == nil || !strings.Contains(err.Error(), "stage 8") || !strings.Contains(err.Error(), "paisans apply --site watch --only status --execute") {
+	if err == nil || !strings.Contains(err.Error(), "stage 8") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
 		t.Fatalf("want a stage 8 failure naming the apply, got %v", err)
 	}
 	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
@@ -62,12 +62,12 @@ func TestAFailedReseedNamesTheApplyAndKeepsTheJoin(t *testing.T) {
 func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
-	w.unhealthy = "status"
+	w.unhealthy = "health"
 	err := siteadd.Execute(build(t, w))
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "stopped at stage 8 (monitor)", "stack status is not healthy", "The join itself is done", "paisans apply --site watch --only status --execute")
+	shortAndVerbose(t, err, "stopped at stage 8 (monitor)", "stack health is not healthy", "The join itself is done", "paisans apply --site watch --only health --execute")
 }
 
 // A deployment with no monitor site skips the stage.
@@ -75,7 +75,7 @@ func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
 	delete(w.cfg.Sites, "watch")
-	delete(w.cfg.Apps, "status")
+	delete(w.cfg.Apps, "health")
 	delete(w.hosts, "watch")
 	p := build(t, w)
 	last := p.Stages[len(p.Stages)-1]

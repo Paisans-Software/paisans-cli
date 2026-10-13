@@ -546,7 +546,7 @@ func TestSMTPPasswordSetAnewReachesEveryUser(t *testing.T) {
 	for _, u := range uses {
 		stacks = append(stacks, u.Stacks...)
 	}
-	for _, want := range []string{"talk", "status"} {
+	for _, want := range []string{"talk", "health"} {
 		if !slices.Contains(stacks, want) {
 			t.Errorf("%s is not handed the password: %v", want, uses)
 		}

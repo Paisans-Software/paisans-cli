@@ -498,19 +498,19 @@ const smtpBlock = `smtp:
   from_name: Fixture
 `
 
-// statusApp is an uptime app pinned to site, appended to validConfig's apps.
-func statusApp(site, extra string) string {
-	return "  status:\n    blueprint: uptime\n    hostname: status.example.org\n    placement: { pinned: " + site + " }\n" + extra
+// healthApp is an uptime app pinned to site, appended to validConfig's apps.
+func healthApp(site, extra string) string {
+	return "  health:\n    blueprint: uptime\n    hostname: health.example.org\n    placement: { pinned: " + site + " }\n" + extra
 }
 
 // An app's smtp block replaces only the fields it names; everything else is
 // the deployment's, so a different sender does not mean repeating the host.
 func TestSMTPForInheritsAndOverridesFieldByField(t *testing.T) {
-	cfg, err := config.Load(write(t, validConfig+statusApp("home-a", "    smtp:\n      from_address: alerts@example.org\n      security: tls\n")+smtpBlock))
+	cfg, err := config.Load(write(t, validConfig+healthApp("home-a", "    smtp:\n      from_address: alerts@example.org\n      security: tls\n")+smtpBlock))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.SMTPFor("status")
+	got := cfg.SMTPFor("health")
 	want := config.SMTP{Host: "smtp.example.org", Port: 587, Security: "tls", Username: "robot@example.org", FromAddress: "alerts@example.org", FromName: "Fixture"}
 	if got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
@@ -533,12 +533,12 @@ func TestSMTPPortDefaultsBySecurity(t *testing.T) {
 }
 
 func TestSMTPShapeIsChecked(t *testing.T) {
-	body := validConfig + statusApp("home-a", "    smtp:\n      security: ssl\n") + "smtp:\n  host: smtp.example.org\n  security: none\n  port: 70000\n"
+	body := validConfig + healthApp("home-a", "    smtp:\n      security: ssl\n") + "smtp:\n  host: smtp.example.org\n  security: none\n  port: 70000\n"
 	_, err := config.Load(write(t, body))
 	if err == nil {
 		t.Fatal("loaded")
 	}
-	for _, want := range []string{"smtp.security", "smtp.port", "apps.status.smtp.security"} {
+	for _, want := range []string{"smtp.security", "smtp.port", "apps.health.smtp.security"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("no problem named %s in %v", want, err)
 		}
@@ -554,7 +554,7 @@ func TestARolelessSiteIsAcceptedOnlyWhenSomethingIsPinnedToIt(t *testing.T) {
 	if _, err := config.Load(write(t, withSite)); err == nil || !strings.Contains(err.Error(), "sites.mon.roles") {
 		t.Fatalf("a role-less site with nothing pinned to it loaded: %v", err)
 	}
-	if _, err := config.Load(write(t, withSite+statusApp("mon", ""))); err != nil {
+	if _, err := config.Load(write(t, withSite+healthApp("mon", ""))); err != nil {
 		t.Fatalf("a role-less site hosting a pinned app was refused: %v", err)
 	}
 }
@@ -563,7 +563,7 @@ func TestARolelessSiteIsAcceptedOnlyWhenSomethingIsPinnedToIt(t *testing.T) {
 // extra appended to its entry, before the uptime app is pinned there.
 func monitorSite(extra string) string {
 	site := "  watch:\n    roles: [monitor]\n    address: 10.44.0.9\n    public_address: 203.0.113.20\n    ssh:\n      host: watch.local\n      user: ubuntu\n      keys: [alice]\n" + extra
-	return strings.Replace(validConfig, "etcd:\n", site+"etcd:\n", 1) + statusApp("watch", "")
+	return strings.Replace(validConfig, "etcd:\n", site+"etcd:\n", 1) + healthApp("watch", "")
 }
 
 func TestAMonitorSiteLoadsWithWebServer(t *testing.T) {

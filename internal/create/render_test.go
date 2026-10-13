@@ -87,7 +87,7 @@ func rules(fs []validate.Finding) []string {
 // validates: every one, with no apps and with every app, gated and not.
 //
 // The warnings each leaves are the known ones: the wizard declares no
-// backups, with no status page there is no uptime monitor, and the high availability shape's Garage needs both
+// backups, with no health page there is no uptime monitor, and the high availability shape's Garage needs both
 // homes for a write and pins the chat server to the witness, as the example
 // does.
 func TestNamedShapesValidate(t *testing.T) {
@@ -179,7 +179,7 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	}
 }
 
-// One machine with the status page beside its gateway renders the file in
+// One machine with the health page beside its gateway renders the file in
 // testdata, which validates with the shared-site warning.
 func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) {
 	a := answersFor(ShapeOneMachine, true, false)
@@ -205,6 +205,6 @@ func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) 
 		t.Errorf("warnings %v", got)
 	}
 	if strings.Contains(string(data), "on a machine of its own") || !strings.Contains(string(data), "beside the gateway") {
-		t.Errorf("the status page's comment does not say where it runs:\n%s", data)
+		t.Errorf("the health page's comment does not say where it runs:\n%s", data)
 	}
 }

@@ -52,7 +52,7 @@ func TestAnExternalListenIsClaimed(t *testing.T) {
 		if l.Port == 80 || l.Port == 443 {
 			t.Errorf("an external monitor claims %s", l)
 		}
-		if l.Address == "127.0.0.1" && l.Port == 8480 && l.Proto == "tcp" && l.Key == "sites.watch.web_server.listen" && l.Owner == "app status (uptime)" {
+		if l.Address == "127.0.0.1" && l.Port == 8480 && l.Proto == "tcp" && l.Key == "sites.watch.web_server.listen" && l.Owner == "app health (uptime)" {
 			found = true
 		}
 	}
@@ -74,8 +74,8 @@ func TestAnExternalListenIsClaimed(t *testing.T) {
 // app, pinned or clustered, is the gateway's.
 func TestServedBy(t *testing.T) {
 	cfg := fixture(t)
-	if site, ok := render.ServedBy(cfg, "status"); !ok || site != "watch" {
-		t.Fatalf("status: %s %v", site, ok)
+	if site, ok := render.ServedBy(cfg, "health"); !ok || site != "watch" {
+		t.Fatalf("health: %s %v", site, ok)
 	}
 	for _, app := range []string{"talk", "chat", "blog"} {
 		if site, ok := render.ServedBy(cfg, app); ok {
@@ -89,25 +89,25 @@ func TestServedBy(t *testing.T) {
 func TestMonitorAppsLeaveTheGatewayCaddyfile(t *testing.T) {
 	files := planFiles(build(t))
 	gateway := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
-	if strings.Contains(gateway, "status.example.org") {
+	if strings.Contains(gateway, "health.example.org") {
 		t.Fatalf("the gateway routes the monitor:\n%s", gateway)
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/status.caddy"]; ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]; ok {
 		t.Fatal("the gateway carries the monitor's snippet")
 	}
 	if !strings.Contains(gateway, "talk.example.org {") {
 		t.Fatal("the gateway lost an ordinary app")
 	}
 	monitor := files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]
-	if !strings.Contains(monitor, "status.example.org {") || strings.Contains(monitor, "talk.example.org") {
+	if !strings.Contains(monitor, "health.example.org {") || strings.Contains(monitor, "talk.example.org") {
 		t.Fatalf("the monitor's Caddyfile:\n%s", monitor)
 	}
 	for path := range files {
-		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/snippets/status.caddy" {
+		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
 			t.Errorf("the monitor carries %s", path)
 		}
 	}
-	snippet := files["watch/srv/paisans/f2a9/infra/caddy/snippets/status.caddy"]
+	snippet := files["watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]
 	if !strings.Contains(snippet, "reverse_proxy 10.44.0.4:3001") {
 		t.Fatalf("the monitor's snippet does not reach the app on its own mesh address:\n%s", snippet)
 	}
@@ -153,7 +153,7 @@ func TestAnExternalMonitorRunsNoCaddy(t *testing.T) {
 			t.Errorf("an external monitor renders %s", path)
 		}
 	}
-	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "status.example.org") {
+	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "health.example.org") {
 		t.Error("the gateway routes an external monitor's app")
 	}
 }
@@ -166,9 +166,9 @@ func TestAMonitorCarriesTheGateOnlyWhenItsAppIsGated(t *testing.T) {
 		t.Error("an ungated monitor imports the gate snippets")
 	}
 	cfg := fixture(t)
-	status := cfg.Apps["status"]
-	status.Gated = true
-	cfg.Apps["status"] = status
+	health := cfg.Apps["health"]
+	health.Gated = true
+	cfg.Apps["health"] = health
 	files = planFiles(mustBuild(t, cfg))
 	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], "import /etc/caddy/snippets/gate-gates.caddy") || files["watch/srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"] == "" {
 		t.Fatalf("a gated monitor lacks the gate snippets:\n%s", files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"])
@@ -194,8 +194,8 @@ func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}, "TRUST_PROXY=100.64.0.0/10"},
 		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "10.44.0.4:8480"}, "TRUST_PROXY=10.44.0.0/24"},
 	} {
-		env := planFiles(mustBuild(t, monitorConfig(t, tc.webServer)))["watch/srv/paisans/f2a9/status/.env"]
-		if !strings.Contains(env, "\n"+tc.want+"\n") || !strings.Contains(env, "\nPUBLIC_BASE_URL=https://status.example.org\n") {
+		env := planFiles(mustBuild(t, monitorConfig(t, tc.webServer)))["watch/srv/paisans/f2a9/health/.env"]
+		if !strings.Contains(env, "\n"+tc.want+"\n") || !strings.Contains(env, "\nPUBLIC_BASE_URL=https://health.example.org\n") {
 			t.Errorf("%+v:\n%s", tc.webServer, env)
 		}
 	}
@@ -207,7 +207,7 @@ func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 // web server's connections arrive from is known. Mode paisans publishes on the
 // mesh address, where its Caddy reaches it, and pins nothing.
 func TestAnExternalAppIsPublishedOnListenOnly(t *testing.T) {
-	compose := planFiles(mustBuild(t, monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})))["watch/srv/paisans/f2a9/status/compose.yaml"]
+	compose := planFiles(mustBuild(t, monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})))["watch/srv/paisans/f2a9/health/compose.yaml"]
 	for _, want := range []string{`"127.0.0.1:8480:3001"`, "subnet: 10.255.255.0/29", "gateway: 10.255.255.1"} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("missing %s:\n%s", want, compose)
@@ -216,7 +216,7 @@ func TestAnExternalAppIsPublishedOnListenOnly(t *testing.T) {
 	if strings.Contains(compose, "10.44.0.4:3001") {
 		t.Errorf("an external app is still published on the mesh:\n%s", compose)
 	}
-	compose = planFiles(build(t))["watch/srv/paisans/f2a9/status/compose.yaml"]
+	compose = planFiles(build(t))["watch/srv/paisans/f2a9/health/compose.yaml"]
 	if strings.Contains(compose, "8480") || strings.Contains(compose, "ipam") || strings.Count(compose, ":3001:3001") != 1 {
 		t.Errorf("mode paisans publishes on the mesh address alone:\n%s", compose)
 	}
@@ -227,7 +227,7 @@ func TestAnExternalAppIsPublishedOnListenOnly(t *testing.T) {
 func TestAnExternalMonitorClaimsItsNetwork(t *testing.T) {
 	cfg := monitorConfig(t, &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"})
 	got := render.SiteNetworks(cfg, "watch")
-	if len(got) != 1 || got[0].Subnet != "10.255.255.0/29" || got[0].Key != "sites.watch.web_server" || got[0].Project != "paisans-f2a9-status" {
+	if len(got) != 1 || got[0].Subnet != "10.255.255.0/29" || got[0].Key != "sites.watch.web_server" || got[0].Project != "paisans-f2a9-health" {
 		t.Fatalf("%+v", got)
 	}
 	for _, l := range render.SiteListeners(cfg, "watch") {
@@ -250,9 +250,9 @@ func monitorOnGateway(t *testing.T) *config.Config {
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"
 	cfg.Sites["vm"] = vm
-	status := cfg.Apps["status"]
-	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
-	cfg.Apps["status"] = status
+	health := cfg.Apps["health"]
+	health.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
+	cfg.Apps["health"] = health
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("the monitor on the gateway is refused: %v", refusals)
 	}
@@ -260,17 +260,17 @@ func monitorOnGateway(t *testing.T) *config.Config {
 }
 
 // The monitor beside the gateway shares its Caddy: one Caddyfile carries the
-// status page and every ordinary app, and one claim each on 80 and 443.
+// health page and every ordinary app, and one claim each on 80 and 443.
 func TestAMonitorOnTheGatewayIsServedByTheGatewaysCaddy(t *testing.T) {
 	cfg := monitorOnGateway(t)
 	files := planFiles(mustBuild(t, cfg))
 	gateway := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
-	for _, host := range []string{"status.example.org {", "talk.example.org {"} {
+	for _, host := range []string{"health.example.org {", "talk.example.org {"} {
 		if !strings.Contains(gateway, host) {
 			t.Errorf("the gateway's Caddyfile lacks %q:\n%s", host, gateway)
 		}
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/status.caddy"]; !ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]; !ok {
 		t.Error("the gateway carries no snippet for the monitor")
 	}
 	claims := map[int]int{}
@@ -293,10 +293,10 @@ func TestAMonitorOnTheGatewayPingsEveryOtherSite(t *testing.T) {
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"
 	cfg.Sites["vm"] = vm
-	status := cfg.Apps["status"]
-	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
-	cfg.Apps["status"] = status
-	monitors := byName(renderSeedAt(t, cfg, secrets, "vm/srv/paisans/f2a9/status/monitors.json"))
+	health := cfg.Apps["health"]
+	health.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm"}
+	cfg.Apps["health"] = health
+	monitors := byName(renderSeedAt(t, cfg, secrets, "vm/srv/paisans/f2a9/health/monitors.json"))
 	for _, name := range []string{"home-a — ping", "home-b — ping"} {
 		if monitors[name] == nil {
 			t.Errorf("%s is missing", name)
@@ -327,12 +327,12 @@ func TestADepartingGatewayKeepsEveryRoute(t *testing.T) {
 	}
 	files := planFiles(plan)
 	watch := files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]
-	for _, want := range []string{"talk.example.org {", "status.example.org {", importLine} {
+	for _, want := range []string{"talk.example.org {", "health.example.org {", importLine} {
 		if !strings.Contains(watch, want) {
 			t.Errorf("the departing gateway's Caddyfile lacks %q:\n%s", want, watch)
 		}
 	}
-	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "status.example.org") {
+	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "health.example.org") {
 		t.Error("the new gateway routes the departing monitor's hostname")
 	}
 	if _, ok := files["home-a/srv/paisans/f2a9/infra/caddy/Caddyfile"]; ok {
@@ -354,7 +354,7 @@ func TestADepartingGatewayMountsTheHostOwnersSites(t *testing.T) {
 	}
 }
 
-// With two gateways, as during a move, the status page beside one of them is
+// With two gateways, as during a move, the health page beside one of them is
 // served by that gateway alone: the other skips it, as it skips any monitor
 // elsewhere.
 func TestAMonitorOnOneOfTwoGatewaysIsServedByThatOneAlone(t *testing.T) {
@@ -364,14 +364,14 @@ func TestAMonitorOnOneOfTwoGatewaysIsServedByThatOneAlone(t *testing.T) {
 	b.PublicAddress = "203.0.113.30"
 	cfg.Sites["home-b"] = b
 	files := planFiles(mustBuild(t, cfg))
-	if vm := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]; !strings.Contains(vm, "status.example.org {") {
+	if vm := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]; !strings.Contains(vm, "health.example.org {") {
 		t.Errorf("vm, the monitor's gateway, does not serve it:\n%s", vm)
 	}
 	other := files["home-b/srv/paisans/f2a9/infra/caddy/Caddyfile"]
 	if !strings.Contains(other, "talk.example.org {") {
 		t.Fatalf("home-b is not rendered as a gateway:\n%s", other)
 	}
-	if strings.Contains(other, "status.example.org") {
+	if strings.Contains(other, "health.example.org") {
 		t.Errorf("home-b serves the monitor on vm:\n%s", other)
 	}
 }

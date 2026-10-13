@@ -53,7 +53,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 		Apps: map[string]config.App{
 			"auth":   {Kind: config.KindPocketID, Hostname: "id.example.org", Placement: config.Placement{Mode: config.PlacementCluster}},
 			"forum":  {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}},
-			"status": {Kind: config.KindUptime, Hostname: "status.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
+			"health": {Kind: config.KindUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
 			"watch":  {Kind: config.KindUptime, Hostname: "watch.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}
@@ -61,7 +61,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 		Sites: map[string]config.SiteSecrets{},
 		Apps: map[string]map[string]any{
 			"auth":   {"admins_heartbeat_token": strings.Repeat("ab", 16)},
-			"status": {"admin_password": "status-admin-old", "session_secret": "status-session"},
+			"health": {"admin_password": "health-admin-old", "session_secret": "health-session"},
 			"watch":  {"admin_password": "watch-admin-old", "session_secret": "watch-session"},
 		},
 	}
@@ -98,7 +98,7 @@ func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed
 	switch stack {
 	case "infra":
 		pushes := false
-		for _, app := range []string{"status", "watch"} {
+		for _, app := range []string{"health", "watch"} {
 			if w.cfg.Apps[app].Placement.Site != site {
 				pushes = true
 			}
@@ -110,7 +110,7 @@ func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed
 			w.pushed[site] = token
 			changed(fmt.Sprintf("apply %s infra heartbeat", site))
 		}
-	case "status", "watch":
+	case "health", "watch":
 		if w.cfg.Apps[stack].Placement.Site != site {
 			w.t.Fatalf("%s applied on %s, where it does not run", stack, site)
 		}
@@ -153,7 +153,7 @@ func (w *uptimeWorld) render(s *config.Secrets, changed func(string)) {
 	for _, site := range []string{"home-a", "home-b", "home-c"} {
 		w.renderStack(site, "infra", s, changed)
 	}
-	w.renderStack("home-c", "status", s, changed)
+	w.renderStack("home-c", "health", s, changed)
 	w.renderStack("home-a", "watch", s, changed)
 	w.renderStack("home-a", "auth", s, changed)
 	w.renderStack("home-b", "auth", s, changed)
@@ -204,7 +204,7 @@ func TestHeartbeatMonitorsLearnTheTokenBeforeTheSitePushesIt(t *testing.T) {
 	if r.Path() != "sites.home-b.heartbeat_token" {
 		t.Fatalf("path %q", r.Path())
 	}
-	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-c:status", "home-a:watch", "home-b:infra"}) {
+	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-c:health", "home-a:watch", "home-b:infra"}) {
 		t.Fatalf("users %v, want every monitor off home-b, then home-b's heartbeat", got)
 	}
 	old := w.store.s.Sites["home-b"].HeartbeatToken
@@ -212,7 +212,7 @@ func TestHeartbeatMonitorsLearnTheTokenBeforeTheSitePushesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"apply home-c status seed home-b", "healthy home-c",
+		"apply home-c health seed home-b", "healthy home-c",
 		"apply home-a watch seed home-b", "healthy home-a",
 		"apply home-b infra heartbeat", "healthy home-b",
 	}
@@ -224,7 +224,7 @@ func TestHeartbeatMonitorsLearnTheTokenBeforeTheSitePushesIt(t *testing.T) {
 		t.Fatalf("the file holds a token of %d characters, not a new one of 32 lowercase hex", len(next))
 	}
 	at := w.seededAtPush["home-b"]
-	if at["status/home-b"] != next || at["watch/home-b"] != next {
+	if at["health/home-b"] != next || at["watch/home-b"] != next {
 		t.Fatal("home-b pushed the next token before every monitor that checks it held it")
 	}
 	if w.pushed["home-b"] != next {
@@ -299,8 +299,8 @@ func TestHeartbeatCostStatesTheRefusedPush(t *testing.T) {
 
 func TestUptimeAdminRotatesOnTheMonitorsSite(t *testing.T) {
 	w := newUptimeWorld(t)
-	r := UptimeAdmin("status")
-	if r.Path() != "apps.status.admin_password" {
+	r := UptimeAdmin("health")
+	if r.Path() != "apps.health.admin_password" {
 		t.Fatalf("path %q", r.Path())
 	}
 	if c := r.Cost(); c != (Cost{}) {
@@ -310,7 +310,7 @@ func TestUptimeAdminRotatesOnTheMonitorsSite(t *testing.T) {
 	if err := r.(Prechecker).Precheck(e); err != nil {
 		t.Fatal(err)
 	}
-	if got := usesOf(e, r); !slices.Equal(got, []string{"home-c:status"}) {
+	if got := usesOf(e, r); !slices.Equal(got, []string{"home-c:health"}) {
 		t.Fatalf("users %v", got)
 	}
 	if ok, err := r.Accepts(e, "anything"); !ok || err != nil {
@@ -322,15 +322,15 @@ func TestUptimeAdminRotatesOnTheMonitorsSite(t *testing.T) {
 	if err := w.rotate(r); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(w.log, []string{"apply home-c status admin", "healthy home-c"}) {
+	if !slices.Equal(w.log, []string{"apply home-c health admin", "healthy home-c"}) {
 		t.Fatalf("log %v", w.log)
 	}
-	next, _ := w.store.s.Get("apps.status.admin_password")
-	if next == "status-admin-old" || next == "" || w.admin["status"] != next {
-		t.Fatal("status does not run with the promoted password")
+	next, _ := w.store.s.Get("apps.health.admin_password")
+	if next == "health-admin-old" || next == "" || w.admin["health"] != next {
+		t.Fatal("health does not run with the promoted password")
 	}
 	if w.admin["watch"] != "watch-admin-old" {
-		t.Fatal("watch's password changed with status's")
+		t.Fatal("watch's password changed with health's")
 	}
 }
 
@@ -344,7 +344,7 @@ func TestUptimePrechecksRefuse(t *testing.T) {
 		{UptimeAdmin("forum"), "uptime"},
 		{Heartbeat("nowhere"), "declares no site"},
 		{AdminsHeartbeat("nowhere"), "declares no app"},
-		{AdminsHeartbeat("status"), "pocket-id"},
+		{AdminsHeartbeat("health"), "pocket-id"},
 	} {
 		err := tc.r.(Prechecker).Precheck(w.env())
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -368,7 +368,7 @@ func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
 	if r.Path() != "apps.auth.admins_heartbeat_token" {
 		t.Fatalf("path %q", r.Path())
 	}
-	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-c:status", "home-a:watch", "home-a:auth", "home-b:auth"}) {
+	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-c:health", "home-a:watch", "home-a:auth", "home-b:auth"}) {
 		t.Fatalf("users %v, want every monitor, then auth on each of its sites", got)
 	}
 	old, _ := w.store.s.Get("apps.auth.admins_heartbeat_token")
@@ -376,7 +376,7 @@ func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"apply home-c status seed auth", "healthy home-c",
+		"apply home-c health seed auth", "healthy home-c",
 		"apply home-a watch seed auth", "healthy home-a",
 		"apply home-a auth admins-heartbeat", "healthy home-a",
 		"apply home-b auth admins-heartbeat", "healthy home-b",
@@ -390,7 +390,7 @@ func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
 	}
 	for _, site := range []string{"home-a", "home-b"} {
 		at := w.adminsSeededAtPush[site]
-		if at["status/auth"] != next || at["watch/auth"] != next {
+		if at["health/auth"] != next || at["watch/auth"] != next {
 			t.Fatalf("auth on %s pushed the next token before every monitor held it", site)
 		}
 		if w.adminsPushed[site] != next {
@@ -398,7 +398,7 @@ func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
 		}
 	}
 	for _, site := range []string{"home-a", "home-b", "home-c"} {
-		if w.seeded["status/"+site] == next || w.seeded["watch/"+site] == next {
+		if w.seeded["health/"+site] == next || w.seeded["watch/"+site] == next {
 			t.Fatal("a site heartbeat's seeded token changed with the admins heartbeat's")
 		}
 	}
@@ -411,7 +411,7 @@ func TestAdminsHeartbeatMonitorsLearnTheTokenBeforeThePushers(t *testing.T) {
 // replaced in the file and handed to nobody.
 func TestAdminsHeartbeatWithNoMonitor(t *testing.T) {
 	w := newUptimeWorld(t)
-	delete(w.cfg.Apps, "status")
+	delete(w.cfg.Apps, "health")
 	delete(w.cfg.Apps, "watch")
 	r := AdminsHeartbeat("auth")
 	if got := usesOf(w.env(), r); len(got) != 0 {

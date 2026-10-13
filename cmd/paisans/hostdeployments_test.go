@@ -87,7 +87,7 @@ func plainOutput(t *testing.T) *bytes.Buffer {
 func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
 	h := &listedHost{t: t, registry: twoDeployments(t), probe: strings.Join([]string{
 		"root f2a9", "root 0c1d", "root dead",
-		"container\t" + monitorID + "\tpaisans-f2a9-status\tapp",
+		"container\t" + monitorID + "\tpaisans-f2a9-health\tapp",
 		"container\t" + strayID + "\tpaisans-dead-talk\tapp",
 		"container\t" + strayID + "\tpaisans-dead-talk\tapp",
 		"end",
@@ -118,7 +118,7 @@ func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
 	if strings.Count(got, "paisans-dead-talk") != 1 {
 		t.Errorf("a project is listed once per container:\n%s", got)
 	}
-	if strings.Contains(got, "/srv/paisans/f2a9: no registry entry") || strings.Contains(got, "paisans-f2a9-status") {
+	if strings.Contains(got, "/srv/paisans/f2a9: no registry entry") || strings.Contains(got, "paisans-f2a9-health") {
 		t.Errorf("a registered deployment is listed as a leftover:\n%s", got)
 	}
 }

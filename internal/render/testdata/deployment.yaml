@@ -179,9 +179,9 @@ apps:
         # Be kind
 
         To each other.
-  status:
+  health:
     blueprint: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     # The monitor on a site of its own, which neither the homes' failures nor
     # the gateway's take down with them.
     placement: { pinned: watch }
@@ -189,7 +189,7 @@ apps:
       admin_group: admins
     # One field overridden, so the golden seed shows the merge.
     smtp:
-      from_name: Example Status
+      from_name: Example Health
 
 # The deployment's mail server. The uptime app above inherits every field but
 # the one it overrides, and talk inherits all of them.

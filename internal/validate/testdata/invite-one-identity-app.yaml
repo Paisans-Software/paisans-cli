@@ -100,9 +100,9 @@ apps:
         # Be kind
 
         Treat each other well.
-  status:
+  health:
     blueprint: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     placement: { pinned: watch }
     settings:
       admin_group: admins
@@ -110,5 +110,5 @@ apps:
 smtp:
   host: smtp.example.org
   security: starttls
-  username: status@example.org
-  from_address: status@example.org
+  username: health@example.org
+  from_address: health@example.org

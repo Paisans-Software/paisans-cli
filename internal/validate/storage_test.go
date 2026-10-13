@@ -80,9 +80,9 @@ func TestStorageRefusals(t *testing.T) {
 // anyway, so it is accepted rather than refused as redundant.
 func TestLocalStorageOnALocalOnlyKindIsAccepted(t *testing.T) {
 	cfg := load(t, "valid")
-	status := cfg.Apps["status"]
-	status.Storage = config.StorageLocal
-	cfg.Apps["status"] = status
+	health := cfg.Apps["health"]
+	health.Storage = config.StorageLocal
+	cfg.Apps["health"] = health
 	if result := validate.Check(cfg); len(result.Findings) != 0 {
 		t.Errorf("%v", result.Findings)
 	}

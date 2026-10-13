@@ -65,7 +65,7 @@ type view struct {
 	Replication int
 	Apps        []appView
 	SMTP        SMTP
-	// MonitorBesideGateway is the status page sharing the gateway's machine,
+	// MonitorBesideGateway is the health page sharing the gateway's machine,
 	// which its comment in the file says.
 	MonitorBesideGateway bool
 }

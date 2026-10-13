@@ -13,22 +13,22 @@ import (
 // a person must be in to sign in at all, so the client is restricted to it at
 // Pocket ID and a non-admin is refused before the monitor sees them.
 func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
-	spec, ok := kinds.OIDCClient(config.KindUptime, "status.example.org", "status")
+	spec, ok := kinds.OIDCClient(config.KindUptime, "health.example.org", "health")
 	if !ok {
 		t.Fatal("the toolkit does not know an uptime client")
 	}
-	if spec.CallbackURL != "https://status.example.org/login/oidc/callback" {
+	if spec.CallbackURL != "https://health.example.org/login/oidc/callback" {
 		t.Errorf("callback %s", spec.CallbackURL)
 	}
 	if !spec.PKCE {
 		t.Error("the fork always sends a code challenge, so PKCE must be on")
 	}
-	app := config.App{Kind: config.KindUptime, Hostname: "status.example.org", Settings: map[string]any{"admin_group": "admins"}}
+	app := config.App{Kind: config.KindUptime, Hostname: "health.example.org", Settings: map[string]any{"admin_group": "admins"}}
 	admin, member := spec.Groups(app)
 	if admin != "admins" || member != "admins" {
 		t.Errorf("groups admin=%q member=%q, want both admins", admin, member)
 	}
-	if got := spec.AdminGroupSource("status"); got != "apps.status.settings.admin_group" {
+	if got := spec.AdminGroupSource("health"); got != "apps.health.settings.admin_group" {
 		t.Errorf("admin group source %q", got)
 	}
 }

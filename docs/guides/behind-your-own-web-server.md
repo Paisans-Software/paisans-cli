@@ -33,7 +33,7 @@ sites:
       listen: 127.0.0.1:8480          # where your web server proxies to
 
 apps:
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
@@ -88,7 +88,7 @@ warning, `!`, that says what to add, with exit status 0.
 ## 3. Include the toolkit's directory
 
 `paisans apply --execute`, with or without `--site health`, writes the monitor's site,
-filled in for the web server it finds, into a file of its own, `paisans-<token>-status.caddy` or
+filled in for the web server it finds, into a file of its own, `paisans-<token>-health.caddy` or
 `.conf`, in a directory beside your server's main configuration:
 `/etc/caddy/paisans.d`, `/etc/nginx/paisans.d` or `/etc/apache2/paisans.d` on
 the machine itself. Your configuration includes that directory with one line,
@@ -125,7 +125,7 @@ move the line:
 
 ```
 web server
-  ! site file for status: caddy imports /etc/caddy/paisans.d above its global options block
+  ! site file for health: caddy imports /etc/caddy/paisans.d above its global options block
        Nothing was written. /opt/caddy/Caddyfile has:
            import /etc/caddy/paisans.d/*
        above its global options block, the block that opens with { alone.
@@ -164,7 +164,7 @@ then apply again:
 
 ```
 web server
-  ! site file for status: caddy does not include /etc/caddy/paisans.d
+  ! site file for health: caddy does not include /etc/caddy/paisans.d
        Nothing was written. Add this line to /opt/caddy/Caddyfile, at the top
        level of the Caddyfile, after the global options block if it has one,
        outside every site block and snippet, once:
@@ -183,7 +183,7 @@ web server
        server still starts, without the paisans sites, if the directory is ever
        gone.
        Or set sites.health.web_server.include_dir: false, and add what paisans
-       web-server show --app status prints to your web server yourself.
+       web-server show --app health prints to your web server yourself.
 ```
 
 With the line there, apply creates the directory if it is missing, writes the
@@ -192,9 +192,9 @@ file, validates your whole configuration, reloads a server in a container
 
 ```
 web server
-  ✓ site file for status   /opt/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy reloaded
+  ✓ site file for health   /opt/caddy/paisans.d/paisans-f2a9-health.caddy written, caddy reloaded
   ! health: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml
-  ✓ status                 health.example.org
+  ✓ health                 health.example.org
 ```
 
 The `include_dir` line is added under the site's `web_server`, every other line
@@ -252,7 +252,7 @@ a few lines:
 
 ```
 web server
-  ! site file for status: no directory caddy reads to write in
+  ! site file for health: no directory caddy reads to write in
        The compose file /opt/caddy/compose.yaml declares
        /opt/caddy/paisans.d:/etc/caddy/paisans.d for web, but the running
        container caddy-1 was created before it. Recreate it; a restart does not
@@ -274,18 +274,18 @@ active, and the run ends on that warning until you have:
 
 ```
 web server
-  ! site file for status: /etc/caddy/paisans.d/paisans-f2a9-status.caddy written, caddy not reloaded
+  ! site file for health: /etc/caddy/paisans.d/paisans-f2a9-health.caddy written, caddy not reloaded
        caddy's configuration is valid with it, and caddy runs on the host
        itself, so apply leaves its reload to you:
            sudo systemctl reload caddy
-       then run paisans web-server check --app status.
+       then run paisans web-server check --app health.
 ```
 
 Without an active unit the command is `caddy reload --config <your Caddyfile>
 --adapter caddyfile`, `sudo nginx -s reload` or `sudo apachectl graceful`.
 
 **The files are the toolkit's, and only they are.** Each is recorded in the
-deployment's manifest. `paisans app remove --app status`, `paisans site
+deployment's manifest. `paisans app remove --app health`, `paisans site
 remove`, including `--force` on an abandoned host, and an apply where the
 app's hostname left the site or `include_dir` changed delete that file and
 nothing else, never the directory or another file in it, then validate the
@@ -302,7 +302,7 @@ under the site's `web_server`: apply writes nothing, and you copy the snippet
 ## 4. Get the hand-off sheet
 
 ```sh
-paisans web-server show --app status
+paisans web-server show --app health
 ```
 
 It reads the machine's web server over ssh, changing nothing, and prints:
@@ -318,7 +318,7 @@ It reads the machine's web server over ssh, changing nothing, and prints:
     address;
   * refuse `/status*`, `/badge/*`, `/metrics` and `/api/v1/*`, as the
     toolkit's own edge does, in any case and with or without a trailing
-    slash, because the app's routing ignores both: the status page lists
+    slash, because the app's routing ignores both: the health page lists
     every monitor, mesh addresses included, and `/metrics` is public whenever
     no API token exists;
 * one line saying which web server it found, where, and how it comes by its
@@ -382,7 +382,7 @@ With `acme_dns`, `show` and `apply` warn, and the site file is still written,
 since it is valid and changes nothing there:
 
 ```
-  ! site file for status: caddy's global acme_dns applies to health.example.org too
+  ! site file for health: caddy's global acme_dns applies to health.example.org too
        /opt/caddy/Caddyfile sets, in its global options:
 
            acme_dns cloudflare {$CF_API_TOKEN}
@@ -428,7 +428,7 @@ again.
 ## 6. Check it from your machine
 
 ```sh
-paisans web-server check --app status
+paisans web-server check --app health
 ```
 
 It changes nothing: it looks at the monitor as a visitor would, and marks
@@ -440,7 +440,7 @@ ssh, as `web-server show` does, and names it.
 |---|---|---|
 | `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 5; delete any other record for the name by hand |
 | `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 4, or the proxy if the answer is not 200 |
-| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app status`, then `paisans apply --site health`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
+| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app health`, then `paisans apply --site health`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or drop the port in Docker's `DOCKER-USER` chain. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
 Run it again after every change until no check fails and it ends with
@@ -453,7 +453,7 @@ up, in a `web server` section:
 
 ```
 web server
-  ✓ status   health.example.org
+  ✓ health   health.example.org
 ```
 
 When one fails the app's line is a warning, `!`, with the checks that failed
@@ -462,7 +462,7 @@ front of the app, read with the sudo password the run asked for at its start.
 When the app's site file step above already warned, the check's line says
 only that it fails until that is fixed, so each problem comes with one set of
 instructions. The run ends on a warning, `! Deployment complete, but 1 app
-failed its web server check: status`, rather than `Deployment complete.`, or
+failed its web server check: health`, rather than `Deployment complete.`, or
 `Applied <n> files to health.` for `apply --site health`, since a visitor cannot
 use the app yet. Every step ran, so the exit status is
 still 0. What apply could not do on the host, such as reaching it over ssh to
@@ -477,16 +477,16 @@ for:
 
 ```
 web server
-  ⠋ status: waiting for caddy's certificate: 14s
+  ⠋ health: waiting for caddy's certificate: 14s
 ```
 
-It passes as soon as every check does, `✓ status   health.example.org, after
+It passes as soon as every check does, `✓ health   health.example.org, after
 14s`, and after a minute fails on the last check's result. Waiting cannot fix
 a name that does not resolve or an app reachable around the web server, so
 those fail at once. A site file already in place and unchanged is checked
 once, and waited on only after apply reloaded a server in a container.
 `paisans web-server check` checks once, when you are ready. Fix what it names with steps 3 to 5, then run `paisans web-server
-check --app status` until it passes.
+check --app health` until it passes.
 
 ## Afterwards
 

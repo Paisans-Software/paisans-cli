@@ -39,23 +39,23 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	cfg := fixture(t)
 	d := cfg.Deployment()
 	server := webservertest.New("")
-	server.Files["/opt/caddy/paisans.d/paisans-f2a9-status.caddy"] = "status.example.org {\n}\n"
+	server.Files["/opt/caddy/paisans.d/paisans-f2a9-health.caddy"] = "health.example.org {\n}\n"
 	server.Files["/opt/caddy/paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
-	status := render.ManifestWebServer{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: sum("status.example.org {\n}\n"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	health := render.ManifestWebServer{App: "health", Path: "/opt/caddy/paisans.d/paisans-f2a9-health.caddy", SHA256: sum("health.example.org {\n}\n"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
 	other := render.ManifestWebServer{App: "other", Path: "/opt/caddy/paisans.d/paisans-f2a9-other.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
-	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/status/compose.yaml", SHA256: "cd"}}, WebServer: []render.ManifestWebServer{other, status}})
+	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/health/compose.yaml", SHA256: "cd"}}, WebServer: []render.ManifestWebServer{other, health}})
 	h := webHost{server, map[string]string{manifestPath: string(m)}}
 
-	sp, err := planSite(cfg, "status", SiteState{Site: "watch", Inventory: &hostcheck.Inventory{Manifest: true, ManifestFiles: []render.ManifestFile{}, ManifestWebServer: []render.ManifestWebServer{other, status}}})
+	sp, err := planSite(cfg, "health", SiteState{Site: "watch", Inventory: &hostcheck.Inventory{Manifest: true, ManifestFiles: []render.ManifestFile{}, ManifestWebServer: []render.ManifestWebServer{other, health}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sp.WebServer) != 1 || sp.WebServer[0] != status || sp.Empty() {
+	if len(sp.WebServer) != 1 || sp.WebServer[0] != health || sp.Empty() {
 		t.Fatalf("planned %+v", sp.WebServer)
 	}
 	rec := &ui.Recorder{}
-	(&Plan{App: "status", Sites: []SitePlan{sp}}).Show(rec)
-	if !rec.Has("detail", status.Path+", from the include directory of caddy") {
+	(&Plan{App: "health", Sites: []SitePlan{sp}}).Show(rec)
+	if !rec.Has("detail", health.Path+", from the include directory of caddy") {
 		t.Errorf("plan:\n%s", rec.Lines())
 	}
 
@@ -63,7 +63,7 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	if err := e.webServer(h, d, sp); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := server.Files[status.Path]; ok {
+	if _, ok := server.Files[health.Path]; ok {
 		t.Error("the site file stayed")
 	}
 	if _, ok := server.Files["/opt/caddy/paisans.d/blog.caddy"]; !ok {
@@ -90,11 +90,11 @@ func TestAppRemoveDeletesItsSiteFileOnly(t *testing.T) {
 func TestAppRemoveStopsWhenTheServerRefuses(t *testing.T) {
 	cfg := fixture(t)
 	server := webservertest.New("")
-	content := "status.example.org {\n}\n"
-	path := "/etc/nginx/paisans.d/paisans-f2a9-status.conf"
+	content := "health.example.org {\n}\n"
+	path := "/etc/nginx/paisans.d/paisans-f2a9-health.conf"
 	server.Files[path] = content
 	server.Validate = "nginx: [emerg] unknown directive in /etc/nginx/nginx.conf:12"
-	entry := render.ManifestWebServer{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
+	entry := render.ManifestWebServer{App: "health", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
 	m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
 	h := webHost{server, map[string]string{manifestPath: string(m)}}
 	err := (&Executor{}).webServer(h, cfg.Deployment(), SitePlan{Site: "watch", WebServer: []render.ManifestWebServer{entry}})
@@ -112,10 +112,10 @@ func TestAppRemoveLeavesTheReloadOfABareMetalServer(t *testing.T) {
 	cfg := fixture(t)
 	server := webservertest.New("")
 	server.Units = []string{"nginx"}
-	content := "status.example.org {\n}\n"
-	path := "/etc/nginx/paisans.d/paisans-f2a9-status.conf"
+	content := "health.example.org {\n}\n"
+	path := "/etc/nginx/paisans.d/paisans-f2a9-health.conf"
 	server.Files[path] = content
-	entry := render.ManifestWebServer{App: "status", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
+	entry := render.ManifestWebServer{App: "health", Path: path, SHA256: sum(content), Server: "nginx", Config: "/etc/nginx/nginx.conf"}
 	m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
 	h := webHost{server, map[string]string{manifestPath: string(m)}}
 	e := &Executor{}

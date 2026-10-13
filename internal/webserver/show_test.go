@@ -11,7 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/webserver"
 )
 
-// fixture is the render fixture: status pinned to watch, a monitor in
+// fixture is the render fixture: health pinned to watch, a monitor in
 // managed_by: paisans with public_address 203.0.113.20.
 func fixture(t *testing.T) *config.Config {
 	t.Helper()
@@ -29,7 +29,7 @@ func external(t *testing.T, listen string) webserver.Target {
 	watch := cfg.Sites["watch"]
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: listen}
 	cfg.Sites["watch"] = watch
-	target, err := webserver.For(cfg, "status")
+	target, err := webserver.For(cfg, "health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func external(t *testing.T, listen string) webserver.Target {
 func TestForReadsTheMonitor(t *testing.T) {
 	target := external(t, "127.0.0.1:8480")
 	want := webserver.Target{
-		App: "status", Site: "watch", Hostname: "status.example.org",
+		App: "health", Site: "watch", Hostname: "health.example.org",
 		Mode: config.ManagedByExternal, Listen: "127.0.0.1:8480", ListenHost: "127.0.0.1", ListenPort: 8480,
 		PublicAddress: "203.0.113.20", HealthPath: "/healthz", HealthExpect: "200",
 	}
@@ -65,7 +65,7 @@ func TestShowHandsOffAnExternalApp(t *testing.T) {
 	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
 	out := buf.String()
 	for _, want := range []string{
-		"status.example.org", "http://127.0.0.1:8480", "/healthz",
+		"health.example.org", "http://127.0.0.1:8480", "/healthz",
 		"terminate TLS", "Host", "X-Forwarded-For", "X-Forwarded-Proto",
 		"203.0.113.20",
 		"reverse_proxy 127.0.0.1:8480",
@@ -73,7 +73,7 @@ func TestShowHandsOffAnExternalApp(t *testing.T) {
 		"proxy_set_header X-Forwarded-Proto $scheme;",
 		"ProxyPass        / http://127.0.0.1:8480/",
 		`RequestHeader set X-Forwarded-Proto "https"`,
-		"paisans web-server check --app status",
+		"paisans web-server check --app health",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -102,7 +102,7 @@ func TestShowWarnsWhenListenIsNotLoopback(t *testing.T) {
 }
 
 func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
-	target, err := webserver.For(fixture(t), "status")
+	target, err := webserver.For(fixture(t), "health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
 	}
 }
 
-// The toolkit's own edge refuses the monitor's status page, badges, /metrics
+// The toolkit's own edge refuses the monitor's health page, badges, /metrics
 // and token API whatever the app's settings say. Behind the operator's web
 // server that edge is theirs, so each snippet carries the same refusals.
 func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
@@ -133,7 +133,7 @@ func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
 	}
 }
 
-// refusalCases are paths the monitor's Express app routes to its status
+// refusalCases are paths the monitor's Express app routes to its health
 // page, badges, metrics or token API, in the forms its non strict, case
 // insensitive routing still accepts, and paths that must pass.
 var refusalCases = map[string]bool{
@@ -269,7 +269,7 @@ func TestACMEDNSWarningRewritesTheLineAsACertIssuer(t *testing.T) {
 			if !strings.Contains(hint, "acme_dns") {
 				t.Errorf("hint %q", hint)
 			}
-			for _, want := range []string{c.found, c.rewrite, "status.example.org", "ZeroSSL", "HTTP-01", "/opt/caddy/Caddyfile"} {
+			for _, want := range []string{c.found, c.rewrite, "health.example.org", "ZeroSSL", "HTTP-01", "/opt/caddy/Caddyfile"} {
 				if !strings.Contains(detail, want) {
 					t.Errorf("detail lacks %q:\n%s", want, detail)
 				}

@@ -19,7 +19,7 @@ import (
 
 func TestWebServerShowPrintsTheSheet(t *testing.T) {
 	var err error
-	out := captureStdout(t, func() { err = runWebServer([]string{"show", "--app", "status", "--config", fixtureConfig()}) })
+	out := captureStdout(t, func() { err = runWebServer([]string{"show", "--app", "health", "--config", fixtureConfig()}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestWebServerRefusesAnAppTheGatewayServes(t *testing.T) {
 }
 
 func TestWebServerRefusesAnUnknownSubcommand(t *testing.T) {
-	if err := runWebServer([]string{"fix", "--app", "status"}); err == nil || !strings.Contains(err.Error(), "show or check") {
+	if err := runWebServer([]string{"fix", "--app", "health"}); err == nil || !strings.Contains(err.Error(), "show or check") {
 		t.Fatalf("err = %v", err)
 	}
 	if err := runWebServer([]string{"check", "--config", fixtureConfig()}); err == nil || !strings.Contains(err.Error(), "--app") {
@@ -64,7 +64,7 @@ func TestWebServerCheckFailsOnAFailedItem(t *testing.T) {
 		}
 	}
 	rec := withRecorder(t, false)
-	err := runWebServer([]string{"check", "--app", "status", "--config", fixtureConfig()})
+	err := runWebServer([]string{"check", "--app", "health", "--config", fixtureConfig()})
 	out := rec.Lines()
 	if err == nil || !rec.Has("fail", "check dns") || !rec.Has("fail", "check certificate") {
 		t.Fatalf("err = %v\n%s", err, out)
@@ -116,20 +116,20 @@ func TestWebServerShowPrintsTheDetectedServer(t *testing.T) {
 	asked := fakeWebServer(t, caddyAutomatic)
 	var err error
 	out := captureStdout(t, func() {
-		err = runWebServer([]string{"show", "--app", "status", "--config", externalFixture(t)})
+		err = runWebServer([]string{"show", "--app", "health", "--config", externalFixture(t)})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, webServerAsks{"status sudo=true"}) {
+	if !slices.Equal(*asked, webServerAsks{"health sudo=true"}) {
 		t.Errorf("asked %v", *asked)
 	}
 	if !strings.Contains(out, caddyAutomatic.Summary()) || strings.Contains(out, "proxy_pass") || strings.Contains(out, "tls /etc/ssl") {
 		t.Errorf("sheet:\n%s", out)
 	}
 	if out2 := captureStdout(t, func() {
-		runWebServer([]string{"show", "--app", "status", "--sudo=false", "--config", externalFixture(t)})
-	}); !slices.Equal(*asked, webServerAsks{"status sudo=true", "status sudo=false"}) {
+		runWebServer([]string{"show", "--app", "health", "--sudo=false", "--config", externalFixture(t)})
+	}); !slices.Equal(*asked, webServerAsks{"health sudo=true", "health sudo=false"}) {
 		t.Errorf("asked %v:\n%s", *asked, out2)
 	}
 }
@@ -149,7 +149,7 @@ func TestWebServerShowWarnsOfAGlobalACMEDNS(t *testing.T) {
 	rec := withRecorder(t, false)
 	var err error
 	out := captureStdout(t, func() {
-		err = runWebServer([]string{"show", "--app", "status", "--config", externalFixture(t)})
+		err = runWebServer([]string{"show", "--app", "health", "--config", externalFixture(t)})
 	})
 	if err != nil {
 		t.Fatal(err)

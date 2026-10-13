@@ -13,7 +13,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
-const seed = "/srv/paisans/f2a9/status/monitors.json"
+const seed = "/srv/paisans/f2a9/health/monitors.json"
 
 // watched is world with the monitor site applied while docs was still
 // declared, so its seed carries docs' checks.
@@ -32,7 +32,7 @@ func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 	var entries []render.ManifestFile
 	for _, f := range before.Files {
 		rel, ok := strings.CutPrefix(f.Path, "watch/")
-		if !ok || rel == render.ManifestName || !strings.HasPrefix(rel, "srv/paisans/f2a9/status/") {
+		if !ok || rel == render.ManifestName || !strings.HasPrefix(rel, "srv/paisans/f2a9/health/") {
 			continue
 		}
 		watch.files["/"+rel] = f.Content
@@ -84,7 +84,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 	}
 	restarted := 0
 	for _, c := range watch.sent {
-		if strings.HasSuffix(c, "/status/compose.yaml restart") {
+		if strings.HasSuffix(c, "/health/compose.yaml restart") {
 			restarted++
 		}
 	}
@@ -114,7 +114,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 // the apply that finishes it.
 func TestAFailedReseedNamesTheApply(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
-	hosts["watch"].fail = "/status/compose.yaml restart"
+	hosts["watch"].fail = "/health/compose.yaml restart"
 	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 		}
 	}
 	var me *MonitorError
-	if !errors.As(err, &me) || !strings.Contains(err.Error(), "paisans apply --site watch --only status --execute") {
+	if !errors.As(err, &me) || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
 		t.Fatalf("want the monitor's failure naming the apply, got %v", err)
 	}
 	if _, ok := hosts["home-a"].files[docsEnv]; ok {
@@ -144,7 +144,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
 	delete(cfg.Sites, "watch")
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	delete(hosts, "watch")
 	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
 	if err != nil {
@@ -161,7 +161,7 @@ func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 // with -v, and the apply that finishes it.
 func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
-	hosts["watch"].unhealthy = "status"
+	hosts["watch"].unhealthy = "health"
 	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
 	if err != nil {
 		t.Fatal(err)
@@ -172,5 +172,5 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 		t.Fatal("an unhealthy monitor passed")
 	}
 	// as the command wraps it
-	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack status is not healthy", "The app is removed", "paisans apply --site watch --only status --execute")
+	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack health is not healthy", "The app is removed", "paisans apply --site watch --only health --execute")
 }

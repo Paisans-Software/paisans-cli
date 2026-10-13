@@ -157,7 +157,7 @@ apps:
       # The chat server's API hostname, which becomes base_url.
       homeserver: chat.example.org
       brand: Example Community
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
