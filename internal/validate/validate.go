@@ -1206,7 +1206,7 @@ func (c *checker) gatedOnUngateableKind() {
 		}
 		c.refuse("gated-on-ungateable-kind", fmt.Sprintf("apps.%s.gated", name),
 			"gated is set on a kind that cannot sit behind the gate",
-			"is true on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt: a Matrix client or a federating server will not follow it, Pocket ID is the sign-in flow itself, and the monitor must stay readable while the sites the gate signs in through are down. Remove gated.",
+			"is true on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt, and its blueprint says it cannot take one: its clients or federating servers would not follow the redirect, it is the sign-in flow itself, or it must stay readable while the gate is down. Remove gated.",
 			app.Kind)
 	}
 }
@@ -1230,7 +1230,7 @@ func (c *checker) gatedWithoutSignedFetch() {
 		}
 		c.refuse("gated-without-signed-fetch", fmt.Sprintf("apps.%s.gated", name),
 			"gated federating app still answers unsigned reads",
-			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and, for a WriteFreely, private: false, since only private mode reads from the allowlist alone), turn federation off for this app, or remove gated.",
+			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and any setting the kind's blueprint says turns its signed reads off), turn federation off for this app, or remove gated.",
 			app.Kind)
 	}
 }
@@ -1248,7 +1248,7 @@ func (c *checker) autoLoginWithoutARule() {
 		}
 		c.refuse("auto-login-without-a-rule", fmt.Sprintf("apps.%s.auto_login", name),
 			"auto_login is set on a kind with no auto-login rule",
-			"is true on an app of kind %s, which has no auto-login rule, so it would do nothing. Outline's sign-in screen already redirects itself when OIDC is its only provider, and a kind that cannot sit behind the gate has nothing to skip. Remove auto_login.",
+			"is true on an app of kind %s, which has no auto-login rule, so it would do nothing: its blueprint declares none, because its sign-in screen already redirects itself or because it cannot sit behind the gate. Remove auto_login.",
 			app.Kind)
 	}
 }

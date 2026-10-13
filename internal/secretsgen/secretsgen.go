@@ -439,13 +439,13 @@ func fillKeypair(app string, entries map[string]any, pair keypair, note func(boo
 func oauthKeypairPEM(passphrase string) (string, string, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return "", "", fmt.Errorf("generating Mbin's OAuth2 key: %w", err)
+		return "", "", fmt.Errorf("generating the OAuth2 key: %w", err)
 	}
 	//nolint:staticcheck // see above for why the deprecated form is the right one
 	block, err := x509.EncryptPEMBlock(rand.Reader, "RSA PRIVATE KEY",
 		x509.MarshalPKCS1PrivateKey(key), []byte(passphrase), x509.PEMCipherAES256)
 	if err != nil {
-		return "", "", fmt.Errorf("encrypting Mbin's OAuth2 key: %w", err)
+		return "", "", fmt.Errorf("encrypting the OAuth2 key: %w", err)
 	}
 	public, err := publicKeyPEM(&key.PublicKey)
 	if err != nil {
@@ -490,7 +490,7 @@ func OpenPrivateKey(privatePEM, passphrase string) (*rsa.PrivateKey, error) {
 func publicKeyPEM(key *rsa.PublicKey) (string, error) {
 	der, err := x509.MarshalPKIXPublicKey(key)
 	if err != nil {
-		return "", fmt.Errorf("encoding Mbin's OAuth2 public key: %w", err)
+		return "", fmt.Errorf("encoding the OAuth2 public key: %w", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})), nil
 }
