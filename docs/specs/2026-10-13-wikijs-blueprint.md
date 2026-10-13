@@ -320,11 +320,11 @@ finds an instance that has left setup mode.
    * every `synced_groups` group missing from Wiki.js, created with Wiki.js's
      defaults.
 
-   The settings changed on one instance reach the others through `HA_ACTIVE`,
-   except authentication strategies, which Wiki.js loads at boot
-   (`server/models/authentication.js:94-122`). *To verify before building*
-   asks whether its reload event covers them; until that is observed, the
-   bootstrap restarts its own instance after changing them, as in step 3.
+   Every instance has its own bootstrap, and each converges the instance it
+   sits beside, so a strategy change reaches every instance through its own
+   bootstrap whether or not Wiki.js passes it on through `HA_ACTIVE`
+   (strategies are loaded at boot, `server/models/authentication.js:94-122`,
+   and reloaded by the instance that is sent them).
 6. **Release** the lock and report healthy. Nothing more happens until the
    container restarts.
 
@@ -463,9 +463,6 @@ it:
   `DATABASE_URL` against the cluster's Postgres.
 * That `pg-pubsub` reconnects its `LISTEN` after a Patroni failover moves the
   primary. If it does not, instances stop hearing each other until restarted.
-* Whether a strategy change made on one instance reaches the others through
-  `HA_ACTIVE`, which decides whether step 5 must restart its own instance
-  after one. The name of the event that carries it, if any, has not been read.
 * That Pocket ID shows no consent screen on a first sign-in that asks for the
   `groups` scope, or what the toolkit's client settings do about one.
 * Wiki.js's behaviour against Pocket ID end to end: the OAuth2 module's
