@@ -14,7 +14,7 @@ apps:
     blueprint: mbin
 `
 
-var pin = Catalog{URL: "https://example.org/c.git", Tag: "v1.0.0", Commit: strings.Repeat("a", 40), Signers: []string{"ssh-ed25519 AAAA k"}}
+var pin = Catalog{URL: "https://example.org/c.git", Tag: "v1.0.0", Commit: strings.Repeat("a", 40)}
 
 // A first catalog goes in its own section just before apps:, leaving the
 // comment that introduces apps: where it was.
@@ -23,12 +23,12 @@ func TestSetCatalogAddsTheSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "version: 1\ncatalogs:\n  example:\n    url: https://example.org/c.git\n    tag: v1.0.0\n    commit: " + strings.Repeat("a", 40) + "\n    signers:\n      - ssh-ed25519 AAAA k\n\n# The apps.\napps:\n"
+	want := "version: 1\ncatalogs:\n  example:\n    url: https://example.org/c.git\n    tag: v1.0.0\n    commit: " + strings.Repeat("a", 40) + "\n\n# The apps.\napps:\n"
 	if !strings.HasPrefix(string(out), want) {
 		t.Errorf("got:\n%s", out)
 	}
 	cfg := mustParse(t, out)
-	if cfg.Catalogs["example"].Commit != pin.Commit || cfg.Catalogs["example"].Signers[0] != pin.Signers[0] {
+	if cfg.Catalogs["example"].Commit != pin.Commit || cfg.Catalogs["example"].Tag != pin.Tag {
 		t.Errorf("parsed %+v", cfg.Catalogs)
 	}
 }
@@ -36,8 +36,8 @@ func TestSetCatalogAddsTheSection(t *testing.T) {
 // A second catalog is added after the first, and an existing one is
 // replaced in place with the comment above it kept.
 func TestSetCatalogAddsAndReplaces(t *testing.T) {
-	doc := "catalogs:\n  # Ours.\n  example:\n    url: old\n    commit: " + strings.Repeat("b", 40) + "\n    unsigned: true\napps: {}\n"
-	out, err := setCatalog([]byte(doc), "other", Catalog{URL: "o", Commit: strings.Repeat("c", 40), Unsigned: true})
+	doc := "catalogs:\n  # Ours.\n  example:\n    url: old\n    commit: " + strings.Repeat("b", 40) + "\napps: {}\n"
+	out, err := setCatalog([]byte(doc), "other", Catalog{URL: "o", Commit: strings.Repeat("c", 40)})
 	if err != nil {
 		t.Fatal(err)
 	}

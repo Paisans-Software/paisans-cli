@@ -21,14 +21,6 @@ import (
 //go:embed all:core all:reserved
 var embedded embed.FS
 
-// CoreSigners is the allowed-signers list of the keys the core catalog's
-// release tags are signed by, one SSH public key per line. A deployment that
-// pins the core catalog to a commit of its own, or to a mirror, is checked
-// against it; the toolkit's own copy needs no check, being in the binary.
-//
-//go:embed signers/core
-var CoreSigners []byte
-
 // File is the name of a blueprint's own description, in its directory.
 const File = "blueprint.yaml"
 

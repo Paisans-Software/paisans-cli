@@ -60,15 +60,6 @@ func catalogEntry(name string, cat Catalog, indent string) string {
 	if cat.Commit != "" {
 		fmt.Fprintf(&b, "%scommit: %s\n", inner, cat.Commit)
 	}
-	if len(cat.Signers) > 0 {
-		fmt.Fprintf(&b, "%ssigners:\n", inner)
-		for _, s := range cat.Signers {
-			fmt.Fprintf(&b, "%s  - %s\n", inner, scalar(s))
-		}
-	}
-	if cat.Unsigned {
-		fmt.Fprintf(&b, "%sunsigned: true\n", inner)
-	}
 	return b.String()
 }
 

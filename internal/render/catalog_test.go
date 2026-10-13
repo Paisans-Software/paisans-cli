@@ -65,7 +65,7 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+commit+"\n    unsigned: true\n\napps:\n  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n", 1)
+	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+commit+"\n\napps:\n  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n", 1)
 	path := filepath.Join(t.TempDir(), config.FileName)
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestACatalogBlueprintWithoutHealthIsWatched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n    unsigned: true\n\napps:\n  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n", 1)
+	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n\napps:\n  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n", 1)
 	path := filepath.Join(t.TempDir(), config.FileName)
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ settings:
 	apps := "\napps:\n" +
 		"  notes:\n    blueprint: example/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n" +
 		"  diary:\n    blueprint: example/journal\n    hostname: diary.example.org\n    placement: { pinned: home-a }\n    settings: { title: Mine, open: false }\n"
-	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n    unsigned: true\n"+apps, 1)
+	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  example:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n"+apps, 1)
 	path := filepath.Join(t.TempDir(), config.FileName)
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
