@@ -1431,10 +1431,12 @@ trusts a stale value during an incident.
 A site may be amd64 or arm64. The toolkit reads each host's architecture
 (`dpkg --print-architecture`) the first time apply, `host prepare` or `site
 add` reaches it, and records it as `sites.<name>.arch`. An operator never
-writes the line. It exists so that `validate` can check the rule below
-without reaching a host, and so that a host replaced under the same name by
-one of another architecture is refused rather than joined. To accept new
-hardware, delete the line, and the next run records what the host reports.
+needs to write the line; one written by hand is checked against the host
+exactly as a recorded one is. It exists so that `validate` can check the
+rule below without reaching a host, and so that a host replaced under the
+same name by one of another architecture is refused rather than joined. To
+accept new hardware, delete the line, and the next run records what the host
+reports.
 
 A whole apply reads every site's architecture before it plans, and records
 the missing keys before it publishes the signed configuration. `apply
@@ -1453,13 +1455,20 @@ sites, an app on SQLite or pinned to its own site, Pocket ID, Garage, etcd,
 the gateway, the monitor and the witness. Each of them talks over the
 network and copies no database between machines. `validate` refuses data
 sites that differ (`data-sites-differ-in-arch`), and apply checks again after
-it records the keys.
+it records the keys. Either refusal says what to do: give the data role only
+to sites of one architecture, or, if a recorded value is wrong, delete that
+site's arch line and run again.
 
 **Every image must have a build for its site.** Apply reads which platforms
 each image was published for when it plans, and refuses one with no build
 for the site's architecture before anything is pulled; a variant such as
-arm64/v8 counts as arm64. A platform list it cannot read becomes a note, not
-a refusal. A clustered app needs a build for every apps site's architecture.
+arm64/v8 counts as arm64. A platform list it cannot read, or a tag it cannot
+resolve, becomes a note, not a refusal: the pull says so if the image does
+not run. A clustered app needs a build for every apps site's architecture.
+A whole apply checks every site's images right after it reads the
+architectures, before it prepares any host, so a dry run of a deployment no
+host of which is prepared yet still shows the refusal, and `site add` checks
+the new site's images before it changes any site.
 
 ### `etcd.members` and `cluster.sites` follow from the roles
 

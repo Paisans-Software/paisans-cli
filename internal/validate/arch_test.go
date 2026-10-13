@@ -33,6 +33,9 @@ func TestDataSitesMustShareAnArchitecture(t *testing.T) {
 		if f.Rule == "data-sites-differ-in-arch" && (!strings.Contains(f.Message, data[0]+" is amd64") || !strings.Contains(f.Message, data[1]+" is arm64")) {
 			t.Errorf("message names neither site with its value: %s", f.Message)
 		}
+		if f.Rule == "data-sites-differ-in-arch" && !strings.Contains(f.Message, "delete that site's arch line and run again") {
+			t.Errorf("message gives no next step: %s", f.Message)
+		}
 	}
 
 	set(data[1], "amd64")

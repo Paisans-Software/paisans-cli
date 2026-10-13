@@ -33,6 +33,6 @@ func (c *checker) dataSitesShareAnArch() {
 	sort.Strings(parts)
 	c.refuse("data-sites-differ-in-arch", "cluster.sites",
 		"data sites have different architectures",
-		"%s. Patroni replicates the data directory byte for byte, so every data site needs the same architecture.",
+		"%s. Patroni replicates the data directory byte for byte, so every data site needs the same architecture. Give the data role only to sites of one architecture, or, if a recorded value is wrong, delete that site's arch line and run again.",
 		strings.Join(parts, " and "))
 }
