@@ -356,12 +356,38 @@ type secretsWriteError struct{ err error }
 func (e *secretsWriteError) Error() string { return e.err.Error() }
 func (e *secretsWriteError) Unwrap() error { return e.err }
 
-// reportOwed warns of what the toolkit will not invent. Leaving these silent
-// would let an operator believe an install is finished when sign in and
-// certificates are both still missing.
+// reportOwed warns of each secret only the operator can provide. Leaving
+// these silent would let an operator believe an install is finished when
+// certificates are still missing. What apply records itself is not a
+// warning: each kind is one pending line naming the apps, with what apply
+// makes for each under --verbose.
 func reportOwed(r ui.Reporter, filled secretsgen.Result) {
 	for _, owed := range filled.Owed {
 		r.Warn(owed.Name+" needs a decision", owed.Why)
+	}
+	var order []string
+	byKind := map[string][]secretsgen.Pending{}
+	for _, p := range filled.Pending {
+		if _, ok := byKind[p.What]; !ok {
+			order = append(order, p.What)
+		}
+		byKind[p.What] = append(byKind[p.What], p)
+	}
+	for _, what := range order {
+		pending := byKind[what]
+		apps := make([]string, len(pending))
+		for i, p := range pending {
+			apps[i] = p.App
+		}
+		verb := "are"
+		if len(pending) == 1 {
+			verb = "is"
+		}
+		s := r.Step(fmt.Sprintf("%s (%s) %s created by apply", plural(len(pending), what), strings.Join(apps, ", "), verb))
+		for _, p := range pending {
+			s.Detail("%s: %s", p.Name, p.Why)
+		}
+		s.End(ui.Pending, "")
 	}
 }
 

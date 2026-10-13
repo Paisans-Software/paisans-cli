@@ -260,18 +260,10 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 // setOwedSecrets asks at the terminal for each secret only the operator can
 // provide, saying why each is owed, and writes each answer before asking for
 // the next, so an interrupted walk keeps what was already typed. A blank
-// answer skips the key, which stays owed and is named at the end.
-//
-// A sign in client is not asked for. It is a client ID and a secret
-// together, and `apply --execute` creates it at Pocket ID and records both
-// itself.
+// answer skips the key, which stays owed and is named at the end. A pending
+// secret, such as a sign in client, is not asked for: apply records it.
 func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, secretsPath string) error {
-	var owed []secretsgen.Owed
-	for _, o := range secretsgen.OwedSecrets(cfg, secrets) {
-		if !strings.HasPrefix(o.Name, "oidc_clients.") {
-			owed = append(owed, o)
-		}
-	}
+	owed := secretsgen.OwedSecrets(cfg, secrets)
 	if len(owed) == 0 {
 		r.Result("Nothing is owed: every secret only you can provide is set.")
 		return nil
@@ -375,7 +367,7 @@ func secretKeyAllowed(cfg *config.Config, secrets *config.Secrets, key string) e
 	if section == "external" {
 		return nil
 	}
-	for _, name := range secretsgen.OwedNames(cfg, secrets) {
+	for _, name := range secretsgen.ExpectedNames(cfg, secrets) {
 		if key == name || strings.HasPrefix(key, name+".") {
 			return nil
 		}
