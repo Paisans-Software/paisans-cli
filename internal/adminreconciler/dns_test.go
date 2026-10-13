@@ -12,14 +12,17 @@ import (
 
 // fakeMembers is the DNS provider's members list, counting its reads.
 type fakeMembers struct {
-	members []dnscontinuity.Member
+	members []dnscontinuity.Member // one account
 	err     error
 	reads   int
 }
 
-func (m *fakeMembers) Members(context.Context) ([]dnscontinuity.Member, error) {
+func (m *fakeMembers) Members(context.Context) ([][]dnscontinuity.Member, error) {
 	m.reads++
-	return m.members, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	return [][]dnscontinuity.Member{m.members}, nil
 }
 
 var dnsHasher = dnscontinuity.Hasher{Key: []byte("fixture-not-a-secret-hash-key-32")}

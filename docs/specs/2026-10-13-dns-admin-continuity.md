@@ -20,7 +20,8 @@ this.
 ## The rule
 
 **Every enabled Pocket ID administrator is an accepted Super Administrator of
-the Cloudflare account that holds the zone, and there are at least two.**
+every Cloudflare account that holds the zone or a zone above it, and there
+are at least two.**
 
 * **Super Administrator, not Administrator.** Cloudflare's Administrator role
   "Can access the full account and edit subscriptions. Cannot manage members
@@ -39,6 +40,12 @@ the Cloudflare account that holds the zone, and there are at least two.**
 * **At least two.** The reconciler's own threshold, for the same reason: one
   is a single loss away from none. It is restated here so that the DNS check is
   correct on its own, though the `admins` group check fails first in practice.
+* **Every account above the zone, not only the zone's own.** The account
+  holding a parent zone controls the delegation to a child, and its members
+  can point the child's nameservers anywhere, so a delegated subzone is only
+  as safe as its parent. An administrator counts only as a Super
+  Administrator of each account, with two-factor on in each. Usually the
+  domain is a zone apex and there is one. Founder decision.
 * **Extra members are allowed.** A Cloudflare member who matches no Pocket ID
   administrator is not reported, whatever their role. Founder decision.
 * **Pending is not accepted.** An invitation not yet accepted grants nothing,
@@ -110,11 +117,14 @@ What this protects, and what it does not:
 ## The token
 
 A new pasted secret, `external.dns_members_token`: a Cloudflare API token
-with **Account Settings: Read** on the account and **Zone: Read** on the zone,
-and nothing else. Cloudflare lists Account Settings Read as sufficient for the
+with **Account Settings: Read** on each account and **Zone: Read** on every
+zone holding `community.domain` or a name above it, and nothing else. Cloudflare lists Account Settings Read as sufficient for the
 members list
 ([Cloudflare API: List Members](https://developers.cloudflare.com/api/resources/accounts/subresources/members/methods/list/),
-read 2026-10-13); Zone Read is for finding the account from the zone.
+read 2026-10-13); Zone Read is for finding the accounts from the zones. A
+zone the token cannot read is answered as if it did not exist, so a token
+missing Zone Read on a parent leaves the parent's account unchecked, without
+an error. That is a limit of the API, and the reason the scope is stated.
 
 It is not `external.acme_dns_token`. That token edits records, and lives in
 Caddy on the gateway and on the operator's workstation. The reconciler runs
@@ -133,13 +143,20 @@ The DNS check runs inside the reconciler's existing pass, after the `admins`
 group step and on its schedule: every two hours, once at start, on the active
 instance only. A standby does nothing, as now.
 
-1. **Account.** `GET /zones?name=<suffix>` with the members token, for each
-   suffix of `community.domain`, longest first, until a zone the token can
-   see answers: the way `internal/dns` finds a zone, because the domain need
-   not be a zone apex. The domain is rendered as `PAISANS_DNS_DOMAIN`, and the
-   zone's `account.id` is the account. Found every pass, never configured, so
-   a zone moved between accounts is followed.
-2. **Members.** `GET /accounts/{account_id}/members`, `per_page=50` (the
+1. **Accounts.** `GET /zones?name=<suffix>&status=active` with the members
+   token, for every suffix of `community.domain`, longest first, the bare top
+   level label never: the suffixes `internal/dns` walks to find a zone,
+   because the domain need not be a zone apex, but all of them rather than
+   the first that answers, because a parent's account controls the
+   delegation (*The rule*). Every zone whose name matches exactly and whose
+   `status` is `active` gives its `account.id`, each account once, the most
+   specific first. A pending, moved or deactivated zone serves nothing, and
+   the same name can be pending in another account, so it is not counted;
+   the status is checked in the response as well as filtered in the request.
+   No active zone at all is `cloudflare unreadable: zone not visible to the
+   token`. The domain is rendered as `PAISANS_DNS_DOMAIN`. Found every pass,
+   never configured, so a zone moved between accounts is followed.
+2. **Members.** For each account, `GET /accounts/{account_id}/members`, `per_page=50` (the
    maximum), paged with `page` up to `result_info.total_pages`, as the DNS
    client pages records. The reference lists `count`, `page`, `per_page` and
    `total_count` only; a real response carries `total_pages` too
@@ -261,6 +278,8 @@ members, 2026-10-13, values withheld:
 * Each member: `api_access_enabled`, `email`, `id`, `policies`, `roles`,
   `status`, `user`; `user` holds `email`, `first_name`, `id`, `last_name`,
   `two_factor_authentication_enabled`.
+* `GET /zones?name=<domain>&status=active`, for a domain that is a zone
+  apex: one zone, `status: active`, carrying `account.id`.
 * Both members `accepted`, each with role `Super Administrator - All
   Privileges` and one policy, `access: allow`, permission group of the same
   name, resource scope key beginning `com.cloudflare.api.account`.

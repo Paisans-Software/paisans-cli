@@ -2262,8 +2262,8 @@ Founder decision. The design is `docs/specs/2026-10-13-dns-admin-continuity.md`.
 ### What was decided
 
 * Every enabled Pocket ID administrator must be an accepted Super
-  Administrator of the Cloudflare account holding the zone, and there must be
-  at least two. Administrator with access to the zone does not count. Extra
+  Administrator of every Cloudflare account holding the zone or a zone above
+  it, and there must be at least two. Only active zones count. Administrator with access to the zone does not count. Extra
   Cloudflare members are allowed.
 * The admin reconciler checks it on its existing pass, reading Cloudflare and
   writing nothing there, and reports it through two heartbeat monitors per

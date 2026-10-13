@@ -1,6 +1,6 @@
 // Package dnscontinuity checks that every Pocket ID administrator is a Super
-// Administrator of the Cloudflare account holding the deployment's zone, and
-// that each of them has two-factor authentication on.
+// Administrator of every Cloudflare account holding the deployment's zone or
+// a zone above it, and that each of them has two-factor authentication on.
 //
 // See docs/specs/2026-10-13-dns-admin-continuity.md. It reads Cloudflare and
 // never writes there: its only requests are the two GETs in Client, and the
@@ -54,15 +54,18 @@ type Member struct {
 	SuperAdmin bool
 }
 
-// Members lists the members of the Cloudflare account holding a zone.
+// Members lists the members of every Cloudflare account that holds a zone
+// above the community's domain: one list per account, each account once, the
+// most specific zone's first.
 type Members interface {
-	Members(ctx context.Context) ([]Member, error)
+	Members(ctx context.Context) ([][]Member, error)
 }
 
 // Client is Cloudflare's API, holding a token with Account Settings Read on
 // the account and Zone Read on the zone, and nothing else.
 //
-//   - find the account: GET /zones?name=<suffix>, whose zone carries account.id
+//   - find the accounts: GET /zones?name=<suffix>, whose zone carries
+//     account.id and status
 //     https://developers.cloudflare.com/api/resources/zones/methods/list/
 //   - list members:     GET /accounts/{account_id}/members?page=&per_page=50
 //     https://developers.cloudflare.com/api/resources/accounts/subresources/members/methods/list/
@@ -149,12 +152,26 @@ func (m cfMember) superAdministrator() bool {
 	return false
 }
 
-// Members reads the zone's account and every member of it.
-func (c *Client) Members(ctx context.Context) ([]Member, error) {
-	account, err := c.account(ctx)
+// Members reads the accounts of every zone above Domain and every member of
+// each.
+func (c *Client) Members(ctx context.Context) ([][]Member, error) {
+	accounts, err := c.accounts(ctx)
 	if err != nil {
 		return nil, err
 	}
+	out := make([][]Member, 0, len(accounts))
+	for _, account := range accounts {
+		members, err := c.members(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, members)
+	}
+	return out, nil
+}
+
+// members is every member of one account.
+func (c *Client) members(ctx context.Context, account string) ([]Member, error) {
 	var out []Member
 	for page := 1; ; page++ {
 		var members []cfMember
@@ -176,29 +193,47 @@ func (c *Client) Members(ctx context.Context) ([]Member, error) {
 	}
 }
 
-// account is the account of the zone holding Domain: the first suffix of
-// it, longest first, that is a zone the token can see. The bare top level
-// label is never asked about.
-func (c *Client) account(ctx context.Context) (string, error) {
+// accounts is the account of every active zone that holds Domain or a name
+// above it, each once, the most specific zone's first: every suffix of
+// Domain is asked about, longest first, the bare top level label never.
+//
+// All of them, not only the zone that serves Domain's records, because the
+// account holding a parent zone controls the delegation to a child: its
+// members can point the child's nameservers anywhere. A zone that is not
+// active (pending, moved, deactivated) serves nothing, and the same name can
+// be pending in more than one account, so only an active zone counts. A
+// suffix the token cannot see answers with no zones, which reads the same as
+// no zone at all, so the token needs Zone Read on every zone above Domain.
+func (c *Client) accounts(ctx context.Context) ([]string, error) {
 	labels := strings.Split(strings.TrimSuffix(c.Domain, "."), ".")
+	var out []string
+	seen := map[string]bool{}
 	for i := 0; i < len(labels)-1; i++ {
 		candidate := strings.Join(labels[i:], ".")
 		var zones []struct {
 			Name    string `json:"name"`
+			Status  string `json:"status"`
 			Account struct {
 				ID string `json:"id"`
 			} `json:"account"`
 		}
-		if _, err := c.get(ctx, "/zones", url.Values{"name": {candidate}}, &zones); err != nil {
-			return "", err
+		if _, err := c.get(ctx, "/zones", url.Values{"name": {candidate}, "status": {"active"}}, &zones); err != nil {
+			return nil, err
 		}
 		for _, z := range zones {
-			if strings.EqualFold(z.Name, candidate) && z.Account.ID != "" {
-				return z.Account.ID, nil
+			if !strings.EqualFold(z.Name, candidate) || z.Status != "active" || z.Account.ID == "" {
+				continue
+			}
+			if !seen[z.Account.ID] {
+				seen[z.Account.ID] = true
+				out = append(out, z.Account.ID)
 			}
 		}
 	}
-	return "", &Unreadable{Status: "zone not visible to the token"}
+	if len(out) == 0 {
+		return nil, &Unreadable{Status: "zone not visible to the token"}
+	}
+	return out, nil
 }
 
 // get makes one GET and decodes its result, returning result_info's
@@ -302,25 +337,44 @@ func Failed(reason string) Result {
 	return Result{SuperAdmins: c, TwoFA: c}
 }
 
-// Evaluate holds every administrator to the rule against the members read.
-// Mapping is keyed and valued by hash: an administrator whose Pocket ID
-// email's hash is mapped is expected at the mapped hash, and otherwise at
-// their own. Members who match no administrator are not counted. log
-// receives one line per failing administrator, by username.
-func Evaluate(admins []Admin, members []Member, h Hasher, mapping map[string]string, log func(string, ...any)) Result {
+// Evaluate holds every administrator to the rule against the members of
+// every account read: an administrator counts only as a Super Administrator
+// of each of them, and with two-factor authentication on in each. Mapping is
+// keyed and valued by hash: an administrator whose Pocket ID email's hash is
+// mapped is expected at the mapped hash, and otherwise at their own. Members
+// who match no administrator are not counted. log receives one line per
+// failing administrator, by username.
+func Evaluate(admins []Admin, accounts [][]Member, h Hasher, mapping map[string]string, log func(string, ...any)) Result {
 	type state struct{ super, pending, twoFA bool }
-	byHash := map[string]state{}
-	for _, m := range members {
-		key := h.Hash(m.Email)
-		s := byHash[key]
-		switch {
-		case m.Status == "accepted" && m.SuperAdmin:
-			s.super = true
-			s.twoFA = s.twoFA || m.TwoFA
-		case m.Status == "pending":
-			s.pending = true
+	perAccount := make([]map[string]state, 0, len(accounts))
+	for _, members := range accounts {
+		byHash := map[string]state{}
+		for _, m := range members {
+			key := h.Hash(m.Email)
+			s := byHash[key]
+			switch {
+			case m.Status == "accepted" && m.SuperAdmin:
+				s.super = true
+				s.twoFA = s.twoFA || m.TwoFA
+			case m.Status == "pending":
+				s.pending = true
+			}
+			byHash[key] = s
 		}
-		byHash[key] = s
+		perAccount = append(perAccount, byHash)
+	}
+	// across is an address's state over every account: a Super Administrator
+	// only of all, with two-factor on only if on in all, and pending when
+	// pending in an account it is not yet a Super Administrator of.
+	across := func(key string) state {
+		out := state{super: len(perAccount) > 0, twoFA: true}
+		for _, byHash := range perAccount {
+			s := byHash[key]
+			out.super = out.super && s.super
+			out.twoFA = out.twoFA && s.twoFA
+			out.pending = out.pending || (!s.super && s.pending)
+		}
+		return out
 	}
 
 	var failing, pending, matched, twoFAOff int
@@ -334,7 +388,7 @@ func Evaluate(admins []Admin, members []Member, h Hasher, mapping map[string]str
 		if to, ok := mapping[expected]; ok {
 			expected = to
 		}
-		s := byHash[expected]
+		s := across(expected)
 		switch {
 		case s.super:
 			matched++
@@ -348,7 +402,7 @@ func Evaluate(admins []Admin, members []Member, h Hasher, mapping map[string]str
 			log("dns: %s has a cloudflare invitation that is still pending", a.Username)
 		default:
 			failing++
-			log("dns: %s is not an accepted cloudflare super admin at their expected address", a.Username)
+			log("dns: %s is not an accepted cloudflare super admin, at their expected address, of every account holding the zone", a.Username)
 		}
 	}
 

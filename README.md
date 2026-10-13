@@ -6279,22 +6279,26 @@ so nobody can add the next administrator, and once the last one leaves the
 zone is recovered only at the registrar.
 
 **Every enabled Pocket ID administrator must be an accepted Super
-Administrator of the account holding the zone, and there must be at least
-two.** Administrator with access to the zone does not count, a pending
+Administrator of every account holding the zone or a zone above it, and
+there must be at least two.** Administrator with access to the zone does not count, a pending
 invitation does not count, and Cloudflare members who are not Pocket ID
 administrators are allowed. Founder decision; the design is
 `docs/specs/2026-10-13-dns-admin-continuity.md`.
 
 **The check is optional, and Cloudflare only.** It renders when
 `acme.provider` is `cloudflare` and `external.dns_members_token` is pasted: a
-token with Account Settings Read on the account and Zone Read on the zone,
+token with Account Settings Read on each account and Zone Read on every zone
+above the domain (a zone it cannot read is skipped silently, as if absent),
 and nothing else. It is not `acme_dns_token`, which edits records and lives
 only beside Caddy, because this one is rendered into the Pocket ID stack on
 every apps site, and a leak there must not be control of every hostname.
 
 **It runs on the reconciler's pass**, on the active instance only, and makes
-two reads at Cloudflare: the zone holding `community.domain`, found by its
-suffixes as `dns init` finds it, for its account, and that account's members.
+two kinds of read at Cloudflare: every active zone holding `community.domain`
+or a name above it, asked suffix by suffix as `dns init` finds a zone, for
+their accounts, and each account's members. A parent zone counts because its
+account controls the delegation to a child, so an administrator must be a
+Super Administrator of every such account; usually there is one.
 It writes nothing there. It answers on `/healthz/dns-super-admins` and
 `/healthz/dns-2fa` with `/healthz`'s contract, and the admins heartbeat
 pusher relays both (*Monitoring*). Each body is a count, such as
