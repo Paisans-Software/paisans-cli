@@ -1,6 +1,11 @@
 # Fork images follow a toolkit channel
 
-Date: 2026-10-11. Status: approved by the founder in session.
+Date: 2026-10-11. Status: **superseded** on 2026-10-13 by *Fork images are
+pinned to release version tags, and the stack channels are retired* in
+`docs/decisions.md`. The channels were never published, and the `stack-1`
+default, the promote workflows and `image-channel-differs` are gone. Its
+sections on resolving tags to digests when apply plans still describe what
+the toolkit does.
 
 The two forks the toolkit runs, Mbin (`ghcr.io/paisans-software/mbin`) and
 WriteFreely (`ghcr.io/josephquigley/writefreely-wisp`), each publish a moving

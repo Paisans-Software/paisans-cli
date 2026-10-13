@@ -17,19 +17,19 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
 
-// unpublished is a registry on which no channel has been promoted to yet:
-// every other tag names one build.
+// unpublished is a registry that does not have the mbin kind's default
+// image: every other tag names one build.
 type unpublished struct{}
 
 func (unpublished) Digest(ref string) (string, error) {
-	if kinds.Channel(ref) == "" {
+	if def, _ := kinds.DefaultImage(config.KindMbin, "app"); ref != def {
 		return "sha256:" + strings.Repeat("a", 64), nil
 	}
 	return "", fmt.Errorf("ghcr.io answered that %s does not exist: %w", ref, imagedigest.ErrNotFound)
 }
 
 // unresolvedPlan is the refusal apply plans freshSite's home-a with, against
-// a registry on which its channel tag is not published.
+// a registry that does not have its Mbin image.
 func unresolvedPlan(t *testing.T) error {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
@@ -77,7 +77,7 @@ func TestAnUnresolvedImageNamesTheSiteOnce(t *testing.T) {
 	if strings.Contains(lines[i], "home-a: home-a") || strings.Count(lines[i], "home-a") != 1 {
 		t.Errorf("the line names the site more than once: %s", lines[i])
 	}
-	if !strings.Contains(lines[i], "is not published") {
-		t.Errorf("the line does not say the image is not published: %s", lines[i])
+	if !strings.Contains(lines[i], "does not exist") {
+		t.Errorf("the line does not say the image does not exist: %s", lines[i])
 	}
 }

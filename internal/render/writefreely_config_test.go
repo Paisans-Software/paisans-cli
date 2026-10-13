@@ -14,7 +14,7 @@ const blogINIA = "home-a/srv/paisans/f2a9/blog/config.ini"
 // writefreelyDatabaseSettings is the fork's setting registry, every setting
 // it keeps in its database and the only names locked_settings accepts
 // (config/settings.go dbSettings, read at writefreely-wisp develop f95d840,
-// v0.21.1+wisp, the first stack-1 release).
+// v0.21.1+wisp, the first release carrying locked settings).
 var writefreelyDatabaseSettings = []string{
 	"app.site_name", "app.site_description", "app.theme", "app.editor", "app.disable_js", "app.webfonts",
 	"app.landing", "app.simple_nav", "app.wf_modesty", "app.chorus", "app.forest", "app.disable_drafts",

@@ -2056,3 +2056,49 @@ reviewable and recoverable without the catalog.
 
 Nothing: a design. The uptime fork's TCP monitor type was read from its source
 (`src/lib/sitePayload.js:18,127-134` at `b730e9b`).
+
+## 2026-10-13: Fork images are pinned to release version tags, and the stack channels are retired
+
+Founder decision. Supersedes `docs/specs/2026-10-11-stack-channels.md`, except
+its sections on resolving tags to digests at plan time, which stand.
+
+### What was decided
+
+* The `mbin` and `writefreely` blueprints name each fork's latest release by
+  its version tag: `ghcr.io/paisans-software/mbin:1.15.1-paisans` and
+  `ghcr.io/josephquigley/writefreely-wisp:0.21.1-wisp`. A newer release is
+  taken by changing the tag in the core catalog and moving this toolkit's pin
+  to it.
+* The `stack-<N>` channel tags are retired, never having been published. The
+  forks' promote workflows are removed, and so are `kinds.Channel`, validate's
+  `image-channel-differs` warning, apply's "no paisans-verified release yet"
+  refusal and `render.ComposeImage.Default`, which existed only for it.
+* Both forks' images are recorded in `kinds.ImageVolumes` by their exact
+  reference, like every other image the toolkit names; `RepositoryVolumes`
+  keeps only the gateway's Caddy.
+* Resolving every tag to a digest when apply plans, and the manifest's
+  `pins`, are unchanged.
+
+### Why
+
+No `stack-N` tag was ever pushed to the registry, so a deployment on either
+kind's default could not resolve its image, and production already ran the
+forks' version tags. A version tag in the blueprint ties each toolkit release
+to the fork build its templates and tests ran against, which is what the
+golden render tree and the volume table check, and the move to a new release
+is a reviewed change to the catalog rather than a tag moved elsewhere.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...` and `gofmt -l .` empty; the
+golden trees regenerated with `go test ./internal/render -update`, and their
+diff read: the blog's image tag and the manifest's hash of that file. Both
+tags were confirmed as the newest releases with `gh release list` and
+`docker buildx imagetools inspect` on 2026-10-13, which also gave the
+declared volumes: `/app/var/` for Mbin (linux/amd64 only) and none for
+WriteFreely on linux/amd64 and linux/arm64, and `go test -tags
+registry_integration -run TestRecordedVolumesMatchEveryPlatform/ghcr
+./internal/kinds/` agreed on both entries (Docker Hub's rate limit kept the
+rest of that test from running). The core copy was synced from
+`Paisans-Software/blueprints` with `scripts/sync-core-catalog.sh`. Nothing
+was run against a deployment, and no image was moved, deleted or retagged.

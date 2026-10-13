@@ -106,9 +106,9 @@ func TestMbinWithoutSMTPRendersTheNullTransport(t *testing.T) {
 
 // mbinDatabaseSettings are the fields of the paisans fork's SettingsDto
 // (src/DTO/SettingsDto.php, read at Paisans-Software/mbin v1.15.0+paisans,
-// the first stack-1 release, and unchanged on develop 64794776): every
-// setting Mbin keeps in its database once an admin saves, after which the
-// environment value of an unlocked one is ignored.
+// the first release carrying locked settings, and unchanged on develop
+// 64794776): every setting Mbin keeps in its database once an admin saves,
+// after which the environment value of an unlocked one is ignored.
 var mbinDatabaseSettings = []string{
 	"KBIN_DOMAIN", "KBIN_TITLE", "KBIN_META_TITLE", "KBIN_META_KEYWORDS", "KBIN_META_DESCRIPTION",
 	"KBIN_DEFAULT_LANG", "KBIN_CONTACT_EMAIL", "KBIN_SENDER_EMAIL", "MBIN_DEFAULT_THEME", "KBIN_JS_ENABLED",

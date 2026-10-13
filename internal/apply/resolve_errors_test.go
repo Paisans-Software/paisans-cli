@@ -25,13 +25,12 @@ func denied(ref string) error {
 	return fmt.Errorf("asking ghcr.io for %s: the token service answered 403 Forbidden: %w", ref, imagedigest.ErrDenied)
 }
 
-// mbinDefault is the fixture with talk on the mbin kind's default image,
-// which follows the stack-1 channel.
+// mbinDefault is the fixture with talk on the mbin kind's default image.
 func mbinDefault(t *testing.T) (*render.Plan, string) {
 	t.Helper()
 	def, ok := kinds.DefaultImage(config.KindMbin, "app")
-	if !ok || kinds.Channel(def) == "" {
-		t.Fatalf("the mbin kind's default %q follows no channel", def)
+	if !ok || kinds.ParseReference(def).Tag == "" {
+		t.Fatalf("the mbin kind's default %q names no tag", def)
 	}
 	return planWith(t, func(cfg *config.Config) {
 		app := cfg.Apps["talk"]
@@ -70,19 +69,6 @@ func saysNot(t *testing.T, text string, unwanted ...string) {
 	}
 }
 
-// The kind's default channel tag the registry does not have is a channel
-// nothing was promoted to yet: the fix is to pin a version, and waiting for
-// the registry to be reachable would change nothing.
-func TestAnUnpublishedChannelSaysItIsNotPublished(t *testing.T) {
-	p, def := mbinDefault(t)
-	hint, explain := refusal(t, p, &registry{digest: buildA, fail: map[string]error{def: missing(def)}})
-	if want := "`talk` image `" + def + "` is not published (ghcr.io: not found)"; hint != want {
-		t.Errorf("hint\n%s\nwant\n%s", hint, want)
-	}
-	says(t, explain, "The `stack-1` channel has no paisans-verified release yet.", "`apps.talk.images.app`", "a digest", "run one anyway")
-	saysNot(t, explain, "reaches the registry", "configuration's")
-}
-
 // A tag the operator named that the registry does not have is a tag to
 // check.
 func TestAMissingOperatorTagSaysToCheckIt(t *testing.T) {
@@ -97,7 +83,7 @@ func TestAMissingOperatorTagSaysToCheckIt(t *testing.T) {
 		t.Errorf("hint\n%s\nwant\n%s", hint, want)
 	}
 	says(t, explain, "`apps.talk.images.app`")
-	saysNot(t, explain, "paisans-verified", "reaches the registry")
+	saysNot(t, explain, "reaches the registry")
 }
 
 // A registry that could not be reached is asked again later. The image the
@@ -110,7 +96,7 @@ func TestAnUnreachableRegistrySaysToRunAgain(t *testing.T) {
 		t.Errorf("hint\n%s\nwant\n%s", hint, want)
 	}
 	says(t, explain, "once this workstation reaches ghcr.io", "`apps.talk.images.app`", "a digest", "Apply does not keep the running `"+mbinTag+"`: it can't confirm that build is `"+kinds.ParseReference(def).Tag+"`.")
-	saysNot(t, explain, "paisans-verified", "configuration's", "which this site runs", "is a build of")
+	saysNot(t, explain, "configuration's", "which this site runs", "is a build of")
 }
 
 // An image the registry will not show an anonymous pull is private, or
@@ -153,7 +139,7 @@ func TestTheAdviceNamesTheNewestPublishedVersion(t *testing.T) {
 	p, def := mbinDefault(t)
 	r := listed{registry: &registry{digest: buildA, fail: map[string]error{def: missing(def)}}, newest: "1.15.0-paisans"}
 	_, explain := refusal(t, p, r)
-	says(t, explain, "Set `apps.talk.images.app` to a published tag (Eg: `ghcr.io/paisans-software/mbin:1.15.0-paisans`) or a digest to run one anyway")
+	says(t, explain, "Check `apps.talk.images.app`: set it to a published tag (Eg: `ghcr.io/paisans-software/mbin:1.15.0-paisans`) or a digest.")
 
 	ref := "ghcr.io/example-org/mbin:v9.9.9-fork"
 	other := planWith(t, func(cfg *config.Config) {

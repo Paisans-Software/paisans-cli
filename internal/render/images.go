@@ -13,8 +13,8 @@ import (
 // ComposeImage is one image reference a site's compose file names, as the
 // configuration decides it, and the services that run it.
 //
-// A reference here may be a tag that moves (Eg: a fork's stack-1, or the
-// gateway's caddy:2), and is rendered as written: render reaches no network,
+// A reference here may be a tag that moves (Eg: the gateway's caddy:2, or an
+// operator's series tag), and is rendered as written: render reaches no network,
 // so it cannot know which build a tag names today. apply does, and pins the
 // digest into every line naming the reference before it compares the file
 // with the host's (see PinImages).
@@ -35,12 +35,6 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
-	// Default is whether the configuration names no image for any of
-	// Services, so the image is the kind's default (acme.Published, or the
-	// provider's, for the gateway). apply's advice for a tag the registry does
-	// not have depends on it: a default naming a channel the fork has not
-	// promoted to yet is pinned differently from a tag the operator wrote.
-	Default bool
 }
 
 // Setting is the configuration key that decides Image, for a message that
@@ -112,16 +106,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				continue
 			}
 			sort.Strings(names)
-			def := true
-			if app == "" {
-				def = p.cfg.ACME.Image == ""
-			}
-			for _, service := range names {
-				if app != "" && declared.Images[service] != "" {
-					def = false
-				}
-			}
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Default: def})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n})
 		}
 	}
 	for site := range out {

@@ -9,17 +9,15 @@ services:
   # settings.queue (postgres) needs: on an image without it,
   # MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
   #
-  # stack-1 is the fork's toolkit channel: the latest release a
-  # maintainer has promoted as working with what this toolkit renders
-  # (docs/specs/2026-10-11-stack-channels.md). The stack-1 contract is
-  # this kind's templates: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
-  # MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
-  # route the monitor checks. Its first promotion is 1.15.0+paisans,
-  # the first release carrying all four, published as the image tag
-  # 1.15.0-paisans (linux/amd64 only, so an arm64 apps site cannot run
-  # it). The tag moves by design, so RepositoryVolumes records what the
-  # image declares.
-  - {name: "app", image: "ghcr.io/paisans-software/mbin:stack-1", purpose: "the application, and its messenger consumers"}
+  # The fork's latest release, named by its version tag: 1.15.1+paisans,
+  # published as the image tag 1.15.1-paisans (linux/amd64 only, so an
+  # arm64 apps site cannot run it). This kind's templates need four
+  # things the fork has carried since 1.15.0+paisans:
+  # MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH, MBIN_PRIVATE_INSTANCE
+  # read from the environment, and the /healthz route the monitor
+  # checks. A newer release is taken by changing this tag, and
+  # paisans-stack's kinds.ImageVolumes records what each tag declares.
+  - {name: "app", image: "ghcr.io/paisans-software/mbin:1.15.1-paisans", purpose: "the application, and its messenger consumers"}
   # The three sidecars upstream's compose.yaml runs beside it. The
   # messenger consumers are not here: they run the application's own
   # code, so they always take the app's image, and a key that let them
@@ -48,12 +46,12 @@ config:
     - {key: "OAUTH_OIDC_MEMBER_GROUP", file: ".env", setting: "member_group"}
     - {key: "S3_BUCKET", file: ".env", setting: "s3_bucket"}
     - {key: "S3_REGION", file: ".env", setting: "s3_region"}
-# The paisans fork's status-only route, from v1.15.0+paisans, the first
-# stack-1 release: GET or HEAD, 200 with an empty body when Postgres and
-# the cache answer, an empty 503 when either does not
-# (config/mbin_routes/health.yaml, HealthController.php:27-38). Its own
-# firewall has no security (security.yaml:34-37), so it answers without a
-# session on a private instance too.
+# The paisans fork's status-only route, from v1.15.0+paisans: GET or
+# HEAD, 200 with an empty body when Postgres and the cache answer, an
+# empty 503 when either does not (config/mbin_routes/health.yaml,
+# HealthController.php:27-38). Its own firewall has no security
+# (security.yaml:34-37), so it answers without a session on a private
+# instance too.
 health: {path: "/healthz", status: [200]}
 # Cited at mbin v1.14.0+paisans (da8b8c34), the tag the pinned image is
 # built from.

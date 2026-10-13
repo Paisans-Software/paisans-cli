@@ -752,10 +752,11 @@ before the configuration check because its error says what to fix.
 **Every image the configuration names is resolved to a build while apply
 plans.** The gateway's Caddy is named by a tag that moves (`acme.Published`,
 `ghcr.io/paisans-software/caddy:2`, or an `acme.image`), and so may an app's
-image (a fork's `stack-<N>`, or any version tag). `render` renders each tag as
-configured, listing each app stack's images and the gateway's Caddy per site
-and compose file in `Plan.Images`, with the configuration's names for each and
-the number of lines naming it, since render reaches no network.
+image (a series tag, or a version tag its publisher rebuilds). `render`
+renders each tag as configured, listing each app stack's images and the
+gateway's Caddy per site and compose file in `Plan.Images`, with the
+configuration's names for each and the number of lines naming it, since
+render reaches no network.
 `planSiteApply` passes `apply.ResolveImages` with `imageDigests`, an
 `imagedigest.Registry`, which asks the registry's HTTP API, anonymously and
 from the workstation, for the digest each tag names; `apply.Build` pins it
@@ -1343,10 +1344,10 @@ go test -tags registry_integration ./internal/kinds/
 ```
 
 `TestRecordedVolumesMatchEveryPlatform` checks `kinds.ImageVolumes`, and each
-repository `kinds.RepositoryVolumes` covers (the gateway's Caddy and the two
-forks) at its highest version tag, against what every linux platform of each
-image declares. A moving tag such as `stack-1` or Caddy's `2` is not checked
-itself: a specific release is what a table row can vouch for.
+repository `kinds.RepositoryVolumes` covers (the gateway's Caddy) at its
+highest version tag, against what every linux platform of each image
+declares. A moving tag such as Caddy's `2` is not checked itself: a specific
+release is what a table row can vouch for.
 
 Pocket ID's standby wrapper has Docker tests of its own, behind their own tag:
 
@@ -1393,8 +1394,8 @@ once more and checks that every name in `locked_settings` is locked at the
 file's value, that `/healthz` answers 200 and that an unsigned read of a blog
 outbox answers 401. It boots the application four times and may pull images,
 hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
-another build, such as a local one of a release not yet promoted to
-`stack-1`.
+another build, such as a local one of a release newer than the one the kind
+names.
 
 The one workflow in `.github/workflows` builds the admin reconciler's image,
 and runs only the tests of the packages that image is built from. Nothing runs

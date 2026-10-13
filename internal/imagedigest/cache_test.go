@@ -88,7 +88,7 @@ func (u *unreachable) Digest(ref string) (string, error) {
 func TestAnUnreachableRegistryFailsFast(t *testing.T) {
 	u := &unreachable{host: "ghcr.io"}
 	c := imagedigest.Cached(u)
-	if _, err := c.Digest("ghcr.io/paisans-software/mbin:stack-1"); err == nil {
+	if _, err := c.Digest("ghcr.io/paisans-software/mbin:develop"); err == nil {
 		t.Fatal("an unreachable registry answered")
 	}
 	_, err := c.Digest("ghcr.io/paisans-software/caddy:2")
@@ -152,14 +152,14 @@ func TestTheCacheAsksForTheNewestVersionOnce(t *testing.T) {
 	l := &listing{newest: "1.15.0-paisans"}
 	c := imagedigest.Cached(l)
 	for range 2 {
-		if got, err := c.NewestVersion("ghcr.io/paisans-software/mbin:stack-1"); err != nil || got != "1.15.0-paisans" {
+		if got, err := c.NewestVersion("ghcr.io/paisans-software/mbin:develop"); err != nil || got != "1.15.0-paisans" {
 			t.Fatalf("got %q, %v", got, err)
 		}
 	}
 	if n := l.asked.Load(); n != 1 {
 		t.Errorf("asked %d times", n)
 	}
-	if got, err := imagedigest.Cached(&moving{}).NewestVersion("ghcr.io/paisans-software/mbin:stack-1"); got != "" || err != nil {
+	if got, err := imagedigest.Cached(&moving{}).NewestVersion("ghcr.io/paisans-software/mbin:develop"); got != "" || err != nil {
 		t.Errorf("a registry that lists nothing answered %q, %v", got, err)
 	}
 }

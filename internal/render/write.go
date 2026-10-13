@@ -28,7 +28,7 @@ type Manifest struct {
 	// Pins are the builds the site's stacks run, one per service the
 	// configuration names an image for: each app's, and the gateway's
 	// Caddy, set by apply. The configuration may name an image by a tag
-	// that moves (Eg: a fork's stack-1, Caddy's 2), so the compose file's
+	// that moves (Eg: Caddy's 2), so the compose file's
 	// digest is the only fact about what ran, and this keeps it beside the
 	// tag it was resolved from, in a form an operator can read on the host
 	// without parsing YAML.
@@ -84,10 +84,10 @@ type ManifestPin struct {
 	// apps.<name>.images (Eg: app), or caddy.
 	Service string `json:"service"`
 	// Image is the reference as the configuration names it
-	// (Eg: ghcr.io/paisans-software/mbin:stack-1).
+	// (Eg: ghcr.io/paisans-software/caddy:2).
 	Image string `json:"image"`
 	// Reference is what the compose file names and the host pulled: Image
-	// with the digest it resolved to (Eg: ghcr.io/paisans-software/mbin:stack-1@sha256:...).
+	// with the digest it resolved to (Eg: ghcr.io/paisans-software/caddy:2@sha256:...).
 	Reference string `json:"reference"`
 	// ResolvedAt is when the apply that first deployed this Reference
 	// resolved it, RFC 3339. A later apply resolving the same build keeps it.

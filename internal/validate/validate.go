@@ -144,7 +144,6 @@ func Check(cfg *config.Config) Result {
 	c.sitesShareAMachine()
 	c.imageServices()
 	c.floatingImages()
-	c.imageChannels()
 	c.clusterPlacementWithoutACluster()
 	c.acmeProviderHasAnImage()
 	c.acmeImageIsNotStockCaddy()

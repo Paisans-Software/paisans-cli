@@ -31,7 +31,7 @@ func TestTheCaddyImageIsListedAsConfigured(t *testing.T) {
 	files := planFiles(plan)
 	for _, site := range []string{"vm", "watch"} {
 		img, n := siteImage(plan, site, "infra", acme.Published)
-		if n != 1 || img.Lines != 1 || img.App != "" || strings.Join(img.Services, ",") != "caddy" || !img.Default {
+		if n != 1 || img.Lines != 1 || img.App != "" || strings.Join(img.Services, ",") != "caddy" {
 			t.Errorf("%s lists %+v (%d times), want Caddy's %s once on one line", site, img, n, acme.Published)
 		}
 		if img.Path != site+"/srv/paisans/f2a9/infra/compose.yaml" {
@@ -71,18 +71,12 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 		if img.Setting() != "apps.talk.images.app" {
 			t.Errorf("the setting is %s", img.Setting())
 		}
-		if img.Default {
-			t.Errorf("%s lists the declared %s as the kind's default", site, image)
-		}
 	}
 	// The gate, which no file declares, is listed on the gateway like any
 	// other app, under its kind's default image.
 	gate, n := siteImage(plan, "vm", "gate", "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4")
 	if n != 1 || gate.Lines != 1 || strings.Join(gate.Services, ",") != "app" {
 		t.Errorf("the gate lists %+v (%d times)", gate, n)
-	}
-	if !gate.Default {
-		t.Errorf("the gate's image is its kind's default, and is listed as %+v", gate)
 	}
 	// The infrastructure stack's own images are not the configuration's.
 	for _, img := range plan.Images["home-a"] {

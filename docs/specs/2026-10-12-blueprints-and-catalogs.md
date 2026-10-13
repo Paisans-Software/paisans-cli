@@ -169,7 +169,7 @@ settings:
   member_group:  { type: group, default: members }
 
 services:
-  app:      { image: "ghcr.io/paisans-software/mbin:stack-1" }
+  app:      { image: "ghcr.io/paisans-software/mbin:1.15.1-paisans" }
   valkey:   { image: "docker.io/valkey/valkey:9.1.2-trixie" }
   rabbitmq: { image: "docker.io/library/rabbitmq:3.13.7-management-alpine",
               when: "app.settings.queue == 'rabbitmq'" }
