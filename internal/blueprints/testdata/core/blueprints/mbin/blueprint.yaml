@@ -40,6 +40,20 @@ port: 8080
 config:
   format: env
   file: ".env"
+  # The database settings the .env renders, so the configuration is their
+  # only source. The paisans fork reads each one named in
+  # MBIN_LOCKED_SETTINGS from the environment on every read, never writes it
+  # when an admin saves, shows it disabled, and refuses it through the
+  # settings API; a name it cannot lock makes it answer every request with
+  # an error, so each must be one the fork lists as lockable.
+  locked_settings:
+    - KBIN_DOMAIN
+    - KBIN_SENDER_EMAIL
+    - KBIN_CONTACT_EMAIL
+    - MBIN_AUTHORIZED_FETCH
+    - {name: MBIN_SSO_ONLY_MODE, when: "app.oidc"}
+    - {name: MBIN_PRIVATE_INSTANCE, when: "app.gated"}
+    - {name: MBIN_USE_FEDERATION_ALLOW_LIST, when: "app.gated"}
   setting_keys:
     - {key: "MBIN_AUTHORIZED_FETCH", file: ".env", setting: "authorized_fetch"}
     - {key: "OAUTH_OIDC_ADMIN_GROUP", file: ".env", setting: "admin_group"}
@@ -193,10 +207,12 @@ storage:
   # copy of a post points a remote instance there.
   local_media_paths: ["/media/*"]
 # Its contact form and the few account mails it still sends, as
-# MAILER_DSN and its sender address (see MbinContactEmailSetting).
+# MAILER_DSN and its sender address; settings.contact_email, else the
+# sender, is where the contact form sends.
 mail: reads
 # The paisans fork's generic OIDC provider, read at tag
-# v1.13.3+paisans: the callback is MbinRedirectURI; PKCE is on because
+# v1.13.3+paisans: the callback is oauth_oidc_verify in
+# config/mbin_routes/security.yaml, /oauth/oidc/verify; PKCE is on because
 # the fork's OidcClient extends KnpU's OAuth2PKCEClient and always
 # sends a code challenge (src/Security/Oidc/OidcClient.php:18); and
 # OAUTH_OIDC_ADMIN_GROUP and OAUTH_OIDC_MEMBER_GROUP, which the .env
@@ -225,12 +241,107 @@ secrets:
   # repository. The OAuth key pair is derived from the passphrase rather
   # than generated on its own.
   generate:
-    - "mercure_jwt_secret"
-    - "rabbitmq_password"
-    - "valkey_password"
-    - "app_secret"
-    - "oauth_passphrase"
-    - "oauth_encryption_key"
-    - "oauth_private_key"
-    - "oauth_public_key"
+    # The hub and the cache hold no session: sessions are in Postgres.
+    - {name: mercure_jwt_secret, rotation_cost: restart}
+    # RabbitMQ keeps its accounts in its data directory and reads
+    # RABBITMQ_DEFAULT_PASS only on a first start, so the password is
+    # changed inside the broker on each site that runs one, before the
+    # stack is handed it. rabbitmqctl takes a password only as an argument,
+    # so a shell inside the container reads it from stdin and passes it on.
+    - name: rabbitmq_password
+      rotation_cost: restart
+      rotate:
+        service: rabbitmq
+        when: "has(app.settings.queue) && app.settings.queue == 'rabbitmq'"
+        kept: "the app runs its queue in Postgres and starts no RabbitMQ, so no account has this password"
+        change: ["sh", "-c", 'IFS= read -r p; exec rabbitmqctl change_password mbin "$p"']
+        check: ["sh", "-c", 'IFS= read -r p; exec rabbitmqctl authenticate_user mbin "$p"']
+        refused: "Failed to authenticate"
+    - {name: valkey_password, rotation_cost: restart}
+    # Symfony's framework.secret, which signs the remember me cookie.
+    - {name: app_secret, rotation_cost: signs-out}
+    # Mbin's OAuth2 server: league's oauth2-server bundle signs access
+    # tokens with the private key and encrypts codes and refresh tokens
+    # with the encryption key, so all four change together and nothing
+    # issued under the old ones verifies after.
+    - {name: oauth_passphrase, group: oauth, rotation_cost: signs-out}
+    - {name: oauth_encryption_key, group: oauth, rotation_cost: signs-out}
+    - {name: oauth_private_key, format: rsa-keypair, passphrase: oauth_passphrase, group: oauth}
+    - {name: oauth_public_key, format: rsa-public, of: oauth_private_key, group: oauth}
   self_rotated: ["app_secret", "mercure_jwt_secret", "valkey_password"]
+# The rules validate holds an Mbin app to, by the ids they have always had.
+checks:
+  # Rendering would otherwise have to pick a backend silently.
+  - id: mbin-queue-unknown
+    level: refuse
+    hint: mbin queue setting is not a known value
+    key: settings.queue
+    rule: |-
+      !has(app.settings.queue) || type(app.settings.queue) != string || app.settings.queue in ['', 'postgres', 'rabbitmq']
+    message_expr: |-
+      'is "' + app.settings.queue + '". Choose postgres (the default: the queues live in the replicated database) or rabbitmq (a broker per site, faster, and lost with its site).'
+  # Each site then has its own broker, and an activity a site has
+  # acknowledged, or a delivery it has queued, is lost with that site. A
+  # warning: a risk an operator may take for throughput.
+  - id: mbin-rabbitmq-across-sites
+    level: warn
+    hint: mbin runs a separate rabbitmq broker on each apps site
+    key: settings.queue
+    rule: |-
+      app.placement != 'cluster' || size(app.sites) < 2 || !has(app.settings.queue) || app.settings.queue != 'rabbitmq'
+    message_expr: |-
+      "is rabbitmq on " + string(size(app.sites)) + " apps sites. Each site runs its own broker, so work a site has accepted (an inbox delivery already answered, a delivery queued for another server) is lost or stranded with that site. postgres keeps the queues in the replicated database, where the other site's consumers take them over."
+  # The toolkit renders authorized_fetch into the app's configuration and
+  # locks it there, so a value read as on that the operator meant as off,
+  # such as the string "no", would be both wrong and out of reach of the
+  # app's admin page.
+  - id: authorized-fetch-not-a-boolean
+    level: refuse
+    hint: authorized_fetch is not true or false
+    key: settings.authorized_fetch
+    rule: |-
+      !has(app.settings.authorized_fetch) || type(app.settings.authorized_fetch) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.authorized_fetch) == string ? '"' + app.settings.authorized_fetch + '"' : string(app.settings.authorized_fetch)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  # With no mail server Mbin renders Symfony's null transport, so nothing
+  # errors and the app works; what is lost is every contact form message
+  # and the few account mails it still sends.
+  - id: mbin-without-smtp
+    level: warn
+    hint: mbin has no smtp host, so its mail is discarded
+    key: smtp
+    rule: has(app.smtp.host)
+    message_expr: |-
+      'resolves no SMTP host, so ' + app.name + ' renders MAILER_DSN=null://null and discards every mail it sends: contact form messages, and the few account mails it still has (resending an activation link, a password reset). It works otherwise. Declare a top level smtp block, or one on this app.'
+  # With no sender Mbin sends as noreply at its own hostname, which dns init
+  # says sends no mail unless that hostname is a mail domain.
+  - id: mbin-smtp-without-sender
+    level: warn
+    hint: mbin smtp has no sender
+    key_expr: |-
+      has(app.own_smtp.from_address) ? 'apps.' + app.name + '.smtp.from_address' : 'smtp.from_address'
+    rule: |-
+      !has(app.smtp.host) || has(app.smtp.from_address)
+    message_expr: |-
+      'is not set, so ' + app.name + ' sends as noreply@' + app.hostname + '. dns init publishes that name as sending no mail unless it is a mail domain, so receivers are likely to reject what it sends. Set from_address.'
+  # KBIN_SENDER_EMAIL is the From of every mail, and Mbin builds it with
+  # Symfony's Address, which throws on anything but an address alone.
+  - id: mbin-smtp-from-not-an-email
+    level: refuse
+    hint: mbin sender is not an email address
+    key_expr: |-
+      has(app.own_smtp.from_address) ? 'apps.' + app.name + '.smtp.from_address' : 'smtp.from_address'
+    rule: |-
+      !has(app.smtp.host) || !has(app.smtp.from_address) || isBareEmail(app.smtp.from_address)
+    message_expr: |-
+      'is "' + app.smtp.from_address + '", which ' + app.name + ' renders as KBIN_SENDER_EMAIL, and Mbin fails to send any mail unless that is an email address alone, Eg: hello@example.org.'
+  # Mbin sends every contact form message to it, publishes it in /api/info,
+  # and uses it as its Web Push VAPID subject.
+  - id: mbin-contact-email-not-an-email
+    level: refuse
+    hint: mbin contact address is not an email address
+    key: settings.contact_email
+    rule: |-
+      !has(app.settings.contact_email) || (type(app.settings.contact_email) == string && isBareEmail(app.settings.contact_email))
+    message_expr: |-
+      'is ' + string(app.settings.contact_email) + ', and Mbin sends contact form messages to it, so it must be an email address alone, Eg: admins@example.org. Leave it out to use the sender address.'

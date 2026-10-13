@@ -85,10 +85,10 @@ func TestDefaultsArePinned(t *testing.T) {
 // The database default is computed from cluster.postgres_version rather than
 // fixed, so every database in a deployment is one major version.
 func TestPostgresHasNoFixedDefault(t *testing.T) {
-	if _, ok := kinds.DefaultImage(config.KindMbin, kinds.PostgresService); ok {
+	if _, ok := kinds.DefaultImage(config.Kind("mbin"), kinds.PostgresService); ok {
 		t.Fatal("postgres ships a fixed default, which would let two apps disagree about the major version")
 	}
-	if !kinds.Has(config.KindMbin, kinds.PostgresService) {
+	if !kinds.Has(config.Kind("mbin"), kinds.PostgresService) {
 		t.Fatal("postgres is not a declarable service, so a pinned app could not choose its database image")
 	}
 }

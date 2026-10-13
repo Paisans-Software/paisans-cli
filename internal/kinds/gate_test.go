@@ -59,10 +59,10 @@ func TestNoGateRecordOpensTheFrontPage(t *testing.T) {
 // A dedicated health route is open past the gate, so a gated app can be
 // checked through the edge; `/` is the front page and never is.
 func TestADedicatedHealthRouteIsOpen(t *testing.T) {
-	if !slices.Contains(kinds.OpenPathsFor(config.KindOutline), "/_health") {
+	if !slices.Contains(kinds.OpenPathsFor(config.Kind("outline")), "/_health") {
 		t.Error("outline's /_health is not open past the gate")
 	}
-	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("writefreely")} {
 		if !slices.Contains(kinds.OpenPathsFor(kind), "/healthz") {
 			t.Errorf("%s's /healthz is not open past the gate", kind)
 		}
@@ -72,7 +72,7 @@ func TestADedicatedHealthRouteIsOpen(t *testing.T) {
 // A federating kind that can be gated records how it refuses an unsigned
 // read, because the gate leaves ActivityPub to the app.
 func TestAGateableFederatingKindRecordsSignedFetch(t *testing.T) {
-	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("writefreely")} {
 		if kinds.GateFor(kind).SignedFetch == nil {
 			t.Errorf("%s federates and can be gated, but records no signed fetch", kind)
 		}
@@ -87,7 +87,7 @@ func TestAGateableFederatingKindRecordsSignedFetch(t *testing.T) {
 // allowlist in private mode alone, so one with private turned off has no
 // signed fetch either, and one with federation off does not federate at all.
 func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
-	for _, kind := range []config.Kind{config.KindMbin, config.KindWriteFreely} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("writefreely")} {
 		app := config.App{Kind: kind}
 		if !kinds.AuthorizedFetch(app) || kinds.SignedFetchFor(app) == nil || !kinds.Federates(app) {
 			t.Fatalf("a default %s has no authorized fetch, no signed fetch, or does not federate", kind)
@@ -100,7 +100,7 @@ func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
 			t.Errorf("%s: authorized_fetch false still claims signed fetch", kind)
 		}
 	}
-	app := config.App{Kind: config.KindWriteFreely, Settings: map[string]any{"private": false}}
+	app := config.App{Kind: config.Kind("writefreely"), Settings: map[string]any{"private": false}}
 	if kinds.SignedFetchFor(app) != nil {
 		t.Error("a writefreely with private off still claims signed fetch")
 	}
@@ -108,14 +108,14 @@ func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
 	if kinds.Federates(app) {
 		t.Error("a writefreely with federation off still federates")
 	}
-	sf := kinds.GateFor(config.KindWriteFreely).SignedFetch
+	sf := kinds.GateFor(config.Kind("writefreely")).SignedFetch
 	if probe := sf.SignedFetchProbe("blog.example.org"); probe != "/api/collections/blog.example.org/outbox" {
 		t.Errorf("writefreely probe is %q", probe)
 	}
 	if !slices.Contains(sf.Settings, "app.authorized_fetch") {
 		t.Errorf("writefreely signed fetch settings %v do not name app.authorized_fetch", sf.Settings)
 	}
-	if probe := kinds.GateFor(config.KindMbin).SignedFetch.SignedFetchProbe("talk.example.org"); probe != "/" {
+	if probe := kinds.GateFor(config.Kind("mbin")).SignedFetch.SignedFetchProbe("talk.example.org"); probe != "/" {
 		t.Errorf("mbin probe is %q", probe)
 	}
 }
@@ -126,7 +126,7 @@ func TestSignedFetchFollowsAuthorizedFetch(t *testing.T) {
 // what makes the token path safe; render's mbin_env_test.go holds that it is
 // rendered for every gated Mbin.
 func TestMbinOpensItsAPIToATokenOnly(t *testing.T) {
-	spec := kinds.GateFor(config.KindMbin)
+	spec := kinds.GateFor(config.Kind("mbin"))
 	if !slices.Contains(spec.TokenPaths, "/api/*") {
 		t.Errorf("mbin token paths %v lack /api/*, so a native app meets the gate", spec.TokenPaths)
 	}

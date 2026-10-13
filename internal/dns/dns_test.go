@@ -198,8 +198,8 @@ func declared() *config.Config {
 			},
 		},
 		Apps: map[string]config.App{
-			"talk": {Kind: config.KindMbin, Hostname: "talk.example.org"},
-			"docs": {Kind: config.KindOutline, Hostname: "Docs.Example.org."},
+			"talk": {Kind: config.Kind("mbin"), Hostname: "talk.example.org"},
+			"docs": {Kind: config.Kind("outline"), Hostname: "Docs.Example.org."},
 		},
 		Community: config.Community{Domain: "example.org"},
 		// Garage, so talk and docs keep their files in it and each has a
@@ -538,7 +538,7 @@ func TestDesiredDerivesAndDedupes(t *testing.T) {
 	// An endpoint given as an address needs no record.
 	cfg.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "198.51.100.20:51820"}
 	// A role hostname is a public name too, and the same name twice is one record.
-	cfg.Apps["chat"] = config.App{Kind: config.KindSynapse, Hostname: "matrix.example.org", Hostnames: map[string]string{"wellknown": "example.org"}}
+	cfg.Apps["chat"] = config.App{Kind: config.Kind("synapse"), Hostname: "matrix.example.org", Hostnames: map[string]string{"wellknown": "example.org"}}
 	vm := cfg.Sites["vm"]
 	vm.PublicAddress6 = "2001:db8::10"
 	vm.Endpoint = "talk.example.org:51820"

@@ -13,7 +13,7 @@ func TestOrphans(t *testing.T) {
 	cfg := &config.Config{
 		Sites: map[string]config.Site{"home-a": {}},
 		Apps: map[string]config.App{
-			"talk":  {Kind: config.KindMbin},
+			"talk":  {Kind: config.Kind("mbin")},
 			"auth":  {Kind: config.KindPocketID, Settings: map[string]any{"signup_default_groups": []any{"provisional"}}},
 			"auth2": {Kind: config.KindPocketID, Settings: map[string]any{"signup_default_groups": []any{"members"}}},
 		},
@@ -58,7 +58,7 @@ func TestOrphans(t *testing.T) {
 }
 
 func TestNoOrphansWhenTheSecretsMatch(t *testing.T) {
-	cfg := &config.Config{Sites: map[string]config.Site{"home-a": {}}, Apps: map[string]config.App{"talk": {Kind: config.KindMbin}}}
+	cfg := &config.Config{Sites: map[string]config.Site{"home-a": {}}, Apps: map[string]config.App{"talk": {Kind: config.Kind("mbin")}}}
 	s := &config.Secrets{
 		Sites:       map[string]config.SiteSecrets{"home-a": {}},
 		Apps:        map[string]map[string]any{"talk": {}},

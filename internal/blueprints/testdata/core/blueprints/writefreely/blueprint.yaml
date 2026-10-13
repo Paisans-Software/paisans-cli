@@ -33,6 +33,23 @@ config:
   # passthrough key means anything.
   format: ini
   file: "config.ini"
+  # The database settings config.ini renders, in the fork's registry order,
+  # so the configuration is their only source: the fork reads each from the
+  # file on every start, never imports it, and refuses to change it from its
+  # admin page or `writefreely settings set`. app.federation_allowlist is not
+  # rendered, so it stays the admins' to edit.
+  locked_settings:
+    - app.site_name
+    - app.theme
+    - app.open_registration
+    - app.min_username_len
+    - app.federation
+    - app.public_stats
+    - app.private
+    - app.authorized_fetch
+    - app.local_timeline
+    - uploads.enabled
+    - uploads.max_size_mb
   setting_keys:
     - {key: "app.authorized_fetch", file: "config.ini", setting: "authorized_fetch"}
     - {key: "app.federation", file: "config.ini", setting: "federation"}
@@ -159,3 +176,38 @@ oidc:
   member_group_setting: "member_group"
   default_admin_group: "admins"
   default_member_group: "members"
+# The rules validate holds a WriteFreely app to, by the ids they have
+# always had.
+checks:
+  # The toolkit renders authorized_fetch into the app's configuration and
+  # locks it there, so a value read as on that the operator meant as off,
+  # such as the string "no", would be both wrong and out of reach of the
+  # app's admin page.
+  - id: authorized-fetch-not-a-boolean
+    level: refuse
+    hint: authorized_fetch is not true or false
+    key: settings.authorized_fetch
+    rule: |-
+      !has(app.settings.authorized_fetch) || type(app.settings.authorized_fetch) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.authorized_fetch) == string ? '"' + app.settings.authorized_fetch + '"' : string(app.settings.authorized_fetch)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  # config.ini locks every setting the toolkit renders, and the fork refuses
+  # to start on a locked value it would refuse to save (docs/settings.md,
+  # "Locking settings in config.ini", at writefreely-wisp v0.21.1+wisp). The
+  # ranges are its registry's (config/settings.go dbSettings).
+  - id: writefreely-setting-invalid
+    level: refuse
+    hint: writefreely setting is out of range
+    key: settings.min_username_len
+    rule: |-
+      !has(app.settings.min_username_len) || type(app.settings.min_username_len) != string || app.settings.min_username_len == '' || (int(app.settings.min_username_len.trim()) >= 1 && int(app.settings.min_username_len.trim()) <= 100)
+    message_expr: |-
+      'is "' + app.settings.min_username_len + '". WriteFreely accepts a whole number from 1 to 100, and config.ini locks this setting, so any other value stops the blog at startup.'
+  - id: writefreely-setting-invalid
+    level: refuse
+    hint: writefreely setting is out of range
+    key: settings.uploads_max_size_mb
+    rule: |-
+      !has(app.settings.uploads_max_size_mb) || type(app.settings.uploads_max_size_mb) != string || app.settings.uploads_max_size_mb == '' || (int(app.settings.uploads_max_size_mb.trim()) >= 1 && int(app.settings.uploads_max_size_mb.trim()) <= 1048576)
+    message_expr: |-
+      'is "' + app.settings.uploads_max_size_mb + '". WriteFreely accepts a whole number from 1 to 1048576, and config.ini locks this setting, so any other value stops the blog at startup.'

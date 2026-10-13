@@ -132,7 +132,7 @@ services:
       # S3_KEY is set in .env), and `sed -i` over a bind mount fails and stops
       # the container.
     depends_on:
-{{- if eq .MbinQueue "rabbitmq" }}
+{{- if eq (.Setting "queue" "postgres") "rabbitmq" }}
       amqproxy:
         condition: service_started
 {{- end }}
@@ -176,7 +176,7 @@ services:
       # the web container in which keys it can see.
       - {{ .DataPath }}/oauth:/app/config/oauth2:ro
     depends_on:
-{{- if eq .MbinQueue "rabbitmq" }}
+{{- if eq (.Setting "queue" "postgres") "rabbitmq" }}
       amqproxy:
         condition: service_started
 {{- end }}
@@ -186,7 +186,7 @@ services:
       postgres:
         condition: service_started
 {{- end }}
-{{- if eq .MbinQueue "rabbitmq" }}
+{{- if eq (.Setting "queue" "postgres") "rabbitmq" }}
 
   amqproxy:
     labels:

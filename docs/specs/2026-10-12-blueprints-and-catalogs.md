@@ -18,18 +18,18 @@ simpler form covered every blueprint there is:
 * A blueprint's templates are every file in its directory but
   `blueprint.yaml`; there is no `templates` list.
 * A service has no `when`: a compose template renders a service or not itself.
-* A secret rotates by re-rendering its stack (`secrets.self_rotated`); a
-  blueprint cannot yet declare rotation steps run in its containers.
+* A secret rotates by re-rendering its stack (`secrets.self_rotated`), as a
+  unit with its `group`, or by a `rotate` step in one of its services, each
+  declared under `secrets.generate`.
 * A setting's `default` is filled in only for a blueprint read from a
   catalog, and only into what that blueprint's templates and CEL expressions
   see, never into the configuration: the built in blueprints' Go code and
   validate's rules give a setting that is absent a meaning of its own (an
   absent `authorized_fetch` is on).
-* An expression sees no `app.name`, `app.oidc` or `deployment.sites`; the
-  variables are the ones `internal/kinds/cel.go` declares.
-* Mbin's lock list is not a key: `MBIN_LOCKED_SETTINGS` is rendered from Go
-  (`MbinLockedSettings` in `internal/render/mbin.go`), so `blueprint lint` has
-  no lock list to check it against.
+* The variables an expression sees are the ones `internal/kinds/cel.go`
+  declares, listed under *Predicates and checks are CEL*.
+* A lock list is `config.locked_settings`, which a template renders with
+  `.LockedSettings`.
 * `placement` is not a key: an engine other than postgres is pinned only, as
   the cluster rules already decide.
 * **Catalogs are unsigned.** Signing, as *Signing* below describes it, was
@@ -159,6 +159,11 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 
 ### Example: Mbin, as the core catalog would ship it
 
+This example is the design as written on 2026-10-12. The core catalog's own
+`blueprints/mbin/blueprint.yaml` is the form it took, with its checks, its
+locked settings and its secrets declared, and its templates calling only the
+helpers below.
+
 The values below are the ones the toolkit renders, from
 `internal/blueprints/core/mbin/blueprint.yaml`, `internal/kinds/mbin.go` and
 `internal/render/mbin.go`, shortened: the gate's open paths and the comments
@@ -266,10 +271,10 @@ KBIN_CONTACT_EMAIL={{ envquote .MbinContactEmail }}
 MBIN_LOCKED_SETTINGS={{ .MbinLockedSettings }}
 ```
 
-`.MailerDSN`, `.MbinContactEmail` and `.MbinLockedSettings` are Mbin only
-values, worked out in Go in `internal/render/mbin.go`: the mailer DSN is in
-Symfony's syntax, which only Mbin reads, and the other two follow Mbin's own
-rules. They are not general helpers and not part of the contract below. A
+`.MailerDSN`, `.MbinContactEmail` and `.MbinLockedSettings` were Mbin only
+values, worked out in Go. They became `.SMTPDSN`, `.Setting "contact_email"
+.SMTPSender` and `.LockedSettings ","`, which any blueprint may use
+(`docs/specs/2026-10-13-core-catalog-fetched.md`). A
 blueprint of its own reads a setting with `.Setting`, Eg:
 `{{ envquote (.Setting "contact_email" "") }}`.
 
@@ -344,20 +349,24 @@ An expression sees:
 | `app.smtp` | its resolved SMTP settings, without the password |
 | `app.sites` | the sites it runs on |
 | `app.storage` | `mode` (`object` or `local`), `bucket` and `media_hostname` |
+| `app.own_smtp` | the SMTP settings the app declares itself |
 | `deployment.sites` | site names and their roles |
 
 A gate setting's condition sees the app alone, so `app.name`, `app.smtp`,
 `app.sites`, `app.storage` and `deployment.sites` are empty in one.
 
 The toolkit adds functions where CEL has none. The first are `isBareEmail`
-(what `isAddressAlone` in `internal/validate/mbin_mail.go` checks) and
+(an email address with nothing around it, which Symfony's Address insists
+on) and
 `isHostname`, beside CEL's string extension. A function is part of the helper
 contract below.
 
 A check gives its `message` as text, or as `message_expr`, a string
 expression over the same variables, so the message can name the value that is
-wrong. Its key, relative to `apps.<name>`, is `key` or `key_expr` the same
-way, and `hint` is its one line summary.
+wrong. Its key is `key`, relative to `apps.<name>`, or `key_expr`, an
+expression giving the whole key, which may be the deployment's own when the
+value came from there (`app.own_smtp` is the app's own mail settings, beside
+the resolved `app.smtp`). `hint` is its one line summary.
 
 ## Capabilities, helpers and in-app actions
 
@@ -392,8 +401,8 @@ address, `.LockedSettings "<separator>"` joins the blueprint's
 `config.locked_settings` that apply, `stableULID` derives a ULID from an
 app's name, and `.Linked "<role>" "<value>"` reads what the provider of a
 consumed role offers. Values the toolkit
-works out in Go for one blueprint, such as Mbin's mailer DSN (`.MailerDSN`),
-are that blueprint's, not helpers.
+works out in Go for one blueprint are that blueprint's, not helpers; the
+reserved blueprints' are the only ones left.
 
 **In-app actions** run a command inside one of the app's own containers: a
 gate setting's live read (`env-lock-list`, which is today's `mbinLive`), a

@@ -245,9 +245,9 @@ workstation and written to the secrets file before Pocket ID is sent it, and is
 never printed. `--rotate-secret` adds a new secret, leaving the old one valid.
 `apply` runs the same step for every app it starts (see *`apply` creates each
 app's OIDC client* below), so the command is for running it alone and for
-rotating. The known clients are Mbin's, Outline's, WriteFreely's, uptime's,
-Synapse's (its authentication service's, at `kinds.MASRedirectURI`) and the
-gate's (`kinds.OIDCClient`), each with its callback cited from the pinned source. The launch URL is the app's
+rotating. A client is made for every app whose blueprint declares `oidc`
+(`kinds.OIDCClient`), at the callback the blueprint gives, each cited there
+from the pinned source. The launch URL is the app's
 hostname plus the kind's dashboard path (`kinds.DashboardPath`, Mbin's
 `/oauth/oidc/connect` so the tile signs the member in, otherwise `/`), or
 `apps.<app>.settings.sso_dashboard_link`, which `validate` refuses unless it is
@@ -1670,11 +1670,12 @@ before.
   until a fork release reads it. `TestMbinSplitsItsLocks` asserts both for
   clustered and pinned placement. `README.md` has the reasoning under "Mbin's
   locks are split: flock by default, Postgres for the few that cross sites".
-* **Mbin's queues default to Postgres** (`settings.queue`, `kinds.MbinQueue`),
+* **Mbin's queues default to Postgres** (`settings.queue`, read by the mbin
+  blueprint's templates as `.Setting "queue" "postgres"`),
   with no broker in the stack; `queue: rabbitmq` renders the broker stack as
   before. `TestMbinQueuesInPostgresByDefault` and `TestMbinRabbitMQIsAnOptIn`
-  hold both, and `validate` refuses an unknown value and warns for RabbitMQ on
-  more than one apps site. The default needs a paisans fork image with the
+  hold both, and the blueprint's checks refuse an unknown value and warn for
+  RabbitMQ on more than one apps site. The default needs a paisans fork image with the
   Doctrine transport decorator. README: "Mbin's queues are in Postgres by
   default".
 * **Pocket ID's standby is keyed on its log text**, pinned per image in

@@ -134,6 +134,13 @@ var mbinLockableSettings = []string{
 	"MBIN_USE_FEDERATION_ALLOW_LIST", "MBIN_AUTHORIZED_FETCH",
 }
 
+// mbinSettingEnv maps a Mbin database setting to the environment variable
+// that feeds it, where the two names differ (config/services.yaml:135 at
+// Paisans-Software/mbin develop: sso_only_mode reads SSO_ONLY_MODE).
+var mbinSettingEnv = map[string]string{
+	"MBIN_SSO_ONLY_MODE": "SSO_ONLY_MODE",
+}
+
 // MBIN_LOCKED_SETTINGS is exactly the database settings the template renders,
 // gated and not, with authorized fetch on and off: every name in it is a key
 // the .env sets and one the fork can lock, and every key the .env sets that
@@ -145,7 +152,7 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 	database := map[string]string{}
 	for _, name := range mbinDatabaseSettings {
 		key := name
-		if env, ok := render.MbinSettingEnv[name]; ok {
+		if env, ok := mbinSettingEnv[name]; ok {
 			key = env
 		}
 		database[key] = name

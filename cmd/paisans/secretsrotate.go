@@ -33,17 +33,6 @@ const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--restart]
 // --replaced.
 const replacedEarlier = "replaced earlier, hosts already run it: the value the secrets file holds is what every host using it runs, so there is nothing to hand out"
 
-// encryptsStoredData is why Pocket ID's encryption_key, MAS's
-// mas_encryption_secret and Outline's outline_secret_key are kept
-// (docs/specs/2026-10-12-secrets-rotate.md, Scope).
-const encryptsStoredData = "it encrypts data already stored, so changing it makes that data unreadable, and none of Pocket ID, Matrix Authentication Service and Outline offers a re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
-
-// forgetsDeclines is why the invite service's email_hash_key is kept: the
-// service stores only the keyed hash of a declined address
-// (docs/specs/2026-10-12-invite-service.md, Declining), so a new key matches
-// none of them.
-const forgetsDeclines = "rotating it forgets every declined address"
-
 // wireguardKept is why secrets rotate leaves the WireGuard keys alone.
 const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, which moves it without dropping a tunnel"
 
@@ -103,7 +92,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	case *restart && !*all:
 		return &ui.Problem{Hint: "--restart takes --all", Explain: "--restart starts an --all run's full list again, discarding what an earlier --all run left. " + rotateUsage}
 	case !*all && len(named) == 0:
-		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: paisans secrets rotate cluster.standby_password, or apps.<app>.oauth for Mbin's OAuth2 keys; or --all for every one. " + rotateUsage}
+		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: paisans secrets rotate cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups, such as apps.talk.oauth; or --all for every one. " + rotateUsage}
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -524,20 +513,10 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return r, err
 		}
 		switch last {
-		case "oauth":
-			return secretsrotate.MbinOAuth(app), nil
-		case "encryption_key", "mas_encryption_secret", "outline_secret_key":
-			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, encryptsStoredData)
-		case "email_hash_key":
-			return nil, fmt.Errorf("secrets rotate: %s is kept: %s", path, forgetsDeclines)
-		case "oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key":
-			return nil, fmt.Errorf("secrets rotate: %s encrypts or opens Mbin's OAuth2 keypair, and is rotated with the rest of it: name apps.%s.oauth", path, app)
 		case "s3_access_key_id", "s3_secret_access_key":
 			return secretsrotate.AppS3(app, w.s3Run), nil
 		case "database_password":
 			return secretsrotate.AppDatabase(app), nil
-		case "rabbitmq_password":
-			return secretsrotate.MbinRabbitMQ(app), nil
 		case "admin_password":
 			return secretsrotate.UptimeAdmin(app), nil
 		case "admins_heartbeat_token":
@@ -547,7 +526,7 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.AppSelf(app, last, costOf(w.cfg, app, last)), nil
 		}
 	}
-	return nil, fmt.Errorf("secrets rotate: there is no rotation for %s. It names a secret by its path in the secrets file, Eg: cluster.standby_password, or apps.<app>.oauth for Mbin's OAuth2 keys. Nothing was changed", path)
+	return nil, fmt.Errorf("secrets rotate: there is no rotation for %s. It names a secret by its path in the secrets file, Eg: cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups. Nothing was changed", path)
 }
 
 // declaredRotator is the rotation of apps.<app>.<key> as the app's blueprint
@@ -580,7 +559,7 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 // blueprint when the deployment is known.
 func costOf(cfg *config.Config, app, key string) secretsrotate.Cost {
 	if cfg == nil {
-		return secretsrotate.AppSelfCost(key)
+		return secretsrotate.Cost{}
 	}
 	return secretsrotate.CostOf(cfg, app, key)
 }
@@ -623,11 +602,16 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 		return out
 	}
-	self := func(key string) {
-		kind, _ := secretsrotate.AppSelfKind(key)
-		for _, app := range appsOf(kind) {
-			if has("apps." + app + "." + key) {
-				rs = append(rs, secretsrotate.AppSelf(app, key, secretsrotate.CostOf(cfg, app, key)))
+	// self is every secret an app's own stack checks whose blueprint gives
+	// it the cost named: those that sign members out go with the other
+	// signing keys, early; those that only restart a stack go last.
+	self := func(cost string) {
+		for _, app := range cfg.AppNames() {
+			kind := cfg.Apps[app].Kind
+			for _, key := range kinds.SelfRotated(kind) {
+				if spec, _ := kinds.SecretOf(kind, key); spec.RotationCost == cost && has("apps."+app+"."+key) {
+					rs = append(rs, secretsrotate.AppSelf(app, key, secretsrotate.CostOf(cfg, app, key)))
+				}
 			}
 		}
 	}
@@ -660,8 +644,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 		rs = append(rs, secretsrotate.OIDCClient(name, w.oidcRun, w.oidcRetire))
 	}
-	// Each unit of secrets a blueprint groups, and Mbin's OAuth2 unit for a
-	// blueprint that groups none.
+	// Each unit of secrets a blueprint groups.
 	for _, app := range cfg.AppNames() {
 		groups := kinds.SecretGroups(cfg.Apps[app].Kind)
 		for _, group := range groups {
@@ -669,22 +652,14 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 				rs = append(rs, secretsrotate.AppGroup(cfg, app, group))
 			}
 		}
-		if len(groups) == 0 && cfg.Apps[app].Kind == config.KindMbin && has("apps."+app+".oauth_passphrase") {
-			rs = append(rs, secretsrotate.MbinOAuth(app))
-		}
 	}
-	self("app_secret")
-	self("cookie_secret")
-	self("session_secret")
-	self("session_key")
-	self("mas_signing_key")
-	self("mas_matrix_secret")
+	self(kinds.CostSignsOut)
 	for _, app := range cfg.AppNames() {
 		if has("apps." + app + ".s3_access_key_id") {
 			rs = append(rs, secretsrotate.AppS3(app, w.s3Run))
 		}
 	}
-	self("static_api_key")
+	self("")
 	for _, app := range appsOf(config.KindUptime) {
 		if has("apps." + app + ".admin_password") {
 			rs = append(rs, secretsrotate.UptimeAdmin(app))
@@ -702,36 +677,16 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			rs = append(rs, secretsrotate.AppDatabase(app))
 		}
 	}
-	// Each secret a blueprint changes inside the running app, and Mbin's
-	// RabbitMQ password for a blueprint that declares no such rotation.
+	// Each secret a blueprint changes inside the running app.
 	for _, app := range cfg.AppNames() {
 		kind := cfg.Apps[app].Kind
-		declared := false
 		for _, key := range kinds.AppSecrets(kind) {
-			if spec, _ := kinds.SecretOf(kind, key); spec.Rotate != nil {
-				declared = true
-				if has("apps." + app + "." + key) {
-					rs = append(rs, secretsrotate.InApp(cfg, app, key))
-				}
-			}
-		}
-		if !declared && kind == config.KindMbin && has("apps."+app+".rabbitmq_password") {
-			rs = append(rs, secretsrotate.MbinRabbitMQ(app))
-		}
-	}
-	self("valkey_password")
-	self("mercure_jwt_secret")
-	self("redis_password")
-	self("utils_secret")
-	// Any other secret a blueprint's own stack checks, in the app's order.
-	named := []string{"app_secret", "cookie_secret", "session_secret", "session_key", "mas_signing_key", "mas_matrix_secret", "static_api_key", "valkey_password", "mercure_jwt_secret", "redis_password", "utils_secret"}
-	for _, app := range cfg.AppNames() {
-		for _, key := range kinds.SelfRotated(cfg.Apps[app].Kind) {
-			if !slices.Contains(named, key) && has("apps."+app+"."+key) {
-				rs = append(rs, secretsrotate.AppSelf(app, key, secretsrotate.CostOf(cfg, app, key)))
+			if spec, _ := kinds.SecretOf(kind, key); spec.Rotate != nil && has("apps."+app+"."+key) {
+				rs = append(rs, secretsrotate.InApp(cfg, app, key))
 			}
 		}
 	}
+	self(kinds.CostRestart)
 	if len(cfg.Storage.Garage.Sites) > 0 {
 		if has("storage.garage.admin_token") {
 			rs = append(rs, secretsrotate.GarageAdminToken())
@@ -751,30 +706,13 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 	}
 
-	for _, app := range appsOf(config.KindPocketID) {
-		if path := "apps." + app + ".encryption_key"; has(path) {
-			kept = append(kept, keptSecret{path, encryptsStoredData})
-		}
-	}
-	// Each secret a blueprint says is never rotated, and the core
-	// encryption keys of a blueprint that says nothing of them.
+	// Each secret a blueprint says is never rotated, with why.
 	for _, app := range cfg.AppNames() {
 		kind := cfg.Apps[app].Kind
 		for _, key := range kinds.AppSecrets(kind) {
-			path := "apps." + app + "." + key
-			spec, _ := kinds.SecretOf(kind, key)
-			switch {
-			case !has(path):
-			case spec.NeverRotate != "":
-				kept = append(kept, keptSecret{path, spec.NeverRotate})
-			case (kind == config.KindSynapse && key == "mas_encryption_secret") || (kind == config.KindOutline && key == "outline_secret_key"):
-				kept = append(kept, keptSecret{path, encryptsStoredData})
+			if spec, _ := kinds.SecretOf(kind, key); spec.NeverRotate != "" && has("apps."+app+"."+key) {
+				kept = append(kept, keptSecret{"apps." + app + "." + key, spec.NeverRotate})
 			}
-		}
-	}
-	for _, app := range appsOf(config.KindInvite) {
-		if path := "apps." + app + ".email_hash_key"; has(path) {
-			kept = append(kept, keptSecret{path, forgetsDeclines})
 		}
 	}
 	for _, path := range []string{"backup.restic_password", "backup.walg_libsodium_key"} {

@@ -38,6 +38,9 @@ const celCostLimit = 10000
 //   - app.name, its name under apps, empty in a condition
 //   - app.oidc, whether its blueprint signs members in through the identity
 //     provider
+//   - app.own_smtp, the mail settings the app itself declares, beside the
+//     deployment's, which is how a check says which key a value came from,
+//     empty in a condition
 //   - app.sites, the sites it runs on, empty in a condition
 //   - app.storage, where its files go: mode ("object" or "local"), bucket
 //     (its bucket's name, when in object storage) and media_hostname (the
@@ -64,6 +67,7 @@ var celEnv = func() *cel.Env {
 		cel.Variable("app.smtp", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("app.name", cel.StringType),
 		cel.Variable("app.oidc", cel.BoolType),
+		cel.Variable("app.own_smtp", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("app.sites", cel.ListType(cel.StringType)),
 		cel.Variable("app.storage", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("deployment.sites", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
@@ -108,6 +112,7 @@ func celApp(app config.App) map[string]any {
 		"app.smtp":         map[string]any{},
 		"app.name":         "",
 		"app.oidc":         of(app.Kind).OIDC != nil,
+		"app.own_smtp":     map[string]any{},
 		"app.sites":        []string{},
 		"app.storage":      map[string]string{},
 		"deployment.sites": []map[string]any{},
@@ -120,6 +125,9 @@ func celAppIn(cfg *config.Config, name string) map[string]any {
 	app := cfg.Apps[name]
 	vars := celApp(app)
 	vars["app.smtp"] = smtpOf(cfg.SMTPFor(name))
+	if app.SMTP != nil {
+		vars["app.own_smtp"] = smtpOf(*app.SMTP)
+	}
 	vars["app.name"] = name
 	sites := []string{}
 	if app.Placement.Mode == config.PlacementPinned {

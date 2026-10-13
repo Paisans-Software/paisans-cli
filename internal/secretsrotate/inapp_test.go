@@ -31,8 +31,8 @@ func newMQWorld(t *testing.T) *mqWorld {
 			"home-b": {Roles: []config.Role{config.RoleApps}, Address: "10.0.0.2"},
 		},
 		Apps: map[string]config.App{
-			"forum": {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}, Settings: map[string]any{"queue": "rabbitmq"}},
-			"plain": {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"forum": {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}, Settings: map[string]any{"queue": "rabbitmq"}},
+			"plain": {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 			"gate":  {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}
@@ -78,24 +78,24 @@ func (w *mqWorld) env() Env {
 	return Env{Cfg: w.cfg, Store: w.store, Sites: sites}
 }
 
-func TestMbinRabbitMQUsersAndCost(t *testing.T) {
+func TestInAppRabbitMQUsersAndCost(t *testing.T) {
 	w := newMQWorld(t)
-	r := MbinRabbitMQ("forum")
+	r := InApp(w.cfg, "forum", "rabbitmq_password")
 	if r.Path() != "apps.forum.rabbitmq_password" {
 		t.Fatalf("path %q", r.Path())
 	}
 	if got := usesOf(w.env(), r); !slices.Equal(got, []string{"home-a:forum", "home-b:forum"}) {
 		t.Fatalf("users %v", got)
 	}
-	if c := r.Cost(); c.SignsOut || c.Downtime != mbinRestart {
+	if c := r.Cost(); c.SignsOut || c.Downtime != "the forum stack, for one restart on each site in turn" {
 		t.Fatalf("cost %+v", c)
 	}
 }
 
-func TestMbinRabbitMQChangesEveryBrokerWithThePasswordOnStdin(t *testing.T) {
+func TestInAppRabbitMQChangesEveryBrokerWithThePasswordOnStdin(t *testing.T) {
 	w := newMQWorld(t)
 	e := w.env()
-	r := MbinRabbitMQ("forum")
+	r := InApp(w.cfg, "forum", "rabbitmq_password")
 	if ok, err := r.Accepts(e, "mq-new"); err != nil || ok {
 		t.Fatalf("accepts before: %v %v", ok, err)
 	}
@@ -120,27 +120,27 @@ func TestMbinRabbitMQChangesEveryBrokerWithThePasswordOnStdin(t *testing.T) {
 		if strings.Contains(c.command, "mq-") {
 			t.Fatalf("a password in a command line: %s", c.command)
 		}
-		if !strings.Contains(c.command, "/forum/compose.yaml exec -T rabbitmq sh -c") {
+		if !strings.Contains(c.command, "/forum/compose.yaml exec -T 'rabbitmq' 'sh' '-c'") {
 			t.Fatalf("not run in the forum's rabbitmq: %s", c.command)
 		}
 	}
 }
 
-func TestMbinRabbitMQAcceptsReportsAnUnreachableBrokerAsAnError(t *testing.T) {
+func TestInAppRabbitMQAcceptsReportsAnUnreachableBrokerAsAnError(t *testing.T) {
 	w := newMQWorld(t)
 	w.down["home-b"] = true
-	ok, err := MbinRabbitMQ("forum").Accepts(w.env(), "mq-old")
+	ok, err := InApp(w.cfg, "forum", "rabbitmq_password").Accepts(w.env(), "mq-old")
 	if err == nil || ok {
 		t.Fatalf("a broker that did not answer is %v %v, not a refused password", ok, err)
 	}
-	if err := MbinRabbitMQ("forum").Checked(w.env(), "mq-new"); err == nil {
+	if err := InApp(w.cfg, "forum", "rabbitmq_password").Checked(w.env(), "mq-new"); err == nil {
 		t.Fatal("a broker that did not answer took the password")
 	}
 }
 
-func TestMbinRabbitMQRefusesAPasswordItCannotSend(t *testing.T) {
+func TestInAppRabbitMQRefusesAPasswordItCannotSend(t *testing.T) {
 	w := newMQWorld(t)
-	if err := MbinRabbitMQ("forum").Checked(w.env(), "a\nb"); err == nil {
+	if err := InApp(w.cfg, "forum", "rabbitmq_password").Checked(w.env(), "a\nb"); err == nil {
 		t.Fatal("a newline password was sent")
 	}
 	if len(w.cmds) != 0 {
@@ -149,9 +149,9 @@ func TestMbinRabbitMQRefusesAPasswordItCannotSend(t *testing.T) {
 }
 
 // Review Focus 3: an Mbin on the default queue has no RabbitMQ user.
-func TestMbinRabbitMQOnPostgresQueueIsKeptAndNothingIsWritten(t *testing.T) {
+func TestInAppRabbitMQOnPostgresQueueIsKeptAndNothingIsWritten(t *testing.T) {
 	w := newMQWorld(t)
-	err := MbinRabbitMQ("plain").(Prechecker).Precheck(w.env())
+	err := InApp(w.cfg, "plain", "rabbitmq_password").(Prechecker).Precheck(w.env())
 	var kept *KeptError
 	if !errors.As(err, &kept) || !errors.Is(err, ErrKept) {
 		t.Fatalf("precheck %v, want a KeptError", err)
@@ -162,7 +162,7 @@ func TestMbinRabbitMQOnPostgresQueueIsKeptAndNothingIsWritten(t *testing.T) {
 	if len(w.cmds) != 0 {
 		t.Fatalf("commands ran: %v", w.cmds)
 	}
-	if err := w.run(MbinRabbitMQ("plain")); err != nil {
+	if err := w.run(InApp(w.cfg, "plain", "rabbitmq_password")); err != nil {
 		t.Fatal(err)
 	}
 	if len(w.store.s.Rotations) != 0 {
@@ -170,15 +170,15 @@ func TestMbinRabbitMQOnPostgresQueueIsKeptAndNothingIsWritten(t *testing.T) {
 	}
 }
 
-func TestMbinRabbitMQPrecheckRefusesTheWrongApp(t *testing.T) {
+func TestInAppRabbitMQPrecheckRefusesTheWrongApp(t *testing.T) {
 	w := newMQWorld(t)
 	for _, app := range []string{"gate", "missing"} {
-		err := MbinRabbitMQ(app).(Prechecker).Precheck(w.env())
+		err := InApp(w.cfg, app, "rabbitmq_password").(Prechecker).Precheck(w.env())
 		if err == nil || errors.Is(err, ErrKept) {
 			t.Fatalf("%s: %v", app, err)
 		}
 	}
-	if err := MbinRabbitMQ("forum").(Prechecker).Precheck(w.env()); err != nil {
+	if err := InApp(w.cfg, "forum", "rabbitmq_password").(Prechecker).Precheck(w.env()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -198,9 +198,9 @@ func (w *mqWorld) run(r Rotator) error {
 	return run.Execute(e, signOut)
 }
 
-func TestMbinRabbitMQRotatesBrokersBeforeTheStackIsHandedTheValue(t *testing.T) {
+func TestInAppRabbitMQRotatesBrokersBeforeTheStackIsHandedTheValue(t *testing.T) {
 	w := newMQWorld(t)
-	if err := w.run(MbinRabbitMQ("forum")); err != nil {
+	if err := w.run(InApp(w.cfg, "forum", "rabbitmq_password")); err != nil {
 		t.Fatal(err)
 	}
 	next, _ := w.store.s.Get("apps.forum.rabbitmq_password")
@@ -213,25 +213,25 @@ func TestMbinRabbitMQRotatesBrokersBeforeTheStackIsHandedTheValue(t *testing.T) 
 	}
 }
 
-func TestMbinRabbitMQNextNeverBeginsWithADash(t *testing.T) {
+func TestInAppRabbitMQNextNeverBeginsWithADash(t *testing.T) {
 	w := newMQWorld(t)
 	draws := []string{"-dashed-one", "--dashed-two", "-dashed-three", "clean-value-1"}
-	old := mqGenerate
-	defer func() { mqGenerate = old }()
-	mqGenerate = func(string, *config.Secrets) (string, error) {
+	old := inAppGenerate
+	defer func() { inAppGenerate = old }()
+	inAppGenerate = func(*config.Config, string, *config.Secrets) (string, error) {
 		v := draws[0]
 		draws = draws[1:]
 		return v, nil
 	}
-	got, err := MbinRabbitMQ("forum").Next(w.env(), w.store.s)
+	got, err := InApp(w.cfg, "forum", "rabbitmq_password").Next(w.env(), w.store.s)
 	if err != nil || got != "clean-value-1" {
 		t.Fatalf("next %q %v", got, err)
 	}
 }
 
-func TestMbinRabbitMQRefusesALeadingDashWithNoCommand(t *testing.T) {
+func TestInAppRabbitMQRefusesALeadingDashWithNoCommand(t *testing.T) {
 	w := newMQWorld(t)
-	r := MbinRabbitMQ("forum")
+	r := InApp(w.cfg, "forum", "rabbitmq_password")
 	if err := r.Checked(w.env(), "-secret"); err == nil || !strings.Contains(err.Error(), "dash") {
 		t.Fatalf("checked: %v", err)
 	}
@@ -243,10 +243,10 @@ func TestMbinRabbitMQRefusesALeadingDashWithNoCommand(t *testing.T) {
 	}
 }
 
-func TestMbinRabbitMQSendsSpacesAndQuotesUnchanged(t *testing.T) {
+func TestInAppRabbitMQSendsSpacesAndQuotesUnchanged(t *testing.T) {
 	w := newMQWorld(t)
 	pw := `zq spaced'quoted"dollar$value`
-	if err := MbinRabbitMQ("forum").Checked(w.env(), pw); err != nil {
+	if err := InApp(w.cfg, "forum", "rabbitmq_password").Checked(w.env(), pw); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range w.cmds {
@@ -256,11 +256,11 @@ func TestMbinRabbitMQSendsSpacesAndQuotesUnchanged(t *testing.T) {
 	}
 }
 
-func TestMbinRabbitMQResumesWithOneBrokerAlreadyOnTheNextValue(t *testing.T) {
+func TestInAppRabbitMQResumesWithOneBrokerAlreadyOnTheNextValue(t *testing.T) {
 	w := newMQWorld(t)
 	w.store.s.Rotations = map[string]string{"apps.forum.rabbitmq_password": "mq-next"}
 	w.broker["home-a"] = "mq-next"
-	if err := w.run(MbinRabbitMQ("forum")); err != nil {
+	if err := w.run(InApp(w.cfg, "forum", "rabbitmq_password")); err != nil {
 		t.Fatal(err)
 	}
 	for site, p := range w.broker {
@@ -278,9 +278,9 @@ func TestMbinRabbitMQResumesWithOneBrokerAlreadyOnTheNextValue(t *testing.T) {
 
 // A pending password that begins with a dash cannot be sent to the broker,
 // and the refusal says how to remove it.
-func TestMbinRabbitMQLeadingDashNamesTheWayOut(t *testing.T) {
+func TestInAppRabbitMQLeadingDashNamesTheWayOut(t *testing.T) {
 	w := newMQWorld(t)
-	_, err := MbinRabbitMQ("forum").Accepts(w.env(), "-starts-with-a-dash")
+	_, err := InApp(w.cfg, "forum", "rabbitmq_password").Accepts(w.env(), "-starts-with-a-dash")
 	if err == nil || !strings.Contains(err.Error(), `"A rotation that cannot finish"`) {
 		t.Fatalf("err = %v", err)
 	}

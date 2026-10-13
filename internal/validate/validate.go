@@ -129,9 +129,7 @@ func Check(cfg *config.Config) Result {
 	c.dataSiteNotInCluster()
 	c.undeclaredSites()
 	c.placementShape()
-	c.outlineBucketName()
 	c.dashboardLinkIsAPath()
-	c.mbinQueueIsKnown()
 	c.clusterSiteWithoutData()
 	c.dataSitesShareAnArch()
 	c.clusterAppWithoutAppsSite()
@@ -155,9 +153,6 @@ func Check(cfg *config.Config) Result {
 	c.gatedWithoutSignedFetch()
 	c.autoLoginWithoutARule()
 	c.usesGateOutsideTheDomain()
-	c.authorizedFetchIsABoolean()
-	c.writefreelySettingsInRange()
-	c.homeserverMustBePinned()
 	c.uptimeNeedsAnAdminGroup()
 	c.adminGroupNotAdmins()
 	c.oidcMemberGroupNotAName()
@@ -175,14 +170,11 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDEmailWithoutSMTP()
 	c.pocketIDAdminUsername()
 	c.pocketIDSMTPSender()
-	c.mbinSMTPSender()
-	c.mbinContactEmail()
 	c.storage()
 	c.backup()
 	c.mediaHostnameShape()
 	c.mediaHostnameUnderAnAppHostname()
 	c.mailDomains()
-	c.outlineBucketInMediaURL()
 	c.configKeyIsNestedInAnEnvFile()
 	c.configKeyLooksLikeASecret()
 	c.configKeySteersCompose()
@@ -203,13 +195,11 @@ func Check(cfg *config.Config) Result {
 	c.gatewayOnDataSite()
 	c.pocketIDFileBackend()
 	c.uptimeWithoutSMTP()
-	c.mbinWithoutSMTP()
 	c.pocketIDSettingUnknown()
 	c.pocketIDSMTPFromName()
 	c.nothingWatches()
 	c.blueprintRules()
 	c.pocketIDStandbyMarkerUnknown()
-	c.mbinRabbitMQAcrossSites()
 	c.imageForAbsentPostgres()
 	c.publicAddress()
 	c.watchdogOffOnDataSite()
@@ -846,25 +836,6 @@ func (c *checker) placementShape() {
 	}
 }
 
-// outlineBucketName refuses the one bucket name upstream cannot handle. It is
-// a known Outline bug, and it fails after the deployment is up rather than at
-// configuration time.
-func (c *checker) outlineBucketName() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		// An Outline keeping its attachments on its own disk has no bucket.
-		if app.Kind != config.KindOutline || !kinds.InObjectStorage(c.cfg, app) {
-			continue
-		}
-		bucket, _ := app.Settings["s3_bucket"].(string)
-		if bucket == "outline" {
-			c.refuse("outline-bucket-named-outline", fmt.Sprintf("apps.%s.settings.s3_bucket", name),
-				"outline bucket cannot be named outline",
-				"is \"outline\". Upstream Outline cannot use a bucket of that name. Choose another, for example %s-uploads.", name)
-		}
-	}
-}
-
 // dashboardLinkIsAPath refuses a sso_dashboard_link that is not a path on
 // the app's own hostname. `oidc client create` sends it to the identity
 // provider as part of a launch URL, so a malformed one is caught here, before
@@ -878,48 +849,6 @@ func (c *checker) dashboardLinkIsAPath() {
 		if err := kinds.CheckDashboardLink(v); err != nil {
 			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, kinds.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
 		}
-	}
-}
-
-// mbinQueueIsKnown refuses an Mbin queue setting that names no backend the
-// toolkit renders. Rendering would otherwise have to pick one silently.
-func (c *checker) mbinQueueIsKnown() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindMbin {
-			continue
-		}
-		switch q := kinds.MbinQueue(app.Settings); q {
-		case kinds.MbinQueuePostgres, kinds.MbinQueueRabbitMQ:
-		default:
-			c.refuse("mbin-queue-unknown", fmt.Sprintf("apps.%s.settings.%s", name, kinds.MbinQueueSetting),
-				"mbin queue setting is not a known value",
-				"is %q. Choose %s (the default: the queues live in the replicated database) or %s (a broker per site, faster, and lost with its site).",
-				q, kinds.MbinQueuePostgres, kinds.MbinQueueRabbitMQ)
-		}
-	}
-}
-
-// mbinRabbitMQAcrossSites warns when an Mbin app on more than one apps site
-// keeps its queues in RabbitMQ. Each site then has its own broker, and an
-// activity a site has acknowledged, or a delivery it has queued, is lost with
-// that site; the remote server that got the acknowledgement never sends it
-// again. A warning rather than a refusal: it is a risk an operator may take
-// for throughput, not a configuration that cannot work.
-func (c *checker) mbinRabbitMQAcrossSites() {
-	sites := len(c.cfg.AppsSites())
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindMbin || app.Placement.Mode == config.PlacementPinned || sites < 2 {
-			continue
-		}
-		if kinds.MbinQueue(app.Settings) != kinds.MbinQueueRabbitMQ {
-			continue
-		}
-		c.warn("mbin-rabbitmq-across-sites", fmt.Sprintf("apps.%s.settings.%s", name, kinds.MbinQueueSetting),
-			"mbin runs a separate rabbitmq broker on each apps site",
-			"is %s on %d apps sites. Each site runs its own broker, so work a site has accepted (an inbox delivery already answered, a delivery queued for another server) is lost or stranded with that site. %s keeps the queues in the replicated database, where the other site's consumers take them over.",
-			kinds.MbinQueueRabbitMQ, sites, kinds.MbinQueuePostgres)
 	}
 }
 
@@ -1358,93 +1287,6 @@ func (c *checker) usesGateOutsideTheDomain() {
 	}
 }
 
-// authorizedFetchIsABoolean refuses a settings.authorized_fetch on an mbin or
-// writefreely app that is not a YAML boolean. The toolkit renders it into the
-// app's configuration and locks it there, so a value read as on that the
-// operator meant as off (Eg: the string "no") would be both wrong and out of
-// reach of the app's admin page.
-func (c *checker) authorizedFetchIsABoolean() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindMbin && app.Kind != config.KindWriteFreely {
-			continue
-		}
-		v, ok := app.Settings[kinds.AuthorizedFetchSetting]
-		if !ok {
-			continue
-		}
-		if _, isBool := v.(bool); isBool {
-			continue
-		}
-		c.refuse("authorized-fetch-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.AuthorizedFetchSetting),
-			"authorized_fetch is not true or false",
-			"is %#v. Write true or false, unquoted, or leave it out for the default, true.", v)
-	}
-}
-
-// writefreelySettingsInRange refuses a numeric WriteFreely setting outside
-// the range the fork accepts. config.ini locks every setting the toolkit
-// renders, and the fork refuses to start on a locked value it would refuse to
-// save (docs/settings.md, "Locking settings in config.ini", at
-// writefreely-wisp v0.21.1+wisp), so the blog would not come up at all. The
-// ranges are the fork's registry's (config/settings.go dbSettings).
-func (c *checker) writefreelySettingsInRange() {
-	ranges := []struct {
-		setting  string
-		min, max int
-	}{
-		{"min_username_len", 1, 100},
-		{"uploads_max_size_mb", 1, 1 << 20},
-	}
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindWriteFreely {
-			continue
-		}
-		for _, r := range ranges {
-			s, ok := app.Settings[r.setting].(string)
-			if !ok || s == "" {
-				continue
-			}
-			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= r.min && n <= r.max {
-				continue
-			}
-			c.refuse("writefreely-setting-invalid", fmt.Sprintf("apps.%s.settings.%s", name, r.setting),
-				"writefreely setting is out of range",
-				"is %q. WriteFreely accepts a whole number from %d to %d, and config.ini locks this setting, so any other value stops the blog at startup.",
-				s, r.min, r.max)
-		}
-	}
-}
-
-// homeserverMustBePinned refuses cluster placement for a homeserver.
-//
-// Synapse's S3 storage provider supplements a local media directory rather
-// than replacing it, so the media store cannot follow a failover: a promoted
-// site would serve a homeserver whose media is on another machine. The kind
-// also renders its own Postgres and an initialisation hook that creates a
-// second database beside it, neither of which exists under cluster placement,
-// so the authentication service would start against a database nobody created
-// and the failure would arrive at the first login rather than at render.
-//
-// There is no half-pinned form worth having. A stack pinned for its database
-// and clustered for its app is less available than either, so this is a
-// refusal rather than a warning.
-func (c *checker) homeserverMustBePinned() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindSynapse {
-			continue
-		}
-		if app.Placement.Mode != config.PlacementCluster {
-			continue
-		}
-		c.refuse("homeserver-must-be-pinned", fmt.Sprintf("apps.%s.placement", name),
-			"synapse app must be pinned to a site",
-			"is cluster, and the synapse kind has no clustered form. Its media store cannot follow a failover, because the S3 storage provider supplements a local media directory rather than replacing it, and the kind renders its own Postgres plus the hook that creates the authentication service's database beside it. Pin it: placement: { pinned: <site> }.")
-	}
-}
-
 // mediaHostnameShape refuses a media hostname that cannot be one.
 //
 // Every app that stores objects serves them on a hostname of its own, derived
@@ -1575,43 +1417,6 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 				media, host.hostname, host.key, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
 			break
 		}
-	}
-}
-
-// outlineBucketInMediaURL refuses an Outline app whose bucket name appears in
-// its media URL.
-//
-// Outline decides between path style and virtual host addressing by looking
-// for the bucket name anywhere in AWS_S3_UPLOAD_BUCKET_URL, as a substring,
-// rather than by asking: getPublicEndpoint in server/storage/files/
-// S3Storage.ts, read at v1.10.0, is `host.includes(AWS_S3_UPLOAD_BUCKET_NAME)`.
-// When it matches, Outline stops appending the bucket to the URL a browser
-// uploads to and builds attachment URLs on, while its S3 client still signs
-// path style. Garage resolves a bucket from the path here, because the media
-// hostname is not under its S3 root domain, so every upload would go to a
-// path with no bucket in it and fail after the deployment is up.
-//
-// With the default names it cannot happen: docs-uploads is not a substring of
-// https://docs-media.example.org. A bucket named docs, or one named media, is.
-func (c *checker) outlineBucketInMediaURL() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Kind != config.KindOutline {
-			continue
-		}
-		media := kinds.MediaHostname(c.cfg, app)
-		if media == "" {
-			continue
-		}
-		bucket := kinds.BucketName(name, app)
-		url := "https://" + media
-		if !strings.Contains(url, bucket) {
-			continue
-		}
-		c.refuse("outline-bucket-in-media-url", fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole),
-			"media URL contains the outline bucket name",
-			"makes the bucket URL %s, which contains the bucket name %q. Outline reads a bucket name anywhere in that URL as virtual host addressing and stops putting the bucket in the path, while Garage needs it there, so every attachment upload would fail. Rename the bucket (settings.s3_bucket) or choose a media hostname that does not contain it.",
-			url, bucket)
 	}
 }
 

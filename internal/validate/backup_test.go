@@ -286,11 +286,11 @@ func withPinnedForum(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
 	cfg.Apps["forum"] = config.App{
-		Kind:      config.KindMbin,
+		Kind:      config.Kind("mbin"),
 		Hostname:  "forum.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 	}
-	if !kinds.Has(config.KindMbin, kinds.PostgresService) {
+	if !kinds.Has(config.Kind("mbin"), kinds.PostgresService) {
 		t.Fatal("mbin no longer declares a postgres service; pick a kind that does")
 	}
 	return cfg

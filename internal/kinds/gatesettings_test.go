@@ -28,13 +28,13 @@ func TestEveryFederatingGateableKindRecordsItsGateSettings(t *testing.T) {
 
 // An app that does not use the gate needs none of them.
 func TestAPublicAppNeedsNoGateSettings(t *testing.T) {
-	if got := kinds.GateSettingsFor(config.App{Kind: config.KindMbin}); len(got) != 0 {
+	if got := kinds.GateSettingsFor(config.App{Kind: config.Kind("mbin")}); len(got) != 0 {
 		t.Errorf("public mbin needs %v", got)
 	}
 }
 
 func TestMbinReadsOnlyTheNamedVariables(t *testing.T) {
-	live, _ := kinds.LiveSettingsFor(config.KindMbin)
+	live, _ := kinds.LiveSettingsFor(config.Kind("mbin"))
 	argv := live.ReadCommand([]string{"MBIN_PRIVATE_INSTANCE"})
 	script := argv[len(argv)-1]
 	if !strings.Contains(script, "for n in MBIN_PRIVATE_INSTANCE MBIN_LOCKED_SETTINGS;") {
@@ -59,7 +59,7 @@ func TestMbinReadsOnlyTheNamedVariables(t *testing.T) {
 // The settings command's tabwriter output, as cmd/writefreely/settings.go
 // prints it at v0.21.1+wisp.
 func TestWriteFreelyReadsItsSettingsList(t *testing.T) {
-	live, _ := kinds.LiveSettingsFor(config.KindWriteFreely)
+	live, _ := kinds.LiveSettingsFor(config.Kind("writefreely"))
 	out := "app.authorized_fetch  true   (locked in config.ini)\napp.private           false  (default)\napp.site_name         My Blog  (locked in config.ini)\n"
 	got, err := live.Parse(out, []string{"app.private", "app.authorized_fetch"})
 	if err != nil {
@@ -77,9 +77,9 @@ func TestWriteFreelyReadsItsSettingsList(t *testing.T) {
 // template writes; any other value is a contradiction and is not redundant.
 func TestRedundantGateConfig(t *testing.T) {
 	cfg := &config.Config{Apps: map[string]config.App{
-		"talk": {Kind: config.KindMbin, Gated: true, Config: map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": false, "KBIN_META_TITLE": "x"}},
-		"open": {Kind: config.KindMbin, Config: map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true}},
-		"blog": {Kind: config.KindWriteFreely, Gated: true, Config: map[string]any{"app.private": "true"}},
+		"talk": {Kind: config.Kind("mbin"), Gated: true, Config: map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": false, "KBIN_META_TITLE": "x"}},
+		"open": {Kind: config.Kind("mbin"), Config: map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true}},
+		"blog": {Kind: config.Kind("writefreely"), Gated: true, Config: map[string]any{"app.private": "true"}},
 	}}
 	got := kinds.RedundantGateConfig(cfg)
 	want := []kinds.RedundantKey{{App: "blog", Key: "app.private"}, {App: "talk", Key: "MBIN_USE_FEDERATION_ALLOW_LIST"}}

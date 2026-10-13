@@ -1,8 +1,8 @@
 {
   "default_server_config": {
     "m.homeserver": {
-      "base_url": "https://{{ .Setting "homeserver" .Hostname }}",
-      "server_name": "{{ .Setting "server_name" .ServerName }}"
+      "base_url": "{{ .Linked "matrix-homeserver" "base_url" }}",
+      "server_name": "{{ .Setting "server_name" (.Linked "matrix-homeserver" "server_name") }}"
     }
   },
   "brand": "{{ .Setting "brand" "Element" }}",

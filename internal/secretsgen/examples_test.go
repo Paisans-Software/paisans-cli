@@ -109,7 +109,7 @@ func TestExampleOIDCClientsCoverEveryApp(t *testing.T) {
 		if cfg.Apps[name].Kind == config.KindPocketID {
 			continue // the identity provider has no client at itself
 		}
-		if cfg.Apps[name].Kind == config.KindElement {
+		if cfg.Apps[name].Kind == config.Kind("element") {
 			continue // a Matrix client authenticates at the homeserver, not here
 		}
 		if _, ok := secrets.OIDCClients[name]; !ok {

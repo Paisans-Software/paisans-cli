@@ -3,6 +3,7 @@ package secretsrotate
 import (
 	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"slices"
 	"strings"
 	"testing"
@@ -47,10 +48,10 @@ func newSelfWorld(t *testing.T) *selfWorld {
 		},
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}},
 		Apps: map[string]config.App{
-			"forum":  {Kind: config.KindMbin, Placement: config.Placement{Mode: config.PlacementCluster}},
+			"forum":  {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
 			"gate":   {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 			"health": {Kind: config.KindUptime, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
-			"chat":   {Kind: config.KindSynapse, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
+			"chat":   {Kind: config.Kind("synapse"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
 			"id":     {Kind: config.KindPocketID, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}
@@ -64,7 +65,7 @@ func newSelfWorld(t *testing.T) *selfWorld {
 	}
 	// The OAuth unit is a real pair, so that a promotion is checked against
 	// one that opens.
-	priv, pub, err := secretsgen.ReplacementOAuthKeypair("forum-oauth_passphrase-old")
+	priv, pub, err := secretsgen.ReplacementKeypair("forum-oauth_passphrase-old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,7 @@ func usesOf(e Env, r Rotator) []string {
 // second site runs the old value while the first is checked.
 func TestAppSelfClusterAppliesSiteBySite(t *testing.T) {
 	w := newSelfWorld(t)
-	r := AppSelf("forum", "app_secret", AppSelfCost("app_secret"))
+	r := AppSelf("forum", "app_secret", CostOf(w.cfg, "forum", "app_secret"))
 	if r.Path() != "apps.forum.app_secret" {
 		t.Fatalf("path %q", r.Path())
 	}
@@ -171,7 +172,7 @@ func TestAppSelfClusterAppliesSiteBySite(t *testing.T) {
 func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 	w := newSelfWorld(t)
 	w.unhealthy["home-a"] = errors.New("app is restarting")
-	err := w.rotate(AppSelf("forum", "app_secret", AppSelfCost("app_secret")))
+	err := w.rotate(AppSelf("forum", "app_secret", CostOf(w.cfg, "forum", "app_secret")))
 	if err == nil {
 		t.Fatal("an unhealthy first site did not stop the rotation")
 	}
@@ -189,7 +190,7 @@ func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 	// nothing there, and finishes on home-b.
 	delete(w.unhealthy, "home-a")
 	w.log = nil
-	if err := w.rotate(AppSelf("forum", "app_secret", AppSelfCost("app_secret"))); err != nil {
+	if err := w.rotate(AppSelf("forum", "app_secret", CostOf(w.cfg, "forum", "app_secret"))); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"healthy home-a", "apply home-b forum app_secret", "healthy home-b"}
@@ -198,30 +199,33 @@ func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 	}
 }
 
+// Each secret's cost is the one its blueprint declares.
 func TestAppSelfCosts(t *testing.T) {
-	for key, signsOut := range map[string]bool{
-		"app_secret": true, "cookie_secret": true, "session_secret": true, "session_key": true,
-		"mas_signing_key": true, "mas_matrix_secret": true,
-		"mercure_jwt_secret": false, "valkey_password": false, "static_api_key": false,
+	w := newSelfWorld(t)
+	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
+	for _, c := range []struct {
+		app, key string
+		signsOut bool
+		restart  bool
+	}{
+		{"forum", "app_secret", true, false}, {"gate", "cookie_secret", true, false},
+		{"health", "session_secret", true, false}, {"invite", "session_key", true, false},
+		{"chat", "mas_signing_key", true, false}, {"chat", "mas_matrix_secret", true, false},
+		{"forum", "mercure_jwt_secret", false, true}, {"forum", "valkey_password", false, true},
+		{"id", "static_api_key", false, false},
 	} {
-		if got := AppSelfCost(key).SignsOut; got != signsOut {
-			t.Errorf("%s: SignsOut %v, want %v", key, got, signsOut)
+		got := CostOf(w.cfg, c.app, c.key)
+		if got.SignsOut != c.signsOut || (got.Downtime != "") != c.restart {
+			t.Errorf("%s.%s: cost %+v", c.app, c.key, got)
 		}
-	}
-	for _, key := range []string{"mercure_jwt_secret", "valkey_password"} {
-		if d := AppSelfCost(key).Downtime; !strings.Contains(d, "Mbin stack") {
-			t.Errorf("%s: Downtime %q, want a restart of the Mbin stack", key, d)
-		}
-	}
-	for _, key := range []string{"app_secret", "cookie_secret", "session_secret", "session_key", "mas_signing_key", "mas_matrix_secret", "static_api_key"} {
-		if d := AppSelfCost(key).Downtime; d != "" {
-			t.Errorf("%s: Downtime %q, want none", key, d)
+		if c.restart && got.Downtime != "the "+c.app+" stack, for one restart on each site in turn" {
+			t.Errorf("%s.%s: downtime %q", c.app, c.key, got.Downtime)
 		}
 	}
 	if c := AppSelf("forum", "app_secret", Cost{Downtime: "x"}).Cost(); c.Downtime != "x" {
 		t.Errorf("AppSelf does not keep the cost it is given: %+v", c)
 	}
-	if !MbinOAuth("forum").Cost().SignsOut {
+	if !AppGroup(w.cfg, "forum", "oauth").Cost().SignsOut {
 		t.Error("the Mbin OAuth unit does not sign members out")
 	}
 }
@@ -237,7 +241,7 @@ func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
 		{"chat", "mas_matrix_secret", "home-b:chat"},
 		{"id", "static_api_key", "home-a:id"},
 	} {
-		r := AppSelf(tc.app, tc.key, AppSelfCost(tc.key))
+		r := AppSelf(tc.app, tc.key, CostOf(w.cfg, tc.app, tc.key))
 		e := w.env()
 		if err := r.(Prechecker).Precheck(e); err != nil {
 			t.Errorf("%s.%s: %v", tc.app, tc.key, err)
@@ -254,7 +258,7 @@ func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
 			t.Errorf("%s.%s Checked: %v", tc.app, tc.key, err)
 		}
 	}
-	if err := w.rotate(AppSelf("chat", "mas_signing_key", AppSelfCost("mas_signing_key"))); err != nil {
+	if err := w.rotate(AppSelf("chat", "mas_signing_key", CostOf(w.cfg, "chat", "mas_signing_key"))); err != nil {
 		t.Fatal(err)
 	}
 	next, _ := w.store.s.Get("apps.chat.mas_signing_key")
@@ -278,7 +282,7 @@ func TestStaticAPIKeyReachesTheInviteAppsThatNameIt(t *testing.T) {
 	w.cfg.Apps["elsewhere"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster},
 		Settings: map[string]any{"identity_app": "other-id"}}
 	e := w.env()
-	got := usesOf(e, AppSelf("id", "static_api_key", AppSelfCost("static_api_key")))
+	got := usesOf(e, AppSelf("id", "static_api_key", CostOf(w.cfg, "id", "static_api_key")))
 	if want := []string{"home-a:id,invite", "home-b:invite"}; !slices.Equal(got, want) {
 		t.Fatalf("users %v, want %v", got, want)
 	}
@@ -296,7 +300,7 @@ func TestInviteSessionKeyIsAnAppSelfSecret(t *testing.T) {
 	if kind, ok := AppSelfKind("session_key"); !ok || kind != config.KindInvite {
 		t.Fatalf("session_key is %v %v, want the invite kind's", kind, ok)
 	}
-	r := AppSelf("invite", "session_key", AppSelfCost("session_key"))
+	r := AppSelf("invite", "session_key", CostOf(w.cfg, "invite", "session_key"))
 	e := w.env()
 	if err := r.(Prechecker).Precheck(e); err != nil {
 		t.Fatal(err)
@@ -330,7 +334,7 @@ func TestAppSelfPrecheckRefuses(t *testing.T) {
 // Mbin that cannot sign a token.
 func TestMbinOAuthPromotesFourKeysTogether(t *testing.T) {
 	w := newSelfWorld(t)
-	r := MbinOAuth("forum")
+	r := AppGroup(w.cfg, "forum", "oauth")
 	if r.Path() != "apps.forum.oauth" {
 		t.Fatalf("path %q", r.Path())
 	}
@@ -357,7 +361,7 @@ func TestMbinOAuthPromotesFourKeysTogether(t *testing.T) {
 			t.Errorf("%s is not registered as a secret, so output would show it", key)
 		}
 	}
-	if _, err := secretsgen.OpenOAuthPrivateKey(now["oauth_private_key"], now["oauth_passphrase"]); err != nil {
+	if _, err := secretsgen.OpenPrivateKey(now["oauth_private_key"], now["oauth_passphrase"]); err != nil {
 		t.Fatalf("the new private key does not open with the new passphrase: %v", err)
 	}
 	// Each site took all four in one apply, so no site ever ran a key with
@@ -390,7 +394,7 @@ func TestMbinOAuthPromotesFourKeysTogether(t *testing.T) {
 
 func TestMbinOAuthPromoteRefusesAPairThatDoesNotOpen(t *testing.T) {
 	w := newSelfWorld(t)
-	r := MbinOAuth("forum")
+	r := AppGroup(w.cfg, "forum", "oauth")
 	s, _ := w.store.Load()
 	next, err := r.Next(w.env(), s)
 	if err != nil {
@@ -419,11 +423,14 @@ func TestMbinOAuthPromoteRefusesAPairThatDoesNotOpen(t *testing.T) {
 	}
 }
 
+// oauthKeys are the four values of Mbin's OAuth2 unit.
+var oauthKeys = []string{"oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key"}
+
 func oauthValue(t *testing.T, next, key string) string {
 	t.Helper()
-	u, err := parseOAuthUnit(next)
-	if err != nil {
+	var values map[string]string
+	if err := yaml.Unmarshal([]byte(next), &values); err != nil {
 		t.Fatal(err)
 	}
-	return u.values()[key]
+	return values[key]
 }

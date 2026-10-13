@@ -9,16 +9,15 @@ import (
 )
 
 // Replacement is a new value for the secret at a dotted path, in the shape
-// that secret's consumer parses: Garage and the monitors take hex, MAS takes a
-// PEM key, and everything else is a generated password. A password in a hex
-// or PEM position is a service that will not start, so the shape is chosen
-// here, once, from the path.
+// that secret's consumer parses: Garage and the monitors take hex, and the
+// cluster's and Garage's own passwords are generated passwords. A password in
+// a hex position is a service that will not start, so the shape is chosen
+// here, once, from the path. An app's secret is made as its blueprint says,
+// which only ReplacementIn, given the deployment, can read.
 //
 // It refuses the secrets whose replacement would do harm, rather than
-// generating a value for the caller to decide about. An encryption key
-// protects data already stored, so a new one leaves that data unreadable. A
-// WireGuard key is the mesh's, and `paisans mesh rekey` moves it without
-// dropping a tunnel. It also refuses a path the file holds nothing at, because
+// generating a value for the caller to decide about. A WireGuard key is the
+// mesh's, and `paisans mesh rekey` moves it without dropping a tunnel. It also refuses a path the file holds nothing at, because
 // a replacement for a secret that does not exist is a rotation of nothing.
 func Replacement(path string, s *config.Secrets) (string, error) {
 	return ReplacementIn(nil, path, s)
@@ -26,13 +25,13 @@ func Replacement(path string, s *config.Secrets) (string, error) {
 
 // ReplacementIn is Replacement for a deployment, which lets an app's
 // secret be made as its blueprint says: in its format, or refused when the
-// blueprint says it is never rotated, or is a keypair rotated only with its
-// group.
+// blueprint says it is never rotated, as an encryption key protecting data
+// already stored is, or is a keypair rotated only with its group.
 func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, error) {
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
 	if cfg != nil && len(parts) == 3 && parts[0] == "apps" {
-		if spec, ok := kinds.SecretOf(cfg.Apps[parts[1]].Kind, last); ok && (spec.Format != "" || spec.NeverRotate != "") {
+		if spec, ok := kinds.SecretOf(cfg.Apps[parts[1]].Kind, last); ok {
 			if _, held := s.Get(path); !held {
 				return "", fmt.Errorf("%s: the secrets file holds no value to replace", path)
 			}
@@ -46,10 +45,6 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 		}
 	}
 	switch {
-	case last == "encryption_key" && len(parts) == 3 && parts[0] == "apps",
-		last == masEncryptionSecret && len(parts) == 3 && parts[0] == "apps",
-		last == outlineSecretKey && len(parts) == 3 && parts[0] == "apps":
-		return "", fmt.Errorf("%s: rotating it makes the data it encrypts unreadable, so nothing here replaces it", path)
 	case last == "wireguard_private_key" || last == "wireguard_next_private_key":
 		return "", fmt.Errorf("%s: a WireGuard key is moved by `paisans mesh rekey`, which keeps every tunnel up", path)
 	}
@@ -64,18 +59,9 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 		gen = func() (string, error) { return hexSecret(32) }
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		gen = func() (string, error) { return hexSecret(16) }
-	case len(parts) == 3 && parts[0] == "apps":
-		switch last {
-		case "database_password", "app_secret", "cookie_secret", "session_secret",
-			"admin_password", "static_api_key", "rabbitmq_password", "valkey_password",
-			"mercure_jwt_secret", "oauth_passphrase", "oauth_encryption_key", masMatrixSecret,
-			"email_hash_key", "session_key", "utils_secret", "redis_password":
-			gen = password
-		case masSigningKey:
-			gen = rsaPrivateKeyPEM
-		case adminsHeartbeatToken:
-			gen = func() (string, error) { return hexSecret(16) }
-		}
+	case len(parts) == 3 && parts[0] == "apps" && last == "database_password":
+		// Every Postgres backed app has one, whatever its blueprint says.
+		gen = password
 	}
 	if gen == nil {
 		if _, known := s.Get(path); known {
@@ -89,9 +75,9 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 	return gen()
 }
 
-// ReplacementOAuthKeypair is a new Mbin OAuth2 keypair under passphrase. The
+// ReplacementKeypair is a new encrypted RSA keypair under passphrase. The
 // private key is encrypted by the passphrase, so the pair is replaced together
-// with oauth_passphrase and not on its own.
-func ReplacementOAuthKeypair(passphrase string) (privatePEM, publicPEM string, err error) {
+// with it and not on its own.
+func ReplacementKeypair(passphrase string) (privatePEM, publicPEM string, err error) {
 	return oauthKeypairPEM(passphrase)
 }

@@ -198,8 +198,8 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 			},
 		},
 		Apps: map[string]config.App{
-			"talk": {Kind: config.KindMbin},
-			"docs": {Kind: config.KindOutline},
+			"talk": {Kind: config.Kind("mbin")},
+			"docs": {Kind: config.Kind("outline")},
 		},
 	}
 	secrets := &config.Secrets{

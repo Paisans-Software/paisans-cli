@@ -19,10 +19,20 @@ func rotatable() *config.Secrets {
 		Apps: map[string]map[string]any{
 			"id":     {"encryption_key": "old-enc-00000000001", "static_api_key": "old-api-0000000001", "admins_heartbeat_token": "old-admins-heartbeat"},
 			"mas":    {"mas_encryption_secret": "old-mas-enc-00001", "mas_signing_key": "old-pem", "mas_matrix_secret": "old-matrix-0001"},
-			"mbin":   {"app_secret": "old-app-00000000001", "oauth_passphrase": "old-pass-0000000001", "oauth_encryption_key": "old-oek-0000000001"},
+			"mbin":   {"app_secret": "old-app-00000000001", "oauth_passphrase": "old-pass-0000000001", "oauth_encryption_key": "old-oek-0000000001", "oauth_private_key": "old-private"},
 			"invite": {"email_hash_key": "old-hash-000000001", "session_key": "old-session-0000001"},
 		},
 	}
+}
+
+// declared is a deployment whose apps' blueprints say how their secrets are
+// made, as Replacement reads them through ReplacementIn.
+var declared = &config.Config{Apps: map[string]config.App{
+	"id": {Kind: config.KindPocketID}, "mas": {Kind: "synapse"}, "mbin": {Kind: "mbin"}, "invite": {Kind: config.KindInvite},
+}}
+
+func replacement(path string, s *config.Secrets) (string, error) {
+	return secretsgen.ReplacementIn(declared, path, s)
 }
 
 func TestReplacementShapes(t *testing.T) {
@@ -30,19 +40,19 @@ func TestReplacementShapes(t *testing.T) {
 	hex64 := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	hex32 := regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-	rpc, err := secretsgen.Replacement("storage.garage.rpc_secret", s)
+	rpc, err := replacement("storage.garage.rpc_secret", s)
 	if err != nil || !hex64.MatchString(rpc) {
 		t.Errorf("rpc_secret = %q, %v; want 64 hex", rpc, err)
 	}
-	hb, err := secretsgen.Replacement("sites.vm.heartbeat_token", s)
+	hb, err := replacement("sites.vm.heartbeat_token", s)
 	if err != nil || !hex32.MatchString(hb) {
 		t.Errorf("heartbeat_token = %q, %v; want 32 hex", hb, err)
 	}
-	ahb, err := secretsgen.Replacement("apps.id.admins_heartbeat_token", s)
+	ahb, err := replacement("apps.id.admins_heartbeat_token", s)
 	if err != nil || !hex32.MatchString(ahb) {
 		t.Errorf("admins_heartbeat_token = %q, %v; want 32 hex", ahb, err)
 	}
-	key, err := secretsgen.Replacement("apps.mas.mas_signing_key", s)
+	key, err := replacement("apps.mas.mas_signing_key", s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +67,13 @@ func TestReplacementPasswordsDiffer(t *testing.T) {
 		"cluster.superuser_password", "cluster.admin_password", "cluster.standby_password",
 		"storage.garage.admin_token", "apps.id.static_api_key", "apps.mbin.app_secret",
 		"apps.mbin.oauth_passphrase", "apps.mbin.oauth_encryption_key", "apps.mas.mas_matrix_secret",
-		"apps.invite.email_hash_key", "apps.invite.session_key",
+		"apps.invite.session_key",
 	} {
-		a, err := secretsgen.Replacement(path, s)
+		a, err := replacement(path, s)
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		b, err := secretsgen.Replacement(path, s)
+		b, err := replacement(path, s)
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
@@ -78,11 +88,13 @@ func TestReplacementRefusesWhatRotationBreaks(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{"apps.id.encryption_key", "unreadable"},
 		{"apps.mas.mas_encryption_secret", "unreadable"},
+		{"apps.invite.email_hash_key", "forgets every declined address"},
+		{"apps.mbin.oauth_private_key", "replaced with the rest of apps.mbin.oauth"},
 		{"sites.vm.wireguard_private_key", "paisans mesh rekey"},
 		{"apps.id.nothing", "no secret"},
 		{"external.acme_dns_token", "no replacement"},
 	} {
-		got, err := secretsgen.Replacement(tc.path, s)
+		got, err := replacement(tc.path, s)
 		if err == nil || got != "" {
 			t.Errorf("%s: got %q, %v; want a refusal", tc.path, got, err)
 			continue
@@ -93,12 +105,12 @@ func TestReplacementRefusesWhatRotationBreaks(t *testing.T) {
 	}
 }
 
-func TestReplacementOAuthKeypairOpensWithItsPassphrase(t *testing.T) {
-	priv, pub, err := secretsgen.ReplacementOAuthKeypair("a-passphrase-for-the-test")
+func TestReplacementKeypairOpensWithItsPassphrase(t *testing.T) {
+	priv, pub, err := secretsgen.ReplacementKeypair("a-passphrase-for-the-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := secretsgen.OpenOAuthPrivateKey(priv, "a-passphrase-for-the-test"); err != nil {
+	if _, err := secretsgen.OpenPrivateKey(priv, "a-passphrase-for-the-test"); err != nil {
 		t.Errorf("the private key does not open with its passphrase: %v", err)
 	}
 	if !strings.Contains(pub, "PUBLIC KEY") {

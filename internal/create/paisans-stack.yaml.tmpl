@@ -136,8 +136,10 @@ apps:
 {{- end}}
 {{- if eq .Kind "element"}}
     settings:
-      # The chat server's API hostname, which becomes base_url.
-      homeserver: {{q .Homeserver}}
+{{- range $setting, $host := .Links}}
+      # The hostname of the app it is a client of.
+      {{$setting}}: {{q $host}}
+{{- end}}
       brand: {{q $.Name}}
 {{- end}}
 {{- if eq .Kind "uptime"}}

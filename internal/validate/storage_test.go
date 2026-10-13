@@ -60,7 +60,7 @@ func TestStorageRefusals(t *testing.T) {
 			c.Apps["docs"] = docs
 		}, "media-hostname-without-object-storage", "apps.docs.hostnames.media"},
 		{"a kind with no files", func(c *config.Config) {
-			c.Apps["web"] = config.App{Kind: config.KindElement, Hostname: "web.example.org",
+			c.Apps["web"] = config.App{Kind: config.Kind("element"), Hostname: "web.example.org",
 				Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
 				Storage:   config.StorageLocal, Settings: map[string]any{"homeserver": "chat.example.org"}}
 		}, "storage-on-a-kind-without-files", "apps.web.storage"},

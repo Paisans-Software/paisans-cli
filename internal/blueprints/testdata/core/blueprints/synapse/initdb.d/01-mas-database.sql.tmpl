@@ -11,4 +11,4 @@
 -- There is no clustered form of this file. This kind is pinned by design and
 -- internal/validate refuses any other placement, so the Postgres container
 -- that reads this hook is always here.
-CREATE DATABASE {{ .MASDBName }} OWNER {{ .DBUser }};
+CREATE DATABASE {{ (index .Databases "mas") }} OWNER {{ .DBUser }};

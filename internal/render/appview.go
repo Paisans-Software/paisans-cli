@@ -146,20 +146,6 @@ type appValues struct {
 	ServiceUpstreams map[string][]string
 	Databases        map[string]string
 
-	// MASPort, MASUpstreams, MASDBName and MASUpstreamProviderID describe the
-	// synapse kind's second container, Matrix Authentication Service. They are
-	// populated only for that kind, for the same reason the two fields above
-	// are populated only for the gate.
-	//
-	// MAS is a second service on a second port with a database of its own, and
-	// the gateway has to reach it directly: the three compatibility login paths
-	// are split off to it in front of the homeserver, so a snippet that only
-	// knew the homeserver's address could not route them.
-	MASPort               int
-	MASUpstreams          []string
-	MASDBName             string
-	MASUpstreamProviderID string
-
 	// SMTP is this app's resolved mail settings, populated only for a kind
 	// that sends mail (kinds.SendsMail) and zero when no host resolves.
 	SMTP smtpValues
@@ -287,30 +273,6 @@ func (v appValues) AuthorizedFetch() bool {
 	return kinds.AuthorizedFetch(config.App{Settings: v.set})
 }
 
-// writefreelyLockedSettings are the database settings config.ini renders, in
-// the fork's registry order, so the configuration is their only source:
-// config.ini names them in locked_settings, and the fork then reads each from
-// the file on every start, never imports it, and refuses to change it from
-// its admin page or `writefreely settings set`.
-//
-// Each name is a key the template renders and an entry in the fork's setting
-// registry (config/settings.go at writefreely-wisp v0.21.1+wisp), and
-// TestWriteFreelyLockedSettingsAreRendered checks both directions against
-// the rendered file, so a setting added to the template without being locked
-// here fails a test. app.federation_allowlist is not rendered, so it stays
-// the admins' to edit, and an allowlist saved while private is off is refused
-// by the fork's own settings page.
-var writefreelyLockedSettings = []string{
-	"app.site_name", "app.theme", "app.open_registration", "app.min_username_len",
-	"app.federation", "app.public_stats", "app.private", "app.authorized_fetch",
-	"app.local_timeline", "uploads.enabled", "uploads.max_size_mb",
-}
-
-// WriteFreelyLockedSettings is config.ini's locked_settings, comma separated.
-func (v appValues) WriteFreelyLockedSettings() string {
-	return strings.Join(writefreelyLockedSettings, ", ")
-}
-
 // SettingBool returns a declared boolean setting, or a catalog blueprint's
 // default for it, or the fallback.
 func (v appValues) SettingBool(key string, fallback bool) bool {
@@ -319,10 +281,6 @@ func (v appValues) SettingBool(key string, fallback bool) bool {
 	}
 	return fallback
 }
-
-// MbinQueue is the queue backend an Mbin app's settings choose, with the
-// toolkit's default, so a template never repeats the default itself.
-func (v appValues) MbinQueue() string { return kinds.MbinQueue(v.set) }
 
 // OIDCAdminGroup and OIDCMemberGroup are the groups the app's client at
 // Pocket ID admits, from the kind's client spec, so that the template renders
@@ -439,9 +397,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	if delegated := app.Hostnames[kinds.WellknownRole]; delegated != "" {
 		v.ServerName = delegated
 	}
-	if planned.Kind == config.KindElement {
-		v.ServerName = p.homeserverServerName(v.Setting("homeserver", planned.Hostname))
-	}
 	for _, c := range kinds.Consumes(planned.Kind) {
 		if v.links == nil {
 			v.links = map[string]map[string]string{}
@@ -493,12 +448,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.Databases[extra] = planned.DBName + "_" + extra
 	}
-	if planned.Kind == config.KindSynapse {
-		v.MASPort = masPort
-		v.MASUpstreams = p.upstreamsOnPort(planned.Name, masPort)
-		v.MASDBName = planned.DBName + "_mas"
-		v.MASUpstreamProviderID = kinds.StableULID(planned.Name)
-	}
 	return v, nil
 }
 
@@ -532,35 +481,6 @@ func (p *planner) linked(role, hostname string) map[string]string {
 		return map[string]string{"base_url": "https://" + hostname, "server_name": serverName}
 	}
 	return nil
-}
-
-// homeserverServerName is the server_name of the homeserver reached at a given
-// hostname, or that hostname when no declared homeserver answers on it.
-//
-// A client has to be told two different names. base_url is where the API is,
-// which is the homeserver's primary hostname; server_name is the part after the
-// colon in a user identifier, which is the hostname holding the wellknown role
-// when the homeserver declares one. Defaulting the second to the first is wrong
-// the moment delegation is in use: the client would offer members accounts on a
-// name that is not in any identifier the homeserver mints, and it disagreed
-// with the homeserver in this repository's own fixture.
-//
-// It is resolved from the declared deployment rather than made a setting an
-// operator types twice, because the two values are not independent: a
-// server_name that disagrees with the homeserver's is not a preference, it is a
-// broken client.
-func (p *planner) homeserverServerName(hostname string) string {
-	for _, name := range p.cfg.AppNames() {
-		app := p.cfg.Apps[name]
-		if app.Kind != config.KindSynapse || app.Hostname != hostname {
-			continue
-		}
-		if delegated := app.Hostnames[kinds.WellknownRole]; delegated != "" {
-			return delegated
-		}
-		return app.Hostname
-	}
-	return hostname
 }
 
 // dsn is the app's connection URL, empty for a kind that uses no Postgres so

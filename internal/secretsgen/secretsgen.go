@@ -271,64 +271,21 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 	return keys
 }
 
-// adminsHeartbeatToken is the Pocket ID app secret its instances push the
-// admins group's health with: 16 random bytes, hex, which is the shape the
-// uptime fork's seed takes a token in (src/lib/sitePayload.js insertSite at
-// 1.1.0-oidc.4), as for a site's heartbeat_token.
-const adminsHeartbeatToken = "admins_heartbeat_token"
-
-// The three secrets Matrix Authentication Service needs, named here because
-// two of them are not a generated password and the difference has to be
-// visible in one place.
-const (
-	// masEncryptionSecret encrypts database fields and cookies. MAS states the
-	// form: "This must be a 32-byte long hex-encoded key", from its
-	// configuration reference at tag v1.24.0, checked 2026-09-15. Losing or
-	// changing it after members exist makes every encrypted field and cookie
-	// unrecoverable, which is why nothing here ever replaces one that is set.
-	masEncryptionSecret = "mas_encryption_secret"
-	// masMatrixSecret is shared with the homeserver, which carries the same
-	// value in matrix_authentication_service.secret. It authenticates the
-	// service to the homeserver, so leaking it is an admin compromise.
-	masMatrixSecret = "mas_matrix_secret"
-	// masSigningKey signs the tokens MAS issues. Its configuration reference
-	// says "At least one RSA key must be configured", so this is an RSA key
-	// and not one of the elliptic curve types it also accepts.
-	masSigningKey = "mas_signing_key"
-)
-
-// outlineSecretKey is Outline's SECRET_KEY, which it refuses unless it is
-// exactly 64 hex characters (server/env.ts at 65be53c, the commit
-// outlinewiki/outline:1.10.0 is built from). It encrypts fields in Outline's
-// database, so, like masEncryptionSecret, nothing here ever replaces one that
-// is set.
-const outlineSecretKey = "outline_secret_key"
-
-// appSecret produces the value for one app secret key.
-//
-// Most are a generated password. MAS and Outline parse their encryption secret
-// as hex and MAS its signing key as PEM, so a base64 password in either position is a
-// service that will not start. Garage is stricter still: it refuses a base64
-// key ID or secret outright rather than merely failing to start with one, so
-// the two S3 credential keys get their own generators too.
+// appSecret produces the value for one app secret key: in the format its
+// blueprint declares, a password by default. A database password is always
+// a password, and Garage refuses a base64 key ID or secret outright, so the
+// two S3 credential keys get their own generators.
 func appSecret(kind config.Kind, key string) (string, error) {
-	if spec, ok := kinds.SecretOf(kind, key); ok && spec.Format != "" {
-		return generate(spec.Format)
-	}
 	switch key {
-	case masEncryptionSecret, outlineSecretKey:
-		return hexSecret(32)
-	case masSigningKey:
-		return rsaPrivateKeyPEM()
-	case adminsHeartbeatToken:
-		return hexSecret(16)
 	case "s3_access_key_id":
 		return garageKeyID()
 	case "s3_secret_access_key":
 		return garageSecretKey()
-	default:
-		return password()
 	}
+	if spec, ok := kinds.SecretOf(kind, key); ok {
+		return generate(spec.Format)
+	}
+	return password()
 }
 
 // hexSecret is n bytes from the system source, hex encoded, for a consumer
@@ -358,18 +315,6 @@ func rsaPrivateKeyPEM() (string, error) {
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), nil
 }
-
-// Mbin's OAuth2 server keypair, which signs the tokens it issues to API
-// clients and mobile apps. The image does not generate one and upstream's
-// install documents an operator running openssl by hand
-// (docs/02-admin/01-installation/02-docker.md, "Configure OAuth2 keys", at
-// tag v1.13.3+paisans). Generating it here means no host step, and keeping it
-// in the secrets file means every apps site under cluster placement renders
-// the same pair, so a token one site issues verifies on another.
-const (
-	oauthPrivateKey = "oauth_private_key"
-	oauthPublicKey  = "oauth_public_key"
-)
 
 // generate is a new value of a format a blueprint names. The keypair
 // formats are made with their passphrase, by keypairOf.
@@ -402,8 +347,9 @@ func (l keypairList) has(key string) bool {
 	return false
 }
 
-// keypairs is the encrypted keypairs a kind's blueprint declares, or Mbin's
-// OAuth2 pair for a blueprint that declares none.
+// keypairs is the encrypted keypairs a kind's blueprint declares. Keeping
+// one in the secrets file means every apps site under cluster placement
+// renders the same pair, so a token one site signs verifies on another.
 func keypairs(kind config.Kind) keypairList {
 	var out keypairList
 	for _, s := range kinds.AppSecrets(kind) {
@@ -419,14 +365,11 @@ func keypairs(kind config.Kind) keypairList {
 		}
 		out = append(out, p)
 	}
-	if len(out) == 0 && hasKey(kinds.AppSecrets(kind), oauthPrivateKey) {
-		out = append(out, keypair{private: oauthPrivateKey, public: oauthPublicKey, passphrase: "oauth_passphrase"})
-	}
 	return out
 }
 
-// fillKeypair generates an encrypted keypair when its private key is unset:
-// Mbin's OAuth2 pair, and any a blueprint declares.
+// fillKeypair generates an encrypted keypair a blueprint declares when its
+// private key is unset.
 //
 // The private key is never replaced: every token Mbin has issued is signed by
 // it, so a new one logs out every API client and app at once. The public key
@@ -435,38 +378,38 @@ func keypairs(kind config.Kind) keypairList {
 // private key, and one the passphrase beside it cannot open is refused rather
 // than regenerated, because Mbin would refuse it too, on the host.
 func fillKeypair(app string, entries map[string]any, pair keypair, note func(bool, string)) error {
-	oauthPrivateKey, oauthPublicKey := pair.private, pair.public
+	privateKey, publicKey := pair.private, pair.public
 	passphrase, _ := entries[pair.passphrase].(string)
 	if passphrase == "" {
 		return fmt.Errorf("apps.%s.%s is empty, and the private key %s is encrypted with it", app, pair.passphrase, pair.private)
 	}
-	privateName := "apps." + app + "." + oauthPrivateKey
-	publicName := "apps." + app + "." + oauthPublicKey
+	privateName := "apps." + app + "." + privateKey
+	publicName := "apps." + app + "." + publicKey
 
-	existing, _ := entries[oauthPrivateKey].(string)
+	existing, _ := entries[privateKey].(string)
 	if existing == "" {
 		private, public, err := oauthKeypairPEM(passphrase)
 		if err != nil {
 			return err
 		}
-		entries[oauthPrivateKey] = private
+		entries[privateKey] = private
 		note(true, privateName)
-		if oauthPublicKey != "" {
-			entries[oauthPublicKey] = public
+		if publicKey != "" {
+			entries[publicKey] = public
 			note(true, publicName)
 		}
 		return nil
 	}
 	note(false, privateName)
-	if oauthPublicKey == "" {
+	if publicKey == "" {
 		return nil
 	}
-	if current, _ := entries[oauthPublicKey].(string); current != "" {
+	if current, _ := entries[publicKey].(string); current != "" {
 		note(false, publicName)
 		return nil
 	}
 
-	key, err := OpenOAuthPrivateKey(existing, passphrase)
+	key, err := OpenPrivateKey(existing, passphrase)
 	if err != nil {
 		return fmt.Errorf("oauth-key-does-not-open: %s cannot be opened with apps.%s.%s, so its public half cannot be derived and the app could not sign a token with it either: %w", privateName, app, pair.passphrase, err)
 	}
@@ -474,7 +417,7 @@ func fillKeypair(app string, entries map[string]any, pair keypair, note func(boo
 	if err != nil {
 		return err
 	}
-	entries[oauthPublicKey] = public
+	entries[publicKey] = public
 	note(true, publicName)
 	return nil
 }
@@ -511,10 +454,10 @@ func oauthKeypairPEM(passphrase string) (string, string, error) {
 	return string(pem.EncodeToMemory(block)), public, nil
 }
 
-// OpenOAuthPrivateKey decrypts and parses an OAuth2 private key the way Mbin
+// OpenPrivateKey decrypts and parses an OAuth2 private key the way Mbin
 // will, so a key that would fail there fails here first. An unencrypted key
 // is accepted, as OpenSSL accepts one with a passphrase supplied.
-func OpenOAuthPrivateKey(privatePEM, passphrase string) (*rsa.PrivateKey, error) {
+func OpenPrivateKey(privatePEM, passphrase string) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(privatePEM))
 	if block == nil {
 		return nil, fmt.Errorf("not PEM")

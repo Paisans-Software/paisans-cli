@@ -62,15 +62,17 @@ func ToolkitLaunchURLs(kind config.Kind, hostname string) []string {
 // second place to spell it is one that can disagree with `hostname`, and a
 // tile pointing at another site is not this setting's job.
 func CheckDashboardLink(v any) error {
+	// A path a tile sends members to, given as the example.
+	const example = "/oauth/oidc/connect"
 	s, ok := v.(string)
 	if !ok {
-		return fmt.Errorf("is %v, not a string. It is a path on the app's own hostname, as in %s", v, MbinDashboardPath)
+		return fmt.Errorf("is %v, not a string. It is a path on the app's own hostname, as in %s", v, example)
 	}
 	switch {
 	case !strings.HasPrefix(s, "/"):
-		return fmt.Errorf("is %q, which is not a path. Give only the path, starting with /, as in %s: the host is always the app's own hostname, so a full URL would be a second place to spell it", s, MbinDashboardPath)
+		return fmt.Errorf("is %q, which is not a path. Give only the path, starting with /, as in %s: the host is always the app's own hostname, so a full URL would be a second place to spell it", s, example)
 	case strings.HasPrefix(s, "//"):
-		return fmt.Errorf("is %q, which starts with // and so reads as a host rather than a path. Give a path starting with a single /, as in %s", s, MbinDashboardPath)
+		return fmt.Errorf("is %q, which starts with // and so reads as a host rather than a path. Give a path starting with a single /, as in %s", s, example)
 	case strings.ContainsAny(s, " \t\r\n"):
 		return fmt.Errorf("is %q, which contains whitespace. Give a path with any spaces percent encoded", s)
 	}

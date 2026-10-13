@@ -78,9 +78,14 @@ secrets:
   # redis_password is Valkey's, named apart from Mbin's
   # valkey_password because a self rotated key belongs to one kind.
   generate:
-    - "outline_secret_key"
-    - "utils_secret"
-    - "redis_password"
+    - name: outline_secret_key
+      format: hex32
+      never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Outline offers no re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
+    # UTILS_SECRET only authorizes Outline's own scheduled tasks, and Valkey
+    # holds no session: Outline signs each with a per-user secret it keeps
+    # in Postgres (server/models/User.ts, getJwtToken, at 65be53c).
+    - {name: utils_secret, rotation_cost: restart}
+    - {name: redis_password, rotation_cost: restart}
   required:
     - {key: "outline_secret_key", why: "Outline will not start without SECRET_KEY"}
     - {key: "utils_secret", why: "Outline will not start without UTILS_SECRET"}
@@ -88,3 +93,29 @@ secrets:
   # Each is checked by the stack that presents it, so re-rendering
   # the stack is the whole rotation.
   self_rotated: ["redis_password", "utils_secret"]
+# The rules validate holds an Outline app to, by the ids they have always
+# had. Each message names the value an operator has to change.
+checks:
+  # A known Outline bug: upstream cannot use a bucket named outline, and it
+  # fails after the deployment is up rather than at configuration time.
+  - id: outline-bucket-named-outline
+    level: refuse
+    hint: outline bucket cannot be named outline
+    key: settings.s3_bucket
+    rule: |-
+      app.storage.mode != 'object' || !has(app.settings.s3_bucket) || app.settings.s3_bucket != 'outline'
+    message_expr: |-
+      'is "outline". Upstream Outline cannot use a bucket of that name. Choose another, for example ' + app.name + '-uploads.'
+  # Outline reads a bucket name anywhere in the bucket URL as virtual host
+  # addressing and stops putting it in the path, while Garage needs it
+  # there, because the media hostname is not under its S3 root domain. With
+  # the default names it cannot happen: docs-uploads is not a substring of
+  # https://docs-media.example.org. A bucket named docs, or media, is.
+  - id: outline-bucket-in-media-url
+    level: refuse
+    hint: media URL contains the outline bucket name
+    key: hostnames.media
+    rule: |-
+      !has(app.storage.media_hostname) || !('https://' + app.storage.media_hostname).contains(app.storage.bucket)
+    message_expr: |-
+      'makes the bucket URL https://' + app.storage.media_hostname + ', which contains the bucket name "' + app.storage.bucket + '". Outline reads a bucket name anywhere in that URL as virtual host addressing and stops putting the bucket in the path, while Garage needs it there, so every attachment upload would fail. Rename the bucket (settings.s3_bucket) or choose a media hostname that does not contain it.'

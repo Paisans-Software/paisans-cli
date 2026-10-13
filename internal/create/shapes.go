@@ -99,17 +99,17 @@ type appSpec struct {
 
 var capabilities = []capability{
 	{question: "Forums and social (Mbin)?", def: true, apps: []appSpec{
-		{key: "talk", kind: config.KindMbin, sub: "talk", gateable: true, what: "forums and social"},
+		{key: "talk", kind: "mbin", sub: "talk", gateable: true, what: "forums and social"},
 	}},
 	{question: "A wiki (Outline)?", def: true, apps: []appSpec{
-		{key: "docs", kind: config.KindOutline, sub: "docs", gateable: true, what: "wiki"},
+		{key: "docs", kind: "outline", sub: "docs", gateable: true, what: "wiki"},
 	}},
 	{question: "Blogs (WriteFreely)?", def: true, apps: []appSpec{
-		{key: "blog", kind: config.KindWriteFreely, sub: "blog", gateable: true, what: "blog"},
+		{key: "blog", kind: "writefreely", sub: "blog", gateable: true, what: "blog"},
 	}},
 	{question: "Chat (Matrix: Synapse and the Element web client)?", def: false, twoSites: true, apps: []appSpec{
-		{key: "chat", kind: config.KindSynapse, sub: "chat", what: "chat server"},
-		{key: "web", kind: config.KindElement, sub: "web", gateable: true, what: "chat web client"},
+		{key: chatApp, kind: "synapse", sub: "chat", what: "chat server"},
+		{key: webApp, kind: "element", sub: "web", gateable: true, what: "chat web client"},
 	}},
 	{question: "A health page (uptime monitor)?", def: true, apps: []appSpec{
 		{key: healthApp, kind: config.KindUptime, sub: "health", what: "health page"},
@@ -121,6 +121,10 @@ var capabilities = []capability{
 var signIn = appSpec{key: "auth", kind: config.KindPocketID, sub: "id", what: "sign in"}
 
 const (
+	// chatApp and webApp are the chat capability's two apps, which go on
+	// sites of their own (twoSites).
+	chatApp     = "chat"
+	webApp      = "web"
 	healthApp   = "health"
 	monitorSite = "health"
 )

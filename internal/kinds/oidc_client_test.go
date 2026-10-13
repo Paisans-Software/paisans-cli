@@ -37,15 +37,15 @@ func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
 // names neither gets a client restricted to members and admins, and the fork
 // reads the same two names, so a member-only Mbin needs nothing declared.
 func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
-	spec, _ := kinds.OIDCClient(config.KindMbin, "talk.example.org", "talk")
-	admin, member := spec.Groups(config.App{Kind: config.KindMbin})
+	spec, _ := kinds.OIDCClient(config.Kind("mbin"), "talk.example.org", "talk")
+	admin, member := spec.Groups(config.App{Kind: config.Kind("mbin")})
 	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
 		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, kinds.AdminsGroup, kinds.MembersGroup)
 	}
 	if !spec.ReadsGroups {
 		t.Error("the fork reads the groups claim, so the spec must say so")
 	}
-	chosen := config.App{Kind: config.KindMbin, Settings: map[string]any{"admin_group": "mods", "member_group": "crew"}}
+	chosen := config.App{Kind: config.Kind("mbin"), Settings: map[string]any{"admin_group": "mods", "member_group": "crew"}}
 	admin, member = spec.Groups(chosen)
 	if admin != "mods" || member != "crew" {
 		t.Errorf("groups admin=%q member=%q", admin, member)
@@ -55,7 +55,7 @@ func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
 	}
 	// A blank or non-string value is as good as absent: the default holds
 	// rather than an unrestricted client slipping through on a typo.
-	blank := config.App{Kind: config.KindMbin, Settings: map[string]any{"admin_group": "  ", "member_group": false}}
+	blank := config.App{Kind: config.Kind("mbin"), Settings: map[string]any{"admin_group": "  ", "member_group": false}}
 	admin, member = spec.Groups(blank)
 	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
 		t.Errorf("blank settings gave admin=%q member=%q", admin, member)
@@ -72,8 +72,8 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 		kind     config.Kind
 		callback string
 	}{
-		{config.KindOutline, "https://docs.example.org/auth/oidc.callback"},
-		{config.KindWriteFreely, "https://docs.example.org/oauth/callback/generic"},
+		{config.Kind("outline"), "https://docs.example.org/auth/oidc.callback"},
+		{config.Kind("writefreely"), "https://docs.example.org/oauth/callback/generic"},
 	}
 	for _, tc := range cases {
 		spec, ok := kinds.OIDCClient(tc.kind, "docs.example.org", "docs")
@@ -108,7 +108,7 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 // one from an empty declaration. An unrestricted client on a member facing
 // app would admit anyone with a Pocket ID account.
 func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
-	for _, kind := range []config.Kind{config.KindMbin, config.KindOutline, config.KindWriteFreely, config.KindElement, config.KindUptime} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("outline"), config.Kind("writefreely"), config.Kind("element"), config.KindUptime} {
 		spec, ok := kinds.OIDCClient(kind, "app.example.org", "app")
 		if !ok || !kinds.GateFor(kind).Gateable {
 			continue
@@ -129,7 +129,7 @@ func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 // to the member group and admins, which is the whole control, since the
 // service reads no groups claim. It has no dashboard tile.
 func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
-	spec, ok := kinds.OIDCClient(config.KindSynapse, "matrix.example.org", "chat")
+	spec, ok := kinds.OIDCClient(config.Kind("synapse"), "matrix.example.org", "chat")
 	if !ok {
 		t.Fatal("the toolkit does not know a synapse client")
 	}
@@ -145,11 +145,11 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 	if spec.LaunchURL != "" {
 		t.Errorf("launch URL %s, want none", spec.LaunchURL)
 	}
-	admin, member := spec.Groups(config.App{Kind: config.KindSynapse})
+	admin, member := spec.Groups(config.App{Kind: config.Kind("synapse")})
 	if admin != kinds.AdminsGroup || member != kinds.MembersGroup {
 		t.Errorf("groups admin=%q member=%q", admin, member)
 	}
-	_, member = spec.Groups(config.App{Kind: config.KindSynapse, Settings: map[string]any{"member_group": "crew"}})
+	_, member = spec.Groups(config.App{Kind: config.Kind("synapse"), Settings: map[string]any{"member_group": "crew"}})
 	if member != "crew" {
 		t.Errorf("member group %q with member_group set", member)
 	}

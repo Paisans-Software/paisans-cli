@@ -17,7 +17,7 @@ func TestGateSettingsAreRenderedAndLocked(t *testing.T) {
 	gated := func(a *config.App) { a.Gated = true }
 
 	env := renderTalk(t, fixtureSMTP, nil, gated)
-	talk := config.App{Kind: config.KindMbin, Gated: true}
+	talk := config.App{Kind: config.Kind("mbin"), Gated: true}
 	locked := strings.Split(envValue(env, "MBIN_LOCKED_SETTINGS"), ",")
 	for _, s := range kinds.GateSettingsFor(talk) {
 		if got := envValue(env, s.Name); got != s.Want {
@@ -29,7 +29,7 @@ func TestGateSettingsAreRenderedAndLocked(t *testing.T) {
 	}
 
 	ini := renderBlog(t, gated)
-	blog := config.App{Kind: config.KindWriteFreely, Gated: true}
+	blog := config.App{Kind: config.Kind("writefreely"), Gated: true}
 	value, _ := iniValue(ini, "", "locked_settings")
 	var lockedINI []string
 	for _, n := range strings.Split(value, ",") {

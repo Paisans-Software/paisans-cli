@@ -89,9 +89,5 @@ func localOnlyReason(kind config.Kind) string {
 	if why := kinds.LocalOnlyReason(kind); why != "" {
 		return why
 	}
-	switch kind {
-	case config.KindSynapse:
-		return "its S3 storage provider supplements the local media store rather than replacing it, so the media directory is always required"
-	}
 	return "it keeps its files on local disk"
 }
