@@ -18,6 +18,9 @@ func TestEveryKindHasARecord(t *testing.T) {
 		}
 	}
 	for _, kind := range known() {
+		if _, fromCatalog := Source(kind); fromCatalog {
+			continue
+		}
 		if !accepted[kind] {
 			t.Errorf("%s has a record but the configuration does not accept it", kind)
 		}

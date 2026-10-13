@@ -16,7 +16,6 @@ import (
 	"golang.org/x/crypto/curve25519"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
@@ -611,7 +610,7 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 func TemplateSet(kind config.Kind) ([]string, error) {
 	dir := string(kind)
 	var out []string
-	err := fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(kinds.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -633,7 +632,7 @@ func TemplateSet(kind config.Kind) ([]string, error) {
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
 	dir := string(app.Kind)
-	entries, err := fs.ReadDir(blueprints.Templates, dir)
+	entries, err := fs.ReadDir(kinds.Templates, dir)
 	if err != nil {
 		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Kind, err)
 	}
@@ -648,7 +647,7 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 
 	var files []File
 	sources := map[string]string{}
-	err = fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(kinds.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -694,7 +693,7 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 // rather than into the shared set, so that two kinds may name a file the same
 // thing, which they routinely do.
 func (p *planner) renderFile(path string, values appValues) (string, error) {
-	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(blueprints.Templates, path)
+	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(kinds.Templates, path)
 	if err != nil {
 		return "", fmt.Errorf("parsing %s: %w", path, err)
 	}

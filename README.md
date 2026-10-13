@@ -2581,6 +2581,38 @@ what is stuck and how to recover*). Both name `paisans app remove <app>` for
 each app the leftovers belong to, which is the command that takes them off
 (see *`app remove` takes an app off its hosts*).
 
+#### A blueprint can come from a catalog
+
+The blueprints built into the toolkit are the reserved four (`pocket-id`, the
+gate, `invite`, `uptime`) and a pinned copy of the core catalog. Any other
+comes from a **catalog**: a git repository of blueprints the deployment
+declares and pins to a commit, and an app names it qualified:
+
+```yaml
+catalogs:
+  example:
+    url: https://github.com/example/paisans-blueprints
+    tag: v1.0.0
+    commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a
+    unsigned: true
+apps:
+  notes:
+    blueprint: example/journal
+    hostname: notes.example.org
+    placement: { pinned: vm }
+```
+
+**An unqualified name is never a catalog's.** `mbin` is always the core
+catalog's, and a reserved name is refused from every catalog, so no catalog
+can stand in for the identity provider. **The pin is a commit**, because a
+deployment must render the same bytes for every admin and on every run; a
+tag beside it must still name that commit, so a tag moved after the pin was
+written is refused. Loading the configuration fetches each catalog an app
+names once, with the `git` binary and the operator's own git credentials,
+into a cache keyed by the commit. Signing, the snapshot every site keeps, and
+the commands that add and move a pin are in
+`docs/specs/2026-10-12-blueprints-and-catalogs.md`.
+
 #### A blueprint ships a template set, not a single `.env`
 
 Not every application is configured through environment variables, and the

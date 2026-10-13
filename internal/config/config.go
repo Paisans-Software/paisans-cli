@@ -115,8 +115,11 @@ type Config struct {
 	SMTP SMTP `yaml:"smtp"`
 	// Backup is nil when the declaration has no backup section, which means
 	// no backups, and validate warns about it on every run.
-	Backup *Backup        `yaml:"backup"`
-	Apps   map[string]App `yaml:"apps"`
+	Backup *Backup `yaml:"backup"`
+	// Catalogs are the git repositories of blueprints the apps may name, by
+	// <catalog>/<blueprint>. The core catalog is always there.
+	Catalogs map[string]Catalog `yaml:"catalogs"`
+	Apps     map[string]App     `yaml:"apps"`
 
 	// Path is where this configuration was read from. Error messages use it.
 	Path string `yaml:"-"`
@@ -1048,8 +1051,6 @@ func (c *Config) structural(noSubnet bool) error {
 		app := c.Apps[name]
 		if app.Kind == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or outline: the blueprint it runs.", name)
-		} else if !knownKinds[app.Kind] {
-			add("apps.%s.blueprint: unknown blueprint %q. The ones built into this toolkit are element, mbin, oauth2-proxy, outline, pocket-id, synapse, uptime and writefreely.", name, app.Kind)
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
@@ -1105,6 +1106,12 @@ func (c *Config) structural(noSubnet bool) error {
 		// second copy in prose that nothing keeps in step with the catalogue.
 		// `validate` names them, built from acme.Providers.
 		add("acme.provider: required, because %s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans). Certificates are issued over DNS-01, so the provider that answers the challenge has to be named. It must be one this toolkit publishes an image for, which `paisans validate` will list, or any other provider together with an acme.image carrying its module.", strings.Join(c.CaddySites(), ", "))
+	}
+	problems = append(problems, c.catalogProblems()...)
+	// Resolving reads the catalogs, which may mean fetching them, so it runs
+	// only on a file that is otherwise sound.
+	if len(problems) == 0 && ResolveBlueprints != nil {
+		problems = append(problems, ResolveBlueprints(c)...)
 	}
 	if len(problems) == 0 {
 		return nil
