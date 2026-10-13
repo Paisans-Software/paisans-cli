@@ -621,10 +621,10 @@ func TestARolelessSiteStillHostsOtherKinds(t *testing.T) {
 	web := config.App{Kind: config.KindElement, Hostname: "web.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
 	cfg.Apps["web"] = web
 	result := validate.Check(cfg)
-	if !refusedFor(result, "uptime-needs-a-monitor-site", "apps.status.placement") {
+	if !refusedFor(result, "uptime-needs-a-monitor-site", "apps.health.placement") {
 		t.Fatalf("uptime on a role-less site: %v", result.Findings)
 	}
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	for _, f := range validate.Check(cfg).Refusals() {
 		t.Errorf("a role-less site hosting element was refused: %s", f)
 	}

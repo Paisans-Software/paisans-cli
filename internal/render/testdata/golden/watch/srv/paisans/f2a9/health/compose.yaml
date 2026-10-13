@@ -9,7 +9,7 @@
 # carries the SMTP password. The fork's entrypoint (from 1.1.0-oidc.2) hands
 # both to `node` and drops to it for good. An older image ignores the seed and
 # simply runs as root.
-name: paisans-f2a9-status
+name: paisans-f2a9-health
 
 services:
   app:
@@ -32,8 +32,8 @@ services:
     ports:
       - "10.44.0.4:3001:3001"
     volumes:
-      - /srv/paisans/f2a9/status/data:/data
-      - /srv/paisans/f2a9/status/monitors.json:/seed/monitors.json:ro
+      - /srv/paisans/f2a9/health/data:/data
+      - /srv/paisans/f2a9/health/monitors.json:/seed/monitors.json:ro
 
 # Every network carries the deployment label too, so that what owns it is
 # read from the label rather than guessed from its name.

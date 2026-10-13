@@ -41,28 +41,28 @@ func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(f.server.Files[statusFile], "reverse_proxy 127.0.0.1:8480") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
+	if !strings.Contains(f.server.Files[healthFile], "reverse_proxy 127.0.0.1:8480") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != statusFile {
+	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != healthFile {
 		t.Errorf("record %+v", got)
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "include_dir: /opt/caddy/paisans.d\n") {
 		t.Errorf("paisans-stack.yaml:\n%s", data)
 	}
-	if !slices.Equal(*checked, []string{"status"}) {
+	if !slices.Equal(*checked, []string{"health"}) {
 		t.Errorf("checked %v", *checked)
 	}
 	got := lines(inSection(rec, "web server"))
 	want := []string{
-		"step site file for status",
-		"progress read the web server on watch: site file for status",
-		"progress write paisans-f2a9-status.caddy: site file for status",
-		"done site file for status: " + statusFile + " written, caddy reloaded",
+		"step site file for health",
+		"progress read the web server on watch: site file for health",
+		"progress write paisans-f2a9-health.caddy: site file for health",
+		"done site file for health: " + healthFile + " written, caddy reloaded",
 		"note watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml: Apply derived it beside caddy's configuration, /opt/caddy/Caddyfile, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.",
-		"step status",
-		"progress reach status.example.org: status",
-		"done status: status.example.org",
+		"step health",
+		"progress reach health.example.org: health",
+		"done health: health.example.org",
 		"result Applied 4 files to watch.",
 	}
 	if !slices.Equal(got, want) {
@@ -80,7 +80,7 @@ func TestApplySiteWarnsWhereTheServerDoesNotIncludeTheDirectory(t *testing.T) {
 	f := fakeWebServerFiles(t, mountedCaddy, "blog.example.org {\n\treverse_proxy 127.0.0.1:2368\n}\n")
 	rec, err := siteApply(t, path, "watch", false)
 	var w *ui.Warning
-	if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: status" {
+	if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: health" {
 		t.Fatalf("err %v", err)
 	}
 	if reportError(io.Discard, err, false) != 0 {
@@ -89,11 +89,11 @@ func TestApplySiteWarnsWhereTheServerDoesNotIncludeTheDirectory(t *testing.T) {
 	if len(f.server.Files) != 0 || f.manifest.writes != 0 {
 		t.Errorf("wrote %v", f.server.Files)
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || rec.Events[i].Extra != "caddy does not include /etc/caddy/paisans.d" || !strings.Contains(rec.Events[i+1].Text, "    import /etc/caddy/paisans.d/*\n") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
-	if got := lines(inSection(rec, "web server")); slices.Contains(got, "step status") || len(*checked) != 0 {
+	if got := lines(inSection(rec, "web server")); slices.Contains(got, "step health") || len(*checked) != 0 {
 		t.Errorf("checked %v:\n%s", *checked, rec.Lines())
 	}
 	if rec.Has("result", "Applied") {
@@ -182,7 +182,7 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 	}
 	steps, reloads := 0, 0
 	for _, e := range rec.Events {
-		if e.Kind == "step" && e.Text == "site file for status" {
+		if e.Kind == "step" && e.Text == "site file for health" {
 			steps++
 		}
 	}
@@ -191,7 +191,7 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 			reloads++
 		}
 	}
-	if steps != 1 || reloads != 1 || !slices.Equal(*checked, []string{"status"}) {
+	if steps != 1 || reloads != 1 || !slices.Equal(*checked, []string{"health"}) {
 		t.Errorf("site file steps %d, asked %v, checked %v:\n%s", steps, f.server.Asked, *checked, rec.Lines())
 	}
 }
@@ -223,7 +223,7 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 		})
 		reporterOverride = saved
 		got := lines(inSection(rec, "web server"))
-		if tc.want && !slices.Equal(got, []string{"step status", "waiting status: checked with --execute", "result Nothing changed. Re-run with --execute to apply; it asks you to type approve for the review above."}) {
+		if tc.want && !slices.Equal(got, []string{"step health", "waiting health: checked with --execute", "result Nothing changed. Re-run with --execute to apply; it asks you to type approve for the review above."}) {
 			t.Errorf("%s: web server section:\n%s\n\n%s", tc.site, strings.Join(got, "\n"), rec.Lines())
 		}
 		if !tc.want && rec.Has("section", "web server") {

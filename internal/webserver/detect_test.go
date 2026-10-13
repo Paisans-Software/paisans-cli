@@ -93,7 +93,7 @@ func TestDetectsADockerCaddyThatObtainsItsOwnCertificates(t *testing.T) {
 		t.Errorf("summary\n got %q\nwant %q", got, want)
 	}
 	out := show(t, ws)
-	if !strings.Contains(out, want) || !strings.Contains(out, "status.example.org {") {
+	if !strings.Contains(out, want) || !strings.Contains(out, "health.example.org {") {
 		t.Errorf("sheet:\n%s", out)
 	}
 	if !strings.Contains(out, "\ttls {\n    \t\tissuer acme\n") {
@@ -122,7 +122,7 @@ func TestDetectsADockerCaddyThatLoadsCertificateFiles(t *testing.T) {
 		t.Fatalf("got %+v", ws)
 	}
 	out := show(t, ws)
-	if !strings.Contains(out, "tls /etc/ssl/status.example.org/fullchain.pem /etc/ssl/status.example.org/privkey.pem") {
+	if !strings.Contains(out, "tls /etc/ssl/health.example.org/fullchain.pem /etc/ssl/health.example.org/privkey.pem") {
 		t.Errorf("sheet:\n%s", out)
 	}
 	if strings.Contains(out, "proxy_pass") {
@@ -144,7 +144,7 @@ func TestDetectAsksDockerThroughSudoWhenDenied(t *testing.T) {
 	if !sudo.ran("docker ps") || ws.Server != webserver.ServerNginx || ws.Container != "web" || ws.Config != "/srv/web/nginx.conf" {
 		t.Fatalf("got %+v\nsudo asked %v", ws, sudo.asked)
 	}
-	if ws.CertFile != "/etc/ssl/status.example.org/cert.pem" || ws.KeyFile != "/etc/ssl/status.example.org/key.pem" {
+	if ws.CertFile != "/etc/ssl/health.example.org/cert.pem" || ws.KeyFile != "/etc/ssl/health.example.org/key.pem" {
 		t.Errorf("certificate files %q %q", ws.CertFile, ws.KeyFile)
 	}
 }
@@ -181,18 +181,18 @@ func TestDetectsABareMetalNginxWithCertbot(t *testing.T) {
 	if ws.Server != webserver.ServerNginx || ws.Container != "" || ws.Process != "nginx" || ws.Config != "/etc/nginx/nginx.conf" || ws.Main != ws.Config {
 		t.Fatalf("got %+v", ws)
 	}
-	if ws.CertFile != "/etc/letsencrypt/live/status.example.org/fullchain.pem" || ws.KeyFile != "/etc/letsencrypt/live/status.example.org/privkey.pem" {
+	if ws.CertFile != "/etc/letsencrypt/live/health.example.org/fullchain.pem" || ws.KeyFile != "/etc/letsencrypt/live/health.example.org/privkey.pem" {
 		t.Errorf("certificate files %q %q", ws.CertFile, ws.KeyFile)
 	}
-	if ws.Certbot != "certbot certonly --nginx -d status.example.org" {
+	if ws.Certbot != "certbot certonly --nginx -d health.example.org" {
 		t.Errorf("certbot %q", ws.Certbot)
 	}
 	out := show(t, ws)
 	for _, want := range []string{
 		"web server: nginx (process nginx, config /etc/nginx/nginx.conf)",
-		"ssl_certificate     /etc/letsencrypt/live/status.example.org/fullchain.pem;",
-		"ssl_certificate_key /etc/letsencrypt/live/status.example.org/privkey.pem;",
-		"certbot certonly --nginx -d status.example.org",
+		"ssl_certificate     /etc/letsencrypt/live/health.example.org/fullchain.pem;",
+		"ssl_certificate_key /etc/letsencrypt/live/health.example.org/privkey.pem;",
+		"certbot certonly --nginx -d health.example.org",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -214,7 +214,7 @@ func TestCertbotKeepsTheWebroot(t *testing.T) {
 		{key: "renewal", out: "authenticator = webroot\nwebroot_path = /var/www/html,\n"},
 	}}
 	ws := webserver.Detect(webserver.Host{Plain: plain, Sudo: sudo}, external(t, "127.0.0.1:8480"))
-	if ws.Certbot != "certbot certonly --webroot -w /var/www/html -d status.example.org" {
+	if ws.Certbot != "certbot certonly --webroot -w /var/www/html -d health.example.org" {
 		t.Errorf("certbot %q", ws.Certbot)
 	}
 }
@@ -233,7 +233,7 @@ func TestUnknownWebServerFallsBackToEverySnippet(t *testing.T) {
 	out := show(t, ws)
 	for _, want := range []string{
 		"web server: not determined",
-		"\t# tls /etc/ssl/status.example.org/fullchain.pem /etc/ssl/status.example.org/privkey.pem",
+		"\t# tls /etc/ssl/health.example.org/fullchain.pem /etc/ssl/health.example.org/privkey.pem",
 		"reverse_proxy 127.0.0.1:8480",
 		"proxy_pass http://127.0.0.1:8480;",
 		"ProxyPass        / http://127.0.0.1:8480/",

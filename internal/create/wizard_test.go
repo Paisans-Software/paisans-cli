@@ -37,7 +37,7 @@ func appAnswers(chat bool) []string {
 		out = append(out, "y", "", "", "", "") // chat: yes, server, its display name, web client, members only
 	}
 	return append(out,
-		"", "", "", // status page: yes, hostname, display name
+		"", "", "", // health page: yes, hostname, display name
 		"", "", "203.0.113.50", "", "", // its machine: where (its own), name, address, ssh host, user
 	)
 }
@@ -180,8 +180,8 @@ func TestMembersOnlySaysWhatEachAnswerMeans(t *testing.T) {
 	}
 }
 
-// Declining the status page leaves no status page and no machine for it.
-func TestDecliningTheStatusPageDropsIt(t *testing.T) {
+// Declining the health page leaves no health page and no machine for it.
+func TestDecliningTheHealthPageDropsIt(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
@@ -192,15 +192,15 @@ func TestDecliningTheStatusPageDropsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if _, ok := w.Answers.App(statusApp); ok || w.Answers.Monitor != nil || w.Answers.MonitorOnGateway {
-		t.Errorf("the status page or its machine is still declared: %+v", w.Answers)
+	if _, ok := w.Answers.App(healthApp); ok || w.Answers.Monitor != nil || w.Answers.MonitorOnGateway {
+		t.Errorf("the health page or its machine is still declared: %+v", w.Answers)
 	}
 }
 
 // Choosing the gateway puts the monitor beside it, offered by the gateway
 // site's name with what it costs, and answering the machines again with the
 // gateway renamed keeps it there.
-func TestTheStatusPageOnTheGateway(t *testing.T) {
+func TestTheHealthPageOnTheGateway(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
@@ -209,7 +209,7 @@ func TestTheStatusPageOnTheGateway(t *testing.T) {
 		"",            // sign in hostname
 		"n", "n", "n", // no forums, wiki or blog
 		"n",        // no chat
-		"", "", "", // status page: yes, hostname, display name
+		"", "", "", // health page: yes, hostname, display name
 		"2", // on the gateway
 	)
 	lines = append(lines, mailAnswers...)
@@ -339,7 +339,7 @@ func TestOneMachineNameDefaultsToTheCommunitySlug(t *testing.T) {
 	}
 }
 
-// Answering the machines again keeps the status page beside the gateway only
+// Answering the machines again keeps the health page beside the gateway only
 // while there is exactly one gateway with a public address and no machine
 // already holds the monitor role.
 func TestAnsweringTheMachinesAgainSettlesTheMonitorOnTheGateway(t *testing.T) {
@@ -368,8 +368,8 @@ func TestAnsweringTheMachinesAgainSettlesTheMonitorOnTheGateway(t *testing.T) {
 }
 
 // Answering the machines or the apps again, Enter at every question, keeps
-// the status page beside the gateway: "Where it runs" defaults to it.
-func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
+// the health page beside the gateway: "Where it runs" defaults to it.
+func TestAnsweringAgainKeepsTheHealthPageOnTheGateway(t *testing.T) {
 	var lines []string
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
@@ -387,7 +387,7 @@ func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
 			t.Fatalf("%s: %v\n%s", s, err, again.String())
 		}
 		if !w.Answers.MonitorOnGateway || w.Answers.Monitor != nil {
-			t.Errorf("answering %s again moved the status page: %+v", s, w.Answers)
+			t.Errorf("answering %s again moved the health page: %+v", s, w.Answers)
 		}
 	}
 }
@@ -405,7 +405,7 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 		"n",                // no forums
 		"", "", "Wiki", "", // wiki: yes, hostname, display name, members only
 		"n", "n", // no blog or chat
-		"", "", "", "2", // status page: yes, hostname, display name, on the gateway
+		"", "", "", "2", // health page: yes, hostname, display name, on the gateway
 	)
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))

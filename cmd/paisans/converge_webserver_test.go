@@ -64,7 +64,7 @@ func fakeWebServer(t *testing.T, ws webserver.WebServer) *webServerAsks {
 }
 
 // externalWatch makes the fixture's monitor, watch, a site with managed_by:
-// external, which serves status through the operator's own web server.
+// external, which serves health through the operator's own web server.
 func externalWatch(t *testing.T) {
 	t.Helper()
 	saved := convergeRead
@@ -80,12 +80,12 @@ func externalWatch(t *testing.T) {
 	t.Cleanup(func() { convergeRead = saved })
 }
 
-// certificateFails is the status app's web server with no route for its
+// certificateFails is the health app's web server with no route for its
 // hostname at the operator's web server.
-var certificateFails = map[string][]webserver.Result{"status": {
-	{Name: webserver.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
-	{Name: webserver.CheckCertificate, Detail: "the certificate is not valid for status.example.org: it names watch.example.org"},
-	{Name: webserver.CheckSignIn, OK: true, Detail: "https://status.example.org/login/oidc redirects"},
+var certificateFails = map[string][]webserver.Result{"health": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: "the certificate is not valid for health.example.org: it names watch.example.org"},
+	{Name: webserver.CheckSignIn, OK: true, Detail: "https://health.example.org/login/oidc redirects"},
 	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
 }}
 
@@ -117,7 +117,7 @@ func TestConvergeChecksEachExternalWebServer(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*checked, []string{"status"}) {
+	if !slices.Equal(*checked, []string{"health"}) {
 		t.Errorf("checked %v", *checked)
 	}
 	got := sections(rec)
@@ -134,8 +134,8 @@ func TestConvergeChecksEachExternalWebServer(t *testing.T) {
 		}
 	}
 	sameLines(t, shown, []string{
-		"step status",
-		"done status: status.example.org",
+		"step health",
+		"done health: health.example.org",
 		"result Deployment complete.",
 	})
 }
@@ -154,22 +154,22 @@ func TestConvergeFailedWebServerIsNotComplete(t *testing.T) {
 		t.Errorf("said complete:\n%s", rec.Lines())
 	}
 	var w *ui.Warning
-	if !errors.As(err, &w) || !strings.Contains(w.Hint, "status") || !strings.Contains(w.Hint, "web server check") {
+	if !errors.As(err, &w) || !strings.Contains(w.Hint, "health") || !strings.Contains(w.Hint, "web server check") {
 		t.Fatalf("err = %#v", err)
 	}
 	var b strings.Builder
-	if code := reportError(&b, err, false); code != 0 || !strings.HasPrefix(b.String(), "WARN Deployment complete, but 1 app failed its web server check: status") {
+	if code := reportError(&b, err, false); code != 0 || !strings.HasPrefix(b.String(), "WARN Deployment complete, but 1 app failed its web server check: health") {
 		t.Errorf("exit %d:\n%s", code, b.String())
 	}
-	i := rec.Index("warned", "status")
-	if i < 0 || rec.Events[i+1].Kind != "explain" || rec.Has("fail", "status") || rec.Has("note", "status") {
+	i := rec.Index("warned", "health")
+	if i < 0 || rec.Events[i+1].Kind != "explain" || rec.Has("fail", "health") || rec.Has("note", "health") {
 		t.Fatalf("not one warning line:\n%s", rec.Lines())
 	}
 	explain := rec.Events[i+1].Text
 	for _, want := range []string{
-		"certificate: the certificate is not valid for status.example.org: it names watch.example.org",
-		"paisans web-server show --app status",
-		"paisans web-server check --app status",
+		"certificate: the certificate is not valid for health.example.org: it names watch.example.org",
+		"paisans web-server show --app health",
+		"paisans web-server check --app health",
 	} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("detail %q lacks %q", explain, want)
@@ -248,9 +248,9 @@ func TestConvergeWaitsForACertificate(t *testing.T) {
 	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checks++
 		if checks < 3 {
-			return tlsInternal["status"]
+			return tlsInternal["health"]
 		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"}}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"}}
 	}
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
@@ -262,7 +262,7 @@ func TestConvergeWaitsForACertificate(t *testing.T) {
 	if !rec.Has("progress", "waiting for the certificate") {
 		t.Errorf("no progress while waiting:\n%s", rec.Lines())
 	}
-	if i := rec.Index("done", "status"); i < 0 || rec.Events[i].Extra != "status.example.org, after 6s" || !rec.Has("result", "Deployment complete.") {
+	if i := rec.Index("done", "health"); i < 0 || rec.Events[i].Extra != "health.example.org, after 6s" || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
@@ -282,9 +282,9 @@ func TestConvergeWaitsAMinuteAtMost(t *testing.T) {
 	if len(*checked) != len(*waits)+1 {
 		t.Errorf("checked %d times after %d waits", len(*checked), len(*waits))
 	}
-	i := rec.Index("warned", "status")
-	if i < 0 || rec.Events[i].Extra != "status.example.org" || rec.Events[i+1].Kind != "explain" ||
-		!strings.Contains(rec.Events[i+1].Text, "certificate: the certificate is not valid for status.example.org: it names watch.example.org") {
+	i := rec.Index("warned", "health")
+	if i < 0 || rec.Events[i].Extra != "health.example.org" || rec.Events[i+1].Kind != "explain" ||
+		!strings.Contains(rec.Events[i+1].Text, "certificate: the certificate is not valid for health.example.org: it names watch.example.org") {
 		t.Fatalf("not the check's warning:\n%s", rec.Lines())
 	}
 }
@@ -295,18 +295,18 @@ func TestConvergeWaitsAMinuteAtMost(t *testing.T) {
 func TestConvergeDoesNotWaitOnWhatWaitingCannotFix(t *testing.T) {
 	for name, results := range map[string][]webserver.Result{
 		"dns": {
-			{Name: webserver.CheckDNS, Detail: "status.example.org does not resolve"},
-			{Name: webserver.CheckCertificate, Detail: "https://status.example.org/healthz: no such host"},
+			{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"},
+			{Name: webserver.CheckCertificate, Detail: "https://health.example.org/healthz: no such host"},
 		},
 		"upstream": {
-			{Name: webserver.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
-			{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"},
+			{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
+			{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"},
 			{Name: webserver.CheckUpstream, Detail: "203.0.113.20:8480 answers"},
 		},
 	} {
 		fakeConverge(t, nil)
 		externalWatch(t)
-		checked := fakeWebServerCheck(t, map[string][]webserver.Result{"status": results})
+		checked := fakeWebServerCheck(t, map[string][]webserver.Result{"health": results})
 		waits := recordWaits(t)
 		rec := recordConverge(t)
 		converge(t, "--execute")
@@ -334,7 +334,7 @@ func TestConvergeDryRunListsTheWebServerCheck(t *testing.T) {
 		t.Errorf("a dry run checked %v", *checked)
 	}
 	got := lines(inSection(rec, "web server"))
-	if len(got) < 2 || got[0] != "step status" || !strings.HasPrefix(got[1], "waiting status: ") {
+	if len(got) < 2 || got[0] != "step health" || !strings.HasPrefix(got[1], "waiting health: ") {
 		t.Errorf("web server section %q:\n%s", got, rec.Lines())
 	}
 }
@@ -363,10 +363,10 @@ func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	// TestWebServerHostSharesTheRunsSudo shows a read with sudo shares the
 	// run's answer.
 	converge(t, "--execute")
-	if !slices.Equal(*asked, webServerAsks{"status sudo=false"}) {
+	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	i := rec.Index("warned", "status")
+	i := rec.Index("warned", "health")
 	if i < 0 || !strings.Contains(rec.Events[i+1].Text, caddyAutomatic.Summary()) {
 		t.Errorf("the warning does not name the web server:\n%s", rec.Lines())
 	}

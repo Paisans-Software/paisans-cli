@@ -134,7 +134,7 @@ sites:
     # What is in front of the monitor. Left out, it is managed_by: paisans: the
     # toolkit's own Caddy, the gateway's image, with certificates over DNS-01.
     # On a machine that already runs a web server on 80 and 443, hand the app
-    # to that server instead; `paisans web-server show --app status` prints what
+    # to that server instead; `paisans web-server show --app health` prints what
     # to put in it, and docs/guides/behind-your-own-web-server.md walks
     # through it.
     # web_server:
@@ -430,7 +430,7 @@ apps:
     config:
       app.max_blogs: 3
 
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     # The uptime monitor. Pinned only, and only to a site holding the monitor
@@ -444,7 +444,7 @@ apps:
       admin_group: admins
     # Optional, any field of the smtp block below; the rest is inherited.
     # smtp:
-    #   from_name: Example Status
+    #   from_name: Example Health
 
   # Members bring new people in. The invitee agrees to the code of conduct
   # below and chooses their details before any account exists; with
@@ -476,6 +476,6 @@ smtp:
   host: smtp.example.org
   port: 587
   security: starttls          # or tls
-  username: status@example.org
-  from_address: status@example.org
+  username: health@example.org
+  from_address: health@example.org
   from_name: Example Community

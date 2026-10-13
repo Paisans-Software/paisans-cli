@@ -22,20 +22,20 @@ func withMonitor(t *testing.T, smtp config.SMTP, own *config.SMTP) (*config.Conf
 	t.Helper()
 	cfg := fixture(t)
 	cfg.SMTP = smtp
-	cfg.Apps["status"] = config.App{Kind: config.KindUptime, Hostname: "status.example.org",
+	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 		Settings:  map[string]any{"admin_group": "admins"}, SMTP: own}
 	secrets := fixtureSecrets(t)
 	if secrets.Apps == nil {
 		secrets.Apps = map[string]map[string]any{}
 	}
-	secrets.Apps["status"] = map[string]any{"admin_password": "fixture-admin", "session_secret": "fixture-session"}
+	secrets.Apps["health"] = map[string]any{"admin_password": "fixture-admin", "session_secret": "fixture-session"}
 	return cfg, secrets
 }
 
 func renderSeed(t *testing.T, cfg *config.Config, secrets *config.Secrets) seedFile {
 	t.Helper()
-	return renderSeedAt(t, cfg, secrets, "watch/srv/paisans/f2a9/status/monitors.json")
+	return renderSeedAt(t, cfg, secrets, "watch/srv/paisans/f2a9/health/monitors.json")
 }
 
 // renderSeedAt is renderSeed for the seed at path, for a deployment with more
@@ -227,7 +227,7 @@ func TestAnUngatedMbinHasNoPrivateAPICheck(t *testing.T) {
 	}
 }
 
-// The status page is switched off from the seed, and SMTP is carried only
+// The health page is switched off from the seed, and SMTP is carried only
 // when a host resolves, with the app's own fields and password winning.
 func TestTheSeedCarriesSettings(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
@@ -238,12 +238,12 @@ func TestTheSeedCarriesSettings(t *testing.T) {
 
 	cfg, secrets = withMonitor(t,
 		config.SMTP{Host: "smtp.example.org", Security: "starttls", Username: "robot", FromAddress: "hello@example.org", FromName: "Example"},
-		&config.SMTP{Security: "tls", FromName: "Example Status"})
+		&config.SMTP{Security: "tls", FromName: "Example Health"})
 	secrets.External["smtp_password"] = "shared"
-	secrets.Apps["status"]["smtp_password"] = "own"
+	secrets.Apps["health"]["smtp_password"] = "own"
 	settings = renderSeed(t, cfg, secrets).Settings
 	want := map[string]any{"status_page_enabled": false, "smtp_host": "smtp.example.org", "smtp_port": float64(465),
-		"smtp_secure": true, "smtp_user": "robot", "smtp_pass": "own", "smtp_from_address": "hello@example.org", "smtp_from_name": "Example Status"}
+		"smtp_secure": true, "smtp_user": "robot", "smtp_pass": "own", "smtp_from_address": "hello@example.org", "smtp_from_name": "Example Health"}
 	for k, v := range want {
 		if settings[k] != v {
 			t.Errorf("settings.%s = %v, want %v", k, settings[k], v)
@@ -300,7 +300,7 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 	}
 	var snippet string
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/status.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
 			snippet = f.Content
 		}
 	}
@@ -359,10 +359,10 @@ func TestTheMonitorDoesNotCheckItself(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
 	for name, m := range monitors {
-		if strings.HasPrefix(name, "status — ") {
+		if strings.HasPrefix(name, "health — ") {
 			t.Errorf("the monitor seeds a check of itself: %s", name)
 		}
-		if url, _ := m["url"].(string); strings.Contains(url, "status.example.org") {
+		if url, _ := m["url"].(string); strings.Contains(url, "health.example.org") {
 			t.Errorf("%s checks the monitor's own hostname: %s", name, url)
 		}
 	}
@@ -386,16 +386,16 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 	watchB.PublicAddress = "203.0.113.21"
 	watchB.SSH.Host = "watch-b.example.org"
 	cfg.Sites["watch-b"] = watchB
-	cfg.Apps["status-b"] = config.App{Kind: config.KindUptime, Hostname: "status-b.example.org",
+	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}
-	secrets.Apps["status-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
+	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("two monitors is a configuration the toolkit refuses: %v", refusals)
 	}
 
-	for self, other := range map[string]string{"status": "status-b", "status-b": "status"} {
+	for self, other := range map[string]string{"health": "health-b", "health-b": "health"} {
 		site := cfg.Apps[self].Placement.Site
 		seed := renderSeedAt(t, cfg, secrets, site+"/srv/paisans/f2a9/"+self+"/monitors.json")
 		count := map[string]int{}
@@ -434,11 +434,11 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 // validate, so the seed holds the rule itself rather than leaning on that.
 func TestMonitorsOnOneSiteDoNotCheckEachOther(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	cfg.Apps["status-b"] = config.App{Kind: config.KindUptime, Hostname: "status-b.example.org",
+	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 		Settings:  map[string]any{"admin_group": "admins"}}
-	secrets.Apps["status-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
-	for self, other := range map[string]string{"status": "status-b", "status-b": "status"} {
+	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
+	for self, other := range map[string]string{"health": "health-b", "health-b": "health"} {
 		monitors := byName(renderSeedAt(t, cfg, secrets, "watch/srv/paisans/f2a9/"+self+"/monitors.json"))
 		if monitors[render.PublicCheckName(self)] != nil {
 			t.Errorf("%s checks its own public URL", self)
@@ -454,7 +454,7 @@ func TestMonitorsOnOneSiteDoNotCheckEachOther(t *testing.T) {
 func TestASingleMonitorSeedsNoUptimeCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	for _, m := range renderSeed(t, cfg, secrets).Monitors {
-		if url, _ := m["url"].(string); strings.HasPrefix(url, "https://status") {
+		if url, _ := m["url"].(string); strings.HasPrefix(url, "https://health") {
 			t.Errorf("uptime check: %s", m["name"])
 		}
 	}
@@ -470,7 +470,7 @@ func TestTheEdgeRefusesMetricsWithATrailingSlash(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/status.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
 			if !strings.Contains(f.Content, "@refused path /status* /badge/* /metrics /metrics/ /api/v1/*") {
 				t.Fatalf("%s", f.Content)
 			}
@@ -543,7 +543,7 @@ func TestEveryWatchedSitePushesAHeartbeatToTheMonitor(t *testing.T) {
 		if env.Mode != 0o600 {
 			t.Errorf("%s: heartbeat.env carries the token and is rendered %o", site, env.Mode)
 		}
-		if want := "HEARTBEAT_URLS=https://status.example.org/ping/" + token + "\n"; !strings.Contains(env.Content, want) {
+		if want := "HEARTBEAT_URLS=https://health.example.org/ping/" + token + "\n"; !strings.Contains(env.Content, want) {
 			t.Errorf("%s: heartbeat.env lacks %q:\n%s", site, want, env.Content)
 		}
 		compose := files[site+"/srv/paisans/f2a9/infra/compose.yaml"]
@@ -577,11 +577,11 @@ func withTwoMonitors(t *testing.T) (*config.Config, *config.Secrets) {
 	watchB.PublicAddress = "203.0.113.21"
 	watchB.SSH.Host = "watch-b.example.org"
 	cfg.Sites["watch-b"] = watchB
-	cfg.Apps["status-b"] = config.App{Kind: config.KindUptime, Hostname: "status-b.example.org",
+	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}
-	secrets.Apps["status-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
+	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("two monitors is a configuration the toolkit refuses: %v", refusals)
 	}
@@ -595,7 +595,7 @@ func withTwoMonitors(t *testing.T) (*config.Config, *config.Secrets) {
 // one instance only (src/lib/sitePayload.js insertSite).
 func TestTwoMonitorsCrossCoverHeartbeats(t *testing.T) {
 	cfg, secrets := withTwoMonitors(t)
-	for self, other := range map[string]string{"status": "status-b", "status-b": "status"} {
+	for self, other := range map[string]string{"health": "health-b", "health-b": "health"} {
 		site := cfg.Apps[self].Placement.Site
 		otherSite := cfg.Apps[other].Placement.Site
 		monitors := byName(renderSeedAt(t, cfg, secrets, site+"/srv/paisans/f2a9/"+self+"/monitors.json"))
@@ -613,13 +613,13 @@ func TestTwoMonitorsCrossCoverHeartbeats(t *testing.T) {
 	}
 	files := planFiles(plan)
 	token := secrets.Sites["home-a"].HeartbeatToken
-	if want := "HEARTBEAT_URLS=https://status.example.org/ping/" + token + " https://status-b.example.org/ping/" + token + "\n"; !strings.Contains(files["home-a/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
+	if want := "HEARTBEAT_URLS=https://health.example.org/ping/" + token + " https://health-b.example.org/ping/" + token + "\n"; !strings.Contains(files["home-a/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
 		t.Errorf("home-a pushes to %q, want %q", files["home-a/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want)
 	}
-	if want := "HEARTBEAT_URLS=https://status-b.example.org/ping/" + secrets.Sites["watch"].HeartbeatToken + "\n"; !strings.Contains(files["watch/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
+	if want := "HEARTBEAT_URLS=https://health-b.example.org/ping/" + secrets.Sites["watch"].HeartbeatToken + "\n"; !strings.Contains(files["watch/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
 		t.Errorf("watch pushes to %q, want %q", files["watch/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want)
 	}
-	if want := "HEARTBEAT_URLS=https://status.example.org/ping/" + secrets.Sites["watch-b"].HeartbeatToken + "\n"; !strings.Contains(files["watch-b/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
+	if want := "HEARTBEAT_URLS=https://health.example.org/ping/" + secrets.Sites["watch-b"].HeartbeatToken + "\n"; !strings.Contains(files["watch-b/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want) {
 		t.Errorf("watch-b pushes to %q, want %q", files["watch-b/srv/paisans/f2a9/infra/heartbeat/heartbeat.env"], want)
 	}
 	if !strings.Contains(files["watch-b/srv/paisans/f2a9/infra/compose.yaml"], "\n  heartbeat:\n") {
@@ -631,7 +631,7 @@ func TestTwoMonitorsCrossCoverHeartbeats(t *testing.T) {
 // heartbeat service.
 func TestNoMonitorMeansNoHeartbeatPusher(t *testing.T) {
 	cfg := fixture(t)
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	delete(cfg.Sites, "watch")
 	secrets := fixtureSecrets(t)
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
@@ -677,24 +677,24 @@ func TestAMissingOrMalformedHeartbeatTokenIsRefused(t *testing.T) {
 // send anyone to, so the variable is not rendered at all.
 func TestTheMonitorIsSSOOnlyWhenItHasAClient(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	if _, ok := secrets.OIDCClients["status"]; !ok {
+	if _, ok := secrets.OIDCClients["health"]; !ok {
 		t.Fatal("the fixture gives the monitor no client, so this test proves nothing")
 	}
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := planFiles(plan)["watch/srv/paisans/f2a9/status/.env"]
+	env := planFiles(plan)["watch/srv/paisans/f2a9/health/.env"]
 	if !strings.Contains(env, "\nOIDC_DISABLE_PASSWORD_LOGIN=true\n") {
 		t.Errorf("with a client the monitor is SSO only:\n%s", env)
 	}
 
-	delete(secrets.OIDCClients, "status")
+	delete(secrets.OIDCClients, "health")
 	plan, err = render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env := planFiles(plan)["watch/srv/paisans/f2a9/status/.env"]; strings.Contains(env, "OIDC_DISABLE_PASSWORD_LOGIN") {
+	if env := planFiles(plan)["watch/srv/paisans/f2a9/health/.env"]; strings.Contains(env, "OIDC_DISABLE_PASSWORD_LOGIN") {
 		t.Errorf("without a client there is no provider to be SSO only with:\n%s", env)
 	}
 }
@@ -703,15 +703,15 @@ func TestTheMonitorIsSSOOnlyWhenItHasAClient(t *testing.T) {
 // refuses first rather than leave a container that exits after apply moved.
 func TestAnSSOOnlyMonitorRefusesTheDefaultAdminPassword(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	secrets.Apps["status"]["admin_password"] = "admin"
+	secrets.Apps["health"]["admin_password"] = "admin"
 	_, err := render.Build(cfg, secrets)
-	if err == nil || !strings.Contains(err.Error(), "apps.status.admin_password") {
-		t.Fatalf("got %v, want a refusal naming apps.status.admin_password", err)
+	if err == nil || !strings.Contains(err.Error(), "apps.health.admin_password") {
+		t.Fatalf("got %v, want a refusal naming apps.health.admin_password", err)
 	}
 
 	// Without a client the fork only warns, but the password is still the
 	// one anybody would guess first.
-	delete(secrets.OIDCClients, "status")
+	delete(secrets.OIDCClients, "health")
 	if _, err := render.Build(cfg, secrets); err == nil {
 		t.Error("the literal admin password was accepted without a client")
 	}

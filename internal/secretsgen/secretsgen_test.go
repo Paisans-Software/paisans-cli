@@ -548,7 +548,7 @@ func TestMbinOAuthKeypairIsGeneratedOnceAndOpens(t *testing.T) {
 func withUptime(t *testing.T, smtp *config.SMTP) *config.Config {
 	t.Helper()
 	cfg := load(t)
-	cfg.Apps["status"] = config.App{Kind: config.KindUptime, Hostname: "status.example.org",
+	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	cfg.SMTP = config.SMTP{}
@@ -593,7 +593,7 @@ func TestUptimeGetsItsOwnTwoSecretsAndNothingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var keys []string
-	for k := range secrets.Apps["status"] {
+	for k := range secrets.Apps["health"] {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -618,16 +618,16 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	}
 	// The fixture's Pocket ID, auth, its Mbin, talk, and its invite app send
 	// mail too, so all four need their own.
-	perApp := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
+	perApp := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
 	if _, ok := owedBy(t, withUptime(t, smtp), perApp)["external.smtp_password"]; ok {
 		t.Error("owed although every app that sends mail has its own smtp_password")
 	}
-	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
+	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), allButMbin)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "talk") {
 		t.Errorf("not owed for Mbin, which has no smtp_password of its own: %q", why)
 	}
-	onlyUptime := &config.Secrets{Apps: map[string]map[string]any{"status": {"smtp_password": "x"}}}
+	onlyUptime := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), onlyUptime)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "auth") {
 		t.Errorf("not owed for Pocket ID, which has no smtp_password of its own: %q", why)
@@ -637,8 +637,8 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 // The monitor's client returns to the fork's own callback, which an operator
 // needs while minting the client.
 func TestAnUptimePendingClientNamesItsRedirectURI(t *testing.T) {
-	why := pendingBy(t, withUptime(t, nil), &config.Secrets{})["oidc_clients.status"]
-	if !strings.Contains(why, "https://status.example.org/login/oidc/callback") {
+	why := pendingBy(t, withUptime(t, nil), &config.Secrets{})["oidc_clients.health"]
+	if !strings.Contains(why, "https://health.example.org/login/oidc/callback") {
 		t.Errorf("the pending client does not name the redirect URI:\n%s", why)
 	}
 	if !strings.Contains(why, "paisans apply") {

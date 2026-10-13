@@ -133,9 +133,9 @@ func width(p *Prompter, cols int) { p.width = func() int { return cols } }
 func TestSayWrapsAtTheTerminalsWidth(t *testing.T) {
 	p, out := prompter("")
 	width(p, 30)
-	p.Say("\nThe status page reports the other machines failing, so it is best on a machine of its own.")
+	p.Say("\nThe health page reports the other machines failing, so it is best on a machine of its own.")
 	want := "\n" +
-		"The status page reports the\n" +
+		"The health page reports the\n" +
 		"other machines failing, so it\n" +
 		"is best on a machine of its\n" +
 		"own.\n"

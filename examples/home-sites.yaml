@@ -157,7 +157,7 @@ apps:
       app_name: Example ID
       allow_own_account_edit: false   # always false; see README.md
 
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     placement: { pinned: health }
@@ -168,6 +168,6 @@ smtp:
   host: smtp.example.org
   port: 587
   security: starttls
-  username: status@example.org
-  from_address: status@example.org
+  username: health@example.org
+  from_address: health@example.org
   from_name: Example Community

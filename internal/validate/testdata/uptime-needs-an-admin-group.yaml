@@ -83,12 +83,12 @@ apps:
     placement: cluster
     settings:
       file_backend: database
-  status:
+  health:
     blueprint: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     placement: { pinned: watch }
 
 smtp:
   host: smtp.example.org
   security: starttls
-  from_address: status@example.org
+  from_address: health@example.org

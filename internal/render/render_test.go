@@ -2720,9 +2720,9 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	cfg := fixture(t)
 	cfg.Sites["mon"] = config.Site{Address: "10.44.0.9", SSH: cfg.Sites["vm"].SSH}
-	status := cfg.Apps["status"]
-	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "mon"}
-	cfg.Apps["status"] = status
+	health := cfg.Apps["health"]
+	health.Placement = config.Placement{Mode: config.PlacementPinned, Site: "mon"}
+	cfg.Apps["health"] = health
 	secrets := fixtureSecrets(t)
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
 		t.Fatal(err)
@@ -2735,7 +2735,7 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	for _, f := range plan.Files {
 		have[f.Path] = true
 	}
-	for _, want := range []string{"mon/etc/wireguard/psns-f2a9.conf", "mon/srv/paisans/f2a9/status/compose.yaml", "mon/srv/paisans/f2a9/status/monitors.json"} {
+	for _, want := range []string{"mon/etc/wireguard/psns-f2a9.conf", "mon/srv/paisans/f2a9/health/compose.yaml", "mon/srv/paisans/f2a9/health/monitors.json"} {
 		if !have[want] {
 			t.Errorf("%s was not rendered", want)
 		}

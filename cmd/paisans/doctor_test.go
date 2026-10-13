@@ -148,7 +148,7 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 	watch := map[string]string{
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
-		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-status-app-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-health-app-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
 	}
 	return map[string]doctorHost{
 		"home-a.local":      {name: "home-a.local", answers: homeA, sent: sent, writes: writes},

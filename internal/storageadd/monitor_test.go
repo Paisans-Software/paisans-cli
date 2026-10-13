@@ -11,7 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
 )
 
-const seed = "/srv/paisans/f2a9/status/monitors.json"
+const seed = "/srv/paisans/f2a9/health/monitors.json"
 
 // The last stage reseeds the monitor: a monitor whose seed was rendered
 // before a site existed is given the one rendered now, and restarted on it.
@@ -33,7 +33,7 @@ func TestTheJoinReseedsTheMonitorLast(t *testing.T) {
 
 	p := w.build(storageadd.Options{})
 	last := p.Stages[len(p.Stages)-1]
-	if last.Name != "monitor" || !strings.Contains(printed(p), "detail: watch: "+seed) || !strings.Contains(printed(p), "detail: watch: status") {
+	if last.Name != "monitor" || !strings.Contains(printed(p), "detail: watch: "+seed) || !strings.Contains(printed(p), "detail: watch: health") {
 		t.Fatalf("the last stage is not the monitor's reseed:\n%s", printed(p))
 	}
 	if !p.Pending() {
@@ -45,7 +45,7 @@ func TestTheJoinReseedsTheMonitorLast(t *testing.T) {
 	if !strings.Contains(watch.files[seed], `"home-b — ping"`) {
 		t.Errorf("the monitor was not reseeded:\n%s", watch.files[seed])
 	}
-	if watch.ran("/srv/paisans/f2a9/status/compose.yaml restart") != 1 {
+	if watch.ran("/srv/paisans/f2a9/health/compose.yaml restart") != 1 {
 		t.Error("the monitor was not restarted on the new seed")
 	}
 	again := w.build(storageadd.Options{})
@@ -65,10 +65,10 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	watch := w.hosts["watch"]
 	watch.files[seed] = strings.Replace(watch.files[seed], `"home-b — ping"`, `"home-x — ping"`, 1)
 	watch.recordManifest()
-	w.failOnce = "/srv/paisans/f2a9/status/compose.yaml restart"
+	w.failOnce = "/srv/paisans/f2a9/health/compose.yaml restart"
 
 	err := storageadd.Execute(w.build(storageadd.Options{}))
-	if err == nil || !strings.Contains(err.Error(), "(monitor)") || !strings.Contains(err.Error(), "paisans apply --site watch --only status --execute") {
+	if err == nil || !strings.Contains(err.Error(), "(monitor)") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
 		t.Fatalf("want the monitor stage to fail naming the apply, got %v", err)
 	}
 	if zoneOf(w.hosts["home-b"], w.hosts["home-b"]) != "home-b" {
@@ -88,13 +88,13 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	watch := w.hosts["watch"]
 	watch.files[seed] = strings.Replace(watch.files[seed], `"home-b — ping"`, `"home-x — ping"`, 1)
 	watch.recordManifest()
-	w.unhealthy = "status"
+	w.unhealthy = "health"
 
 	err := storageadd.Execute(w.build(storageadd.Options{}))
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "(monitor)", "stack status is not healthy", "The join itself is done", "paisans apply --site watch --only status --execute", "run storage add again")
+	shortAndVerbose(t, err, "(monitor)", "stack health is not healthy", "The join itself is done", "paisans apply --site watch --only health --execute", "run storage add again")
 }
 
 // A deployment with no monitor site skips the stage.
@@ -102,7 +102,7 @@ func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	cfg, secrets := fixture(t)
 	cfg.Storage.Garage.Replication = 1
 	delete(cfg.Sites, "watch")
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	w := newWorld(t, cfg, secrets)
 	w.provisioned(1, "home-a")
 	w.deployGarage("home-b", 1)

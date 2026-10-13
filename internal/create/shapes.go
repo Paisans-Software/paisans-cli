@@ -111,8 +111,8 @@ var capabilities = []capability{
 		{key: "chat", kind: config.KindSynapse, sub: "chat", what: "chat server"},
 		{key: "web", kind: config.KindElement, sub: "web", gateable: true, what: "chat web client"},
 	}},
-	{question: "A status page (uptime monitor)?", def: true, apps: []appSpec{
-		{key: statusApp, kind: config.KindUptime, sub: "health", what: "status page"},
+	{question: "A health page (uptime monitor)?", def: true, apps: []appSpec{
+		{key: healthApp, kind: config.KindUptime, sub: "health", what: "health page"},
 	}},
 }
 
@@ -121,6 +121,6 @@ var capabilities = []capability{
 var signIn = appSpec{key: "auth", kind: config.KindPocketID, sub: "id", what: "sign in"}
 
 const (
-	statusApp   = "status"
+	healthApp   = "health"
 	monitorSite = "health"
 )

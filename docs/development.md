@@ -129,8 +129,8 @@ paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
 paisans dns init                          # shows which records it would create
 paisans dns prune                         # shows which records it would delete
-paisans web-server show  --app status        # hand-off sheet for a monitor's web server
-paisans web-server check --app status        # DNS, certificate, sign in, closed upstream
+paisans web-server show  --app health        # hand-off sheet for a monitor's web server
+paisans web-server check --app health        # DNS, certificate, sign in, closed upstream
 security find-generic-password -s acme -w \
   | paisans secrets set external.acme_dns_token
 ```

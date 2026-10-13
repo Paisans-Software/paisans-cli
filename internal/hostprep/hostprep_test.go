@@ -246,7 +246,7 @@ func fixture(t *testing.T) *config.Config {
 func withoutMonitor(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := fixture(t)
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	return cfg
 }
 
@@ -1565,9 +1565,9 @@ func TestPreparedKeysPlanNothing(t *testing.T) {
 // to a local app arrive on a compose bridge rather than on the mesh interface.
 func TestContainerRulesLetTheMonitorReachLocalApps(t *testing.T) {
 	cfg := fixture(t)
-	status := cfg.Apps["status"]
-	status.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
-	cfg.Apps["status"] = status
+	health := cfg.Apps["health"]
+	health.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	cfg.Apps["health"] = health
 	homeA := cfg.Sites["home-a"]
 	homeA.Roles = append(homeA.Roles, config.RoleMonitor)
 	cfg.Sites["home-a"] = homeA

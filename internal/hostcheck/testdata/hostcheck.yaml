@@ -81,15 +81,15 @@ apps:
     blueprint: writefreely
     hostname: blog.example.org
     placement: cluster
-  status:
+  health:
     blueprint: uptime
-    hostname: status.example.org
+    hostname: health.example.org
     placement: { pinned: watch }
     settings:
       admin_group: admins
-  porch-status:
+  porch-health:
     blueprint: uptime
-    hostname: porch-status.example.org
+    hostname: porch-health.example.org
     placement: { pinned: porch }
     settings:
       admin_group: admins

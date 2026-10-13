@@ -191,7 +191,7 @@ func TestAnUnreachableMonitorSaysNothingReportsFailures(t *testing.T) {
 		{Site: "watch", Destination: "ubuntu@watch.example.org", Err: "ssh: connect to host watch.example.org port 22: Connection refused"},
 	})
 	text := strings.Join(find(t, findings, SectionReach, "watch:").More, "\n")
-	for _, want := range []string{"the uptime monitor, so nothing reports the other sites' failures while it is gone", "status, pinned here"} {
+	for _, want := range []string{"the uptime monitor, so nothing reports the other sites' failures while it is gone", "health, pinned here"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("watch's loss lacks %q:\n%s", want, text)
 		}

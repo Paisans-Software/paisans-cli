@@ -9,7 +9,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
 )
 
-const fileName = "paisans-f2a9-status.caddy"
+const fileName = "paisans-f2a9-health.caddy"
 
 // dockerCaddy is a Caddy in a container whose configuration directory is
 // mounted whole.
@@ -102,11 +102,11 @@ func TestCheckInclude(t *testing.T) {
 		{"caddy glob in a snippet", dockerCaddy, "/etc/caddy/paisans.d", fileName, "(common) {\n\timport /etc/caddy/paisans.d/*\n}\n", webserver.IncludeInBlock, "import /etc/caddy/paisans.d/*"},
 		{"caddy glob in the options", dockerCaddy, "/etc/caddy/paisans.d", fileName, "{\n\timport /etc/caddy/paisans.d/*\n}\n", webserver.IncludeInBlock, "import /etc/caddy/paisans.d/*"},
 		{"caddy glob above options and after", dockerCaddy, "/etc/caddy/paisans.d", fileName, "import /etc/caddy/paisans.d/*\n{\n}\nimport /etc/caddy/paisans.d/*\n", webserver.IncludeAboveOptions, "import /etc/caddy/paisans.d/*"},
-		{"nginx glob", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "# configuration file /etc/nginx/nginx.conf:\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include paisans.d/*.conf;\n}\n", webserver.IncludeWildcard, ""},
-		{"nginx glob that misses", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "include /etc/nginx/paisans.d/*.vhost;\n", webserver.IncludeMissing, ""},
-		{"nginx literal", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-status.conf", "include /etc/nginx/paisans.d/paisans-f2a9-status.conf;\n", webserver.IncludeRefused, "include /etc/nginx/paisans.d/paisans-f2a9-status.conf;"},
-		{"apache optional", apache, "/etc/apache2/paisans.d", "paisans-f2a9-status.conf", "IncludeOptional mods-enabled/*.load\nIncludeOptional /etc/apache2/paisans.d/*.conf\n", webserver.IncludeWildcard, ""},
-		{"apache include", apache, "/etc/apache2/paisans.d", "paisans-f2a9-status.conf", "Include /etc/apache2/paisans.d/*.conf\n", webserver.IncludeRefused, "Include /etc/apache2/paisans.d/*.conf"},
+		{"nginx glob", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-health.conf", "# configuration file /etc/nginx/nginx.conf:\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include paisans.d/*.conf;\n}\n", webserver.IncludeWildcard, ""},
+		{"nginx glob that misses", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-health.conf", "include /etc/nginx/paisans.d/*.vhost;\n", webserver.IncludeMissing, ""},
+		{"nginx literal", nginx, "/etc/nginx/paisans.d", "paisans-f2a9-health.conf", "include /etc/nginx/paisans.d/paisans-f2a9-health.conf;\n", webserver.IncludeRefused, "include /etc/nginx/paisans.d/paisans-f2a9-health.conf;"},
+		{"apache optional", apache, "/etc/apache2/paisans.d", "paisans-f2a9-health.conf", "IncludeOptional mods-enabled/*.load\nIncludeOptional /etc/apache2/paisans.d/*.conf\n", webserver.IncludeWildcard, ""},
+		{"apache include", apache, "/etc/apache2/paisans.d", "paisans-f2a9-health.conf", "Include /etc/apache2/paisans.d/*.conf\n", webserver.IncludeRefused, "Include /etc/apache2/paisans.d/*.conf"},
 	} {
 		s := webservertest.New(tc.config)
 		got, line, err := webserver.CheckInclude(host(s), tc.ws, tc.seen, tc.file)
@@ -146,26 +146,26 @@ func TestIncludeLineForCaddyComesAfterTheGlobalOptions(t *testing.T) {
 	}
 }
 
-func statusFile(t *testing.T, ws webserver.WebServer) webserver.File {
+func healthFile(t *testing.T, ws webserver.WebServer) webserver.File {
 	t.Helper()
 	target := external(t, "127.0.0.1:8480")
-	return webserver.File{App: "status", Name: webserver.FileName("paisans-f2a9", "status", ws.Server), Content: webserver.FileContent(target, ws)}
+	return webserver.File{App: "health", Name: webserver.FileName("paisans-f2a9", "health", ws.Server), Content: webserver.FileContent(target, ws)}
 }
 
-const statusPath = "/opt/caddy/paisans.d/" + fileName
+const healthPath = "/opt/caddy/paisans.d/" + fileName
 
 // With the directory included, the file is written, the whole
 // configuration validated and the server reloaded, inside its container,
 // and the file is recorded with what removing it needs.
 func TestSyncWritesValidatesAndReloads(t *testing.T) {
 	s := webservertest.New("")
-	f := statusFile(t, dockerCaddy)
+	f := healthFile(t, dockerCaddy)
 	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, nil)
-	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Path != statusPath || out[0].Reload.Kind != webserver.Reloaded {
+	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Path != healthPath || out[0].Reload.Kind != webserver.Reloaded {
 		t.Fatalf("outcomes %+v", out)
 	}
-	content := s.Files[statusPath]
-	for _, want := range []string{"status.example.org {", "reverse_proxy 127.0.0.1:8480", "written by paisans apply"} {
+	content := s.Files[healthPath]
+	for _, want := range []string{"health.example.org {", "reverse_proxy 127.0.0.1:8480", "written by paisans apply"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("file lacks %q:\n%s", want, content)
 		}
@@ -180,7 +180,7 @@ func TestSyncWritesValidatesAndReloads(t *testing.T) {
 		!s.Ran("docker exec 'caddy-1' sh -c 'caddy reload --config '\\''/etc/caddy/Caddyfile'\\'' --adapter caddyfile") {
 		t.Errorf("not validated and reloaded in the container: %v", s.Asked)
 	}
-	want := []render.ManifestWebServer{{App: "status", Path: statusPath, SHA256: record[0].SHA256, Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
+	want := []render.ManifestWebServer{{App: "health", Path: healthPath, SHA256: record[0].SHA256, Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
 	if len(record) != 1 || record[0] != want[0] || record[0].SHA256 == "" {
 		t.Errorf("record %+v", record)
 	}
@@ -205,12 +205,12 @@ func TestSyncWritesValidatesAndReloads(t *testing.T) {
 // the server keeps the configuration it ran, and its error is reported.
 func TestSyncRemovesAFileTheServerRefuses(t *testing.T) {
 	s := webservertest.New("")
-	s.Validate = "Error: adapting config using caddyfile: ambiguous site definition: status.example.org"
-	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	s.Validate = "Error: adapting config using caddyfile: ambiguous site definition: health.example.org"
+	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{healthFile(t, dockerCaddy)}, nil)
 	if len(out) != 1 || out[0].Kind != webserver.Refused || !strings.Contains(out[0].Why, "ambiguous site definition") {
 		t.Fatalf("outcomes %+v", out)
 	}
-	if _, ok := s.Files[statusPath]; ok || len(record) != 0 {
+	if _, ok := s.Files[healthPath]; ok || len(record) != 0 {
 		t.Errorf("the refused file stayed: %v, record %+v", s.Files, record)
 	}
 	if s.Ran("reload") || s.Ran("restart") {
@@ -223,7 +223,7 @@ func TestSyncRemovesAFileTheServerRefuses(t *testing.T) {
 func TestSyncFailsOnAHostItCannotReach(t *testing.T) {
 	s := webservertest.New("")
 	s.Unreachable = true
-	_, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	_, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{healthFile(t, dockerCaddy)}, nil)
 	if len(out) != 1 || out[0].Kind != webserver.Failed || !strings.Contains(out[0].Why, "cannot be reached") {
 		t.Fatalf("outcomes %+v", out)
 	}
@@ -234,11 +234,11 @@ func TestSyncFailsOnAHostItCannotReach(t *testing.T) {
 func TestSyncRestartsAContainerWhoseReloadFails(t *testing.T) {
 	s := webservertest.New("")
 	s.Reload = "Error: loading new config: admin endpoint disabled"
-	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{healthFile(t, dockerCaddy)}, nil)
 	if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Reload.Kind != webserver.Restarted || !strings.Contains(out[0].Reload.Why, "admin endpoint disabled") {
 		t.Fatalf("outcomes %+v", out)
 	}
-	if !s.Ran("docker restart 'caddy-1'") || len(record) != 1 || s.Files[statusPath] == "" {
+	if !s.Ran("docker restart 'caddy-1'") || len(record) != 1 || s.Files[healthPath] == "" {
 		t.Errorf("record %+v, asked %v", record, s.Asked)
 	}
 }
@@ -263,7 +263,7 @@ func TestSyncLeavesTheReloadOfABareMetalServer(t *testing.T) {
 		s := webservertest.New("")
 		s.Units = c.units
 		inc := webserver.Include{Dir: "/etc/x/paisans.d", Seen: "/etc/x/paisans.d"}
-		record, out := webserver.Sync(host(s), c.ws, inc, []webserver.File{statusFile(t, c.ws)}, nil)
+		record, out := webserver.Sync(host(s), c.ws, inc, []webserver.File{healthFile(t, c.ws)}, nil)
 		if len(out) != 1 || out[0].Kind != webserver.Written || out[0].Reload.Kind != webserver.OperatorReloads || out[0].Reload.Command != c.want {
 			t.Errorf("%s %v: outcomes %+v", c.ws.Server, c.units, out)
 			continue
@@ -281,18 +281,18 @@ func TestSyncLeavesTheReloadOfABareMetalServer(t *testing.T) {
 // replaced, and keeps its record.
 func TestSyncRestoresTheFileARefusedRewriteReplaced(t *testing.T) {
 	s := webservertest.New("")
-	f := statusFile(t, dockerCaddy)
+	f := healthFile(t, dockerCaddy)
 	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, nil)
-	before := s.Files[statusPath]
+	before := s.Files[healthPath]
 	s.Reload = "Error: loading new config: http.handlers.reverse_proxy: upstream unreachable"
 	s.Restart = "Error response from daemon: container caddy-1 is restarting"
-	f.Content = strings.Replace(f.Content, "status.example.org", "uptime.example.org", -1)
+	f.Content = strings.Replace(f.Content, "health.example.org", "uptime.example.org", -1)
 	kept, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, record)
 	if out[0].Kind != webserver.Refused || !strings.Contains(out[0].Why, "did not reload") || !strings.Contains(out[0].Why, "is restarting") {
 		t.Fatalf("outcomes %+v", out)
 	}
-	if s.Files[statusPath] != before || len(kept) != 1 || kept[0] != record[0] {
-		t.Errorf("not restored: %q, record %+v", s.Files[statusPath], kept)
+	if s.Files[healthPath] != before || len(kept) != 1 || kept[0] != record[0] {
+		t.Errorf("not restored: %q, record %+v", s.Files[healthPath], kept)
 	}
 }
 
@@ -300,8 +300,8 @@ func TestSyncRestoresTheFileARefusedRewriteReplaced(t *testing.T) {
 // never recorded, is left as it is.
 func TestSyncLeavesAnEditedFile(t *testing.T) {
 	s := webservertest.New("")
-	f := statusFile(t, dockerCaddy)
-	s.Files[statusPath] = "status.example.org {\n\trespond \"mine\"\n}\n"
+	f := healthFile(t, dockerCaddy)
+	s.Files[healthPath] = "health.example.org {\n\trespond \"mine\"\n}\n"
 	record, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{f}, nil)
 	if out[0].Kind != webserver.Edited || len(record) != 0 || s.Ran("printf") || s.Ran("reload") {
 		t.Errorf("%+v %+v %v", out, record, s.Asked)
@@ -313,14 +313,14 @@ func TestSyncLeavesAnEditedFile(t *testing.T) {
 // reloaded. Nothing else in the directory is touched, nor the directory.
 func TestSyncRemovesWhatIsNoLongerWanted(t *testing.T) {
 	s := webservertest.New("")
-	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{healthFile(t, dockerCaddy)}, nil)
 	s.Files["/opt/caddy/paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
 	s.Asked = nil
 	kept, out := webserver.Sync(host(s), dockerCaddy, caddyInclude, nil, record)
 	if len(out) != 1 || out[0].Kind != webserver.Removed || len(kept) != 0 {
 		t.Fatalf("%+v %+v", out, kept)
 	}
-	if _, ok := s.Files[statusPath]; ok {
+	if _, ok := s.Files[healthPath]; ok {
 		t.Error("the file stayed")
 	}
 	if _, ok := s.Files["/opt/caddy/paisans.d/blog.caddy"]; !ok {
@@ -340,21 +340,21 @@ func TestSyncRemovesWhatIsNoLongerWanted(t *testing.T) {
 // record, and one whose removal the server refuses is put back.
 func TestRemove(t *testing.T) {
 	s := webservertest.New("")
-	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{statusFile(t, dockerCaddy)}, nil)
+	record, _ := webserver.Sync(host(s), dockerCaddy, caddyInclude, []webserver.File{healthFile(t, dockerCaddy)}, nil)
 	e := record[0]
 
 	s.Validate = "Error: a site of the operator's imports a snippet from it"
-	if o := webserver.Remove(host(s), e); o.Kind != webserver.Refused || s.Files[statusPath] == "" {
-		t.Errorf("refused removal: %+v, file %q", o, s.Files[statusPath])
+	if o := webserver.Remove(host(s), e); o.Kind != webserver.Refused || s.Files[healthPath] == "" {
+		t.Errorf("refused removal: %+v, file %q", o, s.Files[healthPath])
 	}
 	s.Validate = ""
 
-	s.Files[statusPath] += "# mine\n"
-	if o := webserver.Remove(host(s), e); o.Kind != webserver.Edited || s.Files[statusPath] == "" {
+	s.Files[healthPath] += "# mine\n"
+	if o := webserver.Remove(host(s), e); o.Kind != webserver.Edited || s.Files[healthPath] == "" {
 		t.Errorf("edited: %+v", o)
 	}
 
-	delete(s.Files, statusPath)
+	delete(s.Files, healthPath)
 	s.Asked = nil
 	if o := webserver.Remove(host(s), e); o.Kind != webserver.Gone || s.Ran("reload") {
 		t.Errorf("gone: %+v %v", o, s.Asked)
@@ -368,14 +368,14 @@ func TestSyncUsesSudoOnlyWhereRefused(t *testing.T) {
 	s := webservertest.New("")
 	s.Denied = true
 	nginx := webserver.WebServer{Server: webserver.ServerNginx, Process: "nginx", Config: "/etc/nginx/nginx.conf", Main: "/etc/nginx/nginx.conf",
-		Certs: webserver.CertsFiles, CertFile: "/etc/letsencrypt/live/status.example.org/fullchain.pem", KeyFile: "/etc/letsencrypt/live/status.example.org/privkey.pem"}
+		Certs: webserver.CertsFiles, CertFile: "/etc/letsencrypt/live/health.example.org/fullchain.pem", KeyFile: "/etc/letsencrypt/live/health.example.org/privkey.pem"}
 	inc := webserver.Include{Dir: "/etc/nginx/paisans.d", Seen: "/etc/nginx/paisans.d"}
-	_, out := webserver.Sync(host(s), nginx, inc, []webserver.File{statusFile(t, nginx)}, nil)
+	_, out := webserver.Sync(host(s), nginx, inc, []webserver.File{healthFile(t, nginx)}, nil)
 	if out[0].Kind != webserver.Written {
 		t.Fatalf("%+v %v", out, s.Asked)
 	}
-	content := s.Files["/etc/nginx/paisans.d/paisans-f2a9-status.conf"]
-	if !strings.Contains(content, "ssl_certificate     /etc/letsencrypt/live/status.example.org/fullchain.pem;") {
+	content := s.Files["/etc/nginx/paisans.d/paisans-f2a9-health.conf"]
+	if !strings.Contains(content, "ssl_certificate     /etc/letsencrypt/live/health.example.org/fullchain.pem;") {
 		t.Errorf("file:\n%s", content)
 	}
 	if !s.Ran("sudo set -e; mkdir -p") || s.Ran("sudo nginx -t") || !s.Ran("nginx -t") || s.Ran("nginx -s reload") {

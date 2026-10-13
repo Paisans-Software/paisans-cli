@@ -260,16 +260,16 @@ func TestApplyHoldsBackOnlyAppsWithoutAClientWhenPocketIDIsUnreachable(t *testin
 		hold     string
 		says     string
 	}{
-		{"no client", false, "plan hold=status ", "status held back: no client yet and Pocket ID not asked"},
-		{"recorded client", true, "plan hold= ", "status: Pocket ID not asked, recorded client used"},
+		{"no client", false, "plan hold=health ", "health held back: no client yet and Pocket ID not asked"},
+		{"recorded client", true, "plan hold= ", "health: Pocket ID not asked, recorded client used"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := withIDPFake(t)
-			path := secretsWithout(t, "status")
+			path := secretsWithout(t, "health")
 			if tc.recorded {
 				secrets, _ := config.LoadSecrets(path)
-				_ = secrets.Set("oidc_clients.status.client_id", "fixture-not-a-secret-status-id")
-				_ = secrets.Set("oidc_clients.status.client_secret", "fixture-not-a-secret-status-secret")
+				_ = secrets.Set("oidc_clients.health.client_id", "fixture-not-a-secret-health-id")
+				_ = secrets.Set("oidc_clients.health.client_secret", "fixture-not-a-secret-health-secret")
 				if err := config.WriteSecrets(path, secrets, nil); err != nil {
 					t.Fatal(err)
 				}
@@ -278,7 +278,7 @@ func TestApplyHoldsBackOnlyAppsWithoutAClientWhenPocketIDIsUnreachable(t *testin
 			var log passLog
 			var err error
 			stdout, _ := captureOutput(t, func() {
-				_, err = executeWithClients(c, log.pass(t, c, "status"))
+				_, err = executeWithClients(c, log.pass(t, c, "health"))
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -297,7 +297,7 @@ func TestApplyHoldsBackOnlyAppsWithoutAClientWhenPocketIDIsUnreachable(t *testin
 			if result != nil {
 				t.Errorf("an unreachable Pocket ID failed the apply: %v", result)
 			}
-			if !tc.recorded && !strings.Contains(after, "held back from this apply: status\n") {
+			if !tc.recorded && !strings.Contains(after, "held back from this apply: health\n") {
 				t.Errorf("the end of the apply does not say what was held back:\n%s", after)
 			}
 		})
@@ -642,7 +642,7 @@ func TestApplyHasNoIdentityStepWithoutPocketID(t *testing.T) {
 // not that Pocket ID is down.
 func TestApplyNamesAMissingAPIKey(t *testing.T) {
 	fake := withIDPFake(t)
-	path := secretsWithout(t, "status")
+	path := secretsWithout(t, "health")
 	secrets, _ := config.LoadSecrets(path)
 	delete(secrets.Apps["auth"], "static_api_key")
 	if err := config.WriteSecrets(path, secrets, nil); err != nil {
@@ -658,10 +658,10 @@ func TestApplyNamesAMissingAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(c.heldApps(), ","); got != "status" {
+	if got := strings.Join(c.heldApps(), ","); got != "health" {
 		t.Errorf("held %s", got)
 	}
-	for _, want := range []string{"static_api_key is missing", "paisans init", "held back from this apply: status"} {
+	for _, want := range []string{"static_api_key is missing", "paisans init", "held back from this apply: health"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("output lacks %q:\n%s", want, stdout)
 		}
@@ -680,17 +680,17 @@ func TestApplyReportsAnOverwriteItHeldBack(t *testing.T) {
 	var asked []string
 	lookWith(t, map[string]string{"home-a.local": "down", "home-b.local": "down"}, &asked)
 	withIDPFake(t)
-	c := stepFor(t, "watch", secretsWithout(t, "status"))
-	log := passLog{heldOverwrites: []string{"/srv/paisans/f2a9/status/.env"}}
+	c := stepFor(t, "watch", secretsWithout(t, "health"))
+	log := passLog{heldOverwrites: []string{"/srv/paisans/f2a9/health/.env"}}
 	var err error
 	stdout, _ := captureOutput(t, func() {
-		_, err = executeWithClients(c, log.pass(t, c, "status"))
+		_, err = executeWithClients(c, log.pass(t, c, "health"))
 		err = errors.Join(err, c.result())
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "--overwrite not applied, its stack was held back: /srv/paisans/f2a9/status/.env") {
+	if !strings.Contains(stdout, "--overwrite not applied, its stack was held back: /srv/paisans/f2a9/health/.env") {
 		t.Errorf("the held overwrite is not reported:\n%s", stdout)
 	}
 }

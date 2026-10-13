@@ -407,15 +407,15 @@ func TestSomethingOverlappingTheWebServerNetworkConflicts(t *testing.T) {
 // own network holding it is what an apply leaves, and is clean.
 func TestAStaleToolkitStackOnTheWebServerNetworkConflicts(t *testing.T) {
 	stale := cleanHost()
-	stale.answers["docker network inspect"] = defaultNetworks + fmt.Sprintf(`{"id":%q,"name":"paisans-f2a9-status_default","labels":{"com.docker.compose.project":"paisans-f2a9-status","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ipam":[{"Subnet":"10.255.255.0/29"}]}
+	stale.answers["docker network inspect"] = defaultNetworks + fmt.Sprintf(`{"id":%q,"name":"paisans-f2a9-health_default","labels":{"com.docker.compose.project":"paisans-f2a9-health","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ipam":[{"Subnet":"10.255.255.0/29"}]}
 `, id("7"))
 	r := check(t, "porch", stale)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "subnet 10.255.255.0/29: claimed by sites.porch.web_server, held by docker network paisans-f2a9-status_default (compose project paisans-f2a9-status)")
-	wantLine(t, r, "docker compose -p paisans-f2a9-status down")
+	wantLine(t, r, "subnet 10.255.255.0/29: claimed by sites.porch.web_server, held by docker network paisans-f2a9-health_default (compose project paisans-f2a9-health)")
+	wantLine(t, r, "docker compose -p paisans-f2a9-health down")
 
 	own := cleanHost()
-	own.answers["docker network inspect"] = defaultNetworks + fmt.Sprintf(`{"id":%q,"name":"paisans-f2a9-porch-status_default","labels":{"com.docker.compose.project":"paisans-f2a9-porch-status","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ipam":[{"Subnet":"10.255.255.0/29"}]}
+	own.answers["docker network inspect"] = defaultNetworks + fmt.Sprintf(`{"id":%q,"name":"paisans-f2a9-porch-status_default","labels":{"com.docker.compose.project":"paisans-f2a9-porch-health","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ipam":[{"Subnet":"10.255.255.0/29"}]}
 `, id("8"))
 	wantClass(t, check(t, "porch", own), hostcheck.Clean)
 }

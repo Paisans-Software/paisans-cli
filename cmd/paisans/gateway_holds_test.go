@@ -44,7 +44,7 @@ func TestHoldsGatewayOnAMonitorSiteCountsRoutesNotItsCaddy(t *testing.T) {
 		host       probeHost
 		want       bool
 	}{
-		{"a monitor's own Caddy", "watch", probeHost{caddy: true, files: map[string]string{path: "status.example.org {\n}\n"}}, false},
+		{"a monitor's own Caddy", "watch", probeHost{caddy: true, files: map[string]string{path: "health.example.org {\n}\n"}}, false},
 		{"a monitor still serving the gateway", "watch", probeHost{caddy: true, files: map[string]string{path: gateway}}, true},
 		{"a plain site's Caddy", "home-a", probeHost{caddy: true, files: map[string]string{}}, true},
 	} {

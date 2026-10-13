@@ -83,7 +83,7 @@ func TestEveryPocketIDSitePushesTheAdminsHeartbeat(t *testing.T) {
 		if env.Mode != 0o600 {
 			t.Errorf("%s: the admins heartbeat env carries the token and is rendered %o", site, env.Mode)
 		}
-		if want := "ADMINS_HEARTBEAT_URLS=https://status.example.org/ping/" + token + "\n"; !strings.Contains(env.Content, want) {
+		if want := "ADMINS_HEARTBEAT_URLS=https://health.example.org/ping/" + token + "\n"; !strings.Contains(env.Content, want) {
 			t.Errorf("%s: the admins heartbeat env lacks %q:\n%s", site, want, env.Content)
 		}
 		compose := files[stack+"compose.yaml"]
@@ -107,7 +107,7 @@ func TestEveryPocketIDSitePushesTheAdminsHeartbeat(t *testing.T) {
 func TestTwoMonitorsBothExpectTheAdminsHeartbeat(t *testing.T) {
 	cfg, secrets := withTwoMonitors(t)
 	token := adminsToken(t, secrets)
-	for self, site := range map[string]string{"status": "watch", "status-b": "watch-b"} {
+	for self, site := range map[string]string{"health": "watch", "health-b": "watch-b"} {
 		monitors := byName(renderSeedAt(t, cfg, secrets, site+"/srv/paisans/f2a9/"+self+"/monitors.json"))
 		if m := monitors["auth — admin continuity"]; m == nil || m["heartbeat_token"] != token {
 			t.Errorf("%s does not expect auth's admins heartbeat: %v", self, m)
@@ -118,7 +118,7 @@ func TestTwoMonitorsBothExpectTheAdminsHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := planFiles(plan)
-	want := "ADMINS_HEARTBEAT_URLS=https://status.example.org/ping/" + token + " https://status-b.example.org/ping/" + token + "\n"
+	want := "ADMINS_HEARTBEAT_URLS=https://health.example.org/ping/" + token + " https://health-b.example.org/ping/" + token + "\n"
 	for _, site := range render.AppSites(cfg)["auth"] {
 		if got := files[site+"/srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env"]; !strings.Contains(got, want) {
 			t.Errorf("%s pushes to %q, want %q", site, got, want)
@@ -130,7 +130,7 @@ func TestTwoMonitorsBothExpectTheAdminsHeartbeat(t *testing.T) {
 // none of its files.
 func TestNoMonitorMeansNoAdminsHeartbeatPusher(t *testing.T) {
 	cfg := fixture(t)
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	delete(cfg.Sites, "watch")
 	secrets := fixtureSecrets(t)
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
@@ -168,7 +168,7 @@ func TestAMissingOrMalformedAdminsHeartbeatTokenIsRefused(t *testing.T) {
 	// With no monitor the token is read by nothing, so its absence is not
 	// refused.
 	cfg := fixture(t)
-	delete(cfg.Apps, "status")
+	delete(cfg.Apps, "health")
 	delete(cfg.Sites, "watch")
 	secrets := fixtureSecrets(t)
 	delete(secrets.Apps["auth"], "admins_heartbeat_token")

@@ -308,8 +308,8 @@ func TestAnOwedStackNoLongerRenderedIsDropped(t *testing.T) {
 
 // pocketIDOnWatch renders the fixture with Pocket ID pinned to watch, the
 // monitor that runs Caddy for its own apps. watch then runs Caddy, Pocket ID
-// and status, an app that signs in through Pocket ID: the site apply's
-// identity step runs in two passes, holding status back in the first.
+// and health, an app that signs in through Pocket ID: the site apply's
+// identity step runs in two passes, holding health back in the first.
 func pocketIDOnWatch(t *testing.T, change func(*config.Config)) *render.Plan {
 	t.Helper()
 	return planWith(t, func(cfg *config.Config) {
@@ -322,7 +322,7 @@ func pocketIDOnWatch(t *testing.T, change func(*config.Config)) *render.Plan {
 	})
 }
 
-const statusSnippet = "/srv/paisans/f2a9/infra/caddy/snippets/status.caddy"
+const healthSnippet = "/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"
 
 // A held app's route on the site's Caddy is held with it. Written in the
 // first pass, Caddy would be reloaded with a route to an app still running
@@ -338,28 +338,28 @@ func TestExceptHoldsBackAHeldAppsRouteOnTheSitesCaddy(t *testing.T) {
 	if err := apply.Execute(first, host); err != nil {
 		t.Fatal(err)
 	}
-	before := host.files[statusSnippet]
+	before := host.files[healthSnippet]
 	manifest := host.files["/srv/paisans/f2a9/.paisans-manifest.json"]
 	host.commands = nil
 
 	changed := pocketIDOnWatch(t, func(cfg *config.Config) {
-		status := cfg.Apps["status"]
-		status.Hostname = "uptime.example.org"
-		cfg.Apps["status"] = status
+		health := cfg.Apps["health"]
+		health.Hostname = "uptime.example.org"
+		cfg.Apps["health"] = health
 	})
-	held, err := apply.Build("watch", changed, acmeModule(t), host, apply.Except("status"))
+	held, err := apply.Build("watch", changed, acmeModule(t), host, apply.Except("health"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range held.Changes {
-		if c.Path == statusSnippet {
-			t.Errorf("status is held back, yet its route is planned as %v", c.Kind)
+		if c.Path == healthSnippet {
+			t.Errorf("health is held back, yet its route is planned as %v", c.Kind)
 		}
 	}
 	if err := apply.Execute(held, host); err != nil {
 		t.Fatal(err)
 	}
-	if host.files[statusSnippet] != before {
+	if host.files[healthSnippet] != before {
 		t.Error("the held app's route was written")
 	}
 	if !strings.Contains(host.files["/srv/paisans/f2a9/.paisans-manifest.json"], sum(before)) || !strings.Contains(manifest, sum(before)) {
@@ -373,16 +373,16 @@ func TestExceptHoldsBackAHeldAppsRouteOnTheSitesCaddy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(released.Conflicts()) != 0 {
-		t.Fatalf("releasing status sees conflicts: %v", released.Conflicts())
+		t.Fatalf("releasing health sees conflicts: %v", released.Conflicts())
 	}
 	if !released.GatewayReload {
-		t.Error("releasing status plans no reload for its route")
+		t.Error("releasing health plans no reload for its route")
 	}
 	if err := apply.Execute(released, host); err != nil {
 		t.Fatal(err)
 	}
-	if host.files[statusSnippet] == before {
-		t.Error("releasing status did not write its route")
+	if host.files[healthSnippet] == before {
+		t.Error("releasing health did not write its route")
 	}
 	if !host.ran("caddy reload") {
 		t.Error("Caddy was not reloaded with the released route")
@@ -396,18 +396,18 @@ func TestExceptHoldsBackAHeldAppsRouteOnTheSitesCaddy(t *testing.T) {
 // Until the app starts, its hostname answers with upstream_unavailable's 503.
 func TestExceptWritesAHeldAppsRouteTheCaddyfileNeeds(t *testing.T) {
 	host := newHost()
-	p, err := apply.Build("watch", pocketIDOnWatch(t, nil), acmeModule(t), host, apply.Except("status"))
+	p, err := apply.Build("watch", pocketIDOnWatch(t, nil), acmeModule(t), host, apply.Except("health"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := host.files[statusSnippet]; !ok {
+	if _, ok := host.files[healthSnippet]; !ok {
 		t.Error("a route the Caddyfile imports was held back")
 	}
-	if _, ok := host.files["/srv/paisans/f2a9/status/.env"]; ok {
-		t.Error("status's own files were written")
+	if _, ok := host.files["/srv/paisans/f2a9/health/.env"]; ok {
+		t.Error("health's own files were written")
 	}
 }
 
@@ -429,9 +429,9 @@ func TestAHeldFileEditedOnTheHostIsStillAConflict(t *testing.T) {
 	if err := apply.Execute(first, host); err != nil {
 		t.Fatal(err)
 	}
-	host.files[statusSnippet] += "# edited on the host\n"
-	host.files["/srv/paisans/f2a9/status/.env"] += "# edited on the host\n"
-	p, err := apply.Build("watch", pocketIDOnWatch(t, nil), acmeModule(t), host, apply.Except("status"))
+	host.files[healthSnippet] += "# edited on the host\n"
+	host.files["/srv/paisans/f2a9/health/.env"] += "# edited on the host\n"
+	p, err := apply.Build("watch", pocketIDOnWatch(t, nil), acmeModule(t), host, apply.Except("health"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,12 +440,12 @@ func TestAHeldFileEditedOnTheHostIsStillAConflict(t *testing.T) {
 	for _, c := range p.Conflicts() {
 		got[c.Path] = true
 	}
-	for _, path := range []string{statusSnippet, "/srv/paisans/f2a9/status/.env"} {
+	for _, path := range []string{healthSnippet, "/srv/paisans/f2a9/health/.env"} {
 		if !got[path] {
 			t.Errorf("held %s, edited on the host, is not a conflict", path)
 		}
 	}
-	if err := apply.Refusal(p); err == nil || !strings.Contains(err.Error(), statusSnippet) {
+	if err := apply.Refusal(p); err == nil || !strings.Contains(err.Error(), healthSnippet) {
 		t.Errorf("Refusal gave %v", err)
 	}
 	if err := apply.Execute(p, host); err == nil {

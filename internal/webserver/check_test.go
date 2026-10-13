@@ -89,10 +89,10 @@ type world struct {
 
 func good() world {
 	return world{
-		certName: "status.example.org",
+		certName: "health.example.org",
 		notAfter: now.Add(60 * 24 * time.Hour),
 		resolves: []string{"203.0.113.20"},
-		location: "https://id.example.org/authorize?client_id=c&redirect_uri=https%3A%2F%2Fstatus.example.org%2Flogin%2Foidc%2Fcallback&response_type=code",
+		location: "https://id.example.org/authorize?client_id=c&redirect_uri=https%3A%2F%2Fhealth.example.org%2Flogin%2Foidc%2Fcallback&response_type=code",
 		health:   200,
 	}
 }
@@ -125,7 +125,7 @@ func (w world) probes(t *testing.T) webserver.Probes {
 	}
 	t.Cleanup(transport.CloseIdleConnections)
 	return webserver.Probes{
-		Resolver: resolver{"status.example.org": w.resolves},
+		Resolver: resolver{"health.example.org": w.resolves},
 		Client:   &http.Client{Transport: transport, Timeout: 5 * time.Second},
 		Dial: func(_ context.Context, _, address string) (net.Conn, error) {
 			if w.dialled != nil {
@@ -199,18 +199,18 @@ func TestCheckFailsACertificateForAnotherName(t *testing.T) {
 	w.certName = "other.example.org"
 	results := run(t, w, external(t, "127.0.0.1:8480"))
 	r := result(t, results, webserver.CheckCertificate)
-	if r.OK || !strings.Contains(r.Detail, "not valid for status.example.org") || !strings.Contains(r.Fix, "YOUR CERTIFICATE") {
+	if r.OK || !strings.Contains(r.Detail, "not valid for health.example.org") || !strings.Contains(r.Fix, "YOUR CERTIFICATE") {
 		t.Fatalf("%+v", r)
 	}
 	if len(results) != 4 {
 		t.Fatalf("one failing item stopped the run: %+v", results)
 	}
 	rec := &ui.Recorder{}
-	if !webserver.Report(rec, results) || !rec.Has("fail", "check certificate") || !rec.Has("refuse", "not valid for status.example.org") {
+	if !webserver.Report(rec, results) || !rec.Has("fail", "check certificate") || !rec.Has("refuse", "not valid for health.example.org") {
 		t.Errorf("Report:\n%s", rec.Lines())
 	}
 	// The fix is the refusal's explanation, so it shows without --verbose.
-	if i := rec.Index("refuse", "not valid for status.example.org"); !strings.Contains(rec.Events[i].Extra, "YOUR CERTIFICATE") {
+	if i := rec.Index("refuse", "not valid for health.example.org"); !strings.Contains(rec.Events[i].Extra, "YOUR CERTIFICATE") {
 		t.Errorf("the refusal does not carry the fix:\n%s", rec.Lines())
 	}
 }
@@ -233,9 +233,9 @@ func TestCheckFailsAnUnhealthyAnswer(t *testing.T) {
 
 func TestCheckFailsAnHTTPCallback(t *testing.T) {
 	w := good()
-	w.location = "https://id.example.org/authorize?redirect_uri=http%3A%2F%2Fstatus.example.org%2Flogin%2Foidc%2Fcallback"
+	w.location = "https://id.example.org/authorize?redirect_uri=http%3A%2F%2Fhealth.example.org%2Flogin%2Foidc%2Fcallback"
 	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckSignIn)
-	if r.OK || !strings.Contains(r.Detail, "http://status.example.org/login/oidc/callback") || !strings.Contains(r.Fix, "paisans apply --site watch") {
+	if r.OK || !strings.Contains(r.Detail, "http://health.example.org/login/oidc/callback") || !strings.Contains(r.Fix, "paisans apply --site watch") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -244,7 +244,7 @@ func TestCheckFailsWhenSignInIsNotConfigured(t *testing.T) {
 	w := good()
 	w.location = "/login"
 	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckSignIn)
-	if r.OK || !strings.Contains(r.Detail, "back to /login") || !strings.Contains(r.Fix, "paisans oidc client create --app status") {
+	if r.OK || !strings.Contains(r.Detail, "back to /login") || !strings.Contains(r.Fix, "paisans oidc client create --app health") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -261,7 +261,7 @@ func TestCheckFailsAnUpstreamReachableAroundTheProxy(t *testing.T) {
 // With managed_by: paisans the toolkit's own Caddy is in front, so only the
 // name and the certificate are the operator's to check.
 func TestCheckRunsOnlyTheFirstTwoInPaisansMode(t *testing.T) {
-	target, err := webserver.For(fixture(t), "status")
+	target, err := webserver.For(fixture(t), "health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestCheckDialsTheIPv6AddressToo(t *testing.T) {
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	watch.PublicAddress6 = "2001:db8::20"
 	cfg.Sites["watch"] = watch
-	target, err := webserver.For(cfg, "status")
+	target, err := webserver.For(cfg, "health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestCheckPassesWhenOneFamilyIsConclusive(t *testing.T) {
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	watch.PublicAddress6 = "2001:db8::20"
 	cfg.Sites["watch"] = watch
-	target, err := webserver.For(cfg, "status")
+	target, err := webserver.For(cfg, "health")
 	if err != nil {
 		t.Fatal(err)
 	}

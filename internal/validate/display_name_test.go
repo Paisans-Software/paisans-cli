@@ -22,8 +22,8 @@ func TestDisplayNameRules(t *testing.T) {
 		{"surrounding space", map[string]string{"docs": "Wiki "}, "display-name-invalid", "apps.docs.display_name", validate.Refuse},
 		// "e" followed by a combining acute accent, which NFC composes.
 		{"not NFC", map[string]string{"docs": "Café"}, "display-name-invalid", "apps.docs.display_name", validate.Refuse},
-		{"another app's name", map[string]string{"docs": "status"}, "duplicate-client-name", "apps.docs.display_name", validate.Refuse},
-		{"two display names alike", map[string]string{"docs": "Ours", "status": "Ours"}, "duplicate-client-name", "apps.status.display_name", validate.Refuse},
+		{"another app's name", map[string]string{"docs": "health"}, "duplicate-client-name", "apps.docs.display_name", validate.Refuse},
+		{"two display names alike", map[string]string{"docs": "Ours", "health": "Ours"}, "duplicate-client-name", "apps.health.display_name", validate.Refuse},
 		{"no client", map[string]string{"auth": "Sign in"}, "display-name-without-a-client", "apps.auth.display_name", validate.Warn},
 	}
 	for _, tc := range cases {

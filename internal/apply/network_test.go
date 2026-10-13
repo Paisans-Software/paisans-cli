@@ -9,9 +9,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
-// statusNetwork is the uptime app's compose default network in the fixture,
+// healthNetwork is the uptime app's compose default network in the fixture,
 // <project>_default, the name Compose gives it.
-const statusNetwork = "paisans-f2a9-status_default"
+const healthNetwork = "paisans-f2a9-health_default"
 
 const (
 	pinnedPool   = `[{"Subnet":"10.255.255.0/29","Gateway":"10.255.255.1"}]`
@@ -45,14 +45,14 @@ func appliedFrom(t *testing.T, site string, rendered *render.Plan) *fakeHost {
 	return host
 }
 
-func statusAction(t *testing.T, p *apply.Plan) apply.Action {
+func healthAction(t *testing.T, p *apply.Plan) apply.Action {
 	t.Helper()
 	for _, a := range p.Actions {
-		if a.Stack == "status" {
+		if a.Stack == "health" {
 			return a
 		}
 	}
-	t.Fatalf("no action on status in %+v", p.Actions)
+	t.Fatalf("no action on health in %+v", p.Actions)
 	return apply.Action{}
 }
 
@@ -62,13 +62,13 @@ func statusAction(t *testing.T, p *apply.Plan) apply.Action {
 // and building the plan changes nothing on the host.
 func TestPinningANetworkTakesTheStackDown(t *testing.T) {
 	host := appliedFrom(t, "watch", plan(t))
-	host.networks = map[string]string{statusNetwork: unpinnedPool}
+	host.networks = map[string]string{healthNetwork: unpinnedPool}
 
 	p, err := apply.Build("watch", external(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	action := statusAction(t, p)
+	action := healthAction(t, p)
 	if !action.Down || !action.Recreate {
 		t.Fatalf("a newly pinned network is not taken down and recreated: %+v", action)
 	}
@@ -82,10 +82,10 @@ func TestPinningANetworkTakesTheStackDown(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	down := host.indexOf("status/compose.yaml down")
-	up := host.indexOf("status/compose.yaml up -d")
+	down := host.indexOf("health/compose.yaml down")
+	up := host.indexOf("health/compose.yaml up -d")
 	if down < 0 || up < 0 || down > up {
-		t.Fatalf("want down then up for status, got %v", host.commands)
+		t.Fatalf("want down then up for health, got %v", host.commands)
 	}
 }
 
@@ -93,13 +93,13 @@ func TestPinningANetworkTakesTheStackDown(t *testing.T) {
 // pinned pool would keep its old gateway, which TRUST_PROXY no longer names.
 func TestDroppingAPinTakesTheStackDown(t *testing.T) {
 	host := appliedFrom(t, "watch", external(t))
-	host.networks = map[string]string{statusNetwork: pinnedPool}
+	host.networks = map[string]string{healthNetwork: pinnedPool}
 
 	p, err := apply.Build("watch", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action := statusAction(t, p); !action.Down {
+	if action := healthAction(t, p); !action.Down {
 		t.Fatalf("a network left on the old pin is not taken down: %+v", action)
 	}
 }
@@ -119,12 +119,12 @@ func TestAMatchingNetworkIsLeftUp(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			host := appliedFrom(t, "watch", tc.rendered)
-			host.networks = map[string]string{statusNetwork: tc.pool}
-			p, err := apply.Build("watch", tc.rendered, acmeModule(t), host, apply.Recreate("status"))
+			host.networks = map[string]string{healthNetwork: tc.pool}
+			p, err := apply.Build("watch", tc.rendered, acmeModule(t), host, apply.Recreate("health"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if action := statusAction(t, p); action.Down {
+			if action := healthAction(t, p); action.Down {
 				t.Fatalf("a matching network is taken down: %+v", action)
 			}
 			if err := apply.Execute(p, host); err != nil {
@@ -142,15 +142,15 @@ func TestAMatchingNetworkIsLeftUp(t *testing.T) {
 func TestATakenDownStackKeepsItsAnonymousVolumes(t *testing.T) {
 	const old = "3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191"
 	host := appliedFrom(t, "watch", plan(t))
-	host.networks = map[string]string{statusNetwork: unpinnedPool}
-	host.stackVolumes = map[string]string{"status": old + "\n"}
+	host.networks = map[string]string{healthNetwork: unpinnedPool}
+	host.stackVolumes = map[string]string{"health": old + "\n"}
 	host.dangling = old + "\n"
 
 	p, err := apply.Build("watch", external(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !statusAction(t, p).Down {
+	if !healthAction(t, p).Down {
 		t.Fatal("the test needs a stack taken down")
 	}
 	if err := apply.Execute(p, host); err != nil {

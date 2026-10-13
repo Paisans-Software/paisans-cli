@@ -101,7 +101,7 @@ var mountedCaddy = webserver.WebServer{
 	Certs:  webserver.CertsAutomatic,
 }
 
-const statusFile = "/opt/caddy/paisans.d/paisans-f2a9-status.caddy"
+const healthFile = "/opt/caddy/paisans.d/paisans-f2a9-health.caddy"
 
 // convergeAt is converge on the configuration at path.
 func convergeAt(t *testing.T, path string, extra ...string) error {
@@ -134,20 +134,20 @@ func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
 	if i := rec.Index("note", "watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml"); i < 0 {
 		t.Errorf("no warning for the yaml edit:\n%s", rec.Lines())
 	}
-	if !strings.Contains(f.server.Files[statusFile], "reverse_proxy 127.0.0.1:8480") {
+	if !strings.Contains(f.server.Files[healthFile], "reverse_proxy 127.0.0.1:8480") {
 		t.Errorf("files %v", f.server.Files)
 	}
 	if !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
 		t.Errorf("asked %v", f.server.Asked)
 	}
-	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != statusFile || got[0].Container != "caddy-1" {
+	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != healthFile || got[0].Container != "caddy-1" {
 		t.Errorf("record %+v", got)
 	}
-	if i := rec.Index("done", "site file for status"); i < 0 || rec.Events[i].Extra != statusFile+" written, caddy reloaded" || !rec.Has("result", "Deployment complete.") {
+	if i := rec.Index("done", "site file for health"); i < 0 || rec.Events[i].Extra != healthFile+" written, caddy reloaded" || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 	got := lines(inSection(rec, "web server"))
-	if i, j := slices.Index(got, "step site file for status"), slices.Index(got, "step status"); i < 0 || j < i {
+	if i, j := slices.Index(got, "step site file for health"), slices.Index(got, "step health"); i < 0 || j < i {
 		t.Errorf("the file is not written ahead of the check:\n%s", strings.Join(got, "\n"))
 	}
 
@@ -175,7 +175,7 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	rec := recordConverge(t)
 	err := convergeAt(t, path, "--execute")
 	var w *ui.Warning
-	if !errors.As(err, &w) || !strings.Contains(w.Hint, "status") {
+	if !errors.As(err, &w) || !strings.Contains(w.Hint, "health") {
 		t.Fatalf("err %v", err)
 	}
 	if rec.Has("result", "Deployment complete.") {
@@ -187,7 +187,7 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || rec.Events[i].Extra != "caddy does not include /etc/caddy/paisans.d" || rec.Events[i+1].Kind != "explain" {
 		t.Fatalf("no warning:\n%s", rec.Lines())
 	}
@@ -202,12 +202,12 @@ func TestApplyWritesNothingWhereTheServerDoesNotIncludeIt(t *testing.T) {
 func TestApplyRefusesALiteralInclude(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/paisans-f2a9-status.caddy\n")
+	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/paisans-f2a9-health.caddy\n")
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err == nil {
 		t.Fatal("complete")
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || rec.Events[i].Extra != "caddy includes /etc/caddy/paisans.d by a path, not a wildcard" || !strings.Contains(rec.Events[i+1].Text, "Replace it with:\n\n    import /etc/caddy/paisans.d/*") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
@@ -245,7 +245,7 @@ func TestApplyRefusesAnImportAboveTheGlobalOptions(t *testing.T) {
 			if after, _ := os.ReadFile(path); string(after) != string(before) {
 				t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 			}
-			i := rec.Index("warned", "site file for status")
+			i := rec.Index("warned", "site file for health")
 			if i < 0 || rec.Events[i].Extra != "caddy imports /etc/caddy/paisans.d above its global options block" || rec.Events[i+1].Kind != "explain" {
 				t.Fatalf("output:\n%s", rec.Lines())
 			}
@@ -277,7 +277,7 @@ func TestApplyRefusesAnImportInsideABlock(t *testing.T) {
 	if len(f.server.Files) != 0 || f.server.Ran("validate") {
 		t.Errorf("wrote %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || rec.Events[i].Extra != "caddy imports /etc/caddy/paisans.d inside a block" {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
@@ -332,7 +332,7 @@ func TestApplyWithIncludeDirFalseRemovesWhatItWrote(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := f.server.Files[statusFile]; ok {
+	if _, ok := f.server.Files[healthFile]; ok {
 		t.Errorf("the file stayed:\n%s", rec.Lines())
 	}
 	if _, ok := f.server.Files["/opt/caddy/paisans.d/blog.caddy"]; !ok {
@@ -359,7 +359,7 @@ func TestApplyAdvisesTheMountForASingleFileMount(t *testing.T) {
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf("paisans-stack.yaml was edited:\n%s", after)
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || rec.Events[i].Extra != "no directory caddy reads to write in" || !strings.Contains(rec.Events[i+1].Text, "- /opt/caddy/paisans.d:/etc/caddy/paisans.d") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
@@ -374,7 +374,7 @@ func TestApplyReportsTheServersRefusal(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
 	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
-	f.server.Validate = "Error: ambiguous site definition: status.example.org"
+	f.server.Validate = "Error: ambiguous site definition: health.example.org"
 	rec := recordConverge(t)
 	err := convergeAt(t, path, "--execute")
 	var w *ui.Warning
@@ -384,8 +384,8 @@ func TestApplyReportsTheServersRefusal(t *testing.T) {
 	if len(f.server.Files) != 0 || f.server.Ran("reload") || f.server.Ran("restart") {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	i := rec.Index("warned", "site file for status")
-	if i < 0 || rec.Events[i].Extra != "caddy refused "+statusFile || !strings.Contains(rec.Events[i+1].Text, "ambiguous site definition") {
+	i := rec.Index("warned", "site file for health")
+	if i < 0 || rec.Events[i].Extra != "caddy refused "+healthFile || !strings.Contains(rec.Events[i+1].Text, "ambiguous site definition") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}
 }
@@ -401,10 +401,10 @@ func TestApplyRestartsAWebServerWhoseReloadFails(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if !f.server.Ran("docker restart 'caddy-1'") || f.server.Files[statusFile] == "" {
+	if !f.server.Ran("docker restart 'caddy-1'") || f.server.Files[healthFile] == "" {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	if i := rec.Index("done", "site file for status"); i < 0 || rec.Events[i].Extra != statusFile+" written, container caddy-1 restarted: its reload failed" {
+	if i := rec.Index("done", "site file for health"); i < 0 || rec.Events[i].Extra != healthFile+" written, container caddy-1 restarted: its reload failed" {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
@@ -432,7 +432,7 @@ func TestApplyLeavesTheReloadOfABareMetalServer(t *testing.T) {
 	if !errors.As(err, &w) {
 		t.Fatalf("err %v", err)
 	}
-	const file = "/etc/caddy/paisans.d/paisans-f2a9-status.caddy"
+	const file = "/etc/caddy/paisans.d/paisans-f2a9-health.caddy"
 	if f.server.Files[file] == "" || !f.server.Ran("caddy validate") || f.server.Ran("caddy reload") || f.server.Ran("systemctl reload") || f.server.Ran("restart") {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
@@ -443,21 +443,21 @@ func TestApplyLeavesTheReloadOfABareMetalServer(t *testing.T) {
 		}
 	}
 	sameLines(t, shown, []string{
-		"step site file for status",
-		"warned site file for status: " + file + " written, caddy not reloaded",
-		"explain caddy's configuration is valid with it, and caddy runs on the host itself, so apply leaves its reload to you:\n\n    sudo systemctl reload caddy\n\nthen run paisans web-server check --app status.",
-		"step status",
-		"warned status: status.example.org",
-		"explain certificate: the certificate is not valid for status.example.org: it names watch.example.org, expected until caddy is reloaded, see above.",
+		"step site file for health",
+		"warned site file for health: " + file + " written, caddy not reloaded",
+		"explain caddy's configuration is valid with it, and caddy runs on the host itself, so apply leaves its reload to you:\n\n    sudo systemctl reload caddy\n\nthen run paisans web-server check --app health.",
+		"step health",
+		"warned health: health.example.org",
+		"explain certificate: the certificate is not valid for health.example.org: it names watch.example.org, expected until caddy is reloaded, see above.",
 	})
 }
 
-// tlsInternal is the status app's checks against a Caddy with no
+// tlsInternal is the health app's checks against a Caddy with no
 // certificate for its hostname: each HTTPS request fails the same way.
-var tlsInternal = map[string][]webserver.Result{"status": {
-	{Name: webserver.CheckDNS, OK: true, Detail: "status.example.org resolves to 203.0.113.20"},
-	{Name: webserver.CheckCertificate, Detail: `https://status.example.org/healthz: Get "https://status.example.org/healthz": remote error: tls: internal error`},
-	{Name: webserver.CheckSignIn, Detail: `https://status.example.org/login/oidc: Get "https://status.example.org/login/oidc": remote error: tls: internal error`},
+var tlsInternal = map[string][]webserver.Result{"health": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: `https://health.example.org/healthz: Get "https://health.example.org/healthz": remote error: tls: internal error`},
+	{Name: webserver.CheckSignIn, Detail: `https://health.example.org/login/oidc: Get "https://health.example.org/login/oidc": remote error: tls: internal error`},
 	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
 }}
 
@@ -478,7 +478,7 @@ func TestApplyGivesOneSetOfInstructionsPerProblem(t *testing.T) {
 		rec.Verbose_ = verbose
 		err := convergeAt(t, path, "--execute")
 		var w *ui.Warning
-		if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: status" {
+		if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: health" {
 			t.Fatalf("verbose=%v: err %v", verbose, err)
 		}
 		var b strings.Builder
@@ -492,13 +492,13 @@ func TestApplyGivesOneSetOfInstructionsPerProblem(t *testing.T) {
 			}
 		}
 		want := []string{
-			"step site file for status",
-			"warned site file for status: no directory caddy reads to write in",
+			"step site file for health",
+			"warned site file for health: no directory caddy reads to write in",
 		}
 		if verbose {
 			want = append(want,
-				"step status",
-				"warned status: status.example.org",
+				"step health",
+				"warned health: health.example.org",
 				"explain healthz and login/oidc: tls: internal error (caddy has no certificate for this name), expected until its site file is in place, see above.",
 			)
 		}
@@ -506,7 +506,7 @@ func TestApplyGivesOneSetOfInstructionsPerProblem(t *testing.T) {
 			t.Fatalf("verbose=%v: section:\n%s", verbose, strings.Join(shown, "\n"))
 		}
 		sameLines(t, append(shown[:2:2], shown[3:]...), want)
-		if !strings.HasPrefix(shown[2], "explain The container caddy-1 mounts /opt/caddy/Caddyfile alone") || strings.Count(shown[2], "paisans web-server show --app status") != 1 {
+		if !strings.HasPrefix(shown[2], "explain The container caddy-1 mounts /opt/caddy/Caddyfile alone") || strings.Count(shown[2], "paisans web-server show --app health") != 1 {
 			t.Errorf("the site file's instructions:\n%s", shown[2])
 		}
 	}
@@ -547,7 +547,7 @@ func TestApplyDiagnosesTheMountFromTheComposeFile(t *testing.T) {
 		if err := convergeAt(t, path, "--execute"); err == nil {
 			t.Fatalf("%s: complete", tc.name)
 		}
-		i := rec.Index("warned", "site file for status")
+		i := rec.Index("warned", "site file for health")
 		if i < 0 || rec.Events[i].Extra != "no directory caddy reads to write in" {
 			t.Fatalf("%s: output:\n%s", tc.name, rec.Lines())
 		}
@@ -582,9 +582,9 @@ func TestApplyReloadsAndChecksAgainWhenTheCheckFails(t *testing.T) {
 	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checks++
 		if checks == 1 {
-			return tlsInternal["status"]
+			return tlsInternal["health"]
 		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"}}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"}}
 	}
 	t.Cleanup(func() { convergeWebServerCheck = saved })
 	f.server.Asked = nil
@@ -595,7 +595,7 @@ func TestApplyReloadsAndChecksAgainWhenTheCheckFails(t *testing.T) {
 	if checks != 2 || f.server.Ran("printf") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
 		t.Errorf("checked %d times, asked %v", checks, f.server.Asked)
 	}
-	if !rec.Has("done", "status") || !rec.Has("result", "Deployment complete.") {
+	if !rec.Has("done", "health") || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
@@ -614,9 +614,9 @@ func TestApplyWaitsForTheCertificateOfAReloadedServer(t *testing.T) {
 	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checks++
 		if checks < 3 {
-			return tlsInternal["status"]
+			return tlsInternal["health"]
 		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://status.example.org/healthz answered 200"}}
+		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"}}
 	}
 	t.Cleanup(func() { convergeWebServerCheck = saved })
 	rec := recordConverge(t)
@@ -630,7 +630,7 @@ func TestApplyWaitsForTheCertificateOfAReloadedServer(t *testing.T) {
 	checks, *waits = 0, nil
 	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
 		checks++
-		return tlsInternal["status"]
+		return tlsInternal["health"]
 	}
 	f.server.Asked = nil
 	rec = recordConverge(t)
@@ -638,7 +638,7 @@ func TestApplyWaitsForTheCertificateOfAReloadedServer(t *testing.T) {
 	if !f.server.Ran("caddy reload") || checks != len(*waits)+2 || total(*waits) != time.Minute {
 		t.Errorf("checked %d times, waited %v, asked %v", checks, *waits, f.server.Asked)
 	}
-	if !rec.Has("warned", "status") {
+	if !rec.Has("warned", "health") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
@@ -701,14 +701,14 @@ func TestApplyRewritesTheSiteFileForARenamedHostname(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	os.WriteFile(path, []byte(strings.Replace(string(data), "hostname: status.example.org", "hostname: uptime.example.org", 1)), 0o600)
+	os.WriteFile(path, []byte(strings.Replace(string(data), "hostname: health.example.org", "hostname: uptime.example.org", 1)), 0o600)
 	f.server.Asked = nil
 	rec := recordConverge(t)
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	content := f.server.Files[statusFile]
-	if !strings.Contains(content, "uptime.example.org {") || strings.Contains(content, "status.example.org") || !f.server.Ran("caddy reload") {
+	content := f.server.Files[healthFile]
+	if !strings.Contains(content, "uptime.example.org {") || strings.Contains(content, "health.example.org") || !f.server.Ran("caddy reload") {
 		t.Errorf("file:\n%s\n%s", content, rec.Lines())
 	}
 	if got := f.manifest.record(t); len(got) != 1 {
@@ -724,13 +724,13 @@ func TestApplyWarnsOfAGlobalACMEDNS(t *testing.T) {
 	path := externalFixture(t)
 	f := fakeWebServerFiles(t, acmeDNSCaddy, "{\n\tacme_dns cloudflare {$CF_API_TOKEN}\n}\nimport /etc/caddy/paisans.d/*\n")
 	rec := recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err == nil || !strings.Contains(err.Error(), "the web server needs you: status") {
+	if err := convergeAt(t, path, "--execute"); err == nil || !strings.Contains(err.Error(), "the web server needs you: health") {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(f.server.Files[statusFile], "issuer acme") || !f.server.Ran("caddy reload") {
+	if !strings.Contains(f.server.Files[healthFile], "issuer acme") || !f.server.Ran("caddy reload") {
 		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
 	}
-	i := rec.Index("warned", "site file for status")
+	i := rec.Index("warned", "site file for health")
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "acme_dns") {
 		t.Fatalf("output:\n%s", rec.Lines())
 	}

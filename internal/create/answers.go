@@ -13,11 +13,11 @@ type Answers struct {
 	Admins   []Admin
 	Shape    Shape
 	Sites    []Site
-	// Monitor is the status page's own machine, added when the status page
+	// Monitor is the health page's own machine, added when the health page
 	// was chosen and no site holds the monitor role. It is kept apart from
 	// Sites so that answering the sites again does not lose it.
 	Monitor *Site
-	// MonitorOnGateway puts the status page beside the gateway instead of on
+	// MonitorOnGateway puts the health page beside the gateway instead of on
 	// a machine of its own: AllSites adds the monitor role to the site holding
 	// the gateway role, so answering the sites again keeps it.
 	MonitorOnGateway bool
@@ -79,7 +79,7 @@ type SMTP struct {
 }
 
 // AllSites is every site in the order the file declares them: the shape's,
-// the gateway's holding the monitor role too when the status page is beside
+// the gateway's holding the monitor role too when the health page is beside
 // it, then the monitor's own machine.
 func (a Answers) AllSites() []Site {
 	sites := append([]Site{}, a.Sites...)

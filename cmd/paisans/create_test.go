@@ -44,7 +44,7 @@ func plainReporter(t *testing.T) *bytes.Buffer {
 var (
 	createCommunity = []string{"Example Community", "example.org", ""}
 	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "", "n"}
-	// sign in, then no forums, wiki, blog or status page.
+	// sign in, then no forums, wiki, blog or health page.
 	createNoApps = []string{"", "n", "n", "n", "n"}
 	createMail   = []string{"smtp.example.org", "", "", "community@example.org", "", ""}
 )

@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env",
-      "sha256": "bf79dbf67d17744731c397959b5f40b286183d9d10e3ff91c44657db3464eac4",
+      "sha256": "990639d0c3eb50c8b2150cebd865d94f29076f976aa84504f699c3de51fd2a87",
       "mode": "0600"
     },
     {
@@ -78,7 +78,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/heartbeat/heartbeat.env",
-      "sha256": "9f459f13b7c1d9bbbf80121e0a794f7e7a623895c7ed3e6b37defa48755fa821",
+      "sha256": "ebe16b9a94411632fdde134543a3c149276a0b1f99e2ee27579080977eea7ae5",
       "mode": "0600"
     },
     {

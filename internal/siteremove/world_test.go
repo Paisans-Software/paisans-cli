@@ -452,7 +452,7 @@ func (h *host) Run(command string) (string, error) {
 		return b.String(), nil
 	case command == "docker image ls --no-trunc --format json":
 		return "", nil
-	case strings.HasSuffix(command, root+"/status/compose.yaml restart"):
+	case strings.HasSuffix(command, root+"/health/compose.yaml restart"):
 		return "", nil
 
 	// patroni.env on a replica, and the witness's etcd container

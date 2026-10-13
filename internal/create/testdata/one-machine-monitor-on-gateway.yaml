@@ -94,7 +94,7 @@ apps:
     blueprint: writefreely
     hostname: blog.example.org
     placement: cluster
-  status:
+  health:
     blueprint: uptime
     hostname: health.example.org
     placement: { pinned: all-in-one }

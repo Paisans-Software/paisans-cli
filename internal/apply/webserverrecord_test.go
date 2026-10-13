@@ -16,7 +16,7 @@ import (
 func TestApplyKeepsTheWebServerRecord(t *testing.T) {
 	host := gatewayAt(t, buildA)
 	d := plan(t).Deployment
-	entry := render.ManifestWebServer{App: "status", Path: "/opt/caddy/paisans.d/paisans-f2a9-status.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
+	entry := render.ManifestWebServer{App: "health", Path: "/opt/caddy/paisans.d/paisans-f2a9-health.caddy", SHA256: "ab", Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}
 	if err := apply.WriteWebServerRecord(host, d, []render.ManifestWebServer{entry}); err != nil {
 		t.Fatal(err)
 	}

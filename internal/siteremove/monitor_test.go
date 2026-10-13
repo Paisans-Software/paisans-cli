@@ -8,7 +8,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/siteremove"
 )
 
-const seed = root + "/status/monitors.json"
+const seed = root + "/health/monitors.json"
 
 // The last stage reseeds the monitor from the end state: once home-b is
 // out, watch's monitors.json no longer names it, and the monitor restarts
@@ -21,7 +21,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 	}
 	p := w.mustBuild("home-b", siteremove.Options{})
 	last := p.Stages[len(p.Stages)-1]
-	if last.Name != "monitor" || !hasStep(p, last.Number, "watch", "update", "status/monitors.json") || !hasStep(p, last.Number, "watch", "restart", "status") {
+	if last.Name != "monitor" || !hasStep(p, last.Number, "watch", "update", "health/monitors.json") || !hasStep(p, last.Number, "watch", "restart", "health") {
 		t.Fatalf("the last stage is not the monitor's reseed:\n%v", last.Steps)
 	}
 	if remains := strings.Join(p.Remains(), "\n"); strings.Contains(remains, "monitors.json") {
@@ -33,7 +33,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 	if strings.Contains(w.hosts["watch"].files[seed], "home-b") {
 		t.Errorf("the monitor still names home-b:\n%s", w.hosts["watch"].files[seed])
 	}
-	if w.hosts["watch"].ran(root+"/status/compose.yaml restart") != 1 {
+	if w.hosts["watch"].ran(root+"/health/compose.yaml restart") != 1 {
 		t.Error("the monitor was not restarted on the new seed")
 	}
 }
@@ -43,9 +43,9 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 // remove cannot be run again for a site the configuration no longer declares.
 func TestAFailedReseedNamesTheApply(t *testing.T) {
 	w := setup(t)
-	w.failOnce = root + "/status/compose.yaml restart"
+	w.failOnce = root + "/health/compose.yaml restart"
 	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
-	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "paisans apply --site watch --only status --execute") {
+	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
 		t.Fatalf("want a stage 6 failure naming the apply, got %v", err)
 	}
 	if strings.Contains(err.Error(), "run site remove again") {
@@ -63,12 +63,12 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 // that finishes it.
 func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	w := setup(t)
-	w.unhealthy = "status"
+	w.unhealthy = "health"
 	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "site remove home-b stopped at stage 6 (monitor)", "stack status is not healthy", "The removal itself is done", "paisans apply --site watch --only status --execute")
+	shortAndVerbose(t, err, "site remove home-b stopped at stage 6 (monitor)", "stack health is not healthy", "The removal itself is done", "paisans apply --site watch --only health --execute")
 	if strings.Contains(err.Error(), "run site remove again") {
 		t.Errorf("the failure says to run site remove again, which no longer declares the site: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAnAppUnhealthyAfterHAProxyNamesItsCause(t *testing.T) {
 func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	w := newWorld(t, func(text string) string {
 		text = regexp.MustCompile(`(?s)\n  # The monitor's own machine.*?\n\ncluster:`).ReplaceAllString(text, "\n\ncluster:")
-		return regexp.MustCompile(`(?s)\n  status:\n    blueprint: uptime.*?\n\n# The deployment's mail server`).ReplaceAllString(text, "\n\n# The deployment's mail server")
+		return regexp.MustCompile(`(?s)\n  health:\n    blueprint: uptime.*?\n\n# The deployment's mail server`).ReplaceAllString(text, "\n\n# The deployment's mail server")
 	})
 	t.Cleanup(siteremove.SetFast())
 	t.Cleanup(siteremove.SetInspect(w.inspect))

@@ -39,7 +39,7 @@ func Show(w io.Writer, t Target, ws WebServer) {
 	fmt.Fprintf(w, "  * pass the Host header through unchanged\n")
 	fmt.Fprintf(w, "  * set X-Forwarded-For to the client's address and X-Forwarded-Proto to https;\n")
 	fmt.Fprintf(w, "    the monitor's sign in rate limit is keyed on the client's address\n")
-	fmt.Fprintf(w, "  * refuse /status*, /badge/*, /metrics and /api/v1/*: the status page lists\n")
+	fmt.Fprintf(w, "  * refuse /status*, /badge/*, /metrics and /api/v1/*: the health page lists\n")
 	fmt.Fprintf(w, "    every monitor, mesh addresses included, and /metrics is public whenever\n")
 	fmt.Fprintf(w, "    no API token exists, which under this toolkit is always\n\n")
 

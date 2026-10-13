@@ -8,7 +8,7 @@ import (
 // cgnat is RFC 6598 shared address space, 100.64.0.0/10. net.IP.IsPrivate
 // covers RFC 1918 and RFC 4193 but not this range, and a site behind carrier
 // grade NAT is the commonest way an operator ends up holding an address that
-// looks public on the router's status page and is not.
+// looks public on the router's health page and is not.
 var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
 
 // publicAddress refuses a site's public_address or public_address6 that the
