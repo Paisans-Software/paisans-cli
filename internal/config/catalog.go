@@ -11,7 +11,7 @@ import (
 const CoreCatalog = "core"
 
 // Catalog is one entry of `catalogs`: a git repository of blueprints and the
-// signed tag it is pinned to (docs/specs/2026-10-12-blueprints-and-
+// release it is pinned to (docs/specs/2026-10-12-blueprints-and-
 // catalogs.md, "Catalogs").
 type Catalog struct {
 	// URL is anything `git clone` accepts. The toolkit fetches with the git
@@ -23,11 +23,6 @@ type Catalog struct {
 	// commit is refused.
 	Tag    string `yaml:"tag"`
 	Commit string `yaml:"commit"`
-	// Signers are the SSH public keys a tag must be signed by. Unsigned
-	// accepts a catalog with no signed tags, which the grant review says
-	// every time the pin moves.
-	Signers  []string `yaml:"signers"`
-	Unsigned bool     `yaml:"unsigned"`
 }
 
 // ResolveBlueprints, when set, resolves every app's blueprint once the
@@ -118,26 +113,6 @@ func (c *Config) catalogProblems() []string {
 		}
 		if cat.Commit == "" && name != CoreCatalog {
 			add("%s.commit: required, the commit the catalog is pinned to. `paisans catalog add` writes it.", key)
-		}
-		if name != CoreCatalog && len(cat.Signers) == 0 && !cat.Unsigned {
-			add("%s: names no signers and is not unsigned. A pin trusts the keys its tags are signed by: `paisans catalog add` records the key you accept, or write unsigned: true to check nothing.", key)
-		}
-		if name != CoreCatalog && len(cat.Signers) > 0 && cat.Unsigned {
-			add("%s: names signers and is unsigned; it is one or the other.", key)
-		}
-		if name != CoreCatalog && len(cat.Signers) > 0 && cat.Tag == "" {
-			add("%s.tag: required with signers, since the signature is on the tag.", key)
-		}
-		for i, s := range cat.Signers {
-			if _, _, err := ParseKeyLine(s); err != nil {
-				add("%s.signers[%d]: is not an SSH public key: %v.", key, i, err)
-			}
-		}
-		if name == CoreCatalog && len(cat.Signers) > 0 {
-			add("%s.signers: the core catalog's keys are built into the toolkit and cannot be replaced; a mirror must carry tags they signed.", key)
-		}
-		if name == CoreCatalog && cat.Unsigned {
-			add("%s.unsigned: the core catalog cannot be unsigned.", key)
 		}
 	}
 	for _, name := range c.AppNames() {

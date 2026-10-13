@@ -73,7 +73,7 @@ func loadWithCatalog(t *testing.T, settings string) *config.Config {
 		t.Fatal(err)
 	}
 	app := "\napps:\n  notes:\n    blueprint: ex/notes\n    hostname: notes.example.org\n    placement: { pinned: vm }\n    gated: true\n" + settings
-	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  ex:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n    unsigned: true\n"+app, 1)
+	doc := strings.Replace(string(base), "\napps:\n", "\ncatalogs:\n  ex:\n    url: "+repo+"\n    commit: "+git("rev-parse", "HEAD")+"\n"+app, 1)
 	path := filepath.Join(t.TempDir(), config.FileName)
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)

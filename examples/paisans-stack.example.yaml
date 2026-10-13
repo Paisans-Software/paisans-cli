@@ -245,7 +245,6 @@ backup:
 #     url: https://github.com/example/paisans-blueprints
 #     tag: v1.0.0
 #     commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a
-#     unsigned: true
 
 # Every app is rendered with trusted proxies set to the mesh subnet, never to a
 # specific host. That is what lets the gateway role move between machines later

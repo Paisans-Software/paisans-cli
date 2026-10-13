@@ -50,7 +50,7 @@ func testCatalog(t *testing.T, extra map[string]string) (string, string) {
 
 func catalogConfig(url, commit, tag, blueprint string) *config.Config {
 	return &config.Config{
-		Catalogs: map[string]config.Catalog{"example": {URL: url, Commit: commit, Tag: tag, Unsigned: true}},
+		Catalogs: map[string]config.Catalog{"example": {URL: url, Commit: commit, Tag: tag}},
 		Apps:     map[string]config.App{"notes": {Kind: config.Kind(blueprint), Hostname: "notes.example.org"}},
 	}
 }
@@ -168,5 +168,28 @@ func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
 	// A snapshot path that leaves its directory is refused.
 	if err := InstallSnapshot(map[string][]byte{strings.Repeat("b", 40) + "/../../x": nil}); err == nil {
 		t.Error("a path leaving the snapshot was installed")
+	}
+}
+
+// The core catalog pinned to a commit of its own replaces the built in core
+// blueprints with the ones that commit holds.
+func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	url, commit := testCatalog(t, nil)
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(defs, "journal")
+		delete(sources, "journal")
+	})
+	cfg := &config.Config{
+		Catalogs: map[string]config.Catalog{"core": {URL: url, Tag: "v1.0.0", Commit: commit}},
+		Apps:     map[string]config.App{"notes": {Kind: "journal", Hostname: "notes.example.org"}},
+	}
+	if problems := resolve(cfg); len(problems) > 0 {
+		t.Fatalf("problems %v", problems)
+	}
+	if dir, ok := Source("journal"); !ok || !strings.HasPrefix(dir, os.Getenv("PAISANS_CATALOG_CACHE")) {
+		t.Errorf("journal was not read from the core pin: %q %v", dir, ok)
 	}
 }

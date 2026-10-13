@@ -2621,7 +2621,6 @@ catalogs:
     url: https://github.com/example/paisans-blueprints
     tag: v1.0.0
     commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a
-    unsigned: true
 apps:
   notes:
     blueprint: example/blueprints/journal
@@ -2646,20 +2645,16 @@ written is refused. Loading the configuration fetches each catalog an app
 names once, with the `git` binary and the operator's own git credentials,
 into a cache keyed by the commit.
 
-**A pin trusts the keys its catalog's tags are signed by.** Releases are
-signed tags, with git's SSH signatures, and a catalog lists its keys in
-`keys/allowed_signers`. Every fetch checks the pinned tag against the pin's
-`signers`, so a compromised forge account, a transferred repository or a
-re-registered name can publish a tag but not one the trusted key signed. Trust
-starts from the operator: `catalog add` records a key only when given its
-fingerprint, and a catalog moves to a new key only through a release the old
-key signed that lists it. A catalog may be pinned `unsigned: true`, which checks
-nothing and is said wherever the pin moves. The core catalog pinned to a commit
-of its own is checked against release keys built into the toolkit, and with
-none recorded there yet it can only be the toolkit's copy. The sites never check
-a catalog's signature: they trust the operator's signature on the configuration
-version that carries the blueprints (see *Every site keeps signed copies of the
-configuration*).
+**A catalog is trusted by its pin, not by who published it.** Nothing checks
+a release's author: a pin is a commit the operator chose, and moving it is
+reviewed. `catalog add` and `catalog update` show the release they read and,
+for each app, what it changes, and the grant review asks for approval before
+a moved pin renders on a site (see *`apply` and `host prepare` review what
+`paisans-stack.yaml` grants*). The
+core catalog may be pinned to a commit of its own or a mirror, like any other.
+The sites never fetch a catalog: they trust the operator's signature on the
+configuration version that carries the blueprints (see *Every site keeps
+signed copies of the configuration*).
 
 **A catalog blueprint brings rules of its own, and is held to what it leaves
 out.** Its `checks` are CEL conditions over the app's declaration, each run by
@@ -4887,7 +4882,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
 | images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
-| blueprints | per app whose blueprint a catalog provides: the blueprint, its tag and commit, the SHA-256 of its files, and whether its catalog is unsigned | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does |
+| blueprints | per app whose blueprint a catalog provides: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does |
 
 A key is the same key when its fingerprint is, so a new comment or a new admin
 for it is a change of that key. An image is the same when its reference is,

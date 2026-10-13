@@ -409,18 +409,8 @@ paisans catalog list
   uses is refused, and nothing changes.
 * **`remove <name>`:** refused while an app names one of its blueprints.
 * **`list`:** the core catalog with the commit the toolkit carries (or the one
-  pinned under `catalogs.core`), then every declared catalog with its URL, tag,
-  commit and whether its tags are checked.
-* **Signing:** a release is signed at its tag with git's SSH signatures, and
-  a catalog lists the keys it signs with in `keys/allowed_signers`. `add` on a
-  signed release prints the key's fingerprint and records the key only when
-  run again with `--trust <fingerprint>`, after you have checked it with the
-  catalog's author. `update` checks every release between the pin and the new
-  one against the trusted keys; a release a trusted key signed may list a new
-  key, which becomes trusted for the releases after it. Any other new key stops
-  the update until `--trust` names its fingerprint. `--unsigned` on `add` pins
-  a catalog whose tags are checked for nothing, and every `update` of it says
-  so.
+  pinned under `catalogs.core`), then every declared catalog with its URL, tag
+  and commit.
 
 ### `paisans blueprint`
 

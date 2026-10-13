@@ -23,9 +23,11 @@ simpler form covered every blueprint there is:
 * `settings` declare types only, not defaults.
 * `placement` is not a key: an engine other than postgres is pinned only, as
   the cluster rules already decide.
-* The core catalog's release key is not yet recorded, so a deployment cannot
-  pin `catalogs.core` to another commit and renders the toolkit's copy
-  (`internal/blueprints/signers/core`).
+* **Catalogs are unsigned.** Signing, as *Signing* below describes it, was
+  built and then removed on 2026-10-13 (`docs/decisions.md`, *Catalogs are
+  unsigned, trusted by their pin*). A pin has no `signers` or `unsigned` key,
+  and the core catalog may be pinned to a commit of its own or a mirror like
+  any other catalog.
 
 Every application the toolkit can run is compiled into the binary today. What
 the toolkit knows about a kind is spread over about thirty files: the service
@@ -500,6 +502,9 @@ template against its lock list in both directions; the lint makes the same
 check of any blueprint with a lock list.
 
 ## Signing
+
+Removed on 2026-10-13: catalogs are unsigned (see the status above). This
+section is the design as approved.
 
 Catalogs are signed at their release tags, with git's SSH signatures. A
 commit is not required to be signed. `catalog update` moves to the newest

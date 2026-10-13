@@ -19,18 +19,12 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c"}}, "example/journal", "catalogs.example.commit: required"},
 		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c", Commit: "main"}}, "example/journal", "is not a full 40 character"},
 		{map[string]Catalog{"Bad_Name": {URL: "https://example.org/x/paisans-c", Commit: commit}}, "mbin", "is not a catalog name"},
-		{map[string]Catalog{"core": {Signers: []string{"k"}}}, "mbin", "catalogs.core.signers"},
-		{map[string]Catalog{"core": {Unsigned: true}}, "mbin", "core catalog cannot be unsigned"},
 		{nil, "core/mbin", "written unqualified"},
 		{nil, "a/b/c/d", "is not a blueprint name"},
 		{nil, "example/blueprints/journal", "paisans catalog add example/blueprints`, which reads https://github.com/example/paisans-blueprints"},
-		{map[string]Catalog{"example": {URL: "https://example.org/x/blueprints", Commit: commit, Unsigned: true}}, "example/journal", "is not a catalog's repository"},
-		{map[string]Catalog{"Example/Blueprints": {URL: "https://example.org/x/paisans-c", Commit: commit, Unsigned: true}}, "mbin", "is not a catalog name"},
+		{map[string]Catalog{"example": {URL: "https://example.org/x/blueprints", Commit: commit}}, "example/journal", "is not a catalog's repository"},
+		{map[string]Catalog{"Example/Blueprints": {URL: "https://example.org/x/paisans-c", Commit: commit}}, "mbin", "is not a catalog name"},
 		{nil, "gopher", "unknown blueprint"},
-		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c", Commit: commit}}, "example/journal", "names no signers and is not unsigned"},
-		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c", Commit: commit, Tag: "v1", Signers: []string{"ssh-ed25519 AAAA"}, Unsigned: true}}, "example/journal", "one or the other"},
-		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c", Commit: commit, Signers: []string{"not a key"}}}, "example/journal", "tag: required with signers"},
-		{map[string]Catalog{"example": {URL: "https://example.org/x/paisans-c", Commit: commit, Tag: "v1", Signers: []string{"not a key"}}}, "example/journal", "is not an SSH public key"},
 	}
 	for _, c := range cases {
 		cfg := &Config{Catalogs: c.catalogs, Apps: map[string]App{"notes": {Kind: c.kind}}}
@@ -40,8 +34,8 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 		}
 	}
 	ok := &Config{Catalogs: map[string]Catalog{
-		"example":            {URL: "https://example.org/x/paisans-c", Commit: commit, Unsigned: true},
-		"example/blueprints": {URL: "https://github.com/example/paisans-blueprints.git", Commit: commit, Unsigned: true},
+		"example":            {URL: "https://example.org/x/paisans-c", Commit: commit},
+		"example/blueprints": {URL: "https://github.com/example/paisans-blueprints.git", Commit: commit},
 	}, Apps: map[string]App{"notes": {Kind: "example/journal"}, "talk": {Kind: "mbin"}, "wiki": {Kind: "example/blueprints/journal"}}}
 	if p := ok.catalogProblems(); len(p) > 0 {
 		t.Errorf("a sound declaration was refused: %v", p)

@@ -117,11 +117,7 @@ func blueprintLabel(b Blueprint) string {
 	if b.Tag != "" {
 		release = b.Tag + " (" + release + ")"
 	}
-	out := b.Blueprint + " at " + release
-	if b.Unsigned {
-		out += ", unsigned: nothing checked who published it"
-	}
-	return out
+	return b.Blueprint + " at " + release
 }
 
 // compareBlueprints is each app's catalog blueprint against the record. A
@@ -139,7 +135,7 @@ func compareBlueprints(now, was []Blueprint) []Change {
 		switch {
 		case !ok:
 			out = append(out, Change{Op: Added, Subject: subject, To: to, Text: "blueprint " + b.App + ": " + blueprintLabel(b)})
-		case p.Blueprint != b.Blueprint || p.SHA256 != b.SHA256 || p.Unsigned != b.Unsigned:
+		case p.Blueprint != b.Blueprint || p.SHA256 != b.SHA256:
 			out = append(out, Change{Op: Changed, Subject: subject, To: to, Text: "blueprint " + b.App + ": " + blueprintLabel(p) + " → " + blueprintLabel(b)})
 		}
 		delete(prior, b.App)

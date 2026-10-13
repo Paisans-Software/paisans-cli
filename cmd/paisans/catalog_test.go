@@ -69,17 +69,14 @@ func TestTheCatalogCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runCatalogAdd([]string{"ex", repo, "--config", path}); err == nil || !strings.Contains(err.Error(), "not signed") {
-		t.Fatalf("an add without --unsigned: %v", err)
-	}
-	if err := runCatalogAdd([]string{"ex", repo, "--unsigned", "--config", path}); err != nil {
+	if err := runCatalogAdd([]string{"ex", repo, "--config", path}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := cfg.Catalogs["ex"]; c.Tag != "v1.0.0" || len(c.Commit) != 40 || !c.Unsigned {
+	if c := cfg.Catalogs["ex"]; c.Tag != "v1.0.0" || len(c.Commit) != 40 {
 		t.Fatalf("pin %+v", c)
 	}
 
@@ -120,61 +117,6 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
-}
-
-// catalog add records a signed release's key only when the operator passes
-// its fingerprint, and the pin then checks every later fetch against it.
-func TestCatalogAddTrustsAKeyOnlyByItsFingerprint(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
-	reporterOverride = ui.NewPlain(&bytes.Buffer{}, false)
-	defer func() { reporterOverride = nil }()
-	repo, _ := catalogRepo(t)
-	key := filepath.Join(t.TempDir(), "k")
-	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "release", "-f", key).CombinedOutput(); err != nil {
-		t.Fatalf("%s", out)
-	}
-	pub, err := os.ReadFile(key + ".pub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	k, _, err := config.ParseKeyLine(strings.TrimSpace(string(pub)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "keys"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "keys", "allowed_signers"), pub, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "keys"}, {"-c", "gpg.format=ssh", "-c", "user.signingkey=" + key, "tag", "-s", "v2.0.0", "-m", "v2.0.0"}} {
-		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.org", "-c", "commit.gpgsign=false"}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %s", args, out)
-		}
-	}
-	base, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), config.FileName)
-	if err := os.WriteFile(path, base, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err = runCatalogAdd([]string{"ex", repo, "--config", path})
-	if err == nil || !strings.Contains(err.Error(), k.Fingerprint) {
-		t.Fatalf("an add without --trust: %v", err)
-	}
-	if err := runCatalogAdd([]string{"ex", repo, "--trust", k.Fingerprint, "--config", path}); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c := cfg.Catalogs["ex"]; c.Tag != "v2.0.0" || c.Unsigned || len(c.Signers) != 1 || !strings.HasPrefix(c.Signers[0], k.Type) {
-		t.Errorf("pin %+v", c)
-	}
 }
 
 // catalog add names a catalog <owner>/<name> from its repository unless told
@@ -220,7 +162,7 @@ func TestCatalogAddNamesTheCatalog(t *testing.T) {
 	if err := os.WriteFile(path, base, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runCatalogAdd([]string{repo, "--unsigned", "--config", path}); err != nil {
+	if err := runCatalogAdd([]string{repo, "--config", path}); err != nil {
 		t.Fatal(err)
 	}
 	want, _ := config.DefaultCatalogName(repo)
