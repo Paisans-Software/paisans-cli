@@ -390,7 +390,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 			}
 			what = "a version on " + strings.Join(on, " and ")
 		}
-		r.Step("publish "+what).End(ui.Pending, "signed with "+k.Fingerprint+"; --execute signs and pushes it")
+		r.Step("publish "+what).End(ui.Pending, "signed with "+k.Fingerprint)
 		return nil
 	}
 	a, err := l.Anchor()
@@ -433,7 +433,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return err
 	default:
-		s.Done(fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+		s.Done(sha[:12])
 	}
 	r.Result("published %s", sha)
 	return nil

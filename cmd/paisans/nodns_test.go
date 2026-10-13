@@ -75,7 +75,7 @@ func (noStore) check(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.W
 	return nil
 }
 
-func (noStore) publish(ui.Reporter, bool, string) (*appliedVersion, error) { return nil, nil }
+func (noStore) publish(ui.Reporter, bool) (*appliedVersion, error) { return nil, nil }
 
 // testCaddyDigest is the build every test's registry says Caddy's tag names.
 const testCaddyDigest = "sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186"

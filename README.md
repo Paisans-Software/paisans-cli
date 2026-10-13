@@ -4948,8 +4948,8 @@ A removal is shown and not approved, because it only takes away. The review
 is one line per site, pending when anything needs approval, with every change
 under it at every verbosity, with `--execute` as well as without: the login and
 the keys first, then the images stack by stack, then the web server, so a long
-list stays readable. A host with no record of the parts a review covers says
-`first review` on its line, and that every entry is new because there is no
+list stays readable. A host with no record of the parts a review covers counts its
+entries as new and says `first review` on its line, because there is no
 record yet: the first `--execute` on such a host asks once for the whole list,
 which is the record being made, and later runs show only what changes.
 `host prepare` reviews the login and the keys; `apply --site` the images and

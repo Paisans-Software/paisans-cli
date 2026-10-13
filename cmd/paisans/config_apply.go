@@ -50,9 +50,8 @@ type storeVersion interface {
 	// change; a dry run reports what --execute would ask.
 	check(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) error
 	// publish signs and pushes the version with execute; a dry run says
-	// it would, and when (when, Eg: "before the first change"), and
-	// returns nil.
-	publish(r ui.Reporter, execute bool, when string) (*appliedVersion, error)
+	// it would, and returns nil.
+	publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 }
 
 // applyStore gathers the versions every site holds for an apply, before its
@@ -165,33 +164,26 @@ func samePath(a, b string) bool {
 	return errA == nil && errB == nil && x == y
 }
 
-// what is the version in words: the sites' version the files equal, or a
-// new one on its parents.
+// what is the version in words: the sites' version the files equal, or the
+// revision of a new one.
 func (v *gathered) what() string {
-	switch {
-	case v.same != "":
+	if v.same != "" {
 		return describe(v.g, v.same)
-	case len(v.parents) == 0:
-		return fmt.Sprintf("revision %d, the first version", v.revision)
 	}
-	var on []string
-	for _, p := range v.parents {
-		on = append(on, p[:12])
-	}
-	return fmt.Sprintf("revision %d, a new version on %s", v.revision, strings.Join(on, " and "))
+	return fmt.Sprintf("revision %d", v.revision)
 }
 
 func (v *gathered) check(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) error {
 	return witness(r, records, v.revision, v.same, v.what(), execute, stdin, stdout)
 }
 
-func (v *gathered) publish(r ui.Reporter, execute bool, when string) (*appliedVersion, error) {
+func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error) {
 	k, _, _ := config.ParseKeyLine(v.key)
 	if !execute {
 		if v.same != "" {
-			r.Step("publish "+v.what()).End(ui.OK, "the sites hold it already; --execute pushes it again to any that lack it, "+when)
+			r.Step("publish "+v.what()).End(ui.OK, "the sites hold it already")
 		} else {
-			r.Step("publish "+v.what()).End(ui.Pending, "signed with "+k.Fingerprint+"; --execute signs and pushes it "+when)
+			r.Step("publish "+v.what()).End(ui.Pending, "signed with "+k.Fingerprint)
 		}
 		return nil, nil
 	}
@@ -214,7 +206,7 @@ func (v *gathered) publish(r ui.Reporter, execute bool, when string) (*appliedVe
 		s.Fail(err)
 		return nil, &ui.Problem{Hint: "could not publish the version to apply", Explain: errLine(err) + ". Nothing was applied.", Cause: err}
 	default:
-		s.Done(fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+		s.Done(sha[:12])
 	}
 	return &appliedVersion{sha: sha, revision: v.revision, files: v.files}, nil
 }

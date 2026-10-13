@@ -797,13 +797,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		if err := store.check(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
 			return err
 		}
-		if _, err := store.publish(r, false, publishWhen); err != nil {
+		if _, err := store.publish(r, false); err != nil {
 			return err
 		}
 		convergeLeft(r, cfg, secretsPath, configPath)
-		next := "Re-run with --execute to apply. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
+		next := "Re-run with --execute to apply."
 		if pending > 0 {
-			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above before its first step. Each step's own dry run, Eg: paisans apply --site <name>, shows its detail."
+			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above."
 		}
 		if len(generated) > 0 {
 			r.Result("Nothing changed on the servers. Added %s to %s. %s", plural(len(generated), "generated secret"), filepath.Base(convergeSecretsPath(configPath, secretsPath)), next)
@@ -829,7 +829,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	publish := func() (err error) {
-		reviewedByRun.version, err = store.publish(r, true, publishWhen)
+		reviewedByRun.version, err = store.publish(r, true)
 		return err
 	}
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
@@ -1285,10 +1285,6 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 	}
 	return nil
 }
-
-// publishWhen is when apply without --site publishes the version it
-// applies, as its plan says.
-const publishWhen = "after host prepare, which makes every site's store, and before any other step"
 
 // convergePrepareAll runs steps, the prepare lines', every host at once,
 // each on its own line, which ends with its host. A host that fails stops
