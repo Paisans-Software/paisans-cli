@@ -2722,8 +2722,9 @@ configuration version that carries the blueprints (see *Every site keeps
 signed copies of the configuration*).
 
 **A catalog blueprint brings rules of its own, and is held to what it leaves
-out.** Its `checks` are CEL conditions over the app's declaration, each run by
-`validate` under the blueprint's own rule id as a refusal or a warning; its
+out.** Its `checks` are CEL conditions over the app's declaration and the
+sites it runs on, each run by `validate` under the blueprint's own rule id as a
+refusal or a warning, with a message that may name the value it refuses; its
 `settings` are checked by type, and a key it does not read is warned about. A
 setting may declare a `default` of its own type, which the blueprint's
 templates and CEL expressions see for an app that leaves the key out; a value

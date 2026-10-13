@@ -40,25 +40,37 @@ type Check struct {
 	// Refuse is whether a failure refuses the configuration, rather than
 	// warning about it.
 	Refuse bool
+	// Hint is the finding's one line summary, empty for the general one.
+	Hint string
 	// Key is the app key the finding names, relative to apps.<app>.
 	Key string
-	// Message is what the operator reads when the rule fails.
+	// Message is what the operator reads when the rule fails, when the
+	// blueprint gives it as text.
 	Message string
 	prg     cel.Program
+	// message and key, when set, work the message and the key out for the
+	// app that fails, so either can name what is wrong.
+	message, key cel.Program
 }
 
 // checkSpec is a check as a blueprint writes it.
 type checkSpec struct {
-	ID      string `yaml:"id"`
-	Level   string `yaml:"level"`
-	Key     string `yaml:"key"`
-	Rule    string `yaml:"rule"`
-	Message string `yaml:"message"`
+	ID          string `yaml:"id"`
+	Level       string `yaml:"level"`
+	Hint        string `yaml:"hint"`
+	Key         string `yaml:"key"`
+	KeyExpr     string `yaml:"key_expr"`
+	Rule        string `yaml:"rule"`
+	Message     string `yaml:"message"`
+	MessageExpr string `yaml:"message_expr"`
 }
 
 func (s checkSpec) check() (Check, error) {
-	if !ruleID.MatchString(s.ID) || s.Message == "" {
-		return Check{}, fmt.Errorf("needs an id, lowercase words joined by hyphens, and a message")
+	if !ruleID.MatchString(s.ID) || (s.Message == "") == (s.MessageExpr == "") {
+		return Check{}, fmt.Errorf("needs an id, lowercase words joined by hyphens, and one of message and message_expr")
+	}
+	if s.Key != "" && s.KeyExpr != "" {
+		return Check{}, fmt.Errorf("gives both key and key_expr; give one")
 	}
 	if s.Level != "refuse" && s.Level != "warn" {
 		return Check{}, fmt.Errorf("level: is %q; it must be refuse or warn", s.Level)
@@ -67,7 +79,18 @@ func (s checkSpec) check() (Check, error) {
 	if err != nil {
 		return Check{}, fmt.Errorf("rule: %w", err)
 	}
-	return Check{ID: s.ID, Refuse: s.Level == "refuse", Key: s.Key, Message: s.Message, prg: prg}, nil
+	c := Check{ID: s.ID, Refuse: s.Level == "refuse", Hint: s.Hint, Key: s.Key, Message: s.Message, prg: prg}
+	if s.MessageExpr != "" {
+		if c.message, err = compileString(s.MessageExpr); err != nil {
+			return Check{}, fmt.Errorf("message_expr: %w", err)
+		}
+	}
+	if s.KeyExpr != "" {
+		if c.key, err = compileString(s.KeyExpr); err != nil {
+			return Check{}, fmt.Errorf("key_expr: %w", err)
+		}
+	}
+	return c, nil
 }
 
 // Holds evaluates the check for the app named name. A rule that cannot be
@@ -75,12 +98,41 @@ func (s checkSpec) check() (Check, error) {
 // asking has() first, fails: the blueprint's author asked for something the
 // toolkit could not confirm.
 func (c Check) Holds(cfg *config.Config, name string) bool {
-	out, _, err := c.prg.Eval(celApp(cfg.Apps[name], smtpOf(cfg.SMTPFor(name))))
+	out, _, err := c.prg.Eval(celAppIn(cfg, name))
 	if err != nil {
 		return false
 	}
 	v, ok := out.Value().(bool)
 	return ok && v
+}
+
+// Failure is the key, relative to apps.<name>, and the message of the check
+// failing for the app called name. A key or message expression that cannot
+// be worked out for the app gives the check's own key, or says so.
+func (c Check) Failure(cfg *config.Config, name string) (key, message string) {
+	key, message = c.Key, c.Message
+	vars := celAppIn(cfg, name)
+	eval := func(prg cel.Program) (string, bool) {
+		out, _, err := prg.Eval(vars)
+		if err != nil {
+			return "", false
+		}
+		v, ok := out.Value().(string)
+		return v, ok
+	}
+	if c.key != nil {
+		if v, ok := eval(c.key); ok {
+			key = v
+		}
+	}
+	if c.message != nil {
+		v, ok := eval(c.message)
+		if !ok {
+			v = "fails, and its blueprint's message for it could not be worked out"
+		}
+		message = v
+	}
+	return key, message
 }
 
 // ChecksFor is the checks of an app's kind.

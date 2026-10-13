@@ -341,11 +341,22 @@ An expression sees:
 | `app.placement` | `cluster`, or the site it is pinned to |
 | `app.settings` | its `settings:` map, with the blueprint's defaults filled in for a blueprint from a catalog |
 | `app.smtp` | its resolved SMTP settings, without the password |
+| `app.sites` | the sites it runs on |
+| `app.storage` | `mode` (`object` or `local`), `bucket` and `media_hostname` |
 | `deployment.sites` | site names and their roles |
+
+A gate setting's condition sees the app alone, so `app.name`, `app.smtp`,
+`app.sites`, `app.storage` and `deployment.sites` are empty in one.
 
 The toolkit adds functions where CEL has none. The first are `isBareEmail`
 (what `isAddressAlone` in `internal/validate/mbin_mail.go` checks) and
-`isHostname`. A function is part of the helper contract below.
+`isHostname`, beside CEL's string extension. A function is part of the helper
+contract below.
+
+A check gives its `message` as text, or as `message_expr`, a string
+expression over the same variables, so the message can name the value that is
+wrong. Its key, relative to `apps.<name>`, is `key` or `key_expr` the same
+way, and `hint` is its one line summary.
 
 ## Capabilities, helpers and in-app actions
 
