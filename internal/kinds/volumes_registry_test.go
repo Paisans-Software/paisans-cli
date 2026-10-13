@@ -24,8 +24,7 @@ func TestRecordedVolumesMatchEveryPlatform(t *testing.T) {
 		refs[ref] = paths
 	}
 	// A repository's entry is checked at its highest version tag, a specific
-	// release, rather than at a moving tag such as the gateway's Caddy `2` or
-	// a fork's `stack-1` channel.
+	// release, rather than at a moving tag such as the gateway's Caddy `2`.
 	registry := imagedigest.Registry{}
 	for repository, paths := range kinds.RepositoryVolumes {
 		newest, err := registry.NewestVersion(repository + ":latest")

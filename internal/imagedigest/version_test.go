@@ -51,7 +51,7 @@ func published(t *testing.T, builds ...build) (*httptest.Server, *[]string) {
 			return
 		}
 		base := "/v2/paisans-software/mbin/"
-		if r.URL.Path == base+"manifests/"+indexDigest || r.URL.Path == base+"manifests/stack-1" {
+		if r.URL.Path == base+"manifests/"+indexDigest || r.URL.Path == base+"manifests/1.15.1-paisans" {
 			entries := []string{fmt.Sprintf(`{"digest":%q,"platform":{"os":"unknown","architecture":"unknown"}}`, attestation)}
 			for _, b := range builds {
 				entries = append(entries, fmt.Sprintf(`{"digest":%q,"platform":{"os":"linux","architecture":%q}}`, manifestOf(b.arch), b.arch))

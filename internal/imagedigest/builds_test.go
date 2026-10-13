@@ -15,7 +15,7 @@ func TestBuildsReadEachPlatformsVolumes(t *testing.T) {
 	srv, _ := published(t,
 		build{arch: "arm64", volumes: `"/app/var/":{}`},
 		build{arch: "amd64", volumes: `"/data":{},"/app/var/":{}`})
-	for _, ref := range []string{mbinRef(srv), strings.TrimPrefix(srv.URL, "https://") + "/paisans-software/mbin:stack-1"} {
+	for _, ref := range []string{mbinRef(srv), strings.TrimPrefix(srv.URL, "https://") + "/paisans-software/mbin:1.15.1-paisans"} {
 		got, err := imagedigest.Registry{Client: srv.Client()}.Builds(ref)
 		if err != nil {
 			t.Fatalf("%s: %v", ref, err)

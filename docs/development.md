@@ -1344,10 +1344,10 @@ go test -tags registry_integration ./internal/kinds/
 ```
 
 `TestRecordedVolumesMatchEveryPlatform` checks `kinds.ImageVolumes`, and each
-repository `kinds.RepositoryVolumes` covers (the gateway's Caddy and the two
-forks) at its highest version tag, against what every linux platform of each
-image declares. A moving tag such as `stack-1` or Caddy's `2` is not checked
-itself: a specific release is what a table row can vouch for.
+repository `kinds.RepositoryVolumes` covers (the gateway's Caddy) at its
+highest version tag, against what every linux platform of each image
+declares. A moving tag such as Caddy's `2` is not checked itself: a specific
+release is what a table row can vouch for.
 
 Pocket ID's standby wrapper has Docker tests of its own, behind their own tag:
 

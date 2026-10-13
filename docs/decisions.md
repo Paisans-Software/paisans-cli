@@ -2096,6 +2096,9 @@ diff read: the blog's image tag and the manifest's hash of that file. Both
 tags were confirmed as the newest releases with `gh release list` and
 `docker buildx imagetools inspect` on 2026-10-13, which also gave the
 declared volumes: `/app/var/` for Mbin (linux/amd64 only) and none for
-WriteFreely on linux/amd64 and linux/arm64. The core copy was synced from
+WriteFreely on linux/amd64 and linux/arm64, and `go test -tags
+registry_integration -run TestRecordedVolumesMatchEveryPlatform/ghcr
+./internal/kinds/` agreed on both entries (Docker Hub's rate limit kept the
+rest of that test from running). The core copy was synced from
 `Paisans-Software/blueprints` with `scripts/sync-core-catalog.sh`. Nothing
 was run against a deployment, and no image was moved, deleted or retagged.
