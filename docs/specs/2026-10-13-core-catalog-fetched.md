@@ -1,6 +1,10 @@
 # The core catalog is fetched, not embedded
 
-Date: 2026-10-13. Status: approved by the founder, 2026-10-13. Not implemented.
+Date: 2026-10-13. Status: approved by the founder, 2026-10-13. Implemented
+2026-10-13, in pull requests #250, #252, #253, #255, #256, #257, #258, #259
+and #260, and Paisans-Software/paisans-blueprints#5; the work list below
+was done in that order, with the test copy and `coretest` moving from the
+first step to the third, where core is first read from the cache.
 Amends *The core catalog* in `docs/specs/2026-10-12-blueprints-and-catalogs.md`.
 
 The binary carries a copy of the core catalog today: `scripts/sync-core-catalog.sh`

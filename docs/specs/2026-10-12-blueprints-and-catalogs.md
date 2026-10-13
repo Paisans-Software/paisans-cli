@@ -4,6 +4,9 @@ Date: 2026-10-12. Status: approved by the founder in session, 2026-10-12.
 Implemented 2026-10-13, in pull requests #209, #211, #212, #213, #214, #215,
 #217, #218 and #221; the core catalog is
 [`Paisans-Software/paisans-blueprints`](https://github.com/Paisans-Software/paisans-blueprints).
+Since `docs/specs/2026-10-13-core-catalog-fetched.md`, the binary carries
+only the core catalog's pin and fetches it, and no core blueprint is named in
+Go.
 
 **Where the implementation differs from the design below**, each because the
 simpler form covered every blueprint there is:
@@ -28,6 +31,8 @@ simpler form covered every blueprint there is:
   absent `authorized_fetch` is on).
 * The variables an expression sees are the ones `internal/kinds/cel.go`
   declares, listed under *Predicates and checks are CEL*.
+* A blueprint links to another by a role it `provides` or `consumes`, of a
+  closed set; `matrix-homeserver` is the first.
 * A lock list is `config.locked_settings`, which a template renders with
   `.LockedSettings`.
 * `placement` is not a key: an engine other than postgres is pinned only, as
