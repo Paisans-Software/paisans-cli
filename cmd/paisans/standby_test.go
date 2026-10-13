@@ -125,7 +125,7 @@ func TestPocketIDAdminRefusesWithNoActiveSite(t *testing.T) {
 func TestPocketIDAdminTakesSiteAsGiven(t *testing.T) {
 	var asked []string
 	lookWith(t, map[string]string{}, &asked)
-	got, err := pocketIDSite(ui.Discard, standbyCfg(t), "auth", "home-b", "app admin create")
+	got, err := pocketIDSite(ui.Discard, standbyCfg(t), "auth", "home-b", "admin magic-link")
 	if err != nil || got != "home-b" || len(asked) != 0 {
 		t.Fatalf("got %q, %v, asked %v", got, err, asked)
 	}

@@ -231,16 +231,6 @@ func TestPocketIDIsIdempotent(t *testing.T) {
 		t.Errorf("an existing admin planned %v", plan.Actions)
 	}
 
-	req := pidRequest()
-	req.LoginLink = true
-	plan, err = Build(config.KindPocketID, f, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(plan.Actions, []Action{ActionLoginLink}) {
-		t.Errorf("--login-link planned %v", plan.Actions)
-	}
-
 	f.users[0].IsAdmin = false
 	plan, err = Build(config.KindPocketID, f, pidRequest())
 	if err != nil {

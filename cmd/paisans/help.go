@@ -49,10 +49,9 @@ var groupSummary = map[string]string{
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"config":      "Publish, pull, list and recover the sites' signed configuration.",
-	"admin":       "Sign the sites' configuration with your own key.",
+	"admin":       "Sign the sites' configuration, or give an admin a sign-in link.",
 	"secrets":     "Set, prune and rotate secrets.",
-	"app":         "Make a Pocket ID administrator, or take a removed app off hosts.",
-	"app admin":   "Make a Pocket ID administrator.",
+	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
 	"oidc client": "Create an app's sign-in client at Pocket ID.",
 	"web-server":  "Show or check the web server in front of a monitor's app.",
@@ -314,6 +313,14 @@ var helpCommands = []helpCommand{
 			configTrust,
 	},
 	{
+		name:    "admin magic-link",
+		summary: "Give a declared admin a one-time sign-in link.",
+		usage:   []string{"paisans admin magic-link <admin> [--app <pocket-id app>]\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--site <name>] [--ssh <destination>] [--execute]"},
+		detail: "Issue an admin under admins a one-time link that signs them in to Pocket ID once, to register a passkey with: after a first link expired unused, or a passkey was lost. " +
+			"Printed once on stdout, and emailed by Pocket ID as well when it emails apply's links. " +
+			"Changes nothing else: apply makes the account, its groups and its administrator flag, and an admin with no account yet is pointed there. Writes nothing without --execute.",
+	},
+	{
 		name:    "admin register",
 		summary: "Sign the sites' newest version with your own key.",
 		usage:   []string{"paisans admin register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>] [--execute]"},
@@ -350,13 +357,6 @@ var helpCommands = []helpCommand{
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +
 			"A run that signs members out asks for sign out at a terminal, before any host is claimed. A stopped run resumes. Writes nothing without --execute.",
-	},
-	{
-		name:    "app admin create",
-		summary: "Make a user an administrator of Pocket ID and the apps.",
-		usage:   []string{"paisans app admin create --app <pocket-id app> --username <u> --email <e>\n                         [--first-name <f>] [--last-name <l>] [--login-link]\n                         [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                         [--site <name>] [--ssh <destination>] [--execute]"},
-		detail: "Make sure a user exists, is verified and is an administrator of Pocket ID, and is in every admin group the apps signing in through it read. " +
-			"There is no password: a created account gets a one-time login link, printed once, to register a passkey with. Writes nothing without --execute.",
 	},
 	{
 		name:    "app remove",
@@ -578,7 +578,7 @@ func resolveHelp(args []string) (page func(io.Writer), asked bool, run []string)
 		}
 	}
 	// The command's name is as many words as name a group, and then one:
-	// app, app admin, app admin create.
+	// app, app remove.
 	name := args[0]
 	for at := 1; isGroup(name); at++ {
 		group := name

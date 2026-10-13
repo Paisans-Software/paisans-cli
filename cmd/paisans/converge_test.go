@@ -1863,7 +1863,7 @@ func adminNotes(rec *ui.Recorder) []string {
 	return out
 }
 
-const authAdminCommand = "paisans app admin create --app auth --username <name> --email <address>"
+const authAdminCommand = "Declare one under admins in paisans-stack.yaml and run apply, which makes their account at auth and gives them a sign-in link."
 
 // fakeDeclaredAdmins replaces making a declared admin: answer gives the
 // outcome for each app and admin. It returns the calls, as "app/id", with
@@ -2160,7 +2160,7 @@ func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
 
 // A declared admin joins every app's member group as well as its admin group,
 // since an app whose member gate does not admit its administrator refuses
-// their first login. app admin create, which names its user, does not.
+// their first login.
 func TestAdminRequestJoinsTheMemberGroups(t *testing.T) {
 	cfg := fixture(t)
 	cfg.Admins["alice"] = config.Admin{Name: "Alice Example", Email: "alice@example.org"}
@@ -2173,7 +2173,7 @@ func TestAdminRequestJoinsTheMemberGroups(t *testing.T) {
 	}
 }
 
-// The check asks the Pocket ID app admin create would call, with its key, read
+// The check asks the Pocket ID a declared admin is made at, with its key, read
 // only, through the run's sudo, and answers whether a user is an admin.
 func TestConvergeAdminCheckAsksPocketIDReadOnly(t *testing.T) {
 	fake := withPIDFake(t)

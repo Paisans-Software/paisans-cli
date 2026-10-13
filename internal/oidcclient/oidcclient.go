@@ -3,8 +3,8 @@
 // secrets file.
 //
 // Every step is a Pocket ID client, group or user mutation, and those need a
-// human's approval each time. So the shape is the one `storage init` and
-// `app admin create` use: probe read only, plan one printed line per
+// human's approval each time. So the shape is the one `storage init`
+// uses: probe read only, plan one printed line per
 // mutation, showing what it sends, and change nothing until the operator
 // re-runs with --execute. The printed plan is what is approved.
 //

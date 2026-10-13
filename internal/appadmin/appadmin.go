@@ -60,11 +60,6 @@ type Request struct {
 	// that app is exempt, which a first login is not.
 	MemberGroups []string
 
-	// LoginLink asks for a fresh one-time login link for
-	// an account that already exists. A created account always gets one,
-	// since it cannot be signed in to without it.
-	LoginLink bool
-
 	// Declared is an admin the configuration's admins list declares, made by
 	// apply rather than by the operator naming them. Such an account may have
 	// been renamed by its owner since it was made, so it is also found by its

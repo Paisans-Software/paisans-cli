@@ -26,10 +26,13 @@ func runAdmin(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "register" {
 		return runAdminRegister(args[1:], stdin, stdout)
 	}
-	if len(args) == 0 {
-		return &ui.Problem{Hint: "admin takes one subcommand", Explain: "Use register."}
+	if len(args) > 0 && args[0] == "magic-link" {
+		return runAdminMagicLink(args[1:])
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("admin has no subcommand %q", args[0]), Explain: "Use register."}
+	if len(args) == 0 {
+		return &ui.Problem{Hint: "admin takes one subcommand", Explain: "Use register or magic-link."}
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("admin has no subcommand %q", args[0]), Explain: "Use register or magic-link."}
 }
 
 func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {

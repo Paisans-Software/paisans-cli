@@ -214,22 +214,15 @@ with mail Pocket ID emails one too (`Request.EmailLink`); its log is read for
 a failed send. Every link is printed after the run's result. See *`apply`
 makes the declared admins and hands each a login link* in `README.md`.
 
-`app admin create --app <pocket-id app> --username <u> --email <e>` makes
-sure one user exists, is verified, is an administrator of Pocket ID, and is in
-every admin group the apps signing in through it read (`kinds.OIDCClient`),
-creating a group that does not exist yet. It probes, prints the plan or
-`present`, and changes nothing without `--execute`. Pocket ID is the one kind
-that implements it. An `mbin` app is refused before any host is reached: its
-administrators come only through single sign on, so they are made here. See *`app admin create` makes an app's first administrator* in
-`README.md`.
-
-There is no password: the command creates the user as an administrator, with
-its email marked verified, through Pocket ID's API and prints a one-time login
-link once, on `--execute`, valid twenty minutes; `--login-link` issues a fresh
-one for an account that exists. It refuses a piped password rather than dropping it. It
+`admin magic-link <admin>` issues one declared admin a one-time sign-in link
+and nothing else (`appadmin.MagicLink`): it finds the account as apply does,
+by username then email, refuses one apply has not made or that is disabled,
+and prints the link once on `--execute`, emailed too when apply's are. It
 reads `apps.<app>.static_api_key` from the secrets file, so it takes
 `--secrets`. Its calls to Pocket ID never use sudo, because curl needs no root;
 only the claim `--execute` makes in the host registry, which is root's, does.
+See *`admin magic-link` gives a declared admin a fresh sign-in link* in
+`README.md`.
 
 `oidc client create --app <name>` creates an app's client at the deployment's
 Pocket ID, restricted to the member and admin groups the app's `settings`

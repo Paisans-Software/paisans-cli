@@ -2223,3 +2223,34 @@ today, so a third party blueprint can say it too.
   core blueprints.
 * **Moving only the RabbitMQ rotation**, which keeps formats and costs keyed
   by name in Go.
+
+## 2026-10-13: Admins are declared, and `admin magic-link` replaces `app admin create`
+
+Founder decision, 2026-10-13.
+
+### What was decided
+
+* Every admin declared under `admins` is an admin of every app that takes its
+  administrators from a Pocket ID group, which `apply` already makes so. No
+  command makes an administrator outside that list.
+* `app admin create` is removed.
+* `paisans admin magic-link <admin>` gives a declared admin a one-time sign-in
+  link, with Pocket ID's static API key, and does nothing else. It serves a
+  first link that expired unused and a lost passkey alike, which is why it is
+  named for what it hands out rather than for either case.
+
+### Why
+
+An administrator made on the side holds every app's admin rights while
+`paisans-stack.yaml` does not show them. With `apply` making the declared
+admins, the one thing it cannot do is help an admin who already registered a
+passkey and lost it, and a link is all that takes.
+
+### What was weighed
+
+* **Keeping `app admin create` for declared admins only**, or letting it act
+  on an app other than Pocket ID: each kept a second path to the same
+  accounts.
+* **The names** `restore-access`, `recover` and `onboard` each fit one of the
+  two cases only; `sign-in-link` and `auth-link`, where "auth" is also the
+  wizard's name for the Pocket ID app and reads as authorization too.

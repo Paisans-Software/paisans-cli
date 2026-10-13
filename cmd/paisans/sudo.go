@@ -83,7 +83,7 @@ func settleSudo(r ui.Reporter, sites []string, host func(string) apply.Transport
 
 // openTTY opens the controlling terminal. The password is read there rather
 // than from stdin, because stdin may already carry something else (`secrets
-// set` and `app admin create` read a value from it), and because a run with
+// set` reads a value from it), and because a run with
 // no controlling terminal, from cron or CI, is exactly the run that must not
 // be asked. Tests replace it.
 var openTTY = func() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
