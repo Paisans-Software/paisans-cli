@@ -122,6 +122,20 @@ func platformCheck(site, arch string, image ImagePin, r Resolver) (*Note, error)
 	return nil, fmt.Errorf("%s (%s): %s is published for %s only.", site, arch, ui.Name(image.Image), strings.Join(named, ", "))
 }
 
+// provenOn reports whether pin's build needs no platform check on this site:
+// the host already runs that very build, by digest, and the site's
+// architecture is the one the last apply recorded. A digest names one
+// platform list, which the registry cannot change under it, and a host
+// running the build proves it runs on its architecture, so asking the
+// registry again proves nothing; Docker Hub counts every such manifest GET
+// against an address's anonymous allowance. The architecture is compared
+// because a host can be rebuilt on another one with its files restored, and
+// a manifest that recorded none, or a plan that read none, is checked.
+func provenOn(pin ImagePin, arch, recorded string) bool {
+	d := digestOf(pin.Reference)
+	return d != "" && d == digestOf(pin.Deployed) && arch != "" && arch == recorded
+}
+
 // CheckPlatforms is Build's platform check for the images a render names for
 // site (render.Plan.Images), made without reading its host. A whole apply
 // runs it on every site before it prepares any host, which a site's plan
@@ -486,8 +500,12 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		if digestOf(deployed) == "" {
 			kept = fmt.Sprintf("keeps %s unpinned, as this site runs it, until an apply can resolve it", ui.Name(deployed))
 		}
+		hint := fmt.Sprintf("could not resolve %s %s; keeping the build this site runs", label, ui.Name(want))
+		if errors.Is(failed, imagedigest.ErrRateLimited) {
+			hint = fmt.Sprintf("%s is rate limiting this workstation; keeping the build this site runs of %s %s", imagedigest.Host(want), label, ui.Name(want))
+		}
 		return pin, []Note{{
-			Hint: fmt.Sprintf("could not resolve %s %s; keeping the build this site runs", label, ui.Name(want)),
+			Hint: hint,
 			Text: fmt.Sprintf("Resolving %s failed (%v), so the plan %s. A newer build, if one exists, arrives with the next apply that resolves %s.", ui.Name(want), failed, kept, ui.Name(want)),
 		}}, nil
 	}
@@ -537,6 +555,15 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	named := imageLabel(image) + " " + ui.Name(want)
 	setting := ui.Name(image.Setting())
 	host := imagedigest.Host(want)
+	if errors.Is(failed, imagedigest.ErrRateLimited) {
+		// Asking again at once is refused again, and counts against the
+		// same limit, so the advice is to wait.
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("%s is rate limiting this workstation, so %s could not be resolved", host, named),
+			Explain: "Nothing runs it on this site to keep. Run apply again once the registry's limit resets; its answer says when, if it said.",
+			Cause:   failed,
+		}
+	}
 	if image.Setting() == "" {
 		// No setting of the configuration decides it: it is the core
 		// catalog's foundation image, so the fix is the catalog's.

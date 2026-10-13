@@ -74,6 +74,33 @@ func agreed(byPlatform map[string]string, show func(string) string) string {
 	return strings.Join(parts, ", ")
 }
 
+// fetcherFor is a fetcher for ref's repository, and what to ask its manifests
+// for: ref's digest, or else its tag.
+func (r Registry) fetcherFor(ref string) (*fetcher, string, error) {
+	name, digest := ref, ""
+	if at := strings.LastIndex(ref, "@"); at >= 0 {
+		name, digest = ref[:at], ref[at+1:]
+	}
+	if slash, colon := strings.LastIndex(name, "/"), strings.LastIndex(name, ":"); colon > slash {
+		if digest == "" {
+			digest = name[colon+1:]
+		}
+		name = name[:colon]
+	}
+	if digest == "" {
+		digest = "latest"
+	}
+	host, repo := locate(name)
+	if repo == "" {
+		return nil, "", fmt.Errorf("%s is not a reference this lookup can read", ref)
+	}
+	client := r.Client
+	if client == nil {
+		client = &http.Client{Timeout: DefaultTimeout}
+	}
+	return &fetcher{client: client, base: fmt.Sprintf("https://%s/v2/%s/", host, repo), repo: repo}, digest, nil
+}
+
 // Build is what one platform of an image declares in its configuration.
 type Build struct {
 	// Platform is the architecture, with its variant when the index gives
@@ -90,29 +117,10 @@ type Build struct {
 // published for a single platform. It reads anonymously, as Digest does, and
 // needs no Docker, so it answers for every platform from any workstation.
 func (r Registry) Builds(ref string) ([]Build, error) {
-	name, digest := ref, ""
-	if at := strings.LastIndex(ref, "@"); at >= 0 {
-		name, digest = ref[:at], ref[at+1:]
+	f, digest, err := r.fetcherFor(ref)
+	if err != nil {
+		return nil, err
 	}
-	if slash, colon := strings.LastIndex(name, "/"), strings.LastIndex(name, ":"); colon > slash {
-		if digest == "" {
-			digest = name[colon+1:]
-		}
-		name = name[:colon]
-	}
-	if digest == "" {
-		digest = "latest"
-	}
-	host, repo := locate(name)
-	if repo == "" {
-		return nil, fmt.Errorf("%s is not a reference this lookup can read", ref)
-	}
-	client := r.Client
-	if client == nil {
-		client = &http.Client{Timeout: DefaultTimeout}
-	}
-	f := &fetcher{client: client, base: fmt.Sprintf("https://%s/v2/%s/", host, repo), repo: repo}
-
 	type platform struct {
 		OS           string `json:"os"`
 		Architecture string `json:"architecture"`
@@ -192,14 +200,63 @@ func (r Registry) Builds(ref string) ([]Build, error) {
 // Platforms names the platforms the build ref names was published for, as
 // Build.Platform does (amd64, arm64/v8), sorted. Apply refuses an image with
 // none for a site's architecture before anything is pulled.
+//
+// It reads one manifest: an index lists every platform beside its entry, so
+// the entries' own manifests and configurations, which Builds reads, are not
+// needed. Docker Hub counts each manifest GET against an address's anonymous
+// allowance, so one read here rather than one per platform is what keeps an
+// apply of many images under it. An image published for one platform has no
+// index, and its platform is in its configuration, a blob, which is not
+// counted.
 func (r Registry) Platforms(ref string) ([]string, error) {
-	builds, err := r.Builds(ref)
+	f, digest, err := r.fetcherFor(ref)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(builds))
-	for _, b := range builds {
-		out = append(out, b.Platform)
+	var top struct {
+		Config struct {
+			Digest string `json:"digest"`
+		} `json:"config"`
+		Manifests []struct {
+			Platform struct {
+				OS           string `json:"os"`
+				Architecture string `json:"architecture"`
+				Variant      string `json:"variant"`
+			} `json:"platform"`
+		} `json:"manifests"`
+	}
+	if err := f.json("manifests/"+digest, accept, &top); err != nil {
+		return nil, fmt.Errorf("reading %s: %w", ref, err)
+	}
+	var out []string
+	for _, m := range top.Manifests {
+		// An attestation is listed with the platform unknown/unknown.
+		if m.Platform.OS != "linux" {
+			continue
+		}
+		p := m.Platform.Architecture
+		if m.Platform.Variant != "" {
+			p += "/" + m.Platform.Variant
+		}
+		out = append(out, p)
+	}
+	if len(top.Manifests) == 0 && top.Config.Digest != "" {
+		var config struct {
+			OS           string `json:"os"`
+			Architecture string `json:"architecture"`
+			Variant      string `json:"variant"`
+		}
+		if err := f.json("blobs/"+top.Config.Digest, "application/json, */*", &config); err != nil {
+			return nil, fmt.Errorf("reading %s's configuration: %w", ref, err)
+		}
+		p := config.Architecture
+		if config.Variant != "" {
+			p += "/" + config.Variant
+		}
+		if config.OS != "" && config.OS != "linux" {
+			p = config.OS + "/" + p
+		}
+		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out, nil
@@ -231,7 +288,7 @@ func (f *fetcher) json(path, accepts string, into any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the registry answered %s", resp.Status)
+		return refused(resp, fmt.Sprintf("the registry answered %s", resp.Status))
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(into)
 }
@@ -275,6 +332,8 @@ func (f *fetcher) jsonLink(path string, into any) (string, error) {
 		return "", errNotFoundStatus
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return "", fmt.Errorf("the registry answered %s: %w", resp.Status, ErrDenied)
+	case http.StatusTooManyRequests:
+		return "", refused(resp, fmt.Sprintf("the registry answered %s", resp.Status))
 	default:
 		return "", fmt.Errorf("the registry answered %s", resp.Status)
 	}

@@ -1847,7 +1847,23 @@ build. The registry is asked from the workstation, anonymously; when it cannot
 be reached, the plan keeps what the stack already runs of the same tag and
 says so, and a stack that runs none is refused until it can be. A registry
 that could not be reached is not asked again for the rest of the run, so an
-outage costs one timeout rather than one per image. `--only` and a stack an
+outage costs one timeout rather than one per image.
+
+**An apply that moves nothing asks the registry for no manifest.** Docker Hub
+limits how many manifests an address may fetch anonymously, and counts every
+`GET` of one; listing tags and asking a tag's digest (a `HEAD`) are not
+counted. The only manifest apply reads is the platform list it checks each
+build against a site's architecture with, and it skips that for a build the
+site's host already runs, on the architecture the site's manifest recorded
+at the last apply: a digest names one platform list, which cannot change
+under it, and the host running the build proves it runs there. A host rebuilt
+on another architecture is checked again, since its recorded architecture no
+longer matches. The check made before any host is read keeps each digest's
+answer on the workstation, under the catalog cache's `platforms/`, for the
+same reason. A registry that answers 429 is rate limiting this workstation:
+it is treated as unreachable for the rest of the run, the plan keeps what each
+site runs and says the registry is rate limiting, with when to retry when it
+says, and a stack that runs none is refused until the limit resets. `--only` and a stack an
 apply holds back resolve nothing: they keep what the host runs, and nothing
 about them is listed or refused.
 
