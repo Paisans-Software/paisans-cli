@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -133,5 +134,67 @@ func TestEveryKeyRecordedWritesNothing(t *testing.T) {
 	again, _ := os.Stat(path)
 	if !again.ModTime().Equal(info.ModTime()) {
 		t.Fatal("rewrote a file with nothing to add")
+	}
+}
+
+// archTransport is a host that answers hostarch.Command with arch and hands
+// every other command to Transport.
+type archTransport struct {
+	apply.Transport
+	arch string
+}
+
+func (h archTransport) Run(command string) (string, error) {
+	if command == hostarch.Command {
+		return h.arch + "\n", nil
+	}
+	return h.Transport.Run(command)
+}
+
+// SettlesSudo and PrepareSudo are the wrapped host's, so a run settles sudo
+// on it as it would unwrapped.
+func (h archTransport) SettlesSudo() bool  { return apply.SettlesSudo(h.Transport) }
+func (h archTransport) PrepareSudo() error { return apply.PrepareSudo(h.Transport) }
+
+// A whole apply reads every site's architecture before it plans, and its dry
+// run says what --execute would record without writing it.
+func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
+	// The setup of the runConverge dry runs in converge_test.go: every
+	// step, etcd read and review faked, and convergeHost replaced by a
+	// host answering hostarch.Command with "arm64\n". The configuration is
+	// a copy, so a write would land where the test can see it.
+	fakeConverge(t, nil)
+	recordConverge(t)
+	saved := convergeHost
+	convergeHost = func(string, config.Site, bool) apply.Transport {
+		return archTransport{runningHost{failingHost{match: "\x00"}}, "arm64"}
+	}
+	t.Cleanup(func() { convergeHost = saved })
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture records every site's arch, so this copy drops them, as
+	// a file written before the key existed lacks them.
+	body = []byte(strings.ReplaceAll(string(body), "    arch: amd64\n", ""))
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secrets := fixtureSecretsPath()
+	r := &ui.Recorder{}
+	_ = runConverge(r, convergeOptions{Config: path, Secrets: secrets, Execute: false, Sudo: false})
+	if r.Index("done", "read each site's architecture") < 0 {
+		t.Fatalf("no architecture read: %+v", r.Events)
+	}
+	if a, e := r.Index("done", "read each site's architecture"), r.Index("section", "etcd members"); e >= 0 && e < a {
+		t.Errorf("read after the etcd records:\n%s", r.Lines())
+	}
+	if r.Index("note", "home-a: arch arm64, recorded in paisans-stack.yaml by --execute") < 0 {
+		t.Errorf("no note of what --execute records:\n%s", r.Lines())
+	}
+	before, _ := os.ReadFile(path)
+	if strings.Contains(string(before), "arch:") {
+		t.Fatal("a dry run wrote arch")
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 	"github.com/paisans-software/paisans-stack/internal/webserver"
@@ -30,6 +31,9 @@ type manifestHost struct {
 
 func (h *manifestHost) Describe() string { return "watch.example.org" }
 func (h *manifestHost) Run(command string) (string, error) {
+	if command == hostarch.Command {
+		return "amd64\n", nil
+	}
 	return "", errors.New("manifestHost runs nothing: " + command)
 }
 func (h *manifestHost) RunInput(command, _ string) (string, error) { return h.Run(command) }

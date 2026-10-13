@@ -10,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -94,6 +95,15 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	// checked when it is applied.
 	if _, ok := cfg.Sites[site]; !ok {
 		return fmt.Errorf("site add: %s declares no site %q. Declared sites are %s", *configPath, site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	// The new site's architecture is recorded as host prepare records it;
+	// preflight compares it with the data sites'.
+	read, err := readArchitectures(r, cfg, []string{site}, func(name string) hostarch.Runner { return transports[name] })
+	if err != nil {
+		return err
+	}
+	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
+		return err
 	}
 	host, err := hostGate(r, cfg, site, transports[site])
 	if err != nil {

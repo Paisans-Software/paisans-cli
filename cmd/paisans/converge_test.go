@@ -299,7 +299,15 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// is one with no files, and so no images.
 	savedRender := convergeRender
 	convergeRender = func(*config.Config, *config.Secrets) (*render.Plan, error) { return &render.Plan{}, nil }
+	// The run reads each site's architecture through the host its steps
+	// reach; here every host is amd64, and everything else goes on to the
+	// host the test set.
+	savedHost := convergeHost
+	convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
+		return archTransport{savedHost(name, site, sudo), "amd64"}
+	}
 	t.Cleanup(func() {
+		convergeHost = savedHost
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
 		convergePullPlan, convergePullImage = savedPullPlan, savedPull
@@ -940,13 +948,13 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "step init", "pending init", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section secrets", "step read the deployment record", "section etcd members"}},
+		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section architecture", "step read each site's architecture", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section configuration", "warn", "section architecture", "step read each site's architecture", "section secrets", "step read the deployment record", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "section architecture", "step read each site's architecture", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init
@@ -1084,7 +1092,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "deployment" || section == "pocket id" || section == "secrets" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text

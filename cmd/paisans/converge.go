@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -771,6 +772,21 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 	}
 	if err := settle(cfg); err != nil {
+		return err
+	}
+	// Every site's architecture is read before anything is planned, and a
+	// missing one is recorded before the file is gathered and published:
+	// each step of the run refuses bytes changed after the publish. See
+	// recordArchitectures. The read has a section of its own, as the sudo
+	// before it does, rather than ending whichever section came last.
+	r.Section("architecture")
+	read, err := readArchitectures(r, cfg, cfg.SiteNames(), func(name string) hostarch.Runner {
+		return convergeHost(name, cfg.Sites[name], sudo)
+	})
+	if err != nil {
+		return err
+	}
+	if cfg, err = recordArchitectures(r, configPath, cfg, read, execute); err != nil {
 		return err
 	}
 	// An init that has just run warned about the secrets itself.

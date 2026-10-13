@@ -218,8 +218,10 @@ func TestConvergeWithoutSudoHasNoSudoSection(t *testing.T) {
 	rec := recordConverge(t)
 	fakeSudoHosts(t, nil, nil)
 	saved := convergeHost
+	// The real transport, whose sudo is what is checked; only the
+	// architecture read is answered here.
 	convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
-		return siteTransport(name, site, "", sudo)
+		return archTransport{siteTransport(name, site, "", sudo), "amd64"}
 	}
 	t.Cleanup(func() { convergeHost = saved })
 	if err := converge(t); err != nil {
