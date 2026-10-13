@@ -89,8 +89,8 @@ var ImageVolumes = map[string][]string{
 // names when it plans (see acme.Published), so no reference to it stays fixed
 // for long enough to be a key. Every build comes from the same Dockerfile in
 // Paisans-Software/caddy-dns, and the build the tag named on 2026-10-11
-// (sha256:b401d1cb...) declared none; the registry test reads whichever
-// build it names now, on every platform. `paisans apply` inspects the exact
+// (sha256:b401d1cb...) declared none; the registry test reads the highest
+// version tag of the repository, on every platform. `paisans apply` inspects the exact
 // build it deploys against the host's copy all the same, so a later build
 // that declared a path is still refused before it runs.
 //
@@ -102,8 +102,8 @@ var ImageVolumes = map[string][]string{
 // promotion, declared exactly that when inspected for linux/amd64, its only
 // platform, on 2026-10-11. WriteFreely's declares none (Dockerfile at
 // writefreely-wisp develop f95d840), and 0.21.0-wisp printed null inspected
-// the same way. The registry test checks each channel tag on every platform
-// it names.
+// the same way. The registry test checks each fork's highest version tag on
+// every platform it is published for.
 var RepositoryVolumes = map[string][]string{
 	acme.Repository:                          nil,
 	"ghcr.io/paisans-software/mbin":          {"/app/var/"},
