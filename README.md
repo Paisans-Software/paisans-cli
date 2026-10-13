@@ -1393,6 +1393,11 @@ clustered app stores objects, since a clustered app may not keep files on one
 disk; the chat server goes where no database is, since it binds Patroni's
 ports.
 
+For each app that signs in through Pocket ID it also asks the name shown at
+sign in, which becomes the app's `display_name` (see *`oidc client create`
+makes an app's client at Pocket ID*). Enter takes the app's key, which is
+what the client is named without one, and then nothing is written.
+
 Mail is required in it, although validate only warns without it: sign in
 mails each admin's login link and members' codes, and the status page alerts
 by mail, so a deployment with no mail has admins who sign in only through a
@@ -6865,20 +6870,35 @@ what lets an operator see what that approval does, in a dry run of either
 each request sends. The same probe runs
 again on `--execute`, so what executes is what a fresh probe plans.
 
-**A client is named after its app, except the gate's, which carries the
-community's name.** Pocket ID heads its sign in page "Sign in to" the
-client's name (`frontend/src/routes/interaction/+page.svelte:111,117` at
-v2.14.0), and the gate's sign in is the community's front door rather than an app a
-member picked, so `community.name` is what they should read there. When the
-configuration gives no `community.name`, the gate's client is named `gate`
-like any other app's. The name is also how the toolkit finds the client, so it
-is found under the name the configuration gives it, or, when Pocket ID holds
-no client of that name, under the client ID recorded for the app. A recorded
-client found that way under another name, as after `community.name` changes,
-is renamed in place: one `PUT` that sends every other field back as it is, so
-its ID, its secret and its group restriction are untouched and nobody's
-session is affected. A client of the old name with no recorded ID is never
-renamed, since nothing proves this deployment made it.
+**A client is named by its app's `display_name`, and otherwise after its
+app, except the gate's, which carries the community's name.** Pocket ID heads
+its sign in page "Sign in to" the client's name
+(`frontend/src/routes/interaction/+page.svelte:111,117` at v2.14.0), so the
+name is what a person signing in reads, and an app's key is often not what
+they should: `apps.docs.display_name: Wiki` puts "Wiki" there. The gate's
+sign in is the community's front door rather than an app a member picked, so
+`community.name` is what they should read there. When the configuration gives
+no `community.name`, the gate's client is named `gate` like any other app's.
+The name is also how the toolkit finds the client, so it is found under the
+name the configuration gives it, or, when Pocket ID holds no client of that
+name, under the client ID recorded for the app. A recorded client found that
+way under another name, as after `community.name` or a `display_name`
+changes, is renamed in place: one `PUT` that sends every other field back as
+it is, so its ID, its secret and its group restriction are untouched and
+nobody's session is affected. A client of the old name with no recorded ID is
+never renamed, since nothing proves this deployment made it.
+
+Because the name is how a client is found, `validate` refuses a name the
+client could not keep. Two apps whose clients would share a name are refused
+(`duplicate-client-name`), since the second would find the first's client. A
+`display_name` Pocket ID would refuse or change is refused too
+(`display-name-invalid`): longer than the 50 characters Pocket ID accepts
+(`dto/oidc_dto.go:42` at v2.14.0, `binding:"required,max=50"`), with space
+at either end, or not in Unicode normal form C, which Pocket ID normalises the
+name to on the way in (`unorm:"nfc"` on the same field), so that it would
+never be found under the name written. A `display_name` on an app whose
+blueprint has no client names nothing, and is warned about
+(`display-name-without-a-client`).
 
 The client is the app kind's, not a choice made at the command line, and
 **every member facing kind's client is restricted at Pocket ID to its member

@@ -28,16 +28,16 @@ var (
 // every capability, its default hostnames, and members only where offered.
 func appAnswers(chat bool) []string {
 	out := []string{
-		"",         // sign in hostname
-		"", "", "", // forums: yes, hostname, members only
-		"", "", "", // wiki
-		"", "", "", // blog
+		"",             // sign in hostname
+		"", "", "", "", // forums: yes, hostname, display name, members only
+		"", "", "", "", // wiki
+		"", "", "", "", // blog
 	}
 	if chat {
-		out = append(out, "y", "", "", "") // chat: yes, server, web client, members only
+		out = append(out, "y", "", "", "", "") // chat: yes, server, its display name, web client, members only
 	}
 	return append(out,
-		"", "", // status page: yes, hostname
+		"", "", "", // status page: yes, hostname, display name
 		"", "", "203.0.113.50", "", "", // its machine: where (its own), name, address, ssh host, user
 	)
 }
@@ -208,8 +208,8 @@ func TestTheStatusPageOnTheGateway(t *testing.T) {
 	lines = append(lines,
 		"",            // sign in hostname
 		"n", "n", "n", // no forums, wiki or blog
-		"n",    // no chat
-		"", "", // status page: yes, hostname
+		"n",        // no chat
+		"", "", "", // status page: yes, hostname, display name
 		"2", // on the gateway
 	)
 	lines = append(lines, mailAnswers...)
@@ -374,7 +374,7 @@ func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
-	lines = append(lines, "", "n", "n", "n", "n", "", "", "2")
+	lines = append(lines, "", "n", "n", "n", "n", "", "", "", "2")
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))
 	if err != nil {
@@ -388,6 +388,72 @@ func TestAnsweringAgainKeepsTheStatusPageOnTheGateway(t *testing.T) {
 		}
 		if !w.Answers.MonitorOnGateway || w.Answers.Monitor != nil {
 			t.Errorf("answering %s again moved the status page: %+v", s, w.Answers)
+		}
+	}
+}
+
+// A display name typed at its question is written as display_name, and is
+// the default when the apps are answered again. Enter takes the app's key,
+// which is the client's name without one, so nothing is written for it.
+func TestDisplayNameIsAskedAndKept(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines,
+		"",                 // sign in hostname
+		"n",                // no forums
+		"", "", "Wiki", "", // wiki: yes, hostname, display name, members only
+		"n", "n", // no blog or chat
+		"", "", "", "2", // status page: yes, hostname, display name, on the gateway
+	)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if want := "Name shown at sign in for the wiki [docs]: "; !strings.Contains(out, want) {
+		t.Errorf("missing %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "Name shown at sign in for the sign in") {
+		t.Errorf("Pocket ID has no client of its own, but was asked for a display name:\n%s", out)
+	}
+	data, err := Render(w.Answers, "0123456789abcdef", Origin{Version: "test", Date: "2026-01-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "display_name: Wiki\n") {
+		t.Errorf("docs's display name is not written:\n%s", data)
+	}
+	if n := strings.Count(string(data), "display_name:"); n != 1 {
+		t.Errorf("display_name written %d times, want only docs's:\n%s", n, data)
+	}
+
+	var again strings.Builder
+	w.p = NewPrompter(strings.NewReader(strings.Repeat("\n", 40)), &again)
+	if err := w.Ask(SectionApps); err != nil {
+		t.Fatalf("%v\n%s", err, again.String())
+	}
+	if app, _ := w.Answers.App("docs"); app.DisplayName != "Wiki" {
+		t.Errorf("answering the apps again changed docs's display name to %q", app.DisplayName)
+	}
+}
+
+func TestCheckDisplayName(t *testing.T) {
+	for _, tc := range []struct {
+		in string
+		ok bool
+	}{
+		{"Wiki", true},
+		{"Café", true},
+		{strings.Repeat("é", 50), true},
+		{strings.Repeat("w", 51), false},
+		{" Wiki", false},
+		{"Cafe\u0301", false},
+		{"", false},
+	} {
+		if err := checkDisplayName(tc.in); (err == nil) != tc.ok {
+			t.Errorf("checkDisplayName(%q) = %v, want ok=%v", tc.in, err, tc.ok)
 		}
 	}
 }

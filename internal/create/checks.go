@@ -8,8 +8,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
@@ -214,4 +216,20 @@ func notIn(taken []string, what string, check func(string) error) func(string) e
 		}
 		return check(s)
 	}
+}
+
+// checkDisplayName is validate's display-name-invalid at the prompt: a name
+// Pocket ID can hold as written, since the name is how apply finds the client.
+func checkDisplayName(s string) error {
+	switch {
+	case s == "":
+		return errors.New("a name for the sign in page, Eg: Wiki")
+	case utf8.RuneCountInString(s) > 50:
+		return errors.New("at most 50 characters, the longest client name Pocket ID accepts")
+	case strings.TrimSpace(s) != s:
+		return errors.New("no space at the start or the end")
+	case !norm.NFC.IsNormalString(s):
+		return fmt.Errorf("Pocket ID stores this as %q; type that instead", norm.NFC.String(s))
+	}
+	return nil
 }

@@ -808,4 +808,13 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != kinds.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
 		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)
 	}
+
+	// An app's display_name names its client, and the app stays its key in
+	// the secrets file.
+	app := cfg.Apps["chat"]
+	app.DisplayName = "Chat"
+	cfg.Apps["chat"] = app
+	if chat, _ = clientDesired(cfg, "chat", false); chat.Name != "Chat" || chat.App != "chat" {
+		t.Errorf("with a display name, chat's client is %q for app %q", chat.Name, chat.App)
+	}
 }
