@@ -657,6 +657,10 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// ShellQuote is shellQuote, for a command another package builds to run on
+// a host.
+func ShellQuote(s string) string { return shellQuote(s) }
+
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i] + " ..."

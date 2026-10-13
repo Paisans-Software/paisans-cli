@@ -146,10 +146,10 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		for _, svc := range kinds.ServicePorts(kind) {
 			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
 		}
-		switch kind {
-		case config.KindSynapse:
+		switch {
+		case kind == config.KindSynapse && len(kinds.ServicePorts(kind)) == 0:
 			add(owner+" MAS", "apps."+name, "tcp", addr, masPort)
-		case config.KindPocketID:
+		case kind == config.KindPocketID:
 			add(owner+" admin reconciler", "apps."+name, "tcp", addr, reconcilerPort)
 		}
 	}

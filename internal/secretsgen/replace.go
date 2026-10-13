@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Replacement is a new value for the secret at a dotted path, in the shape
@@ -20,8 +21,30 @@ import (
 // dropping a tunnel. It also refuses a path the file holds nothing at, because
 // a replacement for a secret that does not exist is a rotation of nothing.
 func Replacement(path string, s *config.Secrets) (string, error) {
+	return ReplacementIn(nil, path, s)
+}
+
+// ReplacementIn is Replacement for a deployment, which lets an app's
+// secret be made as its blueprint says: in its format, or refused when the
+// blueprint says it is never rotated, or is a keypair rotated only with its
+// group.
+func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, error) {
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
+	if cfg != nil && len(parts) == 3 && parts[0] == "apps" {
+		if spec, ok := kinds.SecretOf(cfg.Apps[parts[1]].Kind, last); ok && (spec.Format != "" || spec.NeverRotate != "") {
+			if _, held := s.Get(path); !held {
+				return "", fmt.Errorf("%s: the secrets file holds no value to replace", path)
+			}
+			switch {
+			case spec.NeverRotate != "":
+				return "", fmt.Errorf("%s: %s, so nothing here replaces it", path, spec.NeverRotate)
+			case spec.Format == kinds.FormatRSAKeypair, spec.Format == kinds.FormatRSAPublic:
+				return "", fmt.Errorf("%s: a keypair is replaced with the rest of apps.%s.%s", path, parts[1], spec.Group)
+			}
+			return generate(spec.Format)
+		}
+	}
 	switch {
 	case last == "encryption_key" && len(parts) == 3 && parts[0] == "apps",
 		last == masEncryptionSecret && len(parts) == 3 && parts[0] == "apps",

@@ -132,7 +132,7 @@ type oidcSpec struct {
 }
 
 type secretsSpec struct {
-	Generate    []string         `yaml:"generate"`
+	Generate    []secretSpec     `yaml:"generate"`
 	Required    []RequiredSecret `yaml:"required"`
 	SelfRotated []string         `yaml:"self_rotated"`
 }
@@ -293,6 +293,14 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if err := checkLinks(s.Provides, s.Consumes); err != nil {
 		return nil, err
 	}
+	secrets, err := secretSpecs(s.Secrets.Generate, s.Services)
+	if err != nil {
+		return nil, err
+	}
+	var generate []string
+	for _, sec := range secrets {
+		generate = append(generate, sec.Name)
+	}
 	locked, err := lockedSettings(s.Config.LockedSettings)
 	if err != nil {
 		return nil, err
@@ -334,7 +342,8 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		LocalMediaPaths: s.Storage.LocalMediaPaths,
 		SendsMail:       s.Mail == "reads",
 		OIDC:            oidc,
-		AppSecrets:      s.Secrets.Generate,
+		AppSecrets:      generate,
+		Secrets:         secrets,
 		RequiredSecrets: s.Secrets.Required,
 		SelfRotated:     s.Secrets.SelfRotated,
 	}
