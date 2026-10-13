@@ -62,7 +62,7 @@ type Members interface {
 // Client is Cloudflare's API, holding a token with Account Settings Read on
 // the account and Zone Read on the zone, and nothing else.
 //
-//   - find the account: GET /zones?name=<zone>, whose zone carries account.id
+//   - find the account: GET /zones?name=<suffix>, whose zone carries account.id
 //     https://developers.cloudflare.com/api/resources/zones/methods/list/
 //   - list members:     GET /accounts/{account_id}/members?page=&per_page=50
 //     https://developers.cloudflare.com/api/resources/accounts/subresources/members/methods/list/
@@ -71,7 +71,10 @@ type Members interface {
 // a real response carries (observed 2026-10-13).
 type Client struct {
 	Token string
-	Zone  string
+	// Domain is the community's domain. The zone holding it is found by
+	// asking about each suffix, longest first, as internal/dns finds a zone,
+	// because the domain need not be a zone apex.
+	Domain string
 	// Base is the API root, API unless a test points it elsewhere.
 	Base string
 	HTTP *http.Client
@@ -148,23 +151,9 @@ func (m cfMember) superAdministrator() bool {
 
 // Members reads the zone's account and every member of it.
 func (c *Client) Members(ctx context.Context) ([]Member, error) {
-	var zones []struct {
-		Name    string `json:"name"`
-		Account struct {
-			ID string `json:"id"`
-		} `json:"account"`
-	}
-	if _, err := c.get(ctx, "/zones", url.Values{"name": {c.Zone}}, &zones); err != nil {
+	account, err := c.account(ctx)
+	if err != nil {
 		return nil, err
-	}
-	account := ""
-	for _, z := range zones {
-		if strings.EqualFold(z.Name, c.Zone) {
-			account = z.Account.ID
-		}
-	}
-	if account == "" {
-		return nil, &Unreadable{Status: "zone not visible to the token"}
 	}
 	var out []Member
 	for page := 1; ; page++ {
@@ -185,6 +174,31 @@ func (c *Client) Members(ctx context.Context) ([]Member, error) {
 			return out, nil
 		}
 	}
+}
+
+// account is the account of the zone holding Domain: the first suffix of
+// it, longest first, that is a zone the token can see. The bare top level
+// label is never asked about.
+func (c *Client) account(ctx context.Context) (string, error) {
+	labels := strings.Split(strings.TrimSuffix(c.Domain, "."), ".")
+	for i := 0; i < len(labels)-1; i++ {
+		candidate := strings.Join(labels[i:], ".")
+		var zones []struct {
+			Name    string `json:"name"`
+			Account struct {
+				ID string `json:"id"`
+			} `json:"account"`
+		}
+		if _, err := c.get(ctx, "/zones", url.Values{"name": {candidate}}, &zones); err != nil {
+			return "", err
+		}
+		for _, z := range zones {
+			if strings.EqualFold(z.Name, candidate) && z.Account.ID != "" {
+				return z.Account.ID, nil
+			}
+		}
+	}
+	return "", &Unreadable{Status: "zone not visible to the token"}
 }
 
 // get makes one GET and decodes its result, returning result_info's

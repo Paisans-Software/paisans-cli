@@ -104,7 +104,7 @@ func newClient(t *testing.T, f *fakeCloudflare) *Client {
 	t.Helper()
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
-	return &Client{Token: testToken, Zone: testZone, Base: srv.URL, HTTP: srv.Client()}
+	return &Client{Token: testToken, Domain: testZone, Base: srv.URL, HTTP: srv.Client()}
 }
 
 var hasher = Hasher{Key: []byte("fixture-not-a-secret-hash-key-32")}
@@ -290,13 +290,13 @@ func TestUnreadableNeverCarriesTheBody(t *testing.T) {
 	if strings.Contains(err.Error(), "secret detail") || strings.Contains(err.Error(), testToken) {
 		t.Errorf("err carries the response or token: %v", err)
 	}
-	c := &Client{Token: testToken, Zone: testZone, Base: "http://127.0.0.1:1"}
+	c := &Client{Token: testToken, Domain: testZone, Base: "http://127.0.0.1:1"}
 	if _, err := c.Members(context.Background()); err == nil || err.Error() != "cloudflare unreadable: no answer" {
 		t.Errorf("no answer: err = %v", err)
 	}
 	g := &fakeCloudflare{}
 	c = newClient(t, g)
-	c.Zone = "other.example"
+	c.Domain = "other.example"
 	if _, err := c.Members(context.Background()); err == nil || err.Error() != "cloudflare unreadable: zone not visible to the token" {
 		t.Errorf("missing zone: err = %v", err)
 	}
@@ -320,6 +320,21 @@ func TestOnlyTheTwoReadsAreMade(t *testing.T) {
 	}
 	if len(f.requests) != 3 {
 		t.Errorf("made %d requests, want 3 (the zone and two pages): %q", len(f.requests), f.requests)
+	}
+}
+
+// A community domain below the zone apex finds the zone by its suffixes,
+// longest first.
+func TestTheZoneIsFoundFromASubdomain(t *testing.T) {
+	f := &fakeCloudflare{members: []map[string]any{member("a@example.org", "accepted", true, SuperAdministrator, "")}}
+	c := newClient(t, f)
+	c.Domain = "community.example.org"
+	got, err := c.Members(context.Background())
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Members = %v, %v", got, err)
+	}
+	if f.requests[0] != "GET /zones" || f.requests[1] != "GET /zones" {
+		t.Errorf("requests = %q, want two zone lookups first", f.requests)
 	}
 }
 

@@ -15,7 +15,7 @@
 // (docs/specs/2026-10-13-dns-admin-continuity.md), all of:
 //
 //	PAISANS_DNS_MEMBERS_TOKEN   a Cloudflare token that reads the account's members
-//	PAISANS_DNS_ZONE            the zone whose account is checked
+//	PAISANS_DNS_DOMAIN          the community domain, whose zone's account is checked
 //	PAISANS_DNS_EMAIL_HASH_KEY  the key every address is hashed under, hex
 //	PAISANS_DNS_EMAIL_MAP       hashed pairs for admins whose address differs
 package main
@@ -112,17 +112,17 @@ func dnsCheck() (*adminreconciler.DNS, error) {
 	if token == "" {
 		return nil, nil
 	}
-	zone := os.Getenv("PAISANS_DNS_ZONE")
+	domain := os.Getenv("PAISANS_DNS_DOMAIN")
 	key, err := hex.DecodeString(os.Getenv("PAISANS_DNS_EMAIL_HASH_KEY"))
-	if zone == "" || err != nil || len(key) < 32 {
-		return nil, errors.New("PAISANS_DNS_MEMBERS_TOKEN is set, so PAISANS_DNS_ZONE and PAISANS_DNS_EMAIL_HASH_KEY, at least 32 bytes as hex, must be too; the pocket-id kind's .env renders all three")
+	if domain == "" || err != nil || len(key) < 32 {
+		return nil, errors.New("PAISANS_DNS_MEMBERS_TOKEN is set, so PAISANS_DNS_DOMAIN and PAISANS_DNS_EMAIL_HASH_KEY, at least 32 bytes as hex, must be too; the pocket-id kind's .env renders all three")
 	}
 	mapping, err := dnscontinuity.ParseMap(os.Getenv("PAISANS_DNS_EMAIL_MAP"))
 	if err != nil {
 		return nil, err
 	}
 	return &adminreconciler.DNS{
-		Members: &dnscontinuity.Client{Token: token, Zone: zone, HTTP: &http.Client{Timeout: 30 * time.Second}},
+		Members: &dnscontinuity.Client{Token: token, Domain: domain, HTTP: &http.Client{Timeout: 30 * time.Second}},
 		Hasher:  dnscontinuity.Hasher{Key: key},
 		Map:     mapping,
 	}, nil
