@@ -20,7 +20,8 @@
 - `Guests` (group ID 2): no permissions, no page rules.
 - `/finalize` is called only when the `settings` table is empty, under the advisory lock. Never otherwise.
 - The bootstrap writes only what the spec's *What it writes, and only that* table lists; a test enforces it.
-- Clustered DSN carries `?sslmode=no-verify`; pinned DSN carries no `sslmode`.
+- Clustered DSN carries `?ssl=no-verify` (not `sslmode`, which Wiki.js's parser ignores: spike finding); pinned DSN carries neither.
+- Every client the toolkit creates has `skipConsent` on unless the app sets `sso_consent: true` (founder decision, 2026-10-13).
 - No em dashes in anything written in `paisans-stack` (docs, comments, commits, PR text). No rejected alternatives outside `docs/decisions.md`.
 - No real hostnames, addresses or secrets in any repo: examples use `example.org`.
 - `main` and `develop` in every repo take pull requests only. Never push to them. Never tag or release: that is the human's action.
@@ -33,7 +34,7 @@
 1. **A second bootstrap racing the first on an empty database** must never call `/finalize` once the `settings` table has rows; the second one must stop its stale setup-mode instance instead. Pinned by Task 11's `TestSecondInstanceStopsItsStaleAppInsteadOfFinalizing`.
 2. **An admin group whose existing page rules an admin wrote** must keep them when the bootstrap resets its permissions. Pinned by Task 11's `TestAdminGroupKeepsItsPageRules`.
 3. **A `synced_groups` that does not include the admin group** must be refused by `paisans validate`, not discovered after deploy. Pinned by Task 13's `checks:` rule, Task 7's `TestSyncedGroupsMustHoldTheAdminGroup` and Task 16's fixture.
-4. **A clustered DSN with `sslmode=no-verify`** must still connect from the bootstrap (pgx does not know `no-verify`). Pinned by Task 7's `TestNoVerifyBecomesRequireForPgx`.
+4. **A clustered DSN with `ssl=no-verify`** must still connect from the bootstrap (pgx does not know `ssl=no-verify`). Pinned by Task 7's `TestNoVerifyBecomesRequireForPgx`.
 5. **A Wiki.js that answers but whose login fails** (wrong password after someone reset it) must leave the bootstrap unhealthy with a message naming the break glass account, not crash-loop silently. Pinned by Task 11's `TestLoginFailureIsReportedNotRetriedSilently`.
 
 ---
@@ -667,7 +668,172 @@ EOF
 )"
 ```
 
-Stop here for the human to review and merge before Phase 3 depends on it.
+Run Task 19 before pushing; the pull request carries both. Stop here for the human to review and merge before Phase 3 depends on it.
+
+
+### Task 19: Consent is off by default, and `sso_consent` turns it on
+
+Founder decision, 2026-10-13, after the spike observed Pocket ID's consent screen. Runs after Task 5, in the same branch and pull request.
+
+**Files:**
+- Modify: `internal/kinds/dashboard.go` (beside `DashboardLinkSetting`: `const ConsentSetting = "sso_consent"`)
+- Modify: `internal/pocketid/client.go` (`OIDCClient.SkipConsent`, `NewOIDCClient.SkipConsent`, `SetSkipConsent`)
+- Modify: `internal/oidcclient/oidcclient.go` (`Desired.SkipConsent`, `newClient`, `Build`, `Execute`, new `StepKind` `SetSkipConsent`)
+- Modify: `cmd/paisans/clients.go` (`clientDesired`), and every other place that builds an `oidcclient.Desired` (find them: `grep -rn 'oidcclient.Desired{' cmd internal`)
+- Modify: `internal/validate/validate.go` (refuse a non-boolean `sso_consent`)
+- Test: `internal/oidcclient/oidcclient_test.go`, `internal/validate/testdata/sso-consent-not-a-boolean.yaml` plus its row
+- Modify: `README.md` (the passage on `sso_dashboard_link`: `grep -n sso_dashboard_link README.md`)
+
+**Interfaces:**
+- Produces: `kinds.ConsentSetting`; `Desired.SkipConsent bool`; `StepKind` `SetSkipConsent`; `func (c *Client) SetSkipConsent(clientID string, skip bool) error`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`internal/oidcclient/oidcclient_test.go`:
+
+```go
+// A new client is created with consent skipped when the app asks for no
+// consent screen.
+func TestANewClientSkipsConsent(t *testing.T) {
+	f := newFake()
+	d := talk()
+	d.SkipConsent = true
+	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("consent-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	if !f.clients[0].SkipConsent {
+		t.Errorf("client %+v", f.clients[0])
+	}
+}
+
+// An existing client whose consent setting differs is corrected, and nothing
+// else about it changes.
+func TestAnExistingClientsConsentIsCorrected(t *testing.T) {
+	f := newFake()
+	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), &memRecorder{}, secretSource("consent-secret-not-real-0002")); err != nil {
+		t.Fatal(err)
+	}
+	d := talk()
+	d.SkipConsent = true
+	p := plan(t, f, d, Recorded{ClientID: f.clients[0].ID})
+	var kinds []StepKind
+	for _, s := range p.Steps {
+		kinds = append(kinds, s.Kind)
+	}
+	if fmt.Sprint(kinds) != fmt.Sprint([]StepKind{SetSkipConsent}) {
+		t.Fatalf("planned %v", kinds)
+	}
+	if err := Execute(p, api(f), &memRecorder{}, secretSource("unused-not-real-0003")); err != nil {
+		t.Fatal(err)
+	}
+	if !f.clients[0].SkipConsent {
+		t.Error("consent not corrected")
+	}
+}
+```
+
+The fake's `serve` (top of the test file) must store and return `skipConsent` on create, read and update: extend the fake's client handling where it decodes `NewOIDCClient` and where it applies an update body, following how it handles `launchURL`. If `plan` needs the recorded secret too for "nothing else planned", pass the `Recorded` the first `Execute` wrote (`memRecorder.rec`), as `rotated` does.
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `go test ./internal/oidcclient/ -run Consent`
+Expected: FAIL to compile (`SkipConsent`, `SetSkipConsent` undefined).
+
+- [ ] **Step 3: Implement**
+
+`internal/kinds/dashboard.go`:
+
+```go
+// ConsentSetting is the app setting that asks Pocket ID to show its consent
+// screen on a person's first sign in through the app's client. Absent or
+// false, the client skips it: the toolkit made the client for the community's
+// own app, so the screen asks a member to approve something already theirs.
+const ConsentSetting = "sso_consent"
+```
+
+`internal/pocketid/client.go`: add `SkipConsent bool `json:"skipConsent"`` to `OIDCClient` and to `NewOIDCClient`, and:
+
+```go
+// SetSkipConsent sets whether the client skips Pocket ID's consent screen and
+// leaves the rest of it as it is (see updateClient).
+func (c *Client) SetSkipConsent(clientID string, skip bool) error {
+	return c.updateClient(clientID, "skipConsent", skip)
+}
+```
+
+Check `updateClient`'s value parameter type (`grep -n 'func (c \*Client) updateClient' internal/pocketid/client.go`); if it takes a string, widen it to `any` and keep its existing callers compiling.
+
+`internal/oidcclient/oidcclient.go`: in `Desired`, after `PKCE`:
+
+```go
+	// SkipConsent is whether the client skips Pocket ID's consent screen.
+	// It is on unless the app's sso_consent setting is true.
+	SkipConsent bool
+```
+
+Add `SetSkipConsent` to the `StepKind` constants after `SetLaunchURL`, with the comment "SetSkipConsent corrects an existing client's consent setting.". In `newClient`, `SkipConsent: d.SkipConsent,`. In `Build`, where the existing client's launch URL is compared (around the `SetLaunchURL` step), add:
+
+```go
+		if client.SkipConsent != d.SkipConsent {
+			p.Steps = append(p.Steps, Step{Kind: SetSkipConsent, Title: "set consent screen for " + d.App, Detail: fmt.Sprintf("set skipConsent %v for client %s: PUT /api/oidc/clients/%s with skipConsent %v and every other field sent back as it is now", d.SkipConsent, d.App, client.ID, d.SkipConsent)})
+		}
+```
+
+In `Execute`'s switch, beside `case SetLaunchURL:`:
+
+```go
+		case SetSkipConsent:
+			err = c.SetSkipConsent(client.ID, d.SkipConsent)
+```
+
+`cmd/paisans/clients.go`, in `clientDesired`'s literal:
+
+```go
+		SkipConsent:       app.Settings[kinds.ConsentSetting] != true,
+```
+
+and the same in every other `oidcclient.Desired{` the grep finds (the gate's client, if built elsewhere, reads its own configuration's `sso_consent` if it has one, else skips consent).
+
+`internal/validate/validate.go`, beside the `sso-dashboard-link-not-a-path` check:
+
+```go
+	for _, name := range c.cfg.AppNames() {
+		v, ok := c.cfg.Apps[name].Settings[kinds.ConsentSetting]
+		if _, isBool := v.(bool); ok && !isBool {
+			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.ConsentSetting),
+				"sso_consent is not true or false",
+				"is %v. Write true to show Pocket ID's consent screen on a member's first sign in, or leave it out.", v)
+		}
+	}
+```
+
+(place it in the function that holds the dashboard link check, or a new method called from the same place). Fixture `sso-consent-not-a-boolean.yaml`: `valid.yaml` with the blog app's settings gaining `sso_consent: "yes"`; its row expects `sso-consent-not-a-boolean`.
+
+- [ ] **Step 4: Run the suites**
+
+Run: `go test ./internal/oidcclient/ ./internal/pocketid/ ./internal/validate/ ./cmd/paisans/`
+Expected: PASS. Then `go test ./internal/render -update` only if a golden changed, and read its diff.
+
+- [ ] **Step 5: README**
+
+Beside the `sso_dashboard_link` passage, document `sso_consent`: what it does, that it is off by default and why (the client is the community's own app), and that `apply` corrects an existing client to match.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A internal cmd README.md
+git commit -F - <<'EOF'
+feat: Pocket ID's consent screen is off by default, and sso_consent turns it on
+
+Every client the toolkit makes is for the community's own app, so asking a
+member to consent to it on their first sign in asks them to approve
+something already theirs. apply now creates clients with skipConsent on and
+corrects an existing client that differs, as it does a launch URL. An app's
+sso_consent: true keeps the screen. Founder decision.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
 
 ---
 
@@ -713,7 +879,7 @@ type Config struct {
 	HealthAddr                                        string
 }
 func FromEnv(get func(string) string) (Config, error)
-func (c Config) PgxDSN() string // DatabaseURL with sslmode=no-verify replaced by sslmode=require
+func (c Config) PgxDSN() string // DatabaseURL with ssl=no-verify replaced by sslmode=require
 ```
 
 - [ ] **Step 1: `go mod init`**
@@ -738,7 +904,7 @@ import (
 
 func env(over map[string]string) func(string) string {
 	base := map[string]string{
-		"WIKI_URL": "http://app:3000", "DATABASE_URL": "postgresql://u:p@db:5432/wiki?sslmode=no-verify",
+		"WIKI_URL": "http://app:3000", "DATABASE_URL": "postgresql://u:p@db:5432/wiki?ssl=no-verify",
 		"PUBLIC_URL": "https://wiki.example.org", "ADMIN_EMAIL": "wikijs-admin@example.org", "ADMIN_PASSWORD": "not-a-real-password",
 		"OAUTH_CLIENT_ID": "cid", "OAUTH_CLIENT_SECRET": "not-a-real-secret",
 		"OAUTH_AUTHORIZE_URL": "https://id.example.org/authorize", "OAUTH_TOKEN_URL": "https://id.example.org/api/oidc/token",
@@ -871,21 +1037,21 @@ func FromEnv(get func(string) string) (Config, error) {
 	return c, nil
 }
 
-// PgxDSN is DatabaseURL as pgx takes it. Wiki.js's node-postgres reads
-// sslmode=no-verify (encrypt, do not check the certificate), which pgx does
-// not know; pgx's require means the same. A DSN without sslmode is a pinned
-// wiki's own Postgres, which serves no TLS, so it gets disable rather than
-// pgx's default of prefer.
+// PgxDSN is DatabaseURL as pgx takes it. Wiki.js's connection string parser
+// reads ssl=no-verify (encrypt, do not check the certificate) and ignores
+// sslmode; pgx knows no ssl parameter, and its sslmode=require means the
+// same. A DSN without either is a pinned wiki's own Postgres, which serves no
+// TLS, so it gets disable rather than pgx's default of prefer.
 func (c Config) PgxDSN() string {
 	u, err := url.Parse(c.DatabaseURL)
 	if err != nil {
 		return c.DatabaseURL
 	}
 	q := u.Query()
-	switch q.Get("sslmode") {
-	case "no-verify":
+	if q.Get("ssl") == "no-verify" {
+		q.Del("ssl")
 		q.Set("sslmode", "require")
-	case "":
+	} else if q.Get("sslmode") == "" {
 		q.Set("sslmode", "disable")
 	}
 	u.RawQuery = q.Encode()
@@ -2547,9 +2713,10 @@ DATABASE_URL={{ .DSN }}
 HA_ACTIVE=false
 {{- else }}
 DB_PASS={{ .DBPassword }}
-# The cluster rejects connections without TLS; no-verify encrypts without
-# checking its certificate, as sslmode=require does for the other apps.
-DATABASE_URL={{ .DSN }}?sslmode=no-verify
+# The cluster rejects connections without TLS. ssl=no-verify encrypts without
+# checking its certificate, as sslmode=require does for the other apps; the
+# image's parser ignores sslmode (docs/specs/2026-10-13-wikijs-blueprint-findings.md).
+DATABASE_URL={{ .DSN }}?ssl=no-verify
 # Every apps site runs an instance against this database; they tell each
 # other about changes over LISTEN/NOTIFY (server/core/db.js:229-264).
 HA_ACTIVE=true
@@ -2564,7 +2731,7 @@ WIKI_URL=http://app:{{ .App.Port }}
 {{- if .App.Pinned }}
 DATABASE_URL={{ .DSN }}
 {{- else }}
-DATABASE_URL={{ .DSN }}?sslmode=no-verify
+DATABASE_URL={{ .DSN }}?ssl=no-verify
 {{- end }}
 PUBLIC_URL={{ .PublicURL }}
 ADMIN_EMAIL=wikijs-admin@{{ .Domain }}

@@ -18,7 +18,7 @@ Four repositories change:
 |---|---|
 | `Paisans-Software/wikijs-bootstrap` | new: the bootstrap, a one shot program that finishes Wiki.js's setup and keeps its sign-in, site settings and groups as the configuration says |
 | `Paisans-Software/paisans-blueprints` | `blueprints/wikijs/` added, `blueprints/outline/` removed |
-| `Paisans-Software/paisans-stack` | a `list` setting type, an OIDC key naming further groups to create at Pocket ID, the `create` wizard, help and error text, the volume registry, the core pin, the test fixtures and the README |
+| `Paisans-Software/paisans-stack` | a `list` setting type, an OIDC key naming further groups to create at Pocket ID, consent off by default for every client, the `create` wizard, help and error text, the volume registry, the core pin, the test fixtures and the README |
 | none | the deployment agent rules, if the founder widens the exception in *Groups at Pocket ID* |
 
 Every citation of Wiki.js below is at `v2.5.316`, the newest 2.x release, which
@@ -74,12 +74,15 @@ unset one becomes the string `"undefined"` (`server/helpers/config.js:22`).
 A clustered wiki connects over TLS, because the cluster's `pg_hba.conf`
 rejects every connection without it (`hostnossl all all all reject`) and the
 proxy's backend may be on another site. Wiki.js takes the connection as
-`DATABASE_URL` when it is set (`server/core/db.js:32`), and node-postgres reads
-`sslmode` from it, so a clustered wiki renders the DSN with
-`sslmode=no-verify`: encrypted, without checking the cluster's certificate,
-which is what `sslmode=require` means to the other apps on the cluster. A
-pinned wiki talks to the Postgres container in its own project, which serves no
-TLS, and renders the DSN without it. The bootstrap uses the same DSN.
+`DATABASE_URL` when it is set (`server/core/db.js:32`). The connection string
+parser in its image ignores `sslmode` but reads `ssl`, so a clustered wiki
+renders the DSN with `ssl=no-verify`: encrypted, without checking the cluster's
+certificate, which is what `sslmode=require` means to the other apps on the
+cluster. With `sslmode=no-verify` it connected without TLS and was refused
+(observed, `docs/specs/2026-10-13-wikijs-blueprint-findings.md`). A pinned wiki
+talks to the Postgres container in its own project, which serves no TLS, and
+renders the DSN without it. The bootstrap uses the same DSN, read as
+`sslmode=require` by its own driver.
 
 Two instances against one empty database is the hard case, and *The bootstrap*
 handles it.
@@ -132,9 +135,11 @@ only what a signed in person may do.
 **Auto-login is on at both layers.** Wiki.js's own `authAutoLogin` sends
 `/login` to the first strategy by `order` unless it is a form
 (`server/controllers/auth.js:37-43`), so `pocketid` is order 0 and `local`
-after it. A guest asking for any page is sent to `/login` with the page kept in
-the `loginRedirect` cookie, so a deep link lands where it pointed. The gate's
-rule skips that hop for someone it already let through:
+after it. A guest asking for `/` is sent to `/login`; a guest asking for any
+other page gets Wiki.js's refusal page with a Login button, and the page is kept
+in the `loginRedirect` cookie, so one click signs them in and lands them where
+the link pointed. Founder decision: the one click stays. The gate's rule skips
+the hop on `/` and `/login` for someone it already let through:
 
 ```yaml
 gate:
@@ -147,6 +152,13 @@ gate:
 A member who opens the wiki with a Pocket ID session passes the gate, is sent
 to `/login/pocketid`, comes back from Pocket ID without a prompt and is signed
 in with their groups set from the claim.
+
+**No consent screen.** Pocket ID asks each person to consent the first time
+they sign in through a client created with `skipConsent` off, which is how the
+toolkit used to create every client (observed). Consent is now off by default
+for every app the toolkit makes a client for, and an app's `sso_consent: true`
+setting turns it back on. Founder decision. `apply` sets it when it creates a
+client and corrects an existing client that differs, as it does a launch URL.
 
 ## Groups
 
@@ -454,17 +466,11 @@ Each through a pull request; `main` and `develop` take nothing else.
 
 ## To verify before building
 
-Each of these is reasoned from source, not observed, and the design depends on
-it:
+A spike observed the rest of this design end to end
+(`docs/specs/2026-10-13-wikijs-blueprint-findings.md`). Still reasoned, not
+observed:
 
-* That the bootstrap, sharing the app's process namespace, comes back after
-  it stops the app, and rejoins the restarted app's namespace.
-* That node-postgres in the Wiki.js image honours `sslmode=no-verify` in
-  `DATABASE_URL` against the cluster's Postgres.
 * That `pg-pubsub` reconnects its `LISTEN` after a Patroni failover moves the
-  primary. If it does not, instances stop hearing each other until restarted.
-* That Pocket ID shows no consent screen on a first sign-in that asks for the
-  `groups` scope, or what the toolkit's client settings do about one.
-* Wiki.js's behaviour against Pocket ID end to end: the OAuth2 module's
-  callback, the claims as userinfo returns them, the groups mapping, and the
-  `loginRedirect` return to a deep link.
+  primary. It did across a restart of one Postgres. If it does not across a
+  failover, instances stop hearing each other until restarted.
+* A sign-in completed through the second instance.
