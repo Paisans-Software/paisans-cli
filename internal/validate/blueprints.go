@@ -25,9 +25,19 @@ func (c *checker) blueprintRules() {
 			if check.Holds(c.cfg, name) {
 				continue
 			}
+			rel, message := check.Failure(c.cfg, name)
 			key := prefix
-			if check.Key != "" {
-				key += "." + check.Key
+			if rel != "" {
+				key += "." + rel
+			}
+			hint := check.Hint
+			if hint == "" {
+				hint = "a check of the app's blueprint fails"
+			}
+			// A catalog's own check says whose it is; the core catalog's
+			// read as the toolkit's own rules.
+			if strings.Contains(string(kind), "/") {
+				message = fmt.Sprintf("%s (a check of the %s blueprint).", strings.TrimSuffix(message, "."), kind)
 			}
 			// The rule is the blueprint's own id, so it is not a literal
 			// here as every other rule's is.
@@ -35,7 +45,7 @@ func (c *checker) blueprintRules() {
 			if check.Refuse {
 				level = Refuse
 			}
-			c.findings = append(c.findings, Finding{level, check.ID, key, "a check of the app's blueprint fails", fmt.Sprintf("%s (a check of the %s blueprint).", check.Message, kind)})
+			c.findings = append(c.findings, Finding{level, check.ID, key, hint, message})
 		}
 
 		// A blueprint with no health route is still watched, less closely.

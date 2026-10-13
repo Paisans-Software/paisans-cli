@@ -37,6 +37,12 @@ checks:
     level: warn
     rule: "has(app.smtp.host)"
     message: "notes has no mail server"
+  - id: notes-mode-on-a-small-deployment
+    level: warn
+    hint: notes runs loud on a small deployment
+    key_expr: "'settings.' + 'mode'"
+    rule: "!has(app.settings.mode) || app.settings.mode != 'loud' || size(deployment.sites) > 9"
+    message_expr: "app.name + ' is loud on ' + app.sites.join(', ') + ', one of ' + string(size(deployment.sites)) + ' sites, keeping files ' + app.storage.mode"
 `
 
 // loadWithCatalog writes a catalog holding notesBlueprint, and the render
@@ -109,6 +115,22 @@ func TestABlueprintsOwnRulesRun(t *testing.T) {
 			t.Errorf("no %s at %s in %v", rule, key, result.Findings)
 		}
 	}
+	// A check's key and message may be worked out for the app, and the
+	// catalog's check says whose it is.
+	cfg = loadWithCatalog(t, "    settings:\n      mode: loud\n")
+	var loud *validate.Finding
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "notes-mode-on-a-small-deployment" {
+			loud = &f
+		}
+	}
+	if loud == nil {
+		t.Fatal("the loud check did not fail")
+	}
+	if loud.Key != "apps.notes.settings.mode" || loud.Hint != "notes runs loud on a small deployment" || !strings.HasPrefix(loud.Message, "notes is loud on vm, one of ") || !strings.HasSuffix(loud.Message, " sites, keeping files local (a check of the ex/notes blueprint).") {
+		t.Errorf("finding %+v", *loud)
+	}
+
 	// A blueprint's check that holds says nothing.
 	cfg = loadWithCatalog(t, "    settings:\n      contact: notes@example.org\n")
 	if validate.Check(cfg).Has("notes-contact-not-an-email") {

@@ -8,6 +8,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/ext"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
@@ -34,13 +35,24 @@ const celCostLimit = 10000
 //     (SettingsSeen)
 //   - app.smtp, its resolved mail settings (host, port, security, username,
 //     from_address, from_name), without the password, empty in a condition
+//   - app.name, its name under apps, empty in a condition
+//   - app.sites, the sites it runs on, empty in a condition
+//   - app.storage, where its files go: mode ("object" or "local"), bucket
+//     (its bucket's name, when in object storage) and media_hostname (the
+//     hostname its objects are served from, when it has one), empty in a
+//     condition
+//   - deployment.sites, each site as {name, roles}, in name order, empty in
+//     a condition
 //
 // and the functions isBareEmail(string), an email address with nothing
-// around it, and isHostname(string). Each variable is declared with its
+// around it, and isHostname(string), with CEL's string extension (join,
+// split, replace, lowerAscii and the rest), which a message expression
+// builds its text with. Each variable is declared with its
 // type, so an expression naming a field that does not exist, or comparing
 // one with the wrong type, is refused when the blueprint is read.
 var celEnv = func() *cel.Env {
 	env, err := cel.NewEnv(
+		ext.Strings(),
 		cel.Variable("app.hostname", cel.StringType),
 		cel.Variable("app.gated", cel.BoolType),
 		cel.Variable("app.auto_login", cel.BoolType),
@@ -48,6 +60,10 @@ var celEnv = func() *cel.Env {
 		cel.Variable("app.placement", cel.StringType),
 		cel.Variable("app.settings", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("app.smtp", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("app.name", cel.StringType),
+		cel.Variable("app.sites", cel.ListType(cel.StringType)),
+		cel.Variable("app.storage", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("deployment.sites", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
 		cel.Function("isBareEmail", cel.Overload("isBareEmail_string", []*cel.Type{cel.StringType}, cel.BoolType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
 				s, _ := v.Value().(string)
@@ -68,29 +84,65 @@ var celEnv = func() *cel.Env {
 
 var hostnameRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 
-// celApp is what an expression sees of an app, smtp being its resolved mail
-// settings or nil.
-func celApp(app config.App, smtp map[string]any) map[string]any {
+// celApp is what an expression sees of an app with no deployment around it,
+// as a condition sees it.
+func celApp(app config.App) map[string]any {
 	settings := map[string]any{}
 	for k, v := range SettingsSeen(app) {
 		settings[k] = v
-	}
-	if smtp == nil {
-		smtp = map[string]any{}
 	}
 	placement := "cluster"
 	if app.Placement.Mode == config.PlacementPinned {
 		placement = app.Placement.Site
 	}
 	return map[string]any{
-		"app.hostname":   app.Hostname,
-		"app.gated":      app.Gated,
-		"app.auto_login": app.AutoLogin,
-		"app.federates":  Federates(app),
-		"app.placement":  placement,
-		"app.settings":   settings,
-		"app.smtp":       smtp,
+		"app.hostname":     app.Hostname,
+		"app.gated":        app.Gated,
+		"app.auto_login":   app.AutoLogin,
+		"app.federates":    Federates(app),
+		"app.placement":    placement,
+		"app.settings":     settings,
+		"app.smtp":         map[string]any{},
+		"app.name":         "",
+		"app.sites":        []string{},
+		"app.storage":      map[string]string{},
+		"deployment.sites": []map[string]any{},
 	}
+}
+
+// celAppIn is what an expression sees of the app called name in cfg, as a
+// check sees it.
+func celAppIn(cfg *config.Config, name string) map[string]any {
+	app := cfg.Apps[name]
+	vars := celApp(app)
+	vars["app.smtp"] = smtpOf(cfg.SMTPFor(name))
+	vars["app.name"] = name
+	sites := []string{}
+	if app.Placement.Mode == config.PlacementPinned {
+		sites = append(sites, app.Placement.Site)
+	} else {
+		sites = append(sites, cfg.AppsSites()...)
+	}
+	vars["app.sites"] = sites
+	storage := map[string]string{"mode": "local"}
+	if InObjectStorage(cfg, app) {
+		storage["mode"] = "object"
+		storage["bucket"] = BucketName(name, app)
+	}
+	if media := MediaHostname(cfg, app); media != "" {
+		storage["media_hostname"] = media
+	}
+	vars["app.storage"] = storage
+	deployment := []map[string]any{}
+	for _, site := range cfg.SiteNames() {
+		roles := []string{}
+		for _, r := range cfg.Sites[site].Roles {
+			roles = append(roles, string(r))
+		}
+		deployment = append(deployment, map[string]any{"name": site, "roles": roles})
+	}
+	vars["deployment.sites"] = deployment
+	return vars
 }
 
 // smtpOf is an app's resolved mail settings as an expression sees them: only
@@ -109,7 +161,14 @@ func smtpOf(s config.SMTP) map[string]any {
 }
 
 // compile compiles a boolean CEL expression.
-func compile(expr string) (cel.Program, error) {
+func compile(expr string) (cel.Program, error) { return compileOf(expr, cel.BoolType, "a boolean") }
+
+// compileString compiles a CEL expression whose value is a string.
+func compileString(expr string) (cel.Program, error) {
+	return compileOf(expr, cel.StringType, "a string")
+}
+
+func compileOf(expr string, want *cel.Type, what string) (cel.Program, error) {
 	if expr == "" {
 		return nil, fmt.Errorf("required")
 	}
@@ -117,8 +176,8 @@ func compile(expr string) (cel.Program, error) {
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
-	if ast.OutputType() != cel.BoolType {
-		return nil, fmt.Errorf("%q is %s, not a boolean", expr, ast.OutputType())
+	if !ast.OutputType().IsExactType(want) {
+		return nil, fmt.Errorf("%q is %s, not %s", expr, ast.OutputType(), what)
 	}
 	return celEnv.Program(ast, cel.CostLimit(celCostLimit))
 }
@@ -136,7 +195,7 @@ func compileCondition(expr string) (func(config.App) bool, error) {
 		return nil, err
 	}
 	return func(app config.App) bool {
-		out, _, err := prg.Eval(celApp(app, nil))
+		out, _, err := prg.Eval(celApp(app))
 		if err != nil {
 			return true
 		}
