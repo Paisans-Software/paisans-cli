@@ -133,6 +133,7 @@ func Check(cfg *config.Config) Result {
 	c.dashboardLinkIsAPath()
 	c.mbinQueueIsKnown()
 	c.clusterSiteWithoutData()
+	c.dataSitesShareAnArch()
 	c.clusterAppWithoutAppsSite()
 	c.garageReplicationExceedsSites()
 	c.garageConsistency()
