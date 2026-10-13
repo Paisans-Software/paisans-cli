@@ -383,7 +383,11 @@ var convergeReadInitial = func(cfg *config.Config, member string, sudo bool) (re
 // monitor, the Caddy is not evidence; the record, the marker and a Caddyfile
 // still naming the gateway's hostnames are. Tests replace it.
 var convergeHoldsGateway = func(cfg *config.Config, site string, sudo bool) (bool, error) {
-	t := siteTransport(site, cfg.Sites[site], "", sudo)
+	return holdsGatewayOn(cfg, site, siteTransport(site, cfg.Sites[site], "", sudo))
+}
+
+// holdsGatewayOn is convergeHoldsGateway over a transport already made.
+func holdsGatewayOn(cfg *config.Config, site string, t apply.Transport) (bool, error) {
 	if cfg.Sites[site].RunsCaddy() {
 		return gatewaymove.Departing(t, cfg)
 	}

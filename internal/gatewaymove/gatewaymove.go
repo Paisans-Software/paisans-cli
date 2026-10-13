@@ -304,7 +304,11 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 		)
 	}
 	if len(p.evidence.HostSites) > 0 {
-		p.Notes = append(p.Notes, fmt.Sprintf("%s's /srv/caddy.d holds %s. The old Caddy is not stopped while it does: move those files to %s's /srv/caddy.d, or delete them, then run the move again.", p.From, strings.Join(p.evidence.HostSites, ", "), p.To))
+		held := "The old Caddy is not stopped while it does"
+		if p.shared {
+			held = p.From + " is not handed off while it does, since a monitor's Caddy does not serve them"
+		}
+		p.Notes = append(p.Notes, fmt.Sprintf("%s's /srv/caddy.d holds %s. %s: move those files to %s's /srv/caddy.d, or delete them, then run the move again.", p.From, strings.Join(p.evidence.HostSites, ", "), held, p.To))
 	}
 	return p, nil
 }
@@ -386,13 +390,21 @@ func Departing(t apply.Transport, cfg *config.Config) (bool, error) {
 }
 
 // inspectDeparting is inspect for a site whose roles run Caddy: its Caddy is
-// legitimately there, so it is not evidence, and its routes are.
+// legitimately there, so it is not evidence, and its routes are while that
+// Caddy runs. A plain move leaves the old Caddy's files behind, so a site
+// that gains the monitor role later holds a Caddyfile naming the gateway's
+// hostnames with no Caddy serving it until its first apply as a monitor,
+// which rewrites it: that is not a hand-off waiting to finish.
 func inspectDeparting(t apply.Transport, cfg *config.Config) (Evidence, error) {
 	ev, err := inspect(t, cfg.Deployment())
 	if err != nil {
 		return ev, err
 	}
+	running := len(ev.Caddy) > 0
 	ev.Caddy = nil
+	if !running {
+		return ev, nil
+	}
 	routes, err := gatewayRoutes(t, cfg)
 	if err != nil {
 		return ev, err
@@ -420,7 +432,7 @@ func gatewayRoutes(t apply.Transport, cfg *config.Config) ([]string, error) {
 	var out []string
 	for _, line := range strings.Split(content, "\n") {
 		head, ok := strings.CutSuffix(strings.TrimRight(line, " \t"), "{")
-		if !ok || line == "" || line[0] == ' ' || line[0] == '\t' {
+		if !ok || line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
 			continue
 		}
 		for _, name := range strings.FieldsFunc(head, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
