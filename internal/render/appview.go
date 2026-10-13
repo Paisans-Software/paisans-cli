@@ -130,10 +130,10 @@ type appValues struct {
 	// app the same shape.
 	Upstreams []string
 	// UpstreamElsewhere is true when Upstreams is a single address on a
-	// machine other than the gateway's, so the route imports upstream_single:
-	// that site can die while the gateway stays up, and a request on a
-	// connection the gateway already had open to it would otherwise wait for
-	// TCP to give up.
+	// machine other than the one whose Caddy renders the route, so the route
+	// imports upstream_single: that site can die while this Caddy stays up,
+	// and a request on a connection already open to it would otherwise wait
+	// for TCP to give up. Set per Caddy site, by renderSnippets.
 	UpstreamElsewhere bool
 
 	// MASPort, MASUpstreams, MASDBName and MASUpstreamProviderID describe the
@@ -201,7 +201,8 @@ type s3Values struct {
 	// the data.
 	GarageAddresses []string
 	// GarageElsewhere is UpstreamElsewhere for GarageAddresses: one Garage
-	// node, on a machine other than the gateway's.
+	// node, on a machine other than the one whose Caddy renders the route.
+	// Set per Caddy site, by renderSnippets.
 	GarageElsewhere bool
 
 	// WebHost is the Host Garage's web endpoint resolves this app's bucket
@@ -351,7 +352,6 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 		// every read goes through PublicBase, not here.
 		Endpoint:        s3Endpoint,
 		GarageAddresses: garageAddresses(p),
-		GarageElsewhere: p.elsewhere(garageAddresses(p)),
 		AccessKeyID:     v.Secret("s3_access_key_id"),
 		SecretKey:       v.Secret("s3_secret_access_key"),
 		Bucket:          kinds.BucketName(planned.Name, app),
@@ -428,12 +428,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	}
 	v.OIDC = p.oidcFor(planned)
 	v.Upstreams = p.upstreams(planned.Name)
-	v.UpstreamElsewhere = p.elsewhere(v.Upstreams)
-	if _, onMonitor := ServedBy(p.cfg, planned.Name); onMonitor {
-		// The Caddy in front of a monitor's app is on the monitor itself, so
-		// the app cannot die while its edge stays up.
-		v.UpstreamElsewhere = false
-	}
 	if kinds.SendsMail(planned.Kind) {
 		v.SMTP = p.smtpFor(planned.Name)
 	}
