@@ -1021,7 +1021,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests)}, options...)
+	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch)}, options...)
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err

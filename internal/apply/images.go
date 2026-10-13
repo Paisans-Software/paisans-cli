@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -51,6 +52,48 @@ type Versioner interface {
 // build nobody planned.
 func ResolveImages(r Resolver) Option {
 	return func(o *options) { o.resolver = r }
+}
+
+// Platformer is a Resolver that can also name the platforms a build was
+// published for. imagedigest.Registry and imagedigest.Cache are both.
+type Platformer interface {
+	Platforms(ref string) ([]string, error)
+}
+
+// goArchs are the architecture names an image index uses (Go's GOARCH),
+// for telling an architecture from an OS in Build.Platform.
+var goArchs = map[string]bool{"amd64": true, "arm64": true, "arm": true, "386": true, "ppc64le": true, "s390x": true, "riscv64": true, "mips64le": true}
+
+// platformCheck refuses a pin whose build has no Linux platform for arch,
+// before anything is pulled, so a dry run names it. A list that cannot be
+// read is a note rather than a refusal: the pull on the host still says so,
+// and a registry's bad moment should not stop an apply that would succeed.
+func platformCheck(site, arch string, image ImagePin, r Resolver) (*Note, error) {
+	p, ok := r.(Platformer)
+	if !ok || arch == "" {
+		return nil, nil
+	}
+	platforms, err := p.Platforms(image.Reference)
+	if err != nil {
+		return &Note{
+			Hint: fmt.Sprintf("could not read the platforms of %s", ui.Name(image.Image)),
+			Text: fmt.Sprintf("Reading which platforms %s was published for failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image.Image), err, arch, site),
+		}, nil
+	}
+	if platforms == nil || hostarch.Runs(platforms, arch) {
+		return nil, nil
+	}
+	// Build.Platform names the OS only when it is not linux (windows/amd64),
+	// so linux is put back where the first segment is an architecture.
+	named := make([]string, len(platforms))
+	for i, pl := range platforms {
+		first, _, _ := strings.Cut(pl, "/")
+		named[i] = pl
+		if goArchs[first] {
+			named[i] = "linux/" + pl
+		}
+	}
+	return nil, fmt.Errorf("%s (%s): %s is published for %s only.", site, arch, ui.Name(image.Image), strings.Join(named, ", "))
 }
 
 // PeerCompose is an app's compose file as another site running the app
@@ -743,4 +786,11 @@ func siteNames(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Arch has Build refuse an image with no build for the site's architecture
+// (amd64, arm64), before anything is pulled. Empty, or not given, checks
+// nothing, which is a site whose architecture is not known yet.
+func Arch(arch string) Option {
+	return func(o *options) { o.arch = arch }
 }

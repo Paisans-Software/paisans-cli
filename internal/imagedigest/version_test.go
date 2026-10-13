@@ -177,3 +177,14 @@ func TestVersionReadsASinglePlatformImage(t *testing.T) {
 		t.Errorf("got %q, %v; want 3.1.0", got, err)
 	}
 }
+
+func TestPlatformsNamesEveryLinuxBuild(t *testing.T) {
+	srv, _ := published(t, build{arch: "amd64"}, build{arch: "arm64"})
+	got, err := imagedigest.Registry{Client: srv.Client()}.Platforms(mbinRef(srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "amd64,arm64" {
+		t.Errorf("got %v", got)
+	}
+}

@@ -407,6 +407,8 @@ type options struct {
 	minFree    int64
 	minFreeSet bool
 	keepImages bool
+	// arch is the site's architecture; see Arch.
+	arch string
 	// noSweepRead leaves Plan.Sweep unread; see SkipSweepRead.
 	noSweepRead bool
 	only        []string
@@ -700,6 +702,16 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 			content = pinned
 			if !leftAlone {
+				for _, pin := range pins {
+					note, err := platformCheck(site, o.arch, pin, r)
+					if err != nil {
+						finish(done, err)
+						return nil, err
+					}
+					if note != nil {
+						notes = append(notes, *note)
+					}
+				}
 				out.Pins = append(out.Pins, pins...)
 				out.Notes = append(out.Notes, notes...)
 			}

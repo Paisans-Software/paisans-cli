@@ -68,6 +68,7 @@ func healthy(name string) *fakeHost {
 			{match: "sudo -n true"},
 			{match: "timedatectl", out: "yes\n"},
 			{match: "ldd --version", out: "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39\nCopyright\n"},
+			{match: "dpkg --print-architecture", out: "amd64\n"},
 			{match: "wireguard"},
 			{match: "/dev/watchdog"},
 			{match: "ss -Hltnu", out: "tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nudp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n"},
@@ -251,6 +252,10 @@ func TestPreflightRefuses(t *testing.T) {
 		{name: "glibc differs", site: "home-b", check: "platform", want: "glibc 2.41",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "ldd --version", out: "ldd (GNU libc) 2.41\n"})
+			}},
+		{name: "architecture differs", site: "home-b", check: "platform", want: "arm64, but home-a runs amd64",
+			setup: func(h map[string]*fakeHost) {
+				h["home-b"].override(rule{match: "dpkg --print-architecture", out: "arm64\n"})
 			}},
 		{name: "os differs", site: "home-b", check: "platform", want: "ubuntu 22.04",
 			setup: func(h map[string]*fakeHost) { h["home-a"].files["/etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04\n" }},
