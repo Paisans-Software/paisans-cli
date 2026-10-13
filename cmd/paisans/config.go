@@ -188,7 +188,8 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		return g, err
 	}
 	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
-	if !m.execute {
+	// A stack of one site has no peers, so a sync would bring nothing.
+	if !m.execute && configured > 1 {
 		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute starts each site's sync before reading it, so versions only its peers hold arrive too.")
 	}
 	for _, rc := range g.Reached {
