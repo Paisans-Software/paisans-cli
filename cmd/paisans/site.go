@@ -105,6 +105,16 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
+	// etcd have changed on every site, so an image with no build for its
+	// architecture is refused here, before anything is claimed.
+	rendered, err := render.Build(cfg, secrets)
+	if err != nil {
+		return err
+	}
+	if err := checkPlatforms(r, cfg, rendered, []string{site}); err != nil {
+		return err
+	}
 	host, err := hostGate(r, cfg, site, transports[site])
 	if err != nil {
 		return err
@@ -119,10 +129,6 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	// operator who does not approve leaves every host as it was. Its images
 	// are the new site's render, as stage 4 applies it. Keys are host
 	// prepare's, which the new site has had already.
-	rendered, err := render.Build(cfg, secrets)
-	if err != nil {
-		return err
-	}
 	g, err := grant.For(cfg, rendered, site)
 	if err != nil {
 		return err

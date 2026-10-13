@@ -399,3 +399,42 @@ func TestAnExecutedApplyRefusesAnImageBeforeAnyHostPrepare(t *testing.T) {
 		t.Fatalf("no refusal:\n%s", rec.Lines())
 	}
 }
+
+// publishedFor is a registry naming one build for every tag, each published
+// for one architecture alone.
+type publishedFor string
+
+func (p publishedFor) Digest(string) (string, error)      { return testCaddyDigest, nil }
+func (p publishedFor) Platforms(string) ([]string, error) { return []string{string(p)}, nil }
+
+// site add changes the mesh, HAProxy and etcd on every site before its
+// stage 4 pulls the new site's images, so it checks them against the new
+// site's architecture before it claims any host, its dry run included.
+func TestSiteAddRefusesAnImageWithoutTheNewSitesPlatform(t *testing.T) {
+	path := joinConfig(t)
+	saved := imageDigests
+	imageDigests = publishedFor("arm64")
+	t.Cleanup(func() { imageDigests = saved })
+	for _, execute := range []bool{false, true} {
+		log := loggingSSH(t, "")
+		fakeGrants(t, func(string) *grant.Record { return nil })
+		rec := recordConverge(t)
+		args := []string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}
+		if execute {
+			args = append(args, "--execute")
+		}
+		err := runSiteAdd(args, noTerminalStdin(), io.Discard)
+		if err == nil || !strings.Contains(problemText(err), "refusal") {
+			t.Fatalf("execute %v: got %v\n%s", execute, err, rec.Lines())
+		}
+		if i := rec.Index("refuse", ""); i < 0 || !strings.HasPrefix(rec.Events[i].Extra, "home-b (amd64): ") || !strings.HasSuffix(rec.Events[i].Extra, "is published for linux/arm64 only.") {
+			t.Fatalf("execute %v: no refusal:\n%s", execute, rec.Lines())
+		}
+		if rec.Has("refuse", "") && strings.Contains(rec.Lines(), "home-a (") {
+			t.Errorf("checked a site other than the new one:\n%s", rec.Lines())
+		}
+		if claimed(logged(t, log)) {
+			t.Errorf("execute %v: claimed a host before refusing", execute)
+		}
+	}
+}
