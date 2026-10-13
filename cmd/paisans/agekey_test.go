@@ -261,26 +261,6 @@ type lookupStore struct{ *keystore.Memory }
 
 func (lookupStore) LookupCommand(id string) string { return "lookup-age-key " + id }
 
-// A SOPS_AGE_* variable set while init runs means later commands use it
-// rather than the item, so init says that instead of promising the keystore.
-func TestInitNamesASetAgeVariable(t *testing.T) {
-	withoutAgeKey(t)
-	withKeystore(t, lookupStore{keystore.NewMemory()})
-	path, rec := initWorld(t, nil, fakeSites(), nil)
-	t.Setenv("SOPS_AGE_KEY_CMD", "true")
-	err, out := runInitShowing(t, "--config", path, "--sudo=false")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shown := rec.Lines() + out
-	if strings.Contains(shown, "finds the key on its own") {
-		t.Errorf("init promised the keystore is read:\n%s", shown)
-	}
-	if !strings.Contains(shown, "SOPS_AGE_KEY_CMD is set") {
-		t.Errorf("init did not name the variable:\n%s", shown)
-	}
-}
-
 func TestInitWithoutAgeVariableFindsTheKey(t *testing.T) {
 	withoutAgeKey(t)
 	withKeystore(t, lookupStore{keystore.NewMemory()})

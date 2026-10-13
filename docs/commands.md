@@ -119,13 +119,22 @@ under `--verbose`.
   its own to see what is owed before any host is changed, or to generate the
   secrets for a site or app just declared without applying anything.
 * **Flags:** `--config`, `--secrets`, `--sudo` (on: each site's registry is
-  root's).
+  root's), `--age-private-key-file <path>` (keep a newly made age key in this
+  file, outside the configuration's directory, instead of the keystore).
+* **Age key:** for a deployment with no secrets file and no `.sops.yaml`, it
+  makes the age key and keeps it in the keystore, or in
+  `--age-private-key-file`. With a `SOPS_AGE_*` variable set it makes none:
+  it writes the variable's public key to `.sops.yaml` and names the variable
+  on the `age key` step. Variables that hold no key or several are refused,
+  and so is `--age-private-key-file` beside one.
 * **Hosts:** reads every site, to choose the mesh subnet. Changes none.
 * **`--execute`:** not taken. It writes local files only: the `id` and the
-  subnet into `paisans-stack.yaml`, the secrets into the secrets file.
+  subnet into `paisans-stack.yaml`, the secrets into the secrets file, and
+  `.sops.yaml` (and the key file, when named) for a new deployment.
 
-See *Three kinds of secret* and *A deployment has an id, and a host knows every
-deployment on it* in `README.md`.
+See *Three kinds of secret*, *Rendered configuration is a build artifact* and
+*A deployment has an id, and a host knows every deployment on it* in
+`README.md`.
 
 ### `paisans render`
 

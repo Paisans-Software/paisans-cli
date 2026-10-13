@@ -154,8 +154,8 @@ Names and the public key, never the private key:
 * the public recipient and the file it was written to;
 * where the key went: the keystore item (service and account), or the
   `--age-private-key-file` path;
-* the `SOPS_AGE_KEY_CMD` line for running `sops` directly, Eg: `sops
-  updatekeys`, since only `paisans` looks in the keystore on its own:
+* with `--verbose`, the `SOPS_AGE_KEY_CMD` line for running `sops` directly,
+  Eg: `sops updatekeys`, since only `paisans` looks in the keystore on its own:
   `security find-generic-password -s paisans-age -a <id> -w` on macOS,
   `secret-tool lookup service paisans-age account <id>` on Linux;
 * a warning that this is the only copy of the key. Losing the workstation
@@ -180,7 +180,10 @@ Each is a `ui.Problem` with a hint and an explanation, in the existing style.
 | decryption: item's recipient not in the file | the recipient mismatch problem above |
 | decryption: the keystore cannot be read, Eg: no D-Bus session or a locked keychain | sops' own search runs; if it finds nothing, a problem naming the item and the keystore's error |
 | decryption fails while a `SOPS_AGE_*` variable is set | the no key problem names the variable and the item it kept paisans from reading |
-| `init` with a `SOPS_AGE_*` variable set | the key is still made and kept; the output names the variable and says paisans uses it instead of the item until it is unset |
+| `init` from scratch with a `SOPS_AGE_*` variable set | no key is made or kept; `.sops.yaml` names the public key the variables hold, and the `age key` step names the variable and that key |
+| the variables hold several keys, or a set one gives none | refuse; nothing is written. sops tries every key every set variable holds, so one key across all of them is required |
+| `--age-private-key-file` with a `SOPS_AGE_*` variable set | refuse; the flag asks for a new key and the variable names one |
+| decryption with a variable while the keystore holds the deployment's key, which the variable does not name | a note at every verbosity naming the variable and the item passed over |
 
 ## Testing
 

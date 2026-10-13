@@ -295,8 +295,8 @@ var ageVariables = []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_C
 func AgeVariables() []string { return append([]string(nil), ageVariables...) }
 
 // AgeVariableSet returns the first of the SOPS_AGE_* variables that is set,
-// and whether there is one. While one is, decryption uses it and never reads
-// the keystore, so init says so rather than promising the keystore is read.
+// and whether there is one. While one is, decryption uses it and not the
+// keystore, and init uses its key rather than making one.
 func AgeVariableSet() (string, bool) {
 	for _, name := range ageVariables {
 		if os.Getenv(name) != "" {
@@ -405,7 +405,9 @@ func decryptSOPS(data []byte, id string) ([]byte, error) {
 // in the environment, so no child paisans starts can inherit it. sops'
 // own search runs when there is no item, when the keystore cannot be read,
 // and when the item's key is not a recipient, so neither a stale item nor a
-// broken keystore ever hides a key sops would find.
+// broken keystore ever hides a key sops would find. With a variable set,
+// sops' search alone runs, and a keystore item it passed over is reported
+// through KeystoreBypassed.
 func dataKey(m *sops.Metadata, id string) ([]byte, error) {
 	if id == "" {
 		return sopsDataKey(m)
@@ -414,6 +416,9 @@ func dataKey(m *sops.Metadata, id string) ([]byte, error) {
 		key, err := sopsDataKey(m)
 		if _, none := AgeKeystore.(keystore.Unavailable); errors.Is(err, errNoKey) && !none {
 			return nil, &variableChosen{name: name, item: AgeKeystore.Describe(id), err: err}
+		}
+		if err == nil {
+			noticeBypass(id)
 		}
 		return key, err
 	}

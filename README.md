@@ -2542,18 +2542,39 @@ every other. With no keystore, `init` refuses unless you name a file with
 `--verbose`, since the operator has to know where the only copy is; with a
 file, it also prints the `export SOPS_AGE_KEY_FILE=` line later commands need.
 
+**With a `SOPS_AGE_*` variable set, `init` uses that key instead of making
+one**, because every later command decrypts with what the variable names and a
+key made beside it would never be used. It reads the variable the way sops
+does, writes the key's public half to `.sops.yaml`, keeps nothing, and says on
+the step, without `--verbose`, which variable the key came from and its public
+key (`age key: from SOPS_AGE_KEY_CMD, public key age1…`). An SSH key, from
+`SOPS_AGE_SSH_PRIVATE_KEY_FILE` or `SOPS_AGE_SSH_PRIVATE_KEY_CMD`, becomes an
+SSH recipient. sops reads every variable that is set and tries every key they
+hold, so `init` does too, and refuses unless together they hold exactly one
+key: `.sops.yaml` is written for one, and nothing says which of several is
+the deployment's. To encrypt to several, write `.sops.yaml` yourself. A
+variable that is set and gives no key is refused rather than answered with a
+new key nobody chose, and so is `--age-private-key-file` beside one, since it
+asks for a key the variable already names.
+
 **The keystore, or the file you named, then holds the only copy.** Losing it
 loses every secret in the file, so add a second recipient to `.sops.yaml`,
 another admin's key or an offline backup key, and run `sops updatekeys
-secrets.enc.yaml`.
+secrets.enc.yaml`. With a key from a variable, `init` cannot know whether
+anything else holds it, and warns only that the file is encrypted to that one
+key; the remedy is the same.
 
 Every later command finds the key on its own: with no `SOPS_AGE_*` variable
 set, paisans reads the keystore item for the deployment id and decrypts with
 it in memory. When the item is missing, the keystore cannot be read, or the
 item's key is not a recipient, sops' own search still runs. A variable you
-set always wins. `SOPS_AGE_KEY_CMD`, a command that prints the key, keeps it
-out of files and the shell's environment, and is what `sops` itself needs
-when you run it by hand; `init` prints the line.
+set always wins, and a command that decrypts with one says so at every
+verbosity when the keystore holds the deployment's key and the variable does
+not name it, because the key you saved is then not the one in use.
+`SOPS_AGE_KEY_CMD`, a command that prints the key, keeps it out of files and
+the shell's environment, and is what `sops` itself needs when you run it by
+hand; `init --verbose` prints the line for the keystore item, and a variable
+set to it is not reported, since it names the saved key.
 `SOPS_AGE_KEY_FILE` (the key's path), `SOPS_AGE_KEY` (the key itself) and
 `sops/age/keys.txt` in your config directory are read too.
 

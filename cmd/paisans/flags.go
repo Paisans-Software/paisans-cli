@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -52,6 +54,7 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		}
 		routeRetries(r)
 		routeHolds(r)
+		routeKeyNotices(r)
 		return r
 	}
 }
@@ -94,6 +97,31 @@ func routeHolds(r ui.Reporter) {
 	apply.SetPromptHold(hold)
 }
 
+// routeKeyNotices sends r the notice that a SOPS_AGE_* variable decrypted
+// the secrets while the keystore holds the deployment's own key, which the
+// variable does not name. It is shown at every verbosity, once a command:
+// the operator saved a key and is not using it, and a line only --verbose
+// shows is one they never see. A command loads the secrets more than once,
+// so a repeat says nothing new.
+func routeKeyNotices(r ui.Reporter) {
+	var mu sync.Mutex
+	shown := map[string]bool{}
+	config.KeystoreBypassed = func(variables []string, item string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if shown[item] {
+			return
+		}
+		shown[item] = true
+		are := " is"
+		if len(variables) > 1 {
+			are = " are"
+		}
+		names := andList(variables)
+		r.Note(names+are+" set, so the saved age key is not used", item+" holds this deployment's age key, and paisans decrypts with what "+names+" names instead. Unset "+names+" to use the saved key.")
+	}
+}
+
 // detailWriter turns each line written to it into a detail of the reporter.
 type detailWriter struct{ r ui.Reporter }
 
@@ -116,5 +144,6 @@ func errReporter(r ui.Reporter) ui.Reporter {
 	e := ui.New(os.Stderr, r.Verbose())
 	routeRetries(e)
 	routeHolds(e)
+	routeKeyNotices(e)
 	return e
 }
