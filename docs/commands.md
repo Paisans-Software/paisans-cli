@@ -382,20 +382,26 @@ Pins the catalogs of blueprints the deployment's apps may name, in
 `paisans-stack.yaml`. None of its subcommands reaches a host.
 
 ```sh
-paisans catalog add example https://github.com/example/paisans-blueprints   # prints the signing key
-paisans catalog add example https://github.com/example/paisans-blueprints --trust SHA256:...
+paisans catalog add example/blueprints     # github.com/example/paisans-blueprints
+paisans catalog add https://git.example.org/team/paisans-tools.git   # named team/tools
+paisans catalog add notes https://github.com/example/paisans-blueprints   # a name of your own
 paisans catalog update            # every catalog; or name one, with --tag
-paisans catalog remove example
+paisans catalog remove example/blueprints
 paisans catalog list
 ```
 
-* **`add <name> <url>`:** reads the newest release (or `--tag`) and the commit
+* **`add [<name>] <url>` or `add <owner>/<name>`:** a catalog's repository is
+  named `paisans-<name>`, and one that is not is refused. With a URL alone the
+  catalog is named `<owner>/<name>`, the prefix left out; `<owner>/<name>` alone
+  is `https://github.com/<owner>/paisans-<name>`. The command reads the newest
+  release (or `--tag`) and the commit
   it names with `git ls-remote`. A release is a tag that is
   `vMAJOR.MINOR.PATCH` (or the same without the `v`), compared number by
   number; a pre-release such as `v2.0.0-rc1` is pinned only by naming it with
   `--tag`, and a tag that is not a version is ignored. It then fetches that
   commit into the catalog cache, refuses a repository with no `catalog.yaml`,
-  and writes the pin as `catalogs.<name>`. An app then names a blueprint as `<name>/<blueprint>`.
+  and writes the pin as `catalogs.<name>`. An app then names a blueprint as
+  `<name>/<blueprint>`, Eg: `example/blueprints/journal`.
 * **`update [<name>]`:** for each declared catalog, or the one named, moves the
   pin to the newest release, by the same rule (or `--tag`), when it names
   another commit, saying for each app using one of its blueprints what changes: images, port, sign-in, the
@@ -420,7 +426,7 @@ paisans catalog list
 
 ```sh
 paisans blueprint list                      # every name an app can use
-paisans blueprint show example/journal      # its blueprint.yaml at the pin
+paisans blueprint show example/blueprints/journal   # its blueprint.yaml at the pin
 paisans blueprint lint ./blueprints/journal # for a catalog author; needs no paisans-stack.yaml
 ```
 

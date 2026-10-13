@@ -17,7 +17,7 @@ import (
 // the blueprint and tags it.
 func catalogRepo(t *testing.T) (string, func(image, tag string)) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "paisans-example")
 	write := func(name, content string) {
 		p := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -174,5 +174,68 @@ func TestCatalogAddTrustsAKeyOnlyByItsFingerprint(t *testing.T) {
 	}
 	if c := cfg.Catalogs["ex"]; c.Tag != "v2.0.0" || c.Unsigned || len(c.Signers) != 1 || !strings.HasPrefix(c.Signers[0], k.Type) {
 		t.Errorf("pin %+v", c)
+	}
+}
+
+// catalog add names a catalog <owner>/<name> from its repository unless told
+// otherwise, reads <owner>/<name> alone as a GitHub repository, and refuses
+// a repository not named paisans-<name>.
+func TestCatalogAddNamesTheCatalog(t *testing.T) {
+	for _, c := range []struct {
+		args       []string
+		name, url  string
+		wantRefuse string
+	}{
+		{args: []string{"example/blueprints"}, name: "example/blueprints", url: "https://github.com/example/paisans-blueprints"},
+		{args: []string{"Example/Media"}, name: "example/media", url: "https://github.com/Example/paisans-Media"},
+		{args: []string{"https://github.com/example/paisans-blueprints.git"}, name: "example/blueprints", url: "https://github.com/example/paisans-blueprints.git"},
+		{args: []string{"notes", "https://github.com/example/paisans-blueprints"}, name: "notes", url: "https://github.com/example/paisans-blueprints"},
+		{args: []string{"https://github.com/example/blueprints"}, wantRefuse: "is not a catalog's repository"},
+		{args: []string{"notes", "https://github.com/example/blueprints"}, wantRefuse: "is not a catalog's repository"},
+		{args: []string{"Not A Name", "https://github.com/example/paisans-x"}, wantRefuse: "is not a catalog name"},
+		{args: nil, wantRefuse: "catalog add takes a URL"},
+	} {
+		name, url, err := catalogAddArgs(c.args)
+		switch {
+		case c.wantRefuse != "":
+			if err == nil || !strings.Contains(err.Error(), c.wantRefuse) {
+				t.Errorf("%v: got %v, want %q", c.args, err, c.wantRefuse)
+			}
+		case err != nil || name != c.name || url != c.url:
+			t.Errorf("%v: got %q %q %v, want %q %q", c.args, name, url, err, c.name, c.url)
+		}
+	}
+
+	// Through the command: a URL alone pins the catalog under its default
+	// name, and an app names a blueprint in it with three parts.
+	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	reporterOverride = ui.NewPlain(&bytes.Buffer{}, false)
+	defer func() { reporterOverride = nil }()
+	repo, _ := catalogRepo(t)
+	base, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, base, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCatalogAdd([]string{repo, "--unsigned", "--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := config.DefaultCatalogName(repo)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Catalogs[want]; !ok || !strings.HasSuffix(want, "/example") {
+		t.Fatalf("catalogs %v, want %s", cfg.Catalogs, want)
+	}
+	withApp := strings.Replace(string(mustRead(t, path)), "\napps:\n", "\napps:\n  notes:\n    blueprint: "+want+"/journal\n    hostname: notes.example.org\n    placement: { pinned: vm }\n", 1)
+	if err := os.WriteFile(path, []byte(withApp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err != nil {
+		t.Errorf("an app naming %s/journal: %v", want, err)
 	}
 }

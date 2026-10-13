@@ -73,8 +73,12 @@ var helpCommands = []helpCommand{
 	{
 		name:    "catalog add",
 		summary: "Pin a catalog of blueprints at its newest release.",
-		usage:   []string{"paisans catalog add <name> <url> [--tag <tag>] [--trust <fingerprint> | --unsigned]\n                    [--config " + config.FileName + "]"},
-		detail: "Read the catalog at <url>, pin its newest release, the highest vMAJOR.MINOR.PATCH tag with pre-releases skipped (or --tag), and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>.\n\n" +
+		usage: []string{
+			"paisans catalog add <owner>/<name> [--tag <tag>] [--trust <fingerprint> | --unsigned]\n                    [--config " + config.FileName + "]",
+			"paisans catalog add [<name>] <url> [--tag <tag>] [--trust <fingerprint> | --unsigned]\n                    [--config " + config.FileName + "]",
+		},
+		detail: "A catalog's repository is named paisans-<name>. <owner>/<name> alone is https://github.com/<owner>/paisans-<name>, and a URL alone names the catalog <owner>/<name>, the prefix left out; give a name before the URL for another.\n\n" +
+			"Read the catalog at <url>, pin its newest release, the highest vMAJOR.MINOR.PATCH tag with pre-releases skipped (or --tag), and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>.\n\n" +
 			"A signed release is pinned to its key only with --trust and that key's fingerprint, which the command prints: check it with the catalog's author first. --unsigned pins a catalog whose tags are checked for nothing. Edits only " + config.FileName + ".",
 	},
 	{
