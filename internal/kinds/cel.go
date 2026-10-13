@@ -29,7 +29,9 @@ const celCostLimit = 10000
 //   - app.gated and app.auto_login, the two gate booleans
 //   - app.federates, whether it answers ActivityPub (Federates)
 //   - app.placement, "cluster" or the site it is pinned to
-//   - app.settings, its settings map
+//   - app.settings, its settings map, with its blueprint's defaults for
+//     the keys it leaves out when the blueprint is from a catalog
+//     (SettingsSeen)
 //   - app.smtp, its resolved mail settings (host, port, security, username,
 //     from_address, from_name), without the password, empty in a condition
 //
@@ -70,7 +72,7 @@ var hostnameRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-
 // settings or nil.
 func celApp(app config.App, smtp map[string]any) map[string]any {
 	settings := map[string]any{}
-	for k, v := range app.Settings {
+	for k, v := range SettingsSeen(app) {
 		settings[k] = v
 	}
 	if smtp == nil {

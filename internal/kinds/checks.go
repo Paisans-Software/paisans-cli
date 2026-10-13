@@ -97,10 +97,13 @@ func BackupOf(kind config.Kind) *BackupSpec { return of(kind).Backup }
 func NeedsDump(kind config.Kind) bool { return needsDump[of(kind).Engine] }
 
 // SettingSpec is the type of one `settings` key a blueprint reads: string,
-// bool, int, email, or enum with its values.
+// bool, int, email, or enum with its values. Default, when set, is the value
+// the blueprint's templates and expressions see for an app that leaves the
+// key out (see SettingsSeen); nil means the key has none.
 type SettingSpec struct {
-	Type   string   `yaml:"type"`
-	Values []string `yaml:"values"`
+	Type    string   `yaml:"type"`
+	Values  []string `yaml:"values"`
+	Default any      `yaml:"default"`
 }
 
 var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "email": true, "enum": true}
@@ -108,6 +111,41 @@ var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "e
 // SettingsOf is the settings a kind declares, nil for one that declares
 // none.
 func SettingsOf(kind config.Kind) map[string]SettingSpec { return of(kind).Settings }
+
+// SettingsSeen is the settings map an app's blueprint templates and CEL
+// expressions read: the app's own settings, and for a blueprint read from a
+// catalog, the default of every declared key the app leaves out. A setting
+// the app declares always wins over the default.
+//
+// Defaults are filled here, for what the blueprint itself reads, and never
+// into config.App.Settings or the configuration. The built in blueprints'
+// Go code and validate's rules give "not set" a meaning of its own (Eg:
+// AuthorizedFetch treats an absent authorized_fetch as on, and the
+// passthrough checks look at which settings an app declares), so a default
+// written into the configuration would change those answers without anyone
+// asking. A built in blueprint gets its own settings back unchanged.
+func SettingsSeen(app config.App) map[string]any {
+	if _, fromCatalog := Source(app.Kind); !fromCatalog {
+		return app.Settings
+	}
+	var out map[string]any
+	for key, spec := range SettingsOf(app.Kind) {
+		if _, set := app.Settings[key]; set || spec.Default == nil {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(app.Settings)+1)
+			for k, v := range app.Settings {
+				out[k] = v
+			}
+		}
+		out[key] = spec.Default
+	}
+	if out == nil {
+		return app.Settings
+	}
+	return out
+}
 
 // Problem is why a value is not one of the setting's type, or empty.
 func (s SettingSpec) Problem(v any) string {

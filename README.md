@@ -2665,6 +2665,15 @@ configuration*).
 out.** Its `checks` are CEL conditions over the app's declaration, each run by
 `validate` under the blueprint's own rule id as a refusal or a warning; its
 `settings` are checked by type, and a key it does not read is warned about. A
+setting may declare a `default` of its own type, which the blueprint's
+templates and CEL expressions see for an app that leaves the key out; a value
+the app sets always wins. The default is never written into the
+configuration, only into what that blueprint reads, because the built in
+blueprints give a setting that is absent a meaning of its own (an absent
+`authorized_fetch` is on), and filling defaults everywhere would change those
+answers silently. `blueprint lint` fails a template whose literal `.Setting`
+or `.SettingBool` fallback differs from the declared default, so a default is
+stated once. A
 blueprint with no health route is still watched, by a TCP connect to its port
 on each site and its front page at the public hostname answering anything
 below 500, with a warning (`blueprint-without-health`) since an app up and
