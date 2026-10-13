@@ -492,10 +492,9 @@ func (w *Wizard) publicGateway() string {
 func (w *Wizard) mail() error {
 	a := &w.Answers
 	d := a.SMTP
-	w.p.Say("\nMail. Sign in mails each admin's login link and every member's login")
-	w.p.Say("codes, the status page alerts by mail, and the forums send account mail,")
-	w.p.Say("so a server to send through is required. Its password is set afterwards,")
-	w.p.Say("with secrets set, so it is never written here.")
+	w.p.Say("\nMail. The apps send sign in links and codes, alerts, notifications and")
+	w.p.Say("account mail, so a server to send through is required. Its password is")
+	w.p.Say("set afterwards, with secrets set, so it is never written here.")
 	host, err := w.p.Text("SMTP host", d.Host, checkHostname)
 	if err != nil {
 		return err
