@@ -24,7 +24,6 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 		{nil, "example/blueprints/journal", "paisans catalog add example/blueprints`, which reads https://github.com/example/paisans-blueprints"},
 		{map[string]Catalog{"example": {URL: "https://example.org/x/blueprints", Commit: commit}}, "example/journal", "is not a catalog's repository"},
 		{map[string]Catalog{"Example/Blueprints": {URL: "https://example.org/x/paisans-c", Commit: commit}}, "mbin", "is not a catalog name"},
-		{nil, "gopher", "unknown blueprint"},
 	}
 	for _, c := range cases {
 		cfg := &Config{Catalogs: c.catalogs, Apps: map[string]App{"notes": {Kind: c.kind}}}

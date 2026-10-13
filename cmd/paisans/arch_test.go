@@ -226,7 +226,7 @@ func (s *gatheredStore) publish(_ ui.Reporter, execute bool) (*appliedVersion, e
 	if !execute {
 		return nil, nil
 	}
-	return &appliedVersion{sha: strings.Repeat("d", 40), revision: 1, files: configstore.Files{Paisans: s.paisans, Secrets: s.secrets}}, nil
+	return &appliedVersion{sha: strings.Repeat("d", 40), revision: 1, files: snapshotted(configstore.Files{Paisans: s.paisans, Secrets: s.secrets})}, nil
 }
 
 func (s *gatheredStore) held() (string, int) { return "", 0 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -55,7 +56,7 @@ func catalogRepo(t *testing.T) (string, func(image, tag string)) {
 // catalog remove refuses while it does, and catalog update moves the pin
 // and says what changed.
 func TestTheCatalogCommands(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	var out bytes.Buffer
 	reporterOverride = ui.NewPlain(&out, false)
 	defer func() { reporterOverride = nil }()
@@ -150,7 +151,7 @@ func TestCatalogAddNamesTheCatalog(t *testing.T) {
 
 	// Through the command: a URL alone pins the catalog under its default
 	// name, and an app names a blueprint in it with three parts.
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	reporterOverride = ui.NewPlain(&bytes.Buffer{}, false)
 	defer func() { reporterOverride = nil }()
 	repo, _ := catalogRepo(t)

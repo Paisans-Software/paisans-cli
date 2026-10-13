@@ -115,7 +115,7 @@ func newStore(t *testing.T) store {
 // commit adds a version of yaml plus suffix on parents, signed with key.
 func (s store) commit(t *testing.T, yaml, suffix string, parents []string, rev int, key string) (string, configstore.Files) {
 	t.Helper()
-	f := configstore.Files{Paisans: []byte(yaml + suffix), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	f := snapshotted(configstore.Files{Paisans: []byte(yaml + suffix), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	sha, err := s.repo.Commit(f, parents, rev, key, time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
@@ -781,7 +781,7 @@ func TestConfigPublishOfAFirstVersionWithoutAMajorityAsksPartial(t *testing.T) {
 	configSignWith = func(string) string { return key }
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
 	l := configstore.Local{Dir: t.TempDir()}
-	f := configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	f := snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	if err := l.WriteFiles(f); err != nil {
 		t.Fatal(err)
 	}

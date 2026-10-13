@@ -11,7 +11,7 @@ import (
 // answer zero to every question the other asks.
 func TestEveryKindHasARecord(t *testing.T) {
 	accepted := map[config.Kind]bool{}
-	for _, kind := range config.Kinds() {
+	for _, kind := range Builtin() {
 		accepted[kind] = true
 		if _, ok := For(kind); !ok {
 			t.Errorf("%s is accepted by the configuration but has no record", kind)

@@ -129,9 +129,9 @@ func (c *Config) catalogProblems() []string {
 		case strings.Count(string(kind), "/") > 2 || !blueprintName.MatchString(bp):
 			add("%s: %q is not a blueprint name. Write a built in one (mbin) or one from a declared catalog (example/blueprints/journal).", key, kind)
 		case catalog == "":
-			if !knownKinds[kind] {
-				add("%s: unknown blueprint %q. The ones built into this toolkit are element, mbin, oauth2-proxy, outline, pocket-id, synapse, uptime and writefreely; one from a catalog is written <catalog>/<name>.", key, kind)
-			}
+			// A reserved or core blueprint. Which the core catalog holds is
+			// known only once its pin is read, so ResolveBlueprints says
+			// whether this one is among them.
 		case catalog == CoreCatalog:
 			add("%s: %q names the core catalog, whose blueprints are written unqualified: %s.", key, kind, bp)
 		default:

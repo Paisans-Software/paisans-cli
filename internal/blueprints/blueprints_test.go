@@ -2,6 +2,8 @@ package blueprints
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -46,25 +48,10 @@ func TestTemplatesHideTheBlueprintFile(t *testing.T) {
 	}
 }
 
-// A blueprint is in core or reserved, never both, so a name has one answer.
-func TestABlueprintHasOneOrigin(t *testing.T) {
-	builtins, err := Builtins()
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]Origin{}
-	for _, b := range builtins {
-		if o, ok := seen[b.Name]; ok {
-			t.Errorf("%s is in both %s and %s", b.Name, o, b.Origin)
-		}
-		seen[b.Name] = b.Origin
-	}
-}
-
-// The copy of the core catalog in the binary is exactly the commit its pin
-// names: a hand edit to a blueprint's copy, or a sync that did not write the
-// pin, fails here rather than shipping as if it were the catalog's.
-func TestTheCoreCopyMatchesItsPin(t *testing.T) {
+// The test copy of the core catalog is exactly the commit the pin names: a
+// hand edit to a blueprint's copy, or a pin written without the copy, fails
+// here rather than testing something the binary will not fetch.
+func TestTheTestCopyMatchesThePin(t *testing.T) {
 	pin, err := CorePin()
 	if err != nil {
 		t.Fatal(err)
@@ -72,38 +59,34 @@ func TestTheCoreCopyMatchesItsPin(t *testing.T) {
 	if len(pin.Commit) != 40 || pin.URL == "" {
 		t.Fatalf("pin %+v names no commit", pin)
 	}
+	copy := os.DirFS(filepath.Join("testdata", "core", "blueprints"))
+	entries, err := fs.ReadDir(copy, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
 	copied := map[string]bool{}
-	for _, b := range mustBuiltins(t) {
-		if b.Origin == Core {
-			copied[b.Name] = true
+	for _, e := range entries {
+		if e.IsDir() {
+			copied[e.Name()] = true
 		}
 	}
 	for name := range pin.Blueprints {
 		if !copied[name] {
-			t.Errorf("the pin names %s, which the core copy does not hold", name)
+			t.Errorf("the pin names %s, which the test copy does not hold", name)
 		}
 	}
 	for name := range copied {
 		want, ok := pin.Blueprints[name]
 		if !ok {
-			t.Errorf("the core copy holds %s, which the pin does not name", name)
+			t.Errorf("the test copy holds %s, which the pin does not name", name)
 			continue
 		}
-		got, err := CoreDigest(name)
+		got, err := Digest(copy, name)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got != want {
-			t.Errorf("the core copy of %s has SHA-256 %s and its pin says %s. Change a core blueprint in the catalog and run scripts/pin-core-catalog.sh, rather than editing the copy", name, got, want)
+			t.Errorf("the test copy of %s has SHA-256 %s and the pin says %s. Change a core blueprint in the catalog and run scripts/pin-core-catalog.sh, rather than editing the copy", name, got, want)
 		}
 	}
-}
-
-func mustBuiltins(t *testing.T) []Builtin {
-	t.Helper()
-	builtins, err := Builtins()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return builtins
 }

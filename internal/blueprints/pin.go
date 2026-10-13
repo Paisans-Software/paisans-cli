@@ -12,8 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PinFile is the record, in core/, of which core catalog commit the copy
-// there came from.
+// PinFile is the record, in core/, of which core catalog commit the binary
+// fetches.
 const PinFile = "pin.yaml"
 
 // Pin is the core catalog commit this binary is pinned to
@@ -30,7 +30,7 @@ type Pin struct {
 
 // CorePin is the pin the binary was built with.
 func CorePin() (Pin, error) {
-	raw, err := fs.ReadFile(embedded, path.Join(string(Core), PinFile))
+	raw, err := fs.ReadFile(embedded, path.Join("core", PinFile))
 	if err != nil {
 		return Pin{}, err
 	}
@@ -41,17 +41,10 @@ func CorePin() (Pin, error) {
 	return p, nil
 }
 
-// CoreDigest is the SHA-256 of one core blueprint's copy in the binary,
-// computed as scripts/pin-core-catalog.sh computes it: each file's SHA-256
-// and its path relative to the blueprint's directory, one per line in
-// bytewise order, hashed.
-func CoreDigest(name string) (string, error) {
-	return Digest(embedded, path.Join(string(Core), name))
-}
-
-// Digest is that SHA-256 for the files under dir in fsys, the same whether
-// they came from the binary or from a catalog's checkout. A pin.yaml
-// directly under dir is left out.
+// Digest is the SHA-256 of the files under dir in fsys, as
+// scripts/pin-core-catalog.sh computes it for each core blueprint: each
+// file's SHA-256 and its path relative to dir, one per line in bytewise
+// order, hashed. A pin.yaml directly under dir is left out.
 func Digest(fsys fs.FS, dir string) (string, error) {
 	files := map[string][]byte{}
 	err := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {

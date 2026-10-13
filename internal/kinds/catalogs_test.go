@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
@@ -59,7 +60,7 @@ func catalogConfig(url, commit, tag, blueprint string) *config.Config {
 // recorded under its qualified name, and its templates are rendered from
 // where it was fetched.
 func TestACatalogBlueprintResolves(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, commit := testCatalog(t, nil)
 	if problems := resolve(catalogConfig(url, commit, "v1.0.0", "example/journal")); len(problems) > 0 {
 		t.Fatal(problems)
@@ -92,7 +93,7 @@ func TestACatalogBlueprintResolves(t *testing.T) {
 
 // What a catalog cannot do is refused by name.
 func TestACatalogMistakeIsRefused(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, commit := testCatalog(t, map[string]string{
 		"blueprints/pocket-id/blueprint.yaml": strings.Replace(minimal, "name: example", "name: pocket-id", 1),
 	})
@@ -117,7 +118,7 @@ func TestACatalogMistakeIsRefused(t *testing.T) {
 // A tag that has moved since the pin was written is refused: the pin names
 // a commit, and the tag no longer does.
 func TestAMovedTagIsRefused(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, first := testCatalog(t, nil)
 	if err := os.WriteFile(filepath.Join(url, "catalog.yaml"), []byte("apiVersion: paisans.catalog/v1\nname: example\n# moved\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -138,7 +139,7 @@ func TestAMovedTagIsRefused(t *testing.T) {
 // that has never fetched the catalog, resolves the same blueprints with the
 // catalog gone.
 func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, commit := testCatalog(t, nil)
 	cfg := catalogConfig(url, commit, "", "example/journal")
 	if p := resolve(cfg); len(p) > 0 {
@@ -152,7 +153,7 @@ func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
 		t.Fatalf("snapshot %v", snap)
 	}
 	// Another machine: a fresh cache, and the catalog deleted.
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	if err := os.RemoveAll(url); err != nil {
 		t.Fatal(err)
 	}
@@ -174,14 +175,9 @@ func TestASnapshotResolvesWithoutTheCatalog(t *testing.T) {
 // The core catalog pinned to a commit of its own replaces the built in core
 // blueprints with the ones that commit holds.
 func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, commit := testCatalog(t, nil)
-	t.Cleanup(func() {
-		mu.Lock()
-		defer mu.Unlock()
-		delete(defs, "journal")
-		delete(sources, "journal")
-	})
+	t.Cleanup(forgetCore)
 	cfg := &config.Config{
 		Catalogs: map[string]config.Catalog{"core": {URL: url, Tag: "v1.0.0", Commit: commit}},
 		Apps:     map[string]config.App{"notes": {Kind: "journal", Hostname: "notes.example.org"}},
@@ -192,13 +188,25 @@ func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 	if dir, ok := Source("journal"); !ok || !strings.HasPrefix(dir, os.Getenv("PAISANS_CATALOG_CACHE")) {
 		t.Errorf("journal was not read from the core pin: %q %v", dir, ok)
 	}
+	if _, ok := For("mbin"); ok {
+		t.Error("mbin, which the configuration's core pin does not hold, is still known")
+	}
+}
+
+// forgetCore drops the core blueprints read so far, so the next one asked
+// for is read again at the binary's pin.
+func forgetCore() {
+	replaceCore()
+	core.Lock()
+	defer core.Unlock()
+	core.done, core.err = false, nil
 }
 
 // A fetch takes the commit's trees and checks out only the blueprints in
 // use: a blueprint no app names is listed but its files are never fetched,
 // and one a later configuration names is added to the same checkout.
 func TestAFetchTakesOnlyTheBlueprintsInUse(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	src, commit := testCatalog(t, map[string]string{
 		"blueprints/diary/blueprint.yaml":    strings.Replace(minimal, "name: example", "name: diary", 1),
 		"blueprints/diary/compose.yaml.tmpl": "services: {}\n# diary\n",
@@ -254,7 +262,7 @@ func TestAFetchTakesOnlyTheBlueprintsInUse(t *testing.T) {
 // A blueprint whose checkout was interrupted, so has no mark, is checked
 // out again rather than used half done.
 func TestAnUnmarkedBlueprintIsCheckedOutAgain(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	url, commit := testCatalog(t, nil)
 	dir, err := Fetch(config.Catalog{URL: url, Commit: commit})
 	if err != nil {

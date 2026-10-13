@@ -163,7 +163,7 @@ sites:
     address: not-an-address
 apps:
   talk:
-    blueprint: gopher
+    blueprint: Gopher
     hostname: ""
 `
 	_, err := config.Load(write(t, body))

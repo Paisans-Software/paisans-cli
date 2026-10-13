@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
@@ -44,7 +45,7 @@ func TestASettingDefaultIsOfItsType(t *testing.T) {
 // out and the app's own value for one it sets, and the app's configuration
 // is not written to.
 func TestACatalogBlueprintsExpressionsSeeItsDefaults(t *testing.T) {
-	t.Setenv("PAISANS_CATALOG_CACHE", t.TempDir())
+	coretest.Cache(t)
 	spec := strings.Replace(withDefaults, "name: example", "name: journal", 1) +
 		"checks:\n  - {id: quiet-by-default, level: refuse, rule: 'app.settings.mode == \"quiet\" && app.settings.limit == 5', message: m}\n"
 	url, commit := testCatalog(t, map[string]string{"blueprints/journal/blueprint.yaml": spec})

@@ -166,16 +166,37 @@ func (r Repo) writeTree(f Files) (string, error) {
 	os.Remove(index.Name())
 	defer os.Remove(index.Name())
 	env := []string{"GIT_INDEX_FILE=" + index.Name()}
-	for _, e := range entries {
-		out, err := r.git(bytes.NewReader(e.data), nil, "hash-object", "-w", "--stdin")
-		if err != nil {
-			return "", err
-		}
-		if _, err := r.git(nil, env, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(out))+","+e.path); err != nil {
-			return "", err
-		}
+	// One git for every blob and one for the index, since a snapshot holds
+	// every file of every blueprint the apps use.
+	staged, err := os.MkdirTemp("", "paisans-blobs-")
+	if err != nil {
+		return "", err
 	}
-	out, err := r.git(nil, env, "write-tree")
+	defer os.RemoveAll(staged)
+	var paths bytes.Buffer
+	for i, e := range entries {
+		p := filepath.Join(staged, strconv.Itoa(i))
+		if err := os.WriteFile(p, e.data, 0o600); err != nil {
+			return "", err
+		}
+		paths.WriteString(p + "\n")
+	}
+	out, err := r.git(&paths, nil, "hash-object", "-w", "--stdin-paths")
+	if err != nil {
+		return "", err
+	}
+	oids := strings.Fields(string(out))
+	if len(oids) != len(entries) {
+		return "", fmt.Errorf("git hash-object stored %d of %d files", len(oids), len(entries))
+	}
+	var info bytes.Buffer
+	for i, e := range entries {
+		fmt.Fprintf(&info, "100644 %s\t%s\n", oids[i], e.path)
+	}
+	if _, err := r.git(&info, env, "update-index", "--add", "--index-info"); err != nil {
+		return "", err
+	}
+	out, err = r.git(nil, env, "write-tree")
 	if err != nil {
 		return "", err
 	}
@@ -299,17 +320,39 @@ func (r Repo) snapshot(sha string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := map[string][]byte{}
+	var names []string
+	var want bytes.Buffer
 	for _, name := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
 		rel := strings.TrimPrefix(name, blueprintsDir+"/")
 		if name == "" || rel == sumsFile || !snapshotPath.MatchString(rel) {
 			continue
 		}
-		data, err := r.git(nil, nil, "cat-file", "blob", sha+":"+name)
-		if err != nil {
-			return nil, err
+		names = append(names, rel)
+		want.WriteString(sha + ":" + name + "\n")
+	}
+	files := map[string][]byte{}
+	if len(names) == 0 {
+		return files, nil
+	}
+	// One git for every file, since a snapshot holds every file of every
+	// blueprint the apps use. snapshotPath keeps a newline out of a name, so
+	// each is one request.
+	out, err = r.git(&want, nil, "cat-file", "--batch")
+	if err != nil {
+		return nil, err
+	}
+	for _, rel := range names {
+		header, rest, ok := bytes.Cut(out, []byte("\n"))
+		f := strings.Fields(string(header))
+		if !ok || len(f) != 3 || f[1] != "blob" {
+			return nil, fmt.Errorf("reading blueprints/%s from version %s: %s", rel, sha, header)
 		}
-		files[rel] = data
+		size, err := strconv.Atoi(f[2])
+		if err != nil || size < 0 || len(rest) < size+1 {
+			return nil, fmt.Errorf("reading blueprints/%s from version %s: a short answer", rel, sha)
+		}
+		files[rel] = append([]byte(nil), rest[:size]...)
+		out = rest[size+1:]
 	}
 	return files, nil
 }

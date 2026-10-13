@@ -77,8 +77,8 @@ func newMergeCaseSOPS(t *testing.T, base, ours, theirs []string, headYAML, headS
 		return must(os.ReadFile(p))
 	}
 	s := newStore(t)
-	b := configstore.Files{Paisans: []byte(yaml), Secrets: enc(base), SOPS: []byte(sops)}
-	h := configstore.Files{Paisans: []byte(yaml + headYAML), Secrets: enc(theirs), SOPS: []byte(sops)}
+	b := snapshotted(configstore.Files{Paisans: []byte(yaml), Secrets: enc(base), SOPS: []byte(sops)})
+	h := snapshotted(configstore.Files{Paisans: []byte(yaml + headYAML), Secrets: enc(theirs), SOPS: []byte(sops)})
 	if headSOPS != "" {
 		h.SOPS = []byte(headSOPS)
 	}
@@ -93,7 +93,7 @@ func newMergeCaseSOPS(t *testing.T, base, ours, theirs []string, headYAML, headS
 		t.Fatal(err)
 	}
 	shas = []string{sha0, sha1}
-	local := configstore.Files{Paisans: b.Paisans, Secrets: enc(ours), SOPS: b.SOPS}
+	local := snapshotted(configstore.Files{Paisans: b.Paisans, Secrets: enc(ours), SOPS: b.SOPS})
 	l := pullWorkstation(t, s.answer(t), sha0, sha0, local)
 	return mergeCase{l: l, cfg: filepath.Join(l.Dir, "paisans-stack.yaml"), shas: shas, sops: sops, files: local}
 }

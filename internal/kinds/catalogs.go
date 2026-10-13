@@ -347,16 +347,7 @@ func resolve(cfg *config.Config) []string {
 		if dir, ok := fetched[name]; ok {
 			return dir, dir != ""
 		}
-		cat := cfg.Catalogs[name]
-		if name == config.CoreCatalog && cat.URL == "" {
-			pin, err := blueprints.CorePin()
-			if err != nil {
-				problems = append(problems, fmt.Sprintf("catalogs.core: %v", err))
-				fetched[name] = ""
-				return "", false
-			}
-			cat.URL = pin.URL
-		}
+		cat := CorePin(cfg, name)
 		if dir, ok := snapshotDir(cat.Commit); ok {
 			fetched[name] = dir
 			return dir, true
@@ -378,6 +369,8 @@ func resolve(cfg *config.Config) []string {
 		if dir, ok := fetch(config.CoreCatalog); ok {
 			problems = append(problems, overrideCore(dir)...)
 		}
+	} else if err := LoadCore(core.URL); err != nil {
+		problems = append(problems, fmt.Sprintf("catalogs.core: %v.", err))
 	}
 
 	for _, app := range cfg.AppNames() {
@@ -386,7 +379,8 @@ func resolve(cfg *config.Config) []string {
 		key := "apps." + app + ".blueprint"
 		if catalog == "" {
 			if _, ok := For(kind); !ok {
-				problems = append(problems, fmt.Sprintf("%s: unknown blueprint %q.", key, kind))
+				reserved, core := BuiltinNames()
+				problems = append(problems, fmt.Sprintf("%s: unknown blueprint %q. The reserved ones are %s, the core catalog's are %s, and one from a catalog is written <catalog>/<name>.", key, kind, strings.Join(reserved, ", "), strings.Join(core, ", ")))
 			}
 			continue
 		}
@@ -408,10 +402,11 @@ func resolve(cfg *config.Config) []string {
 	return problems
 }
 
-// overrideCore replaces the built in core blueprints with the ones a
-// configuration's own core pin holds. A reserved blueprint is never among
-// them: a core catalog that ships one is refused.
+// overrideCore replaces the core blueprints at the binary's pin with the
+// ones a configuration's own core pin holds. A reserved blueprint is never
+// among them: a core catalog that ships one is refused.
 func overrideCore(dir string) []string {
+	replaceCore()
 	names, err := Blueprints(dir)
 	if err == nil {
 		err = Checkout(dir, names...)
@@ -589,9 +584,9 @@ func Snapshot(cfg *config.Config) (map[string][]byte, error) {
 		if catalog == "" {
 			catalog = config.CoreCatalog
 		}
-		cat, declared := cfg.Catalogs[catalog]
+		cat := CorePin(cfg, catalog)
 		dir, fromCatalog := Source(kind)
-		if !declared || !fromCatalog || cat.Commit == "" {
+		if !fromCatalog || cat.Commit == "" {
 			continue
 		}
 		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {

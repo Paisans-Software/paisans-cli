@@ -32,7 +32,7 @@ func TestUsesObjectStorage(t *testing.T) {
 // image_url_base. Outline's bucket holds document attachments and must never
 // be.
 func TestMbinAndTheBlogServeObjectsPubliclyAndOutlineDoesNot(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		want := kind == config.KindMbin || kind == config.KindWriteFreely
 		if got := kinds.ServesObjectsPublicly(kind); got != want {
 			t.Errorf("%s: ServesObjectsPublicly is %v, want %v", kind, got, want)
@@ -73,7 +73,7 @@ func TestWriteFreelyUsesPostgresAndPublicObjectStorage(t *testing.T) {
 // nothing routes, and a kind with the role and no bucket would route a
 // hostname to nothing.
 func TestEveryKindThatStoresObjectsHasAMediaRole(t *testing.T) {
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		if got, want := kinds.HasHostnameRole(kind, kinds.MediaRole), kinds.UsesObjectStorage(kind); got != want {
 			t.Errorf("%s: HasHostnameRole(media) is %v, UsesObjectStorage is %v", kind, got, want)
 		}
@@ -135,7 +135,7 @@ func TestEachKindsConfigFileAndFormat(t *testing.T) {
 		config.KindUptime:      {kinds.ConfigEnv, ".env"},
 		config.KindInvite:      {kinds.ConfigEnv, ".env"},
 	}
-	for _, kind := range config.Kinds() {
+	for _, kind := range kinds.Builtin() {
 		want, known := cases[kind]
 		if !known {
 			t.Errorf("%s is not in this table, so nobody decided where its configuration lives", kind)
