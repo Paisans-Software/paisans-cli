@@ -141,7 +141,9 @@ exits non zero when anything was refused.
 
 `create` asks a new deployment's questions at a terminal and writes its
 `paisans-stack.yaml`. `internal/create` holds the questions (`wizard.go`), the three
-named shapes and the capabilities they are asked in (`shapes.go`), the checks
+named shapes and the capabilities they are asked in (`shapes.go`: the core
+catalog's `wizard` menu, read with `kinds.Wizard`, and the health page, which
+is the toolkit's own; an app's `on` and `avoid` roles decide its site), the checks
 each answer meets when it is typed (`checks.go`), and the template the file is
 rendered from (`paisans-stack.yaml.tmpl`, through `render.go`, which also decides
 placement, object storage and etcd timings from the answers). The rendered
@@ -1482,6 +1484,14 @@ repository, and tag a release; deployments take it on their next run. Run
 `internal/blueprints/testdata/core/` and its tag in `core.release`; with
 `CORE_CATALOG_DIR` it copies a local checkout instead, for a change made to
 both repositories before the release exists.
+
+Links between apps are the blueprints' own: a provider lists each role it
+provides with a CEL expression per value (`provides: [{role, values}]`, each a
+string over the app, `app.hostnames` included), and a consumer's templates
+read them with `.Linked "<role>" "<value>"`, which fails the render for a
+value the provider does not declare. No role is named in Go; a consumer
+pointed at a provider outside the deployment gets the values any blueprint
+providing the role says of that hostname (`kinds.LinkValuesAt`).
 
 A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older

@@ -105,7 +105,7 @@ func build(a Answers, id string) view {
 
 	sites := a.AllSites()
 	var data []string
-	pinTo, monitor, chat, web := "", "", "", ""
+	pinTo, monitor := "", ""
 	for i, s := range sites {
 		roles := make([]string, len(s.Roles))
 		for j, r := range s.Roles {
@@ -125,25 +125,9 @@ func build(a Answers, id string) view {
 			monitor = s.Name
 			v.MonitorBesideGateway = s.Has(config.RoleGateway)
 		}
-		// The chat server binds the ports Patroni and bg_mon do, so it goes
-		// where no data is, and off a monitor that is not the gateway, which
-		// serves the monitor alone; its web client binds 80, which the
-		// gateway's Caddy holds, so it goes where no gateway is.
-		if chat == "" && !s.Has(config.RoleData) && (!s.Has(config.RoleMonitor) || s.Has(config.RoleGateway)) {
-			chat = s.Name
-		}
-		if web == "" && s.Has(config.RoleApps) && !s.Has(config.RoleGateway) {
-			web = s.Name
-		}
 	}
 	if pinTo == "" && len(sites) > 0 {
 		pinTo = sites[0].Name
-	}
-	if chat == "" {
-		chat = pinTo
-	}
-	if web == "" {
-		web = pinTo
 	}
 
 	// An app whose blueprint consumes a role is pointed at the app that
@@ -168,10 +152,8 @@ func build(a Answers, id string) view {
 		switch {
 		case app.Kind == config.KindUptime && monitor != "":
 			av.Placement = pinned(monitor)
-		case app.Key == chatApp:
-			av.Placement = pinned(chat)
-		case app.Key == webApp:
-			av.Placement = pinned(web)
+		case placedApart(app.Key):
+			av.Placement = pinned(siteFor(app.Key, sites, pinTo))
 		case kinds.UsesPostgres(app.Kind) && len(data) > 0:
 			// Clustered whenever any site holds data, so that adding a data
 			// site later is an addition rather than a move. A clustered app
@@ -195,6 +177,36 @@ func build(a Answers, id string) view {
 }
 
 func pinned(site string) string { return "{ pinned: " + site + " }" }
+
+// placedApart reports whether the app under key says where it may go (its
+// wizard entry's on and avoid), which decides its site over the defaults.
+func placedApart(key string) bool {
+	spec, ok := specFor(key)
+	return ok && (len(spec.on) > 0 || len(spec.avoid) > 0)
+}
+
+// siteFor is the first site the app under key may go on: one holding every
+// role its spec's on names and none its avoid names, and not a monitor away
+// from the gateway, which serves the monitor alone. pinTo when none may.
+func siteFor(key string, sites []Site, pinTo string) string {
+	spec, _ := specFor(key)
+	for _, s := range sites {
+		if s.Has(config.RoleMonitor) && !s.Has(config.RoleGateway) {
+			continue
+		}
+		ok := true
+		for _, r := range spec.on {
+			ok = ok && s.Has(r)
+		}
+		for _, r := range spec.avoid {
+			ok = ok && !s.Has(r)
+		}
+		if ok {
+			return s.Name
+		}
+	}
+	return pinTo
+}
 
 // quote is s as a YAML scalar that reads back as exactly s: marshalled by
 // the same library that will read it, so a name holding `:` or `#`, a quote

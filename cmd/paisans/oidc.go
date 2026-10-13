@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -72,7 +73,7 @@ func runOIDCClientCreate(args []string) error {
 	}
 	desired, ok := clientDesired(cfg, *appName, *rotate)
 	if !ok {
-		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: mbin, outline, writefreely, uptime, synapse, oauth2-proxy", app.Kind)
+		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: %s", app.Kind, strings.Join(kindsWithClients(), ", "))
 	}
 	idp := pocketIDApp(cfg)
 	if idp == "" {
@@ -185,4 +186,16 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 	}
 	r.wrote = true
 	return nil
+}
+
+// kindsWithClients is every built in kind whose blueprint signs in through
+// the identity provider, for a refusal that lists them.
+func kindsWithClients() []string {
+	var out []string
+	for _, kind := range kinds.Builtin() {
+		if _, ok := kinds.OIDCClient(kind, "example.org", "app"); ok {
+			out = append(out, string(kind))
+		}
+	}
+	return out
 }

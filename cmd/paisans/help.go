@@ -371,7 +371,7 @@ var helpCommands = []helpCommand{
 		summary: "Create an app's client at the deployment's Pocket ID.",
 		usage:   []string{"paisans oidc client create --app <name> [--rotate-secret]\n                           [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                           [--site <name>] [--ssh <destination>] [--execute]"},
 		detail: "Create an app's client at the deployment's Pocket ID, with the groups the app reads, and record its ID and secret in the secrets file. The secret is never printed. " +
-			"Writes nothing without --execute. Supports the mbin, outline, writefreely and uptime kinds.",
+			"Writes nothing without --execute. Supports every kind whose blueprint signs in through Pocket ID.",
 	},
 	{
 		name:    "web-server show",

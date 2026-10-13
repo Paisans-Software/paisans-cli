@@ -39,7 +39,7 @@ type spec struct {
 	Backup          *BackupSpec            `yaml:"backup"`
 	Checks          []checkSpec            `yaml:"checks"`
 	Settings        map[string]SettingSpec `yaml:"settings"`
-	Provides        []string               `yaml:"provides"`
+	Provides        []Provide              `yaml:"provides"`
 	Consumes        []Consume              `yaml:"consumes"`
 }
 
@@ -295,7 +295,8 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 			return nil, fmt.Errorf("hostname_roles: %s needs a template %s, which the blueprint does not ship", role, SnippetFor(role))
 		}
 	}
-	if err := checkLinks(s.Provides, s.Consumes); err != nil {
+	provides, err := checkLinks(s.Provides, s.Consumes)
+	if err != nil {
 		return nil, err
 	}
 	secrets, err := secretSpecs(s.Secrets.Generate, s.Services)
@@ -342,7 +343,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		LocalOnlyReason: s.Storage.LocalOnlyReason,
 		ExtraDatabases:  s.Database.Extra,
 		LockedSettings:  locked,
-		Provides:        s.Provides,
+		Provides:        provides,
 		Consumes:        s.Consumes,
 		LocalMediaPaths: s.Storage.LocalMediaPaths,
 		SendsMail:       s.Mail == "reads",

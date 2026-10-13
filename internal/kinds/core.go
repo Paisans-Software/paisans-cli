@@ -45,6 +45,7 @@ var core struct {
 	err     error
 	release config.Catalog
 	skipped []string
+	wizard  []WizardEntry
 }
 
 // LoadCore reads the core catalog from url, coreURL() when empty, unless it
@@ -129,11 +130,15 @@ func coreDir(cat config.Catalog) (string, bool) {
 // wrong is skipped whole, not half known.
 func readCoreAt(dir string, cat config.Catalog) error {
 	// An installed snapshot holds only the blueprints and the foundation a
-	// configuration used, not the catalog's own file.
-	if fetched(dir) {
-		if _, err := ReadCatalog(dir); err != nil {
+	// configuration used, not the catalog's own file, and so no wizard,
+	// which only a new deployment's `paisans create` asks.
+	var wizard []WizardEntry
+	if _, err := os.Stat(filepath.Join(dir, "catalog.yaml")); err == nil || fetched(dir) {
+		c, err := ReadCatalog(dir)
+		if err != nil {
 			return err
 		}
+		wizard = c.Wizard
 	}
 	f, err := readFoundation(dir)
 	if err != nil {
@@ -169,7 +174,21 @@ func readCoreAt(dir string, cat config.Catalog) error {
 		register(config.Kind(name), d, at[name])
 	}
 	setFoundation(f)
+	core.wizard = wizard
 	return nil
+}
+
+// Wizard is what `paisans create` offers, as the core catalog it read says.
+func Wizard() ([]WizardEntry, error) {
+	if err := LoadCore(""); err != nil {
+		return nil, err
+	}
+	core.Lock()
+	defer core.Unlock()
+	if len(core.wizard) == 0 {
+		return nil, fmt.Errorf("the core catalog at %s offers nothing to `paisans create`", core.release.Tag)
+	}
+	return append([]WizardEntry(nil), core.wizard...), nil
 }
 
 // lastCoreFile records, in the catalog cache, the core release this

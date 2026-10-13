@@ -53,8 +53,12 @@ func answersFor(sh Shape, all, gated bool) Answers {
 	if !all {
 		return a
 	}
-	for _, c := range capabilities {
-		if c.twoSites && len(a.Sites) < 2 {
+	offered, err := capabilities()
+	if err != nil {
+		panic(err)
+	}
+	for _, c := range offered {
+		if c.separateSites && len(a.Sites) < 2 {
 			continue
 		}
 		for _, s := range c.apps {

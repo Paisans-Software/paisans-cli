@@ -1,6 +1,11 @@
 package create
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import (
+	"fmt"
+
+	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/kinds"
+)
 
 // Shape is a layout of sites and roles.
 type Shape int
@@ -78,42 +83,74 @@ var allRoles = []config.Role{
 // apps that provide it.
 type capability struct {
 	question string
-	def      bool
-	// twoSites is a capability one machine cannot hold: the chat server
-	// binds the ports the database does, and its web client the port the
-	// gateway does (validate's port-collision).
-	twoSites bool
-	apps     []appSpec
+	// name is what the capability is called on the line saying it is not
+	// offered, for one with separateSites.
+	name string
+	def  bool
+	// separateSites is a capability one machine cannot hold: its apps
+	// collide with other roles' ports, so each goes where its on and avoid
+	// let it.
+	separateSites bool
+	apps          []appSpec
 }
 
 // appSpec is how a capability's app is declared: its key, its kind, the
-// label its hostname is under, and whether the gate can stand in front of it
-// (kinds.Gate's Gateable).
+// label its hostname is under, whether the gate can stand in front of it
+// (kinds.Gate's Gateable), and the roles its site must hold (on) and must
+// not (avoid).
 type appSpec struct {
 	key      string
 	kind     config.Kind
 	sub      string
 	gateable bool
 	what     string
+	on       []config.Role
+	avoid    []config.Role
 }
 
-var capabilities = []capability{
-	{question: "Forums and social (Mbin)?", def: true, apps: []appSpec{
-		{key: "talk", kind: "mbin", sub: "talk", gateable: true, what: "forums and social"},
-	}},
-	{question: "A wiki (Outline)?", def: true, apps: []appSpec{
-		{key: "docs", kind: "outline", sub: "docs", gateable: true, what: "wiki"},
-	}},
-	{question: "Blogs (WriteFreely)?", def: true, apps: []appSpec{
-		{key: "blog", kind: "writefreely", sub: "blog", gateable: true, what: "blog"},
-	}},
-	{question: "Chat (Matrix: Synapse and the Element web client)?", def: false, twoSites: true, apps: []appSpec{
-		{key: chatApp, kind: "synapse", sub: "chat", what: "chat server"},
-		{key: webApp, kind: "element", sub: "web", gateable: true, what: "chat web client"},
-	}},
-	{question: "A health page (uptime monitor)?", def: true, apps: []appSpec{
-		{key: healthApp, kind: config.KindUptime, sub: "health", what: "health page"},
-	}},
+// health is the one capability the toolkit asks about itself, after the
+// core catalog's (kinds.Wizard), since the monitor is its own blueprint.
+var health = capability{question: "A health page (uptime monitor)?", def: true, apps: []appSpec{
+	{key: healthApp, kind: config.KindUptime, sub: "health", what: "health page"},
+}}
+
+// capabilities is what the wizard offers: the core catalog's menu, then the
+// health page.
+func capabilities() ([]capability, error) {
+	entries, err := kinds.Wizard()
+	if err != nil {
+		return nil, err
+	}
+	var out []capability
+	for _, e := range entries {
+		c := capability{question: e.Question, name: e.Name, def: e.Default, separateSites: e.SeparateSites}
+		for _, app := range e.Apps {
+			kind := config.Kind(app.Blueprint)
+			if _, ok := kinds.For(kind); !ok {
+				return nil, fmt.Errorf("the core catalog's wizard offers %s, which it does not hold", app.Blueprint)
+			}
+			c.apps = append(c.apps, appSpec{key: app.Key, kind: kind, sub: app.Subdomain, gateable: kinds.GateFor(kind).Gateable, what: app.What, on: app.On, avoid: app.Avoid})
+		}
+		out = append(out, c)
+	}
+	return append(out, health), nil
+}
+
+// specFor is the capability app declared under key, false for one the
+// wizard does not offer (sign in, or an app added by hand).
+func specFor(key string) (appSpec, bool) {
+	all, err := capabilities()
+	if err != nil {
+		return appSpec{}, false
+	}
+	for _, c := range all {
+		for _, spec := range c.apps {
+			if spec.key == key {
+				return spec, true
+			}
+		}
+	}
+	return appSpec{}, false
 }
 
 // signIn is the app the wizard declares without being asked: every other app
@@ -121,10 +158,6 @@ var capabilities = []capability{
 var signIn = appSpec{key: "auth", kind: config.KindPocketID, sub: "id", what: "sign in"}
 
 const (
-	// chatApp and webApp are the chat capability's two apps, which go on
-	// sites of their own (twoSites).
-	chatApp     = "chat"
-	webApp      = "web"
 	healthApp   = "health"
 	monitorSite = "health"
 )
