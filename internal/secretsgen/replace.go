@@ -24,7 +24,8 @@ func Replacement(path string, s *config.Secrets) (string, error) {
 	last := parts[len(parts)-1]
 	switch {
 	case last == "encryption_key" && len(parts) == 3 && parts[0] == "apps",
-		last == masEncryptionSecret && len(parts) == 3 && parts[0] == "apps":
+		last == masEncryptionSecret && len(parts) == 3 && parts[0] == "apps",
+		last == outlineSecretKey && len(parts) == 3 && parts[0] == "apps":
 		return "", fmt.Errorf("%s: rotating it makes the data it encrypts unreadable, so nothing here replaces it", path)
 	case last == "wireguard_private_key" || last == "wireguard_next_private_key":
 		return "", fmt.Errorf("%s: a WireGuard key is moved by `paisans mesh rekey`, which keeps every tunnel up", path)
@@ -45,7 +46,7 @@ func Replacement(path string, s *config.Secrets) (string, error) {
 		case "database_password", "app_secret", "cookie_secret", "session_secret",
 			"admin_password", "static_api_key", "rabbitmq_password", "valkey_password",
 			"mercure_jwt_secret", "oauth_passphrase", "oauth_encryption_key", masMatrixSecret,
-			"email_hash_key", "session_key":
+			"email_hash_key", "session_key", "utils_secret", "redis_password":
 			gen = password
 		case masSigningKey:
 			gen = rsaPrivateKeyPEM

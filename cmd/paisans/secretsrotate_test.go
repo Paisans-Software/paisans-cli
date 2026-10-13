@@ -247,6 +247,8 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.talk.rabbitmq_password",
 		"apps.talk.valkey_password",
 		"apps.talk.mercure_jwt_secret",
+		"apps.docs.redis_password",
+		"apps.docs.utils_secret",
 		"storage.garage.admin_token",
 		"storage.garage.rpc_secret",
 		"sites.home-a.heartbeat_token",
@@ -268,6 +270,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	for _, p := range []string{
 		"apps.auth.encryption_key",
 		"apps.chat.mas_encryption_secret",
+		"apps.docs.outline_secret_key",
 		"apps.invite.email_hash_key",
 		"sites.*.wireguard_private_key",
 	} {

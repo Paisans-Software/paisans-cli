@@ -52,9 +52,27 @@ services:
       # a tmpfs: switched to local storage, it would hold every attachment.
 {{- end }}
       - {{ .DataPath }}/data:/var/lib/outline/data
-{{- if .App.Pinned }}
     depends_on:
-      - postgres
+      valkey:
+        condition: service_started
+{{- if .App.Pinned }}
+      postgres:
+        condition: service_started
+{{- end }}
+
+  valkey:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ .Image "valkey" }}
+    restart: unless-stopped
+    # The password is on the command line, as Mbin's cache has it, so it is
+    # visible to `ps` on the host. Snapshots are off and there is no data
+    # directory: a restart loses queued background jobs, not documents,
+    # which live in Postgres.
+    command: ["valkey-server", "--save", "", "--requirepass", "${VALKEY_PASSWORD:?set in .env}"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+{{- if .App.Pinned }}
 
   postgres:
     labels:

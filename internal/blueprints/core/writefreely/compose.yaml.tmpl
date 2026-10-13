@@ -20,12 +20,29 @@ services:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
     image: {{ .Image "app" }}
     restart: unless-stopped
+    # Root, not the image's writefreely user (uid 1000). `paisans apply`
+    # writes config.ini as root at 0600, and Docker creates data/ as root,
+    # so as uid 1000 the fork can neither read its configuration nor write
+    # its keys into /data, and exits at startup. Dropping to uid 1000 after a
+    # chown, as the outline blueprint does, cannot work here: config.ini is a
+    # read-only bind, so it cannot be chowned from inside, and it has to stay
+    # 0600 because it holds the database password and the SSO client secret.
+    user: "0:0"
     # The mesh address only. Docker's own iptables rules bypass a host
     # firewall, so a port published on every interface of a host with a
     # public address is reachable from the internet whatever ufw says. The
     # gateway, over the mesh, is the only thing that should reach it.
     ports:
       - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+    # Replaces the image's own, which probes port 8080, WriteFreely's
+    # default. This blueprint serves on {{ .App.Port }}, so the image's check
+    # marks a working blog unhealthy and `paisans apply` stops on it.
+    # /healthz answers 200 only when the database does (blueprint.yaml).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:{{ .App.Port }}/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
     volumes:
       - {{ .DataPath }}/data:/data
       # WriteFreely reads a file, not an environment. Its SSO client secret is
