@@ -301,25 +301,35 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // the C library that built it, and naming the release keeps a pull from
 // changing it under an existing data directory.
 func (p *planner) appImages(app config.App) (map[string]string, error) {
-	out := map[string]string{}
+	out, _, err := p.appImageOrigins(app)
+	return out, err
+}
+
+// appImageOrigins is appImages, and the services whose image it took from
+// the core catalog's foundation: one the blueprint names with foundation:,
+// and the database's, when the configuration declares neither.
+func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string]bool, error) {
+	out, foundation := map[string]string{}, map[string]bool{}
 	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
 		switch {
 		case app.Images[service.Name] != "":
 			out[service.Name] = app.Images[service.Name]
 		case err != nil:
-			return nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
+			return nil, nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
 		case image != "":
 			out[service.Name] = image
+			foundation[service.Name] = service.Foundation != ""
 		case service.Name == blueprints.PostgresService:
 			pg, err := blueprints.PostgresImage(p.postgresVersion())
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			out[service.Name] = pg
+			foundation[service.Name] = true
 		}
 	}
-	return out, nil
+	return out, foundation, nil
 }
 
 // dbIdentifier keeps app names usable as Postgres identifiers without

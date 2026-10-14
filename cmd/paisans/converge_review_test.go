@@ -221,8 +221,16 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	if err := convergeWith(t, noTerminalStdin(), &out, "--execute"); err != nil || out.Len() != 0 {
 		t.Fatalf("err %v, asked %q\n%s", err, out.String(), rec.Lines())
 	}
-	want := fmt.Sprintf("done: home-a %d approved earlier, not applied yet, nothing new to approve", len(approved.Entries))
-	if !strings.Contains(rec.Lines(), want) || strings.Contains(rec.Lines(), "explain: + ") {
+	// The foundation's images were never approved, so they are listed
+	// again, apart, and still ask nothing.
+	want := fmt.Sprintf("done: home-a only foundation images, nothing to approve; %d approved earlier, not applied yet", len(approved.Entries))
+	heading := rec.Index("explain", foundationHeading)
+	if !strings.Contains(rec.Lines(), want) || heading < 0 {
 		t.Errorf("the review, wanting %q:\n%s", want, rec.Lines())
+	}
+	for i, e := range rec.Events {
+		if e.Kind == "explain" && strings.HasPrefix(e.Text, "+ ") && i < heading {
+			t.Errorf("an approved entry is listed again: %s", e.Text)
+		}
 	}
 }

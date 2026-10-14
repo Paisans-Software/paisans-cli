@@ -406,9 +406,12 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 		if entries == nil {
 			entries = []Image{}
 		}
-		if rec.Images == nil || !slices.Equal(rec.Images.Entries, entries) {
+		// An image is the same image when its stack, service and reference
+		// are: a part differing only in the foundation mark is unchanged,
+		// and left as it is. When it is written, the mark is written with it.
+		if rec.Images == nil || !slices.Equal(imageKeys(rec.Images.Entries), imageKeys(entries)) {
 			part := &ImagesPart{AppliedAt: at, ApprovedBy: approvedBy, Entries: entries}
-			if rec.Images != nil && subset(entries, rec.Images.Entries) {
+			if rec.Images != nil && approvedNothing(entries, rec.Images.Entries) {
 				part.ApprovedBy = rec.Images.ApprovedBy
 			}
 			out.Images = part
@@ -465,6 +468,30 @@ func (rec Record) WithConfig(hash string, revision int, now time.Time) Record {
 func subset[T comparable](list, of []T) bool {
 	for _, e := range list {
 		if !slices.Contains(of, e) {
+			return false
+		}
+	}
+	return true
+}
+
+// imageKey is what makes an image the same image: its place and reference.
+type imageKey struct{ stack, service, reference string }
+
+func imageKeys(list []Image) []imageKey {
+	out := make([]imageKey, len(list))
+	for i, image := range list {
+		out[i] = imageKey{image.Stack, image.Service, image.Reference}
+	}
+	return out
+}
+
+// approvedNothing reports whether every image of list that of does not hold
+// is a foundation image, which nobody approves: a part that only lost
+// entries or moved foundation images keeps the name of who approved the rest.
+func approvedNothing(list, of []Image) bool {
+	held := imageKeys(of)
+	for _, image := range list {
+		if !image.Foundation && !slices.Contains(held, imageKey{image.Stack, image.Service, image.Reference}) {
 			return false
 		}
 	}
