@@ -584,31 +584,63 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 }
 
 // owedSMTPPassword is external.smtp_password, owed once any app that sends
-// mail resolves an SMTP host and neither that secret nor the app's own
+// mail logs in to its SMTP host and neither that secret nor the app's own
 // apps.<app>.smtp_password covers it. Said at init rather than discovered when
 // the first alert fails to send.
 func owedSMTPPassword(cfg *config.Config, secrets *config.Secrets) (Owed, bool) {
 	if secrets.External["smtp_password"] != "" {
 		return Owed{}, false
 	}
-	for _, name := range cfg.AppNames() {
-		if !blueprints.SendsMail(cfg.Apps[name].Blueprint) {
-			continue
-		}
-		host := cfg.SMTPFor(name).Host
-		if host == "" {
-			continue
-		}
-		if own, _ := secrets.Apps[name]["smtp_password"].(string); own != "" {
+	for _, name := range smtpLogins(cfg) {
+		if ownSMTPPassword(secrets, name) {
 			continue
 		}
 		return Owed{
 			Name: "external.smtp_password",
-			Why: fmt.Sprintf("issued by the mail provider for %s. %s sends mail through it and has no password of its own under apps.%s.smtp_password",
-				host, name, name),
+			Why: fmt.Sprintf("issued by the mail provider for %s. %s logs in to it as %s and has no password of its own under apps.%s.smtp_password",
+				cfg.SMTPFor(name).Host, name, cfg.SMTPFor(name).Username, name),
 		}, true
 	}
 	return Owed{}, false
+}
+
+// SMTPPasswordUsed reports whether an app logs in to its SMTP host with the
+// password at path: apps.<app>.smtp_password for that app, or
+// external.smtp_password for any app without its own. A relay with no
+// username is sent to unauthenticated, so a password nothing logs in with is
+// neither owed nor rotated.
+func SMTPPasswordUsed(cfg *config.Config, secrets *config.Secrets, path string) bool {
+	for _, name := range smtpLogins(cfg) {
+		if path == "apps."+name+".smtp_password" {
+			return true
+		}
+		if path == "external.smtp_password" && !ownSMTPPassword(secrets, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// smtpLogins is every app that sends mail and logs in to do it: its
+// resolved SMTP settings name both a host and a username.
+func smtpLogins(cfg *config.Config) []string {
+	var out []string
+	for _, name := range cfg.AppNames() {
+		if !blueprints.SendsMail(cfg.Apps[name].Blueprint) {
+			continue
+		}
+		if s := cfg.SMTPFor(name); s.Host != "" && s.Username != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// ownSMTPPassword reports whether app has a password of its own under
+// apps.<app>.smtp_password.
+func ownSMTPPassword(secrets *config.Secrets, app string) bool {
+	own, _ := secrets.Apps[app]["smtp_password"].(string)
+	return own != ""
 }
 
 // fillString generates into a pointer when it is empty, reporting whether it

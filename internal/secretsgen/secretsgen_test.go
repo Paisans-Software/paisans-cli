@@ -605,7 +605,7 @@ func TestUptimeGetsItsOwnTwoSecretsAndNothingElse(t *testing.T) {
 // A declared mail server with no password anywhere is said at init, not
 // discovered when the first alert fails to send.
 func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
-	smtp := &config.SMTP{Host: "smtp.example.org"}
+	smtp := &config.SMTP{Host: "smtp.example.org", Username: "robot@example.org"}
 	if _, ok := owedBy(t, withUptime(t, nil), &config.Secrets{})["external.smtp_password"]; ok {
 		t.Error("owed with no smtp host declared")
 	}
@@ -631,6 +631,35 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	why, ok = owedBy(t, withUptime(t, smtp), uptimeAndAccount)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "auth") {
 		t.Errorf("not owed for Pocket ID, which has no smtp_password of its own: %q", why)
+	}
+}
+
+// A relay with no login takes no password, whatever its security: an app
+// sends to it unauthenticated, so init has nothing to ask for. A username,
+// declared for the deployment or by one app, is what makes it owed.
+func TestSMTPPasswordIsOwedOnlyWithAUsername(t *testing.T) {
+	for _, smtp := range []*config.SMTP{
+		{Host: "smtp.example.org"},
+		{Host: "smtp.example.org", Security: config.SMTPTLS},
+		// A test deployment's Mailpit on the mesh.
+		{Host: "mailpit.mesh.internal", Port: 1025, Security: config.SMTPNone, FromAddress: "noreply@example.org"},
+	} {
+		if why, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{})["external.smtp_password"]; ok {
+			t.Errorf("owed for %+v, which has no username: %q", *smtp, why)
+		}
+	}
+
+	cfg := withUptime(t, &config.SMTP{Host: "smtp.example.org"})
+	talk := cfg.Apps["talk"]
+	talk.SMTP = &config.SMTP{Username: "talk@example.org"}
+	cfg.Apps["talk"] = talk
+	why, ok := owedBy(t, cfg, &config.Secrets{})["external.smtp_password"]
+	if !ok || !strings.Contains(why, "talk") {
+		t.Errorf("not owed for talk, whose own smtp block sets a username: %q", why)
+	}
+	own := &config.Secrets{Apps: map[string]map[string]any{"talk": {"smtp_password": "x"}}}
+	if why, ok := owedBy(t, cfg, own)["external.smtp_password"]; ok {
+		t.Errorf("owed although the one app that logs in has its own smtp_password: %q", why)
 	}
 }
 

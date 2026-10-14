@@ -710,6 +710,42 @@ func TestSecretsRotateReplacedRefusesWhatHostsDoNotRun(t *testing.T) {
 	}
 }
 
+// --all leaves out an SMTP password no app logs in with: a relay with no
+// username takes none, so there is nothing at the provider to replace, and
+// --all would otherwise refuse to run until one was.
+func TestSecretsRotateAllSkipsAnSMTPPasswordWithNoUsername(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.External["smtp_password"] == "" {
+		t.Fatal("the fixture's secrets set no external.smtp_password")
+	}
+	cfg.SMTP.Username = ""
+	rs, _, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(paths(rs), "external.smtp_password") {
+		t.Error("--all rotates external.smtp_password, which no app logs in with")
+	}
+
+	// One app's own username brings it back.
+	talk := cfg.Apps["talk"]
+	talk.SMTP = &config.SMTP{Username: "talk@example.org"}
+	cfg.Apps["talk"] = talk
+	if rs, _, err = rotateTargets(cfg, s, nil, true, rotateWiring{}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths(rs), "external.smtp_password") {
+		t.Error("--all leaves out external.smtp_password, which talk logs in with")
+	}
+}
+
 // --all refuses a pasted secret every host already runs, and passes it with
 // --replaced.
 func TestSecretsRotateAllPassesWithReplaced(t *testing.T) {

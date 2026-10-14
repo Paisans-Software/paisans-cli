@@ -621,14 +621,14 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		rs = append(rs, secretsrotate.DNSToken())
 	}
 	// The other pasted secrets, with the DNS token: each issued by a
-	// provider on the internet, and used only where the deployment sends
-	// mail.
+	// provider on the internet, and used only where an app logs in to send
+	// mail. One no app logs in with has nothing at the provider to replace.
 	smtp := []string{"external.smtp_password"}
 	for _, app := range cfg.AppNames() {
 		smtp = append(smtp, "apps."+app+".smtp_password")
 	}
 	for _, path := range smtp {
-		if !has(path) {
+		if !has(path) || !secretsgen.SMTPPasswordUsed(cfg, s, path) {
 			continue
 		}
 		used, err := secretsrotate.Carries(cfg, s, path)

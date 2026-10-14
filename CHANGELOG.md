@@ -29,6 +29,10 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime blueprint's admin group defaults to `operators`.
 - `paisans create` asks who manages accounts, adds the account app under `paisans`, and asks for at least two operators.
 
+### Fixed
+
+- `init` and `secrets set` ask for an SMTP password, and `secrets rotate --all` rotates one, only when an app's mail settings name a username, so a relay with no login needs none.
+
 [Unreleased]: https://github.com/Paisans-Software/paisans-cli/commits/develop
 
 ### Security

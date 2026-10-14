@@ -183,7 +183,7 @@ about it are load bearing:
   changes it where it is checked before any file presents it.
 * **It generates only what it can.** A DNS token is issued by a provider, a
   mail password by the mail provider (`external.smtp_password`, when an app
-  sends mail through a host and has no password of its own), and an OIDC
+  logs in to a mail host with a username and has no password of its own), and an OIDC
   client lives at a running identity provider. None is invented or left
   silent, and `secretsgen.Result` sorts them by who acts. `Owed` is what only
   the operator can provide, each a warning with its reason. `Pending` is what
