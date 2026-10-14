@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/.env",
-      "sha256": "82f067ae620c876e6655144e08da3681173d9c6e377aa6328b0b385ab86ed3df",
+      "sha256": "3fff2e91fe53ebcec336102ba5b5ed974b8d9d0105bad3b7779b52bce4a236f2",
       "mode": "0600"
     },
     {
@@ -63,7 +63,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/haproxy/haproxy.cfg",
-      "sha256": "45a6bf3c0a8d188b3c65e8d5cfe33a244435ce2a33c7f8c1f638c210c3c139e0",
+      "sha256": "6f7bacc4107d0f92ce1ffcf98ef26d603e04a3025f9710427dbd72977c0cbb89",
       "mode": "0644"
     },
     {

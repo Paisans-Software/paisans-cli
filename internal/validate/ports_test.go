@@ -81,6 +81,14 @@ func TestPortCollisionRefuses(t *testing.T) {
 			},
 			want: []string{"Postgres", "HAProxy cluster port", ":5432/tcp"},
 		},
+		{
+			// Every HAProxy site serves Pocket ID's API on 1413.
+			name: "a cluster port on Pocket ID's API",
+			change: func(cfg *config.Config) {
+				cfg.Cluster.Port = 1413
+			},
+			want: []string{"HAProxy Pocket ID API", "HAProxy cluster port", ":1413/tcp"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

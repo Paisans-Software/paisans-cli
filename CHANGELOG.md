@@ -19,6 +19,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- Every HAProxy site serves Pocket ID's API on its mesh address at port 1413, and the account service calls it there rather than at Pocket ID's public hostname.
 - The `invite` blueprint is the `account` blueprint, running paisans-account-service: `settings.signup` (`invite` or `open`) is required, and every account app serves signups on `join.<domain>` beside `account.<domain>`.
 - The Pocket ID gateway closes its signup routes on `allow_user_signups` alone.
 - The `admins:` section of `paisans-stack.yaml` and the secrets file is `operators:`, and `paisans admin` is `paisans operator`.

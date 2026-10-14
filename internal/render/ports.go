@@ -107,6 +107,11 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		add("HAProxy cluster port", "cluster.port", "tcp", addr, port)
 		add("HAProxy cluster port", "cluster.port", "tcp", loopback, port)
 		add("HAProxy stats", roles(config.RoleApps), "tcp", loopback, haproxyStatsPort)
+		// Pocket ID's API on the mesh, wherever HAProxy runs in a deployment
+		// with a pocket-id app, so that app is what claims it.
+		if idp, ok := cfg.PocketIDApp(); ok {
+			add("HAProxy Pocket ID API", "apps."+idp, "tcp", addr, pocketIDAPIPort)
+		}
 	}
 	if contains(cfg.Storage.Garage.Sites, site) {
 		add("Garage S3 API", "storage.garage.sites", "tcp", addr, garageS3Port)

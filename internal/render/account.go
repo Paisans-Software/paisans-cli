@@ -10,11 +10,19 @@ import (
 
 // accountValues is what the account blueprint's templates need beyond any app's.
 type accountValues struct {
-	// IdentityURL is the public URL of the deployment's one pocket-id app,
-	// from its hostname in paisans-stack.yaml and nothing else. The service is
-	// given it twice, as its OIDC issuer and as the API it creates accounts
-	// at, and the two are always the same value.
-	IdentityURL string
+	// IssuerURL is the public URL of the deployment's one pocket-id app,
+	// from its hostname in paisans-stack.yaml: the URL Pocket ID names itself
+	// by as an OIDC issuer, which a token's issuer must match.
+	IssuerURL string
+	// APIURL is where the service calls Pocket ID's API with the static API
+	// key: its own site's HAProxy on the mesh, at pocketIDAPIPort, which
+	// routes to the active instance. The key never reaches the public
+	// hostname.
+	APIURL string
+	// PrivateNetworks is the deployment's mesh.subnet, which the service
+	// accepts APIURL in alongside the private ranges, so a mesh declared
+	// outside them still reaches Pocket ID.
+	PrivateNetworks string
 	// APIKey is that app's static API key.
 	APIKey string
 	// Accent is that app's accent_color, quoted for a .env, and empty when
@@ -39,8 +47,8 @@ type accountValues struct {
 
 // accountValuesFor reads the deployment's one pocket-id app, which validate
 // requires of a deployment with an account app, and the code of conduct from
-// the app's own settings.
-func (p *planner) accountValuesFor(name string) (accountValues, error) {
+// the app's own settings, for the instance on site.
+func (p *planner) accountValuesFor(name, site string) (accountValues, error) {
 	app := p.cfg.Apps[name]
 	idp, ok := p.cfg.PocketIDApp()
 	if !ok {
@@ -49,13 +57,15 @@ func (p *planner) accountValuesFor(name string) (accountValues, error) {
 	idApp := p.cfg.Apps[idp]
 	coc, _ := app.Settings["code_of_conduct"].(string)
 	v := accountValues{
-		Signup:       blueprints.AccountSignup(app),
-		JoinHostname: blueprints.JoinHostname(p.cfg, app),
-		Operators:    strings.Join(sortedKeys(p.cfg.Operators), ","),
-		IdentityURL:  "https://" + idApp.Hostname,
-		APIKey:       p.appSecret(idp, "static_api_key"),
-		CoC:          coc,
-		Settings:     map[string]string{},
+		Signup:          blueprints.AccountSignup(app),
+		JoinHostname:    blueprints.JoinHostname(p.cfg, app),
+		Operators:       strings.Join(sortedKeys(p.cfg.Operators), ","),
+		IssuerURL:       "https://" + idApp.Hostname,
+		APIURL:          fmt.Sprintf("http://%s:%d", p.meshAddress(site), pocketIDAPIPort),
+		PrivateNetworks: p.mesh,
+		APIKey:          p.appSecret(idp, "static_api_key"),
+		CoC:             coc,
+		Settings:        map[string]string{},
 	}
 	if accent, ok := idApp.Settings["accent_color"].(string); ok && accent != "default" {
 		quoted, err := envquote(accent)
