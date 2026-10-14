@@ -1,5 +1,5 @@
-# valid.yaml with a wikijs app in place of its outline app, whose synced_groups
-# holds a name too short for Pocket ID.
+# valid.yaml with a wiki whose synced_groups holds a name too short for
+# Pocket ID.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1

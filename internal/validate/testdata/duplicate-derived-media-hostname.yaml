@@ -1,5 +1,5 @@
-# valid.yaml with one thing broken: auth's hostname is docs-media.example.org,
-# which is the media hostname docs derives from its own. Neither line names the
+# valid.yaml with one thing broken: auth's hostname is blog-media.example.org,
+# which is the media hostname blog derives from its own. Neither line names the
 # clash, and Caddy refuses two site blocks for one address.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
@@ -63,15 +63,17 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
-    settings:
-      s3_bucket: docs-uploads
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
   auth:
     blueprint: pocket-id
-    hostname: docs-media.example.org
+    hostname: blog-media.example.org
     placement: cluster
     settings:
       file_backend: database

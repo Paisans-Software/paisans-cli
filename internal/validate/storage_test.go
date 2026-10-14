@@ -7,15 +7,15 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// pinDocs pins the valid fixture's Outline app to home-a, with the given
+// pinBlog pins the valid fixture's WriteFreely app to home-a, with the given
 // storage key, so a storage rule can be tested apart from placement.
-func pinDocs(t *testing.T, storage string) *config.Config {
+func pinBlog(t *testing.T, storage string) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
-	docs := cfg.Apps["docs"]
-	docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
-	docs.Storage = storage
-	cfg.Apps["docs"] = docs
+	blog := cfg.Apps["blog"]
+	blog.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	blog.Storage = storage
+	cfg.Apps["blog"] = blog
 	return cfg
 }
 
@@ -24,7 +24,7 @@ func pinDocs(t *testing.T, storage string) *config.Config {
 // decision.
 func TestPinnedStorageIsQuiet(t *testing.T) {
 	for _, storage := range []string{"", config.StorageLocal, config.StorageS3} {
-		cfg := pinDocs(t, storage)
+		cfg := pinBlog(t, storage)
 		// Garage on home-b, the app on home-a.
 		cfg.Storage.Garage.Sites = []string{"home-b"}
 		if result := validate.Check(cfg); len(result.Findings) != 0 {
@@ -42,23 +42,23 @@ func TestStorageRefusals(t *testing.T) {
 	}{
 		{"s3 without garage", func(c *config.Config) {
 			c.Storage.Garage = config.Garage{}
-			docs := c.Apps["docs"]
-			docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
-			docs.Storage = config.StorageS3
-			c.Apps["docs"] = docs
-		}, "storage-s3-without-garage", "apps.docs.storage"},
+			blog := c.Apps["blog"]
+			blog.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+			blog.Storage = config.StorageS3
+			c.Apps["blog"] = blog
+		}, "storage-s3-without-garage", "apps.blog.storage"},
 		// With no Garage the default is local, which a clustered app cannot
 		// have either, so the refusal names the placement.
 		{"cluster without garage", func(c *config.Config) {
 			c.Storage.Garage = config.Garage{}
-		}, "storage-local-on-cluster", "apps.docs.placement"},
+		}, "storage-local-on-cluster", "apps.blog.placement"},
 		{"media hostname on a local app", func(c *config.Config) {
-			docs := c.Apps["docs"]
-			docs.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
-			docs.Storage = config.StorageLocal
-			docs.Hostnames = map[string]string{"media": "files.example.org"}
-			c.Apps["docs"] = docs
-		}, "media-hostname-without-object-storage", "apps.docs.hostnames.media"},
+			blog := c.Apps["blog"]
+			blog.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+			blog.Storage = config.StorageLocal
+			blog.Hostnames = map[string]string{"media": "files.example.org"}
+			c.Apps["blog"] = blog
+		}, "media-hostname-without-object-storage", "apps.blog.hostnames.media"},
 		{"a kind with no files", func(c *config.Config) {
 			c.Apps["web"] = config.App{Kind: config.Kind("element"), Hostname: "web.example.org",
 				Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},

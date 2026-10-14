@@ -1,4 +1,4 @@
-# valid.yaml with one thing broken: docs declares a media hostname outside
+# valid.yaml with one thing broken: blog declares a media hostname outside
 # community.domain. Its certificate is issued over DNS-01 against the
 # deployment's own zone, so the configured provider cannot answer for it.
 version: 1
@@ -63,14 +63,16 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
-    settings:
-      s3_bucket: docs-uploads
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
     hostnames:
-      media: docs-media.example.net
+      media: blog-media.example.net
   auth:
     blueprint: pocket-id
     hostname: id.example.org

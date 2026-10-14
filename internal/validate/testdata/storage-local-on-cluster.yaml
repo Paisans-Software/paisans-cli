@@ -1,6 +1,6 @@
-# valid.yaml with one thing broken: docs keeps its files on its own disk
+# valid.yaml with one thing broken: blog keeps its files on its own disk
 # while clustered. It runs on both apps sites, and each would keep a different
-# copy of the attachments.
+# copy of the images.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -72,13 +72,15 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
     placement: cluster
     storage: local
-    settings:
-      s3_bucket: docs-uploads
   auth:
     blueprint: pocket-id
     hostname: id.example.org

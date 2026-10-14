@@ -43,7 +43,6 @@ func TestRulesFire(t *testing.T) {
 		{"two-etcd-voters", "two-etcd-voters", validate.Refuse},
 		{"undeclared-site", "undeclared-site", validate.Refuse},
 		{"invalid-placement", "invalid-placement", validate.Refuse},
-		{"outline-bucket-named-outline", "outline-bucket-named-outline", validate.Refuse},
 		{"sso-consent-not-a-boolean", "sso-consent-not-a-boolean", validate.Refuse},
 		{"sso-dashboard-link-not-a-path", "sso-dashboard-link-not-a-path", validate.Refuse},
 		{"cluster-site-without-data-role", "cluster-site-without-data-role", validate.Refuse},
@@ -100,7 +99,6 @@ func TestRulesFire(t *testing.T) {
 		{"mail-domain-is-not-a-hostname", "mail-domain-is-not-a-hostname", validate.Refuse},
 		{"mail-domain-outside-the-domain", "mail-domain-outside-the-domain", validate.Refuse},
 		{"media-hostname-under-an-app-hostname", "media-hostname-under-an-app-hostname", validate.Refuse},
-		{"outline-bucket-in-media-url", "outline-bucket-in-media-url", validate.Refuse},
 		{"duplicate-derived-media-hostname", "duplicate-hostname", validate.Refuse},
 		{"config-key-is-nested-in-an-env-file", "config-key-is-nested-in-an-env-file", validate.Refuse},
 		{"config-key-looks-like-a-secret", "config-key-looks-like-a-secret", validate.Refuse},
@@ -109,6 +107,7 @@ func TestRulesFire(t *testing.T) {
 		{"oidc-member-group-disagrees-with-gate", "oidc-member-group-disagrees-with-gate", validate.Refuse},
 		{"oidc-member-group-not-a-name", "oidc-member-group-not-a-name", validate.Refuse},
 		{"oidc-extra-groups-not-names", "oidc-group-not-a-name", validate.Refuse},
+		{"wikijs-synced-groups-lack-admin-group", "wikijs-synced-groups-lack-admin-group", validate.Refuse},
 		{"smtp-on-a-kind-without-mail", "smtp-on-a-kind-without-mail", validate.Refuse},
 		{"uptime-without-smtp", "uptime-without-smtp", validate.Warn},
 		{"mbin-without-smtp", "mbin-without-smtp", validate.Warn},
@@ -165,7 +164,7 @@ func TestRulesFire(t *testing.T) {
 }
 
 // withConfig is the valid fixture plus the element app of the secret fixture,
-// so that env (docs, auth) and json (web) kinds are all present, with every
+// so that env (wiki, auth) and json (web) kinds are all present, with every
 // passthrough map emptied and then one app's replaced by keys.
 func withConfig(t *testing.T, app string, keys map[string]any) *config.Config {
 	t.Helper()
@@ -208,14 +207,14 @@ func TestTheSecretCheckIgnoresSeparatorsAndCase(t *testing.T) {
 		app, key string
 		refused  bool
 	}{
-		{"docs", "SENDGRID_API_KEY", true},
+		{"wiki", "SENDGRID_API_KEY", true},
 		{"web", "privateKey", true},
 		{"web", "signing.private-key", true},
-		{"docs", "SMTP_PASSWORD", true},
+		{"wiki", "SMTP_PASSWORD", true},
 		{"web", "app.api_token", true},
 		// A control: an ordinary name in the same places is not refused, so
 		// the rows above are not passing because everything is.
-		{"docs", "DEFAULT_LANGUAGE", false},
+		{"wiki", "DEFAULT_LANGUAGE", false},
 		{"web", "default_theme", false},
 	}
 	for _, tc := range cases {
@@ -234,11 +233,11 @@ func TestComposeSteeringKeysAreRefusedOnEnvKindsOnly(t *testing.T) {
 		app, key string
 		refused  bool
 	}{
-		{"docs", "COMPOSE_PROJECT_NAME", true},
-		{"docs", "COMPOSE_PROFILES", true},
+		{"wiki", "COMPOSE_PROJECT_NAME", true},
+		{"wiki", "COMPOSE_PROFILES", true},
 		{"auth", "DOCKER_HOST", true},
 		{"web", "COMPOSE_PROJECT_NAME", false},
-		{"docs", "MY_COMPOSE_NOTE", false},
+		{"wiki", "MY_COMPOSE_NOTE", false},
 	}
 	for _, tc := range cases {
 		result := validate.Check(withConfig(t, tc.app, map[string]any{tc.key: "x"}))
@@ -510,17 +509,17 @@ func TestFindingsAreDeterministic(t *testing.T) {
 	}
 }
 
-// withMedia is the valid fixture with docs's media hostname declared, or left
+// withMedia is the valid fixture with blog's media hostname declared, or left
 // to the derivation when media is empty, and one more app's hostname set.
 func withMedia(t *testing.T, media string) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
-	docs := cfg.Apps["docs"]
-	docs.Hostnames = nil
+	blog := cfg.Apps["blog"]
+	blog.Hostnames = nil
 	if media != "" {
-		docs.Hostnames = map[string]string{"media": media}
+		blog.Hostnames = map[string]string{"media": media}
 	}
-	cfg.Apps["docs"] = docs
+	cfg.Apps["blog"] = blog
 	return cfg
 }
 
@@ -531,15 +530,15 @@ func withMedia(t *testing.T, media string) *config.Config {
 func TestADerivedMediaHostnameIsCheckedLikeADeclaredOne(t *testing.T) {
 	cfg := withMedia(t, "")
 	if result := validate.Check(cfg); len(result.Findings) != 0 {
-		t.Fatalf("the derived docs-media.example.org should be quiet, got %v", result.Findings)
+		t.Fatalf("the derived blog-media.example.org should be quiet, got %v", result.Findings)
 	}
 
 	long := strings.Repeat("d", 60)
-	docs := cfg.Apps["docs"]
-	docs.Hostname = long + ".example.org"
-	cfg.Apps["docs"] = docs
+	blog := cfg.Apps["blog"]
+	blog.Hostname = long + ".example.org"
+	cfg.Apps["blog"] = blog
 	result := validate.Check(cfg)
-	if !refusedFor(result, "media-hostname-is-not-a-hostname", "apps.docs.hostnames.media") {
+	if !refusedFor(result, "media-hostname-is-not-a-hostname", "apps.blog.hostnames.media") {
 		t.Fatalf("%s-media is a 66 character label and must be refused, got %v", long, result.Findings)
 	}
 	for _, f := range result.Refusals() {
@@ -554,25 +553,25 @@ func TestADeclaredMediaHostnameIsAHostnameUnderTheDomain(t *testing.T) {
 	for _, tc := range []struct {
 		media, rule string
 	}{
-		{"Docs-Media.example.org", "media-hostname-is-not-a-hostname"},
-		{"https://docs-media.example.org", "media-hostname-is-not-a-hostname"},
-		{"docs-media.example.org:8443", "media-hostname-is-not-a-hostname"},
-		{"-docs.example.org", "media-hostname-is-not-a-hostname"},
-		{"docs..example.org", "media-hostname-is-not-a-hostname"},
+		{"Blog-Media.example.org", "media-hostname-is-not-a-hostname"},
+		{"https://blog-media.example.org", "media-hostname-is-not-a-hostname"},
+		{"blog-media.example.org:8443", "media-hostname-is-not-a-hostname"},
+		{"-blog.example.org", "media-hostname-is-not-a-hostname"},
+		{"blog..example.org", "media-hostname-is-not-a-hostname"},
 		{"localhost", "media-hostname-is-not-a-hostname"},
-		{"docs-media.example.net", "media-hostname-outside-the-domain"},
+		{"blog-media.example.net", "media-hostname-outside-the-domain"},
 		// A suffix match on the bare domain would accept this one.
-		{"docs-media.notexample.org", "media-hostname-outside-the-domain"},
-		{"media.docs.example.org", "media-hostname-under-an-app-hostname"},
+		{"blog-media.notexample.org", "media-hostname-outside-the-domain"},
+		{"media.blog.example.org", "media-hostname-under-an-app-hostname"},
 		// A child of another app's hostname is refused too.
 		{"media.id.example.org", "media-hostname-under-an-app-hostname"},
 	} {
 		result := validate.Check(withMedia(t, tc.media))
-		if !refusedFor(result, tc.rule, "apps.docs.hostnames.media") {
+		if !refusedFor(result, tc.rule, "apps.blog.hostnames.media") {
 			t.Errorf("hostnames.media %q: want %s, got %v", tc.media, tc.rule, result.Findings)
 		}
 	}
-	for _, ok := range []string{"docs-media.example.org", "attachments.example.org", "a.b.example.org"} {
+	for _, ok := range []string{"blog-media.example.org", "attachments.example.org", "a.b.example.org"} {
 		if result := validate.Check(withMedia(t, ok)); len(result.Findings) != 0 {
 			t.Errorf("hostnames.media %q should be accepted, got %v", ok, result.Findings)
 		}
@@ -584,8 +583,8 @@ func TestADeclaredMediaHostnameIsAHostnameUnderTheDomain(t *testing.T) {
 // directions.
 func TestAMediaHostnameCannotBeAnotherAppsHostname(t *testing.T) {
 	result := validate.Check(withMedia(t, "id.example.org"))
-	if !refusedFor(result, "duplicate-hostname", "apps.docs.hostnames.media") && !refusedFor(result, "duplicate-hostname", "apps.auth.hostname") {
-		t.Errorf("docs's media hostname is auth's own hostname and must be refused, got %v", result.Findings)
+	if !refusedFor(result, "duplicate-hostname", "apps.blog.hostnames.media") && !refusedFor(result, "duplicate-hostname", "apps.auth.hostname") {
+		t.Errorf("blog's media hostname is auth's own hostname and must be refused, got %v", result.Findings)
 	}
 
 	cfg := load(t, "duplicate-derived-media-hostname")
@@ -882,13 +881,14 @@ func TestSitesBehindOneRouterAreTwoMachines(t *testing.T) {
 
 // An app on the gate's hostname collides with the gate, which no file
 // declares, so the message says where the gate's name came from rather than
-// quoting a line the file does not have.
+// quoting a line the file does not have. The app is blog because its key
+// sorts before gate, and the refusal falls on the later of the two.
 func TestAnAppOnTheGatesHostnameIsRefused(t *testing.T) {
 	cfg := load(t, "valid")
-	docs := cfg.Apps["docs"]
-	docs.Gated = true
-	docs.Hostname = cfg.GateHostname()
-	cfg.Apps["docs"] = docs
+	blog := cfg.Apps["blog"]
+	blog.Gated = true
+	blog.Hostname = cfg.GateHostname()
+	cfg.Apps["blog"] = blog
 	cfg.Apps[config.GateApp] = config.App{Kind: config.KindOAuth2Proxy, Hostname: cfg.GateHostname(), Derived: true}
 	var found bool
 	for _, f := range validate.Check(cfg).Refusals() {

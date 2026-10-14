@@ -140,9 +140,10 @@ func TestABlueprintsOwnRulesRun(t *testing.T) {
 
 // A setting the toolkit reads for every app, whatever its blueprint, is not
 // unknown to a blueprint that declares settings of its own: the blueprint
-// cannot be expected to list what it never reads. Controller Ruling 18.
+// cannot be expected to list what it never reads, and a warning on a setting
+// that works would teach an operator to read past the warning.
 func TestGenericSettingsAreNotUnknown(t *testing.T) {
-	cfg := load(t, "oidc-extra-groups-not-names")
+	cfg := load(t, "valid")
 	wiki := cfg.Apps["wiki"]
 	wiki.Settings = map[string]any{"sso_consent": true, "sso_dashboard_link": "/login", "colour": "red"}
 	cfg.Apps["wiki"] = wiki
