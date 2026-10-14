@@ -73,6 +73,7 @@ func TestABlueprintMistakeIsRefused(t *testing.T) {
 		{"an unknown setting type", minimal + "settings:\n  mode: {type: colour}\n", "settings.mode.type"},
 		{"leaves open something else", minimal + "gate: {leaves_open: [ssh]}\n", "gate.leaves_open"},
 		{"a requirement in another form", minimal + "requires_toolkit: \"^1.0\"\n", "requires_toolkit"},
+		{"a requirement this toolkit does not meet", minimal + "requires_toolkit: \">= 999.0\"\n", "needs paisans-stack 999.0"},
 	}
 	for _, c := range cases {
 		_, err := Parse("example", []byte(c.change), always)
@@ -132,8 +133,5 @@ func TestOptionalHealthAndADumpParse(t *testing.T) {
 	mysql := strings.Replace(minimal, "engine: none", "engine: mysql", 1) + "backup:\n  dump: {service: db, run: [mysqldump, x]}\n  restore: {service: db, run: [mysql, x]}\n"
 	if d, err := Parse("example", []byte(mysql), always); err != nil || d.Backup == nil || d.Engine != "mysql" {
 		t.Errorf("mysql: %+v, %v", d, err)
-	}
-	if err := requirement(">= 0.1"); err != nil {
-		t.Errorf("a development build meets every requirement: %v", err)
 	}
 }

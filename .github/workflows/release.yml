@@ -1,0 +1,156 @@
+name: release
+
+# A push to main whose version has no tag is a release: this tags it vX.Y.Z
+# and publishes the GitHub Release. Any other push to main is a no-op. The
+# version is the constant in internal/version/version.go, which `make bump`
+# sets on develop; the "Release X to main" pull request from develop brings
+# it here.
+#
+# That pull request is merged with a merge commit, never squashed or rebased.
+# A merge commit keeps main an ancestor of develop, so the next release pull
+# request merges without a conflict and develop needs nothing from main.
+#
+# Tags matching admin-reconciler-v* belong to the admin reconciler's image
+# (admin-reconciler-image.yml) and are not toolkit releases; the tags here
+# are vX.Y.Z alone.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Tags, so the release can tell whether this version was already
+          # released and which release came before it.
+          fetch-depth: 0
+
+      # A merge to main whose version has no tag is a release, and anything
+      # else is a no-op. That needs no label to remember and cannot fire
+      # twice for one version.
+      - name: Decide whether this is a release
+        id: decide
+        run: |
+          version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
+          test -n "$version" || { echo "no Version in internal/version/version.go"; exit 1; }
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists; nothing to release"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Bounded to toolkit release tags, so the notes generator never
+          # picks an admin-reconciler-v* tag as the previous release.
+          previous=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          {
+            echo "release=true"
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "previous=${previous}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set the commit identity
+        if: steps.decide.outputs.release == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      # The changelog section for this version is cut by `make bump`, in the
+      # commit that sets Version, so it reaches main through the release pull
+      # requests like everything else. main takes pull requests only, so this
+      # job cannot commit there. changelog.yml refuses a pull request into
+      # main without the section; this checks again, before anything is
+      # tagged, in case one arrived some other way.
+      - name: Require the changelog section
+        if: steps.decide.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          KACL_VERSION: "0.7.0"
+        run: |
+          pipx install "python-kacl==$KACL_VERSION"
+          kacl-cli verify
+          kacl-cli get "${VERSION}" >/dev/null 2>&1 || {
+            echo "::error file=CHANGELOG.md::No ${VERSION} section. Cut it on develop with make bump, and release again."
+            exit 1
+          }
+
+      - name: Create and push the tag
+        if: steps.decide.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          git tag -a "$TAG" -m "paisans-stack ${VERSION}"
+          git push origin "$TAG"
+
+      # The operator-facing half of the notes: what someone upgrading has to
+      # do. The generated half, which lists what changed, is appended by the
+      # API call below.
+      - name: Read the merged pull request body
+        id: pr
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq 'first(.[] | select(.merged_at != null) | .body // "") // ""')
+          {
+            echo "body<<PRBODY_EOF"
+            echo "$body"
+            echo "PRBODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Release pull requests carry no change of their own. The notes generator
+      # filters by label and by nothing else, so they are labelled here, before
+      # the notes are generated below, and dropped by .github/release.yml.
+      #
+      # Two of them per release: the "Release X" pull request into develop, and
+      # the "Release X to main" pull request that this run is the merge of.
+      - name: Label the release pull requests
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create release --repo "$REPO" --force \
+            --color ededed \
+            --description 'Release plumbing; excluded from generated release notes'
+          {
+            gh api "repos/${REPO}/commits/${GITHUB_SHA}/pulls" \
+              --jq '.[] | select(.merged_at != null) | .number'
+            gh pr list --repo "$REPO" --state merged --limit 20 \
+              --json number,headRefName \
+              --jq '.[] | select(.headRefName | startswith("release-")) | .number'
+          } | sort -u | while read -r pr; do
+            gh pr edit "$pr" --repo "$REPO" --add-label release
+          done
+
+      - name: Publish the GitHub Release
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          PREVIOUS: ${{ steps.decide.outputs.previous }}
+          BODY: ${{ steps.pr.outputs.body }}
+        run: |
+          # The REST API takes a hand-written body and the generated list at
+          # once, appending the second under the first.
+          gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            -f "tag_name=${TAG}" \
+            -f "name=${TAG}" \
+            -f "body=${BODY}" \
+            -F generate_release_notes=true \
+            ${PREVIOUS:+-f "previous_tag_name=${PREVIOUS}"}

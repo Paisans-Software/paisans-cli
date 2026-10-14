@@ -128,6 +128,8 @@ func main() {
 		err = runFailover(os.Args[2:])
 	case "doctor":
 		err = runDoctor(os.Args[2:])
+	case "version", "--version":
+		err = runVersion(os.Args[2:], os.Stdout)
 	case "dns":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "init":

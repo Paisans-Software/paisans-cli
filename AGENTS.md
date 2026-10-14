@@ -16,8 +16,8 @@ have been built: the `paisans` command, from `validate` and `render` through
 `cmd/admin-reconciler`. `docs/development.md` lists what exists, under *Run*,
 and what does not, under *What is not here yet*. The commands reach hosts over
 SSH and drive Docker there, and each one that changes a host does so only with
-`--execute`. The toolkit has had no release; *Releases* says what has been
-published.
+`--execute`. The toolkit's version is the constant in `internal/version`;
+*Releases* says how a release is cut and what publishes one.
 
 That matters for scope. Much of the work here is still *documentation of a
 design*, and the design is explained rather than asserted: every rule in
@@ -221,30 +221,45 @@ on a shared branch unasked.
 
 ## Releases
 
-**The toolkit has had no release, and no versioning scheme is settled.** One
-tag exists, `admin-reconciler-v0.1.0`, and it is not a toolkit release: it
-published the admin reconciler's image through
+**Versions are semantic, `MAJOR.MINOR.PATCH`, and written in one place**: the
+`Version` constant in `internal/version/version.go`. `paisans version` prints
+it, a blueprint's `requires_toolkit` is checked against it, and a release is
+tagged `vMAJOR.MINOR.PATCH` from it. `0.x` holds while command names remain
+provisional. Tags matching `admin-reconciler-v*` are not toolkit releases: one
+publishes the admin reconciler's image through
 `.github/workflows/admin-reconciler-image.yml`, which the `pocket-id` kind pins
-by digest. The shape below is provisional and needs a founder decision before
-the first release; do not treat it as ratified, and do not cut a release, or
-push a tag, on your own initiative under any circumstances.
+by digest.
 
-When it is settled, the expectation is:
+**Every pull request into `develop` records its change in `CHANGELOG.md`**, one
+bullet under `[Unreleased]` in the Keep a Changelog category that fits, one
+sentence of at most 35 words. `.github/workflows/changelog.yml` checks it. A
+pull request with nothing an operator would notice opts out by starting its
+head commit's message with `kacl-skip:`.
 
-* **Semantic versioning on git tags** (`v0.1.0`), with `0.x` while command
-  names remain provisional.
-* **`CHANGELOG.md` written by hand** from the commit bodies, grouped by what an
-  operator has to *do*, not by commit type. The categories that matter to this
-  project: changes requiring an `apply`, changes requiring a config edit,
-  changes affecting an existing deployment's data or topology, and everything
-  else.
-* **A migration note for anything that changes an existing deployment.** This
-  toolkit's entire design premise is that additions must not become migrations;
-  a release that quietly requires one has broken the premise and must say so at
-  the top.
-* **Release is a human action.** Tagging and publishing leave this repository
-  and cannot be walked back. Prepare the changelog and the exact tag command;
-  let the human run it.
+**A release is cut in three steps**, and only the first is ever yours:
+
+1. `make bump-patch`, `make bump-minor`, `make bump-major` or
+   `make bump VERSION=x.y.z` on a branch. It sets the constant, moves the
+   `[Unreleased]` bullets into a dated section for that version, and commits
+   both as `kacl-skip: release x.y.z`. It refuses a dirty tree, a version
+   already tagged and an empty `[Unreleased]`. The branch goes to `develop`
+   as a pull request titled `Release x.y.z`.
+2. A pull request from `develop` into `main`, titled `Release x.y.z to main`.
+   Its body is the operator notes at the top of the GitHub Release: anything
+   an operator has to *do*, such as an `apply`, a configuration edit, or a
+   change to an existing deployment's data or topology. A release that changes
+   an existing deployment says so first, with what to do about it, because
+   this toolkit's design premise is that additions must not become migrations.
+3. The founder merges that pull request **with a merge commit, never a squash
+   or a rebase**, which keeps `main` an ancestor of `develop`.
+   `.github/workflows/release.yml` sees a version on `main` with no tag, tags
+   it and publishes the GitHub Release, with the changes since the previous
+   release listed under the operator notes.
+
+**Release is a human action.** Tagging and publishing leave this repository
+and cannot be walked back. An agent may run `make bump` and open the
+`Release x.y.z` pull request into `develop` when asked; it never merges into
+`main`, pushes a tag, or publishes a release.
 
 ## When you are unsure
 

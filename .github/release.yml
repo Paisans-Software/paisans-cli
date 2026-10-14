@@ -1,0 +1,18 @@
+# Filters the list GitHub generates for a release (.github/workflows/
+# release.yml asks for it with generate_release_notes=true).
+#
+# Release pull requests, "Release X" into develop and "Release X to main", are
+# plumbing: they carry no change of their own, only the changes already listed
+# individually. The generator filters by label or author and by nothing else,
+# so the release job labels them "release" before it publishes, and this file
+# drops anything wearing that label.
+#
+# The generator reads this file at the commit the release points at, and a
+# release is cut on main, so it takes effect once it has been merged to main.
+#
+# The list is flat: a category renders as a "###" subheading under the
+# generator's own "## What's Changed".
+changelog:
+  exclude:
+    labels:
+      - release

@@ -1,24 +1,44 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"io"
 	"runtime/debug"
-	"strings"
+
+	"github.com/paisans-software/paisans-stack/internal/version"
 )
 
-// toolkitVersion is this binary's version, as the Go toolchain recorded it.
-func toolkitVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "devel"
+// runVersion prints the binary's version and the commit it was built from.
+func runVersion(args []string, w io.Writer) error {
+	fs := newFlagSet("version", flag.ContinueOnError)
+	commonFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	return versionFrom(info)
+	if fs.NArg() > 0 {
+		return fmt.Errorf("version takes no arguments, and was given %q", fs.Arg(0))
+	}
+	fmt.Fprintf(w, "paisans %s\n", toolkitVersion())
+	return nil
 }
 
-// versionFrom is the tag the binary was built from, or, for a build between
-// tags, the commit (with -dirty when the tree had changes), or devel when
-// neither was recorded. A build between tags carries a pseudo-version, which
-// says no more than the commit and is three times as long.
-func versionFrom(info *debug.BuildInfo) string {
+// toolkitVersion is this binary's version, with the commit the Go toolchain
+// recorded it was built from.
+func toolkitVersion() string {
+	info, _ := debug.ReadBuildInfo()
+	return versionFrom(version.Version, info)
+}
+
+// versionFrom is release followed by the commit info records, cut to 12
+// characters and marked -dirty when the tree had uncommitted changes, as
+// "0.1.0 (519299d5cb00-dirty)". It is release alone when info records no
+// commit, as for a build outside a git checkout. The commit is what tells
+// two builds of one version apart.
+func versionFrom(release string, info *debug.BuildInfo) string {
+	if info == nil {
+		return release
+	}
 	var revision, dirty string
 	for _, s := range info.Settings {
 		switch s.Key {
@@ -30,15 +50,11 @@ func versionFrom(info *debug.BuildInfo) string {
 			}
 		}
 	}
+	if revision == "" {
+		return release
+	}
 	if len(revision) > 12 {
 		revision = revision[:12]
 	}
-	v := info.Main.Version
-	if v != "" && v != "(devel)" && (revision == "" || !strings.Contains(v, revision)) {
-		return v
-	}
-	if revision == "" {
-		return "devel"
-	}
-	return revision + dirty
+	return fmt.Sprintf("%s (%s%s)", release, revision, dirty)
 }

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"net/mail"
 	"regexp"
-	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"cel.dev/cel-go/cel"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-stack/internal/version"
 )
 
 // BackupSpec is how to dump and restore a database the backups do not reach
@@ -244,11 +244,17 @@ func (s SettingSpec) Problem(v any) string {
 	return ""
 }
 
-// requirement checks a blueprint's requires_toolkit against this binary. The
-// requirement is ">= MAJOR.MINOR[.PATCH]". A binary built from a release tag
-// must be at least that release; one built from a commit between releases,
-// or without version information, is a development build and meets it.
+// requirement checks a blueprint's requires_toolkit against this binary's
+// version, the constant in internal/version.
 func requirement(req string) error {
+	return meets(req, version.Version)
+}
+
+// meets checks the requirement req, ">= MAJOR.MINOR[.PATCH]", against the
+// toolkit version have. Every build counts as the version its commit holds,
+// so a build between releases meets what the last release cut on its branch
+// meets, and nothing more.
+func meets(req, have string) error {
 	if req == "" {
 		return nil
 	}
@@ -260,9 +266,12 @@ func requirement(req string) error {
 	if err != nil {
 		return fmt.Errorf("requires_toolkit: %w", err)
 	}
-	have, release := toolkitRelease()
-	if release && less(have, need) {
-		return fmt.Errorf("requires_toolkit: needs paisans-stack %s, and this is %d.%d.%d", strings.TrimSpace(want), have[0], have[1], have[2])
+	is, err := parseVersion(have)
+	if err != nil {
+		return fmt.Errorf("the toolkit's own version: %w", err)
+	}
+	if less(is, need) {
+		return fmt.Errorf("requires_toolkit: needs paisans-stack %s, and this is %s", strings.TrimSpace(want), have)
 	}
 	return nil
 }
@@ -290,19 +299,4 @@ func less(a, b [3]int) bool {
 		}
 	}
 	return false
-}
-
-// toolkitRelease is this binary's release version, and false for a
-// development build.
-func toolkitRelease() ([3]int, bool) {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return [3]int{}, false
-	}
-	v := info.Main.Version
-	if v == "" || v == "(devel)" || strings.Contains(v, "-") {
-		return [3]int{}, false
-	}
-	out, err := parseVersion(v)
-	return out, err == nil
 }
