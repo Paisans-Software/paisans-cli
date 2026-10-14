@@ -25,6 +25,11 @@ health: {path: "/healthz", status: [200]}
 # Invitees reach /i/* on the invite hostname before they have an
 # account; a member gate would lock them out.
 gate: {gateable: false}
+# invite.<domain>, or hostnames.invite, serves the pages an invitee opens
+# before they have an account, and exists only with settings.invites true
+# (blueprints.InviteHostname). Everything a signed in member or admin uses
+# stays on the primary hostname.
+hostname_roles: ["invite"]
 mail: reads
 # paisans-account-service's callback is GET /auth/callback with PKCE S256
 # (internal/web/auth.go); it reads the groups claim to tell members

@@ -1,6 +1,7 @@
 package validate_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
@@ -160,5 +161,43 @@ func TestEveryInviteSettingIsRefusedWithInvitesOff(t *testing.T) {
 		if f := findings(validate.Check(cfg), "account-invite-settings-without-invites"); len(f) != 1 || f[0] != "REFUSE apps.account.settings."+k {
 			t.Errorf("%s: %v", k, f)
 		}
+	}
+}
+
+// The invite hostname is claimed like any other, so one that repeats the
+// account app's own hostname, or a derived invite.<domain> that another app
+// already uses, is refused rather than rendered as two site blocks for one
+// name, by the key the operator has to change.
+func TestTheInviteHostnameIsClaimed(t *testing.T) {
+	cfg := load(t, "valid")
+	app := cfg.Apps["account"]
+	app.Hostnames = map[string]string{"invite": "account.example.org"}
+	cfg.Apps["account"] = app
+	if f := findings(validate.Check(cfg), "duplicate-hostname"); len(f) != 1 || f[0] != "REFUSE apps.account.hostnames.invite" {
+		t.Errorf("hostnames.invite equal to the primary: %v", f)
+	}
+
+	cfg = load(t, "valid")
+	wiki := cfg.Apps["wiki"]
+	wiki.Hostname = "invite.example.org"
+	cfg.Apps["wiki"] = wiki
+	r := validate.Check(cfg)
+	var said string
+	for _, f := range r.Findings {
+		if f.Rule == "duplicate-hostname" {
+			said = f.Key + ": " + f.Message
+		}
+	}
+	if !strings.Contains(said, "apps.wiki.hostname") || !strings.Contains(said, "apps.account.hostnames.invite, derived from the community's domain") {
+		t.Errorf("an app on the derived invite hostname: %q", said)
+	}
+
+	// With invites off the name is free.
+	cfg = withInvitesOff(t)
+	wiki = cfg.Apps["wiki"]
+	wiki.Hostname = "invite.example.org"
+	cfg.Apps["wiki"] = wiki
+	if f := findings(validate.Check(cfg), "duplicate-hostname"); len(f) != 0 {
+		t.Errorf("invites off: %v", f)
 	}
 }

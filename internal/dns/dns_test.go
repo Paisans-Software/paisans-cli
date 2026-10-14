@@ -677,3 +677,38 @@ func hasWant(wants []Want, typ, name, content string) bool {
 	}
 	return false
 }
+
+// An account app's invite hostname is a record only with invites on: derived
+// as invite.<domain> and named by the key to change, and absent with invites
+// off even when a stale hostnames.invite declares it.
+func TestAccountInviteHostnameOnlyWithInvitesOn(t *testing.T) {
+	keyOf := func(cfg *config.Config, name string) (string, bool) {
+		for _, h := range hostnames(cfg) {
+			if h.Name == name {
+				return h.Key, true
+			}
+		}
+		return "", false
+	}
+	cfg := declared()
+	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+		Settings: map[string]any{"identity_app": "auth", "invites": true}}
+	if key, ok := keyOf(cfg, "invite.example.org"); !ok || key != "apps.account.hostnames.invite (derived)" {
+		t.Errorf("invites on: invite.example.org is %q, %v", key, ok)
+	}
+	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+		Hostnames: map[string]string{"invite": "invite.example.org"},
+		Settings:  map[string]any{"identity_app": "auth", "invites": false}}
+	if key, ok := keyOf(cfg, "invite.example.org"); ok {
+		t.Errorf("invites off with a stale hostnames.invite: published as %s", key)
+	}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range wants {
+		if w.Name == "invite.example.org" {
+			t.Errorf("invites off: %s %s is wanted", w.Type, w.Name)
+		}
+	}
+}

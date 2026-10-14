@@ -293,33 +293,26 @@ func hostnames(cfg *config.Config) []Hostname {
 		if app.Hostname != "" {
 			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostname", appName), Name: app.Hostname, App: appName, Main: true})
 		}
-		roles := make([]string, 0, len(app.Hostnames))
-		for role := range app.Hostnames {
-			roles = append(roles, role)
-		}
-		sort.Strings(roles)
-		for _, role := range roles {
-			if role == blueprints.MediaRole && blueprints.MediaHostname(cfg, app) == "" {
-				// An app keeping its files on its own disk serves them on its
-				// own hostname, so a media hostname would point at no route.
-				// validate refuses a declared one; this keeps dns from
-				// publishing it if that is ever bypassed.
-				continue
+		for _, rh := range blueprints.RoleHostnames(cfg, app) {
+			if !rh.Derived {
+				out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.%s", appName, rh.Role), Name: rh.Hostname, App: appName})
 			}
-			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.%s", appName, role), Name: app.Hostnames[role], App: appName})
 		}
 	}
-	// Each app keeping objects in Garage serves them on a media hostname of
-	// its own, derived when the app does not declare one under hostnames.media
-	// (a declared one is already in the loop above). An app keeping its files
-	// on its own disk has none, and gets no record for one.
+	// A hostname nobody declared, after every declared one: each app keeping
+	// objects in Garage serves them on a media hostname of its own, and an
+	// account app with invites on serves its invitees on invite.<domain>,
+	// unless the app names another under hostnames. A role whose condition
+	// does not hold (an app keeping its files on its own disk, an account app
+	// with invites off) gets no record, even if a stale line declares one:
+	// validate refuses that line, and this keeps dns from publishing it if
+	// that is ever bypassed.
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
-		if !blueprints.MediaHostnameIsDerived(cfg, app) {
-			continue
-		}
-		if media := blueprints.MediaHostname(cfg, app); media != "" {
-			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.media (derived)", appName), Name: media, App: appName})
+		for _, rh := range blueprints.RoleHostnames(cfg, app) {
+			if rh.Derived {
+				out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.%s (derived)", appName, rh.Role), Name: rh.Hostname, App: appName})
+			}
 		}
 	}
 	return out

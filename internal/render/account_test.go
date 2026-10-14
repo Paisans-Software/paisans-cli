@@ -20,7 +20,7 @@ const (
 // toolkit does not render is a setting nobody can change, and a required one
 // is a container that refuses to start.
 var accountServiceEnv = []string{
-	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_INVITES", "ACCOUNT_DATABASE_URL",
+	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_INVITES", "ACCOUNT_INVITE_PUBLIC_URL", "ACCOUNT_DATABASE_URL",
 	"ACCOUNT_SESSION_KEY", "ACCOUNT_EMAIL_HASH_KEY",
 	"ACCOUNT_OIDC_ISSUER", "ACCOUNT_OIDC_CLIENT_ID", "ACCOUNT_OIDC_CLIENT_SECRET",
 	"ACCOUNT_MEMBER_GROUP", "ACCOUNT_ADMIN_GROUP",
@@ -334,5 +334,71 @@ func TestAccountInvitesReachTheService(t *testing.T) {
 	}
 	if got := files[accountCoCA]; got != "" {
 		t.Errorf("code-of-conduct.md is %q with invites off, want empty", got)
+	}
+}
+
+// With invites on, invitees are served on their own hostname, never gated,
+// and its snippet passes only the invite pages and their static files; the
+// primary refuses the invite pages.
+func TestAccountInviteHostnameWithInvitesOn(t *testing.T) {
+	files := buildAccount(t, nil)
+	const snippetPath = "vm/srv/paisans/f2a9/infra/caddy/snippets/account-invite.caddy"
+	snippet, ok := files[snippetPath]
+	if !ok {
+		t.Fatalf("%s was not rendered", snippetPath)
+	}
+	for _, want := range []string{"@invitee path /i/* /static/*", "respond 404", "10.44.0.1:8082", "import upstream_failover"} {
+		if !strings.Contains(snippet, want) {
+			t.Errorf("the invite snippet lacks %q:\n%s", want, snippet)
+		}
+	}
+	block := hostBlock(t, files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "invite.example.org")
+	if !strings.Contains(block, "import /etc/caddy/snippets/account-invite.caddy") {
+		t.Errorf("the invite host block does not import its snippet:\n%s", block)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "import gate") || strings.HasPrefix(line, "forward_auth") {
+			t.Errorf("the invite host block is gated: %q", line)
+		}
+	}
+	if primary := files["vm/srv/paisans/f2a9/infra/caddy/snippets/account.caddy"]; !strings.Contains(primary, "@invitepages path /i/*") || !strings.Contains(primary, "respond @invitepages 404") {
+		t.Errorf("the primary snippet does not refuse /i/*:\n%s", primary)
+	}
+	if got := envValue(files[accountEnvA], "ACCOUNT_INVITE_PUBLIC_URL"); got != "https://invite.example.org" {
+		t.Errorf("ACCOUNT_INVITE_PUBLIC_URL=%q", got)
+	}
+	declared := buildAccount(t, func(cfg *config.Config, _ *config.Secrets) {
+		app := cfg.Apps["account"]
+		app.Hostnames = map[string]string{"invite": "join.example.org"}
+		cfg.Apps["account"] = app
+	})
+	if got := envValue(declared[accountEnvA], "ACCOUNT_INVITE_PUBLIC_URL"); got != "https://join.example.org" {
+		t.Errorf("ACCOUNT_INVITE_PUBLIC_URL=%q with hostnames.invite declared", got)
+	}
+	hostBlock(t, declared["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "join.example.org")
+}
+
+// With invites off the invite hostname exists nowhere: no host block, no
+// snippet, no URL, even with a stale hostnames.invite that validate would
+// refuse.
+func TestAccountInviteHostnameWithInvitesOff(t *testing.T) {
+	for name, change := range map[string]func(*config.Config, *config.Secrets){
+		"derived": invitesOff,
+		"stale declared": func(cfg *config.Config, s *config.Secrets) {
+			invitesOff(cfg, s)
+			app := cfg.Apps["account"]
+			app.Hostnames = map[string]string{"invite": "invite.example.org"}
+			cfg.Apps["account"] = app
+		},
+	} {
+		for path, content := range buildAccount(t, change) {
+			if strings.HasSuffix(path, "/account-invite.caddy") {
+				t.Errorf("%s: %s rendered with invites off", name, path)
+			}
+			if strings.Contains(content, "invite.example.org") {
+				t.Errorf("%s: %s names invite.example.org with invites off", name, path)
+			}
+		}
 	}
 }
