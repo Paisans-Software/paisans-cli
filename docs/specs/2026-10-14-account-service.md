@@ -89,9 +89,9 @@ app, SMTP resolved, the code of conduct present, and the settings' ranges.
 |---|---|---|
 | `ACCOUNT_PUBLIC_URL` | always | the OIDC redirect, links to `/admin`, the `Secure` cookie flag |
 | `ACCOUNT_INVITES` | always, `true` or `false` | registers the invite routes and the invite UI |
-| `INVITE_PUBLIC_URL` | required with `ACCOUNT_INVITES=true`, refused otherwise | invite links |
+| `ACCOUNT_INVITE_PUBLIC_URL` | required with `ACCOUNT_INVITES=true`, refused otherwise | invite links |
 
-Every other `INVITE_*` variable is renamed `ACCOUNT_*` (`INVITE_QUOTA` becomes
+Every `INVITE_*` variable is renamed `ACCOUNT_*` (`INVITE_QUOTA` becomes
 `ACCOUNT_INVITE_QUOTA`, `INVITE_SMTP_HOST` becomes `ACCOUNT_SMTP_HOST`, and so
 on). Neither public URL may end in `/`.
 
@@ -116,7 +116,7 @@ queue are not registered. The home page shows the signed in member, and
 
 ### Links
 
-* Invite link: `INVITE_PUBLIC_URL + "/i/" + token`.
+* Invite link: `ACCOUNT_INVITE_PUBLIC_URL + "/i/" + token`.
 * The admins' notice that an application is waiting:
   `ACCOUNT_PUBLIC_URL + "/admin"`.
 * OIDC redirect: `ACCOUNT_PUBLIC_URL + "/auth/callback"`.
@@ -184,7 +184,9 @@ undone, and each is confirmed with the founder at the time it runs.
 1. ⚠ Rename `Paisans-Software/paisans-invite` to `paisans-account-service`.
    Point the local remote at the new name, move `src/paisans-invite` to
    `src/paisans-account-service` in the operator workspace, run
-   `git worktree repair` there, and update that workspace's ignore entry.
+   `git worktree repair` there, and update that workspace's `.gitignore`
+   entry and `src/CLAUDE.md`, whose account of `src/` names the service and
+   the toolkit's `account` blueprint.
 2. The account service: module path, command, environment, routes by host,
    links, cookies, `release.yml`'s image name, README and changelog under
    `0.2.0`. Its unit tests and its contract tests against Pocket ID pass.
@@ -207,7 +209,7 @@ undone, and each is confirmed with the founder at the time it runs.
 * **The account service:** a request for every route on each host, asserting
   200 or the route's own status on its host and 404 on the other, and
   `/healthz` on a bare address. With `ACCOUNT_INVITES=false`, every invite
-  route is 404 on every host. Config tests for `INVITE_PUBLIC_URL` required,
+  route is 404 on every host. Config tests for `ACCOUNT_INVITE_PUBLIC_URL` required,
   refused and trailing slash. The invite link, the admin notice and the OIDC
   redirect each use the right base URL. The cookie has no `Domain`.
 * **The toolkit:** render goldens for an account app with invites on and off,
