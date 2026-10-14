@@ -174,7 +174,7 @@ storage:
   # There is no media hostname here. Each app that stores objects serves them
   # on a hostname of its own, a sibling of the app's: talk.example.org gets
   # talk-media.example.org, and each one needs a DNS record pointing at the
-  # gateway. An app can choose another name under `hostnames.media`, as docs
+  # gateway. An app can choose another name under `hostnames.media`, as blog
   # does below.
   garage:
     # Preference order, not a set. The first site serves every media read the
@@ -301,30 +301,18 @@ apps:
     images:
       app: ghcr.io/example-org/mbin:v1.2.3
 
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     # What Pocket ID's sign in page calls this app, as its client's name.
-    # Without it the client is named after the app's key, here "docs".
+    # Without it the client is named after the app's key, here "wiki".
     display_name: Wiki
     placement: cluster
     settings:
-      # Non-AWS S3 endpoints need path style. Upstream bug: the bucket must
-      # not be named "outline".
-      s3_force_path_style: true
-      s3_bucket: docs-uploads
-      # Its client at Pocket ID admits only this group and admins. Outline
-      # reads no groups claim, so that restriction is the whole control.
-      # Optional; members is the default, shown here because it is the one
-      # thing deciding who may open the wiki.
-      member_group: members
-    # Optional. Without it this would be docs-media.example.org, derived from
-    # the hostname above. A media hostname is never a child of an app's own
-    # hostname (files.docs.example.org would share its cookie scope), and it
-    # is never gated: Outline's attachments are private because every URL
-    # carries a signature, not because of a cookie.
-    hostnames:
-      media: attachments.example.org
+      # Pocket ID groups that become Wiki.js groups. Membership follows
+      # Pocket ID at every sign in; what each group may do is set in Wiki.js.
+      synced_groups: [admins, members]
+      site_title: "Example Wiki"
 
   auth:
     blueprint: pocket-id
@@ -419,8 +407,8 @@ apps:
       # other database setting it renders, so the blog's admin page cannot
       # change it.
       authorized_fetch: true
-      # As for docs: the client admits only member_group (default members)
-      # and admins, and WriteFreely reads no groups claim.
+      # The client admits only member_group (default members) and admins,
+      # and WriteFreely reads no groups claim.
     # Not settings. A settings key works only if a template asks for it by
     # name, and one no template reads is ignored without a word. A config key
     # is passed through as written: here, max_blogs inside config.ini's
@@ -430,6 +418,12 @@ apps:
     # its first start, so a key added later is ignored; see the README.
     config:
       app.max_blogs: 3
+    # Optional. Without it this would be blog-media.example.org, derived from
+    # the hostname above. A media hostname is never a child of an app's own
+    # hostname (files.blog.example.org would share its cookie scope), and it
+    # is never gated: a federating server fetching an image is a machine.
+    hostnames:
+      media: images.example.org
 
   health:
     blueprint: uptime
