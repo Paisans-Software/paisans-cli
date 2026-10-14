@@ -6878,6 +6878,20 @@ admin a fresh sign-in link* gives, and
 in every app's admin group, and in every app's
 member group as well. Declaring the admin is the approval for all of it.
 
+**The gateway refuses Pocket ID's own first-admin setup, always.** `POST
+/api/signup/setup` takes no authentication and makes its caller an
+administrator (`usersignup/module.go:86-87` at v2.14.0), and it is open while
+Pocket ID holds no user besides its static API key's
+(`usersignup/service.go:220-229`). That is the state of every new deployment
+until apply makes the declared admins, and of a restore that holds no users,
+so on a public hostname whoever reaches it first would own the identity
+provider. Nothing in Pocket ID turns it off. The pocket-id kind's Caddy
+snippet answers 404 to every method on `/api/signup/setup`, `/setup` and
+`/signup/setup` and everything below each; Caddy's path matcher compares the
+decoded, cleaned path case insensitively, so no spelling of them gets through.
+`/api/signup` and `/signup` stay open, since signup links use them. Apply makes
+admins through the static API key and never needs the setup route.
+
 **A declared admin is a member of every app too**, because an app that gates
 on its member group would otherwise refuse its own administrator. Mbin reads
 `settings.member_group` and refuses a login whose claim lacks it unless the
