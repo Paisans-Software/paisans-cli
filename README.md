@@ -134,9 +134,7 @@ path under it, because a hostname is the unit DNS can move. Pointing one app's
 media at a CDN, another provider or another Garage is a record change for that
 app and no other; a path under a shared hostname can only move with every other
 app's. Two apps' uploads on two hostnames are also two browser origins, so a
-file one app stored cannot script against another's. The shared hostname was
-this toolkit's first shape, and it was replaced before anything was released
-under it.
+file one app stored cannot script against another's.
 
 The name is a **sibling, never a child**, and never a name for the backend.
 `media.talk.example.org` sits under the app's own host, so a cookie the app
@@ -231,14 +229,14 @@ onto every apps site with storage of its own. `invite` is the opposite case:
 its state is in the cluster's Postgres and it must outlive a site, so it takes
 `cluster` and nothing else (`invite-must-be-clustered`).
 
-`writefreely` used to be in that list. It no longer is: the kind now means the
+`writefreely` is not in that list: the kind runs the
 [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp) fork,
 which adds Postgres and S3 support upstream WriteFreely does not have, so the
-blog can join the cluster like any other app. **This is a breaking change for
-anyone who adopted this toolkit before it:** the fork's image replaces
-upstream's, and upstream's own image will reject the configuration this kind
-now renders, because it has no `[database]` Postgres driver and no
-`[storage]` section at all. See `docs/decisions.md` for the record.
+blog can join the cluster like any other app. **The fork's image is required,
+not interchangeable with upstream's:** upstream's own image rejects the
+configuration this kind renders, because it has no `[database]` Postgres
+driver and no `[storage]` section at all. See `docs/decisions.md` for the
+record.
 
 **"The authentication service's database" is Matrix Authentication Service,
 and the `synapse` kind renders it as a second container beside the
@@ -292,10 +290,9 @@ hostname would serve two deployments that diverge the moment anybody writes,
 and a failover would move readers between them. Element, oauth2-proxy and
 uptime are the cases that exist: a static client with no server side state, a
 session kept in a cookie rather than a database, and a monitor keeping a
-SQLite file. Pinning any of them is not a downgrade, because that was always
-its availability. WriteFreely used to be
-in this group too, before the fork it now runs gained Postgres support; see
-Rule 5 above.
+SQLite file. Pinning any of them is not a downgrade, because a single site is
+the only availability its storage allows. WriteFreely is not in this group,
+because the fork it runs keeps its data in Postgres; see Rule 5 above.
 
 #### A pinned app may keep its files on its own disk
 
@@ -1061,7 +1058,7 @@ from this configuration and the fork reconciles it at every start:
   it was the host. A monitor on the same site is not checked: it shares the
   host, so it would go down with it and could say nothing about losing it.
 
-Every other app's public check now runs from a machine that is not the
+Every other app's public check runs from a machine that is not the
 gateway, so a dead gateway shows as every public check failing while the
 direct checks stay green.
 
@@ -2954,9 +2951,8 @@ workstation, not the public address of every application at once.
 
 **A routing change gets exactly one action on Caddy.** When only the Caddyfile
 or its snippets changed, that action is a reload, which drops no connection;
-the infrastructure stack is not acted on at all. A routing change used to be a
-reload and then a restart of Caddy as well, because the same files also made
-an infrastructure action: two actions for one change, the second the one that
+the infrastructure stack is not acted on at all, because a restart of Caddy on
+top of the reload would be a second action for one change, and the one that
 drops connections. When Caddy's compose file, environment or image also
 changed, the stack's `up -d` is the action, and the reload waits for it: a
 Caddy `up -d` replaced started on the new routing and is not reloaded, and one
@@ -2990,7 +2986,7 @@ stop the gateway loading its whole configuration.
 name are refused. Caddy will not choose between two site blocks that hold the
 same address, and it refuses the whole file rather than the block, so a name
 typed twice takes every hostname in the deployment down rather than the one
-that was duplicated. This is easiest to hit now that an app can declare
+that was duplicated. This is easiest to hit because an app can declare
 several: setting one app's `hostname` to the value another app already uses for
 a role reads as two unrelated lines.
 
@@ -3591,17 +3587,17 @@ receiver that looks up a hostname's policy at the organisational domain
 publishes. The SPF record on each hostname holds either way.
 
 **`dns prune` removes what `dns init` made and nothing wants any more.** A
-deployment that moved from one shared media hostname to one per app is left
-holding the old name's A record: `dns init` created it, and no line of the
-configuration implies it now. Founder decision: the toolkit removes such a
-record, not an operator in the provider's console, which amends the earlier
-rule that the toolkit never deletes a record. A deletion by hand is exactly the
+deployment that renames or drops an app's media hostname is left holding the
+old name's A record: `dns init` created it, and no line of the configuration
+implies it now. Founder decision: the toolkit removes such a record, not an
+operator in the provider's console, and `dns prune` is the one command that
+does, since `dns init` never deletes. A deletion by hand is exactly the
 unchecked edit to the zone that `dns init` exists to replace, and the next one
 deletes the wrong name. How to run it, and its flags, are under *`paisans dns
 prune`* in [docs/commands.md](docs/commands.md).
 
 **`--name <fqdn>` vouches for one name outside the domain.** A hostname
-configured explicitly beside `community.domain` (Eg: an old shared media name
+configured explicitly beside `community.domain` (Eg: a media name
 `staging-media.example.org` for the domain `staging.example.org`) and later
 dropped leaves a record no rule can tie to this deployment, so prune keeps it
 and says so. Naming it with `--name` lifts the scope rule for that exact name
@@ -4162,8 +4158,8 @@ operator can trace a key there back to this file. Options are refused rather tha
 and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
 
-The section replaced a single string, `ssh: home-a.local`. That form is now
-refused, and the refusal says the section to write and its keys (`host`,
+A single string in place of the section, `ssh: home-a.local`, is refused, and
+the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
 
@@ -4318,11 +4314,11 @@ that depends on every admin's own file is not a default.
 
 #### Never infer host state from a failed probe
 
-A probe that never reached the host has not answered. During the first real
-`storage add`, ssh timed out on the command that sets the stored layout aside,
-and the error said the aside name "already exists from an earlier attempt",
-which nothing had checked. Every command that asks a host a question
-(`storage add`, `site add`, `apply`) now follows one rule: when the probe's own
+A probe that never reached the host has not answered. Read as an answer, an
+ssh timeout on the command that sets the stored layout aside in `storage add`
+would say the aside name already exists from an earlier attempt, which nothing
+checked. Every command that asks a host a question (`storage add`, `site add`,
+`apply`) follows one rule: when the probe's own
 command fails to reach the host, the error says the host state could not be
 read, carries ssh's message, and the command stops there.
 
@@ -5659,14 +5655,14 @@ while `/cluster` names the leader (Patroni v4.1.0, `docs/rest_api.rst`).
 
 The infrastructure stack is one compose project holding etcd, Patroni, HAProxy,
 Garage, the toolkit's Caddy and the heartbeat pusher, each where the site's
-roles call for it. A change to a bind mounted file there used to
-restart the whole project, so a new `garage.toml` restarted Patroni, which on
-the primary is a failover, and HAProxy, which drops every app's database
+roles call for it. Restarting the whole project for a change to one bind
+mounted file would make a new `garage.toml` restart Patroni, which on the
+primary is a failover, and HAProxy, which drops every app's database
 connection. Each service's bind mounted files live in a directory named for
-it (`haproxy/`, `garage/`, `caddy/`), so a restart now names the services
+it (`haproxy/`, `garage/`, `caddy/`), so a restart names the services
 whose directories changed: `docker compose -f /srv/paisans/<token>/infra/compose.yaml restart
-garage`. A file at the top of the stack still restarts the whole project, and
-an environment or compose change is still a recreate, which Compose limits to
+garage`. A file at the top of the stack restarts the whole project, and
+an environment or compose change is a recreate, which Compose limits to
 the services whose configuration changed.
 
 **The directory is the mapping because the templates are the toolkit's own.**
@@ -6746,20 +6742,20 @@ for linux/amd64 alone:
 | Image | Declares | Mounted as |
 |-------|----------|------------|
 | mbin 1.15.1-paisans (app, messenger), inspected 2026-10-13 | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
-| rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` (already) |
+| rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` |
 | wiki 2.5.316, read from its `dev/build/Dockerfile:49` | `/wiki/data/content` | bind, `/srv/paisans/<token>/<app>/content`. Uploads live in Postgres and no storage module the bootstrap turns on writes here, so it holds nothing a member wrote; the bind keeps Docker from making an anonymous volume at each recreate |
-| postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
-| postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
+| postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` |
+| postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, never at `/var/lib/postgresql/data` (below) |
 | invite (`paisans-invite`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-invite/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
 | amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, wikijs-bootstrap 0.1 (read from its Dockerfile), curl (the heartbeat and the admins heartbeat) | nothing | |
 
-Postgres 18 was worse than a leak. Its image sets `PGDATA` to
+For Postgres 18 the path is more than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
-something is mounted at the old `/var/lib/postgresql/data`, so a pinned app at
-the default `postgres_version` could not start its database at all. The mount
-now follows the official image's own tag (an app may pin an older Postgres than
-the cluster runs) and the cluster's version otherwise.
+something is mounted at `/var/lib/postgresql/data`, the path 16 and 17 declare,
+so a mount there would leave a pinned app at the default `postgres_version`
+unable to start its database at all. The mount follows the official image's
+own tag (an app may pin an older Postgres than the cluster runs) and the cluster's version otherwise.
 
 **Mbin's cache is a tmpfs rather than a bind under the deployment's root.** The two messenger
 replicas would share one bind and race over one cache directory, and the cache
@@ -7374,10 +7370,9 @@ consent screen for <app>`, a `PUT /api/oidc/clients/<id>` that sends every field
 back as read with only `skipConsent` changed, as the launch URL update does.
 
 **An existing client's launch URL is changed only when the toolkit put it
-there.** That means empty, which is a client made before this command set one,
-or one of the toolkit's own defaults (`kinds.ToolkitLaunchURLs`): the bare
-`https://<hostname>`, the only default before kinds named a path, and the
-kind's current default. Either plans `set launch URL for <app>`: a `PUT
+there.** That means empty, which nobody chose, or one of the toolkit's own
+defaults (`blueprints.ToolkitLaunchURLs`): the bare `https://<hostname>`, and
+the blueprint's default when it names a path. Either plans `set launch URL for <app>`: a `PUT
 /api/oidc/clients/<id>` that sends every field back as read with only
 `launchURL` changed, because the update overwrites the whole client. That keeps
 the callback URLs, PKCE, the public flag, the group restriction (sending it
