@@ -38,6 +38,20 @@ and [docs/commands.md](docs/commands.md) describes each one: what it does,
 when to run it on its own rather than through `paisans apply`, its flags, and
 what it changes.
 
+## How Paisans differs from YunoHost
+
+YunoHost and Paisans both put self-hosting within reach of people who are not
+full-time sysadmins. They answer different questions.
+
+* **YunoHost:** "I want one server at home running a lot of apps, managed from
+  a browser."
+* **Paisans:** "A group wants a private, federated community that runs across
+  several members' machines, survives losing one, and grows without a data
+  migration."
+
+[docs/guides/compared-to-yunohost.md](docs/guides/compared-to-yunohost.md)
+sets out what the two share and where they differ.
+
 ## Design rules that everything else follows from
 
 ### Rule 1: the cluster always runs, even when it has one node
