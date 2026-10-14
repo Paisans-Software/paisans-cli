@@ -788,3 +788,16 @@ func TestUnknownArchIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// An app is rendered into a stack directory named for it, beside the
+// toolkit's own, so an app may not take a toolkit stack's name.
+func TestAnAppIsNeverNamedForAToolkitStack(t *testing.T) {
+	named := validConfig + `  infra:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+`
+	if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "apps.infra: the name is the toolkit's infrastructure stack's") {
+		t.Errorf("an app named infra loaded, or was refused without saying why: %v", err)
+	}
+}

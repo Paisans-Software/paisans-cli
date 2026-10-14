@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,29 +35,32 @@ func coreURL() string {
 }
 
 // CoreIsOfficial reports whether the core catalog this process read is the
-// official one: a git checkout made from CoreURL at the commit read
-// (officialCheckout). Only then is its foundation.yaml the one the team
-// reviews in that repository's pull requests, and only then may apply skip
-// approving the images it names (README.md, "Apply asks before it grants").
-// A core read from PAISANS_CORE_CATALOG, from a catalogs.core url, from any
-// mirror, from a cached commit another URL fetched, or from an installed
-// snapshot, which is bytes another admin published, is not reviewed by that
-// team, however faithful the copy. A core not read, or read with an error,
-// is not official.
+// official one: a release of CoreURL, read from a git checkout made from
+// CoreURL at the commit that release names (officialCheckout). Only then is
+// its foundation.yaml one the team reviewed in that repository's pull
+// requests and released, and only then may apply skip approving the images
+// it names (README.md, "Apply asks before it grants"). A commit the team did
+// not release, a core read from PAISANS_CORE_CATALOG, from a catalogs.core
+// url, from any mirror, from a cached commit another URL fetched, or from an
+// installed snapshot, which is bytes another admin published, is not, however
+// faithful the copy. A core not read, or read with an error, is not official.
 func CoreIsOfficial() bool {
 	core.Lock()
 	defer core.Unlock()
 	return core.done && core.err == nil && core.official
 }
 
-// officialCheckout reports whether dir, a core catalog read at commit, came
-// from the official repository. It is decided from the directory itself,
-// never from what the configuration says the URL is, since the cache is
-// keyed by commit alone and a snapshot carries no origin at all: dir must
-// be a checkout Fetch made, its origin the official URL, and its HEAD the
-// commit.
-func officialCheckout(dir, commit string) bool {
-	if !fetched(dir) || commit == "" {
+// officialCheckout reports whether dir, a core catalog read at cat, is a
+// release of the official repository. It is decided from the directory and
+// the official repository, never from what the configuration says the URL
+// is, since the cache is keyed by commit alone and a snapshot carries no
+// origin at all: dir must be a checkout Fetch made, its origin the official
+// URL, its HEAD the commit, and the commit the one a release tag of the
+// official repository names (officialRelease). The official repository
+// serves any commit it holds, a pull request's head included, and only a
+// release is one the team reviewed and released.
+func officialCheckout(dir string, cat config.Catalog) bool {
+	if !fetched(dir) || cat.Commit == "" {
 		return false
 	}
 	origin, err := git(dir, "remote", "get-url", "origin")
@@ -64,7 +68,47 @@ func officialCheckout(dir, commit string) bool {
 		return false
 	}
 	head, err := git(dir, "rev-parse", "--verify", "HEAD^{commit}")
-	return err == nil && head == commit
+	return err == nil && head == cat.Commit && officialRelease(dir, cat)
+}
+
+// officialTagsDir is, inside a checkout's .git, a mark per tag the official
+// repository was asked about and named the checkout's commit. It is apart
+// from checkTag's marks, which record what cat.URL said, and cat.URL may be
+// a mirror.
+const officialTagsDir = "official-tags"
+
+// officialRelease reports whether cat.Tag is a release tag that the official
+// repository itself names cat.Commit by. The answer is recorded in the
+// checkout once the official repository has given it, so a run that cannot
+// reach the forge keeps it.
+func officialRelease(dir string, cat config.Catalog) bool {
+	if _, ok := releaseVersion(cat.Tag); !ok {
+		return false
+	}
+	mark := filepath.Join(dir, ".git", stateDir, officialTagsDir, hex.EncodeToString([]byte(cat.Tag)))
+	if _, err := os.Stat(mark); err == nil {
+		return true
+	}
+	got, err := TagCommit(officialURL(), cat.Tag)
+	if err != nil || got != cat.Commit {
+		return false
+	}
+	// Best effort: a mark that is not written costs only asking again.
+	if os.MkdirAll(filepath.Dir(mark), 0o755) == nil {
+		_ = os.WriteFile(mark, []byte(cat.Tag+"\n"), 0o644)
+	}
+	return true
+}
+
+// officialURL is the repository release tags are checked against: CoreURL,
+// or in a test binary the copy coretest's hook names (testOfficialCore).
+func officialURL() string {
+	if testing.Testing() {
+		if url := os.Getenv("PAISANS_TEST_OFFICIAL_CORE"); url != "" {
+			return url
+		}
+	}
+	return CoreURL
 }
 
 // officialCoreURL reports whether url names CoreURL's repository: the same
@@ -97,7 +141,8 @@ func splitHTTPS(url string) (host, path string, ok bool) {
 
 // testOfficialCore lets a test count a checkout of its local copy of the
 // core catalog (internal/blueprints/coretest) as fetched from the official
-// URL, since a test never reaches the real repository. It reads
+// URL, and officialURL check its release tags there, since a test never
+// reaches the real repository. It reads
 // PAISANS_TEST_OFFICIAL_CORE only inside a binary `go test` built:
 // testing.Testing is false in every other binary, so no configuration or
 // environment can make a production run count another core as official.
@@ -137,7 +182,7 @@ var core struct {
 	skipped []string
 	wizard  []WizardEntry
 	// official is whether the core was read from a checkout of the official
-	// repository at its commit (officialCheckout).
+	// repository at a commit one of its releases names (officialCheckout).
 	official bool
 }
 
@@ -269,7 +314,7 @@ func readCoreAt(dir string, cat config.Catalog) error {
 	}
 	setFoundation(f)
 	core.wizard = wizard
-	core.official = officialCheckout(dir, cat.Commit)
+	core.official = officialCheckout(dir, cat)
 	return nil
 }
 

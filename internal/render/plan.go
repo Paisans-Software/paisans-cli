@@ -165,6 +165,14 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	// Two files at one path would leave one of them unwritten and the other
+	// reviewed and applied as if it were both (Eg: an app named for the
+	// infrastructure stack), so the render stops rather than choose.
+	for i := 1; i < len(files); i++ {
+		if files[i].Path == files[i-1].Path {
+			return nil, fmt.Errorf("the configuration renders two files at %s. Each stack is a directory of its own; rename whatever shares a name with another stack", files[i].Path)
+		}
+	}
 	images, err := p.listImages(files)
 	if err != nil {
 		return nil, err

@@ -315,11 +315,32 @@ func git(dir string, args ...string) (string, error) {
 		args = append([]string{"-C", dir}, args...)
 	}
 	cmd := exec.Command("git", args...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(gitEnv(os.Environ()), "GIT_TERMINAL_PROMPT=0")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	return strings.TrimSpace(out.String()), err
+}
+
+// gitEnv is env without the variables that point git at another repository,
+// another index or another configuration than the checkout's own. What a
+// catalog's checkout says (its origin, its HEAD, its files) decides whether
+// the core is official (CoreIsOfficial), so it must be the checkout's,
+// whatever the environment the toolkit was started in.
+func gitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		switch {
+		case key == "GIT_DIR", key == "GIT_WORK_TREE", key == "GIT_INDEX_FILE",
+			key == "GIT_COMMON_DIR", key == "GIT_OBJECT_DIRECTORY",
+			key == "GIT_ALTERNATE_OBJECT_DIRECTORIES", key == "GIT_NAMESPACE",
+			key == "GIT_CONFIG", strings.HasPrefix(key, "GIT_CONFIG_"):
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // ReadCatalog reads a fetched catalog's catalog.yaml.
@@ -705,6 +726,11 @@ func InstallSnapshot(files map[string][]byte) error {
 		byCommit[commit][rest] = data
 	}
 	for commit, rel := range byCommit {
+		// The commit names a directory, so anything but a full commit id
+		// could name another one.
+		if !config.FullCommit(commit) {
+			return fmt.Errorf("snapshot path %s/... does not start with a full commit id", commit)
+		}
 		if _, ok := snapshotDir(commit); ok {
 			continue
 		}

@@ -2422,15 +2422,17 @@ changed, only when all of these hold:
    decided where the render chose it, never by matching its repository, so
    another service of the same compose file a template points at the same
    reference is approved.
-2. That `foundation.yaml` came from the official core catalog: the core was
-   fetched from exactly
-   `https://github.com/Paisans-Software/paisans-blueprints` at the pinned or
-   resolved commit, which the toolkit checks on the directory it read: a git
-   checkout whose origin is that URL and whose `HEAD` is that commit. The URL
-   may differ only by a trailing slash, a `.git` suffix and the case of its
-   host. A core from `PAISANS_CORE_CATALOG`, a `catalogs.core.url`, any
-   mirror, a cached commit another URL fetched, or an installed configuration
-   store snapshot is not official.
+2. That `foundation.yaml` came from a release of the official core catalog:
+   a release tag of `https://github.com/Paisans-Software/paisans-blueprints`
+   names the commit read, as that repository itself says (checked against it,
+   never against the configured URL, and recorded in the checkout so an
+   offline run keeps it), and the toolkit read the commit from a git checkout
+   whose origin is that URL and whose `HEAD` is that commit. The URL may
+   differ only by a trailing slash, a `.git` suffix and the case of its host.
+   A commit no release tag names (an unmerged branch, a pull request's head),
+   a core pin with no tag, a core from `PAISANS_CORE_CATALOG`, a
+   `catalogs.core.url`, any mirror, a cached commit another URL fetched, or an
+   installed configuration store snapshot is not official.
 3. The service is the toolkit's own: the infrastructure stack's, the gateway's
    Caddy unless `acme.image` declares one, a pinned app's own database unless
    the configuration declares one, a service the toolkit adds to a stack (the
@@ -2458,7 +2460,11 @@ ALLOW 3p FOUNDATION BLUEPRINTS TO BYPASS APPROVALS."
 ### Why
 
 The team reviews `foundation.yaml` in the official repository's pull
-requests, so its images are checked once, before any deployment reads them.
+requests and releases it with a release tag there, so the images of a release
+fetched from that URL at that commit are checked once, before any deployment
+reads them. The repository also serves commits the team never merged or
+released (GitHub serves any pull request's head), so the URL alone does not
+say a commit was reviewed; a release tag the repository itself names does.
 Asking every operator to approve the same tracks again at every apply repeats a
 check already made. A third party catalog or a mirror of the core catalog is
 not reviewed by that team: a mirror's `foundation.yaml` can say anything, and a

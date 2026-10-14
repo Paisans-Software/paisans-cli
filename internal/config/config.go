@@ -539,6 +539,12 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// InfraStack is the toolkit's infrastructure stack: the directory and the
+// compose project every site's infrastructure services render into, beside
+// one per app. An app takes its stack's name from its own, so an app of this
+// name is refused: its files would land on the infrastructure stack's.
+const InfraStack = "infra"
+
 // GateHostname is the gate's hostname: the one name the identity provider's
 // callback is registered against, under the community's domain so the
 // session cookie the gate writes covers every app.
@@ -1071,6 +1077,9 @@ func (c *Config) structural(noSubnet bool) error {
 	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
+		if name == InfraStack {
+			add("apps.%s: the name is the toolkit's infrastructure stack's. An app renders into a stack directory and a compose project named for it, beside the infrastructure stack, so this app's files would land on that stack's. Rename this app.", name)
+		}
 		if app.Blueprint == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}

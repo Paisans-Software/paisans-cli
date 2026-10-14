@@ -107,17 +107,18 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		// ways is not the foundation's, so a declaration that happens to name
 		// a foundation image is still reviewed.
 		chosen, fromElsewhere := map[string]string{}, map[string]bool{}
-		if stack == "infra" {
-			// The infrastructure template is the toolkit's own, so every
-			// service of it running a foundation image was chosen by the
-			// render.
+		if stack == config.InfraStack {
+			// The infrastructure template is the toolkit's own, so each of
+			// its services running a foundation image was chosen by the
+			// render. Only its own services count, so nothing else that
+			// reaches this file is marked.
 			fromFoundation, declared, err := p.infraImageOrigins()
 			if err != nil {
 				return nil, err
 			}
 			fromElsewhere = declared
 			for name, service := range services {
-				if image := strings.TrimSpace(service.Image); fromFoundation[image] {
+				if image := strings.TrimSpace(service.Image); fromFoundation[image] && infraServices[name] {
 					chosen[name] = image
 				}
 			}
@@ -184,6 +185,10 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 	}
 	return out, nil
 }
+
+// infraServices are the services the infrastructure template,
+// templates/infra-compose.yaml.tmpl, writes.
+var infraServices = map[string]bool{"etcd": true, "patroni": true, "haproxy": true, "garage": true, "caddy": true, "heartbeat": true}
 
 // infraImageOrigins is each reference the infrastructure stack runs, split
 // by where the render took it: from the core catalog's foundation, which is

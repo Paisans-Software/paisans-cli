@@ -25,3 +25,16 @@ func SettingOwners() []SettingOwner {
 
 // ComposeSets exposes the compose.yaml scan to a test of its own.
 var ComposeSets = composeSets
+
+// ListImages is listImages for files, exported so the external tests can
+// hand it compose files no template writes.
+func ListImages(cfg *config.Config, secrets *config.Secrets, files []File) (map[string][]ComposeImage, error) {
+	p := newPlanner(cfg, secrets)
+	if err := p.placeApps(); err != nil {
+		return nil, err
+	}
+	return p.listImages(files)
+}
+
+// InfraServices is infraServices, for the test that keeps it the template's.
+var InfraServices = infraServices
