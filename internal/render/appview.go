@@ -473,7 +473,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.UptimeSeed = seed
 	}
 	if planned.Blueprint == config.BlueprintAccount {
-		account, err := p.accountValuesFor(planned.Name)
+		account, err := p.accountValuesFor(planned.Name, planned.Site)
 		if err != nil {
 			return appValues{}, err
 		}

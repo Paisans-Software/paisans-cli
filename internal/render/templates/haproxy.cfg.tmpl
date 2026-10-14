@@ -33,9 +33,10 @@ listen postgres
 {{- if .PocketIDServers }}
 
 # Pocket ID's API, for a service on this site that calls it with the static
-# API key, which then travels only over the mesh. Every site that runs Pocket ID is a server, and only the active instance answers
-# /healthz, since a standby refuses connections on its port, so a takeover
-# moves this route within three failed checks with no change here.
+# API key, which then travels only over the mesh. Every site that runs Pocket
+# ID is a server, and only the active instance answers /healthz, since a
+# standby refuses connections on its port, so a takeover moves this route
+# within three failed checks with no change here.
 listen pocket-id
     bind {{ .Address }}:{{ .PocketIDAPIPort }}
     option httpchk GET /healthz

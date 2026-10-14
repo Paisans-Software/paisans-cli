@@ -192,10 +192,8 @@ func TestAccountReadsTheDeploymentsIdentityApp(t *testing.T) {
 	if key == "" || envValue(env, "ACCOUNT_IDP_API_KEY") != key {
 		t.Errorf("ACCOUNT_IDP_API_KEY is %q, want auth's static key", envValue(env, "ACCOUNT_IDP_API_KEY"))
 	}
-	for _, name := range []string{"ACCOUNT_IDP_URL", "ACCOUNT_OIDC_ISSUER"} {
-		if got := envValue(env, name); got != "https://id.example.org" {
-			t.Errorf("%s is %q, want auth's https://id.example.org", name, got)
-		}
+	if got := envValue(env, "ACCOUNT_OIDC_ISSUER"); got != "https://id.example.org" {
+		t.Errorf("ACCOUNT_OIDC_ISSUER is %q, want auth's https://id.example.org", got)
 	}
 }
 
@@ -237,9 +235,9 @@ func TestAccountAccent(t *testing.T) {
 	}
 }
 
-// Founder requirement, 2026-10-12: the service learns Pocket ID's address
-// only from the identity app's hostname in paisans-stack.yaml, so renaming that
-// host changes both values, and they stay equal.
+// The issuer is the URL Pocket ID names itself by, so it follows the identity
+// app's hostname in paisans-stack.yaml. The API is reached on the mesh, so a
+// renamed host leaves ACCOUNT_IDP_URL as it was.
 func TestAccountFollowsTheIdentityHostname(t *testing.T) {
 	first := buildAccount(t, nil)[accountEnvA]
 	second := buildAccount(t, func(cfg *config.Config, _ *config.Secrets) {
@@ -247,12 +245,28 @@ func TestAccountFollowsTheIdentityHostname(t *testing.T) {
 		auth.Hostname = "login.renamed.example"
 		cfg.Apps["auth"] = auth
 	})[accountEnvA]
-	for _, key := range []string{"ACCOUNT_IDP_URL", "ACCOUNT_OIDC_ISSUER"} {
-		if got := envValue(second, key); got != "https://login.renamed.example" {
-			t.Errorf("%s = %q after the identity hostname changed", key, got)
+	if got := envValue(second, "ACCOUNT_OIDC_ISSUER"); got != "https://login.renamed.example" {
+		t.Errorf("ACCOUNT_OIDC_ISSUER = %q after the identity hostname changed", got)
+	}
+	if a, b := envValue(first, "ACCOUNT_IDP_URL"), envValue(second, "ACCOUNT_IDP_URL"); a != b {
+		t.Errorf("ACCOUNT_IDP_URL changed from %q to %q with the public hostname", a, b)
+	}
+}
+
+// Pocket ID's API, which the service calls with the static API key, is its
+// own site's HAProxy on the mesh, never the public hostname: the key stays
+// on the mesh, and each site's instance names its own address.
+func TestAccountCallsPocketIDOnItsOwnSitesMeshListener(t *testing.T) {
+	files := buildAccount(t, nil)
+	for path, want := range map[string]string{
+		accountEnvA:                            "http://10.44.0.1:1413",
+		"home-b/srv/paisans/f2a9/account/.env": "http://10.44.0.2:1413",
+	} {
+		if got := envValue(files[path], "ACCOUNT_IDP_URL"); got != want {
+			t.Errorf("%s: ACCOUNT_IDP_URL=%q, want %q", path, got, want)
 		}
-		if envValue(first, key) == envValue(second, key) {
-			t.Errorf("%s did not change", key)
+		if got := envValue(files[path], "ACCOUNT_OIDC_ISSUER"); got != "https://id.example.org" {
+			t.Errorf("%s: ACCOUNT_OIDC_ISSUER=%q, want the public https://id.example.org", path, got)
 		}
 	}
 }
