@@ -4,10 +4,10 @@ apiVersion: paisans.blueprint/v1
 name: pocket-id
 services:
   - {name: "app", foundation: "pocket-id", purpose: "the application"}
-  # Built from cmd/admin-reconciler by .github/workflows/admin-reconciler-image.yml.
-  # The DNS continuity check needs 0.2.0 or later, which the foundation's
-  # track names.
-  - {name: "reconciler", foundation: "admin-reconciler", purpose: "the admin reconciler"}
+  # Built from cmd/operator-reconciler by
+  # .github/workflows/operator-reconciler-image.yml. The checks this toolkit
+  # renders for need 0.3.0 or later, which the foundation's track names.
+  - {name: "reconciler", foundation: "operator-reconciler", purpose: "the operator reconciler"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 port: 1411
@@ -51,24 +51,24 @@ secrets:
   # (env_config.go:182-184). README, "The toolkit administers Pocket ID
   # through its static API key", says why it is generated here.
   #
-  # admins_heartbeat_token is what every instance of the app pushes the
-  # admins group's health to each monitor with, and what each monitor's
-  # seed names for the app (internal/render/adminsheartbeat.go). One per
-  # app rather than per site, so that the one monitor follows whichever
-  # instance is active.
+  # operators_heartbeat_token is what every instance of the app pushes the
+  # operator reconciler's answer to each monitor with, and what each
+  # monitor's seed names for the app (internal/render/operatorsheartbeat.go).
+  # One per app rather than per site, so that the one monitor follows
+  # whichever instance is active.
   generate:
     - name: encryption_key
       never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Pocket ID offers no re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
-    # Its users are the toolkit, the admin reconciler and the account
+    # Its users are the toolkit, the operator reconciler and the account
     # service, not members.
     - static_api_key
     # 16 random bytes, hex, the shape the uptime fork's seed takes a push
     # token in (src/lib/sitePayload.js insertSite at 1.1.0-oidc.4).
-    - {name: admins_heartbeat_token, format: hex16}
+    - {name: operators_heartbeat_token, format: hex16}
     # The DNS continuity check's (internal/render/dnscontinuity.go): the key
     # every address is hashed under, so that no DNS provider address reaches
     # a host, and the tokens its two heartbeats push with, one per app as
-    # the admins heartbeat's is. Generated whether or not the deployment
+    # the operators heartbeat's is. Generated whether or not the deployment
     # checks its DNS provider, so that adding the members token later needs
     # no init. The key is read only by this app's reconciler, which the
     # rendered .env restarts with it.

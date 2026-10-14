@@ -99,7 +99,7 @@ wrong.
 
 * **The CLI.** Every call already goes over ssh to the site and runs `curl`
   against the mesh port.
-* **The admin reconciler.** It calls `http://app:1411` on its own compose
+* **The operator reconciler.** It calls `http://app:1411` on its own compose
   network.
 * **The OIDC flows.** Discovery, the authorize, token and userinfo endpoints,
   and JWKS carry no API key, and every app reaches them at the public hostname

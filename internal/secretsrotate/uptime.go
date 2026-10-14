@@ -139,59 +139,59 @@ func (r heartbeat) Users(e Env) []Use {
 	return append(out, Use{Site: r.site, Stacks: []string{"infra"}})
 }
 
-// adminsHeartbeatGap is what an admins heartbeat rotation costs, for the
+// operatorsHeartbeatGap is what an operators heartbeat rotation costs, for the
 // same reason as heartbeatGap: from the first monitor restarting with the
 // next token until the active Pocket ID instance's pusher is recreated with
 // it, that instance still pushes the old one, which a monitor already
 // holding the next answers 404 to. The pushers are recreated one site at a
 // time, so the active instance may be the last. Nobody is signed out, and
 // Pocket ID keeps running throughout.
-const adminsHeartbeatGap = "the admins heartbeat, which the monitors may refuse while they restart with the next token and until the active instance pushes it, normally within the grace before a heartbeat counts as missed"
+const operatorsHeartbeatGap = "the operators heartbeat, which the monitors may refuse while they restart with the next token and until the active instance pushes it, normally within the grace before a heartbeat counts as missed"
 
-// adminsHeartbeat rotates the token a Pocket ID app's instances push the
-// admins group's health with.
-type adminsHeartbeat struct {
+// operatorsHeartbeat rotates the token a Pocket ID app's instances push the
+// operator reconciler's answer with.
+type operatorsHeartbeat struct {
 	Generated
 	app, key string
 }
 
-// AdminsHeartbeat is the rotation of apps.<app>.admins_heartbeat_token, the
-// token every instance of a Pocket ID app pushes the admins heartbeat with
-// (internal/render/adminsheartbeat.go). The monitors learn it first, as for
+// OperatorsHeartbeat is the rotation of apps.<app>.operators_heartbeat_token, the
+// token every instance of a Pocket ID app pushes the operators heartbeat with
+// (internal/render/operatorsheartbeat.go). The monitors learn it first, as for
 // a site's heartbeat: every uptime app, on its own site, is applied in turn,
 // which rewrites its monitors.json and restarts it so the seed reconcile
 // adopts the token. Every monitor, the one on a site the app runs on
-// included, since every monitor's seed names the app's admins heartbeat.
+// included, since every monitor's seed names the app's operators heartbeat.
 // Then each site running the app, its own stack, whose
-// admins-heartbeat/heartbeat.env changes. Only the admins-heartbeat service
-// reads that file, and `up -d` replaces only the service whose configuration
+// operators-heartbeat/heartbeat.env changes. Only the operators-heartbeat
+// service reads that file, and `up -d` replaces only the service whose configuration
 // changed, so Pocket ID, its reconciler and its database are left running. A
 // deployment with no monitor has no user: no pusher is rendered, and the
 // token is replaced in the file and handed to nobody.
-func AdminsHeartbeat(app string) Rotator {
-	return ContinuityHeartbeat(app, "admins_heartbeat_token")
+func OperatorsHeartbeat(app string) Rotator {
+	return ContinuityHeartbeat(app, "operators_heartbeat_token")
 }
 
 // ContinuityHeartbeats is every token a Pocket ID app's instances push a
-// continuity monitor with: the admins heartbeat's and the DNS continuity
+// continuity monitor with: the operators heartbeat's and the DNS continuity
 // check's two (internal/render/dnscontinuity.go).
-var ContinuityHeartbeats = []string{"admins_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token"}
+var ContinuityHeartbeats = []string{"operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token"}
 
 // ContinuityHeartbeat is the rotation of one of ContinuityHeartbeats. Each
-// is handed out exactly as the admins heartbeat's is: every monitor seeds
+// is handed out exactly as the operators heartbeat's is: every monitor seeds
 // it, and the pusher beside every instance pushes with it from
-// admins-heartbeat/heartbeat.env. A DNS token in a deployment that renders
+// operators-heartbeat/heartbeat.env. A DNS token in a deployment that renders
 // no DNS check is replaced in the file and handed to monitors that do not
 // seed it, which costs a restart of each and nothing else.
 func ContinuityHeartbeat(app, key string) Rotator {
-	return adminsHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
+	return operatorsHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
 }
 
-func (r adminsHeartbeat) Cost() Cost { return Cost{Downtime: adminsHeartbeatGap} }
+func (r operatorsHeartbeat) Cost() Cost { return Cost{Downtime: operatorsHeartbeatGap} }
 
 // Precheck refuses an app that is not a Pocket ID app, and one that runs on
 // no site.
-func (r adminsHeartbeat) Precheck(e Env) error {
+func (r operatorsHeartbeat) Precheck(e Env) error {
 	app, ok := e.Cfg.Apps[r.app]
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
@@ -204,14 +204,14 @@ func (r adminsHeartbeat) Precheck(e Env) error {
 
 // Checked has nothing to do: the monitors check the token, and they are
 // handed it as the first users.
-func (r adminsHeartbeat) Checked(e Env, next string) error { return nil }
+func (r operatorsHeartbeat) Checked(e Env, next string) error { return nil }
 
-func (r adminsHeartbeat) Accepts(e Env, next string) (bool, error) { return true, nil }
+func (r operatorsHeartbeat) Accepts(e Env, next string) (bool, error) { return true, nil }
 
 // Users is every monitor, in app order, each on its own site, then every
 // site running the app, its own stack on each: the monitors
-// render.adminsHeartbeatTargets has the app push to, and its pushers.
-func (r adminsHeartbeat) Users(e Env) []Use {
+// render.operatorsHeartbeatTargets has the app push to, and its pushers.
+func (r operatorsHeartbeat) Users(e Env) []Use {
 	var out []Use
 	placed := render.AppSites(e.Cfg)
 	for _, name := range e.Cfg.AppNames() {

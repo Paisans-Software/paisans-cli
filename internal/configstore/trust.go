@@ -7,10 +7,10 @@ import (
 )
 
 // Graph is every version the workstation holds, with a way to read each
-// version's admins.
+// version's operators.
 type Graph struct {
-	Versions map[string]Version
-	Admins   func(sha string) (map[string]string, error) // fingerprint -> admin id, from that version's paisans-stack.yaml
+	Versions  map[string]Version
+	Operators func(sha string) (map[string]string, error) // fingerprint -> operator id, from that version's paisans-stack.yaml
 }
 
 // Anchor is what the operator holds that nobody else can forge: their own
@@ -51,19 +51,19 @@ func (e *ConflictError) Error() string {
 	return fmt.Sprintf("versions %s and %s are part of a loop of removals that bar one another, none of them in your anchor's history; choose one by publishing on it", e.A, e.B)
 }
 
-// UnreadableAdminsError is a version in the anchor's history whose
+// UnreadableOperatorsError is a version in the anchor's history whose
 // paisans-stack.yaml cannot be read. Its removals still stand, but which keys it
 // removed is unknown, so Judge refuses rather than trust what they would bar.
-type UnreadableAdminsError struct {
+type UnreadableOperatorsError struct {
 	SHA string
 	Err error
 }
 
-func (e *UnreadableAdminsError) Error() string {
-	return fmt.Sprintf("the admins of version %s, in your anchor's history, cannot be read: %v", e.SHA, e.Err)
+func (e *UnreadableOperatorsError) Error() string {
+	return fmt.Sprintf("the operators of version %s, in your anchor's history, cannot be read: %v", e.SHA, e.Err)
 }
 
-func (e *UnreadableAdminsError) Unwrap() error { return e.Err }
+func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 
 // Judge decides which versions to trust, starting from the operator's anchor,
 // by the spec's "Which versions the workstation trusts":
@@ -75,7 +75,7 @@ func (e *UnreadableAdminsError) Unwrap() error { return e.Err }
 //   - Removals in that history always stand, and bar the versions signed by
 //     each removed key that are not ancestors of the removal.
 //   - Every other version is a candidate when it passes shape, is not a root,
-//     has only trusted or candidate parents, is signed by a key of an admin in
+//     has only trusted or candidate parents, is signed by a key of an operator in
 //     every parent, and is not barred by the history.
 //   - A candidate's removals bar other candidates, and with them every
 //     candidate built on a barred one. A candidate nobody undecided bars is
@@ -84,16 +84,16 @@ func (e *UnreadableAdminsError) Unwrap() error { return e.Err }
 //     left bars itself in a loop, and is a *ConflictError.
 //
 // Judge returns ErrNoAnchor (or an error that is it to errors.Is) when trust
-// has nowhere to start or the pin is not a good root, *UnreadableAdminsError
-// when a version in the anchor's history has admins that cannot be read, and
+// has nowhere to start or the pin is not a good root, *UnreadableOperatorsError
+// when a version in the anchor's history has operators that cannot be read, and
 // *ConflictError for a loop of removals. The result does not depend on map
 // order, and Judge terminates on any graph, including one with a missing
 // parent or a cycle.
 func Judge(g Graph, a Anchor) (Verdict, error) {
-	if g.Admins == nil {
-		return Verdict{}, errors.New("judging versions needs a way to read their admins")
+	if g.Operators == nil {
+		return Verdict{}, errors.New("judging versions needs a way to read their operators")
 	}
-	j := &judgement{g: g, admins: map[string]adminsResult{}, anc: map[string]map[string]bool{}}
+	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
 	anchor, err := j.anchor(a, order)
@@ -106,8 +106,8 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	}
 	for _, sha := range order {
 		if history[sha] {
-			if err := j.adminsOf(sha).err; err != nil {
-				return Verdict{}, &UnreadableAdminsError{SHA: sha, Err: err}
+			if err := j.operatorsOf(sha).err; err != nil {
+				return Verdict{}, &UnreadableOperatorsError{SHA: sha, Err: err}
 			}
 		}
 	}
@@ -301,24 +301,24 @@ func conflict(order []string, cand map[string]bool, status map[string]int, attac
 	return &ConflictError{A: a, B: b}
 }
 
-type adminsResult struct {
+type operatorsResult struct {
 	m   map[string]string
 	err error
 }
 
 type judgement struct {
-	g      Graph
-	admins map[string]adminsResult
-	anc    map[string]map[string]bool
+	g         Graph
+	operators map[string]operatorsResult
+	anc       map[string]map[string]bool
 }
 
-func (j *judgement) adminsOf(sha string) adminsResult {
-	if r, ok := j.admins[sha]; ok {
+func (j *judgement) operatorsOf(sha string) operatorsResult {
+	if r, ok := j.operators[sha]; ok {
 		return r
 	}
-	m, err := j.g.Admins(sha)
-	j.admins[sha] = adminsResult{m, err}
-	return j.admins[sha]
+	m, err := j.g.Operators(sha)
+	j.operators[sha] = operatorsResult{m, err}
+	return j.operators[sha]
 }
 
 // anchor picks where trust starts.
@@ -364,12 +364,12 @@ func (j *judgement) goodRoot(sha string) string {
 	case j.shape(sha) != "":
 		return "fails shape"
 	}
-	own := j.adminsOf(sha)
+	own := j.operatorsOf(sha)
 	if own.err != nil {
-		return fmt.Sprintf("has unreadable admins: %v", own.err)
+		return fmt.Sprintf("has unreadable operators: %v", own.err)
 	}
 	if _, ok := own.m[v.SignerFP]; !ok {
-		return "is not signed by an admin it lists"
+		return "is not signed by an operator it lists"
 	}
 	return ""
 }
@@ -401,7 +401,7 @@ func (j *judgement) shape(sha string) string {
 
 // extend says why a version outside the anchor's history cannot be a
 // candidate, or "" when it can. A version whose own paisans-stack.yaml cannot be
-// read is not trusted: its admins decide its children and its removals.
+// read is not trusted: its operators decide its children and its removals.
 func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 	if reason := j.shape(sha); reason != "" {
 		return reason
@@ -415,16 +415,16 @@ func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 			return fmt.Sprintf("parent %s is not trusted (signer)", p)
 		}
 	}
-	if own := j.adminsOf(sha); own.err != nil {
-		return fmt.Sprintf("its admins cannot be read: %v (signer)", own.err)
+	if own := j.operatorsOf(sha); own.err != nil {
+		return fmt.Sprintf("its operators cannot be read: %v (signer)", own.err)
 	}
 	for _, p := range v.Parents {
-		pa := j.adminsOf(p)
+		pa := j.operatorsOf(p)
 		if pa.err != nil {
-			return fmt.Sprintf("the admins of parent %s cannot be read: %v (signer)", p, pa.err)
+			return fmt.Sprintf("the operators of parent %s cannot be read: %v (signer)", p, pa.err)
 		}
 		if _, ok := pa.m[v.SignerFP]; !ok {
-			return fmt.Sprintf("signed by %s, which is not a key of an admin in parent %s (signer)", v.SignerFP, p)
+			return fmt.Sprintf("signed by %s, which is not a key of an operator in parent %s (signer)", v.SignerFP, p)
 		}
 	}
 	return ""
@@ -432,7 +432,7 @@ func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 
 // bars says why removals in r bar v, or "" when they do not: v is signed by a
 // key one of r's parents listed and r does not, and v is neither r nor an
-// ancestor of it. Judge refuses an anchor's history with unreadable admins and
+// ancestor of it. Judge refuses an anchor's history with unreadable operators and
 // never makes a candidate of a version with them, so own.err is not expected
 // here; it is treated as removing nothing.
 func (j *judgement) bars(r, v string) string {
@@ -440,7 +440,7 @@ func (j *judgement) bars(r, v string) string {
 		return ""
 	}
 	fp := j.g.Versions[v].SignerFP
-	own := j.adminsOf(r)
+	own := j.operatorsOf(r)
 	if own.err != nil {
 		return ""
 	}
@@ -448,7 +448,7 @@ func (j *judgement) bars(r, v string) string {
 		return ""
 	}
 	for _, p := range j.g.Versions[r].Parents {
-		if id, listed := j.adminsOf(p).m[fp]; listed {
+		if id, listed := j.operatorsOf(p).m[fp]; listed {
 			return fmt.Sprintf("signed by %s, a key of %s that %s removed (removal)", fp, id, r)
 		}
 	}

@@ -31,9 +31,8 @@ images:
   oauth2-proxy: "quay.io/oauth2-proxy/oauth2-proxy:v7.*.*"
   # NOTE THE MISSING `v` in these three: docker/metadata-action's semver
   # pattern strips it from the git tag.
-  # 0.2, the first carrying the DNS continuity check the pocket-id
-  # blueprint renders for.
-  admin-reconciler: "ghcr.io/paisans-software/admin-reconciler:0.2.*"
+  # 0.3, the first that reads the operators and writes nothing.
+  operator-reconciler: "ghcr.io/paisans-software/operator-reconciler:0.3.*"
   uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
   account: "ghcr.io/paisans-software/paisans-account-service:0.2.*"
 # By Postgres major. A major is data, so a deployment's

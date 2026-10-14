@@ -147,7 +147,7 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
 		}
 		if blueprint == config.BlueprintPocketID {
-			add(owner+" admin reconciler", "apps."+name, "tcp", addr, reconcilerPort)
+			add(owner+" operator reconciler", "apps."+name, "tcp", addr, reconcilerPort)
 		}
 	}
 	return out

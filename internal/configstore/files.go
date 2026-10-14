@@ -11,7 +11,7 @@ type Files struct {
 	// it was rendered, keyed by its path under the version's blueprints/
 	// directory: <catalog commit>/<blueprint>/<file>. It is what lets a
 	// removal or a recovery read a blueprint whose catalog has gone, and
-	// what makes every admin and every site render the same bytes
+	// what makes every operator and every site render the same bytes
 	// (docs/specs/2026-10-12-blueprints-and-catalogs.md, "The snapshot in the
 	// configuration store"). Empty for a configuration that uses no catalog.
 	Blueprints map[string][]byte

@@ -206,16 +206,16 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				})
 			}
 			if app.Blueprint == config.BlueprintPocketID {
-				// The admin reconciler service beside each instance, which
-				// /livez answers 200 while its pass loop runs, standby or
-				// not, and 503 once it is stale
-				// (docs/specs/2026-10-08-admin-reconciler.md). It is that
-				// site's service alone: the admins group's health, which
-				// only the active instance knows, is the admins heartbeat
-				// below. The gateway does not route the reconciler, so
+				// The operator reconciler service beside each instance,
+				// which /livez answers 200 while its pass loop runs,
+				// standby or not, and 503 once it is stale
+				// (docs/specs/2026-10-14-operators-and-management.md). It
+				// is that site's service alone: whether the operators
+				// check out, which only the active instance knows, is the
+				// operators heartbeat below. The gateway does not route the reconciler, so
 				// there is no public check.
 				monitors = append(monitors, seedMonitor{
-					Name: fmt.Sprintf("%s — admin reconciler (%s)", name, site), MonitorType: "active", Method: "GET", CheckType: "status",
+					Name: fmt.Sprintf("%s — operator reconciler (%s)", name, site), MonitorType: "active", Method: "GET", CheckType: "status",
 					URL:            fmt.Sprintf("http://%s:%d/livez", p.sites[site].Address, reconcilerPort),
 					ExpectedStatus: "200", FollowRedirects: &noRedirects,
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
@@ -281,8 +281,8 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		})
 	}
 
-	// One admins heartbeat per Pocket ID app, pushed by whichever of its
-	// instances is active (adminsheartbeat.go), with the app's own token
+	// One operators heartbeat per Pocket ID app, pushed by whichever of its
+	// instances is active (operatorsheartbeat.go), with the app's own token
 	// and the site heartbeat's schedule, grace and threshold. Seeded by
 	// every monitor, wherever the app runs: every instance pushes to every
 	// monitor.
@@ -290,7 +290,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		if p.cfg.Apps[name].Blueprint != config.BlueprintPocketID {
 			continue
 		}
-		token, err := p.adminsHeartbeatToken(name)
+		token, err := p.operatorsHeartbeatToken(name)
 		if err != nil {
 			return "", err
 		}

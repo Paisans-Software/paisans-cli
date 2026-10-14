@@ -56,11 +56,16 @@ acme:
   # anything.
   # image: ghcr.io/example-org/caddy-route53:2.11.4
 
-# The people who may log in to the sites. Each site's ssh.keys names some of
-# them, and host prepare makes every key they list an authorized key there, so
-# an admin's keys are written once however many sites they reach. email is
+# The operators: the people who run the machines. They log in to the sites,
+# hold the secrets and run apply. validate wants at least two whose keys are on
+# every site that runs Pocket ID, so one lost workstation does not leave
+# nobody able to run the deployment. apply makes each a Pocket ID user in
+# operators, members and every app's member and admin group, so every operator
+# is a community admin as well. Each site's ssh.keys names some of them, and
+# host prepare makes every key they list an authorized key there, so an
+# operator's keys are written once however many sites they reach. email is
 # required; name is optional.
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
@@ -85,9 +90,9 @@ sites:
     endpoint: home-a.example.org:51820
     # How the toolkit reaches the site, and who may log in. Every site has
     # one, the gateway included. The keys are public keys, one per line,
-    # every admin's: the file is shared, so it never names a private key.
-    # Each admin's own ssh offers these and finds its private half in that
-    # admin's agent. `host prepare` makes them the user's authorized keys.
+    # every operator's: the file is shared, so it never names a private key.
+    # Each operator's own ssh offers these and finds its private half in that
+    # operator's agent. `host prepare` makes them the user's authorized keys.
     ssh:
       host: home-a.local        # optional: defaults to public_address
       user: ubuntu              # must already exist on the host
@@ -319,6 +324,13 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      # Required. paisans: the account service (the account app below)
+      # manages signup, bans and recovery, nobody is a Pocket ID
+      # administrator, and the toolkit renders allow_user_signups and
+      # email_one_time_access_as_unauthenticated itself. pocket-id: Pocket
+      # ID's own admin pages do, every operator is its administrator, and
+      # there is no account app.
+      management: paisans
       # Not `s3`. Uploads are ~1 MB of avatars and branding; in Postgres they
       # ride streaming replication with no sync job, and the service that gates
       # every other one gains no dependency on object storage being up.
@@ -330,14 +342,10 @@ apps:
       # configuration is rendered from paisans-stack.yaml".
       app_name: Example ID       # also the sender name on its mail
       session_duration: 10080    # minutes
-      # New accounts come only from invites (the account app below), so
-      # Pocket ID's own signup links stay off.
-      allow_user_signups: disabled
       # By name. apply finds or creates each group at the running Pocket ID
       # and records its ID under pocket_id_groups in the secrets. members is
       # the group the gate and every member facing app admit.
       signup_default_groups: [members]
-      email_one_time_access_as_unauthenticated: true
       # Always false, and validate refuses true. A username is the identity
       # other apps know a person by, such as their fediverse handle in Mbin,
       # and those apps do not follow a rename.
@@ -435,13 +443,16 @@ apps:
     # monitor one check of its own public URL, generated from this file.
     placement: { pinned: health }
     settings:
-      # Required. Only members of this identity provider group may sign in.
+      # Only members of this identity provider group may sign in. Defaults to
+      # operators, the people who run the machines; admins lets every
+      # community admin in as well.
       admin_group: admins
     # Optional, any field of the smtp block below; the rest is inherited.
     # smtp:
     #   from_name: Example Health
 
-  # The community's account service, on account.example.org. With invites
+  # The community's account service, on account.example.org, signing in
+  # through the one pocket-id app above. With invites
   # on, members bring new people in: the invitee opens their link on
   # invite.example.org, agrees to the code of conduct below and chooses
   # their details before any account exists; with require_approval an admin
@@ -451,7 +462,6 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       # Required. true serves invite.example.org as well, unless
       # hostnames.invite names another hostname for it.
       invites: true

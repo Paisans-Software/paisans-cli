@@ -48,15 +48,21 @@ func Render(a Answers, id string, by Origin) ([]byte, error) {
 
 // view is the template's data: the answers, and what follows from them.
 type view struct {
-	Origin   Origin
-	ID       string
-	Subnet   string
-	Name     string
-	Domain   string
-	Provider string
-	Admins   []Admin
-	AdminIDs string
-	Sites    []siteView
+	Origin      Origin
+	ID          string
+	Subnet      string
+	Name        string
+	Domain      string
+	Provider    string
+	Operators   []Operator
+	OperatorIDs string
+	// Management, Account and PocketID are the answers about who manages
+	// accounts; CodeOfConduct is the account app's, indented as a block.
+	Management    string
+	Account       Account
+	CodeOfConduct string
+	PocketID      PocketIDAccounts
+	Sites         []siteView
 	// Synchronous is the high availability shape's synchronous replication.
 	Synchronous bool
 	// Voters is the number of etcd members the roles derive: every witness
@@ -93,15 +99,31 @@ func build(a Answers, id string) view {
 		Name:        a.Name,
 		Domain:      a.Domain,
 		Provider:    a.Provider,
-		Admins:      a.Admins,
+		Operators:   a.Operators,
+		Management:  a.Management,
+		Account:     a.Account,
+		PocketID:    a.PocketID,
 		Synchronous: a.Shape == ShapeHighAvailability,
 		SMTP:        a.SMTP,
 	}
-	ids := make([]string, len(a.Admins))
-	for i, ad := range a.Admins {
-		ids[i] = ad.ID
+	ids := make([]string, len(a.Operators))
+	for i, op := range a.Operators {
+		ids[i] = op.ID
 	}
-	v.AdminIDs = strings.Join(ids, ", ")
+	v.OperatorIDs = strings.Join(ids, ", ")
+	if a.Account.Invites {
+		// A block scalar under code_of_conduct: each line indented eight
+		// spaces, a blank line left blank.
+		lines := strings.Split(a.Account.CodeOfConduct, "\n")
+		for i, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				lines[i] = "        " + l
+			} else {
+				lines[i] = ""
+			}
+		}
+		v.CodeOfConduct = strings.Join(lines, "\n")
+	}
 
 	sites := a.AllSites()
 	var data []string

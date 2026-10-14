@@ -49,7 +49,7 @@ var groupSummary = map[string]string{
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"config":      "Publish, pull, list and recover the sites' signed configuration.",
-	"admin":       "Sign the sites' configuration, or give an admin a sign-in link.",
+	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
 	"secrets":     "Set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
@@ -64,7 +64,7 @@ var helpSections = []helpSection{
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
 	{"Hosts and sites", []string{"host", "site", "mesh", "gateway", "storage", "prune"}},
 	{"Check", []string{"doctor", "preflight", "failover", "web-server", "version"}},
-	{"Configuration and secrets", []string{"config", "admin", "secrets", "dns"}},
+	{"Configuration and secrets", []string{"config", "operator", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
 }
 
@@ -126,7 +126,7 @@ var helpCommands = []helpCommand{
 		name:    "create",
 		summary: "Write a new " + config.FileName + " by answering questions.",
 		usage:   []string{"paisans create [--config " + config.FileName + "]"},
-		detail: "For a new deployment: ask, at a terminal, about the community, its admins, its machines, its apps and its mail, and write a commented " + config.FileName + " that validate refuses nothing in, once you have read it and said yes. Refuses a file that exists. " +
+		detail: "For a new deployment: ask, at a terminal, about the community, its operators, its machines, its apps and its mail, and write a commented " + config.FileName + " that validate refuses nothing in, once you have read it and said yes. Refuses a file that exists. " +
 			"Asks for no secret and reaches no host.",
 	},
 	{
@@ -173,16 +173,16 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "host allow",
-		summary: "Add admins' keys to a host's key allowlist.",
-		usage:   []string{"paisans host allow <site> <admin>... [--config " + config.FileName + "] [--ssh <destination>]\n                   [--execute]"},
-		detail: "Add each admin's key fingerprints to the site's host's key allowlist, /etc/paisans/ssh-allow.<user>, the keys host prepare may add there; a new list also holds every key a deployment already claims.\n\n" +
+		summary: "Add operators' keys to a host's key allowlist.",
+		usage:   []string{"paisans host allow <site> <operator>... [--config " + config.FileName + "] [--ssh <destination>]\n                   [--execute]"},
+		detail: "Add each operator's key fingerprints to the site's host's key allowlist, /etc/paisans/ssh-allow.<user>, the keys host prepare may add there; a new list also holds every key a deployment already claims.\n\n" +
 			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
 	},
 	{
 		name:    "host disallow",
 		summary: "Take keys off a host's key allowlist.",
-		usage:   []string{"paisans host disallow <site> <admin|fingerprint>... [--config " + config.FileName + "]\n                      [--ssh <destination>] [--execute]"},
-		detail: "Take keys off the site's host's key allowlist, by admin or fingerprint; a key already authorized keeps working.\n\n" +
+		usage:   []string{"paisans host disallow <site> <operator|fingerprint>... [--config " + config.FileName + "]\n                      [--ssh <destination>] [--execute]"},
+		detail: "Take keys off the site's host's key allowlist, by operator or fingerprint; a key already authorized keeps working.\n\n" +
 			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
 	},
 	{
@@ -320,18 +320,18 @@ var helpCommands = []helpCommand{
 			configTrust,
 	},
 	{
-		name:    "admin magic-link",
-		summary: "Give a declared admin a one-time sign-in link.",
-		usage:   []string{"paisans admin magic-link <admin> [--app <pocket-id app>]\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--site <name>] [--ssh <destination>] [--execute]"},
-		detail: "Issue an admin under admins a one-time link that signs them in to Pocket ID once, to register a passkey with: after a first link expired unused, or a passkey was lost. " +
+		name:    "operator magic-link",
+		summary: "Give a declared operator a one-time sign-in link.",
+		usage:   []string{"paisans operator magic-link <operator> [--app <pocket-id app>]\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--site <name>] [--ssh <destination>] [--execute]"},
+		detail: "Issue an operator under operators a one-time link that signs them in to Pocket ID once, to register a passkey with: after a first link expired unused, or a passkey was lost. " +
 			"Printed once on stdout, and emailed by Pocket ID as well when it emails apply's links. " +
-			"Changes nothing else: apply makes the account, its groups and its administrator flag, and an admin with no account yet is pointed there. Writes nothing without --execute.",
+			"Changes nothing else: apply makes the account and its groups, and an operator with no account yet is pointed there. Writes nothing without --execute.",
 	},
 	{
-		name:    "admin register",
+		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
-		usage:   []string{"paisans admin register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>] [--execute]"},
-		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in admins, or the one --key names. " +
+		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>] [--execute]"},
+		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which config publish signs with from then on.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before.",
@@ -401,7 +401,7 @@ var helpCommands = []helpCommand{
 // sentence.
 const configTrust = "\n\n" +
 	"The signed copies of " + config.FileName + ", secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
-	"With --execute, pull, recover, a publish of the first version, apply and admin register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and admin register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
+	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
@@ -409,10 +409,10 @@ const configTrust = "\n\n" +
 const executeTopic = `host prepare, host deployments, host allow, host disallow, apply, prune, site
 add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
 admin create, app remove, oidc client create, secrets prune, secrets rotate,
-preflight, failover test, doctor, init, config and admin register are the only
+preflight, failover test, doctor, init, config and operator register are the only
 commands that reach a host. Each reads it to plan, and changes it only with
 --execute; host allow and host disallow change only a host's key allowlist,
-which is the host owner's, and claim nothing; config and admin register claim
+which is the host owner's, and claim nothing; config and operator register claim
 nothing, and their --execute only starts each site's configuration sync and, for
 publish and register, adds a version to its store; host deployments, preflight,
 doctor and init have no --execute and never change it; secrets prune only reads

@@ -41,13 +41,15 @@ mail: reads
 # one group is settings.admin_group, used as both: its members are
 # the monitor's administrators, and nobody else may sign in, so the
 # client is restricted to it and Pocket ID refuses everyone else
-# before the monitor sees them. It has no default: validate requires
-# it (uptime-needs-an-admin-group).
+# before the monitor sees them. It defaults to operators, the people
+# who run the machines the monitor watches.
 oidc:
   callback: "/login/oidc/callback"
   pkce: true
   admin_group_setting: "admin_group"
   member_group_setting: "admin_group"
+  default_admin_group: "operators"
+  default_member_group: "operators"
   reads_groups: true
 secrets:
   required:

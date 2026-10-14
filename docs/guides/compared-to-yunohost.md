@@ -22,7 +22,7 @@ full-time sysadmins. They answer different questions.
 
 | | YunoHost | Paisans |
 |---|---|---|
-| What it is | An operating system layer on one Debian server | One static binary an admin runs from their machine that manages a suite of Docker containers across one or more server hosts, reaching them over SSH |
+| What it is | An operating system layer on one Debian server | One static binary an operator runs from their machine that manages a suite of Docker containers across one or more server hosts, reaching them over SSH |
 | How you drive it | A web admin panel, or the `yunohost` CLI on the server | One file, `paisans-stack.yaml`, saved locally and synced to every server in the deployment to avoid total loss. Every command shows its plan and changes nothing without `--execute` |
 | Machines | One | One or more sites, joined by a WireGuard mesh |
 | Database | Each app's own, on the server | Postgres under Patroni from the first install, a cluster of one until a second site joins |
@@ -31,27 +31,30 @@ full-time sysadmins. They answer different questions.
 | Packaging | Install scripts that run on the host | Docker Compose blueprints, with no scripts on the host. A third party blueprint runs code only inside the containers it declares |
 | Catalog | Hundreds of apps of every kind | A core catalog of blueprints for private or public federated communities. Any person or organisation can publish a catalog of their own |
 | Mail | A full mail server | None; apps send through an existing, external SMTP server such as Brevo or Mailgun, unless a third party blueprint provides one |
-| Admins | The admins of one server; recovery is that server's backups | Built for admins leaving and machines being lost; see below |
+| Operators | The admins of one server; recovery is that server's backups | Built for operators leaving and machines being lost; see below |
 
-## Admin continuity and recovery
+## Operator continuity and recovery
 
-A community outlives any one of its admins, so Paisans watches for the loss of
-an admin before it happens and has a way back after it does.
+A community outlives any one of its operators, the people who run its
+machines, so Paisans watches for the loss of an operator before it happens and
+has a way back after it does.
 
-* **Never one admin away from lockout.** The admin reconciler keeps the
-  declared admins equal to Pocket ID's administrators, and fails its health
-  check when there are fewer than two, so the monitor raises it while someone
-  can still fix it.
+* **Never one operator away from lockout.** `validate` refuses fewer than two
+  operators whose keys are on every site that runs Pocket ID, because one lost
+  workstation must not leave nobody able to run the deployment. The operator
+  reconciler reads Pocket ID and fails its health check when an operator's
+  account is missing, disabled, or outside the member group or `operators`,
+  so the monitor raises it while someone can still fix it.
 * **The DNS zone is held the same way.** When the zone is at Cloudflare, every
-  Pocket ID administrator must be a Super Administrator of the account holding
-  it, and there must be at least two, because an account nobody can add
+  operator must be a Super Administrator of the account holding it, and there
+  must be at least two, because an account nobody can add
   members to is recovered only at the registrar.
 * **A lost workstation loses nothing.** Every site keeps signed copies of every
-  version of the configuration and the encrypted secrets, so an admin with an
+  version of the configuration and the encrypted secrets, so an operator with an
   empty machine recovers them from any host.
-* **A lost passkey is a new link.** `paisans admin magic-link` gives a declared
-  admin a fresh one-time sign-in link.
-* **An admin who leaves is closed out.** The secrets file is re-encrypted
+* **A lost passkey is a new link.** `paisans operator magic-link` gives a declared
+  operator a fresh one-time sign-in link.
+* **An operator who leaves is closed out.** The secrets file is re-encrypted
   without them, the mesh is rekeyed, and every other secret is rotated.
   A site whose host the others can no longer reach is evicted and its role
   handed to a new host.
@@ -95,7 +98,7 @@ is only worth paying for a community that will use what it buys.
   for every app.
 * [ ] Mail goes out through an external SMTP service, and nobody needs a
   mailbox on the community's own domain.
-* [ ] An admin is comfortable running a command line tool and reviewing its
+* [ ] An operator is comfortable running a command line tool and reviewing its
   plan before saying `--execute`.
 
 ### Examples
@@ -111,7 +114,7 @@ panel matter more than anything Paisans adds: **YunoHost.**
 **A club's forum, chat and wiki.** Three organizers of a local club want a
 private forum, a Matrix chat and a wiki for their members. Each has a small
 machine at home, and the club should not go dark when one of them moves away
-or loses interest. Shared admins, federation, more than one machine:
+or loses interest. Shared operators, federation, more than one machine:
 **Paisans.**
 
 **Starting small, planning to grow.** A community starts on one cloud VM with

@@ -54,7 +54,7 @@ func replacement(text string) string {
     ssh:
       host: home-d.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]`, 1)
 	text = strings.Replace(text, "    endpoint: vm.example.org:51820\n", "    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
@@ -381,7 +381,7 @@ id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 community: { name: Relay, domain: example.org }
 mesh: { subnet: 10.44.0.0/24 }
 acme: { provider: cloudflare }
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

@@ -18,7 +18,7 @@ community:
   domain: example.org
 mesh:
   subnet: 10.44.0.0/24
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

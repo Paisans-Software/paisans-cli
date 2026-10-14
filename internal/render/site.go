@@ -466,7 +466,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, appFiles...)
-		pusher, err := p.adminsHeartbeatFiles(base, app)
+		pusher, err := p.operatorsHeartbeatFiles(base, app)
 		if err != nil {
 			return nil, err
 		}

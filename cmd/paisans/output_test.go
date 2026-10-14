@@ -226,8 +226,8 @@ func fixtureRuns(t *testing.T) map[string]string {
 
 	{
 		withLinkFake(t)
-		runs["admin magic-link dry run"] = runDefault(t, "admin magic-link", func() error {
-			return runAdminMagicLink([]string{"--config", cfg, "--secrets", secrets, "alice"})
+		runs["operator magic-link dry run"] = runDefault(t, "operator magic-link", func() error {
+			return runOperatorMagicLink([]string{"--config", cfg, "--secrets", secrets, "alice"})
 		})
 	}
 

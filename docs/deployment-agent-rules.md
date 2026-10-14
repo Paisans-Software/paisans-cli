@@ -95,11 +95,11 @@ creating a missing client, and restricting it to the app's group, only. Rotating
 a client's secret, deleting a client, and every change to groups or users stay
 in the tier above, and `apply` never replaces a client it has already recorded.
 
-The same holds for the deployment's own administrators. **`paisans apply`
-making each admin `paisans-stack.yaml` declares an administrator of the identity
+The same holds for the deployment's own operators. **`paisans apply`
+making each operator `paisans-stack.yaml` declares an administrator of the identity
 provider**, and handing each one who has not yet signed in a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
-sign into is not set up, and declaring the admin is approval for the account.
+sign into is not set up, and declaring the operator is approval for the account.
 The exception covers creating that account, marking its declared email
 verified, making it an administrator, adding it to the apps' admin and
 member groups, issuing the link and having the identity provider email it. Doing any of
@@ -123,11 +123,11 @@ consequences reach people who are not in the room.
 ## Services the deployment runs
 
 The tiers above govern actions: what an agent, or a person at a keyboard,
-does to a running deployment. Some changes the tiers gate are instead made by
+does to a running deployment. Some changes the tiers gate can instead be made by
 a service the deployment runs, on its own schedule, with no agent involved.
-The admin reconciler is one: it adds every identity provider administrator to
-the admin group and removes members who are none. That is a different context,
-and the tiers do not apply to it write by write.
+That is a different context, and the tiers do not apply to it write by write.
+The operator reconciler makes no such change: it reads the identity provider
+and writes nothing.
 
 **A service is approved once, as a whole.** A human approves its design, and
 it is deployed. What it may change is then fixed in its code rather than

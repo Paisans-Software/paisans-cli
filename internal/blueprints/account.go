@@ -14,7 +14,7 @@ var AccountSettingRanges = map[string][2]int{
 
 // AccountOtherSettings are the account settings that are not whole numbers.
 var AccountOtherSettings = []string{
-	"identity_app", "invites", "require_approval", "code_of_conduct", "member_group", "admin_group",
+	"invites", "require_approval", "code_of_conduct", "member_group", "admin_group",
 }
 
 // AccountSettingDefaults are what the service is told when a setting is unset.

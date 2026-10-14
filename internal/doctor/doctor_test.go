@@ -38,6 +38,18 @@ func fixture(t *testing.T) *config.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every site logs in with alice's key alone: the fixture's second
+	// operator, bob, is there because validate requires two.
+	for name, s := range cfg.Sites {
+		var keys []config.NamedKey
+		for _, k := range s.SSH.Keys {
+			if k.Name == "alice" {
+				keys = append(keys, k)
+			}
+		}
+		s.SSH.Keys = keys
+		cfg.Sites[name] = s
+	}
 	return cfg
 }
 

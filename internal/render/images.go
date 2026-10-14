@@ -41,7 +41,7 @@ type ComposeImage struct {
 	// core catalog's foundation.yaml for a service of the toolkit's own: one
 	// of the infrastructure stack's, a service a reserved or core blueprint
 	// names with foundation:, a pinned app's defaulted database, or the
-	// admins heartbeat. Only that file is reviewed by the team, in the
+	// operators heartbeat. Only that file is reviewed by the team, in the
 	// official repository's pull requests, so a core read from anywhere else
 	// (blueprints.CoreIsOfficial) marks nothing, and a service a third party
 	// catalog's blueprint names with foundation: is not one. The mark is the
@@ -58,7 +58,7 @@ type ComposeImage struct {
 // tells the operator where to pin it: acme.image for the gateway's Caddy,
 // apps.<name>.images.<service> for a service of an app's blueprint, and empty
 // for an image only the core catalog's foundation decides (the rest of the
-// infrastructure stack, and the admins heartbeat).
+// infrastructure stack, and the operators heartbeat).
 func (c ComposeImage) Setting() string {
 	if c.App == "" {
 		if len(c.Services) == 1 && c.Services[0] == "caddy" {
@@ -167,7 +167,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			}
 		}
 		for image, n := range lines {
-			// An image no service of the blueprint declares (the admins
+			// An image no service of the blueprint declares (the operators
 			// heartbeat in a Pocket ID stack), and every image of the
 			// infrastructure stack, is named by the compose services
 			// that run it.
@@ -224,7 +224,7 @@ func (p *planner) infraImageOrigins() (foundation, declared map[string]bool, err
 // injectedImages are the services an app's stack runs that no service of
 // its blueprint names, with their images: services the toolkit adds to a
 // blueprint built into it, each the foundation's. The pocket-id blueprint's
-// admins heartbeat is the one, appValues.HeartbeatImage.
+// operators heartbeat is the one, appValues.HeartbeatImage.
 func (p *planner) injectedImages(app config.App) (map[string]string, error) {
 	if app.Blueprint != config.BlueprintPocketID {
 		return nil, nil
@@ -233,7 +233,7 @@ func (p *planner) injectedImages(app config.App) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{adminsHeartbeatService: heartbeat}, nil
+	return map[string]string{operatorsHeartbeatService: heartbeat}, nil
 }
 
 // ImageLine is the reference an `image:` line of a compose file names,

@@ -61,11 +61,11 @@ type Secrets struct {
 	// it is state the toolkit wrote about a live instance, which is what
 	// this file holds beside the credentials.
 	PocketIDGroups map[string]string `yaml:"pocket_id_groups,omitempty"`
-	// Admins is what is known of each admin paisans-stack.yaml declares that
-	// no host should read in plaintext, keyed by the admin's key there. The
+	// Operators is what is known of each operator paisans-stack.yaml declares that
+	// no host should read in plaintext, keyed by the operator's key there. The
 	// configuration is copied to every site in plaintext; this file is
-	// copied encrypted to the admins' age keys, which no host holds.
-	Admins map[string]AdminSecrets `yaml:"admins,omitempty"`
+	// copied encrypted to the operators' age keys, which no host holds.
+	Operators map[string]OperatorSecrets `yaml:"operators,omitempty"`
 	// MeshRekeyRemaining is the sites a `paisans mesh rekey --all` run has
 	// left, in order, set only while one is under way: written before the
 	// first site's rekey, and each site taken off as its key is promoted, so
@@ -95,9 +95,9 @@ type Secrets struct {
 	UnknownKeys bool `yaml:"-"`
 }
 
-// AdminSecrets is one declared admin's entry under Secrets.Admins.
-type AdminSecrets struct {
-	// DNSProviderEmail is the address the admin's membership at the DNS
+// OperatorSecrets is one declared operator's entry under Secrets.Operators.
+type OperatorSecrets struct {
+	// DNSProviderEmail is the address the operator's membership at the DNS
 	// provider is under, when it is not their email. The DNS continuity
 	// check expects them there instead
 	// (docs/specs/2026-10-13-dns-admin-continuity.md), and only a keyed hash

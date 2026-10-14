@@ -17,7 +17,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/dns"
 	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -828,8 +827,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	identity.applied(store.held())
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
-		// A dry run's admin problem is shown on its line; it stops nothing.
-		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		// A dry run's operator problem is shown on its line; it stops nothing.
+		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
 		convergeWebServerPending(r, cfg, webServerScope{})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
@@ -884,7 +883,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// check draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	links, adminErr := convergeAdmins(r, cfg, o, true, func(string) bool { return true })
+	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
 	// The deployment and the version are named again ahead of them.
@@ -1793,81 +1792,11 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	}
 }
 
-// convergeAnyAdmin names each Pocket ID app that has no admin, for a
-// deployment that declares no admins, so only the operator can create one. An app is asked, in a step of its own, only once up
-// says it is running; one that is not is named by nothing, since the plan
-// already says what brings it up. A check that fails names the app with why,
-// and fails nothing else.
-func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
-	section := false
-	for _, app := range cfg.AppNames() {
-		if cfg.Apps[app].Blueprint != config.BlueprintPocketID || !up(app) {
-			continue
-		}
-		if !section {
-			r.Section("pocket id")
-			section = true
-		}
-		command := "Declare one under admins in " + config.FileName + " and run apply, which makes their account at " + app + " and gives them a sign-in link."
-		s := r.Step(adminCheckTitle(app))
-		has, err := convergeAdminCheck(cfg, app, o)
-		switch {
-		case err != nil:
-			s.End(ui.Failed, "could not check")
-			r.Note("Pocket ID "+app+": could not check for an admin ("+errLine(err)+")", command)
-		case has:
-			s.Done("has one")
-		default:
-			s.End(ui.Pending, "none yet")
-			r.Note("Pocket ID "+app+" has no admin yet", command)
-		}
-	}
-}
-
-func adminCheckTitle(app string) string { return "check " + app + " for an admin" }
-
 // errLine is err's first line, without the colon or full stop it ends on.
 func errLine(err error) string {
 	line, _, _ := strings.Cut(err.Error(), "\n")
 	return strings.TrimRight(strings.TrimSpace(line), ":.")
 }
-
-// convergeAdminCheck asks a Pocket ID app whether any user is an admin, read
-// only, with the API key, the site and the API address a declared admin is
-// made with, reaching the host as every step of the run does, with its sudo. Why
-// it fails is one line. Tests replace it.
-var convergeAdminCheck = func(cfg *config.Config, app string, o convergeOptions) (bool, error) {
-	// The admin check's own step is open, so the search reports nothing.
-	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")
-	if err != nil {
-		line, _, _ := strings.Cut(err.Error(), "\n")
-		return false, &adminCheckFailure{strings.TrimPrefix(line, "apply: "), err}
-	}
-	key, err := pocketIDKey(cfg, o.Config, o.Secrets, app)
-	if err != nil {
-		return false, err
-	}
-	c := &pocketid.Client{Transport: adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo)),
-		BaseURL: pocketIDBase(cfg, where), APIKey: key}
-	has, err := c.HasAdmin()
-	if err != nil {
-		// A host that ran curl and failed says so on the first line, the
-		// command and its exit status, and why after it, as curl put it.
-		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
-		return false, &adminCheckFailure{strings.TrimSpace(lines[len(lines)-1]), err}
-	}
-	return has, nil
-}
-
-// adminCheckFailure is why convergeAdminCheck failed, on one line, with the
-// error in full as its cause.
-type adminCheckFailure struct {
-	reason string
-	cause  error
-}
-
-func (f *adminCheckFailure) Error() string { return f.reason }
-func (f *adminCheckFailure) Unwrap() error { return f.cause }
 
 // convergeHost is how apply without --site reaches a site to settle its
 // sudo: the transport every step builds for it, so the answer is the one

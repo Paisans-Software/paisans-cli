@@ -103,7 +103,7 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}
-	r.Warn("this is the only copy of the age key", "Losing it loses every secret in "+ui.ShortPath(secretsPath)+". Add a second recipient to "+config.SOPSConfigName+", another admin's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
+	r.Warn("this is the only copy of the age key", "Losing it loses every secret in "+ui.ShortPath(secretsPath)+". Add a second recipient to "+config.SOPSConfigName+", another operator's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
 	return nil
 }
 
@@ -135,7 +135,7 @@ func useVariableKey(r ui.Reporter, variables []string, dir, sopsPath, secretsPat
 	// Where the variable's key comes from, and whether anything else holds
 	// it, is the operator's to know: the toolkit can say only that the file
 	// is encrypted to this one key.
-	r.Warn(ui.ShortPath(secretsPath)+" is encrypted to this one age key", "If what "+andList(key.Variables)+" reads is the only copy of the key, losing it loses every secret in the file. Add a second recipient to "+config.SOPSConfigName+", another admin's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
+	r.Warn(ui.ShortPath(secretsPath)+" is encrypted to this one age key", "If what "+andList(key.Variables)+" reads is the only copy of the key, losing it loses every secret in the file. Add a second recipient to "+config.SOPSConfigName+", another operator's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
 	return nil
 }
 

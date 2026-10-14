@@ -188,8 +188,8 @@ func TestConvergeFailedWebServerAndAdminFails(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
 	fakeWebServerCheck(t, certificateFails)
-	fakeDeclaredAdmins(t, func(string, string, bool) (declaredAdmin, error) {
-		return declaredAdmin{}, errors.New("POST /api/users: 400 email already in use")
+	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
+		return declaredOperator{}, errors.New("POST /api/users: 400 email already in use")
 	})
 	recordLinks(t)
 	recordConverge(t)

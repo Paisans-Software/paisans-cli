@@ -58,3 +58,23 @@ func TestPocketIDSettingsAreOneToOne(t *testing.T) {
 		}
 	}
 }
+
+// Under management: paisans the account service manages accounts, so the
+// toolkit renders signup closed and the email sign-in code on whatever the
+// settings say; under pocket-id the settings are the operator's.
+func TestPocketIDSettingsForManagement(t *testing.T) {
+	paisans := blueprints.PocketIDSettingsFor(map[string]any{"management": "paisans"}, true)
+	if paisans["allow_user_signups"] != "disabled" || paisans["email_one_time_access_as_unauthenticated"] != true {
+		t.Errorf("paisans renders %v", paisans)
+	}
+	own := blueprints.PocketIDSettingsFor(map[string]any{"management": "pocket-id", "allow_user_signups": "open"}, true)
+	if own["allow_user_signups"] != "open" || own["email_one_time_access_as_unauthenticated"] != nil {
+		t.Errorf("pocket-id renders %v", own)
+	}
+	if got := blueprints.PocketIDManagement(map[string]any{"management": "paisans"}); got != blueprints.ManagementPaisans {
+		t.Errorf("PocketIDManagement = %q", got)
+	}
+	if got := blueprints.PocketIDManagement(map[string]any{"management": 3}); got != "" {
+		t.Errorf("PocketIDManagement of a number = %q, want empty", got)
+	}
+}

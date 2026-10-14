@@ -692,13 +692,13 @@ func TestAccountInviteHostnameOnlyWithInvitesOn(t *testing.T) {
 	}
 	cfg := declared()
 	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
-		Settings: map[string]any{"identity_app": "auth", "invites": true}}
+		Settings: map[string]any{"invites": true}}
 	if key, ok := keyOf(cfg, "invite.example.org"); !ok || key != "apps.account.hostnames.invite (derived)" {
 		t.Errorf("invites on: invite.example.org is %q, %v", key, ok)
 	}
 	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
 		Hostnames: map[string]string{"invite": "invite.example.org"},
-		Settings:  map[string]any{"identity_app": "auth", "invites": false}}
+		Settings:  map[string]any{"invites": false}}
 	if key, ok := keyOf(cfg, "invite.example.org"); ok {
 		t.Errorf("invites off with a stale hostnames.invite: published as %s", key)
 	}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -188,7 +189,7 @@ func TestNothingToApproveAsksNothing(t *testing.T) {
 // it holds none or several admins' keys.
 func TestApprover(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	saved := agentFingerprints
 	t.Cleanup(func() { agentFingerprints = saved })
 	for want, held := range map[string][]string{"alice": {"SHA256:other", alice.Fingerprint}, "": {"SHA256:other"}} {
@@ -197,11 +198,11 @@ func TestApprover(t *testing.T) {
 			t.Errorf("held %v: %q, want %q", held, got, want)
 		}
 	}
-	cfg.Admins["bob"] = config.Admin{Name: "Bob Example", Email: "bob@example.org", Keys: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"}
-	bob, _, _ := config.ParseKeyLine(cfg.Admins["bob"].KeyLines()[0])
+	cfg.Operators["bob"] = config.Operator{Name: "Bob Example", Email: "bob@example.org", Keys: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"}
+	bob, _, _ := config.ParseKeyLine(cfg.Operators["bob"].KeyLines()[0])
 	agentFingerprints = func() []string { return []string{alice.Fingerprint, bob.Fingerprint} }
 	if got := approver(cfg); got != "" {
-		t.Errorf("two admins' keys named %q", got)
+		t.Errorf("two operators' keys named %q", got)
 	}
 }
 
@@ -287,7 +288,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 // record as it was, so the next run reviews the same keys again.
 func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	for name, fail := range map[string]string{"succeeds": "", "a step fails": "awk -v fp="} {
 		t.Run(name, func(t *testing.T) {
 			loggingSSH(t, fail)
@@ -308,7 +309,8 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, rec.Lines())
 			}
-			if got.Keys == nil || got.Keys.Login != "ubuntu" || len(got.Keys.Entries) != 1 || got.Keys.Entries[0].Fingerprint != alice.Fingerprint || got.Keys.ApprovedBy != "alice" || got.Keys.AppliedAt != "2026-10-11T23:10:04Z" {
+			// The fixture's two operators, alice and bob, both log in to home-a.
+			if got.Keys == nil || got.Keys.Login != "ubuntu" || len(got.Keys.Entries) != 2 || !slices.ContainsFunc(got.Keys.Entries, func(k grant.Key) bool { return k.Fingerprint == alice.Fingerprint }) || got.Keys.ApprovedBy != "alice" || got.Keys.AppliedAt != "2026-10-11T23:10:04Z" {
 				t.Errorf("record %+v", got.Keys)
 			}
 			if got.Images != nil {
@@ -324,7 +326,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 // them once it succeeds.
 func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	loggingSSH(t, "awk -v fp=")
 	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 	agentFingerprints = func() []string { return []string{alice.Fingerprint} }
@@ -332,7 +334,7 @@ func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 		t.Fatal("the failing step passed")
 	}
 	got := hosts["home-a"].record(t)
-	if got.Keys != nil || got.Approved == nil || len(got.Approved.Entries) != 1 || got.Approved.Entries[0].Subject != "key "+alice.Fingerprint || got.Approved.Entries[0].ApprovedBy != "alice" {
+	if got.Keys != nil || got.Approved == nil || len(got.Approved.Entries) != 2 || !slices.ContainsFunc(got.Approved.Entries, func(a grant.Approval) bool { return a.Subject == "key "+alice.Fingerprint && a.ApprovedBy == "alice" }) {
 		t.Fatalf("record after the failed run %+v %+v", got.Keys, got.Approved)
 	}
 	loggingSSH(t, "")
@@ -342,7 +344,7 @@ func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	if err != nil || out.Len() != 0 {
 		t.Fatalf("err %v, asked %q\n%s", err, out.String(), rec.Lines())
 	}
-	if !strings.Contains(rec.Lines(), "1 approved earlier, not applied yet, nothing new to approve") {
+	if !strings.Contains(rec.Lines(), "2 approved earlier, not applied yet, nothing new to approve") {
 		t.Errorf("the review does not say what was approved earlier:\n%s", rec.Lines())
 	}
 	got = hosts["home-a"].record(t)

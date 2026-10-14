@@ -26,10 +26,12 @@ mesh:
 acme:
   provider: cloudflare
 
-# The people who may log in to the sites. Each becomes a Pocket ID
-# administrator on the first apply, and each key below an authorized key on
-# every site that names them.
-admins:
+# The people who run the machines: they log in to every site, hold the
+# secrets and run apply. Each becomes a Pocket ID user and a community admin
+# on the first apply, and each key below an authorized key on every site that
+# names them. At least two, so that one lost workstation does not leave
+# nobody able to run the deployment.
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
@@ -43,7 +45,7 @@ admins:
 
 # Every machine. Each address is the site's WireGuard address inside
 # mesh.subnet, stable forever, and each ssh section is how the toolkit reaches
-# the site: a public key per admin, never a private one.
+# the site: a public key per operator, never a private one.
 sites:
   all-in-one:
     roles: [data, apps, gateway, monitor]
@@ -77,11 +79,29 @@ apps:
     # Sign in for every other app. Its settings are rendered into its
     # configuration, and its admin page for them is read only.
     settings:
+      # The account service manages signup, bans and recovery, and nobody
+      # is a Pocket ID administrator. The toolkit renders Pocket ID's signup
+      # and email-code settings for it.
+      management: paisans
       # Avatars and branding, about a megabyte: in Postgres they ride
       # replication, and sign in gains no dependency on object storage.
       file_backend: database
       # Also the sender name on its mail.
       app_name: Example Community
+  account:
+    blueprint: account
+    hostname: account.example.org
+    placement: cluster
+    # The community's account service, signing in through the pocket-id app.
+    settings:
+      # Members invite new people, who agree to the code of conduct below
+      # before an account exists. Its SHA-256 is the version each person
+      # agrees to, so an edit is a new version.
+      invites: true
+      code_of_conduct: |
+        # Be kind
+
+        Treat each other well.
   talk:
     blueprint: mbin
     hostname: talk.example.org
@@ -103,8 +123,9 @@ apps:
     # of its own with roles: [monitor] would. Its checks are generated from
     # this file.
     settings:
-      # Only members of this group may sign in.
-      admin_group: admins
+      # Only members of this group may sign in: the operators, who run the
+      # machines it watches.
+      admin_group: operators
 
 # How the apps send mail: sign in links and codes, alerts, notifications and
 # account mail. The password is a secret, set with

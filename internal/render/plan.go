@@ -51,7 +51,7 @@ type Plan struct {
 // calls an application's own API from its host needs it.
 func AppPort(blueprint config.Blueprint) int { return blueprints.Port(blueprint) }
 
-// reconcilerPort is the pocket-id blueprint's admin reconciler, which publishes
+// reconcilerPort is the pocket-id blueprint's operator reconciler, which publishes
 // /healthz on the mesh address for the uptime monitor. A literal:
 // the reconciler's own binary and the blueprint's compose template name the
 // same number.

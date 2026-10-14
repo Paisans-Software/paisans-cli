@@ -1,7 +1,7 @@
 package siteremove
 
 // `site remove --evict`: a site whose host still runs and that the other
-// admins can no longer reach. Every cluster service trusts the mesh and
+// operators can no longer reach. Every cluster service trusts the mesh and
 // nothing else, so being a WireGuard peer of the remaining sites is being in
 // the cluster, and cutting the peer is what evicts. The cut comes first, and
 // everything after it follows from the cut: Patroni fails over by itself once
@@ -867,7 +867,7 @@ func (p *Plan) EvictReport() []string {
 	out = append(out,
 		fmt.Sprintf("%s: the host still holds what it was rendered. Its WireGuard key no longer works on any remaining site. Rotate the rest in this order: the DNS token first (secrets set, and revoked at the provider), since it can point the community's names anywhere; the OIDC client secrets (oidc client create --rotate-secret); the apps' S3 keys (storage rotate-key --app); then the Postgres, Garage and heartbeat secrets, which secrets rotate will change where they are checked and where they are used together", p.Site),
 		fmt.Sprintf("%s: a copy of the database and the objects stays on the host; it cannot be taken back", p.Site),
-		"admins: when the evicted admin could decrypt the secrets file, take their age key out of .sops.yaml and re-encrypt under a new data key (sops rotate --rm-age), then rotate every remaining site's WireGuard key with paisans mesh rekey --all before the replacement joins. docs/guides/when-an-admin-leaves.md is the whole order",
+		"operators: when the evicted operator could decrypt the secrets file, take their age key out of .sops.yaml and re-encrypt under a new data key (sops rotate --rm-age), then rotate every remaining site's WireGuard key with paisans mesh rekey --all before the replacement joins. docs/guides/when-an-operator-leaves.md is the whole order",
 	)
 	return out
 }

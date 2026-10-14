@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/.env",
-      "sha256": "10a964410213f536bb3e3e0cc2bac330a85464097c2a8129db6ecdbf54631d40",
+      "sha256": "7f4bfbad2adac9f9463678fc290145c1676ef28b82b7143149238f6d9e5a0db8",
       "mode": "0600"
     },
     {
@@ -23,22 +23,22 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/.env",
-      "sha256": "7583db2d8248543001da441ea36b98768251fe690b1c73f56e750d20da9dddea",
+      "sha256": "4b1cb396c1f7893e98e28cc171867fdf2dfbb892c67c92ddcefbd836e6a736c8",
       "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env",
-      "sha256": "990639d0c3eb50c8b2150cebd865d94f29076f976aa84504f699c3de51fd2a87",
-      "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/auth/admins-heartbeat/push.sh",
-      "sha256": "1ac46f9878b1594bc19b45883592308c1c33e20508eecef0ffa2ba253e3d38a8",
-      "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "9e7431c9fd1724675ad73e06b19bfb687b5f5ecd9fbb6756cce5494adae5e35b",
+      "sha256": "d54443a95effa0edf8b2825f4aac1107b5a526f0ad67e210cb83489826db3e51",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/auth/operators-heartbeat/heartbeat.env",
+      "sha256": "90426c21259f12b40620ff9e3d2f0a90703a781050cb78b950d13b2c38f5c575",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/auth/operators-heartbeat/push.sh",
+      "sha256": "7edbc133ba8379eb9624a9416c8840bc0138f0f0a2c30d3bf37e5ceee3baa209",
       "mode": "0644"
     },
     {

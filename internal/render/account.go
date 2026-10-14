@@ -9,7 +9,7 @@ import (
 
 // accountValues is what the account blueprint's templates need beyond any app's.
 type accountValues struct {
-	// IdentityURL is the public URL of the pocket-id app identity_app names,
+	// IdentityURL is the public URL of the deployment's one pocket-id app,
 	// from its hostname in paisans-stack.yaml and nothing else. The service is
 	// given it twice, as its OIDC issuer and as the API it creates accounts
 	// at, and the two are always the same value.
@@ -32,15 +32,16 @@ type accountValues struct {
 	Settings map[string]string
 }
 
-// accountValuesFor reads the identity app the account app names, never one
-// found by search, and the code of conduct from the app's own settings.
+// accountValuesFor reads the deployment's one pocket-id app, which validate
+// requires of a deployment with an account app, and the code of conduct from
+// the app's own settings.
 func (p *planner) accountValuesFor(name string) (accountValues, error) {
 	app := p.cfg.Apps[name]
-	idp, _ := app.Settings["identity_app"].(string)
-	idApp, ok := p.cfg.Apps[idp]
+	idp, ok := p.cfg.PocketIDApp()
 	if !ok {
-		return accountValues{}, fmt.Errorf("apps.%s.settings.identity_app: %q is not an app in this configuration", name, idp)
+		return accountValues{}, fmt.Errorf("apps.%s: an account app needs exactly one pocket-id app in this configuration", name)
 	}
+	idApp := p.cfg.Apps[idp]
 	coc, _ := app.Settings["code_of_conduct"].(string)
 	v := accountValues{
 		Invites:        blueprints.AccountInvites(app),

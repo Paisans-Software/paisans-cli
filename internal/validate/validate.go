@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
@@ -155,7 +154,6 @@ func Check(cfg *config.Config) Result {
 	c.gatedWithoutSignedFetch()
 	c.autoLoginWithoutARule()
 	c.usesGateOutsideTheDomain()
-	c.uptimeNeedsAnAdminGroup()
 	c.adminGroupNotAdmins()
 	c.oidcMemberGroupNotAName()
 	c.oidcMemberGroupDisagreesWithGate()
@@ -170,7 +168,9 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDAccountEditOn()
 	c.pocketIDConfigKeyHasASetting()
 	c.pocketIDEmailWithoutSMTP()
-	c.pocketIDAdminUsername()
+	c.pocketIDOperatorUsername()
+	c.pocketIDManagement()
+	c.operatorsFewerThanTwo()
 	c.pocketIDSMTPSender()
 	c.storage()
 	c.backup()
@@ -184,7 +184,7 @@ func Check(cfg *config.Config) Result {
 	c.portCollision()
 	c.accountMustBeClustered()
 	c.accountInvites()
-	c.accountIdentityApp()
+	c.accountIdentityProvider()
 	c.accountWithoutSMTP()
 	c.accountCodeOfConduct()
 	c.accountSettingInvalid()
@@ -1759,41 +1759,14 @@ func (c *checker) watchdogOffOnDataSite() {
 	}
 }
 
-// uptimeNeedsAnAdminGroup refuses an uptime app that names no admin group.
-//
-// The fork admits exactly the members of the groups it is given and refuses
-// everyone else, and group names are the community's own, so there is no
-// default to fall back to: without one, nobody but the break glass password
-// could ever sign in.
-func (c *checker) uptimeNeedsAnAdminGroup() {
-	for _, name := range c.cfg.AppNames() {
-		app := c.cfg.Apps[name]
-		if app.Blueprint != config.BlueprintUptime {
-			continue
-		}
-		if group, _ := app.Settings["admin_group"].(string); strings.TrimSpace(group) != "" {
-			continue
-		}
-		c.refuse("uptime-needs-an-admin-group", fmt.Sprintf("apps.%s.settings.admin_group", name),
-			"uptime app has no admin group",
-			"is required. Name the identity provider group whose members may sign in to the monitor, for example admins. Only that group is admitted, and group names are this community's own, so there is no default.")
-	}
-}
-
-// adminGroupNotAdmins warns about an app that reads its administrators from a
-// group other than admins in a deployment that runs Pocket ID. The admin
-// reconciler beside Pocket ID keeps every Pocket ID administrator in admins and
-// fails its health check while admins has fewer than two members
-// (docs/specs/2026-10-08-admin-reconciler.md), so an app reading another group is
-// one the reconciler does not reconcile or report on.
+// adminGroupNotAdmins warns about an app that reads its administrators from
+// a group other than admins or operators in a deployment that runs Pocket ID.
+// The community's admins are the members of admins, and the operators of
+// operators, which apply fills from the operators section and the operator
+// reconciler checks; an app reading another group has administrators that
+// neither the community nor the operators section decides.
 func (c *checker) adminGroupNotAdmins() {
-	runsPocketID := false
-	for _, app := range c.cfg.Apps {
-		if app.Blueprint == config.BlueprintPocketID {
-			runsPocketID = true
-		}
-	}
-	if !runsPocketID {
+	if len(c.pocketIDApps()) == 0 {
 		return
 	}
 	for _, name := range c.cfg.AppNames() {
@@ -1803,13 +1776,13 @@ func (c *checker) adminGroupNotAdmins() {
 			continue
 		}
 		admin, _ := spec.Groups(app)
-		if admin == "" || admin == adminreconciler.Group {
+		if admin == "" || admin == blueprints.AdminsGroup || admin == blueprints.OperatorsGroup {
 			continue
 		}
 		c.warn("admin-group-not-admins", spec.AdminGroupSource(name),
-			"admin group differs from the watched admins group",
-			"is %s. The admin reconciler keeps Pocket ID's administrators in %s and alerts while it has fewer than two members, so %s's administrators are a group nobody is watching. Name %s here, or accept that this app's admin group is unwatched.",
-			admin, adminreconciler.Group, name, adminreconciler.Group)
+			"admin group is neither admins nor operators",
+			"is %s. The community's admins are the members of %s, and its operators of %s, so %s's administrators are a group neither one decides. Name %s or %s here, or accept that this app's administrators are chosen elsewhere.",
+			admin, blueprints.AdminsGroup, blueprints.OperatorsGroup, name, blueprints.AdminsGroup, blueprints.OperatorsGroup)
 	}
 }
 

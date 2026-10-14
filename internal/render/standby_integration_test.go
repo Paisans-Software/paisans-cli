@@ -104,7 +104,7 @@ func startStandbyBox(t *testing.T, label string, env ...string) *standbyBox {
 		t.Fatal(err)
 	}
 	os.Chmod(fake, 0o777)
-	// The directory the wrapper mirrors its marker into for the admin reconciler.
+	// The directory the wrapper mirrors its marker into for the operator reconciler.
 	if err := os.Mkdir(filepath.Join(dir, "run"), 0o777); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestStandbyWrapperIsHealthyOnStandbyAndStopsPromptly(t *testing.T) {
 	b.waitFor("healthy in standby", 30*time.Second, func() bool { return b.inspect("{{.State.Health.Status}}") == "healthy" })
 	shared := filepath.Join(b.dir, "run", "standby")
 	if _, err := os.Stat(shared); err != nil {
-		t.Errorf("in standby, but the marker the admin reconciler reads is missing: %v", err)
+		t.Errorf("in standby, but the marker the operator reconciler reads is missing: %v", err)
 	}
 	took := b.stop()
 	if _, err := os.Stat(shared); err == nil {

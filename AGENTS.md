@@ -12,8 +12,8 @@ A toolkit for installing and operating a paisans community stack, plus the
 design that toolkit follows. **The design leads and the code follows it.**
 `README.md` is the design; `cmd/` and `internal/` implement the parts of it that
 have been built: the `paisans` command, from `validate` and `render` through
-`host prepare`, `apply`, `site add` and the rest, and the admin reconciler in
-`cmd/admin-reconciler`. `docs/development.md` lists what exists, under *Run*,
+`host prepare`, `apply`, `site add` and the rest, and the operator reconciler in
+`cmd/operator-reconciler`. `docs/development.md` lists what exists, under *Run*,
 and what does not, under *What is not here yet*. The commands reach hosts over
 SSH and drive Docker there, and each one that changes a host does so only with
 `--execute`. The toolkit's version is the constant in `internal/version`;
@@ -81,9 +81,8 @@ Choosing between them is not.
 
 The one hard line that is genuinely dangerous here is **publishing**: a push to
 `main` or `develop`, a tag, a release, or anything leaving this repository. That
-is where a mistake becomes irreversible, and it is the human's action. A push to
-`develop` or an `admin-reconciler-v*` tag can publish an image as well (see
-*Releases*).
+is where a mistake becomes irreversible, and it is the human's action. An
+`operator-reconciler-v*` tag publishes an image as well (see *Releases*).
 
 ## What must never enter this repository
 
@@ -225,10 +224,13 @@ on a shared branch unasked.
 `Version` constant in `internal/version/version.go`. `paisans version` prints
 it, a blueprint's `requires_toolkit` is checked against it, and a release is
 tagged `vMAJOR.MINOR.PATCH` from it. `0.x` holds while command names remain
-provisional. Tags matching `admin-reconciler-v*` are not toolkit releases: one
-publishes the admin reconciler's image through
-`.github/workflows/admin-reconciler-image.yml`, which the `pocket-id` kind pins
-by digest.
+provisional. Tags matching `operator-reconciler-v*` are not toolkit releases:
+one publishes the operator reconciler's image through
+`.github/workflows/operator-reconciler-image.yml`, and a push to any branch
+publishes nothing. The reconciler is released from its own repository once
+the repository split (`docs/specs/2026-10-14-repository-split.md`) moves it
+there, so no release tags it here. The core catalog's `foundation.yaml` names
+the track the `pocket-id` blueprint runs.
 
 **Every pull request into `develop` records its change in `CHANGELOG.md`**, one
 bullet under `[Unreleased]` in the Keep a Changelog category that fits, one

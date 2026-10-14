@@ -753,11 +753,11 @@ func TestFillGeneratesAHeartbeatTokenPerSite(t *testing.T) {
 	}
 }
 
-// Every Pocket ID app gets an admins heartbeat token, the one each of its
-// instances pushes the admins group's health to each monitor with: the same
+// Every Pocket ID app gets an operators heartbeat token, the one each of its
+// instances pushes the reconciler's answer to each monitor with: the same
 // 32 lowercase hex shape as a site's heartbeat token, and kept once set like
 // it.
-func TestFillGeneratesAnAdminsHeartbeatTokenPerPocketID(t *testing.T) {
+func TestFillGeneratesAnOperatorsHeartbeatTokenPerPocketID(t *testing.T) {
 	cfg := load(t)
 	secrets := &config.Secrets{}
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
@@ -766,15 +766,15 @@ func TestFillGeneratesAnAdminsHeartbeatTokenPerPocketID(t *testing.T) {
 	shape := regexp.MustCompile(`^[0-9a-f]{32}$`)
 	before := map[string]string{}
 	for _, name := range cfg.AppNames() {
-		token, _ := secrets.Apps[name]["admins_heartbeat_token"].(string)
+		token, _ := secrets.Apps[name]["operators_heartbeat_token"].(string)
 		if cfg.Apps[name].Blueprint != config.BlueprintPocketID {
 			if token != "" {
-				t.Errorf("apps.%s, a %s, was given an admins heartbeat token", name, cfg.Apps[name].Blueprint)
+				t.Errorf("apps.%s, a %s, was given an operators heartbeat token", name, cfg.Apps[name].Blueprint)
 			}
 			continue
 		}
 		if !shape.MatchString(token) {
-			t.Errorf("apps.%s.admins_heartbeat_token is %q, not 32 lowercase hex characters", name, token)
+			t.Errorf("apps.%s.operators_heartbeat_token is %q, not 32 lowercase hex characters", name, token)
 		}
 		before[name] = token
 	}
@@ -789,8 +789,8 @@ func TestFillGeneratesAnAdminsHeartbeatTokenPerPocketID(t *testing.T) {
 		t.Fatalf("a second pass generated %v", filled.Generated)
 	}
 	for name, token := range before {
-		if secrets.Apps[name]["admins_heartbeat_token"] != token {
-			t.Errorf("apps.%s.admins_heartbeat_token was replaced", name)
+		if secrets.Apps[name]["operators_heartbeat_token"] != token {
+			t.Errorf("apps.%s.operators_heartbeat_token was replaced", name)
 		}
 	}
 }

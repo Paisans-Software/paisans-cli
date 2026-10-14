@@ -270,17 +270,14 @@ func TestAppSelfEachBlueprintOnItsOwnSite(t *testing.T) {
 	}
 }
 
-// Pocket ID's static_api_key is in every account .env whose identity_app
-// names it, so rotating it hands the next key to those account stacks too:
-// beside Pocket ID on a site running both, after it, and in a step of its
-// own on a site running only the account app. An account app naming another
-// identity app is left alone.
-func TestStaticAPIKeyReachesTheAccountAppsThatNameIt(t *testing.T) {
+// Pocket ID's static_api_key is in every account .env, since the account app
+// signs in through the deployment's one pocket-id app, so rotating it hands
+// the next key to those account stacks too: beside Pocket ID on a site
+// running both, after it, and in a step of its own on a site running only
+// the account app.
+func TestStaticAPIKeyReachesTheAccountApps(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster},
-		Settings: map[string]any{"identity_app": "id"}}
-	w.cfg.Apps["elsewhere"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster},
-		Settings: map[string]any{"identity_app": "other-id"}}
+	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster}}
 	e := w.env()
 	got := usesOf(e, AppSelf("id", "static_api_key", CostOf(w.cfg, "id", "static_api_key")))
 	if want := []string{"home-a:id,account", "home-b:account"}; !slices.Equal(got, want) {

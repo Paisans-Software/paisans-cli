@@ -211,3 +211,17 @@ func TestPocketIDAdminEmailDefaultsOnWithSMTP(t *testing.T) {
 		t.Errorf("%s rendered with no sender:\n%s", name, env)
 	}
 }
+
+// Under management: paisans the .env closes signup and opens the email
+// sign-in code whatever else is declared; under pocket-id each is the
+// operator's, and unset renders nothing.
+func TestPocketIDEnvFollowsManagement(t *testing.T) {
+	env := renderAuth(t, map[string]any{"management": "paisans"}, nil, nil)
+	if envValue(env, "ALLOW_USER_SIGNUPS") != "disabled" || envValue(env, "EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED") != "true" {
+		t.Errorf("paisans renders signups %q, email code %q", envValue(env, "ALLOW_USER_SIGNUPS"), envValue(env, "EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED"))
+	}
+	env = renderAuth(t, map[string]any{"management": "pocket-id", "allow_user_signups": "open"}, nil, nil)
+	if envValue(env, "ALLOW_USER_SIGNUPS") != "open" || strings.Contains(env, "EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED=") {
+		t.Errorf("pocket-id renders:\n%s", env)
+	}
+}

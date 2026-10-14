@@ -123,12 +123,13 @@ func (p pocketID) Probe(t Transport, req Request) (State, error) {
 	return state, nil
 }
 
-// Steps for a passkey account: a new one is created as an administrator, put
-// in every app's admin group (and, when declared, every member group), and
-// given a link, since it cannot sign in without one. An existing one is only
-// made an administrator if it is not, has its email marked verified if it is
-// not, is put in the groups it is missing, and is given a link while it has no
-// passkey yet.
+// Steps for a passkey account: a new one is created as an administrator, or
+// without the flag for a Member request, put in every app's admin group (and,
+// when declared, every member group), and given a link, since it cannot sign
+// in without one. An existing one is only made an administrator if it is not
+// and the request is not a member's, has its email marked verified if it is
+// not, is put in the groups it is missing, and is given a link while it has
+// no passkey yet.
 func (pocketID) Steps(state State, req Request) []Action {
 	if !state.Exists {
 		out := []Action{ActionCreate}
@@ -141,7 +142,7 @@ func (pocketID) Steps(state State, req Request) []Action {
 	if !state.Verified {
 		out = append(out, ActionVerify)
 	}
-	if !state.Admin {
+	if !state.Admin && !req.Member {
 		out = append(out, ActionGrantAdmin)
 	}
 	if len(state.MissingGroups) > 0 {
@@ -163,7 +164,7 @@ func withLink(out []Action, req Request) []Action {
 }
 
 // newUser is exactly what a create sends, and what the plan prints. A
-// declared admin always has a first and a last name, since validate refuses
+// declared operator always has a first and a last name, since validate refuses
 // one without; were the first name empty, the username would stand in.
 func (pocketID) newUser(req Request) pocketid.NewUser {
 	first := req.FirstName
@@ -175,7 +176,7 @@ func (pocketID) newUser(req Request) pocketid.NewUser {
 		FirstName:   first,
 		LastName:    req.LastName,
 		DisplayName: strings.TrimSpace(first + " " + req.LastName),
-		IsAdmin:     true,
+		IsAdmin:     !req.Member,
 	}
 	if req.Email != "" {
 		email := req.Email
@@ -189,6 +190,9 @@ func (p pocketID) Describe(a Action, req Request) string {
 	switch a {
 	case ActionCreate:
 		body, _ := json.Marshal(p.newUser(req))
+		if req.Member {
+			return fmt.Sprintf("create user %s: POST /api/users %s", req.Username, body)
+		}
 		return fmt.Sprintf("create user %s as an administrator: POST /api/users %s", req.Username, body)
 	case ActionVerify:
 		return fmt.Sprintf("mark email verified for %s: PUT /api/users/<id> with emailVerified true and every other field sent back as it is now", req.Username)
@@ -303,10 +307,10 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 	return out, nil
 }
 
-// MagicLink issues a declared admin a one-time sign-in link at Pocket ID, has
+// MagicLink issues a declared operator a one-time sign-in link at Pocket ID, has
 // Pocket ID email one as well when req.EmailLink is set, and does nothing
 // else: making the account, its groups and its administrator flag are
-// apply's. It serves a first sign in whose link expired and an admin who lost
+// apply's. It serves a first sign in whose link expired and an operator who lost
 // their passkey alike. Without execute it only finds the account, so a dry run
 // says whether there is one to sign in to.
 func MagicLink(t Transport, req Request, execute bool) (Outcome, error) {
@@ -318,7 +322,7 @@ func MagicLink(t Transport, req Request, execute bool) (Outcome, error) {
 		return Outcome{}, redact(fmt.Errorf("looking up %s in %s: %w", req.Username, req.App, err), req.APIKey)
 	}
 	if u == nil {
-		return Outcome{}, fmt.Errorf("%s has no account in %s yet. apply makes every declared admin's account, with a sign-in link of its own", req.Username, req.App)
+		return Outcome{}, fmt.Errorf("%s has no account in %s yet. apply makes every declared operator's account, with a sign-in link of its own", req.Username, req.App)
 	}
 	if u.Disabled {
 		return Outcome{}, fmt.Errorf("%s's account in %s is disabled. Re-enabling an account is not something this command decides; do it deliberately, then run it again", req.Username, req.App)

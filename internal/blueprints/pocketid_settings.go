@@ -119,7 +119,7 @@ const (
 // the identity other apps sign people in as, such as an Mbin account's
 // fediverse handle, and those apps do not follow a rename. With editing off a
 // user can change neither their username nor their email, which also keeps
-// apply finding each declared admin's account by the two. Pocket ID's own admin
+// apply finding each declared operator's account by the two. Pocket ID's own admin
 // page can still edit any account, and a rename made there breaks the same
 // identities.
 const PocketIDAccountEditSetting = "allow_own_account_edit"
@@ -135,8 +135,41 @@ const PocketIDUIConfigDisabledEnv = "UI_CONFIG_DISABLED"
 var PocketIDSMTPEnv = []string{"SMTP_HOST", "SMTP_PORT", "SMTP_TLS", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"}
 
 // PocketIDOtherSettings are the pocket-id settings that are not in the table
-// above but are still read: file_backend renders FILE_BACKEND.
-var PocketIDOtherSettings = []string{"file_backend", PocketIDSignupGroupsSetting}
+// above but are still read: file_backend renders FILE_BACKEND, and
+// management decides who manages accounts.
+var PocketIDOtherSettings = []string{"file_backend", PocketIDSignupGroupsSetting, PocketIDManagementSetting}
+
+// PocketIDManagementSetting is who manages the community's accounts, its
+// signup, bans and recovery: the account service (ManagementPaisans) or
+// Pocket ID's own administration (ManagementPocketID). It is required and
+// never defaulted, because it decides whether anybody is a Pocket ID
+// administrator at all.
+const (
+	PocketIDManagementSetting = "management"
+	ManagementPaisans         = "paisans"
+	ManagementPocketID        = "pocket-id"
+)
+
+// PocketIDManagement is a pocket-id app's management, or "" when it is
+// unset or not one of the two values, which validate refuses.
+func PocketIDManagement(settings map[string]any) string {
+	switch v, _ := settings[PocketIDManagementSetting].(string); v {
+	case ManagementPaisans, ManagementPocketID:
+		return v
+	}
+	return ""
+}
+
+// PocketIDManagedSettings are the settings the toolkit renders itself under
+// management: paisans, with the value each is rendered with: signup closed,
+// since new accounts come only from the account service, and the email
+// sign-in code open, since that is how a member whose link expired signs in
+// again. validate refuses either one declared (pocket-id-setting-managed),
+// since a declared value could only disagree.
+var PocketIDManagedSettings = map[string]any{
+	"allow_user_signups":                       "disabled",
+	"email_one_time_access_as_unauthenticated": true,
+}
 
 // PocketIDSettingByKey finds a row.
 func PocketIDSettingByKey(key string) (PocketIDSetting, bool) {
@@ -333,33 +366,35 @@ func PocketIDEnv(settings map[string]any) []PocketIDEnvVar {
 }
 
 // PocketIDAdminEmailSetting is the toggle that lets the API email a user a
-// login link, which apply's admin step uses to send each declared admin
+// login link, which apply's operator step uses to send each declared operator
 // theirs.
 const PocketIDAdminEmailSetting = "email_one_time_access_as_admin"
 
-// PocketIDSettingsFor is an app's settings with the defaults the blueprint
-// adds: when the app can send mail, PocketIDAdminEmailSetting is true unless
-// the settings set it, so a deployment that can send mail emails its admins
+// PocketIDSettingsFor is an app's settings with the values the blueprint
+// adds: under management: paisans, each of PocketIDManagedSettings; and when
+// the app can send mail, PocketIDAdminEmailSetting is true unless the
+// settings set it, so a deployment that can send mail emails its operators
 // their login links. canMail is an SMTP host and a sender both resolving, which
 // is what Pocket ID's admin page asks before it turns any email on (see
 // pocketIDEmailWithoutSMTP in internal/validate). The settings passed in are
 // not changed.
 func PocketIDSettingsFor(settings map[string]any, canMail bool) map[string]any {
-	if !canMail {
-		return settings
-	}
-	if v, ok := settings[PocketIDAdminEmailSetting]; ok && v != nil {
-		return settings
-	}
-	out := make(map[string]any, len(settings)+1)
+	out := make(map[string]any, len(settings)+len(PocketIDManagedSettings)+1)
 	for k, v := range settings {
 		out[k] = v
 	}
-	out[PocketIDAdminEmailSetting] = true
+	if PocketIDManagement(settings) == ManagementPaisans {
+		for k, v := range PocketIDManagedSettings {
+			out[k] = v
+		}
+	}
+	if v, ok := settings[PocketIDAdminEmailSetting]; canMail && (!ok || v == nil) {
+		out[PocketIDAdminEmailSetting] = true
+	}
 	return out
 }
 
-// PocketIDAdminEmail reports whether a Pocket ID app will email its admins
+// PocketIDAdminEmail reports whether a Pocket ID app will email its operators
 // their login links: it can send mail and the toggle is not set false.
 func PocketIDAdminEmail(settings map[string]any, canMail bool) bool {
 	v, _ := PocketIDSettingsFor(settings, canMail)[PocketIDAdminEmailSetting].(bool)

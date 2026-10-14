@@ -100,7 +100,7 @@ func fixtureAs(t *testing.T, pub string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.Replace(string(body), cfg.Admins["alice"].KeyLines()[0], pub, 1)
+	return strings.Replace(string(body), cfg.Operators["alice"].KeyLines()[0], pub, 1)
 }
 
 func newStore(t *testing.T) store {
@@ -274,7 +274,7 @@ func TestConfigRecoverRefusals(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "admin register") {
+	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "operator register") {
 		t.Fatalf("no anchor: %v", problemText(err))
 	}
 	os.WriteFile(filepath.Join(dir, "paisans-stack.yaml"), []byte("x"), 0o644)
@@ -375,8 +375,11 @@ func TestSecretsKeyChangesNamesKeysOnly(t *testing.T) {
 // with the one agent key an admin of the base lists; none or several refuse.
 func TestSigningKeyFor(t *testing.T) {
 	cfg := fixture(t)
-	alice := cfg.Admins["alice"].KeyLines()[0]
+	alice := cfg.Operators["alice"].KeyLines()[0]
 	other := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"
+	// The fixture declares bob under other; the first cases are about a
+	// key no operator lists.
+	delete(cfg.Operators, "bob")
 	saved := agentKeys
 	t.Cleanup(func() { agentKeys = saved })
 	l := configstore.Local{Dir: t.TempDir()}
@@ -390,10 +393,10 @@ func TestSigningKeyFor(t *testing.T) {
 			t.Errorf("held %d keys: %q, %v", len(c.held), got, err)
 		}
 	}
-	cfg.Admins["bob"] = config.Admin{Name: "Bob Example", Email: "bob@example.org", Keys: other}
+	cfg.Operators["bob"] = config.Operator{Name: "Bob Example", Email: "bob@example.org", Keys: other}
 	agentKeys = func() []string { return []string{alice, other} }
 	if _, err := signingKeyFor(l, cfg); err == nil || !strings.Contains(problemText(err), "more than one") {
-		t.Fatalf("two admin keys: %v", err)
+		t.Fatalf("two operator keys: %v", err)
 	}
 	if err := l.SetSigningKey(other); err != nil {
 		t.Fatal(err)
@@ -700,7 +703,7 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 	t.Cleanup(func() { agentKeys = saved })
 	var out bytes.Buffer
 	err := runConfig([]string{"publish", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(err.Error(), "belongs to no admin") {
+	if err == nil || !strings.Contains(err.Error(), "belongs to no operator") {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -171,10 +171,10 @@ func TestAccountCoCIsWorldReadable(t *testing.T) {
 	}
 }
 
-// The issuer, the API and its key all belong to the app identity_app names.
-// A second pocket-id app is refused by validate (account-one-identity-app), so
-// the deployment has exactly one for the values to come from.
-func TestAccountReadsItsNamedIdentityApp(t *testing.T) {
+// The issuer, the API and its key all belong to the deployment's one
+// pocket-id app. A second is refused by validate (account-one-identity-app),
+// so there is exactly one for the values to come from.
+func TestAccountReadsTheDeploymentsIdentityApp(t *testing.T) {
 	files := buildAccount(t, nil)
 	env := files[accountEnvA]
 	key := envValue(files[authEnvA], "STATIC_API_KEY")

@@ -11,10 +11,10 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// The DNS continuity check: the admin reconciler holds every Pocket ID
-// administrator to being a Super Administrator of the Cloudflare account that
-// holds the zone, and the admins heartbeat pusher passes its two answers to
-// two more monitors. docs/specs/2026-10-13-dns-admin-continuity.md has the
+// The DNS continuity check: the operator reconciler holds every operator to
+// being a Super Administrator of the Cloudflare account that holds the zone,
+// and the operators heartbeat pusher passes its two answers to two more
+// monitors. docs/specs/2026-10-13-dns-admin-continuity.md has the
 // design. Rendered only for a deployment on Cloudflare that has pasted the
 // members token: the check needs an account with members an API can list,
 // and a credential that reads them and nothing else.
@@ -36,7 +36,7 @@ type dnsValues struct {
 	Domain  string
 	HashKey string
 	// Map is space separated <hash of a pocket id email>=<hash of the
-	// address at the provider>, sorted, for each admin the secrets map.
+	// address at the provider>, sorted, for each operator the secrets map.
 	Map string
 }
 
@@ -47,7 +47,7 @@ func (p *planner) dnsContinuity() bool {
 
 // dnsValuesFor is a Pocket ID app's check, or the zero value when the
 // deployment renders none. It refuses a mapping that would let one
-// membership satisfy two administrators, or that names no declared admin:
+// membership satisfy two operators, or that names no declared operator:
 // validate reads no secrets, so the refusal is here, at render, as a
 // heartbeat token's is.
 func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
@@ -68,12 +68,12 @@ func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
 		return hex.EncodeToString(mac.Sum(nil))
 	}
 	var pairs []string
-	for _, id := range sortedKeys(p.secrets.Admins) {
-		to := p.secrets.Admins[id].DNSProviderEmail
+	for _, id := range sortedKeys(p.secrets.Operators) {
+		to := p.secrets.Operators[id].DNSProviderEmail
 		if strings.TrimSpace(to) == "" {
 			continue
 		}
-		pairs = append(pairs, hash(p.cfg.Admins[id].Email)+"="+hash(to))
+		pairs = append(pairs, hash(p.cfg.Operators[id].Email)+"="+hash(to))
 	}
 	sort.Strings(pairs)
 	return dnsValues{
@@ -85,26 +85,26 @@ func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
 	}, nil
 }
 
-// checkDNSMapping refuses an entry under the secrets' admins that names no
-// admin paisans-stack.yaml declares, and an address that two admins would be
-// expected at: two mapped to one address, or one mapped to another admin's
-// email. Either lets one membership satisfy two administrators. Errors name
-// the admins by key, never the address.
+// checkDNSMapping refuses an entry under the secrets' operators that names no
+// operator paisans-stack.yaml declares, and an address that two operators
+// would be expected at: two mapped to one address, or one mapped to another
+// operator's email. Either lets one membership satisfy two operators. Errors
+// name the operators by key, never the address.
 func (p *planner) checkDNSMapping() error {
-	expected := map[string]string{} // address to the admin expected there
+	expected := map[string]string{} // address to the operator expected there
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-	for _, id := range sortedKeys(p.secrets.Admins) {
-		if _, ok := p.cfg.Admins[id]; !ok {
-			return fmt.Errorf("secrets admins.%s: names no admin %s declares. Its dns_provider_email maps an admin there by key", id, config.FileName)
+	for _, id := range sortedKeys(p.secrets.Operators) {
+		if _, ok := p.cfg.Operators[id]; !ok {
+			return fmt.Errorf("secrets operators.%s: names no operator %s declares. Its dns_provider_email maps an operator there by key", id, config.FileName)
 		}
 	}
-	for _, id := range sortedKeys(p.cfg.Admins) {
-		address := p.cfg.Admins[id].Email
-		if mapped := p.secrets.Admins[id].DNSProviderEmail; strings.TrimSpace(mapped) != "" {
+	for _, id := range sortedKeys(p.cfg.Operators) {
+		address := p.cfg.Operators[id].Email
+		if mapped := p.secrets.Operators[id].DNSProviderEmail; strings.TrimSpace(mapped) != "" {
 			address = mapped
 		}
 		if other, ok := expected[norm(address)]; ok && norm(address) != "" {
-			return fmt.Errorf("secrets admins: %s and %s would be expected at the same address at the DNS provider, so one membership would count for both. Each admin's dns_provider_email, or email when it has none, must be their own", other, id)
+			return fmt.Errorf("secrets operators: %s and %s would be expected at the same address at the DNS provider, so one membership would count for both. Each operator's dns_provider_email, or email when it has none, must be their own", other, id)
 		}
 		expected[norm(address)] = id
 	}
@@ -112,13 +112,13 @@ func (p *planner) checkDNSMapping() error {
 }
 
 // continuityName is the name of one of a Pocket ID app's continuity
-// monitors: the admins heartbeat when function is empty, else one of the
+// monitors: the operators heartbeat when function is empty, else one of the
 // DNS check's. They are named for the community rather than the app, since
 // every instance of the app pushes to the one token; only a deployment with
 // more than one Pocket ID app prefixes the app key, because the seed tells
 // monitors apart by name.
 func (p *planner) continuityName(app, function string) string {
-	name := "admin continuity"
+	name := "operator continuity"
 	if function != "" {
 		name += ": " + function
 	}

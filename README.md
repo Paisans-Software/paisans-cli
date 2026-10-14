@@ -511,20 +511,98 @@ which is the right answer there too.
 
 ## Accounts
 
+### Operators and community admins
+
+A deployment has two groups of people with power over it, and the toolkit keeps
+them apart because they hold different things.
+
+| | Operators | Community admins |
+|---|---|---|
+| Run | the machines | the community |
+| Declared in | `operators:` in `paisans-stack.yaml` | membership of the Pocket ID group `admins` |
+| Hold | SSH keys on the sites, the age keys that decrypt the secrets, the right to sign a configuration version | administrator rights in every app that reads `admins` |
+| Do | `host prepare`, `apply`, `secrets`, `config publish` | moderate, approve applications, administer the apps |
+| At least | two (`operators-fewer-than-two`) | none required |
+
+**Every operator is also a community admin**, so that a new deployment has
+someone to run it: `apply` puts each operator in every app's admin group (see
+*`apply` makes the declared operators and hands each a login link*).
+**A community admin is not an operator**, because running the community needs
+no shell on a host and no secret, and handing those out with moderation rights
+would put every admin's workstation inside the deployment's blast radius.
+Anyone besides the operators joins `admins` by promotion, which the toolkit
+does not perform: `paisans-stack.yaml` declares only the operators. The
+operators also form a group of their own, `operators`, which
+the infrastructure apps read for operator access: the uptime monitor admits
+`operators` by default (see *Monitoring*). The operator reconciler checks
+that Pocket ID agrees with the `operators:` section (see *The operator
+reconciler checks Pocket ID against the operators*).
+`docs/specs/2026-10-14-operators-and-management.md` is the approved design.
+
+### Who manages accounts: `management`
+
+Signup, bans and a member's way back in after a lost link are managed in one
+place, and the `pocket-id` app declares which:
+
+```yaml
+apps:
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    settings:
+      management: paisans       # or pocket-id; required
+```
+
+**`management` is required, never defaulted** (`pocket-id-management-unset`,
+which also refuses any value but `paisans` or `pocket-id`), because it decides
+whether anybody is a Pocket ID administrator at all, and that is not a choice
+to make by omission.
+
+| | `paisans` | `pocket-id` |
+|---|---|---|
+| An `account` app | required (`pocket-id-without-account`) | refused (`account-under-pocket-id-management`) |
+| `allow_user_signups` | refused if set (`pocket-id-setting-managed`); rendered `disabled` | the operator's choice |
+| `email_one_time_access_as_unauthenticated` | refused if set (`pocket-id-setting-managed`); rendered `true` | the operator's choice |
+| `email_one_time_access_as_admin` | refused if `false` with invites on (`account-login-link-disabled`) | the operator's choice |
+| SMTP host and sender | required (`pocket-id-paisans-without-smtp`) | optional |
+| Operators' `isAdmin` at Pocket ID | never set by `apply` | set by `apply` |
+| Signup, bans, recovery | the account service | Pocket ID's admin pages |
+
+Each row has its reason:
+
+* **Under `paisans` nobody is a Pocket ID administrator.** The account service
+  manages accounts, so a Pocket ID administrator would be a second place that
+  can make, ban or rename a member, outside the community's process. The
+  operator reconciler reports any enabled administrator it finds.
+* **The settings the toolkit renders are refused when declared**, because a
+  declared value could only disagree with the rendered one. Signup is closed,
+  since new accounts come only from the account service; the email code is
+  open, since that is how a member whose sign-in link expired signs in again.
+* **Mail is required under `paisans`** because recovery is an email code, and
+  the account service will not start without a mail server either.
+* **An account app is refused under `pocket-id`**, because two places that
+  each think they decide who joins would disagree.
+* **Under `pocket-id` the operators are Pocket ID's administrators**, because
+  Pocket ID's admin pages are where accounts are managed there, and somebody
+  has to be able to open them.
+
+### The account service
+
 The `account` blueprint runs [`Paisans-Software/paisans-account-service`](https://github.com/Paisans-Software/paisans-account-service),
-the community's account management. It carries invites and their approval
-today, so that admitting someone needs no Pocket ID administrator. With
-invites on, a signed in member makes an invite link. Whoever opens it reads
-the community's code of conduct, agrees to it, and chooses a username, a
-display name and an email address. With `require_approval` on, an admin then
-approves or declines the application; only after approval does an account
-exist at Pocket ID, and Pocket ID emails the new member a one-time sign-in
-link. The design is in `docs/specs/2026-10-12-invite-service.md` and
+the community's account management under `management: paisans`. It carries
+invites and their approval, so that admitting someone needs no Pocket ID
+administrator. With invites on, a signed in member makes an invite link.
+Whoever opens it reads the community's code of conduct, agrees to it, and
+chooses a username, a display name and an email address. With
+`require_approval` on, a community admin then approves or declines the
+application; only after approval does an account exist at Pocket ID, and
+Pocket ID emails the new member a one-time sign-in link. The design is in
+`docs/specs/2026-10-12-invite-service.md` and
 `docs/specs/2026-10-14-account-service.md`.
 
-The app exists because it is declared. The toolkit never adds it or drops it
-because of another app's settings, so a public, self-service community leaves
-it out.
+The app exists because it is declared, and `management: paisans` requires it:
+the toolkit never adds it or drops it on its own, so the declaration is the
+one place to read whether a deployment has it.
 
 ```yaml
 apps:
@@ -533,7 +611,6 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       invites: true
       invite_quota: 3
       require_approval: true
@@ -547,12 +624,11 @@ apps:
 
 | Setting | Takes | Default |
 |---------|-------|---------|
-| `identity_app` | the name of a `pocket-id` app | required |
 | `invites` | `true` or `false` | required |
-| `invite_quota` | 1 to 100: live invites a member may hold at once; admins have no quota | `3` |
+| `invite_quota` | 1 to 100: live invites a member may hold at once; community admins have no quota | `3` |
 | `require_approval` | `true` or `false` | `true` |
 | `invite_lifetime_days` | 1 to 365: how long an unused invite lasts | `14` |
-| `application_wait_days` | 1 to 365: how long an application waits for an admin before it is dropped | `14` |
+| `application_wait_days` | 1 to 365: how long an application waits for a community admin before it is dropped | `14` |
 | `decline_retention_days` | 1 to 3650: how long a declined address is remembered | `183` |
 | `login_link_days` | 1 to 31: how long the sign-in link Pocket ID emails lasts, and the number of days the invitee's page says | `7` |
 | `code_of_conduct` | the Markdown text itself, a YAML block scalar | required with invites on |
@@ -568,7 +644,7 @@ apps:
 
 | Hostname | Serves |
 |---|---|
-| the app's `hostname`, `account.<domain>` in the example | everything a signed in member or admin uses: sign in, the home page, making and revoking invites, `/admin` and the application queue |
+| the app's `hostname`, `account.<domain>` in the example | everything a signed in member or community admin uses: sign in, the home page, making and revoking invites, `/admin` and the application queue |
 | `invite.<domain>`, or `hostnames.invite` | only the pages an invitee opens before they have an account, `/i/<token>`, and their static files |
 
 The invite hostname exists only with `invites: true`. With invites off there
@@ -595,11 +671,13 @@ site, and answers `GET /healthz` with `200` when its database does. Neither
 hostname is put behind the gate: an invitee has no account when they open
 `/i/<token>`, and the service checks every sign in itself.
 
-**The identity app** is the `pocket-id` app named in `identity_app`. The
-account app's issuer, API key and accent colour all come from that app, never
-from a search, and Pocket ID's address is that app's hostname: renaming it
-re-renders the account service's `.env`, and the next `apply` recreates the
-account stack.
+**The identity app** is the deployment's one `pocket-id` app. The account app
+names none, and `identity_app` among its settings is refused
+(`account-setting-unknown`), because a setting that names one would read as a
+choice the deployment does not offer: with one Pocket ID there is nothing to
+choose. The account app's issuer, API key and accent colour all come from that
+app, and Pocket ID's address is its hostname: renaming it re-renders the
+account service's `.env`, and the next `apply` recreates the account stack.
 
 ### What it writes at Pocket ID
 
@@ -617,9 +695,8 @@ It authenticates with the Pocket ID app's `static_api_key`, the same key the
 toolkit uses, and a Pocket ID API key carries no scopes: the key is all of
 Pocket ID. **A leak is answered by rotating it across the deployment.** Run
 `paisans secrets rotate apps.<auth>.static_api_key`, which re-applies Pocket ID
-and every account stack whose `identity_app` names the app, so the account
-service is handed the next key with it. Then check Pocket ID for admins,
-clients and API keys nobody made.
+and the account stack, so the account service is handed the next key with it.
+Then check Pocket ID for administrators, clients and API keys nobody made.
 
 ### What `validate` refuses
 
@@ -630,27 +707,32 @@ clients and API keys nobody made.
 | `account-invite-hostname-without-invites` | `hostnames.invite` with `invites: false`. Refused: nothing would serve it |
 | `account-serves-nothing` | `invites: false`. A warning: invites are the service's one feature so far |
 
-With invites on, the identity app is held to what an invite community needs:
+With invites on, the identity app is held to the one setting the invite flow
+depends on that the toolkit does not render itself:
 
 | The identity app | Refused | Rule |
 |---|---|---|
-| `allow_user_signups` | anything but `disabled`; unset is fine, since `disabled` is Pocket ID's default. Its own signup links would admit people past the code of conduct | `account-signups-not-disabled` |
-| `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send the sign-in link while it is off | `account-login-link-disabled` |
-| `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `account-recovery-disabled` |
+| `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send an approved member's sign-in link while it is off | `account-login-link-disabled` |
+
+Its signup and its email code are not checked here, because the account app
+exists only under `management: paisans`, where the toolkit renders both itself
+and refuses either one declared (*Who manages accounts: `management`*).
 
 Also refused with invites on: a `code_of_conduct` that is missing, empty or
 not text (`account-code-of-conduct-missing`), and a setting out of range
 (`account-setting-invalid`, which also refuses an `invites` that is not a
 boolean). Refused either way, because every account app signs members in
-through Pocket ID and the service will not start without a mail server: an
-`identity_app` that is missing or not a `pocket-id` app
-(`account-identity-app`), a deployment with more than one `pocket-id` app
-(`account-one-identity-app`: the account app's OIDC client is created at the
-one Pocket ID, its issuer and key come from `identity_app`), and no SMTP host
-and sender for the app (`account-without-smtp`). A setting the
-blueprint does not read is a warning (`account-setting-unknown`), since it
-renders nothing. The service sends its own notices (an application waiting,
-an invitee's outcome) through the deployment's `smtp:` block, which the app's
+through Pocket ID and the service will not start without a mail server: a
+deployment with no `pocket-id` app (`account-without-pocket-id`), one with
+more than one (`account-one-identity-app`, since the account app's OIDC
+client, issuer and API key all come from the deployment's Pocket ID, and with
+two they could come from different ones), a pocket-id app whose `management`
+is `pocket-id` (`account-under-pocket-id-management`), an `identity_app`
+setting (`account-setting-unknown`, refused for that key), and no SMTP host
+and sender for the app (`account-without-smtp`). Any other setting the
+blueprint does not read is a warning under the same rule, since it renders
+nothing. The service sends its own notices (an application waiting, an
+invitee's outcome) through the deployment's `smtp:` block, which the app's
 own `smtp:` fields may override; the sign-in link is Pocket ID's mail.
 
 ### The code of conduct
@@ -1089,23 +1171,24 @@ from this configuration and the fork reconciles it at every start:
   A ping alone reports every one of those the same way. Founder decision;
   the design is the amendment of 2026-10-09 in
   `docs/specs/2026-10-07-uptime-monitoring.md`.
-* every site Pocket ID runs on gets a check on its **admin reconciler**
-  service, `<app> — admin reconciler (<site>)`, which asks `/livez` and
+* every site Pocket ID runs on gets a check on its **operator reconciler**
+  service, `<app> — operator reconciler (<site>)`, which asks `/livez` and
   expects 200: that site's reconciler is running its passes, standby or not.
-  It says nothing about the `admins` group, which only the active instance
-  knows.
-* every Pocket ID app gets one **admins heartbeat**, `admin continuity`: a
-  push monitor its active instance feeds from the reconciler's `/healthz`, so
-  it fails while the `admins` group has fewer than two members (see *The
-  admin reconciler keeps `admins` equal to Pocket ID's administrators*), and
+  It says nothing about the operators, which only the active instance
+  checks.
+* every Pocket ID app gets one **operators heartbeat**, `operator continuity`:
+  a push monitor its active instance feeds from the reconciler's `/healthz`,
+  so it fails while an operator is not an enabled member in the member group
+  and in `operators`, or a Pocket ID administrator is not an operator (see
+  *The operator reconciler checks Pocket ID against the operators*), and
   follows whichever site is active across a failover with one history
   (below). It is named for the community, not the app, because every
   instance pushes to the one token; a deployment with more than one Pocket ID
   app prefixes each continuity monitor with the app key, since the seed tells
   monitors apart by name.
 * a deployment on Cloudflare that has pasted `external.dns_members_token`
-  gets two more beside it, `admin continuity: dns super admins` and
-  `admin continuity: dns 2fa`, fed the same way from the reconciler's DNS
+  gets two more beside it, `operator continuity: dns super admins` and
+  `operator continuity: dns 2fa`, fed the same way from the reconciler's DNS
   check (see *The reconciler checks the DNS provider's account*).
 * the monitor does not watch itself: its seed has no public or direct check
   of its own app, and no ping or heartbeat of its own site. A monitor that is
@@ -1185,27 +1268,29 @@ needs a second, so it is a warning rather than a refusal. Every one of these
 commands therefore has to reach the monitor's host, and host checks it as
 `apply` would.
 
-**The admins heartbeat is a service beside the reconciler.** Each Pocket ID
-stack, on every site the app runs on, runs `admins-heartbeat`: the
-heartbeat's curl image around a rendered `admins-heartbeat/push.sh` that once
-a minute asks the reconciler's `/healthz` over the stack's own network. A
+**The operators heartbeat is a service beside the reconciler.** Each Pocket
+ID stack, on every site the app runs on, runs `operators-heartbeat`: the
+heartbeat's curl image around a rendered `operators-heartbeat/push.sh` that
+once a minute asks the reconciler's `/healthz` over the stack's own network. A
 standby answers 200 `standby`, and nothing is pushed. The active instance
-answers 200 with the group healthy, pushed as success to
+answers 200 when every check passes, pushed as success to
 `https://<monitor hostname>/ping/<token>`, or 503 with one line saying what is
 wrong, pushed to `.../ping/<token>/fail` with that line as a plain text body.
 No answer, or any other status, pushes nothing. Every instance pushes to the
-same token, `apps.<app>.admins_heartbeat_token`, generated at `init` (and by
+same token, `apps.<app>.operators_heartbeat_token`, generated at `init` (and by
 `apply`'s dry run, with the other generated secrets) in the site heartbeat
 token's shape and refused by `render` the same way, so the one monitor hears
 whichever instance is active, and silence past the grace means no instance is.
 It pushes to every monitor, the one on its own site included: what it carries
-is the group's health, not the site's reachability, and the active instance
+is the operators' standing at Pocket ID, not the site's reachability, and the active instance
 may be the one beside a monitor. The interval, grace and threshold are the
 site heartbeat's, and a deployment with no monitor renders no pusher. The
 fork keeps the body with the ping and shows its first line in the monitor's
 recent pings; the incident and the alert say only that the heartbeat
-reported a failure. `secrets rotate` replaces the token, by name or with
-`--all`: every monitor learns it first, then the pusher on each site is
+reported a failure. The URLs carry the token, so they live in
+`OPERATORS_HEARTBEAT_URLS` in a 0600 `operators-heartbeat/heartbeat.env` the
+service reads through `env_file`, as the site heartbeat's do. `secrets rotate`
+replaces the token, by name or with `--all`: every monitor learns it first, then the pusher on each site is
 recreated with it (*`secrets rotate` replaces a secret where it is checked and
 where it is used*).
 
@@ -1214,12 +1299,12 @@ renders it. Each cycle it also asks `/healthz/dns-super-admins` and
 `/healthz/dns-2fa`, with the same table of answers, and pushes each to its
 own monitor under its own token, `apps.<app>.dns_super_admins_heartbeat_token`
 and `apps.<app>.dns_2fa_heartbeat_token`, whose URLs are two more variables
-in the same 0600 `heartbeat.env`. One pusher serves all three, so the check
+in the same 0600 `operators-heartbeat/heartbeat.env`. One pusher serves all three, so the check
 adds no service, image or port.
 
 Monitors the file creates are tagged `managed` and belong to it. Monitors an
-admin makes by hand, and the channels an admin attaches to any monitor, are
-never touched. An admin who ticks **Attach to new managed monitors** on their
+operator makes by hand, and the channels an operator attaches to any monitor, are
+never touched. An operator who ticks **Attach to new managed monitors** on their
 channel is subscribed to apps added later; nobody's recipients are in YAML.
 
 **Beside etcd** is why the monitor renders `RETENTION_VACUUM=false`, on
@@ -1243,14 +1328,20 @@ every site's heartbeat arrives, and where a heartbeat monitor added by hand
 is pinged.
 
 **Sign in** is the identity provider, admitting exactly the group named in
-`settings.admin_group`, which is required. The login page goes straight to
+`settings.admin_group`, `operators` when unset. The health page is a tool
+for the people who run the machines, and `apply` puts every operator in
+`operators`, so a new deployment's monitor admits its operators with nothing
+declared. A community that wants its community admins in too names `admins`,
+which every operator is also in; `validate` warns (`admin-group-not-admins`)
+about a group that is neither, since nobody the deployment records decides
+who is in it. The login page goes straight to
 it, and password sign-in is off for everyone but one account, kept as the
 break glass: Pocket ID is one of the things being watched, and a monitor you
 cannot open while it is down is no use. To use it, open
 `https://<hostname>/login?local=1` and sign in as `admin` with
 `apps.<app>.admin_password` from the secrets file, which `init` generates
 (the fork's `README.md:302` at `v1.1.0-oidc.4`). For the same reason the monitor cannot sit behind the gate
-(`gated-on-ungateable-kind`): the gate signs in through Pocket ID,
+(`gated-on-ungateable-blueprint`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 
 **It starts as root and drops.** `apply` writes the seed through `sudo`, so it
@@ -1471,10 +1562,26 @@ sign in, which becomes the app's `display_name` (see *`oidc client create`
 makes an app's client at Pocket ID*). Enter takes the app's key, which is
 what the client is named without one, and then nothing is written.
 
-Mail is required in it, although validate only warns without it: sign in
-mails each admin's login link and members' codes, and the health page alerts
-by mail, so a deployment with no mail has admins who sign in only through a
-printed link and outages nobody hears of.
+It asks for at least two operators, each with a username, a name, an email
+address and their public keys, because `validate` refuses fewer
+(`operators-fewer-than-two`), and writes them as the `operators:` section,
+named in every site's `ssh.keys`. It then asks who manages accounts and writes
+the answer as the `pocket-id` app's `management` (see *Who manages accounts:
+`management`*), since that is never defaulted. With the account service it
+adds an `account` app, asking its hostname (`account.<domain>` by default),
+whether members invite new people, and with invites the Markdown file that
+holds the code of conduct, whose text it writes into `code_of_conduct`. With
+Pocket ID it asks `allow_user_signups` and the two email settings,
+`email_one_time_access_as_unauthenticated` and
+`email_one_time_access_as_admin`. The health page's `admin_group` is written
+as `operators`.
+
+Mail is required under the account service, because `validate` refuses
+`management: paisans` without it: recovery is an email code and the account
+service will not start without a mail server. Under Pocket ID it is optional,
+and a deployment that skips it gets no `smtp:` block; sign in then mails no
+operator a login link and no member a code, and the health page alerts
+nobody, so its operators sign in only through a printed link.
 
 It writes one file and nothing else. It asks for no secret, because `init` is
 the one command responsible for the secrets file, and reaches no host, because
@@ -1621,7 +1728,7 @@ deployment record beside it), listing every deployment that has claimed it:
 
 Every command that writes to a host **claims it first**: `apply`,
 `host prepare`, `storage init`, `storage add`, `storage rotate-key`,
-`site add`, `site remove`, `prune`, `admin magic-link`, `app remove`, `oidc
+`site add`, `site remove`, `prune`, `operator magic-link`, `app remove`, `oidc
 client create`, `secrets rotate` and `failover test`, each with `--execute`,
 on every site it will write to. The
 claim is one remote shell command run under `flock` on
@@ -1681,7 +1788,7 @@ own forwarded to it; that is two machines and is accepted.
 
 Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
-reads it on the site being added. `admin magic-link` and `oidc client create`
+reads it on the site being added. `operator magic-link` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
 `--execute` they claim through sudo, since the registry is root's.
 
@@ -1943,7 +2050,7 @@ it starts on the newest build on the track.
 The toolkit names no image itself. Every image a deployment runs by default is
 named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
 in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
-gateway's Caddy, the heartbeat, Pocket ID and its admin reconciler, the gate,
+gateway's Caddy, the heartbeat, Pocket ID and its operator reconciler, the gate,
 the account service and the monitor) in its `foundation.yaml`. Each is a
 **track**: a repository and a tag pattern in which each `*` matches one run of
 digits.
@@ -2200,8 +2307,8 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's admins heartbeat token and its DNS check's hash key and two heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
-| **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an admin's address at the DNS provider when it is not their email (`admins.<admin>.dns_provider_email`) | issued elsewhere, supplied by a human |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an operator's address at the DNS provider when it is not their email (`operators.<operator>.dns_provider_email`) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
 **`init` never replaces a generated secret; `secrets rotate` does, on
@@ -2410,7 +2517,7 @@ the next render.
 
 ### `secrets rotate` replaces a secret where it is checked and where it is used
 
-After an admin who could read `secrets.enc.yaml` leaves, or a site is
+After an operator who could read `secrets.enc.yaml` leaves, or a site is
 evicted, every secret they could read has to change, or their copy of it keeps
 working. **`paisans secrets rotate <path>... | --all`** does it without anyone
 editing a file on a host. A secret is named by its path in the secrets file,
@@ -2453,7 +2560,7 @@ recorded path the deployment no longer has a rotation of, Eg: an app since
 removed, is refused rather than left on the list for ever. **`--all --restart`**
 discards the record and rotates the full list again; it is refused while a
 rotation is pending, which has to finish first. Every write is encrypted to the
-recipients `.sops.yaml` names, so once the departed admin is out of it and the
+recipients `.sops.yaml` names, so once the departed operator is out of it and the
 file is re-encrypted, a next value is never readable by them.
 
 **`apply` refuses while a rotation is pending**, with or without `--site`, and
@@ -2481,7 +2588,7 @@ Finishing either command first costs nothing but its resume.
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
 | Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
 | `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
-| Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and every account service naming that Pocket ID app (their stacks are re-applied with it) | none |
+| Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and the account service, whose stack is re-applied with it | none |
 | account `email_hash_key` | the service | the service | kept: `secrets rotate` refuses it and `--all` leaves it alone; `paisans secrets set` changes it and forgets every declined address |
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
@@ -2489,7 +2596,7 @@ Finishing either command first costs nothing but its resume.
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
-| Pocket ID `admins_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the admins heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
+| Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
@@ -2511,11 +2618,11 @@ token and restarts it to adopt it. Only then is the pusher handed the token.
   infrastructure stack, where the changed `heartbeat/heartbeat.env` recreates
   the `heartbeat` service alone. A site no monitor watches renders no pusher,
   so its token is replaced in the file and handed to nobody.
-* **A Pocket ID app's `admins_heartbeat_token`**, and its DNS check's two
+* **A Pocket ID app's `operators_heartbeat_token`**, and its DNS check's two
   tokens the same way, is checked by every monitor,
   the one on a site the app runs on included. The pusher is the app's own
   stack on each of its sites in turn, where the changed
-  `admins-heartbeat/heartbeat.env` recreates the `admins-heartbeat` service
+  `operators-heartbeat/heartbeat.env` recreates the `operators-heartbeat` service
   alone: `up -d` replaces only the service whose configuration changed, so
   Pocket ID, its reconciler and its database keep running and nobody is
   signed out. A deployment with no monitor renders no pusher, so the token is
@@ -2537,7 +2644,7 @@ own commands already do, in their place in the order: `oidc client create
 runs the new one (*`oidc client create` makes an app's client at Pocket ID*,
 *Replacing an app's key: `storage rotate-key`*). `--all` refuses a secrets
 file that lacks a secret `init` generates, naming `paisans init`, since a run
-that skipped one would leave it as the departed admin knew it.
+that skipped one would leave it as the departed operator knew it.
 
 **A pasted secret is replaced by a person first.** The DNS token and the SMTP
 passwords are issued by a provider, and nothing here can issue them. The
@@ -2581,7 +2688,7 @@ includes it (Founder decision).
 * **Pocket ID's `encryption_key` and Matrix Authentication Service's
   `mas_encryption_secret`** encrypt data already stored. Changing either of
   them makes that data unreadable, and none of those projects offers a
-  re-encryption the toolkit could drive. An admin who held one also holds a copy of the data it
+  re-encryption the toolkit could drive. An operator who held one also holds a copy of the data it
   protects, so rotating it would take nothing back.
 * **Wiki.js's `local_admin_password`.** Wiki.js keeps the break glass
   admin's password hashed in its own database once setup has run, and nothing
@@ -2603,7 +2710,7 @@ includes it (Founder decision).
   rekey`*).
 * **`backup.restic_password` and `backup.walg_libsodium_key`** encrypt every
   backup already taken, and a new one would not re-encrypt them: whoever held
-  the old one can still read any copy they made. What keeps an evicted admin
+  the old one can still read any copy they made. What keeps an evicted operator
   out of the backups is the destinations' credentials.
 * **Each backup destination's credentials**, which its provider issued. Issue a
   new key there, pipe it in with `paisans secrets set`, apply, then delete the
@@ -2618,7 +2725,7 @@ a pending `mesh rekey`.
 
 **The signed copies.** The applies a rotation runs hand each stack its next
 value and nothing else: they neither ask for the review nor publish a version,
-since nothing an admin declared changed. The rotated secrets file is a local
+since nothing an operator declared changed. The rotated secrets file is a local
 edit like any other, so the next `apply --execute` publishes it, and `config
 publish` can publish it sooner. A secrets merge refuses while either side has a
 rotation under way (*Secrets are merged key by key*).
@@ -2670,7 +2777,7 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 mail host.
 
 Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
-`ACCOUNT_SMTP_*` in its `.env` for its notices to admins and invitees; the
+`ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and invitees; the
 uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
 `SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
@@ -2752,7 +2859,7 @@ asks for a key the variable already names.
 
 **The keystore, or the file you named, then holds the only copy.** Losing it
 loses every secret in the file, so add a second recipient to `.sops.yaml`,
-another admin's key or an offline backup key, and run `sops updatekeys
+another operator's key or an offline backup key, and run `sops updatekeys
 secrets.enc.yaml`. With a key from a variable, `init` cannot know whether
 anything else holds it, and warns only that the file is encrypted to that one
 key; the remedy is the same.
@@ -2833,7 +2940,7 @@ its own instead; its repository is still `paisans-<name>`.
 **An unqualified name is never a catalog's.** `mbin` is always the core
 catalog's, and a reserved name is refused from every catalog, so no catalog
 can stand in for the identity provider. **The pin is a commit**, because a
-deployment must render the same bytes for every admin and on every run; a
+deployment must render the same bytes for every operator and on every run; a
 tag beside it must still name that commit, so a tag moved after the pin was
 written is refused. Loading the configuration fetches each catalog an app
 names once, with the `git` binary and the operator's own git credentials,
@@ -3240,7 +3347,7 @@ than merely stated. The case that makes this load bearing is a negative one. A
 Matrix hostname must never be gated: a Matrix client is not a browser and will
 not follow a redirect to a passkey prompt, so gating a homeserver's API or its
 `.well-known` apex breaks federation and every client's login, not just one
-member's. Pocket ID is the sign-in flow, so gating it gates the login. The monitor is what an admin opens when the sites it watches
+member's. Pocket ID is the sign-in flow, so gating it gates the login. The monitor is what an operator opens when the sites it watches
 are down, and the gate signs in at the identity provider on those sites, so a
 gated monitor is unreadable at exactly the moment it exists for, and its break
 glass password sign-in (see *Monitoring*) would sit behind the sign-in
@@ -3823,7 +3930,7 @@ restore that looks complete until someone goes looking for their account.
 | Artifact | Holds | Without it |
 |----------|-------|------------|
 | `paisans-stack.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
-| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an admin's age key still decrypts it |
+| `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an operator's age key still decrypts it |
 | Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
 
@@ -3835,7 +3942,7 @@ particularly easy to assume is in the config when it is not.
 The age private keys are the fifth thing, and they must be backed up somewhere
 other than the repo they decrypt. A copy of the first two on every site is no
 substitute: the encrypted file on a site is readable only with an age key, so
-losing every admin's key still loses every credential.
+losing every operator's key still loses every credential.
 
 The first two need no backup of their own beyond the sites, because every site
 keeps every signed version of them and `paisans config recover` writes them onto
@@ -3845,19 +3952,19 @@ which is not built.
 
 ## Every site keeps signed copies of the configuration
 
-`paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on admins' workstations
+`paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` live on operators' workstations
 (see *Backup and restore*), so a lost workstation without a copy elsewhere loses
 the topology and every credential. Every site therefore keeps every version of
-the three files, each signed by the admin who published it, and an admin with an
+the three files, each signed by the operator who published it, and an operator with an
 empty workstation can recover them from any host.
 `docs/specs/2026-10-12-config-store.md` is the approved specification, and
-*`paisans config`* and *`paisans admin register`* in
+*`paisans config`* and *`paisans operator register`* in
 [docs/commands.md](docs/commands.md) give the commands' mechanics.
 
 The copies are recovery copies now and are built to become the deployment's
 shared source of truth: every version records its parent, two versions from one
 parent are a fork, and `apply` refuses to run from files older than the sites'
-newest version. The one loss this cannot protect is every admin losing their age
+newest version. The one loss this cannot protect is every operator losing their age
 key, which is why *Rendered configuration is a build artifact* tells every
 deployment to add a second recipient to `.sops.yaml`.
 
@@ -3867,16 +3974,16 @@ snapshot of those blueprints under
 `blueprints/<catalog commit>/<blueprint>/` with a `blueprints/SHA256SUMS`
 beside it. A commit holding anything else, or a snapshot whose files do not
 match its SHA256SUMS, is invalid. The snapshot is what lets a removal or a
-recovery read a blueprint whose catalog has gone, and what makes every admin
+recovery read a blueprint whose catalog has gone, and what makes every operator
 and every site render the same bytes; publishing takes it from where the
 blueprints were resolved, and checking a version out installs it where they are
 resolved from. Git names a version's files by SHA-1, so the SHA-256 list is
-what the snapshot's integrity rests on beyond the signature. It is signed with the publishing admin's SSH
+what the snapshot's integrity rests on beyond the signature. It is signed with the publishing operator's SSH
 key by git's `gpg.format=ssh`, so signing goes through the operator's ssh-agent
 and needs no new key. The signature covers the tree, and so the files, because
 nothing in the files can prove who wrote them: encrypting to an age recipient
 needs only the recipient's public key, which every stored `.sops.yaml` names, so
-anyone could write a secrets file that decrypts for every admin. A version
+anyone could write a secrets file that decrypts for every operator. A version
 carries `Paisans-Revision: <n>`, one more than its highest parent. Nothing
 decides by the commit date, because any host's clock can be wrong and anyone
 writing a copy can set it. Each version is kept under `refs/versions/<sha>`, a
@@ -3892,7 +3999,7 @@ newest version signed by the operator's own SSH key, or a root hash the operator
 pins with `--root`. **A history found only on the sites is never trusted on its
 own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
-admin. With neither an own signature nor a pin, a pull or a recovery is refused
+operator. With neither an own signature nor a pin, a pull or a recovery is refused
 and asks for one.
 
 From that anchor a version is trusted when it passes three rules, each of which
@@ -3901,13 +4008,13 @@ closes a forgery:
 | Rule | Because |
 |------|---------|
 | Shape: the tree holds exactly the three files and at most a sound blueprint snapshot, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
-| The signer: every parent is trusted, and the signing key belongs to an admin listed in every parent's `paisans-stack.yaml` | someone who is not an admin cannot extend the history, however many sites they control |
-| Removal is final, key by key: when a trusted version drops a key a parent listed (an admin removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an admin removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real admin |
+| The signer: every parent is trusted, and the signing key belongs to an operator listed in every parent's `paisans-stack.yaml` | someone who is not an operator cannot extend the history, however many sites they control |
+| Removal is final, key by key: when a trusted version drops a key a parent listed (an operator removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an operator removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real operator |
 
-The rule works key by key, not admin by admin, because rotating one of an
-admin's keys out must bar that key without barring the admin's others. Removals
+The rule works key by key, not operator by operator, because rotating one of an
+operator's keys out must bar that key without barring the operator's others. Removals
 in the anchor's own history always stand, since the operator signed after them.
-When two admins each remove the other and neither removal is in the anchor's
+When two operators each remove the other and neither removal is in the anchor's
 history, the toolkit refuses and shows both to the operator. Revision and hash
 cannot decide it, because whoever signs chooses both. A root outside the
 anchor's history is never trusted, for the same reason: only the anchor can say
@@ -3917,11 +4024,11 @@ where the true history starts, so a second root written on a site is refused.
 trusted version builds on.** Two such versions are a fork, which stops `apply`
 until `paisans config publish --merge` resolves it.
 
-**Removing an admin who could decrypt the file** is also the operator's to
+**Removing an operator who could decrypt the file** is also the operator's to
 finish by hand: take their age key out of `.sops.yaml` and re-encrypt the file
 under a new data key (`sops rotate --rm-age`) before publishing the version that
 removes them. Nothing in `paisans` checks that this was done. A version that
-only drops them from `admins` would leave every later write readable to them,
+only drops them from `operators` would leave every later write readable to them,
 since the file is still encrypted to their key.
 
 ### An old version is made visible, not impossible
@@ -3935,7 +4042,7 @@ version is the newest, so three memories make an old one visible:
 |--------|--------------|-----------------|
 | The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
 | A majority of sites | a pull, recovery, registration, the publish of a first version or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
-| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another admin applied there, which this apply would replace |
+| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another operator applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a fresh
 workstation that reaches only sites the attacker controls: it can be served an
@@ -3987,7 +4094,7 @@ and nothing is pruned.
 ### Commands
 
 ```sh
-paisans admin register --execute      # sign an attestation, record your key
+paisans operator register --execute   # sign an attestation, record your key
 paisans config publish --execute      # sign the local files, push to every site
 paisans config pull --execute         # move the files to the sites' newest
 paisans config log                    # every version, signer, holding sites
@@ -3995,9 +4102,9 @@ paisans config publish --merge --execute   # one version on every head of a fork
 paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
 ```
 
-* **`paisans admin register`** gives an admin who has never published an anchor
+* **`paisans operator register`** gives an operator who has never published an anchor
   of their own, since they have signed nothing. It finds the key in their
-  ssh-agent that matches one listed under their entry in `admins` (or the one
+  ssh-agent that matches one listed under their entry in `operators` (or the one
   `--key` names), gathers, and signs an attestation: a version with the head's
   tree and the head as its only parent. It records the key in
   `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
@@ -4008,7 +4115,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   directly, since the attestation becomes the operator's anchor.
 * **`paisans config publish`** commits the files with the base as parent, signs,
   and pushes to every site it reaches. It refuses when its base is not the
-  sites' head, when no loaded key belongs to an admin the parent lists, and when
+  sites' head, when no loaded key belongs to an operator the parent lists, and when
   no site answers; a site that missed it gets it from its peers. A first
   version, with no trusted head among the sites that answered, starts the
   history, so with no more than half the sites reached directly it asks for
@@ -4024,7 +4131,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   never trusted on its own. `--id` names the
   deployment when a host's registry lists more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
-  head wins is for an admin to decide, never an order.
+  head wins is for an operator to decide, never an order.
 * **`apply`** gathers before the review, so a fork or files older than the
   sites' newest version are refused before the operator is asked anything; after
   the approval it publishes the very bytes it loaded and applies, so the store
@@ -4167,12 +4274,14 @@ fail on every fork.
 
 ### Every site has an `ssh` section
 
-Every site, the gateway included, declares one. Its `keys` names admins from
-the top level `admins` section, and the site authorises every key those admins
-list:
+Every site, the gateway included, declares one. Its `keys` names operators
+from the top level `operators` section, and the site authorises every key
+those operators list. Operators are the people who run the machines; a
+community admin who runs none of them is not declared here (see *Operators
+and community admins*, under *Accounts*):
 
 ```yaml
-admins:
+operators:
   alice:
     name: Alice Example    # required: a first and a last name
     email: alice@example.org
@@ -4194,7 +4303,7 @@ sites:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
       user: ubuntu         # required, and must already exist on the host
       port: 22             # optional: empty or 0 means 22
-      keys: [alice, bob]   # required: the admins who may log in
+      keys: [alice, bob]   # required: the operators who may log in
 ```
 
 | Key | Required | Refused when |
@@ -4202,22 +4311,22 @@ sites:
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
 | `user` | yes | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
 | `port` | no | outside 1 to 65535 |
-| `keys` | yes | not a list; empty; an admin the `admins` section does not declare; an admin listed twice |
+| `keys` | yes | not a list; empty; an operator the `operators` section does not declare; an operator listed twice |
 
-Each entry of `admins`:
+Each entry of `operators`:
 
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
 | `name` | yes | not at least a first and a last name: split at its first space, either part is empty, Eg: `Alice` is refused and `Alice Example` is not |
 | `email` | yes | not an email address alone, Eg: `alice@example.org` |
-| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two admins, by fingerprint |
+| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two operators, by fingerprint |
 
 `host` defaults to `public_address`, and without that to the host in
 `endpoint`, because on most sites they are the same address written twice.
 `endpoint` comes last because it may name a router that forwards only
 WireGuard's port; there the connection fails and nothing is changed. The user name is held to a conservative form because it
-goes into commands and a file name on the host, and so is an admin's name,
+goes into commands and a file name on the host, and so is an operator's name,
 which `host prepare` records on the host beside each of their keys so an
 operator can trace a key there back to this file. Options are refused rather than carried: a line `host prepare` writes
 and later compares has to mean the same thing everywhere, and a restricted key
@@ -4228,34 +4337,42 @@ the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
 
-#### Keys belong to admins, and sites name admins
+#### Keys belong to operators, and sites name operators
 
-An admin's keys are the same on every site they reach, so they are written
-once, under the admin, and each site names the people who may log in. A key
+An operator's keys are the same on every site they reach, so they are written
+once, under the operator, and each site names the people who may log in. A key
 written out per site is a key that gets rotated on some sites and missed on
 others; written once, rotating it is one edit and a `host prepare` of each site
-that names the admin.
+that names the operator.
+
+**At least two operators must reach the identity provider.** `validate`
+refuses a deployment with fewer than two operators whose keys are on every
+site that runs a `pocket-id` app (`operators-fewer-than-two`), because one lost
+workstation must not leave nobody able to run `apply`, sign a configuration
+version or reach the identity provider's hosts. An operator counts only with a
+key on each of those sites, since running the deployment means reaching every
+one of them. A deployment with no `pocket-id` app is not held to it.
 
 `email` is required so that every key in the file leads to somebody who can
-say whether it is still theirs. `name` is required because the admin's
+say whether it is still theirs. `name` is required because the operator's
 Pocket ID account is given it: apply splits it at its first space into the
-account's first and last name (see *`apply` makes the declared admins and
-hands each a login link*). The entry's own name is the admin's Pocket ID
-username, which is fixed once the account exists. A key belongs to one admin: two admins sharing
-a key cannot be told apart on a host, and taking one of them off a site would
-leave the other's access resting on a key nobody listed for them.
+account's first and last name (see *`apply` makes the declared operators and hands each a login link*). The entry's own name is the operator's
+Pocket ID username, which is fixed once the account exists. A key belongs to
+one operator: two operators sharing a key cannot be told apart on a host, and
+taking one of them off a site would leave the other's access resting on a key
+nobody listed for them.
 
 #### Public keys, not a path to a private key
 
-`paisans-stack.yaml` is one file that every admin of the deployment shares and
-commits. A private key is one admin's, on one admin's machine, at a path that is
-different on everybody's. So the file lists **public** keys, every admin's,
+`paisans-stack.yaml` is one file that every operator of the deployment shares and
+commits. A private key is one operator's, on one operator's machine, at a path that is
+different on everybody's. So the file lists **public** keys, every operator's,
 which are safe to share and which are the same everywhere, and it never names a
 private key or where one lives. The toolkit never reads a private key at all.
 
 The same list is the record of who may log in: `host prepare` makes those keys
 the login user's authorized keys (see *host prepare manages the login user's
-authorized keys*). Giving an admin a site is adding their name to its
+authorized keys*). Giving an operator a site is adding their name to its
 `ssh.keys` and preparing again; taking it away is removing the name and
 preparing again.
 
@@ -4276,8 +4393,8 @@ the corresponding private key that is loaded in ssh-agent(1) when the private
 key file is not present locally", and ssh_config(5) adds that `IdentityFile`
 "may be used in conjunction with `IdentitiesOnly` to select which identities in
 an agent are offered during authentication" (OpenSSH 9.9p2's pages). So each
-admin's ssh offers the listed keys, finds whichever one's private half is in
-that admin's agent, and signs with it there.
+operator's ssh offers the listed keys, finds whichever one's private half is in
+that operator's agent, and signs with it there.
 
 `ConnectTimeout=10` bounds how long ssh waits for a site to answer. Without
 it ssh uses "the default system TCP timeout" (ssh_config(5)), which is 75
@@ -4292,7 +4409,7 @@ key: an answer given after the timeout has passed still connects.
 `IdentitiesOnly=yes` is what makes it a selection. Without it ssh also offers
 every other key the agent holds, first, and a server that allows a handful of
 attempts can refuse the operator before it reaches the right one. Several `-i`
-are tried in order, so the toolkit does not need to know which admin is running
+are tried in order, so the toolkit does not need to know which operator is running
 it.
 
 What this asks of an operator: **the private key must be in their agent**
@@ -4375,7 +4492,7 @@ did first. A connection that never opened ran nothing, so a retry cannot do
 anything twice. File writes are retried too, safely, because each lands in a
 temporary file that is then renamed. `ConnectionAttempts` in the operator's
 `~/.ssh/config` is still honoured, and the retry is built in because a default
-that depends on every admin's own file is not a default.
+that depends on every operator's own file is not a default.
 
 #### Never infer host state from a failed probe
 
@@ -4894,7 +5011,7 @@ That binding is the renderer's, not `host prepare`'s.
 
 #### host prepare manages the login user's authorized keys
 
-`host prepare` makes every key of every admin in `ssh.keys` an authorized key of
+`host prepare` makes every key of every operator in `ssh.keys` an authorized key of
 `ssh.user`, in `~<user>/.ssh/authorized_keys`. When the directory or the file
 is missing it is created, 0700 and 0600, owned by the user. A user that does
 not exist is refused: creating users is out of scope.
@@ -4932,7 +5049,7 @@ For a listed key:
 | `authorized_keys` holds | This sidecar | Another sidecar | The plan says | What happens |
 |-------------------------|--------------|-----------------|---------------|--------------|
 | nothing for the key | | | `○ authorize ssh key` | appended verbatim, recorded `added` |
-| the key | lists it | | `✓` | nothing; `○ rename ssh key` if the key now belongs to a different admin |
+| the key | lists it | | `✓` | nothing; `○ rename ssh key` if the key now belongs to a different operator |
 | the key | does not list it | lists it | `○ share ssh key` | recorded `shared` |
 | the key | does not list it | does not list it | `✓` | nothing; not recorded, so never removed |
 | the key, only with options | | | `✓ …: not paisans` | nothing; adding the plain key would undo the restriction |
@@ -4993,8 +5110,8 @@ construction: the transport offers only listed keys, so the session's key is a
 listed one, unless `--ssh` or the operator's own `IdentityFile` chose another.
 
 **The host's owner may bound which keys it adds.** `paisans-stack.yaml` is one file
-every admin of a deployment edits, and whoever runs `host prepare` runs it with
-their own access, so any admin can get a key of theirs made an authorized key
+every operator of a deployment edits, and whoever runs `host prepare` runs it with
+their own access, so any operator can get a key of theirs made an authorized key
 of `ssh.user` through someone else's run. That user has `sudo` and is in the
 `docker` group, so the key is root on the host. The review (see *`apply` and
 `host prepare` review what `paisans-stack.yaml` grants*) is the operator's check on
@@ -5009,8 +5126,8 @@ SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA bob bob@example.org
 SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
 ```
 
-It holds fingerprints, not admin names, because a name is whatever
-`paisans-stack.yaml` says it is: replacing the key under `admins.alice.keys` must not
+It holds fingerprints, not operator names, because a name is whatever
+`paisans-stack.yaml` says it is: replacing the key under `operators.alice.keys` must not
 carry Alice's permission to the new key. A line is the fingerprint, then any
 run of spaces or tabs, then a comment; it is read that way both when `host
 prepare` plans and when its append checks the list on the host, so the two
@@ -5021,7 +5138,7 @@ line can only refuse a key.
 owner makes a list. Founder decision. An empty file allows no key.
 
 **With a file, `host prepare` refuses to append a key it does not list**, as a
-refusal in the plan, before any step runs, naming the key, its admin and the
+refusal in the plan, before any step runs, naming the key, its operator and the
 `host allow` that would allow it, whoever runs the command. Nothing else the
 list touches is refused:
 
@@ -5038,13 +5155,13 @@ keeps working whatever the list says: the list decides what `host prepare` may
 add, not who may log in now. Taking a key away is still removing it from
 `ssh.keys` and preparing again, or deleting it by hand.
 
-`paisans host allow <site> <admin>...` adds an admin's keys. It shows every
+`paisans host allow <site> <operator>...` adds an operator's keys. It shows every
 fingerprint with its comment, and the list as it would be, so the owner checks
-each against the admin, out of band when unsure, before it is what the list
+each against the operator, out of band when unsure, before it is what the list
 holds. A list that does not exist yet is made holding also every key some
 deployment's sidecar already claims for the user, listed apart, so that making
 a list refuses no access the host already has. `paisans host disallow <site>
-<admin|fingerprint>...` takes lines off; it removes no key from
+<operator|fingerprint>...` takes lines off; it removes no key from
 `authorized_keys`, and says so. Taking the last line leaves an empty list,
 which allows nothing, rather than no file, which would allow everything; going
 back to no list is deleting the file by hand. Both are the owner's: they claim
@@ -5086,10 +5203,10 @@ ufw's source, not observed, as are `systemctl show -p RuntimeWatchdogUSec` and
 
 ### `apply` and `host prepare` review what `paisans-stack.yaml` grants
 
-`paisans-stack.yaml` is one file every admin of a deployment edits and commits, and
-whoever runs `apply` runs it with their own access. So any admin can grant
+`paisans-stack.yaml` is one file every operator of a deployment edits and commits, and
+whoever runs `apply` runs it with their own access. So any operator can grant
 themselves a host through someone else's run: by adding their name to a
-site's `ssh.keys`, or replacing the key under an admin it already names, which
+site's `ssh.keys`, or replacing the key under an operator it already names, which
 makes `host prepare` install their key for a user that is root on the host; or
 by pointing `apps.<name>.images` at an image they control, which `apply` pulls
 and runs with whatever the template mounts. A plan line saying `○ authorize
@@ -5104,12 +5221,12 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | Part | Holds | Comes from |
 |---|---|---|
 | login | `ssh.user` | the site's `ssh` section |
-| keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
+| keys | per key: its operator, its SHA256 fingerprint and its comment | every key of every operator in the site's `ssh.keys` |
 | images | per service: its stack, its name, the image reference as the compose file writes it, and whether it is a foundation image (see below) | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
 | blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new core catalog release moves the core blueprints of every deployment that does not pin core itself |
 
-A key is the same key when its fingerprint is, so a new comment or a new admin
+A key is the same key when its fingerprint is, so a new comment or a new operator
 for it is a change of that key. An image is the same when its reference is,
 which is why `validate` refuses a floating tag for an app. An app's settings,
 `config` and `smtp` are not reviewed: they configure an image the review
@@ -5125,12 +5242,12 @@ past the stack: the Docker daemon is root on the host. The blueprints built
 into the toolkit are reviewed with its code instead, which is how the uptime
 monitor keeps the capability its ping needs.
 
-**The review prints only what it can show.** A key comment, an admin's name or
+**The review prints only what it can show.** A key comment, an operator's name or
 email, or an image reference holding a control character (Eg: ESC, DEL, or a
 C1 control such as CSI) is refused when the file is loaded, naming the field.
 A terminal reads those characters as commands, so a comment carrying one could
 move the cursor and redraw a review line, Eg: dress a `+ key` up as another
-admin's `~ key`. A host file is not loaded through that check, so as a second
+operator's `~ key`. A host file is not loaded through that check, so as a second
 line, everything the review, `host allow`, `host disallow` and `doctor` print
 from the configuration or from a host shows such a character as an escape
 (Eg: `\x1b`), never raw.
@@ -5191,14 +5308,14 @@ these must hold:
    a core pin that names no tag, a core from `PAISANS_CORE_CATALOG`, from a
    `catalogs.core.url`, from any mirror, from a cached commit another URL
    fetched, or from an installed configuration store snapshot (bytes another
-   admin published). When `catalogs.core` pins a commit and sets no `url`, the
+   operator published). When `catalogs.core` pins a commit and sets no `url`, the
    commit is fetched from the official URL before an installed snapshot is
    used, so an honest pin to a release keeps the exemption; with a `url`, it is
    fetched from there, and is not official.
 3. The service is the toolkit's own: one of the infrastructure stack's, the
    gateway's Caddy unless `acme.image` declares one, a pinned app's own database
    unless `apps.<name>.images` declares one, a service the toolkit adds to a
-   stack (Eg: the admins heartbeat), or a service written with `foundation:` (see
+   stack (Eg: the operators heartbeat), or a service written with `foundation:` (see
    *Images follow tracks*) in a reserved blueprint or a core catalog one.
 
 The team reviews `foundation.yaml` in the official repository's pull requests
@@ -5216,7 +5333,7 @@ Foundation images are still listed, apart from the rest, so the operator sees
 what moves. An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,
 WriteFreely, or any third party catalog's) needs approval, and so does any image the
 configuration declares in `apps.<name>.images` or `acme.image`, since nobody
-reviewed those choices but the admin who made them. Whether an image is the
+reviewed those choices but the operator who made them. Whether an image is the
 foundation's is decided by where the render took it, never by its name: a
 catalog blueprint whose `image:` names the foundation's own reference needs
 approval, because a name is what anyone can write. Keys, the web server's
@@ -5260,9 +5377,9 @@ in every script within a week, and approving is the control.
 image outside the foundation asks nothing, terminal or not, so routine applies
 stay scriptable.
 
-**Who approved.** When exactly one admin's key in `paisans-stack.yaml` is loaded in
+**Who approved.** When exactly one operator's key in `paisans-stack.yaml` is loaded in
 the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
-`approved_by: <admin>`; otherwise it records no name. It is a label for the
+`approved_by: <operator>`; otherwise it records no name. It is a label for the
 next reader, not a check: anyone can load any key they hold. Who wrote a change
 is the repository's history, which the toolkit cannot see.
 
@@ -5420,7 +5537,7 @@ site is refused, naming `host prepare`, because the hosts are checked against
 what the store holds. `apply --site` without a store refuses in the same words.
 Gathering reaches every site with `sudo` and needs the standard file names
 beside `paisans-stack.yaml`, so a deployment with renamed files cannot use `apply`
-until they are renamed; and a dry run needs an admin key in the ssh-agent too,
+until they are renamed; and a dry run needs an operator's key in the ssh-agent too,
 because it checks the key `--execute` would sign with.
 
 **DNS comes before any site is applied.** Each site's `wg-quick` resolves the
@@ -5478,9 +5595,9 @@ once Patroni runs, so a later visit applies it again, and one still waiting on
 its last visit is applied once more after every other step, by which time the
 leader's site has created them. Still waiting then, it stops the run. It never takes anything out: a site or an
 app the yaml no longer declares is reported by the deployment record's warning,
-with the command that removes it. Once Pocket ID runs, every admin the
-`admins` section declares is made a Pocket ID administrator and handed a login
-link (see *`apply` makes the declared admins and hands each a login link*).
+with the command that removes it. Once Pocket ID runs, every operator the
+`operators` section declares is made a Pocket ID user and a community admin
+and handed a login link (see *`apply` makes the declared operators and hands each a login link*).
 What only the operator can decide is left to its own command: a credential
 the toolkit cannot generate (`secrets set`), and a DNS record pointing
 elsewhere. `apply --site <name>` is unchanged, for one site at a time.
@@ -5494,10 +5611,11 @@ per site for its `host prepare`; `pull`, one line per site for its images;
 `dns`; and `install`, one line per site for every step from founding to pass
 two that is about it, in the order the run first applies each site, then a
 `storage` line for `storage init` or `storage add` when there is Garage. After
-them, a `pocket id` section asks each Pocket ID app whose sites' steps are all
-up to date, or have run, whether it has an admin (`check <app> for an admin`),
-since one not running yet cannot answer, and for one that has none says to
-declare an admin under `admins` and run apply. Then, when an app is served behind the operator's own web
+them, a `pocket id` section has a line per operator for each Pocket ID app
+whose sites' steps are all up to date, or have run (`<operator> on <app>`),
+since one not running yet cannot answer: `registered` for an operator who has
+a passkey, what the run made otherwise, and in a dry run what it would make.
+Then, when an app is served behind the operator's own web
 server, a `web server` section: with `--execute` a line for each site file
 written into `include_dir` and a line per app for its web server check, and in a
 dry run a line per app, `checked with --execute` (see *The monitor has a site
@@ -6530,7 +6648,7 @@ entrypoint, with the image's own entrypoint and command as its arguments:
   default) and tries again;
 * on any other exit, it exits with the child's status;
 * it keeps the state file, and its copy at `/paisans/run/standby` that the
-  admin reconciler reads, through each retry, so a waiting standby never
+  operator reconciler reads, through each retry, so a waiting standby never
   reads as down while its retry is being refused, and removes it once the
   retried instance is admitted: when the image's healthcheck first passes,
   asked every second, or after `PAISANS_STANDBY_HOLD` seconds (10 by default)
@@ -6570,7 +6688,7 @@ answers on its mesh address (the address and port the gateway dials), `down`
 otherwise, and `absent` before it has the stack. None active is waited for, up
 to three minutes, then fails: sign in is down. Two active fails at once,
 since waiting would leave both serving. A site that cannot be reached is shown
-and not counted. `admin magic-link` and `oidc client create` call the active
+and not counted. `operator magic-link` and `oidc client create` call the active
 site the same way unless `--site` names one, and so does `apply`'s client step.
 
 **The gateway needs nothing new.** The route lists every apps site in order
@@ -6589,77 +6707,73 @@ its cache is per site, its scheduled tasks run per site until the fork's
 scheduler lock lands, and the second site's web workers serve only during a
 failover. Its sessions are in Postgres and survive one.
 
-### The admin reconciler keeps `admins` equal to Pocket ID's administrators
+### The operator reconciler checks Pocket ID against the operators
 
-A community whose identity provider has one administrator is one lost passkey
-away from nobody being able to run it. So the `pocket-id` kind runs a second
-service beside Pocket ID on every site it runs on, `reconciler`, built from
-`cmd/admin-reconciler` and published as `ghcr.io/paisans-software/admin-reconciler`. The
-design is in `docs/specs/2026-10-08-admin-reconciler.md`.
+Pocket ID is the record of who is a member of the community; the `operators:`
+section is the record of who runs the machines. Nothing else holds the two to
+each other, and an operator whose account was banned, disabled or taken out
+of a group would keep their SSH keys and secrets while losing the sign-in a
+recovery needs. So the `pocket-id` blueprint runs a second service beside
+Pocket ID on every site it runs on, `reconciler`, built from
+`cmd/operator-reconciler` and published as
+`ghcr.io/paisans-software/operator-reconciler`, the core catalog
+`foundation.yaml`'s `operator-reconciler` on the track `0.3.*`.
+`docs/specs/2026-10-14-operators-and-management.md` is the approved design,
+and `docs/specs/2026-10-08-admin-reconciler.md` is kept as the record of an
+earlier one.
 
-Every two hours, and once when it starts, the reconciler reads Pocket ID's users
-and the group named `admins` (after one minute instead when it could not reach
-Pocket ID, which starts alongside it), and:
+**It reads and never writes.** Pocket ID is the record of membership, so the
+reconciler reports when it disagrees with the yaml rather than changing
+either one. Its only requests are `GET`s, and its tests fail on any other
+method. Every two hours, and once when it starts, it reads Pocket ID's users
+and the groups it checks (after one minute instead when it could not read
+Pocket ID, which starts alongside it), and holds them to two checks:
 
-* **adds every Pocket ID administrator to `admins`**, unless the user is
-  disabled, is managed by an LDAP sync (which owns that user's groups), or is
-  the static API key's own user (`00000000-0000-0000-0000-000000000000`). The
-  write is `PUT /api/users/:id/user-groups`, which replaces the user's whole
-  set, so the reconciler reads the user again just before it and sends the groups
-  it finds plus `admins`;
-* **removes every member of `admins` who is disabled or no longer a Pocket ID
-  administrator**, the same two kinds of user left alone: an LDAP managed
-  user's groups are the sync's in both directions, and the static key's user
-  is the reconciler's own credential. The write is the same route, after the
-  same fresh read, sending the groups it finds minus `admins`. Without this,
-  demoting or disabling an administrator in Pocket ID would leave them an
-  administrator of every app that reads `admins`, such as Mbin and the uptime
-  monitor, for as long as the group kept them;
-* **counts the members of `admins`**, disabled users and the static key's
-  user left out.
+1. **Every operator in the yaml is a member.** For each operator, a Pocket ID
+   user with that username exists, is not disabled, and is in the community's
+   member group and in `operators`. A failure names the operator and what is
+   missing, Eg: `operator alice is not in operators`. A group that does not
+   exist is one failure of its own (`no group named operators`) rather than
+   one per operator.
+2. **Every Pocket ID administrator is an operator.** Every enabled user with
+   `isAdmin`, the static API key's own user
+   (`00000000-0000-0000-0000-000000000000`) left out because it is the
+   reconciler's credential rather than a person, is an operator. Under
+   `management: paisans` there is none at all, so any one is a failure (see
+   *Who manages accounts: `management`*). An administrator nobody declared
+   holds all of Pocket ID outside the yaml, the review and the signed
+   history.
 
-**A removal never leaves `admins` without an enabled member.** The reconciler
-acts on what one read of Pocket ID says, and a group it emptied on a wrong
-answer would lock every administrator out of every app at once, with nobody
-left inside to fix it. So adds come before removals in a pass, which keeps a
-swap of the only member for a new administrator from passing through empty;
-and a removal that would leave no enabled member is skipped, logged, and named
-in `/healthz`. When every member is due and no administrator can be added,
-the members go in username order and the last one stays, so the one kept is
-the same on every pass. A pass in which an add failed removes nobody, since
-the group may be short of the administrator that add was for. A user list
-Pocket ID did not answer in full is no view to remove anyone on: the list is
-read page by page, and a pass whose read fails at any page writes nothing and
-retries in a minute. A user the list happens to miss only makes the pass more
-cautious, never less: an administrator left out is one fewer counted towards
-the floor, and a member left out is one not removed until the next pass.
-Founder decision, 2026-10-08.
+**An operator banned or removed at Pocket ID fails check 1 until they are
+taken out of the yaml.** That is a manual step by design: removing an operator
+from `operators:`, and their name from every site's `ssh.keys`, is how an
+operator is removed, and the next `host prepare` of each site takes their keys
+off it, which the reconciler cannot do and must not guess at. `apply` never deletes or disables a Pocket ID user, so the
+person stays a member until the community removes them.
 
 `/healthz`, published on the site's mesh address at port 1412, serves the
-last pass: 200 with two or more members, 503 with fewer, on a failed write,
-with no group named `admins`, when Pocket ID does not answer, before the first
-pass, and once the last pass is more than two and a half hours old. The body
-is one line naming users by username, and a standby's is `standby`, with a
-200. The uptime kind does not ask it directly: the active instance's
-`admins-heartbeat` pushes what it says to the monitor's
-`admin continuity` (*Monitoring*), so a community down to one
-administrator gets an incident while that administrator can still fix it,
-from whichever site is active.
+last pass: 200 when both checks pass, and 503 when either fails, when Pocket
+ID does not answer, before the first pass, and once the last pass is more
+than two and a half hours old. The body is one line naming each failure by
+username, never by email, and a standby's is `standby`, with a 200. The
+uptime blueprint does not ask it directly: the active instance's
+`operators-heartbeat` pushes what it says to the monitor's
+`operator continuity` (*Monitoring*), so a deployment whose operators and
+Pocket ID disagree gets an incident from whichever site is active.
 The monitor's per site check asks `/livez`, which fails only when the pass
 loop has hung, and so does Docker's healthcheck: a new deployment has no
-`admins` group until someone makes one, and `apply`'s health gate must not
-hold the Pocket ID stack back on it.
+operators at Pocket ID until `apply` makes them, and `apply`'s health gate
+must not hold the Pocket ID stack back on that.
 
-**The reconciler's two writes are approved once, not per write.** An agent
-needs a human for every change to Pocket ID's groups; the reconciler is a
-service the deployment runs, approved as a whole when its design was
-(`docs/deployment-agent-rules.md`, *Services the deployment runs*).
-Pocket ID administrators are the community's administrators, so keeping
-`admins` equal to them changes nobody's power, only which apps recognise it.
-The reconciler never changes a user, never creates or deletes a group, never
-writes an LDAP managed user's groups, and never removes the last enabled
-member, and its tests fail on any other request that writes. Every write is
-logged on one line. Founder decisions, recorded in `docs/decisions.md`.
+It reads what it checks from the rendered `.env`, and refuses to start
+without it, since a reconciler that knew no operators would report a
+deployment healthy that it had not checked:
+
+| Variable | Value |
+|---|---|
+| `PAISANS_OPERATORS` | the operators' usernames, comma separated, sorted |
+| `PAISANS_MEMBER_GROUP` | the community's member group, `members` |
+| `PAISANS_MANAGEMENT` | `paisans` or `pocket-id` |
 
 **It reaches Pocket ID as `app` on the stack's own network**, with the
 `STATIC_API_KEY` the same `.env` already carries, so the key is on no host and
@@ -6668,9 +6782,18 @@ standby wrapper writes its marker to `/srv/paisans/<token>/<app>/run/standby` as
 `/tmp`, the reconciler mounts that directory read only, and a reconciler that finds the
 marker reports `standby` with a 200.
 
-**The group is always `admins`.** `validate` warns
-(`admin-group-not-admins`) about an app in a deployment running Pocket ID
-whose admin group is another one, since the reconciler does not watch it.
+**Its image is released from its own repository** once the repository split
+moves it there (`docs/specs/2026-10-14-repository-split.md`). In this
+repository the image workflow, `.github/workflows/operator-reconciler-image.yml`,
+publishes only from an `operator-reconciler-v*` tag, and a push to `develop`
+publishes nothing, so no change here reaches a deployment's reconciler by
+itself.
+
+**The groups it reads are `operators` and the member group.** `validate`
+warns (`admin-group-not-admins`) about an app, in a deployment running Pocket
+ID, whose admin group is neither `admins` nor `operators`, since that app's
+administrators are a group that neither the community nor the operators
+section decides.
 
 ### The reconciler checks the DNS provider's account
 
@@ -6682,12 +6805,18 @@ role "Cannot manage members"
 so nobody can add the next administrator, and once the last one leaves the
 zone is recovered only at the registrar.
 
-**Every enabled Pocket ID administrator must be an accepted Super
-Administrator of every account holding the zone or a zone above it, and
-there must be at least two.** Administrator with access to the zone does not count, a pending
-invitation does not count, and Cloudflare members who are not Pocket ID
-administrators are allowed. Founder decision; the design is
-`docs/specs/2026-10-13-dns-admin-continuity.md`.
+**Every operator must be an accepted Super Administrator of every account
+holding the zone or a zone above it, and there must be at least two.** The
+operators are the ones held to it because they run the machines and hold the
+credentials a recovery needs, and the floor of two is `validate`'s floor of
+operators (*Keys belong to operators, and sites name operators*): one is a
+single loss from none. Administrator with access to the zone does not count,
+a pending invitation does not count, and Cloudflare members who are not
+operators are allowed. An operator is found by their Pocket ID username, and
+compared by the address their Pocket ID account holds; one with no enabled
+account is left out here, since the reconciler's first check already reports
+them. Founder decision; `docs/specs/2026-10-13-dns-admin-continuity.md` is
+the record of the design.
 
 **The check is optional, and Cloudflare only.** It renders when
 `acme.provider` is `cloudflare` and `external.dns_members_token` is pasted: a
@@ -6701,25 +6830,27 @@ every apps site, and a leak there must not be control of every hostname.
 two kinds of read at Cloudflare: every active zone holding `community.domain`
 or a name above it, asked suffix by suffix as `dns init` finds a zone, for
 their accounts, and each account's members. A parent zone counts because its
-account controls the delegation to a child, so an administrator must be a
+account controls the delegation to a child, so an operator must be a
 Super Administrator of every such account; usually there is one.
 It writes nothing there. It answers on `/healthz/dns-super-admins` and
-`/healthz/dns-2fa` with `/healthz`'s contract, and the admins heartbeat
-pusher relays both (*Monitoring*). Each body is a count, such as
-`1 of 3 admins not cloudflare super admin (1 pending)`: the monitors exist to
+`/healthz/dns-2fa` with `/healthz`'s contract, and the operators heartbeat
+pusher relays both (*Monitoring*). Each body is a count of operators, such as
+`2 of 2 operators are cloudflare super admins` or
+`1 of 3 operators not cloudflare super admin (1 pending)`: the monitors exist to
 say the community is at risk, and the reconciler's log names who by Pocket ID
 username. When Cloudflare cannot be read, both fail with
 `cloudflare unreadable:` and the status, never the response or the token.
 
-**An admin whose address at Cloudflare differs** is mapped in the secrets
-file, `admins.<admin>.dns_provider_email`, by the admin's key in
-`paisans-stack.yaml`. The configuration is copied to every site in plaintext,
+**An operator whose address at Cloudflare differs** is mapped in the secrets
+file, `operators.<operator>.dns_provider_email`, by the operator's key in
+`paisans-stack.yaml`, and set with `paisans secrets set
+operators.<operator>.dns_provider_email`. The configuration is copied to every site in plaintext,
 and the secrets file only encrypted, so the address stays where only a
 workstation reads it. No address reaches a host: `apply` renders each mapping
 as two HMAC-SHA256 hashes under `apps.<app>.dns_email_hash_key`, and the
 reconciler compares every address under the same key. `render` refuses a
-mapping that names no declared admin, or that would let one membership count
-for two admins. A host taken over while the reconciler runs is not protected:
+mapping that names no declared operator, or that would let one membership
+count for two operators. A host taken over while the reconciler runs is not protected:
 the token can list the account's members directly, which is why it reads and
 does nothing else.
 
@@ -6870,7 +7001,7 @@ for linux/amd64 alone:
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, never at `/var/lib/postgresql/data` (below) |
 | account (`paisans-account-service`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-account-service/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, wikijs-bootstrap 0.1 (read from its Dockerfile), curl (the heartbeat and the admins heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, operator-reconciler, wikijs-bootstrap 0.1 (read from its Dockerfile), curl (the heartbeat and the operators heartbeat) | nothing | |
 
 For Postgres 18 the path is more than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
@@ -6930,26 +7061,35 @@ volume is mounted** because each recreate otherwise costs a volume, and a
 throwaway path is not bound under the deployment's root because a shared cache directory
 between replicas is a race, not state.
 
-### `apply` makes the declared admins and hands each a login link
+### `apply` makes the declared operators and hands each a login link
 
 A deployment that has just come up runs every app and lets nobody in: Pocket
-ID has no administrator, and its users sign in with passkeys, so there is no
-password to hand anyone. The `admins` section already says who the admins
-are, so a whole `apply --execute`, once Pocket ID runs, makes each of them a
-Pocket ID administrator: **the admin's key is the Pocket ID username**, `email` is the
-address, marked verified for the reason *`admin magic-link` gives a declared
-admin a fresh sign-in link* gives, and
-`name` is split at its first space into a first and a last name. Each is put
-in every app's admin group, and in every app's
-member group as well. Declaring the admin is the approval for all of it.
+ID has no users, and its users sign in with passkeys, so there is no password
+to hand anyone. The `operators` section already says who runs the deployment,
+so a whole `apply --execute`, once Pocket ID runs, makes each of them a Pocket
+ID user: **the operator's key is the Pocket ID username**, `email` is the
+address, marked verified for the reason *`operator magic-link` gives a
+declared operator a fresh sign-in link* gives, and `name` is split at its
+first space into a first and a last name. Each is put in the group
+`operators`, in `members`, in every app's member group and in every app's
+admin group, so every operator is also a community admin (see *Operators and
+community admins*). Declaring the operator is the approval for all of it.
+
+**`isAdmin` follows `management`.** Under `management: pocket-id` apply makes
+each operator a Pocket ID administrator, because Pocket ID's admin pages are
+where accounts are managed there. Under `management: paisans` it never sets
+the flag, because nobody is a Pocket ID administrator there, and it never
+clears one either: a flag set by hand is the operator reconciler's to report
+(*The operator reconciler checks Pocket ID against the operators*), not
+apply's to undo on its own.
 
 **The gateway refuses Pocket ID's own first-admin setup, always**, so the
-window between Pocket ID starting and apply making the admins is not a race
+window between Pocket ID starting and apply making the operators is not a race
 with the internet. *The gateway exposes only the Pocket ID routes its
-configuration turns on* gives the rule. Apply makes admins through the static
-API key and never needs the setup route.
+configuration turns on* gives the rule. Apply makes operators through the
+static API key and never needs the setup route.
 
-**A declared admin is a member of every app too**, because an app that gates
+**An operator is a member of every app too**, because an app that gates
 on its member group would otherwise refuse its own administrator. Mbin reads
 `settings.member_group` and refuses a login whose claim lacks it unless the
 linked account is already an Mbin administrator, which a first login never
@@ -6960,29 +7100,29 @@ and relies on the client's restriction at Pocket ID. A member group that is
 also an admin group is joined once. Founder decision.
 
 The username is set when the account is created and never changed after:
-the pocket-id kind turns account editing off (`allow_own_account_edit`, under
-*Pocket ID's configuration is rendered from paisans-stack.yaml*), so nobody can
-rename themselves or change their email, and apply never renames an account.
-Renaming an admin's key in the `admins` section therefore makes a second
-account rather than renaming the first. An account is found by its username,
-then by its email, so one an administrator renamed from Pocket ID's admin page
-is still found by its address. Only an admin found by neither is created. Since the username is the admin's key,
-`validate` refuses a key Pocket ID would not take, one that does not end in a
-letter or digit (`pocket-id-admin-username`), when the deployment runs Pocket
-ID.
+the pocket-id blueprint turns account editing off (`allow_own_account_edit`,
+under *Pocket ID's configuration is rendered from paisans-stack.yaml*), so
+nobody can rename themselves or change their email, and apply never renames
+an account. Renaming an operator's key in the `operators` section therefore
+makes a second account rather than renaming the first. An account is found
+by its username, then by its email, so one renamed from Pocket ID's admin
+page is still found by its address. Only an operator found by neither is
+created. Since the username is the operator's key, `validate` refuses a key
+Pocket ID would not take, one that does not end in a letter or digit
+(`pocket-id-operator-username`), when the deployment runs Pocket ID.
 
-**An admin who has registered a passkey gets nothing more.** That is the sign
-the account was taken up, and Pocket ID records it as a `PASSKEY_ADDED` event
-in its audit log, which apply reads. **Every other admin gets a new login link
-on every run**, valid for 24 hours and for one sign in. Pocket ID keeps no way
-to read a link back once issued, so a run cannot reuse an earlier one, and
-issuing one does not revoke the others: an earlier link stays valid until it
-is used or expires.
+**An operator who has registered a passkey gets nothing more.** That is the
+sign the account was taken up, and Pocket ID records it as a `PASSKEY_ADDED`
+event in its audit log, which apply reads. **Every other operator gets a new
+login link on every run**, valid for 24 hours and for one sign in. Pocket ID
+keeps no way to read a link back once issued, so a run cannot reuse an earlier
+one, and issuing one does not revoke the others: an earlier link stays valid
+until it is used or expires.
 
 **Every link is printed at the end of the run**, after its result, whether
 output is a terminal or a pipe, so that it can be passed on by any means. A
 blank line sets the list apart before and after, and on a terminal each link
-is in italics. A link signs in as its admin: treat it as a password. It is
+is in italics. A link signs in as its operator: treat it as a password. It is
 printed once and kept nowhere.
 
 ```
@@ -6996,51 +7136,53 @@ Login links, each valid for 24 hours and for one sign in. Treat each as a passwo
 ```
 
 **When the smtp settings resolve a host and a sender, Pocket ID emails each
-admin a link as well.** `email_one_time_access_as_admin` is then `true`
+operator a link as well.** `email_one_time_access_as_admin` is then `true`
 unless the settings say otherwise, and apply asks Pocket ID to email the
-admin. The emailed link is Pocket ID's own, a second link beside the printed
-one. Pocket ID answers before it sends and logs only a failure, so apply
-reads its log for 30 seconds and marks the line `failed:` with Pocket ID's
-error, or `sent` when none was logged. `sent` means no failure was reported,
-not that the mail arrived. A failed email fails nothing: the printed link is
-there.
+operator. The emailed link is Pocket ID's own, a second link beside the
+printed one. Pocket ID answers before it sends and logs only a failure, so
+apply reads its log for 30 seconds and marks the line `failed:` with Pocket
+ID's error, or `sent` when none was logged. `sent` means no failure was
+reported, not that the mail arrived. A failed email fails nothing: the
+printed link is there.
 
-An admin who cannot be made fails the run, after every other admin has been
-tried and the links already issued are printed. Taking an admin out of the
-section changes nothing in Pocket ID. A dry run reads Pocket ID and plans,
-one `○` line per admin, and issues nothing.
+An operator who cannot be made fails the run, after every other operator has
+been tried and the links already issued are printed. **Taking an operator out
+of the section changes nothing in Pocket ID**: apply never deletes or
+disables a Pocket ID user, so the person stays a member until the community
+removes them, and the operator reconciler stops expecting them. A dry run
+reads Pocket ID and plans, one `○` line per operator, and issues nothing.
 `docs/specs/2026-10-11-apply-admin-login-links.md` is the approved
-specification.
+specification of the login links.
 
-### `admin magic-link` gives a declared admin a fresh sign-in link
+### `operator magic-link` gives a declared operator a fresh sign-in link
 
 Pocket ID users sign in with passkeys, so there is no password to hand an
-admin, and an admin cannot sign in at all until they have registered one.
-`apply` makes every declared admin and gives each a one-time sign-in link
-until they register a passkey (see above). Two cases are left: a link that
-expired before it was used, when no apply is due, and an admin who lost their
-passkey, whom apply gives nothing more. Both are the same command:
+operator, and an operator cannot sign in at all until they have registered
+one. `apply` makes every declared operator a user and gives each a one-time
+sign-in link until they register a passkey (see above). Two cases are left: a
+link that expired before it was used, when no apply is due, and an operator
+who lost their passkey, whom apply gives nothing more. Both are the same
+command:
 
 ```sh
-paisans admin magic-link alice              # finds alice's account, changes nothing
-paisans admin magic-link alice --execute    # issues the link, prints it once
+paisans operator magic-link alice              # finds alice's account, changes nothing
+paisans operator magic-link alice --execute    # issues the link, prints it once
 ```
 
-It issues a link and does nothing else. It takes an admin by their key under
-`admins`, and refuses any other name before a host is reached: an
-administrator is declared, never made on the side. The account, its groups
-and its administrator flag are apply's, so a declared admin with no account
-yet is pointed at apply, and a disabled account is refused rather than
-re-enabled. The link lives a day, as apply's do, and Pocket ID emails one too
-when it emails apply's. The flags are under *`paisans admin magic-link`* in
-[docs/commands.md](docs/commands.md).
+It issues a link and does nothing else. It takes an operator by their key
+under `operators`, and refuses any other name before a host is reached: an
+operator is declared, never made on the side. The account and its groups are
+apply's, so a declared operator with no account yet is pointed at apply, and
+a disabled account is refused rather than re-enabled. The link lives a day,
+as apply's do, and Pocket ID emails one too when it emails apply's. The flags
+are under *`paisans operator magic-link`* in [docs/commands.md](docs/commands.md).
 
-The link is Pocket ID's own mechanism: an admin issues a one-time access token
+The link is Pocket ID's own mechanism: an administrator issues a one-time access token
 for a user (`POST /api/users/:id/one-time-access-token`,
 `onetimeaccess/module.go:68` at `v2.14.0`), and `{APP_URL}/lc/{token}` signs
 that user in once, the same link the binary's `one-time-access-token`
-subcommand prints (`cmds/one_time_access_token.go:78`). The admin opens it and
-registers a passkey. A link lives over fifteen minutes on purpose: a TTL of
+subcommand prints (`cmds/one_time_access_token.go:78`). The operator opens it
+and registers a passkey. A link lives over fifteen minutes on purpose: a TTL of
 fifteen minutes or less gets a 6 character code
 (`onetimeaccess/service.go:271-274` at `v2.14.0`), which the login page accepts
 only when unauthenticated email login is enabled; on a host without it the
@@ -7051,7 +7193,7 @@ to the terminal running the command, only with `--execute`, with its expiry.
 It never appears in a plan line or an error and is never written to the
 secrets file.
 
-**An admin's email is created verified** (`"emailVerified": true`,
+**An operator's email is created verified** (`"emailVerified": true`,
 `dto/user_dto.go:29`, stored as sent at `service/user_service.go:299`), and an
 existing account whose email is not verified is marked so: a `PUT
 /api/users/<id>` that sends every field back as read with only
@@ -7060,8 +7202,8 @@ existing account whose email is not verified is marked so: a `PUT
 `email_verified: false`, and the paisans Mbin fork refuses an OIDC sign in whose
 email matches an existing local account unless the provider marked it
 verified. That guard stops anyone taking over an account by claiming its
-address at the provider, and it is right; declaring an admin is vouching for
-the address in `admins`, which is the verification it asks for.
+address at the provider, and it is right; declaring an operator is vouching
+for the address in `operators`, which is the verification it asks for.
 
 The calls go through Pocket ID's REST API with its static API key; see *The
 toolkit administers Pocket ID through its static API key*.
@@ -7106,11 +7248,11 @@ which is a restart of a few seconds during which nobody can sign in.
 | `accent_color` | `ACCENT_COLOR` | a CSS colour, or `default` |
 | `disable_animations` | `DISABLE_ANIMATIONS` | `true` or `false` |
 | `allow_own_account_edit` | `ALLOW_OWN_ACCOUNT_EDIT` | `false` only, and rendered `false` when unset; see below |
-| `allow_user_signups` | `ALLOW_USER_SIGNUPS` | `disabled`, `withToken` or `open`; with an `account` app with invites on naming this app, only `disabled` or unset (see *Accounts*) |
+| `allow_user_signups` | `ALLOW_USER_SIGNUPS` | `disabled`, `withToken` or `open` under `management: pocket-id`; under `paisans` refused if set, and rendered `disabled` |
 | `signup_default_groups` | `SIGNUP_DEFAULT_USER_GROUP_IDS` | a list of group names; see below |
 | `require_user_email` | `REQUIRE_USER_EMAIL` | `true` or `false` |
 | `email_login_notification` | `EMAIL_LOGIN_NOTIFICATION_ENABLED` | `true` or `false` |
-| `email_one_time_access_as_unauthenticated` | `EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED` | `true` or `false` |
+| `email_one_time_access_as_unauthenticated` | `EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED` | `true` or `false` under `management: pocket-id`; under `paisans` refused if set, and rendered `true` |
 | `email_one_time_access_as_admin` | `EMAIL_ONE_TIME_ACCESS_AS_ADMIN_ENABLED` | `true` or `false`; `true` when unset and the smtp settings resolve a host and a sender |
 | `email_api_key_expiration` | `EMAIL_API_KEY_EXPIRATION_ENABLED` | `true` or `false` |
 | `email_verification` | `EMAIL_VERIFICATION_ENABLED` | `true` or `false` |
@@ -7121,6 +7263,10 @@ which is a restart of a few seconds during which nobody can sign in.
 Mail settings come from the `smtp:` block, not from here (see *Mail is
 declared once and overridden per app*). `file_backend` is the one setting
 older than the rest (see *Rule 3: object storage from the first install*).
+`management` is outside the table because it renders no variable of its own:
+it decides who manages accounts, and under `paisans` the toolkit renders the
+two settings the table marks (see *Who manages accounts: `management`*,
+under *Accounts*). It is required.
 
 ```yaml
 apps:
@@ -7129,15 +7275,28 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      management: paisans            # required: paisans or pocket-id
       file_backend: database
       app_name: Example ID
       session_duration: 10080        # a week
       home_page_url: /settings/apps
-      allow_user_signups: disabled
       signup_default_groups: [members]
-      email_one_time_access_as_unauthenticated: true
       email_verification: true
       allow_own_account_edit: false  # the only value it takes
+```
+
+Under `management: pocket-id` the same app declares Pocket ID's own signup
+and email code, since they are the operator's choice there:
+
+```yaml
+apps:
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    settings:
+      management: pocket-id
+      allow_user_signups: withToken
+      email_one_time_access_as_unauthenticated: true
 ```
 
 **Nobody can edit their own account.** The kind renders
@@ -7147,8 +7306,7 @@ variable under `config`. A Pocket ID username is the identity other apps know
 a person by, such as their fediverse handle in Mbin, and those apps do not
 follow a rename: a renamed user signs in to them as somebody new. With editing
 off a user cannot change their email either, which keeps apply finding each
-declared admin's account (see *`apply` makes the declared admins and hands
-each a login link*). The setting stays in the table so that a configuration
+declared operator's account (see *`apply` makes the declared operators and hands each a login link*). The setting stays in the table so that a configuration
 can say so where it is read. Pocket ID's own admin page can still edit any
 account, and that is the way to correct one; a username changed there breaks
 the same identities in the other apps.
@@ -7232,24 +7390,25 @@ nothing else.
 
 **The setup routes are closed on every deployment.** That route is open on
 every new deployment from Pocket ID's start until apply makes the declared
-admins, and again after a restore that holds no users. On a public hostname
+operators, and again after a restore that holds no users. On a public hostname
 whoever reaches it first in that window owns the identity provider.
 
-**An invite deployment closes signup and keeps the email code.** Accounts
-there come only from the account app's invites, after the code of conduct,
-which is why `validate` refuses any `allow_user_signups` but `disabled` while
-an account app has invites on. The gateway closes signup on that setting
-alone, the signup tokens an administrator could otherwise hand out included,
-so an invite deployment always gets the closed routes, and with invites off,
-or with no account app, Pocket ID's own setting decides. A member whose
-sign-in link expired recovers through the email code, which `validate`
-requires on (*What `validate` refuses*, under *Accounts*), so those routes
-stay open. A Pocket ID with `allow_user_signups: open` is a public
-self-service identity provider, and its signup pages stay open.
+**Under `management: paisans` signup is closed and the email code is
+open.** Accounts there come only from the account service, so the toolkit
+renders `allow_user_signups` as `disabled` and
+`email_one_time_access_as_unauthenticated` as `true`, and refuses either one
+declared (*Who manages accounts: `management`*, under *Accounts*). The
+snippet needs no change for it: it reads the rendered values, so the signup
+routes are closed, the signup tokens an administrator could otherwise hand
+out included, and the email-code routes stay open, which is how a member
+whose sign-in link expired signs in again. Under `management: pocket-id`
+Pocket ID's own settings decide, as the operator declared them, and a Pocket
+ID with `allow_user_signups: open` is a public self-service identity
+provider whose signup pages stay open.
 
-**Nothing the toolkit or the account app calls is closed.** Apply, `admin
+**Nothing the toolkit or the account app calls is closed.** Apply, `operator
 magic-link` and `oidc client create` reach Pocket ID at a site's own address,
-from that host, and never pass the gateway; the admin reconciler reaches it on
+from that host, and never pass the gateway; the operator reconciler reaches it on
 its stack's own network. The account app does pass the gateway, with the static
 API key, and calls only `/api/users`, `/api/user-groups` and
 `/api/users/<id>/one-time-access-email`, with sign in through OIDC. Sign in,
@@ -7264,8 +7423,8 @@ refusal.
 
 ### The toolkit administers Pocket ID through its static API key
 
-Pocket ID is the one application whose first administrator and whose clients
-this toolkit creates for itself, and every one of those is a call to its REST
+Pocket ID is the one application whose first users, the operators, and whose
+clients this toolkit creates for itself, and every one of those is a call to its REST
 API. What makes the calls possible without a browser is `STATIC_API_KEY`
 (`backend/internal/common/env_config.go:59` at tag `v2.14.0`, at least 16
 characters at `:182-184`): a request whose `X-API-Key` header equals it
@@ -7436,19 +7595,20 @@ never be found under the name written. A `display_name` on an app whose
 blueprint has no client names nothing, and is warned about
 (`display-name-without-a-client`).
 
-The client is the app kind's, not a choice made at the command line, and
-**every member facing kind's client is restricted at Pocket ID to its member
+The client is the app blueprint's, not a choice made at the command line, and
+**every member facing blueprint's client is restricted at Pocket ID to its member
 group and its admin group**, so a person outside both is refused there before
 the app sees them. The two groups are `apps.<app>.settings.member_group` and
 `settings.admin_group`, defaulting to `members` and `admins`
-(`kinds.MembersGroup`, `kinds.AdminsGroup`), and the command creates
+(`blueprints.MembersGroup`, `blueprints.AdminsGroup`), and the command creates
 whichever is missing. WriteFreely reads no admin group, so its client's is
 always `admins` and only `member_group` is a setting; the uptime monitor
-has one group, `settings.admin_group`, with no default, because `validate`
-requires it (`uptime-needs-an-admin-group`). Synapse's client is its
+has one group, `settings.admin_group`, used as both, which defaults to
+`operators` (`blueprints.OperatorsGroup`), because the health page is the tool
+of the people who run the machines (see *Monitoring*). Synapse's client is its
 authentication service's, which reads no admin group, so like WriteFreely's
 it is `admins` plus `member_group`. The gate's is `members` and `admins`, with no
-setting, the same two groups its compose file admits: an admin can see
+setting, the same two groups its compose file admits: a community admin can see
 everything a member can (Founder decision). The defaults exist because an
 empty pair would leave an open client: anyone who could make a Pocket ID account could sign in to the
 app. Which app reads the groups claim itself differs by kind, and the table
@@ -7475,8 +7635,9 @@ names rendered into Mbin's `.env` are the names the client admits, read from
 the same settings, and a passthrough `config` key for either is refused
 (`config-key-already-rendered`), because a second place to type the name is
 one that can disagree with the client. All four are confidential clients.
-Putting a user in the admin group is apply's job, for every declared admin,
-not this command's.
+Putting a user in the admin group is apply's job, for every declared
+operator, not this command's; anyone else joins `admins` by promotion (see
+*Operators and community admins*).
 
 **`validate` holds the groups to the gate.** The gate admits `members`, and
 `admins` as every client does by default, and
@@ -7703,7 +7864,7 @@ describes.
 1. `init`, which generates the VM's WireGuard keypair on the workstation and
    records it in the secrets file (see *Where WireGuard keys are generated*).
 2. `host prepare` on every site: the VM gets Docker, WireGuard, a firewall
-   following its roles and the keys of the admins its `ssh.keys` names, and
+   following its roles and the keys of the operators its `ssh.keys` names, and
    home-a, already prepared, plans nothing.
 3. The pull: the VM pulls the images its apply will start, at the same time as
    any other host with images to pull, and home-a, which has them, pulls
@@ -8227,12 +8388,12 @@ sites a kept Caddy goes on serving, and the data `--delete-data` deletes.
 #### Evicting a site: `--evict`
 
 `--host-gone` is for a host that is dead. `--evict` is for one that still runs
-and that the other admins can no longer log in to: an admin stopped
+and that the other operators can no longer log in to: an operator stopped
 cooperating, and their host is still a data site, a Garage node, an apps site
 or the gateway. `docs/specs/2026-10-11-site-evict.md` is the approved
 specification. How to run it is under *`paisans site remove`* in
 [docs/commands.md](docs/commands.md), and the order of everything around it
-is in [docs/guides/when-an-admin-leaves.md](docs/guides/when-an-admin-leaves.md).
+is in [docs/guides/when-an-operator-leaves.md](docs/guides/when-an-operator-leaves.md).
 
 **Being a WireGuard peer of the remaining sites is being in the cluster.**
 etcd listens on plain `http://` with no client certificates, Patroni's REST
@@ -8374,7 +8535,7 @@ the mesh reaches once it is closed (*`secrets rotate` replaces a secret where
 it is checked and where it is used*). A copy of the database and of the
 objects cannot be taken back.
 
-**An admin who could decrypt the secrets file holds every site's secrets,**
+**An operator who could decrypt the secrets file holds every site's secrets,**
 including every other site's WireGuard private key, and WireGuard accepts a
 handshake from any address that proves a key. So their age key comes out of
 `.sops.yaml` and the file is re-encrypted under a new data key, and every

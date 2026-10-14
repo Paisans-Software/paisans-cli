@@ -99,10 +99,14 @@ func fp(t *testing.T, line string) string {
 	return k.Fingerprint
 }
 
-// withBob is the fixture with bob declared as an admin.
+// withBob is the fixture, which declares bob as its second operator, under
+// bobKey.
 func withBob(t *testing.T) string {
 	t.Helper()
-	data := strings.Replace(readFixture(t), "sites:\n", "  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      "+bobKey+"\nsites:\n", 1)
+	data := readFixture(t)
+	if !strings.Contains(data, bobKey) {
+		t.Fatal("the fixture does not declare bob under bobKey")
+	}
 	return writeConfig(t, data)
 }
 

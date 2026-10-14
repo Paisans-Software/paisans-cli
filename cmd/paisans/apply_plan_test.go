@@ -97,7 +97,7 @@ mesh:
   subnet: 10.44.0.0/24
 acme:
   provider: desec
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

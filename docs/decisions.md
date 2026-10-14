@@ -2535,3 +2535,66 @@ question the setting already answers.
 * **Deploying the app automatically from Pocket ID's settings**, when signups
   are disabled. Not chosen: the app exists because it is declared, and the
   toolkit never adds or drops an app because of another app's settings.
+
+## 2026-10-14: Operators run the machines; management says who manages accounts
+
+Founder decision. The design is
+`docs/specs/2026-10-14-operators-and-management.md`.
+
+### What was decided
+
+* The people `paisans-stack.yaml` declares are **operators**: the section is
+  `operators:`, the command `paisans operator`. Community admins are the
+  members of the Pocket ID group `admins`. Every operator is a community
+  admin; a community admin is not an operator.
+* `validate` refuses fewer than two operators with a key on every site that
+  runs Pocket ID.
+* The `pocket-id` app declares `management`, `paisans` or `pocket-id`,
+  required and never defaulted. Under `paisans` the account service manages
+  signup, bans and recovery, an account app and mail are required, the
+  toolkit renders signup closed and the email code open, and nobody is a
+  Pocket ID administrator. Under `pocket-id` Pocket ID's admin pages do, the
+  operators are its administrators, and an account app is refused.
+* The account app uses the deployment's one `pocket-id` app; `identity_app`
+  is refused.
+* The admin reconciler becomes the operator reconciler. It reads Pocket ID
+  and writes nothing: every operator is an enabled member in the member group
+  and in `operators`, and every Pocket ID administrator is an operator, none
+  under `paisans`. DNS continuity checks the operators.
+* Its image publishes only from a tag; a push to `develop` publishes nothing.
+* Every name changes outright, with no alias and no conversion of an older
+  deployment: deployments are redeployed.
+
+### Why
+
+Two kinds of people had one name. The people who hold SSH keys and the
+secrets are few, declared in a file, and can break every machine; the people
+who moderate the community are many, chosen by the community, and can break
+nothing outside the apps. Naming them apart lets each be held to its own rule.
+Two operators, because one lost workstation must not leave nobody able to run
+the deployment.
+
+Who manages accounts is a choice a community makes once, and the two answers
+need different settings: the account service needs signup closed so new
+people come through the code of conduct, and the email code open so a member
+whose link expired can come back. Declaring it makes the toolkit render those
+settings rather than check that an operator typed them, and makes the
+deployment say who administers its identity provider.
+
+Pocket ID is the record of who is a member. A reconciler that wrote groups
+there was a second writer of that record, with an API key that can do
+anything; one that reads and reports keeps the record with the people and
+services that own it. An operator removed at Pocket ID fails the check until
+they are taken out of the yaml, which is a manual step by design.
+
+### What was weighed
+
+* **Keeping the reconciler's writes** to keep `admins` equal to Pocket ID's
+  administrators. Not chosen: under the account service nobody is a Pocket ID
+  administrator, and a second writer of membership is the risk the
+  read-only reconciler removes.
+* **Defaulting `management`.** Not chosen: it decides who administers the
+  identity provider, which is access policy, declared like `gated` and
+  `invites`.
+* **Letting the account app keep naming its identity app.** Not chosen: a
+  deployment has one, and a setting naming it could only agree or be wrong.

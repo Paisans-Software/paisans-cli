@@ -163,15 +163,18 @@ type appValues struct {
 	// of conduct (account.go). Populated only for that blueprint.
 	Account accountValues
 
-	// AdminsHeartbeat is true for a Pocket ID app in a deployment with a
-	// monitor, whose stack then runs the admins heartbeat pusher on
-	// HeartbeatImage (adminsheartbeat.go).
-	AdminsHeartbeat bool
-	HeartbeatImage  string
+	// OperatorsHeartbeat is true for a Pocket ID app in a deployment with a
+	// monitor, whose stack then runs the operators heartbeat pusher on
+	// HeartbeatImage (operatorsheartbeat.go).
+	OperatorsHeartbeat bool
+	HeartbeatImage     string
 
 	// DNS is a Pocket ID app's DNS continuity check, its Enabled false when
 	// the deployment renders none (dnscontinuity.go).
 	DNS dnsValues
+	// Reconciler is what a Pocket ID app's operator reconciler checks
+	// (operatorsheartbeat.go).
+	Reconciler reconcilerValues
 
 	secrets map[string]any
 	// set is the app's settings as its blueprint sees them, with a catalog
@@ -451,7 +454,8 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.PocketID = pid
-		v.AdminsHeartbeat = len(adminsHeartbeatTargets(p.cfg)) > 0
+		v.OperatorsHeartbeat = len(operatorsHeartbeatTargets(p.cfg)) > 0
+		v.Reconciler = p.reconcilerValuesFor(app)
 		if v.HeartbeatImage, err = blueprints.FoundationImage(blueprints.FoundationHeartbeat); err != nil {
 			return appValues{}, err
 		}

@@ -73,7 +73,7 @@
       "failure_threshold": 2
     },
     {
-      "name": "auth — admin reconciler (home-a)",
+      "name": "auth — operator reconciler (home-a)",
       "monitor_type": "active",
       "url": "http://10.44.0.1:1412/livez",
       "method": "GET",
@@ -101,7 +101,7 @@
       "failure_threshold": 2
     },
     {
-      "name": "auth — admin reconciler (home-b)",
+      "name": "auth — operator reconciler (home-b)",
       "monitor_type": "active",
       "url": "http://10.44.0.2:1412/livez",
       "method": "GET",
@@ -426,7 +426,7 @@
       "heartbeat_grace_seconds": 120
     },
     {
-      "name": "admin continuity",
+      "name": "operator continuity",
       "monitor_type": "heartbeat",
       "interval_seconds": 60,
       "timeout_ms": 10000,

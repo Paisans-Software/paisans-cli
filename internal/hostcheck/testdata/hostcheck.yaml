@@ -16,12 +16,17 @@ mesh:
 acme:
   provider: desec
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -30,7 +35,7 @@ sites:
     endpoint: 203.0.113.10:51820
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   edge:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -38,14 +43,14 @@ sites:
     endpoint: 203.0.113.30:51820
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   watch:
     roles: [monitor]
     address: 10.44.0.4
     public_address: 203.0.113.40
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   porch:
     roles: [monitor]
     address: 10.44.0.5
@@ -55,7 +60,7 @@ sites:
       listen: 127.0.0.1:8480
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
 
 cluster:
   sites: [home-a]
@@ -76,6 +81,7 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      management: pocket-id
       file_backend: database
   blog:
     blueprint: writefreely

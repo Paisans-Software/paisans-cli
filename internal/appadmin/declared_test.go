@@ -22,7 +22,7 @@ func declaredRequest() Request {
 
 func strptr(s string) *string { return &s }
 
-// A declared admin with no account is created, given a 24 hour link, and
+// A declared operator with no account is created, given a 24 hour link, and
 // emailed one of Pocket ID's own.
 func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 	f := &fakePocketID{}
@@ -48,7 +48,7 @@ func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 	}
 }
 
-// A declared admin who renamed themselves is found by their address, and no
+// A declared operator who renamed themselves is found by their address, and no
 // second account is made.
 func TestDeclaredAdminIsFoundByEmail(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-7", Username: "fern-renamed",
@@ -86,7 +86,7 @@ func TestDeclaredAdminEmailMatchIsWhole(t *testing.T) {
 	}
 }
 
-// A declared admin who has registered a passkey has taken the account up:
+// A declared operator who has registered a passkey has taken the account up:
 // no link, no email.
 func TestDeclaredAdminWithAPasskeyGetsNothing(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder",
@@ -129,5 +129,50 @@ func TestDeclaredAdminTitles(t *testing.T) {
 	got := strings.Join(plan.Titles(), "; ")
 	if got != "create administrator founder; issue login link for founder; email login link to founder" {
 		t.Errorf("titles %q", got)
+	}
+}
+
+// A member request, an operator under management: paisans, makes an account
+// that is not a Pocket ID administrator, and its title says so.
+func TestMemberRequestCreatesNoAdministrator(t *testing.T) {
+	f := &fakePocketID{}
+	req := declaredRequest()
+	req.Member = true
+	plan, err := Build(config.BlueprintPocketID, f, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Titles()[0]; got != "create user founder" {
+		t.Errorf("title %q, want create user founder", got)
+	}
+	if _, err := Execute(plan, f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.users) != 1 || f.users[0].IsAdmin {
+		t.Errorf("users %+v, want one that is not an administrator", f.users)
+	}
+	if !strings.Contains(f.bodies[0], `"isAdmin":false`) {
+		t.Errorf("create body %s, want isAdmin false", f.bodies[0])
+	}
+}
+
+// A member request never grants the flag and never clears one set by hand:
+// that flag is the operator reconciler's to report.
+func TestMemberRequestLeavesTheAdministratorFlag(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder",
+			Email: strptr("founder@example.org"), EmailVerified: true, IsAdmin: admin}},
+			passkeys: map[string]bool{"u-1": true}}
+		req := declaredRequest()
+		req.Member = true
+		req.AdminGroups = nil
+		req.MemberGroups = nil
+		plan, err := Build(config.BlueprintPocketID, f, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Actions) != 0 {
+			t.Errorf("isAdmin %t: actions %v, want none", admin, plan.Actions)
+		}
 	}
 }

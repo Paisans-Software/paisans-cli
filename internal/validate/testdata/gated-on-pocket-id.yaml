@@ -14,12 +14,17 @@ mesh:
 acme:
   provider: desec
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -28,14 +33,14 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -43,7 +48,7 @@ sites:
     ssh:
       host: vm.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
 
 cluster:
   sites: [home-a, home-b]
@@ -72,6 +77,7 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      management: pocket-id
       file_backend: database
     gated: true
   # Present only so that the gate exists: an app naming a gate no app renders

@@ -87,13 +87,13 @@ type Config struct {
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
 	ACME ACME `yaml:"acme"`
-	// Admins is the people who may log in to the sites, under the name a
+	// Operators is the people who may log in to the sites, under the name a
 	// site's ssh.keys lists them by.
-	Admins  map[string]Admin `yaml:"admins"`
-	Sites   map[string]Site  `yaml:"sites"`
-	Cluster Cluster          `yaml:"cluster"`
-	Etcd    Etcd             `yaml:"etcd"`
-	Storage Storage          `yaml:"storage"`
+	Operators map[string]Operator `yaml:"operators"`
+	Sites     map[string]Site     `yaml:"sites"`
+	Cluster   Cluster             `yaml:"cluster"`
+	Etcd      Etcd                `yaml:"etcd"`
+	Storage   Storage             `yaml:"storage"`
 	// SMTP is how apps send mail, the default for every app that sends any.
 	// An app's own smtp block overrides it field by field: see SMTPFor.
 	SMTP SMTP `yaml:"smtp"`
@@ -1006,6 +1006,22 @@ func (c *Config) DataSites() []string {
 	return out
 }
 
+// PocketIDApp is the deployment's one pocket-id app, and false when it has
+// none or more than one. The account app signs in and creates accounts
+// there, and validate refuses an account app without exactly one.
+func (c *Config) PocketIDApp() (string, bool) {
+	var found []string
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintPocketID {
+			found = append(found, name)
+		}
+	}
+	if len(found) != 1 {
+		return "", false
+	}
+	return found[0], true
+}
+
 // AppsSites returns the sites holding the apps role, sorted.
 func (c *Config) AppsSites() []string {
 	var out []string
@@ -1155,9 +1171,9 @@ func (c *Config) structural(noSubnet bool) error {
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
-		problems = append(problems, sshProblems(name, site, c.Admins)...)
+		problems = append(problems, sshProblems(name, site, c.Operators)...)
 	}
-	problems = append(problems, c.adminProblems()...)
+	problems = append(problems, c.operatorProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if !blueprintName.MatchString(name) {

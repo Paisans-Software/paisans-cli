@@ -25,7 +25,7 @@ func runApp(args []string) error {
 	if len(args) >= 1 && args[0] == "remove" {
 		return runAppRemove(args[1:], os.Stdin, os.Stdout)
 	}
-	return fmt.Errorf("app takes one subcommand: paisans app remove <app>. An admin is declared under admins and made by apply; paisans admin magic-link gives one a fresh sign-in link")
+	return fmt.Errorf("app takes one subcommand: paisans app remove <app>. An operator is declared under operators and made by apply; paisans operator magic-link gives one a fresh sign-in link")
 }
 
 // adminGroups is every admin group an app that signs in through Pocket ID
@@ -51,7 +51,7 @@ func adminGroups(cfg *config.Config) []string {
 
 // memberGroups is the member group of every app that signs in through the
 // identity provider, sorted and without duplicates, leaving out any that is
-// also an admin group: the groups a declared admin joins so that every such
+// also an admin group: the groups a declared operator joins so that every such
 // app admits them.
 func memberGroups(cfg *config.Config) []string {
 	seen := map[string]bool{}

@@ -17,7 +17,7 @@ func rotatable() *config.Secrets {
 		External: map[string]string{"acme_dns_token": "old-acme-0000001"},
 		Sites:    map[string]config.SiteSecrets{"vm": {WireGuardPrivateKey: "old-wg", HeartbeatToken: "old-heartbeat"}},
 		Apps: map[string]map[string]any{
-			"id":      {"encryption_key": "old-enc-00000000001", "static_api_key": "old-api-0000000001", "admins_heartbeat_token": "old-admins-heartbeat"},
+			"id":      {"encryption_key": "old-enc-00000000001", "static_api_key": "old-api-0000000001", "operators_heartbeat_token": "old-operators-heartbeat"},
 			"mas":     {"mas_encryption_secret": "old-mas-enc-00001", "mas_signing_key": "old-pem", "mas_matrix_secret": "old-matrix-0001"},
 			"mbin":    {"app_secret": "old-app-00000000001", "oauth_passphrase": "old-pass-0000000001", "oauth_encryption_key": "old-oek-0000000001", "oauth_private_key": "old-private"},
 			"account": {"email_hash_key": "old-hash-000000001", "session_key": "old-session-0000001"},
@@ -48,9 +48,9 @@ func TestReplacementShapes(t *testing.T) {
 	if err != nil || !hex32.MatchString(hb) {
 		t.Errorf("heartbeat_token = %q, %v; want 32 hex", hb, err)
 	}
-	ahb, err := replacement("apps.id.admins_heartbeat_token", s)
+	ahb, err := replacement("apps.id.operators_heartbeat_token", s)
 	if err != nil || !hex32.MatchString(ahb) {
-		t.Errorf("admins_heartbeat_token = %q, %v; want 32 hex", ahb, err)
+		t.Errorf("operators_heartbeat_token = %q, %v; want 32 hex", ahb, err)
 	}
 	key, err := replacement("apps.mas.mas_signing_key", s)
 	if err != nil {

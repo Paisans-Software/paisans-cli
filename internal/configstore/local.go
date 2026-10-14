@@ -38,12 +38,12 @@ const (
 func (l Local) state(name string) string { return filepath.Join(l.Dir, stateDir, name) }
 
 // ensureState creates .paisans/ and its .gitignore, which keeps this
-// operator's own state out of the repository the admins share: the cache,
+// operator's own state out of the repository the operators share: the cache,
 // this workstation's memory of every version it has seen; the incoming
 // files, a pull's scratch; the signing key, since a workstation that
-// checked out another admin's would anchor its trust on their signature;
+// checked out another operator's would anchor its trust on their signature;
 // and the head and the seen revision, which describe this workstation's
-// files and gathers. config-root is left out, so the admins can commit the
+// files and gathers. config-root is left out, so the operators can commit the
 // pin and share it. A .gitignore already there is the operator's, and is
 // left as it is.
 func (l Local) ensureState() error {
@@ -439,7 +439,7 @@ type Gathered struct {
 	Synced   bool // each site was asked to sync with its peers first
 	Versions map[string]Version
 	Holders  map[string][]string // version -> the sites whose answer held it
-	Signers  map[string]string   // version -> the admin id its key belongs to, "" when none
+	Signers  map[string]string   // version -> the operator id its key belongs to, "" when none
 	// Seen is the change to the seen record this gather leads to, nil for
 	// none; Local.RecordSeen writes it.
 	Seen *SeenChange
@@ -547,7 +547,7 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		return g, err
 	}
 	configs := versionConfigs(cache)
-	admins := adminReader(configs)
+	operators := operatorReader(configs)
 	own, err := l.SigningKey()
 	if err != nil {
 		return g, err
@@ -566,13 +566,13 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		g.Versions[v.SHA] = v
 	}
 	for sha, v := range g.Versions {
-		g.Signers[sha] = signerID(v, admins)
+		g.Signers[sha] = signerID(v, operators)
 	}
 	if len(g.Versions) == 0 {
 		g.Verdict = Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}}
 		return g, nil
 	}
-	g.Verdict, err = Judge(Graph{Versions: g.Versions, Admins: admins}, a)
+	g.Verdict, err = Judge(Graph{Versions: g.Versions, Operators: operators}, a)
 	if err != nil || len(g.Verdict.Heads) == 0 {
 		return g, err
 	}
@@ -614,15 +614,15 @@ func versionConfigs(cache Repo) func(sha string) (*config.Config, error) {
 	}
 }
 
-// adminKeys maps each admin key a configuration lists, by fingerprint, to
-// the admin it belongs to.
-func adminKeys(cfg *config.Config) (map[string]string, error) {
+// operatorKeys maps each operator key a configuration lists, by fingerprint, to
+// the operator it belongs to.
+func operatorKeys(cfg *config.Config) (map[string]string, error) {
 	m := map[string]string{}
-	for id, admin := range cfg.Admins {
-		for _, line := range admin.KeyLines() {
+	for id, operator := range cfg.Operators {
+		for _, line := range operator.KeyLines() {
 			k, _, err := config.ParseKeyLine(line)
 			if err != nil {
-				return nil, fmt.Errorf("admins.%s.keys: %w", id, err)
+				return nil, fmt.Errorf("operators.%s.keys: %w", id, err)
 			}
 			m[k.Fingerprint] = id
 		}
@@ -630,32 +630,32 @@ func adminKeys(cfg *config.Config) (map[string]string, error) {
 	return m, nil
 }
 
-// adminReader is versionConfigs read as Graph.Admins reads it.
-func adminReader(configs func(string) (*config.Config, error)) func(sha string) (map[string]string, error) {
+// operatorReader is versionConfigs read as Graph.Operators reads it.
+func operatorReader(configs func(string) (*config.Config, error)) func(sha string) (map[string]string, error) {
 	return func(sha string) (map[string]string, error) {
 		cfg, err := configs(sha)
 		if err != nil {
 			return nil, err
 		}
-		return adminKeys(cfg)
+		return operatorKeys(cfg)
 	}
 }
 
-// signerID is the admin a version's signing key belongs to, by its first
-// parent's admins, or its own for a root; "" when neither lists it.
-func signerID(v Version, admins func(string) (map[string]string, error)) string {
+// signerID is the operator a version's signing key belongs to, by its first
+// parent's operators, or its own for a root; "" when neither lists it.
+func signerID(v Version, operators func(string) (map[string]string, error)) string {
 	from := v.SHA
 	if len(v.Parents) > 0 {
 		from = v.Parents[0]
 	}
-	if m, _ := admins(from); m[v.SignerFP] != "" {
+	if m, _ := operators(from); m[v.SignerFP] != "" {
 		return m[v.SignerFP]
 	}
-	m, _ := admins(v.SHA)
+	m, _ := operators(v.SHA)
 	return m[v.SignerFP]
 }
 
-// allowedSigners writes git's allowed-signers file: every admin key any held
+// allowedSigners writes git's allowed-signers file: every operator key any held
 // version lists, and the operator's own. Being listed only lets git report a
 // signature as good; whose signature counts is the trust rules' decision.
 func allowedSigners(shas []string, configs func(string) (*config.Config, error), own string) (string, error) {
@@ -673,8 +673,8 @@ func allowedSigners(shas []string, configs func(string) (*config.Config, error),
 		if err != nil {
 			continue
 		}
-		for _, admin := range cfg.Admins {
-			for _, line := range admin.KeyLines() {
+		for _, operator := range cfg.Operators {
+			for _, line := range operator.KeyLines() {
 				add(line)
 			}
 		}
@@ -723,7 +723,7 @@ type publishOpts struct {
 // whose rollback the operator accepted), signs it with keyLine (a public key
 // line the ssh-agent holds), and pushes the cache to every site that
 // answered. It refuses a base that is not the sites' head, a fork, a key
-// that no admin of the parent lists (of the local paisans-stack.yaml for the first
+// that no operator of the parent lists (of the local paisans-stack.yaml for the first
 // version), and a run that reaches no site. It records the change to the
 // seen record the gather carries, the version as the head, the first as the
 // root, and the key as the signing key when none is recorded. Unchanged
@@ -846,8 +846,8 @@ func pushVersion(cache Repo, g Gathered, sites map[string]apply.Transport, id, s
 	return pushed, nil
 }
 
-// CheckSigner refuses keyLine unless an admin of every parent lists it, or,
-// for the first version (no parents), an admin of the local configuration:
+// CheckSigner refuses keyLine unless an operator of every parent lists it, or,
+// for the first version (no parents), an operator of the local configuration:
 // a version signed by anyone else would not be trusted.
 func CheckSigner(l Local, parents []string, local *config.Config, keyLine string) error {
 	key, opts, err := config.ParseKeyLine(keyLine)
@@ -855,12 +855,12 @@ func CheckSigner(l Local, parents []string, local *config.Config, keyLine string
 		return fmt.Errorf("the signing key is not a bare public key line: %q", keyLine)
 	}
 	if len(parents) == 0 {
-		m, err := adminKeys(local)
+		m, err := operatorKeys(local)
 		if err != nil {
 			return err
 		}
 		if m[key.Fingerprint] == "" {
-			return fmt.Errorf("the key %s belongs to no admin the local "+config.FileName+" lists; add it under your entry in admins", key.Fingerprint)
+			return fmt.Errorf("the key %s belongs to no operator the local "+config.FileName+" lists; add it under your entry in operators", key.Fingerprint)
 		}
 		return nil
 	}
@@ -868,14 +868,14 @@ func CheckSigner(l Local, parents []string, local *config.Config, keyLine string
 	if err != nil {
 		return err
 	}
-	admins := adminReader(versionConfigs(cache))
+	operators := operatorReader(versionConfigs(cache))
 	for _, p := range parents {
-		m, err := admins(p)
+		m, err := operators(p)
 		if err != nil {
-			return fmt.Errorf("read the admins of %s: %w", p, err)
+			return fmt.Errorf("read the operators of %s: %w", p, err)
 		}
 		if m[key.Fingerprint] == "" {
-			return fmt.Errorf("the key %s belongs to no admin version %s lists, so a version signed with it would not be trusted; another admin publishes the change that adds it", key.Fingerprint, p)
+			return fmt.Errorf("the key %s belongs to no operator version %s lists, so a version signed with it would not be trusted; another operator publishes the change that adds it", key.Fingerprint, p)
 		}
 	}
 	return nil

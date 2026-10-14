@@ -19,7 +19,7 @@ import (
 // paisans-stack.yaml grants on a host, before they change it
 // (docs/specs/2026-10-11-config-review.md).
 //
-// Any admin of a deployment can edit paisans-stack.yaml, and whoever runs apply
+// Any operator of a deployment can edit paisans-stack.yaml, and whoever runs apply
 // runs it with their own access, so an added key or a changed image reaches
 // a host through someone else's run. Each host records the grant last
 // applied (internal/grant); the review compares the configuration's grant
@@ -68,14 +68,14 @@ var agentFingerprints = func() []string {
 	return fps
 }
 
-// approver is the admin whose key the operator's ssh agent holds, when
-// exactly one admin's is, and empty otherwise. It is a label for the next
+// approver is the operator whose key the local ssh agent holds, when
+// exactly one operator's is, and empty otherwise. It is a label for the next
 // reader of the record, not a check: anyone can load any key they hold.
 func approver(cfg *config.Config) string {
 	held := agentFingerprints()
 	var found []string
-	for name, admin := range cfg.Admins {
-		for _, line := range admin.KeyLines() {
+	for name, operator := range cfg.Operators {
+		for _, line := range operator.KeyLines() {
 			k, _, err := config.ParseKeyLine(line)
 			if err == nil && slices.Contains(held, k.Fingerprint) && !slices.Contains(found, name) {
 				found = append(found, name)

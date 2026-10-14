@@ -19,26 +19,6 @@ func withAccountSetting(t *testing.T, key string, value any) validate.Result {
 	return validate.Check(cfg)
 }
 
-func TestAccountSignupsUnsetIsFine(t *testing.T) {
-	r := validate.Check(load(t, "valid"))
-	if f := findings(r, "account-signups-not-disabled"); len(f) != 0 {
-		t.Fatalf("unset allow_user_signups is Pocket ID's default, disabled: %v", f)
-	}
-}
-
-func TestAccountRecoveryMustBeExplicitlyTrue(t *testing.T) {
-	for name, set := range map[string]func(map[string]any){
-		"false":   func(s map[string]any) { s["email_one_time_access_as_unauthenticated"] = false },
-		"deleted": func(s map[string]any) { delete(s, "email_one_time_access_as_unauthenticated") },
-	} {
-		cfg := load(t, "valid")
-		set(cfg.Apps["auth"].Settings)
-		if len(findings(validate.Check(cfg), "account-recovery-disabled")) != 1 {
-			t.Fatalf("%s is not true and must be refused", name)
-		}
-	}
-}
-
 func TestAccountCodeOfConductIsText(t *testing.T) {
 	cfg := load(t, "valid")
 	delete(cfg.Apps["account"].Settings, "code_of_conduct")
@@ -90,6 +70,15 @@ func TestAccountSettingRanges(t *testing.T) {
 	}
 }
 
+// identity_app is refused: the account app uses the deployment's one
+// pocket-id app, so a setting naming one would read as a choice made there.
+func TestIdentityAppIsRefused(t *testing.T) {
+	r := withAccountSetting(t, "identity_app", "auth")
+	if got := findings(r, "account-setting-unknown"); len(got) != 1 || got[0] != "REFUSE apps.account.settings.identity_app" {
+		t.Errorf("got %v", got)
+	}
+}
+
 // A misspelt account setting renders nothing, so it is said; the known ones are not.
 func TestAnUnknownAccountSettingIsWarnedAbout(t *testing.T) {
 	r := withAccountSetting(t, "invite_qouta", 3)
@@ -105,7 +94,7 @@ func TestAnUnknownAccountSettingIsWarnedAbout(t *testing.T) {
 // so a second pocket-id app is refused.
 func TestAnAccountAppWithTwoPocketIDAppsIsRefused(t *testing.T) {
 	r := validate.Check(load(t, "account-one-identity-app"))
-	if got := findings(r, "account-one-identity-app"); len(got) != 1 || got[0] != "REFUSE apps.account.settings.identity_app" {
+	if got := findings(r, "account-one-identity-app"); len(got) != 1 || got[0] != "REFUSE apps.account" {
 		t.Errorf("got %v", got)
 	}
 }
@@ -124,14 +113,10 @@ func withInvitesOff(t *testing.T) *config.Config {
 	return cfg
 }
 
-// With invites off, Pocket ID's own settings decide who signs up, so none of
-// the rules an invite community needs fires.
-func TestInvitesOffLeavesThePocketIDSettingsAlone(t *testing.T) {
-	cfg := withInvitesOff(t)
-	cfg.Apps["auth"].Settings["allow_user_signups"] = "open"
-	delete(cfg.Apps["auth"].Settings, "email_one_time_access_as_unauthenticated")
-	r := validate.Check(cfg)
-	for _, rule := range []string{"account-signups-not-disabled", "account-recovery-disabled", "account-code-of-conduct-missing", "account-setting-unknown"} {
+// With invites off, none of the rules an invite community needs fires.
+func TestInvitesOffFiresNoInviteRule(t *testing.T) {
+	r := validate.Check(withInvitesOff(t))
+	for _, rule := range []string{"account-code-of-conduct-missing", "account-setting-unknown"} {
 		if f := findings(r, rule); len(f) != 0 {
 			t.Errorf("%s fired with invites off: %v", rule, f)
 		}

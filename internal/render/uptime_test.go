@@ -320,12 +320,12 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 	}
 }
 
-// Every site Pocket ID runs on gets a check on its admin reconciler, straight to
+// Every site Pocket ID runs on gets a check on its operator reconciler, straight to
 // the reconciler's port on the mesh, and nothing public: the gateway does not
 // route the reconciler. It asks /livez, the reconciler service's own health,
-// which a standby passes too; the admins group's health is the push monitor's
-// (TestTheSeedExpectsAnAdminsHeartbeatPerPocketID).
-func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
+// which a standby passes too; the reconciler's answer is the push monitor's
+// (TestTheSeedExpectsAnOperatorsHeartbeatPerPocketID).
+func TestEveryPocketIDSiteHasAnOperatorReconcilerCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
 	sites := render.AppSites(cfg)["auth"]
@@ -333,9 +333,9 @@ func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 		t.Fatal("the fixture runs Pocket ID nowhere")
 	}
 	for _, site := range sites {
-		m := monitors["auth — admin reconciler ("+site+")"]
+		m := monitors["auth — operator reconciler ("+site+")"]
 		if m == nil {
-			t.Fatalf("no admin reconciler check on %s", site)
+			t.Fatalf("no operator reconciler check on %s", site)
 		}
 		if want := "http://" + cfg.Sites[site].Address + ":1412/livez"; m["url"] != want || m["expected_status"] != "200" {
 			t.Errorf("%s: url %v expects %v, want %s expecting 200", site, m["url"], m["expected_status"], want)
@@ -345,8 +345,8 @@ func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
 		}
 	}
 	for name := range monitors {
-		if strings.Contains(name, "admin reconciler") && !strings.HasPrefix(name, "auth — admin reconciler (") {
-			t.Errorf("an admin reconciler check for something other than Pocket ID: %s", name)
+		if strings.Contains(name, "operator reconciler") && !strings.HasPrefix(name, "auth — operator reconciler (") {
+			t.Errorf("an operator reconciler check for something other than Pocket ID: %s", name)
 		}
 	}
 }
