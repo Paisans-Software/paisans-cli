@@ -13,6 +13,7 @@ package grant
 import (
 	"fmt"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -168,6 +169,11 @@ func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 		}
 		_, stack, rest, ok := deployment.SplitRel(rel)
 		if !ok || rest != "compose.yaml" {
+			// A compose file anywhere but a stack's own directory would run
+			// images the review never shows.
+			if path.Base(rel) == "compose.yaml" {
+				return nil, fmt.Errorf("%s is a compose file outside any stack's own directory", file.Path)
+			}
 			continue
 		}
 		services, err := blueprints.ComposeMounts(file.Content)

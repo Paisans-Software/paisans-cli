@@ -2422,17 +2422,18 @@ changed, only when all of these hold:
    decided where the render chose it, never by matching its repository, so
    another service of the same compose file a template points at the same
    reference is approved.
-2. That `foundation.yaml` came from a release of the official core catalog:
-   a release tag of `https://github.com/Paisans-Software/paisans-blueprints`
-   names the commit read, as that repository itself says (checked against it,
-   never against the configured URL, and recorded in the checkout so an
-   offline run keeps it), and the toolkit read the commit from a git checkout
-   whose origin is that URL and whose `HEAD` is that commit. The URL may
-   differ only by a trailing slash, a `.git` suffix and the case of its host.
-   A commit no release tag names (an unmerged branch, a pull request's head),
-   a core pin with no tag, a core from `PAISANS_CORE_CATALOG`, a
-   `catalogs.core.url`, any mirror, a cached commit another URL fetched, or an
-   installed configuration store snapshot is not official.
+2. That `foundation.yaml` came from a release of the official core catalog: a
+   release tag (`vMAJOR.MINOR.PATCH`) of
+   `https://github.com/Paisans-Software/paisans-blueprints` names the commit
+   read, as that repository itself says (checked against it, never against the
+   configured URL, and recorded in the checkout so an offline run keeps it),
+   and the toolkit read the commit from a git checkout whose origin is that URL
+   and whose `HEAD` is that commit. The URL may differ only by a trailing
+   slash, a `.git` suffix and the case of its host. A commit no release tag
+   names (an unmerged branch, a pull request's head), a core pin with no tag, a
+   core from `PAISANS_CORE_CATALOG`, a `catalogs.core.url`, any mirror, a
+   cached commit another URL fetched, or an installed configuration store
+   snapshot is not official.
 3. The service is the toolkit's own: the infrastructure stack's, the gateway's
    Caddy unless `acme.image` declares one, a pinned app's own database unless
    the configuration declares one, a service the toolkit adds to a stack (the

@@ -801,3 +801,19 @@ func TestAnAppIsNeverNamedForAToolkitStack(t *testing.T) {
 		t.Errorf("an app named infra loaded, or was refused without saying why: %v", err)
 	}
 }
+
+// An app's name is its stack's directory and compose project, so it is one
+// lowercase word: a slash, a dot segment or a capital would put its files
+// somewhere else, or out of the review that reads every stack.
+func TestAnAppNameIsOneWord(t *testing.T) {
+	for _, name := range []string{"a/b", "..", "../x", ".", "Talk", "../../../etc/cron.d", "-x", "a.b"} {
+		named := validConfig + `  "` + name + `":
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+`
+		if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "is not an app name") {
+			t.Errorf("%q: loaded, or refused without saying why: %v", name, err)
+		}
+	}
+}

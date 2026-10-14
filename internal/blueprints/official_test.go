@@ -278,3 +278,37 @@ func TestCatalogGitIgnoresTheEnvironmentsRepository(t *testing.T) {
 		t.Error("the environment set the origin")
 	}
 }
+
+// TagCommit takes only the tag itself: ls-remote matches a pattern against
+// the end of a ref, so refs/tags/x/refs/tags/v1.0.0 would otherwise stand in
+// for v1.0.0.
+func TestTagCommitTakesOnlyTheTagItself(t *testing.T) {
+	url, _, head := officialRepo(t)
+	dir := strings.TrimPrefix(url, "file://")
+	for _, forged := range []string{"refs/tags/v9.9.9", "x/refs/tags/v1.0.0"} {
+		if out, err := git(dir, "-c", "tag.gpgsign=false", "tag", forged, head); err != nil {
+			t.Fatal(out)
+		}
+	}
+	if got, err := TagCommit(url, "v9.9.9"); err == nil {
+		t.Errorf("v9.9.9, which no tag is, names %s", got)
+	}
+	if got, err := TagCommit(url, "v1.0.0"); err != nil || got == head {
+		t.Errorf("v1.0.0 names %s, %v", got, err)
+	}
+}
+
+// The official core's releases are tagged vMAJOR.MINOR.PATCH. A tag without
+// the v, even one the official repository puts on a commit, is not a release
+// and is not official.
+func TestAnUnprefixedTagIsNotAnOfficialRelease(t *testing.T) {
+	coretest.Cache(t)
+	url, _, head := officialRepo(t)
+	if out, err := git(strings.TrimPrefix(url, "file://"), "-c", "tag.gpgsign=false", "tag", "9.9.9", head); err != nil {
+		t.Fatal(out)
+	}
+	pinCore(t, head, "9.9.9")
+	if CoreIsOfficial() {
+		t.Error("a pull request's head tagged 9.9.9 is official")
+	}
+}

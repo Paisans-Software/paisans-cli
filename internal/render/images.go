@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -85,6 +86,11 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		site, rel := splitSite(file.Path)
 		_, stack, rest, ok := deployment.SplitRel(rel)
 		if !ok || rest != "compose.yaml" {
+			// A compose file anywhere but a stack's own directory would run
+			// images this list never names, and so never reviewed.
+			if path.Base(rel) == "compose.yaml" {
+				return nil, fmt.Errorf("%s is a compose file outside any stack's own directory", file.Path)
+			}
 			continue
 		}
 		services, err := blueprints.ComposeMounts(file.Content)

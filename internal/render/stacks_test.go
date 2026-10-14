@@ -90,3 +90,30 @@ func TestInfraServicesAreTheTemplates(t *testing.T) {
 		}
 	}
 }
+
+// Nothing the render writes leaves the deployment's root, except the
+// WireGuard file wg-quick reads where it reads it; an app whose name walks
+// out of the root is refused rather than written there.
+func TestNoFileLeavesTheDeploymentRoot(t *testing.T) {
+	for _, name := range []string{"../x", "..", "../../../etc/cron.d", "."} {
+		cfg := fixture(t)
+		cfg.Apps[name] = cfg.Apps["web"]
+		if _, err := render.Build(cfg, fixtureSecrets(t)); err == nil || !strings.Contains(err.Error(), "outside the deployment") {
+			t.Errorf("an app named %q rendered: %v", name, err)
+		}
+	}
+}
+
+// A compose file that is not a stack's own, one directory under the
+// deployment root, is never skipped: its images would not be reviewed.
+func TestAComposeFileOutsideAStackIsAnError(t *testing.T) {
+	cfg := fixture(t)
+	files := []render.File{{Path: "vm/" + cfg.Deployment().RelPath("a", "b", "compose.yaml"), Content: "services:\n  x:\n    image: ghcr.io/example/x:1\n"}}
+	if _, err := render.ListImages(cfg, fixtureSecrets(t), files); err == nil {
+		t.Error("a compose file at a/b/compose.yaml was skipped")
+	}
+	cfg.Apps["a/b"] = cfg.Apps["web"]
+	if _, err := render.Build(cfg, fixtureSecrets(t)); err == nil {
+		t.Error("an app named a/b rendered")
+	}
+}

@@ -432,3 +432,14 @@ services:
 		}
 	}
 }
+
+// A compose file the grant cannot place in a stack is an error, never left
+// out of the review.
+func TestTheGrantRefusesAComposeFileOutsideAStack(t *testing.T) {
+	cfg := fixture(t)
+	plan := rendered(t, cfg)
+	plan.Files = append(plan.Files, render.File{Path: "vm/" + cfg.Deployment().RelPath("a", "b", "compose.yaml"), Content: "services:\n  x:\n    image: ghcr.io/example/x:1\n"})
+	if _, err := grant.ImagesOf(plan, "vm"); err == nil {
+		t.Error("a compose file at a/b/compose.yaml was left out of the grant")
+	}
+}

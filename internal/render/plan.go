@@ -5,6 +5,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -168,6 +169,16 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	// Two files at one path would leave one of them unwritten and the other
 	// reviewed and applied as if it were both (Eg: an app named for the
 	// infrastructure stack), so the render stops rather than choose.
+	// Nothing leaves the deployment's own directory but the WireGuard file
+	// wg-quick reads from /etc/wireguard: apply writes each file as root at
+	// its path, so a path that walks out would be written anywhere.
+	root, wg := cfg.Deployment().RelPath()+"/", cfg.Deployment().WireGuardConf()
+	for _, f := range files {
+		_, rel := splitSite(f.Path)
+		if rel != path.Clean(rel) || path.IsAbs(rel) || (!strings.HasPrefix(rel, root) && rel != wg) {
+			return nil, fmt.Errorf("the configuration renders %s, outside the deployment's own directory", f.Path)
+		}
+	}
 	for i := 1; i < len(files); i++ {
 		if files[i].Path == files[i-1].Path {
 			return nil, fmt.Errorf("the configuration renders two files at %s. Each stack is a directory of its own; rename whatever shares a name with another stack", files[i].Path)

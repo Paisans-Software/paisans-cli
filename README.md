@@ -5114,7 +5114,7 @@ these must hold:
    never matched it by name: another service of the same compose file that a
    template points at the same reference is reviewed.
 2. The core catalog is a release of the official repository: a release tag
-   (`v1.2.3` or `1.2.3`) of
+   (`vMAJOR.MINOR.PATCH`, Eg: `v1.2.3`; a tag without the `v` is not one) of
    `https://github.com/Paisans-Software/paisans-blueprints` names the commit
    read, as that repository itself says, and the toolkit read it from a git
    checkout whose origin is that URL and whose `HEAD` is that commit. The URL
@@ -5122,14 +5122,14 @@ these must hold:
    host. The official repository's answer about the tag is recorded in the
    checkout, so a run that cannot reach it keeps the exemption. Not official: a
    commit no release tag of the official repository names (Eg: an unmerged
-   branch, or a pull request's head, which the repository serves all the
-   same), a core pin that names no tag, a core from `PAISANS_CORE_CATALOG`,
-   from a `catalogs.core.url`, from any mirror, from a cached commit another
-   URL fetched, or from an installed configuration store snapshot (bytes
-   another admin published). When `catalogs.core` pins a commit and sets no
-   `url`, the commit is fetched from the official URL before an installed
-   snapshot is used, so an honest pin to a release keeps the exemption; with a
-   `url`, it is fetched from there, and is not official.
+   branch, or a pull request's head, which the repository serves all the same),
+   a core pin that names no tag, a core from `PAISANS_CORE_CATALOG`, from a
+   `catalogs.core.url`, from any mirror, from a cached commit another URL
+   fetched, or from an installed configuration store snapshot (bytes another
+   admin published). When `catalogs.core` pins a commit and sets no `url`, the
+   commit is fetched from the official URL before an installed snapshot is
+   used, so an honest pin to a release keeps the exemption; with a `url`, it is
+   fetched from there, and is not official.
 3. The service is the toolkit's own: one of the infrastructure stack's, the
    gateway's Caddy unless `acme.image` declares one, a pinned app's own database
    unless `apps.<name>.images` declares one, a service the toolkit adds to a
@@ -5141,10 +5141,11 @@ and releases it with a release tag there, so the images of a release fetched
 from that URL at that commit were checked before any deployment reads them, and
 asking every operator to approve them again at every apply would repeat a check
 already made. A commit the team has not released, a third party catalog and a
-mirror of the core catalog are not what that team reviewed and released. So a service a third party catalog's blueprint writes with `foundation:`
-needs approval, though it runs a reviewed reference, because that catalog chose
-to run it and nobody on the team reviewed the choice; and with a core catalog
-read from any other URL, every image needs approval, the infrastructure stack's
+mirror of the core catalog are not what that team reviewed and released. So a
+service a third party catalog's blueprint writes with `foundation:` needs
+approval, though it runs a reviewed reference, because that catalog chose to
+run it and nobody on the team reviewed the choice; and with a core catalog read
+from any other URL, every image needs approval, the infrastructure stack's
 included.
 Foundation images are still listed, apart from the rest, so the operator sees
 what moves. An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,

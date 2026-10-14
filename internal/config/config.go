@@ -1077,6 +1077,10 @@ func (c *Config) structural(noSubnet bool) error {
 	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
+		if !blueprintName.MatchString(name) {
+			add("apps.%q: %q is not an app name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63. The name is the app's stack directory and compose project, so a slash, a dot or a capital would put its files somewhere else, outside the deployment or out of the review that reads every stack.", name, name)
+			continue
+		}
 		if name == InfraStack {
 			add("apps.%s: the name is the toolkit's infrastructure stack's. An app renders into a stack directory and a compose project named for it, beside the infrastructure stack, so this app's files would land on that stack's. Rename this app.", name)
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -658,6 +659,13 @@ func TemplateSet(blueprint config.Blueprint) ([]string, error) {
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
+	// The stack's directory is one directory under the deployment's root,
+	// named for the app. A name that is not one segment would put the
+	// stack's files elsewhere, out of the root or out of the review that
+	// reads every stack (config refuses it; this is the render's own check).
+	if stack := p.dep().RelPath(app.Name); path.Dir(stack) != p.dep().RelPath() || path.Base(stack) != app.Name {
+		return nil, fmt.Errorf("apps.%s: the name puts the stack's files outside the deployment's own directory for it, %s", app.Name, p.dep().RelPath(app.Name))
+	}
 	dir := string(app.Blueprint)
 	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
