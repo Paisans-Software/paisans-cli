@@ -53,7 +53,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/auth.caddy",
-      "sha256": "91079871caa725979ee5165a4f3cf3a102ac124e8b306fcb10cc34806adef861",
+      "sha256": "cdf5eb73e69fd29fcb28d3d0c31cab2712833ea116db4c1aad2f3118521dd486",
       "mode": "0644"
     },
     {
