@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 
 	"gopkg.in/yaml.v3"
 
@@ -30,6 +31,81 @@ func coreURL() string {
 		return url
 	}
 	return CoreURL
+}
+
+// CoreIsOfficial reports whether the core catalog this process read came
+// from CoreURL itself. Only then is its foundation.yaml the one the team
+// reviews in that repository's pull requests, and only then may apply skip
+// approving the images it names (README.md, "Apply asks before it grants").
+// A core read from PAISANS_CORE_CATALOG, from a catalogs.core url, or from
+// any mirror is not reviewed by that team, however faithful the copy. A core
+// not read, or read with an error, is not official.
+func CoreIsOfficial() bool {
+	core.Lock()
+	defer core.Unlock()
+	if !core.done || core.err != nil {
+		return false
+	}
+	url := core.release.URL
+	if url == "" {
+		url = coreURL()
+	}
+	return officialCoreURL(url) || testOfficialCore(url)
+}
+
+// officialCoreURL reports whether url names CoreURL's repository: the same
+// scheme, host and path, with the host in any case and the path allowed one
+// trailing slash and a .git suffix, the spellings git and GitHub treat as
+// the same repository. Nothing else is accepted, since a looser comparison
+// would let a lookalike URL count as the reviewed repository.
+func officialCoreURL(url string) bool {
+	host, path, ok := splitHTTPS(url)
+	if !ok {
+		return false
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	officialHost, officialPath, _ := splitHTTPS(CoreURL)
+	return strings.EqualFold(host, officialHost) && path == officialPath
+}
+
+// splitHTTPS is the host and path of an https URL, ok false for any other
+// URL or one carrying characters an ordinary forge URL has no use for
+// (credentials, a port, a query, an escape, whitespace), which are refused
+// rather than interpreted.
+func splitHTTPS(url string) (host, path string, ok bool) {
+	rest, ok := strings.CutPrefix(url, "https://")
+	if !ok || strings.ContainsAny(rest, "@:?#%\\ \t\r\n") {
+		return "", "", false
+	}
+	host, path, ok = strings.Cut(rest, "/")
+	return host, "/" + path, ok && host != ""
+}
+
+// testOfficialCore lets a test count its local copy of the core catalog
+// (internal/blueprints/coretest) as official, since a test never reaches
+// the real repository. It reads PAISANS_TEST_OFFICIAL_CORE only inside a
+// binary `go test` built: testing.Testing is false in every other binary,
+// so no configuration or environment can make a production run count
+// another core as official.
+func testOfficialCore(url string) bool {
+	if !testing.Testing() {
+		return false
+	}
+	want := os.Getenv("PAISANS_TEST_OFFICIAL_CORE")
+	return want != "" && url == want
+}
+
+// ToolkitBlueprint reports whether a blueprint is the toolkit's own: a
+// reserved one, built into the binary, or one of the core catalog's, both
+// written unqualified. A service such a blueprint writes with foundation: is
+// the toolkit's, reviewed with it; one in a blueprint from any other catalog
+// is that catalog's choice, which the team did not review.
+func ToolkitBlueprint(blueprint config.Blueprint) bool {
+	if catalog, _ := config.SplitBlueprint(blueprint); catalog != "" {
+		return false
+	}
+	_, ok := For(blueprint)
+	return ok
 }
 
 // coreTries is how many releases, newest first, are tried before giving up

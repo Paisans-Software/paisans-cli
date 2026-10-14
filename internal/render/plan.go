@@ -306,10 +306,15 @@ func (p *planner) appImages(app config.App) (map[string]string, error) {
 }
 
 // appImageOrigins is appImages, and the services whose image it took from
-// the core catalog's foundation: one the blueprint names with foundation:,
-// and the database's, when the configuration declares neither.
+// the core catalog's foundation for the toolkit: one a reserved or core
+// blueprint names with foundation:, and the database's, which the toolkit
+// chooses for every blueprint, when the configuration declares neither. A
+// foundation: in a blueprint from any other catalog is that catalog's
+// choice, which the team that reviews foundation.yaml did not review, so it
+// is not counted.
 func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string]bool, error) {
 	out, foundation := map[string]string{}, map[string]bool{}
+	toolkits := blueprints.ToolkitBlueprint(app.Blueprint)
 	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
 		switch {
@@ -319,7 +324,7 @@ func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string
 			return nil, nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
 		case image != "":
 			out[service.Name] = image
-			foundation[service.Name] = service.Foundation != ""
+			foundation[service.Name] = service.Foundation != "" && toolkits
 		case service.Name == blueprints.PostgresService:
 			pg, err := blueprints.PostgresImage(p.postgresVersion())
 			if err != nil {

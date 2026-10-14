@@ -35,12 +35,17 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
-	// Foundation is an image the render took from the core catalog's
-	// foundation.yaml for every service of the file that runs it: one of the
-	// infrastructure stack's, a service a blueprint names with foundation:,
-	// a pinned app's database, or the admins heartbeat. It is decided where
-	// the render chose the image, never by its name, so a catalog blueprint
-	// or a declaration naming the same reference is not one.
+	// Foundation is an image the render took from the official core
+	// catalog's foundation.yaml for a service of the toolkit's own, for every
+	// service of the file that runs it: one of the infrastructure stack's, a
+	// service a reserved or core blueprint names with foundation:, a pinned
+	// app's database, or the admins heartbeat. Only that file is reviewed by
+	// the team, in the official repository's pull requests, so a core read
+	// from anywhere else (blueprints.CoreIsOfficial) marks nothing, and a
+	// service a third party catalog's blueprint names with foundation: is not
+	// one. It is decided where the render chose the image, never by its name,
+	// so a catalog blueprint or a declaration naming the same reference is
+	// not one either.
 	Foundation bool
 
 	// blueprint is the app's blueprint, for Setting.
@@ -134,6 +139,9 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				fromFoundation[image] = true
 			}
 		}
+		// Asked once the origins are known, since choosing them is what
+		// reads the core catalog.
+		official := blueprints.CoreIsOfficial()
 		for image, n := range lines {
 			// An image no service of the blueprint declares (the admins
 			// heartbeat in a Pocket ID stack), and every image of the
@@ -146,7 +154,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			sort.Strings(names)
 			// A literal reference equal to one the foundation chose in this
 			// stack shares its mark, harmlessly: it is the same reviewed reference.
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: official && fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {

@@ -5040,7 +5040,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 |---|---|---|
 | login | `ssh.user` | the site's `ssh` section |
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
-| images | per service: its stack, its name, the image reference as the compose file writes it, and whether the render took it from the core catalog's `foundation.yaml` | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
+| images | per service: its stack, its name, the image reference as the compose file writes it, and whether it is a foundation image (see below) | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
 | blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new core catalog release moves the core blueprints of every deployment that does not pin core itself |
 
@@ -5105,18 +5105,34 @@ run review everything again. `site remove` deletes it with the registry entry.
 
 A removal is shown and not approved, because it only takes away.
 
-**A foundation image is shown and not approved.** A foundation image is any
-image the render takes from the core catalog's `foundation.yaml`: the
-infrastructure stack's, the gateway's Caddy unless `acme.image` declares one, a
-pinned app's own database unless `apps.<name>.images` declares one, the
-services the toolkit adds to a stack (Eg: the admins heartbeat), and any
-service of any blueprint, a third party catalog's included, written with
-`foundation:` (see *Images follow tracks*). The team reviews that file in the core catalog's pull
-requests, so its images were checked before any deployment reads them, and
-asking every operator to approve them again at every apply would repeat a
-check already made.
-They are still listed, apart from the rest, so the operator sees what moves.
-An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,
+**A foundation image is shown and not approved.** A foundation image is an
+image the render takes from `foundation.yaml` for one of the toolkit's own
+services, and only when that file came from the official core catalog. All of
+these must hold:
+
+1. The render took the image from `foundation.yaml`, never matched it by name.
+2. The core catalog was read from exactly
+   `https://github.com/Paisans-Software/paisans-blueprints`, not from
+   `PAISANS_CORE_CATALOG`, not from a `catalogs.core.url`, not from any mirror.
+   The URL may differ only by a trailing slash, a `.git` suffix and the case of
+   its host; any other URL is not the official one.
+3. The service is the toolkit's own: one of the infrastructure stack's, the
+   gateway's Caddy unless `acme.image` declares one, a pinned app's own database
+   unless `apps.<name>.images` declares one, a service the toolkit adds to a
+   stack (Eg: the admins heartbeat), or a service written with `foundation:` (see
+   *Images follow tracks*) in a reserved blueprint or a core catalog one.
+
+The team reviews `foundation.yaml` in the official repository's pull requests,
+so those images were checked before any deployment reads them, and asking every
+operator to approve them again at every apply would repeat a check already made.
+A third party catalog or a mirror of the core catalog is not reviewed by that
+team. So a service a third party catalog's blueprint writes with `foundation:`
+needs approval, though it runs a reviewed reference, because that catalog chose
+to run it and nobody on the team reviewed the choice; and with a core catalog
+read from any other URL, every image needs approval, the infrastructure stack's
+included.
+Foundation images are still listed, apart from the rest, so the operator sees
+what moves. An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,
 WriteFreely, or any third party catalog's) needs approval, and so does any image the
 configuration declares in `apps.<name>.images` or `acme.image`, since nobody
 reviewed those choices but the admin who made them. Whether an image is the

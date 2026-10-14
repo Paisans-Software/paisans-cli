@@ -7,7 +7,9 @@
 // At init it makes the test copy, internal/blueprints/testdata/core, into a
 // git repository with one commit, tagged with the release
 // internal/blueprints/testdata/core.release names, points
-// PAISANS_CORE_CATALOG at it, and allows git only local repositories. A test
+// PAISANS_CORE_CATALOG at it, counts it as the official core catalog
+// (PAISANS_TEST_OFFICIAL_CORE, which only a test binary reads), and allows
+// git only local repositories. A test
 // then takes the same path a workstation does, listing the releases,
 // fetching the newest into a catalog cache and reading it, and can never
 // reach a forge. See docs/specs/2026-10-13-images-follow-tracks.md, "The core
@@ -48,6 +50,13 @@ func init() {
 	}
 	installed = dir
 	if err := os.Setenv("PAISANS_CORE_CATALOG", "file://"+repo); err != nil {
+		panic(err)
+	}
+	// The test copy stands in for the official core catalog, so its
+	// foundation's images are exempt from approval as the real one's are.
+	// internal/blueprints reads this only in a test binary; a test that
+	// wants a mirror clears it.
+	if err := os.Setenv("PAISANS_TEST_OFFICIAL_CORE", "file://"+repo); err != nil {
 		panic(err)
 	}
 	if err := os.Setenv("PAISANS_CATALOG_CACHE", filepath.Dir(dir)); err != nil {
