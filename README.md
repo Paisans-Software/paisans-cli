@@ -8907,3 +8907,19 @@ The Go module path moved with it, to
 `paisans.community` is one deployment: its compose files, its Caddy config, its
 operational scripts. This repository is the generalisation — the part another
 organizer could adopt without inheriting this community's specifics.
+
+## License
+
+Copyright the paisans-stack contributors.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. SPDX: `AGPL-3.0-or-later`. The full text is in
+[`LICENSE`](LICENSE).
+
+Section 13 applies to anyone who offers a modified toolkit to users over a
+network — a hosted installer, say: those users must be offered its source.
+Running the unmodified toolkit to deploy a community does not trigger it, and
+the applications a deployment runs keep their own licenses; the toolkit
+configures them and does not link them.
