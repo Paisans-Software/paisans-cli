@@ -1777,6 +1777,11 @@ is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
 (Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only
 against fakes.
 
+HAProxy's `listen pocket-id`, which the account service reaches Pocket ID's
+API through, has not run against a real Pocket ID: that its `/healthz` check
+marks a standby down and the route follows a takeover is reasoned from the
+standby's closed port.
+
 `secrets rotate` has never been run against a real host either. Its `ALTER
 ROLE` on the leader and the Patroni restarts and switchover around a cluster
 password, `rabbitmqctl change_password` in Mbin's broker, every Garage node

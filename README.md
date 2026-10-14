@@ -708,8 +708,17 @@ names none, and `identity_app` among its settings is refused
 (`account-setting-unknown`), because a setting that names one would read as a
 choice the deployment does not offer: with one Pocket ID there is nothing to
 choose. The account app's issuer, API key and accent colour all come from that
-app, and Pocket ID's address is its hostname: renaming it re-renders the
-account service's `.env`, and the next `apply` recreates the account stack.
+app, and its two Pocket ID addresses differ:
+
+| Variable | Value | Why |
+|----------|-------|-----|
+| `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
+| `ACCOUNT_IDP_URL` | `http://<site mesh address>:1413` | The API, with the static API key, through the site's own HAProxy to the active Pocket ID, so the key travels only over the mesh, which WireGuard encrypts between sites. |
+
+Renaming the identity hostname re-renders the account service's `.env`, and
+the next `apply` recreates the account stack. The account app is cluster
+only, so every site it runs on runs HAProxy and has the listener (see
+*Pocket ID runs on every apps site, and one of them is active*).
 
 ### What it writes at Pocket ID
 
@@ -3398,7 +3407,8 @@ starts second fails only when its container does. That is how it was found on
 a real data and apps site: Spilo's bg_mon took 8080 before Mbin could publish
 there. `validate` lists what each site binds (WireGuard's 51820/udp, etcd's
 2379 and 2380, Postgres, the Patroni API and bg_mon on a data site, HAProxy's
-cluster and stats ports where it runs, Garage's 3900 to 3903, Caddy's 80 and
+cluster and stats ports where it runs and its Pocket ID API port, 1413, where
+it runs beside a pocket-id app, Garage's 3900 to 3903, Caddy's 80 and
 443 on every address of the gateway and of a monitor in `managed_by` `paisans`,
 and every app's published ports, counting a clustered app on every apps site,
 a pinned one on its own, and one on a monitor in `managed_by` `external` at
@@ -6780,6 +6790,31 @@ closed port, which is refused at once and marks only the standby down for
 proxy accepting a connection it cannot forward would turn it into a failed
 request instead, and the first multi site run should look.
 
+**A service that calls the API reaches the active instance through
+HAProxy.** Every site that runs HAProxy, in a deployment with a pocket-id
+app, renders a second listener beside the cluster port, on its mesh address
+at port 1413:
+
+```
+listen pocket-id
+    bind 10.44.0.1:1413
+    option httpchk GET /healthz
+    http-check expect status 204
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+    server home-a 10.44.0.1:1411 check
+    server home-b 10.44.0.2:1411 check
+```
+
+One `server` line for every site that runs the pocket-id app, at its mesh
+address and Pocket ID's port. A standby refuses connections on that port, so
+its check fails and only the active instance is up, and a takeover moves the
+route within three failed checks, nine seconds, with no change on any site.
+It is on every HAProxy site rather than only where a caller runs, so a
+service added later that needs the API finds it already there. The account
+service is its caller today, and the static API key it sends never leaves the
+mesh. That is reasoned from the standby's closed port, not yet observed
+through a takeover.
+
 **When upstream binds HA mode to a variable**, delete the wrapper and the
 healthcheck override and set it: every site then serves, and the check
 becomes "at least one active". Until then, Mbin on a second apps site has
@@ -7495,9 +7530,9 @@ provider whose signup pages stay open.
 **Nothing the toolkit or the account app calls is closed.** Apply, `operator
 magic-link` and `oidc client create` reach Pocket ID at a site's own address,
 from that host, and never pass the gateway; the operator reconciler reaches it on
-its stack's own network. The account app does pass the gateway, with the static
-API key, and calls only `/api/users`, `/api/user-groups` and
-`/api/users/<id>/one-time-access-email`, with sign in through OIDC. Sign in,
+its stack's own network. The account app calls only `/api/users`,
+`/api/user-groups` and `/api/users/<id>/one-time-access-email`, with the static
+API key, through its site's HAProxy on the mesh, and signs in through OIDC. Sign in,
 `/lc/` login links, `/login/alternative/code` and `/api/signup-tokens`, an
 administrator's route, stay open on every deployment.
 

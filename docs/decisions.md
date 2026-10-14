@@ -2735,3 +2735,32 @@ is the username refusal.
 * **Letting Pocket ID and the account service send without TLS and drop the
   username.** Not chosen: a field-by-field override cannot unset an inherited
   username, and a relay that wants one would refuse every mail.
+
+## 2026-10-14: Pocket ID's API is reachable only over the mesh
+
+Founder decision. The design is
+`docs/specs/2026-10-14-pocket-id-api-private.md`.
+
+### What was decided
+
+* Every site that runs HAProxy, in a deployment with a pocket-id app, serves
+  the active Pocket ID instance on its mesh address at port 1413, checked at
+  `/healthz` for 204, with one server per site that runs the app.
+* The account service calls Pocket ID's API there:
+  `ACCOUNT_IDP_URL=http://<site mesh address>:1413`. Its OIDC issuer stays
+  `https://<pocket-id hostname>`.
+* The gateway refuses any request to Pocket ID's hostname that carries an
+  `X-API-Key` header, with 403, members' own API keys included.
+* `pocketid-go` refuses a `BaseURL` whose host is not private.
+
+### Why
+
+The static API key is a standing administrator credential, and the gateway
+proxied Pocket ID's whole hostname, so the key worked from anywhere on the
+internet. Every caller but the account service already reached Pocket ID on
+the mesh. Moving that one caller onto a mesh route lets the gateway refuse the
+header outright; the web interface signs in with a session cookie and never
+sends it. The client's private address check guards against a configuration
+mistake, and the gateway rule is what holds when the code is wrong. The
+listener is on every HAProxy site, not only where the account service runs,
+so a later caller finds it there.
