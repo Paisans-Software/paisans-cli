@@ -27,7 +27,9 @@ import (
 // asks the operator to type approve for anything added or changed before the
 // first change. No flag answers it: a flag that could would be in every
 // script within a week, and approving is the control. A run that changes no
-// key and no image asks nothing, so routine applies stay scriptable.
+// key and no image asks nothing, so routine applies stay scriptable. A
+// foundation image is shown and not asked about, since the team reviews
+// foundation.yaml in the core catalog's pull requests.
 
 // approveWord is what the operator types to approve a review.
 const approveWord = "approve"
@@ -156,20 +158,44 @@ func endReview(r ui.Reporter, line ui.Step, rev grant.Review, execute bool) {
 		}
 		return strings.Join(out, "; ")
 	}
+	// A foundation image's change is listed apart, after the rest, and is
+	// not approved: the team reviews foundation.yaml in the core catalog's
+	// pull requests.
+	var listed, foundation []grant.Change
+	for _, c := range rev.Changes {
+		if c.Foundation {
+			foundation = append(foundation, c)
+		} else {
+			listed = append(listed, c)
+		}
+	}
 	switch {
 	case n > 0:
 		line.End(ui.Pending, join(what, earlier))
-	case len(rev.Changes) > 0:
+	case len(listed) > 0 && len(foundation) > 0:
+		line.End(ui.OK, join("only removals and foundation images, nothing to approve", earlier))
+	case len(foundation) > 0:
+		line.End(ui.OK, join("only foundation images, nothing to approve", earlier))
+	case len(listed) > 0:
 		line.End(ui.OK, join("only removals, nothing to approve", earlier))
 	case earlier != "":
 		line.End(ui.OK, earlier+", nothing new to approve")
 	default:
 		line.End(ui.OK, "")
 	}
-	for _, c := range rev.Changes {
+	for _, c := range listed {
+		r.Explain(c.Line())
+	}
+	if len(foundation) > 0 {
+		r.Explain(foundationHeading)
+	}
+	for _, c := range foundation {
 		r.Explain(c.Line())
 	}
 }
+
+// foundationHeading heads the changes to foundation images in a review.
+const foundationHeading = "foundation images, reviewed in the core catalog:"
 
 // approveReviews asks, once, for approval of every review that needs it.
 // It asks nothing when none does. Without a terminal it refuses, before any

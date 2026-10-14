@@ -2407,3 +2407,41 @@ carries `ssl=no-verify`, since the image's connection string parser ignores
 default for every client the toolkit makes, with `sso_consent: true` to keep
 it. A deep link takes one click on Wiki.js's refusal page, which the founder
 chose to keep.
+
+## 2026-10-13: Foundation images are shown in the grant review and not approved
+
+Founder decision, 2026-10-13. It amends the grant review of
+`docs/specs/2026-10-11-config-review.md`.
+
+### What was decided
+
+An image the render takes from the core catalog's `foundation.yaml` (the
+infrastructure stack's, the gateway's Caddy by default, the heartbeats, a
+pinned app's own database by default, and the services of the blueprints built
+into the toolkit) needs no `approve` in `apply`'s grant review when it is added
+or changed. The review lists it apart, under `foundation images, reviewed in
+the core catalog:`, and the host's record holds it like every other image.
+
+Everything else is approved as it was: an image a blueprint names itself
+(Wiki.js, Mbin, WriteFreely, any third party catalog's), an image the
+configuration declares, keys, the web server's directory and catalog
+blueprints. Whether an image is the foundation's is decided by where the render
+took it, never by matching its repository, so a catalog blueprint writing the
+foundation's own reference under `image:` is still approved.
+
+### Why
+
+The team reviews `foundation.yaml` in paisans-blueprints pull requests, so its
+images are checked once, before any deployment reads them. Asking every
+operator to approve the same tracks again at every apply repeats a check
+already made.
+
+### What was weighed
+
+* **Every image of the core catalog**, the core blueprints' own images
+  included (Wiki.js, Mbin, WriteFreely and the rest), since the same pull
+  requests review them. Not chosen: the exemption covers the foundation only.
+* **The foundation's images plus the images of the blueprints that fill a
+  capability.** Not chosen, for the same boundary.
+* **Requiring pull request approvals on the core catalog** before relying on
+  its review: declined for now.

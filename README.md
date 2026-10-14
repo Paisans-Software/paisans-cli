@@ -5040,7 +5040,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 |---|---|---|
 | login | `ssh.user` | the site's `ssh` section |
 | keys | per key: its admin, its SHA256 fingerprint and its comment | every key of every admin in the site's `ssh.keys` |
-| images | per service: its stack, its name, and the image reference as the compose file writes it | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
+| images | per service: its stack, its name, the image reference as the compose file writes it, and whether the render took it from the core catalog's `foundation.yaml` | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
 | blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new core catalog release moves the core blueprints of every deployment that does not pin core itself |
 
@@ -5100,9 +5100,30 @@ run review everything again. `site remove` deletes it with the registry entry.
 | in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
 | in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
 | in the record only | `- key SHA256:… (carol, carol@desk)` | no |
+| a foundation image, in the grant only or changed | under `foundation images, reviewed in the core catalog:`, after the rest | no |
 | approved on the host earlier, not applied yet | counted on the site's line: `3 approved earlier, not applied yet` | no |
 
-A removal is shown and not approved, because it only takes away. The review
+A removal is shown and not approved, because it only takes away.
+
+**A foundation image is shown and not approved.** The core catalog's
+`foundation.yaml` names the images of the toolkit's own templates: the
+infrastructure stack's, the gateway's Caddy, the heartbeats, a pinned app's own
+database, and the services of the blueprints built into the toolkit (see
+*Images follow tracks*). The team reviews that file in the core catalog's pull
+requests, so its images were checked before any deployment reads them, and
+asking every operator to approve them again at every apply would repeat a
+check already made.
+They are still listed, apart from the rest, so the operator sees what moves.
+An image a blueprint names itself (Eg: Wiki.js, Mbin, WriteFreely, or any
+third party catalog's) needs approval, and so does any image the
+configuration declares in `apps.<name>.images` or `acme.image`, since nobody
+reviewed those choices but the admin who made them. Whether an image is the
+foundation's is decided by where the render took it, never by its name: a
+catalog blueprint whose `image:` names the foundation's own reference needs
+approval, because a name is what anyone can write. Keys, the web server's
+directory and catalog blueprints need approval whatever they name. The record
+holds foundation images like every other, marked as the foundation's, so it
+stays the complete baseline the next review compares with. The review
 is one line per site, pending when anything needs approval, with every change
 under it at every verbosity, with `--execute` as well as without: the login and
 the keys first, then the images stack by stack, then the web server, so a long
@@ -5136,8 +5157,8 @@ run it at a terminal. No flag answers the question: a flag that could would be
 in every script within a week, and approving is the control.
 
 **Nothing to approve, nothing asked.** A run that adds or changes no key and no
-image behaves as it always has, terminal or not, so routine applies stay
-scriptable.
+image outside the foundation asks nothing, terminal or not, so routine applies
+stay scriptable.
 
 **Who approved.** When exactly one admin's key in `paisans-stack.yaml` is loaded in
 the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
@@ -5340,7 +5361,8 @@ refuses as that command does, and the sudo password each host asks for is
 asked once for the run, every one of them before the first step (see *A sudo
 that wants a password is asked for once, on a terminal*). Then, before the
 first step that changes a host, it shows one review of what `paisans-stack.yaml`
-grants on every site, and asks once when anything is added or changed (see
+grants on every site, and asks once when anything outside the foundation is
+added or changed (see
 *`apply` and `host prepare` review what `paisans-stack.yaml` grants*); each step then
 applies what was approved, and refuses anything that changed since. An `init`
 with work to do runs ahead of the review: it writes only local files, and the

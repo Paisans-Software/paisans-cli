@@ -35,6 +35,13 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
+	// Foundation is an image the render took from the core catalog's
+	// foundation.yaml for every service of the file that runs it: one of the
+	// infrastructure stack's, a service a blueprint names with foundation:,
+	// a pinned app's database, or the admins heartbeat. It is decided where
+	// the render chose the image, never by its name, so a catalog blueprint
+	// or a declaration naming the same reference is not one.
+	Foundation bool
 
 	// blueprint is the app's blueprint, for Setting.
 	blueprint config.Blueprint
@@ -88,20 +95,43 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		app := ""
 		named := map[string][]string{}
-		if stack != "infra" {
+		// fromFoundation and fromElsewhere are each reference the render
+		// chose for this stack, by where it chose it. A reference chosen
+		// both ways is not the foundation's, so a declaration that happens
+		// to name a foundation image is still reviewed.
+		var fromFoundation, fromElsewhere map[string]bool
+		if stack == "infra" {
+			fromFoundation, fromElsewhere, err = p.infraImageOrigins()
+			if err != nil {
+				return nil, err
+			}
+		} else {
 			declared, isApp := p.cfg.Apps[stack]
 			if !isApp {
 				continue
 			}
 			app = stack
-			images, err := p.appImages(declared)
+			images, foundation, err := p.appImageOrigins(declared)
 			if err != nil {
 				return nil, err
 			}
+			fromFoundation, fromElsewhere = map[string]bool{}, map[string]bool{}
 			for service, image := range images {
 				if lines[image] > 0 {
 					named[image] = append(named[image], service)
 				}
+				if foundation[service] {
+					fromFoundation[image] = true
+				} else {
+					fromElsewhere[image] = true
+				}
+			}
+			injected, err := p.injectedImages(declared)
+			if err != nil {
+				return nil, err
+			}
+			for _, image := range injected {
+				fromFoundation[image] = true
 			}
 		}
 		for image, n := range lines {
@@ -114,7 +144,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, blueprint: p.cfg.Apps[app].Blueprint})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {
@@ -127,6 +157,46 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		})
 	}
 	return out, nil
+}
+
+// infraImageOrigins is each reference the infrastructure stack runs, split
+// by where the render took it: from the core catalog's foundation, which is
+// every one of its images and the gateway's Caddy by default, or from the
+// configuration, which is a Caddy image acme.image declares (caddyImage).
+func (p *planner) infraImageOrigins() (foundation, declared map[string]bool, err error) {
+	images, err := p.infraImages()
+	if err != nil {
+		return nil, nil, err
+	}
+	foundation, declared = map[string]bool{}, map[string]bool{}
+	for _, image := range []string{images.etcd, images.spilo, images.haproxy, images.garage, images.heartbeat} {
+		foundation[image] = true
+	}
+	if ref := p.cfg.ACME.Image; ref != "" {
+		declared[ref] = true
+		return foundation, declared, nil
+	}
+	caddy, err := blueprints.FoundationImage(blueprints.FoundationCaddy)
+	if err != nil {
+		return nil, nil, err
+	}
+	foundation[caddy] = true
+	return foundation, declared, nil
+}
+
+// injectedImages are the images an app's stack runs that no service of its
+// blueprint names: services the toolkit adds to a blueprint built into it,
+// each the foundation's. The pocket-id blueprint's admins heartbeat is the
+// one, appValues.HeartbeatImage.
+func (p *planner) injectedImages(app config.App) ([]string, error) {
+	if app.Blueprint != config.BlueprintPocketID {
+		return nil, nil
+	}
+	heartbeat, err := blueprints.FoundationImage(blueprints.FoundationHeartbeat)
+	if err != nil {
+		return nil, err
+	}
+	return []string{heartbeat}, nil
 }
 
 // PinImages returns a compose file with each image line naming a key of

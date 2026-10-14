@@ -67,6 +67,11 @@ type Image struct {
 	Stack     string `json:"stack"`
 	Service   string `json:"service"`
 	Reference string `json:"reference"`
+	// Foundation is an image the render took from the core catalog's
+	// foundation.yaml, which the team reviews in the core catalog's pull
+	// requests. It is decided by where the render took the image
+	// (render.ComposeImage.Foundation), never by its name.
+	Foundation bool `json:"foundation,omitempty"`
 }
 
 // WebServer is where apply writes the files the operator's web server
@@ -142,9 +147,16 @@ func KeysOf(s config.SSH) []Key {
 
 // ImagesOf is every service of every compose file plan writes for site, with
 // the image it names. A service naming no image is left out, since it runs
-// nothing a reference chose.
+// nothing a reference chose. An image is marked Foundation when the render
+// says it took it from the foundation for that file (render.ComposeImage).
 func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 	var out []Image
+	foundation := map[[2]string]bool{}
+	for _, image := range plan.Images[site] {
+		if image.Foundation {
+			foundation[[2]string{image.Path, image.Image}] = true
+		}
+	}
 	for _, file := range plan.Files {
 		on, rel, ok := strings.Cut(file.Path, "/")
 		if !ok || on != site {
@@ -160,7 +172,7 @@ func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 		}
 		for name, service := range services {
 			if ref := strings.TrimSpace(service.Image); ref != "" {
-				out = append(out, Image{Stack: stack, Service: name, Reference: ref})
+				out = append(out, Image{Stack: stack, Service: name, Reference: ref, Foundation: foundation[[2]string{file.Path, ref}]})
 			}
 		}
 	}

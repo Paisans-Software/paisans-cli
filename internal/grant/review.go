@@ -12,9 +12,11 @@ import (
 type Op byte
 
 const (
-	// Added is an entry in the grant only. It needs approval.
+	// Added is an entry in the grant only. It needs approval, unless it is
+	// a foundation image.
 	Added Op = '+'
-	// Changed is an entry in both, different. It needs approval.
+	// Changed is an entry in both, different. It needs approval, unless it
+	// is a foundation image.
 	Changed Op = '~'
 	// Removed is an entry in the record only. It is shown and not approved,
 	// because it only takes away.
@@ -29,10 +31,17 @@ type Change struct {
 	Subject, To string
 	// Text is the line the operator reads, without its mark.
 	Text string
+	// Foundation is an addition or a change of a foundation image (Image's
+	// Foundation): shown, and not approved here.
+	Foundation bool
 }
 
-// NeedsApproval reports whether the change adds or changes something.
-func (c Change) NeedsApproval() bool { return c.Op != Removed }
+// NeedsApproval reports whether the change adds or changes something other
+// than a foundation image. A foundation image is the toolkit's own, listed in
+// the core catalog's foundation.yaml, which the team reviews in that
+// catalog's pull requests, so approving it again at every apply would repeat
+// a check already made.
+func (c Change) NeedsApproval() bool { return c.Op != Removed && !c.Foundation }
 
 // Line is the change as the review prints it. Its text comes from the
 // configuration and from the host's record, so any control character in it
@@ -248,9 +257,9 @@ func imageChanges(now, was []Image) []Change {
 		prior, ok := find(was, i.Stack, i.Service)
 		switch {
 		case !ok:
-			out = append(out, Change{Op: Added, Subject: "image " + name, To: i.Reference, Text: "image " + name + ": " + i.Reference})
+			out = append(out, Change{Op: Added, Subject: "image " + name, To: i.Reference, Text: "image " + name + ": " + i.Reference, Foundation: i.Foundation})
 		case prior.Reference != i.Reference:
-			out = append(out, Change{Op: Changed, Subject: "image " + name, To: i.Reference, Text: "image " + name + ": " + prior.Reference + " → " + i.Reference})
+			out = append(out, Change{Op: Changed, Subject: "image " + name, To: i.Reference, Text: "image " + name + ": " + prior.Reference + " → " + i.Reference, Foundation: i.Foundation})
 		}
 	}
 	for _, i := range was {

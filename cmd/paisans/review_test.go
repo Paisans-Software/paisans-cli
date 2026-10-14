@@ -491,3 +491,38 @@ func TestSiteAddChecksTheRunsApproval(t *testing.T) {
 		t.Errorf("err %v, claimed %v", err, claimed(logged(t, log)))
 	}
 }
+
+// A foundation image's change is listed in a block of its own, after what
+// needs approval, and asks nothing: the team reviews foundation.yaml in the
+// core catalog's pull requests.
+func TestFoundationImagesAreListedApart(t *testing.T) {
+	etcd := grant.Change{Op: grant.Changed, Subject: "image infra/etcd", To: "etcd:v3.6.*", Text: "image infra/etcd: etcd:v3.5.* → etcd:v3.6.*", Foundation: true}
+	app := grant.Change{Op: grant.Changed, Subject: "image talk/app", To: "mbin:1.15", Text: "image talk/app: mbin:1.14 → mbin:1.15"}
+	rec := &ui.Recorder{}
+	showReview(rec, "review", grant.Review{Site: "home-a", Changes: []grant.Change{etcd, app}}, true)
+	var got []string
+	for _, e := range rec.Events {
+		got = append(got, e.Kind+": "+e.Text+" "+e.Extra)
+	}
+	want := []string{
+		"step: review ",
+		"pending: review 1 entry to approve",
+		"explain: ~ image talk/app: mbin:1.14 → mbin:1.15 ",
+		"explain: foundation images, reviewed in the core catalog: ",
+		"explain: ~ image infra/etcd: etcd:v3.5.* → etcd:v3.6.* ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	rec = &ui.Recorder{}
+	only := []grant.Review{{Site: "home-a", Changes: []grant.Change{etcd}}}
+	showReview(rec, "review", only[0], true)
+	if !rec.Has("done", "review") || rec.Has("pending", "review") {
+		t.Errorf("only a foundation image is pending:\n%s", rec.Lines())
+	}
+	var out bytes.Buffer
+	if err := approveReviews(ui.Discard, noTerminalStdin(), &out, only, "x"); err != nil || out.Len() != 0 {
+		t.Errorf("only a foundation image asked: err %v, printed %q", err, out.String())
+	}
+}
