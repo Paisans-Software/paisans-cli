@@ -160,9 +160,12 @@ only.
 2. `paisans-blueprints`: `foundation.yaml` replaces `admin-reconciler` with
    `operator-reconciler: "ghcr.io/paisans-software/operator-reconciler:0.3.*"`.
    One pull request into `main`; no release.
-3. Founder: tag `operator-reconciler-v0.3.0`, release the core catalog and the
-   toolkit, and delete the ghcr package `admin-reconciler` once nothing points
-   at it.
+3. Founder: the reconciler's first release is a `v0.3.0` tag in its own
+   repository, after steps 1 and 2 of
+   `docs/specs/2026-10-14-repository-split.md`. That tag publishes
+   `ghcr.io/paisans-software/operator-reconciler:0.3.0`, which the `0.3.*`
+   track matches. Releasing the core catalog and the toolkit waits for it.
+   Delete the ghcr package `admin-reconciler` once nothing points at it.
 
 ## Testing
 

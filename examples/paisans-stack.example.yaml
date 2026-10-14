@@ -56,9 +56,14 @@ acme:
   # anything.
   # image: ghcr.io/example-org/caddy-route53:2.11.4
 
-# The people who may log in to the sites. Each site's ssh.keys names some of
-# them, and host prepare makes every key they list an authorized key there, so
-# an admin's keys are written once however many sites they reach. email is
+# The operators: the people who run the machines. They log in to the sites,
+# hold the secrets and run apply. validate wants at least two whose keys are on
+# every site that runs Pocket ID, so one lost workstation does not leave
+# nobody able to run the deployment. apply makes each a Pocket ID user in
+# operators, members and every app's member and admin group, so every operator
+# is a community admin as well. Each site's ssh.keys names some of them, and
+# host prepare makes every key they list an authorized key there, so an
+# operator's keys are written once however many sites they reach. email is
 # required; name is optional.
 operators:
   alice:
@@ -85,9 +90,9 @@ sites:
     endpoint: home-a.example.org:51820
     # How the toolkit reaches the site, and who may log in. Every site has
     # one, the gateway included. The keys are public keys, one per line,
-    # every admin's: the file is shared, so it never names a private key.
-    # Each admin's own ssh offers these and finds its private half in that
-    # admin's agent. `host prepare` makes them the user's authorized keys.
+    # every operator's: the file is shared, so it never names a private key.
+    # Each operator's own ssh offers these and finds its private half in that
+    # operator's agent. `host prepare` makes them the user's authorized keys.
     ssh:
       host: home-a.local        # optional: defaults to public_address
       user: ubuntu              # must already exist on the host
@@ -438,7 +443,9 @@ apps:
     # monitor one check of its own public URL, generated from this file.
     placement: { pinned: health }
     settings:
-      # Required. Only members of this identity provider group may sign in.
+      # Only members of this identity provider group may sign in. Defaults to
+      # operators, the people who run the machines; admins lets every
+      # community admin in as well.
       admin_group: admins
     # Optional, any field of the smtp block below; the rest is inherited.
     # smtp:

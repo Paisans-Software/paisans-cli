@@ -1,10 +1,12 @@
-# Repository split: the CLI, the Pocket ID client and the admin reconciler
+# Repository split: the CLI, the Pocket ID client and the operator reconciler
 
 Status: approved in session by the founder, 2026-10-14. Not implemented.
 
 This repository holds two programs. `cmd/paisans` is the toolkit an operator
-runs on a workstation. `cmd/admin-reconciler` is a service every deployment runs
-beside Pocket ID, published as `ghcr.io/paisans-software/admin-reconciler`. They
+runs on a workstation. `cmd/operator-reconciler` is a service every deployment runs
+beside Pocket ID, published as `ghcr.io/paisans-software/operator-reconciler`. The
+reconciler is the read-only operator reconciler of
+`docs/specs/2026-10-14-operators-and-management.md`. They
 share one Go module, one tag namespace and one set of workflows, and the
 reconciler's image is cut by tags in the toolkit's repository although it is
 not a toolkit release.
@@ -16,7 +18,7 @@ them need, the Pocket ID API client, a repository of its own:
 |------------|-------|--------------|
 | `Paisans-Software/paisans-cli` | `cmd/paisans` and everything only it uses. This repository, renamed. | the `paisans` binary |
 | `Paisans-Software/pocketid-go` | the Pocket ID API client and its types | Go module `github.com/paisans-software/pocketid-go` |
-| `Paisans-Software/paisans-admin-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/admin-reconciler` |
+| `Paisans-Software/paisans-admin-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/operator-reconciler` |
 
 `paisans-account-service` moves onto `pocketid-go` as well, so the toolkit, the
 reconciler and the account service speak to Pocket ID through one client.
@@ -25,7 +27,7 @@ reconciler and the account service speak to Pocket ID through one client.
 
 Founder decisions, 2026-10-14, in session:
 
-* **The admin reconciler gets its own repository.** It is a service with its
+* **The operator reconciler gets its own repository.** It is a service with its
   own image, its own release cadence and its own approval as a service the
   deployment runs, so it ships like the other services
   (`paisans-account-service`, `wikijs-bootstrap`).
@@ -89,7 +91,7 @@ What the module carries:
   release.
 * **The integration test,** behind the `pocketid_integration` build tag,
   against the Pocket ID image the `pocket-id` blueprint's track resolves to
-  today. It moves from `internal/adminreconciler/integration_test.go`, keeping
+  today. It moves from `internal/operatorreconciler/integration_test.go`, keeping
   only what exercises the client; the reconciler keeps its own.
 * **Its own CI:** `go vet` and `go test` on every pull request, and the
   integration test on `develop`.
@@ -104,11 +106,11 @@ Every authenticated call the CLI makes to Pocket ID's API already goes through
 `pocketid.Client`, over the `Transport` path: ssh to the site whose instance is
 active (or the one `--site` names), and `curl` there against
 `http://<mesh address>:1411`, with the key from the workstation's decrypted
-`secrets.enc.yaml`. Four places build a client: `clientAPI` in
+`secrets.enc.yaml`. Three places build a client: `clientAPI` in
 `cmd/paisans/clients.go` (apply's identity step, `oidc client create`,
-`app remove`, `secrets rotate`), `cmd/paisans/converge.go` (apply's admin
-check), `internal/appadmin` (declared admins, `admin magic-link`), and the
-reconciler (the `HTTP` path, on the compose network).
+`app remove`, `secrets rotate`), `internal/appadmin` (declared operators,
+`operator magic-link`), and the reconciler (the `HTTP` path, on the compose
+network).
 
 Three things reach Pocket ID without the client:
 
@@ -135,50 +137,48 @@ the `HTTP` path from the workstation and skip ssh for its Pocket ID calls.
 |---------|-------------------------------|-----|
 | `app remove` | Yes | It deletes clients on the active instance; nothing needs a particular site. |
 | `secrets rotate` (retiring secrets) | Yes | Same: plain API work on the active instance, after apply. |
-| apply's admin check and declared admins | Yes, after the converge | They run after DNS and the gateway are in place. A dry run before the first converge has no public hostname to call. |
+| apply's declared operators | Yes, after the converge | They run after DNS and the gateway are in place. A dry run before the first converge has no public hostname to call. |
 | `oidc client create` | Only without `--site` or `--ssh` | Those flags name one instance, which the public hostname cannot. Its `--execute` claims the host registry over ssh either way. |
 | apply's identity step (clients, signup groups) | No | It runs as soon as Pocket ID starts, before the first converge has given it DNS or a certificate. |
-| `admin magic-link` | No | It is the way back in when something is broken, the gateway included, and it reads the email failure from the log over ssh. |
+| `operator magic-link` | No | It is the way back in when something is broken, the gateway included, and it reads the email failure from the log over ssh. |
 
 Moving any command to HTTPS is a separate decision and not part of this split.
 `pocketid-go` keeps both paths, so either is available to every command.
 
 ## `paisans-admin-reconciler-service`
 
-The repository receives `cmd/admin-reconciler` as the module root's
-`main.go`, `internal/adminreconciler` and `internal/dnscontinuity`, the
+The repository receives `cmd/operator-reconciler` as the module root's
+`main.go`, `internal/operatorreconciler` and `internal/dnscontinuity`, the
 Dockerfile, and the image workflow, with its history (`git filter-repo` over
 those paths), so `git log` on the reconciler still explains it.
 
-It depends on `pocketid-go` for the client. Its write surface is unchanged:
-the tests that fail on any writing request other than `SetUserGroups` move
-with it, and they are what keeps the approval in *Services the deployment runs*
-true, as they are today.
+It depends on `pocketid-go` for the client. It writes nothing: the tests that
+fail on any request other than a `GET` move with it, and they are what keeps
+it a reader.
 
-Releases are tags `vX.Y.Z` on its own repository. The workflow publishes
-`X.Y.Z` from a tag and `develop` and `sha-<short>` from a push to `develop`,
-as it does now. **The first release is `v0.2.1`:** the same behaviour, built
-from the new repository, so the core catalog's track
-`ghcr.io/paisans-software/admin-reconciler:0.2.*` picks it up and no catalog
-release is needed.
+Releases are tags `vX.Y.Z` on its own repository, and only a tag publishes:
+the workflow publishes `X.Y.Z` from a tag and nothing from a push to a
+branch. **The first release is `v0.3.0`:** it publishes
+`ghcr.io/paisans-software/operator-reconciler:0.3.0`, which the core
+catalog's track `ghcr.io/paisans-software/operator-reconciler:0.3.*` matches.
 
-The GHCR package `admin-reconciler` belongs to the organisation and is linked
-to this repository. Before the first release, an organisation owner grants the
-new repository write access to it (package settings, *Manage Actions access*),
+The GHCR package `operator-reconciler` belongs to the organisation. If it
+exists before the first release, an organisation owner grants the new
+repository write access to it (package settings, *Manage Actions access*),
 or the workflow's `GITHUB_TOKEN` cannot push.
 
 ## `paisans-cli`
 
 After the two moves, this repository is the CLI:
 
-* `cmd/admin-reconciler`, `internal/adminreconciler`, `internal/dnscontinuity`
-  and `.github/workflows/admin-reconciler-image.yml` are removed.
+* `cmd/operator-reconciler`, `internal/operatorreconciler`, `internal/dnscontinuity`
+  and `.github/workflows/operator-reconciler-image.yml` are removed.
 * `internal/pocketid` is removed, and every import of it names
   `github.com/paisans-software/pocketid-go`.
-* `internal/validate` uses `blueprints.AdminsGroup`, which already names the
-  same group, in place of `adminreconciler.Group`. The group name is a
-  contract between the `pocket-id` blueprint, its apps and the reconciler, and
-  the reconciler spec states it; neither program imports it from the other.
+* The group `operators` is named by `blueprints.OperatorsGroup` here and by
+  the reconciler's own constant there. The group name is a contract between
+  the `pocket-id` blueprint, apply and the reconciler, and the operators spec
+  states it; neither program imports it from the other.
 * The `pocket-id` blueprint and its compose template are unchanged. They name
   the reconciler through the foundation track, not through the code.
 
@@ -210,8 +210,8 @@ same images.
    history. Tag `v0.1.0`. Switch this repository's imports to it, reconciler
    included, and remove `internal/pocketid`.
 2. **`paisans-admin-reconciler-service`.** Create the repository with its
-   history. Grant it the GHCR package. Tag `v0.2.1` and confirm the image
-   resolves on the `0.2.*` track. Remove the reconciler from this
+   history. Grant it the GHCR package. Tag `v0.3.0` and confirm the image
+   resolves on the `0.3.*` track. Remove the reconciler from this
    repository and delete its two `admin-reconciler-v*` tags here.
 3. **The rename.** Rename the repository, change the module path, update the
    documentation, the core catalog's references and `paisans-account-service`'s.

@@ -41,7 +41,7 @@ These follow the spec's "every name changes outright" for names that hang off th
 2. A `management: paisans` deployment that sets `email_one_time_access_as_unauthenticated: true` (the same value the toolkit renders) is still refused, since a declared managed setting could only disagree later. Pinned in Task 3.
 3. A user who is an operator and also an enabled Pocket ID administrator under `management: paisans` fails check 2 (a hand-set flag is the reconciler's to report). Pinned in Task 7.
 4. The static API key's user (`00000000-...`) never fails check 2 in either mode. Pinned in Task 7.
-5. `paisans app admin create` on a `pocket-id` app under `management: paisans` would make a Pocket ID administrator the reconciler then reports; it is refused. Pinned in Task 5.
+5. A reconciler started without `PAISANS_OPERATORS`, `PAISANS_MEMBER_GROUP` or a known `PAISANS_MANAGEMENT` would report a deployment healthy it never checked; it refuses to start. Pinned in Task 7.
 
 ---
 
@@ -123,7 +123,7 @@ func (c *checker) operatorsFewerThanTwo() {
 **Interfaces:**
 - Produces: `blueprints.OperatorsGroup = "operators"`; `appadmin.Request.Member bool` ("a member, never an identity provider administrator": create with `isAdmin` false, never plan `ActionGrantAdmin`, never clear the flag).
 
-- [ ] Tests: under `paisans` an operator is created with `isAdmin: false` and an existing one without the flag gets no grant; under `pocket-id` with it; both join `operators`, `members`, every member group and every admin group. `app admin create` on a `pocket-id` app under `paisans` is refused.
+- [ ] Tests: under `paisans` an operator is created with `isAdmin: false` and an existing one without the flag gets no grant; under `pocket-id` with it; both join `operators`, `members`, every member group and every admin group.
 - [ ] Implement: the request's admin groups are `adminGroups(cfg)` plus `operators`, its member groups `memberGroups(cfg)` plus `members`; `Member` is `management == paisans`. Remove `convergeAnyAdmin`, which a deployment with a `pocket-id` app and fewer than two operators can no longer reach.
 - [ ] The uptime blueprint's `default_admin_group` is `operators`; `uptime-needs-an-admin-group` goes (a default now exists); `admin-group-not-admins` accepts `admins` and `operators` and is reworded for community admins.
 - [ ] Commit `feat: apply makes each operator a member, and an administrator only under pocket-id management`.
@@ -159,7 +159,7 @@ func (g *Reconciler) pass() Result {
 }
 ```
 
-  `/healthz` keeps its contract. `cmd/operator-reconciler` reads `PAISANS_OPERATORS`, `PAISANS_MEMBER_GROUP`, `PAISANS_MANAGEMENT` and refuses to start without them.
+  `/healthz` keeps its contract. `cmd/operator-reconciler` reads `PAISANS_OPERATORS`, `PAISANS_MEMBER_GROUP`, `PAISANS_MANAGEMENT` and refuses to start without them (`TestCheckedRefusesAnIncompleteEnvironment`).
 - [ ] The pocket-id `.env` renders the three variables; the foundation key, the compose comments, the heartbeat service, its secret, its monitors and the rotation names change. The workflow triggers on `push: tags: ["operator-reconciler-v*"]` only.
 - [ ] `go test ./internal/render -update`; read every golden diff. Run `go test ./internal/operatorreconciler/ ./cmd/operator-reconciler/` and, with Docker, `go test -tags pocketid_integration ./internal/operatorreconciler/`.
 - [ ] Commit `feat: the operator reconciler reads Pocket ID and writes nothing`.

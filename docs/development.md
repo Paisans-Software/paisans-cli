@@ -1,6 +1,6 @@
 # Development
 
-The toolkit is a single Go binary, `cmd/paisans`. A second, `cmd/admin-reconciler`,
+The toolkit is a single Go binary, `cmd/paisans`. A second, `cmd/operator-reconciler`,
 is built into the image that runs beside Pocket ID, so no operator builds it.
 Contributors need a Go toolchain; operators need nothing.
 
@@ -52,7 +52,7 @@ monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
 
-`config publish`, `config pull`, `config log`, `config recover` and `admin
+`config publish`, `config pull`, `config log`, `config recover` and `operator
 register` read every site's configuration store over ssh and change a host only
 with `--execute`, and then only by starting each site's sync and, for `publish`
 and `register`, adding a version to its store; they claim nothing. `apply`
@@ -60,7 +60,7 @@ gathers and publishes through the same code. The commands are in
 `cmd/paisans/config.go` (`publish`, `pull`, `log`, `recover`),
 `cmd/paisans/config_merge.go` (the secrets merge on a pull),
 `cmd/paisans/config_apply.go` (`apply`'s gather, publish and witness check) and
-`cmd/paisans/adminregister.go`. The rules that decide which version to trust are
+`cmd/paisans/operatorregister.go`. The rules that decide which version to trust are
 `internal/configstore/trust.go`, and are written against built histories, not
 against a host, so they are tested without one. `internal/grant` holds the
 version a host last applied in `config` of its record.
@@ -98,7 +98,7 @@ has the reasoning.
 
 `apply`, `apply --site`, `host prepare` and `site add` review what
 `paisans-stack.yaml` grants before their first change. `internal/grant` computes a site's grant from the
-configuration and the render (the login user, every key of the admins
+configuration and the render (the login user, every key of the operators
 `ssh.keys` names, every rendered service's image, and the web server's
 `include_dir`), compares it with the host's record,
 `/var/lib/paisans/granted.<token>.json`, and writes that record under the
@@ -211,29 +211,38 @@ controlling terminal with echo off through `readOwedSecret`, which tests
 replace. Each answer is written before the next prompt, so an interruption
 keeps what was typed; an empty answer skips the key.
 
-A whole `apply --execute` does the same, once Pocket ID runs, for every admin
-the `admins` section declares (`cmd/paisans/converge_admins.go`), through
-`appadmin` with `Request.Declared`: the account is also found by its email, a
-24 hour link is issued to each admin with no `PASSKEY_ADDED` audit event, and
-with mail Pocket ID emails one too (`Request.EmailLink`); its log is read for
-a failed send. Every link is printed after the run's result. See *`apply`
-makes the declared admins and hands each a login link* in `README.md`.
+A whole `apply --execute` does the same, once Pocket ID runs, for every
+operator the `operators` section declares (`cmd/paisans/converge_operators.go`),
+through `appadmin` with `Request.Declared`: the account is also found by its
+email, its username is the operator's key and its name is split at the first
+space, and it joins `operators`, `members`, every app's member group and every
+app's admin group (`operatorRequest`). `Request.Member` keeps it out of Pocket
+ID's administrators under `management: paisans`, since there the account
+service manages accounts and nobody administers Pocket ID; under
+`management: pocket-id` it is one. apply never clears a flag set by hand,
+because reporting one is the operator reconciler's job, and never deletes or
+disables a user, because taking an operator out of `paisans-stack.yaml` is how
+an operator is removed. A 24 hour link is issued to each operator with no
+`PASSKEY_ADDED` audit event, and with mail Pocket ID emails one too
+(`Request.EmailLink`); its log is read for a failed send. Every link is printed
+after the run's result. See *`apply` makes the declared operators and hands
+each a login link* in `README.md`.
 
-`admin magic-link <admin>` issues one declared admin a one-time sign-in link
+`operator magic-link <operator>` issues one declared operator a one-time sign-in link
 and nothing else (`appadmin.MagicLink`): it finds the account as apply does,
 by username then email, refuses one apply has not made or that is disabled,
 and prints the link once on `--execute`, emailed too when apply's are. It
 reads `apps.<app>.static_api_key` from the secrets file, so it takes
 `--secrets`. Its calls to Pocket ID never use sudo, because curl needs no root;
 only the claim `--execute` makes in the host registry, which is root's, does.
-See *`admin magic-link` gives a declared admin a fresh sign-in link* in
+See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 `README.md`.
 
 `oidc client create --app <name>` creates an app's client at the deployment's
 Pocket ID, restricted to the member and admin groups the app's `settings`
 name (`member_group` and `admin_group`, defaulting to `members` and
-`admins`; uptime's one group is `admin_group`, used as both, with no default
-because `validate` requires it; the gate's is `members` and `admins`, the
+`admins`; uptime's one group is `admin_group`, used as both, defaulting to
+`operators` because the health page is for the people who run the machines; the gate's is `members` and `admins`, the
 groups its compose file admits, with no setting), with a launch URL so Pocket ID's dashboard lists it, by default
 for every kind but Synapse and the gate, which have no page for a member
 (`sso_dashboard_link` still gives either one), and records its ID and
@@ -836,7 +845,7 @@ stack passed its own gate whether it is active or on standby, so this is the
 only check that can see two active or none. It lives in `cmd/paisans`
 (`checkStandby`) rather than in `apply.Execute`, because it reaches other
 sites and `Execute` is one site's. The rule is `apply.OneActive`, shared with
-`failover test` and with the admin commands, which use it to find the site
+`failover test` and with the operator commands, which use it to find the site
 to call. README: "Pocket ID runs on every apps site, and one of them is
 active".
 
@@ -1208,7 +1217,7 @@ The `-i` files are the listed **public** keys, written per invocation into a
 those and signs with whichever one's private half is in the operator's agent;
 README's *How the operator's ssh uses them* cites ssh(1) and ssh_config(5) for
 it. `paisans-stack.yaml` never names a private key, because it is shared by every
-admin and a private key is one admin's. `--ssh <destination>` replaces the
+operator and a private key is one operator's. `--ssh <destination>` replaces the
 section whole and is passed verbatim, as it was before the section existed.
 
 File contents go to the host over stdin rather than in a command line, because a
@@ -1378,18 +1387,25 @@ whatever build it already holds under a tag, so a workstation that once
 pulled the image with `--platform linux/amd64` keeps running that one under
 emulation: `docker pull` the tag first to get the native build.
 
-The admin reconciler has a Docker test of its own, behind its own tag:
+The operator reconciler has a Docker test of its own, behind its own tag:
 
 ```
-go test -tags pocketid_integration ./internal/adminreconciler/
+PAISANS_POCKET_ID_IMAGE=ghcr.io/pocket-id/pocket-id:v2.14.0 \
+  go test -tags pocketid_integration ./internal/operatorreconciler/
 ```
 
-It starts the pinned Pocket ID image with a static API key, makes one
-administrator in `admins` and one outside it, runs one pass, and reads the
-groups back; then demotes the second, runs another pass, and reads them
-back again. Rerun it whenever the Pocket ID image is bumped: it proves what
-the reconciler assumes about the API, and the static key's user, against the real
-thing.
+`PAISANS_POCKET_ID_IMAGE` must name a concrete tag, because the foundation
+names a track, which Docker cannot run. The test imports
+`internal/blueprints/coretest` (its `core_test.go`), since without the
+variable it reads the pocket-id image from the core catalog's foundation. It starts that image with a static API key,
+makes `members` and `operators` and two operators in both, one of them a Pocket
+ID administrator, and runs a pass under each management: under `pocket-id` the
+administrator who is an operator passes, and under `paisans` the same one
+fails. It then reads the second operator back, unchanged, and takes them out
+of `operators` to see check 1 fail. Rerun it whenever the Pocket ID image is
+bumped: it proves what the reconciler assumes about the API (the user list
+carries each user's groups and flags, and the static key's user is an
+administrator with a fixed ID) against the real thing.
 
 The passthrough ini merge and the locked settings have a Docker test of
 their own, behind their own tag:
@@ -1408,8 +1424,11 @@ hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
 another build, such as a local one of a release newer than the one the kind
 names.
 
-The one workflow in `.github/workflows` builds the admin reconciler's image,
-and runs only the tests of the packages that image is built from. Nothing runs
+`.github/workflows/operator-reconciler-image.yml` builds the operator reconciler's image,
+and runs only the tests of the packages that image is built from. It runs on
+an `operator-reconciler-v*` tag alone, so a push to `develop` runs nothing; the
+reconciler is released from its own repository once the repository split
+moves it there (`docs/specs/2026-10-14-repository-split.md`). Nothing runs
 `go test ./...` or any tagged test for you, so run them before a pull request.
 
 ## Fixtures and secrets
@@ -1433,8 +1452,8 @@ installed, on a workstation or anywhere else.
 | Path | Holds |
 |------|-------|
 | `cmd/paisans` | the command, flag parsing, and how findings are printed |
-| `cmd/admin-reconciler` | the admin reconciler's binary and its image's Dockerfile: the pass loop, `/healthz` and the DNS check's two paths, and `healthcheck` |
-| `internal/adminreconciler` | one admin reconciler pass: who to add to `admins` and who to remove, the two writes, the floor under removals, and what `/healthz` says |
+| `cmd/operator-reconciler` | the operator reconciler's binary and its image's Dockerfile: the pass loop, `/healthz` and the DNS check's two paths, and `healthcheck` |
+| `internal/operatorreconciler` | one operator reconciler pass, which only reads: every operator an enabled member in the member group and in `operators`, every Pocket ID administrator an operator (none under `management: paisans`), and what `/healthz` says |
 | `internal/config` | loading `paisans-stack.yaml`, and decrypting `secrets.enc.yaml` |
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |

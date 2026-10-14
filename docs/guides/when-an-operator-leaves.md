@@ -1,20 +1,22 @@
-# When an admin leaves
+# When an operator leaves
 
-An admin of a paisans deployment holds three kinds of access: an ssh key on
-the sites that name them, an administrator's account at Pocket ID, and, when
-their age key is a recipient of `secrets.enc.yaml`, every secret of every site.
-Each is closed a different way, and some cannot be closed at all, only made
-worthless by rotating what they unlock. This guide is the order to close them
-in, for two cases: an admin who leaves on good terms, and an admin whose site
-is evicted because the others can no longer reach it.
+An operator of a paisans deployment holds three kinds of access: an ssh key on
+the sites that name them; an account at Pocket ID in the group `operators` and
+in every app's admin group, which makes them a community admin as well, and
+under `management: pocket-id` a Pocket ID administrator; and, when their age
+key is a recipient of `secrets.enc.yaml`, every secret of every site. Each is
+closed a different way, and some cannot be closed at all, only made worthless
+by rotating what they unlock. This guide is the order to close them in, for
+two cases: an operator who leaves on good terms, and an operator whose site is
+evicted because the others can no longer reach it.
 
 Each step says what it closes and what is still open after it. Why each
 protection works, and the scenarios behind them, are in
 [How a deployment protects itself](how-a-deployment-protects-itself.md). The examples
-use `alice` for the admin who leaves, `home-b` for a site, and `vm` for the
-gateway. The reasoning is in `README.md`, under *Keys belong to admins, and
-sites name admins*, *The admin reconciler keeps `admins` equal to Pocket ID's
-administrators*, *Evicting a site: `--evict`*, *Rekeying the mesh: `mesh
+use `alice` for the operator who leaves, `home-b` for a site, and `vm` for the
+gateway. The reasoning is in `README.md`, under *Keys belong to operators, and
+sites name operators*, *The operator reconciler checks Pocket ID against the
+operators*, *Evicting a site: `--evict`*, *Rekeying the mesh: `mesh
 rekey`* and *`secrets rotate` replaces a secret where it is checked and where
 it is used*.
 
@@ -48,7 +50,7 @@ encrypts to the recipients `.sops.yaml` names. A recipient left there is
 added back at the next `paisans secrets set`.
 
 **Nothing re-encryption does reaches an old copy.** Every copy of
-`secrets.enc.yaml` the admin could decrypt, including every version in the
+`secrets.enc.yaml` the operator could decrypt, including every version in the
 repository's history, still opens with their key, and holds every value as it
 was then. Re-encrypting closes the values written from now on; only rotating a
 secret makes their copy of it worthless.
@@ -57,36 +59,37 @@ secret makes their copy of it worthless.
 
 `paisans apply --execute` publishes the files it applies to every site as a
 signed version, and `paisans config publish` does the same without applying.
-The version that drops the admin from `admins` is the one that removes them:
+The version that drops the operator from `operators` is the one that removes them:
 from then on a version signed by any key of theirs is not trusted, so they
 cannot publish one that puts them back (README, *Trust starts from the
 operator's own signature, never from the sites*). Until then their signature
 still counts.
 
-**Each remaining admin runs `paisans admin register` first**, on a workstation
+**Each remaining operator runs `paisans operator register` first**, on a workstation
 that has never published or registered, before the first step of either case
 below:
 
 ```sh
-paisans admin register             # which key, and the version it would sign
-paisans admin register --execute
+paisans operator register             # which key, and the version it would sign
+paisans operator register --execute
 ```
 
 A workstation with neither its own signature nor a pinned root trusts nothing
 the sites hold, so `apply` and `config pull` refuse there. Registering signs the
-version the admin already holds, so trust starts from their own key and not from
-any history the leaving admin could have written. It signs only a version equal
+version the operator already holds, so trust starts from their own key and not from
+any history the leaving operator could have written. It signs only a version equal
 to the local files, which is why it comes before the edit in step 1.
 
-## An admin who leaves on good terms
+## An operator who leaves on good terms
 
-The admin hands over, and the others trust that they keep nothing and use
+The operator hands over, and the others trust that they keep nothing and use
 nothing they kept. How much to rotate depends on that trust, and is the
 community's decision.
 
-1. **Take them out of `paisans-stack.yaml`.** Delete their entry under `admins`,
-   and their name from every site's `ssh.keys`. Taking the admin out of
-   `admins` changes nothing at Pocket ID; steps 3 and 4 do the rest.
+1. **Take them out of `paisans-stack.yaml`.** Delete their entry under `operators`,
+   and their name from every site's `ssh.keys`. Taking the operator out of
+   `operators` changes nothing at Pocket ID, since `apply` never deletes,
+   disables or demotes an account; steps 3 and 4 do the rest.
    Nothing is published yet. Closes nothing yet. Open: everything.
 
 2. **If they were a recipient of the secrets file, re-encrypt it without
@@ -99,7 +102,7 @@ community's decision.
 
    Commit both files. This comes before any `apply --execute` or `config
    publish`, since each publishes the files to every site as a version, and
-   the one that drops them from `admins` would otherwise carry a secrets file
+   the one that drops them from `operators` would otherwise carry a secrets file
    still encrypted to them. Until this runs they hold the file's data key, so
    every value written to it, and every version published from it, opens with
    what they already have. Closes: every value written to the file from now
@@ -124,14 +127,25 @@ community's decision.
    host, and delete such a line by hand. An account of their own on a host,
    or a key on another user, is outside the toolkit too.
 
-4. **Take away their Pocket ID administrator.** In Pocket ID's admin page,
-   remove the admin flag from their account, or disable the account if they
-   should not sign in at all. The admin reconciler takes them out of the
-   `admins` group at its next pass, within two hours, or at once when its
-   container restarts, and every app that reads that group stops treating
-   them as an administrator. Closes: administration of Pocket ID and of every
-   app. Open: sessions they already hold in each app, until those expire or
-   step 5 ends them.
+4. **Take away what their Pocket ID account grants.** Their account is still
+   in `operators`, which the health page reads for its administrators by
+   default, and in
+   every app's admin group, which makes them a community admin. Take them out
+   of `operators`, and out of the admin groups unless the community keeps
+   them as a community admin; disable the account if they should not sign in
+   at all. The operator reconciler only reads, so nobody but you makes this
+   change.
+   Under `management: pocket-id` it is Pocket ID's admin pages, where the
+   admin flag comes off their account as well: until it does, the operator
+   reconciler's health check fails at every pass, naming them as a Pocket ID
+   administrator who is not an operator. Under `management: paisans` nobody
+   is a Pocket ID administrator, so no admin page reaches the account and
+   nothing reports it: the change is a call to Pocket ID's API with the
+   deployment's static API key, `PUT /api/users/<id>/user-groups` with every
+   group they keep, and a call to it is a change to a user, approved as one.
+   Closes: administration of Pocket ID where they held it, of the health
+   page, and of every app whose admin group they left. Open: sessions they already hold in each app,
+   until those expire or step 5 ends them.
 
 5. **Rotate what the trust calls for.** On full trust, nothing more. Short of
    it, in this order:
@@ -172,7 +186,7 @@ community's decision.
       which. A run that stops resumes when run again, and `apply`, like
       every command that renders, refuses until it finishes. A plan that
       says it is resuming an earlier `--all` run that was not this one
-      would leave the secrets that run finished as the departed admin knew
+      would leave the secrets that run finished as the departed operator knew
       them: run `paisans secrets rotate --all --restart` instead, which
       rotates every secret again. A rotation that cannot finish is ended by
       hand: README, *A rotation that cannot finish*.
@@ -189,9 +203,9 @@ community's decision.
    secret signs, Pocket ID's own among them, and Mbin's open sessions, until
    they expire.
 
-## An admin whose site is evicted
+## An operator whose site is evicted
 
-The admin stopped cooperating, and the others can no longer log in to their
+The operator stopped cooperating, and the others can no longer log in to their
 host. It still runs and is still a member of the deployment: possibly a data
 site, a Garage node, an apps site, or the gateway. `paisans site remove
 --evict` takes it out without ever reaching it, and a replacement declared in
@@ -242,7 +256,7 @@ included, and refuses while one does not answer.
    file is the usual reason. Closes nothing new; it is what the DNS stage
    deletes the evicted host's records with.
 
-4. **In one edit of `paisans-stack.yaml`:** take them out of `admins` and every
+4. **In one edit of `paisans-stack.yaml`:** take them out of `operators` and every
    site's `ssh.keys`; declare the replacement as a new site, under a new
    name, with the roles `home-b` held; and pin to it any app pinned to
    `home-b`. The new name keeps the old host and the new one apart in the
@@ -281,7 +295,7 @@ included, and refuses while one does not answer.
    homes reach each other through, Patroni is paused and then resumed, and the
    plan says so. A run that stops resumes when run again, and `apply` refuses
    until it finishes. Closes: every remaining site's
-   WireGuard key, which an admin who could read the secrets file holds, and
+   WireGuard key, which an operator who could read the secrets file holds, and
    which WireGuard accepts from any address that proves it. Skip it only when
    they were never a recipient. Open: nothing on the mesh, once every site is
    done.
@@ -301,14 +315,15 @@ included, and refuses while one does not answer.
    the terminal (`docs/specs/2026-10-11-config-review.md`; `host allow`
    writes `/etc/paisans/ssh-allow.<user>` there). A replacement data site is
    joined by that apply's `site add`. It also publishes the version that
-   takes them out of `admins`, so from then on a version signed by any key of
+   takes them out of `operators`, so from then on a version signed by any key of
    theirs is not trusted. Closes: the outage of step 5, their ssh keys on
    every remaining site, and their signature on the configuration. Open: a
    key of theirs on a remaining host that `host prepare` never recorded (see
    step 3 of the first case).
 
-8. **Take away their Pocket ID administrator**, as in step 4 of the first
-   case. Closes: their administration of Pocket ID and every app.
+8. **Take away what their Pocket ID account grants**, as in step 4 of the
+   first case. Closes: their administration of Pocket ID where they held it,
+   of the health page, and of every app whose admin group they left.
 
 9. **Revoke the old gateway's certificates.** The evicted host keeps the
    certificates it obtained for the community's names, with their private

@@ -38,7 +38,7 @@ apps:
     hostname: health.example.org
     placement: { pinned: health }
     settings:
-      admin_group: admins
+      admin_group: operators
 ```
 
 **Choose `listen` carefully.** Docker publishes a port with its own iptables

@@ -170,6 +170,7 @@ apps:
     hostname: health.example.org
     placement: { pinned: health }
     settings:
+      # Defaults to operators; admins lets every community admin in as well.
       admin_group: admins
 
 smtp:

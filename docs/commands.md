@@ -42,7 +42,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | `--config <path>` | `paisans-stack.yaml` | every command except `host deployments` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
-| `--sudo` | on | every command that reaches a host over ssh, except `admin magic-link` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
+| `--sudo` | on | every command that reaches a host over ssh, except `operator magic-link` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
 With `--execute`, a command first claims each host it writes to in
@@ -84,8 +84,8 @@ refused.
 ### `paisans create`
 
 Asks about a new deployment at a terminal (the community and its domain, the
-DNS provider, the admins, how many machines and what each does, the apps, and
-the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
+DNS provider, the operators, at least two of them, how many machines and what
+each does, the apps, who manages accounts, and the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
 file is checked as `validate` checks it before it is shown; a refusal offers
 the questions it came from again, and nothing is written until the file is
 refused nothing and the operator says yes. It then names `secrets set`,
@@ -218,7 +218,7 @@ paisans secrets rotate --all --replaced external.acme_dns_token --execute   # th
 paisans secrets rotate --all --restart --execute           # the full list again, whatever a stopped --all left
 ```
 
-* **Alone:** always; after an admin who could read the secrets file leaves,
+* **Alone:** always; after an operator who could read the secrets file leaves,
   or a site is evicted, once the file is re-encrypted and the mesh rekeyed.
 * **Flags:** the secrets' paths in the secrets file as arguments, or `--all`
   (every secret in scope, in the order *`secrets rotate` replaces a secret
@@ -253,7 +253,7 @@ A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
 `README.md`. See *`secrets rotate` replaces a secret where it is checked and
 where it is used* there too, and
-[guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md) for the order
+[guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md) for the order
 around it.
 
 ### `paisans config`
@@ -296,13 +296,13 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   cache in `.paisans/` beside the configuration is written.
 * **Per-operator state:** `.paisans/.gitignore` keeps `store.git/`,
   `incoming/`, `signing-key`, `config-head` and `config-seen` out of a
-  repository the admins share, since each describes one workstation, and a
-  shared signing key would start one admin's trust from another's signature.
-  `config-root` may be committed so the admins share the pin.
+  repository the operators share, since each describes one workstation, and a
+  shared signing key would start one operator's trust from another's signature.
+  `config-root` may be committed so the operators share the pin.
 * **`--execute`:** each site first syncs with its peers, so a version only a
   site the operator cannot log in to holds arrives through one they can.
   `publish` signs with the key in `.paisans/signing-key`, or the one ssh-agent
-  key that belongs to an admin the base lists, and pushes to every site it
+  key that belongs to an operator the base lists, and pushes to every site it
   reaches. It refuses when its base is not the sites' newest version (including
   a workstation with no base while the sites hold versions: run `config pull`
   first), when the sites hold a fork and `--merge` is not given, and when no
@@ -322,7 +322,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   `.paisans/incoming/<sha>/` and refuses to choose.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
   answered directly (no more than half), for `apply --execute`, `config pull`,
-  `config recover`, `config publish` of a first version and `admin register`;
+  `config recover`, `config publish` of a first version and `operator register`;
   `rollback` when the newest version is older than one this workstation has
   seen. An accepted `rollback` re-bases `.paisans/config-seen` to the head
   chosen once the command commits its change; a run that stops leaves it as it
@@ -333,35 +333,35 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   it publishes the version it applies and each host records it; a host whose
   record holds a newer revision, or another version at the same revision, makes
   `apply` ask for `rollback`. It needs the standard file names beside
-  `paisans-stack.yaml` (a `--secrets` naming another file is refused), an admin key in
+  `paisans-stack.yaml` (a `--secrets` naming another file is refused), an operator's key in
   the ssh-agent even for a dry run, and a sudo password for every site.
 
 See *Every site keeps signed copies of the configuration* in `README.md` and
 `docs/specs/2026-10-12-config-store.md`.
 
-### `paisans admin register`
+### `paisans operator register`
 
-Gives an admin an anchor of their own: the point on their workstation from which
-the sites' versions are trusted. An admin who has never published has signed
+Gives an operator an anchor of their own: the point on their workstation from which
+the sites' versions are trusted. An operator who has never published has signed
 nothing, so `config pull` has nothing of theirs to start from.
 
 ```sh
-paisans admin register                # the key and the head it would attest
-paisans admin register --execute      # sign the attestation, record the key
-paisans admin register --key ~/.ssh/id_ed25519.pub --execute
+paisans operator register                # the key and the head it would attest
+paisans operator register --execute      # sign the attestation, record the key
+paisans operator register --key ~/.ssh/id_ed25519.pub --execute
 ```
 
-* **Alone:** always, once per admin per workstation, and again if the key
+* **Alone:** always, once per operator per workstation, and again if the key
   changes.
 * **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
   must hold its private half), `--root <sha>` (pin the first version you trust),
   `--execute`.
 * **Hosts:** every site, as `config` does.
 * **The key:** `--key`, else the one `.paisans/signing-key` records, else the
-  one key in the ssh-agent that is listed under an admin of `paisans-stack.yaml`. It
+  one key in the ssh-agent that is listed under an operator of `paisans-stack.yaml`. It
   refuses when none matches, saying the key goes under your own entry in
-  `admins` and another admin publishes that; when the agent holds more than one
-  of your keys; and when it holds keys of more than one admin.
+  `operators` and another operator publishes that; when the agent holds more than one
+  of your keys; and when it holds keys of more than one operator.
 * **What it signs:** an attestation, a version with the head's three files and
   the head as its only parent. It signs only a head whose files equal the local
   files, since it says "I hold this version"; otherwise it shows the difference
@@ -376,28 +376,28 @@ paisans admin register --key ~/.ssh/id_ed25519.pub --execute
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
 
-### `paisans admin magic-link`
+### `paisans operator magic-link`
 
-Gives an admin declared under `admins` a one-time link that signs them in to
+Gives an operator declared under `operators` a one-time link that signs them in to
 Pocket ID once, to register a passkey with: after a first link expired
 unused, or a passkey was lost. It changes nothing else.
 
 ```sh
-paisans admin magic-link alice              # finds alice's account, changes nothing
-paisans admin magic-link alice --execute    # issues the link, prints it once
+paisans operator magic-link alice              # finds alice's account, changes nothing
+paisans operator magic-link alice --execute    # issues the link, prints it once
 ```
 
-* **Alone:** always. apply gives a declared admin with no passkey a link on
+* **Alone:** always. apply gives a declared operator with no passkey a link on
   every run already; this is for one with no apply due, or who lost a passkey.
 * **Flags:** `--app <pocket-id app>` (default: the only one), `--site`
   (default: the pinned site, or the site whose instance is active), `--ssh`,
   `--config`, `--secrets`, `--execute`.
 * **Hosts:** the one site whose Pocket ID it calls.
 * **`--execute`:** issues the link, valid a day and for one sign in, and has
-  Pocket ID email one when it emails apply's. A name not under `admins`, an
-  admin apply has not made yet, and a disabled account are refused.
+  Pocket ID email one when it emails apply's. A name not under `operators`, an
+  operator apply has not made yet, and a disabled account are refused.
 
-See *`admin magic-link` gives a declared admin a fresh sign-in link* in
+See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 `README.md`.
 
 ### `paisans catalog`
@@ -455,7 +455,7 @@ there. See *A blueprint can come from a catalog* in `README.md`.
 
 Takes a blank host to the state `apply` assumes: Docker with the compose
 plugin, the WireGuard tools, a firewall following the site's roles, the login
-user's authorized keys (every key of each admin the site's `ssh.keys` names),
+user's authorized keys (every key of each operator the site's `ssh.keys` names),
 and a watchdog on a data site. Installs only what is missing.
 
 ```
@@ -481,7 +481,7 @@ paisans host prepare --site home-a --execute  # does it
   removed one a `-` line, at every verbosity.
 * **Allowlist:** with `/etc/paisans/ssh-allow.<user>` on the host, a key to
   add that it does not list is a refusal in the plan, naming the key, its
-  admin and the `host allow` that allows it; sharing, renaming and removing
+  operator and the `host allow` that allows it; sharing, renaming and removing
   keys are never refused. Without the file every key is allowed.
 * **`--execute`:** asks for `approve` at a terminal when the review adds or
   changes anything, before the claim; then installs and configures what the
@@ -520,7 +520,7 @@ See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
 ### `paisans host allow`
 
-Adds each named admin's key fingerprints to the site's host's key allowlist,
+Adds each named operator's key fingerprints to the site's host's key allowlist,
 `/etc/paisans/ssh-allow.<user>`: the keys `host prepare` may add to the login
 user's `authorized_keys` there, whoever runs it.
 
@@ -531,8 +531,8 @@ paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
 
 * **Alone:** always; the whole apply never runs it. It is the host owner's
   command, run once they have checked each fingerprint it shows with its
-  admin.
-* **Flags:** the site and one or more admins, by their name in `admins`, as
+  operator.
+* **Flags:** the site and one or more operators, by their name in `operators`, as
   arguments; `--config`, `--ssh`, `--execute`, `--sudo`. It reads no secrets.
 * **Hosts:** the one site's. It claims nothing in the registry and touches
   nothing of a deployment's: the list is the host's.
@@ -552,7 +552,7 @@ paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
 
 ### `paisans host disallow`
 
-Takes lines off the site's host's key allowlist, by admin or by fingerprint.
+Takes lines off the site's host's key allowlist, by operator or by fingerprint.
 
 ```sh
 paisans host disallow home-a bob                                                      # what it would take off
@@ -560,11 +560,11 @@ paisans host disallow home-a SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA 
 ```
 
 * **Alone:** always; the whole apply never runs it.
-* **Flags:** the site and one or more admins or `SHA256:` fingerprints as
+* **Flags:** the site and one or more operators or `SHA256:` fingerprints as
   arguments; `--config`, `--ssh`, `--execute`, `--sudo`.
 * **Hosts:** the one site's, as `host allow`.
 * **Keys already authorized:** it removes no key from `authorized_keys`, and
-  says so with what does: the admin out of `ssh.keys` and `host prepare
+  says so with what does: the operator out of `ssh.keys` and `host prepare
   --execute`, or the line deleted by hand.
 * **The last line:** taking it leaves an empty list, which allows no key, and
   it says so. To allow every key again, the owner deletes the file by hand.
@@ -601,8 +601,9 @@ that it runs, in the order and under the conditions *`paisans apply` with no
 when it has work; `host prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
 founding applies, `site add`, the other sites, storage and pass two; `gateway
-move`, when a site without the gateway role still serves as the gateway; a
-`pocket id` check for an admin; and, for each app behind the operator's own web
+move`, when a site without the gateway role still serves as the gateway; the
+`pocket id` step, which makes each operator a user of every running Pocket ID
+app and issues a login link to one with no passkey; and, for each app behind the operator's own web
 server, its site file written into the web server's `include_dir` and
 `web-server check`'s checks. The version of the configuration it applies is
 published once the `host prepare` steps have made every site's store and before
@@ -634,7 +635,7 @@ images it superseded* in `README.md`).
   records each web server's directory after its web server step.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
-  version, or a key no admin lists is refused, naming `config pull` or `config
+  version, or a key no operator lists is refused, naming `config pull` or `config
   publish --merge`. With `--execute`, it asks for `partial` when fewer than a
   majority of sites answered directly. A dry run changes no site and starts no
   sync. After the approval, a host whose record holds a newer revision, or
@@ -856,7 +857,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   no other copy. No flag answers them.
 
 See *`site remove` takes a site out* and *Evicting a site: `--evict`* in
-`README.md`, and [guides/when-an-admin-leaves.md](guides/when-an-admin-leaves.md)
+`README.md`, and [guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md)
 for the order around an eviction.
 
 ### `paisans mesh rekey`
