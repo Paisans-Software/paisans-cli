@@ -177,7 +177,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
 			if todo == "" {
-				todo = "Pin the first version you trust with --root <sha>, or run paisans admin register to sign the version you hold."
+				todo = "Pin the first version you trust with --root <sha>, or run paisans operator register to sign the version you hold."
 			}
 			return g, &ui.Problem{
 				Hint:    "no version to start trusting from",
@@ -237,7 +237,7 @@ func confirmPartial(stdin io.Reader, stdout io.Writer, g configstore.Gathered, c
 
 // signingKeyFor is the public key line a publish signs with: the recorded
 // signing key, which the agent must hold, or, when none is recorded, the
-// one agent key that belongs to an admin of the base (the local paisans-stack.yaml
+// one agent key that belongs to an operator of the base (the local paisans-stack.yaml
 // for a first version).
 func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	held := agentKeys()
@@ -263,7 +263,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		}
 	}
 	var found []string
-	for _, lines := range adminsHolding(base, held) {
+	for _, lines := range operatorsHolding(base, held) {
 		for _, line := range lines {
 			if !slices.Contains(found, line) {
 				found = append(found, line)
@@ -274,9 +274,9 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	case 1:
 		return found[0], nil
 	case 0:
-		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an admin", Explain: "A version is signed with an admin's key, listed under admins in the version it builds on. Load yours with ssh-add, or have another admin publish the change that adds it."}
+		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an operator", Explain: "A version is signed with an operator's key, listed under operators in the version it builds on. Load yours with ssh-add, or have another operator publish the change that adds it."}
 	}
-	return "", &ui.Problem{Hint: "your ssh-agent holds more than one admin key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
+	return "", &ui.Problem{Hint: "your ssh-agent holds more than one operator key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
 }
 
 // recordedKey is the signing key .paisans/signing-key records, and "" when
@@ -305,13 +305,13 @@ func agentHolds(held []string, fp string) bool {
 	return false
 }
 
-// adminsHolding is, for each admin cfg lists, the agent's key lines (held)
-// that are among that admin's keys. An admin none of whose keys is held is
+// operatorsHolding is, for each operator cfg lists, the agent's key lines (held)
+// that are among that operator's keys. An operator none of whose keys is held is
 // left out.
-func adminsHolding(cfg *config.Config, held []string) map[string][]string {
+func operatorsHolding(cfg *config.Config, held []string) map[string][]string {
 	out := map[string][]string{}
-	for id, admin := range cfg.Admins {
-		for _, al := range admin.KeyLines() {
+	for id, operator := range cfg.Operators {
+		for _, al := range operator.KeyLines() {
 			a, _, err := config.ParseKeyLine(al)
 			if err != nil {
 				continue
@@ -429,7 +429,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans config log shows what each site holds.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
-			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans config pull --root <sha>, or paisans admin register.", Cause: err}
+			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans config pull --root <sha>, or paisans operator register.", Cause: err}
 		}
 		return err
 	default:

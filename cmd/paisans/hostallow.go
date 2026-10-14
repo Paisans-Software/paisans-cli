@@ -19,7 +19,7 @@ import (
 // there (internal/hostprep/allow.go). The list is the host owner's, shared
 // by every deployment on the host, so these commands claim nothing in the
 // registry and touch nothing of a deployment's. They read paisans-stack.yaml only
-// to name the site's host, its login user, and an admin's keys.
+// to name the site's host, its login user, and an operator's keys.
 //
 // Writing the list is an owner granting or withdrawing access, so it is
 // never scripted: --execute asks for the site's name at a terminal, as
@@ -61,9 +61,9 @@ func parseAllow(command string, args []string) (ui.Reporter, allowOptions, error
 		positional = append(positional, fs.Arg(0))
 		args = fs.Args()[1:]
 	}
-	what := "admin"
+	what := "operator"
 	if command == "host disallow" {
-		what = "admin|fingerprint"
+		what = "operator|fingerprint"
 	}
 	if len(positional) < 2 {
 		return nil, o, &ui.Problem{Hint: command + " takes a site and at least one " + strings.ReplaceAll(what, "|", " or "), Explain: "Usage: paisans " + command + " <site> <" + what + ">... [--config " + config.FileName + "] [--execute]"}
@@ -103,15 +103,15 @@ func loadAllowTarget(r ui.Reporter, o allowOptions) (*allowTarget, error) {
 	return &allowTarget{cfg: cfg, user: declared.SSH.User, host: host, path: hostprep.AllowPath(declared.SSH.User)}, nil
 }
 
-// adminKeys is each key of the named admins, as the list would hold it.
-func adminKeys(cfg *config.Config, configPath string, names []string) ([]hostprep.AllowLine, error) {
+// operatorKeys is each key of the named operators, as the list would hold it.
+func operatorKeys(cfg *config.Config, configPath string, names []string) ([]hostprep.AllowLine, error) {
 	var out []hostprep.AllowLine
 	for _, name := range names {
-		admin, ok := cfg.Admins[name]
+		operator, ok := cfg.Operators[name]
 		if !ok {
-			return nil, fmt.Errorf("%s declares no admin %q. Declared admins are %s", configPath, name, strings.Join(adminNames(cfg), ", "))
+			return nil, fmt.Errorf("%s declares no operator %q. Declared operators are %s", configPath, name, strings.Join(operatorNames(cfg), ", "))
 		}
-		for _, line := range admin.KeyLines() {
+		for _, line := range operator.KeyLines() {
 			k, _, err := config.ParseKeyLine(line)
 			if err != nil {
 				continue // validate has refused it already
@@ -126,7 +126,7 @@ func adminKeys(cfg *config.Config, configPath string, names []string) ([]hostpre
 	return out, nil
 }
 
-func adminNames(cfg *config.Config) []string { return slices.Sorted(maps.Keys(cfg.Admins)) }
+func operatorNames(cfg *config.Config) []string { return slices.Sorted(maps.Keys(cfg.Operators)) }
 
 // showList is the file as it would be, at every verbosity: what the owner
 // is about to put on the host. Its comments are the host's text and the
@@ -140,7 +140,7 @@ func showList(r ui.Reporter, path, content string) {
 }
 
 // allowLabel is one line of a list as a step names it, with any control
-// character in it escaped: a comment is the host's text or an admin's.
+// character in it escaped: a comment is the host's text or an operator's.
 func allowLabel(l hostprep.AllowLine) string {
 	if l.Comment == "" {
 		return ui.Visible(l.Fingerprint)
@@ -181,7 +181,7 @@ func writeList(t *allowTarget, o allowOptions, stdin io.Reader, stdout io.Writer
 	return nil
 }
 
-// runHostAllow adds admins' keys to a site's host's allowlist.
+// runHostAllow adds operators' keys to a site's host's allowlist.
 func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	r, o, err := parseAllow("host allow", args)
 	if err != nil {
@@ -191,7 +191,7 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	keys, err := adminKeys(t.cfg, o.config, o.names)
+	keys, err := operatorKeys(t.cfg, o.config, o.names)
 	if err != nil {
 		return err
 	}
@@ -255,10 +255,10 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	next := hostprep.ParseAllow(content)
 	showList(r, t.path, content)
 	if !o.execute {
-		r.Result("Nothing changed. Check each fingerprint with its admin, then re-run with --execute; it asks for the site's name at a terminal.")
+		r.Result("Nothing changed. Check each fingerprint with its operator, then re-run with --execute; it asks for the site's name at a terminal.")
 		return nil
 	}
-	what := fmt.Sprintf("This lets host prepare add the keys above to %s's authorized_keys on %s, whoever runs it. Check each fingerprint with its admin before you proceed.", t.user, o.site)
+	what := fmt.Sprintf("This lets host prepare add the keys above to %s's authorized_keys on %s, whoever runs it. Check each fingerprint with its operator before you proceed.", t.user, o.site)
 	if err := writeList(t, o, stdin, stdout, got.found, got.content, content, what); err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func runHostAllow(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
-// runHostDisallow takes keys off a site's host's allowlist, by admin or by
+// runHostDisallow takes keys off a site's host's allowlist, by operator or by
 // fingerprint. It removes no key from authorized_keys.
 func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 	r, o, err := parseAllow("host disallow", args)
@@ -278,15 +278,15 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	var drop []hostprep.AllowLine
-	var admins []string
+	var operators []string
 	for _, name := range o.names {
 		if strings.HasPrefix(name, "SHA256:") {
 			drop = append(drop, hostprep.AllowLine{Fingerprint: name})
 			continue
 		}
-		admins = append(admins, name)
+		operators = append(operators, name)
 	}
-	keys, err := adminKeys(t.cfg, o.config, admins)
+	keys, err := operatorKeys(t.cfg, o.config, operators)
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,7 @@ func runHostDisallow(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("%s lists none of them. Nothing to do.", t.path)
 		return nil
 	}
-	r.Note("a key already in "+t.user+"'s authorized_keys keeps working", fmt.Sprintf("The list decides what host prepare may add, not who may log in now. To take a key away, remove its admin from sites.%s.ssh.keys and run paisans host prepare --site %s --execute, or delete its line by hand.", o.site, o.site))
+	r.Note("a key already in "+t.user+"'s authorized_keys keeps working", fmt.Sprintf("The list decides what host prepare may add, not who may log in now. To take a key away, remove its operator from sites.%s.ssh.keys and run paisans host prepare --site %s --execute, or delete its line by hand.", o.site, o.site))
 	if len(kept) == 0 {
 		r.Note("the list will be empty, which allows no key", "host prepare then adds no key on "+o.site+". To allow every key again, delete "+t.path+" by hand.")
 	}

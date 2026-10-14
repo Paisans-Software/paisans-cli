@@ -828,8 +828,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	identity.applied(store.held())
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
-		// A dry run's admin problem is shown on its line; it stops nothing.
-		_, _ = convergeAdmins(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		// A dry run's operator problem is shown on its line; it stops nothing.
+		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
 		convergeWebServerPending(r, cfg, webServerScope{})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
@@ -884,7 +884,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// check draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	links, adminErr := convergeAdmins(r, cfg, o, true, func(string) bool { return true })
+	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
 	// The deployment and the version are named again ahead of them.
@@ -1793,12 +1793,12 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	}
 }
 
-// convergeAnyAdmin names each Pocket ID app that has no admin, for a
-// deployment that declares no admins, so only the operator can create one. An app is asked, in a step of its own, only once up
+// convergeAnyOperator names each Pocket ID app that has no administrator, for
+// a deployment that declares no operators. An app is asked, in a step of its own, only once up
 // says it is running; one that is not is named by nothing, since the plan
 // already says what brings it up. A check that fails names the app with why,
 // and fails nothing else.
-func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
+func convergeAnyOperator(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
 	section := false
 	for _, app := range cfg.AppNames() {
 		if cfg.Apps[app].Blueprint != config.BlueprintPocketID || !up(app) {
@@ -1808,7 +1808,7 @@ func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up f
 			r.Section("pocket id")
 			section = true
 		}
-		command := "Declare one under admins in " + config.FileName + " and run apply, which makes their account at " + app + " and gives them a sign-in link."
+		command := "Declare at least two under operators in " + config.FileName + " and run apply, which makes their accounts at " + app + " and gives each a sign-in link."
 		s := r.Step(adminCheckTitle(app))
 		has, err := convergeAdminCheck(cfg, app, o)
 		switch {
@@ -1833,7 +1833,7 @@ func errLine(err error) string {
 }
 
 // convergeAdminCheck asks a Pocket ID app whether any user is an admin, read
-// only, with the API key, the site and the API address a declared admin is
+// only, with the API key, the site and the API address a declared operator is
 // made with, reaching the host as every step of the run does, with its sudo. Why
 // it fails is one line. Tests replace it.
 var convergeAdminCheck = func(cfg *config.Config, app string, o convergeOptions) (bool, error) {

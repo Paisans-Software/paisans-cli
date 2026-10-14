@@ -13,16 +13,16 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// runAdminMagicLink issues one admin the configuration declares a one-time
+// runOperatorMagicLink issues one operator the configuration declares a one-time
 // sign-in link at Pocket ID, and nothing else. It is for a first sign in whose
-// link expired before it was used and for an admin who lost their passkey:
+// link expired before it was used and for an operator who lost their passkey:
 // either way they open the link, sign in once, and register a passkey. The
 // account, its groups and its administrator flag are apply's, which makes
-// every declared admin, so an admin with no account yet is pointed there. The
+// every declared operator, so an operator with no account yet is pointed there. The
 // link is printed once, as apply prints its own, and Pocket ID emails one as
 // well when it emails apply's.
-func runAdminMagicLink(args []string) error {
-	fs := newFlagSet("admin magic-link", flag.ContinueOnError)
+func runOperatorMagicLink(args []string) error {
+	fs := newFlagSet("operator magic-link", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	secretsPath := fs.String("secrets", "", "path to the secrets file, read for Pocket ID's API key (default: secrets.enc.yaml beside the config)")
@@ -35,7 +35,7 @@ func runAdminMagicLink(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "admin magic-link takes one admin", Explain: "paisans admin magic-link <admin>, by their key under admins."}
+		return &ui.Problem{Hint: "operator magic-link takes one operator", Explain: "paisans operator magic-link <operator>, by their key under operators."}
 	}
 	id := pos[0]
 	// The link goes to stdout and nothing else does, so a script can read it.
@@ -50,27 +50,27 @@ func runAdminMagicLink(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "")
 	}
-	if _, ok := cfg.Admins[id]; !ok {
-		return &ui.Problem{Hint: id + " is not a declared admin", Explain: fmt.Sprintf("Only an admin under admins in %s is given a link. Add them there and run apply, which makes their account and gives them one.", *configPath)}
+	if _, ok := cfg.Operators[id]; !ok {
+		return &ui.Problem{Hint: id + " is not a declared operator", Explain: fmt.Sprintf("Only an operator under operators in %s is given a link. Add them there and run apply, which makes their account and gives them one.", *configPath)}
 	}
 	pid, err := magicLinkApp(cfg, *app)
 	if err != nil {
 		return err
 	}
-	where, err := pocketIDSite(r, cfg, pid, *site, "admin magic-link")
+	where, err := pocketIDSite(r, cfg, pid, *site, "operator magic-link")
 	if err != nil {
 		return err
 	}
 	key, err := pocketIDKey(cfg, *configPath, *secretsPath, pid)
 	if err != nil {
-		return fmt.Errorf("admin magic-link: %w", err)
+		return fmt.Errorf("operator magic-link: %w", err)
 	}
-	req := adminRequest(cfg, pid, id)
+	req := operatorRequest(cfg, pid, id)
 	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], *destination, false))
 
 	r.Section(fmt.Sprintf("%s on %s", pid, where))
-	what := fmt.Sprintf("a one-time sign-in link for %s, valid %s and for one sign in", id, humanTTL(adminLinkTTL))
+	what := fmt.Sprintf("a one-time sign-in link for %s, valid %s and for one sign in", id, humanTTL(operatorLinkTTL))
 	if req.EmailLink {
 		what += ", and Pocket ID's email of one to " + req.Email
 	}
@@ -78,7 +78,7 @@ func runAdminMagicLink(args []string) error {
 		if _, err := ui.Get(r, "find "+id+" in "+pid, func() (appadmin.Outcome, error) {
 			return appadmin.MagicLink(transport, req, false)
 		}); err != nil {
-			return fmt.Errorf("admin magic-link: %w", err)
+			return fmt.Errorf("operator magic-link: %w", err)
 		}
 		r.Step("issue "+what).End(ui.Pending, "")
 		r.Result("Nothing changed. Re-run with --execute to issue it.")
@@ -93,17 +93,17 @@ func runAdminMagicLink(args []string) error {
 	outcome, err := appadmin.MagicLink(transport, req, true)
 	if err != nil {
 		s.Fail(err)
-		return fmt.Errorf("admin magic-link: %w", err)
+		return fmt.Errorf("operator magic-link: %w", err)
 	}
 	s.Done("")
-	d := declaredAdmin{App: pid, ID: id, Email: req.Email, Link: outcome.LoginLink, ExpiresIn: outcome.ExpiresIn, Emailed: outcome.Emailed}
+	d := declaredOperator{App: pid, ID: id, Email: req.Email, Link: outcome.LoginLink, ExpiresIn: outcome.ExpiresIn, Emailed: outcome.Emailed}
 	if d.Emailed {
-		convergeEmailResults(r, cfg, pid, convergeOptions{Config: *configPath, Secrets: *secretsPath}, []declaredAdmin{d})
+		convergeEmailResults(r, cfg, pid, convergeOptions{Config: *configPath, Secrets: *secretsPath}, []declaredOperator{d})
 	} else if !req.EmailLink {
-		r.Note("Pocket ID "+pid+" emails no sign-in links", adminEmailOffWhy(cfg, pid))
+		r.Note("Pocket ID "+pid+" emails no sign-in links", operatorEmailOffWhy(cfg, pid))
 	}
 	r.Result("%s can sign in once with the link below and register a passkey.", id)
-	printLoginLinks([]declaredAdmin{d})
+	printLoginLinks([]declaredOperator{d})
 	return nil
 }
 

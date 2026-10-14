@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/paisans-software/paisans-stack/internal/grant"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -263,9 +264,9 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	registryHost = func(string, config.Site, string, bool) registry.Runner { return noRecord{} }
 	// Asking Pocket ID for an admin reaches a host too; here it has none,
 	// and every declared admin has registered. fakeAdminCheck and
-	// fakeDeclaredAdmins say otherwise.
+	// fakeDeclaredOperators say otherwise.
 	fakeAdminCheck(t, false, nil)
-	fakeDeclaredAdmins(t, registered)
+	fakeDeclaredOperators(t, registered)
 	fakeEmailFailures(t, nil, nil)
 	// An app's web server is checked from this machine; here every check
 	// passes. fakeWebServerCheck says otherwise.
@@ -1868,39 +1869,39 @@ func adminNotes(rec *ui.Recorder) []string {
 	return out
 }
 
-const authAdminCommand = "Declare one under admins in paisans-stack.yaml and run apply, which makes their account at auth and gives them a sign-in link."
+const authAdminCommand = "Declare at least two under operators in paisans-stack.yaml and run apply, which makes their accounts at auth and gives each a sign-in link."
 
-// fakeDeclaredAdmins replaces making a declared admin: answer gives the
+// fakeDeclaredOperators replaces making a declared admin: answer gives the
 // outcome for each app and admin. It returns the calls, as "app/id", with
 // "!" after one that executes.
-func fakeDeclaredAdmins(t *testing.T, answer func(app, id string, execute bool) (declaredAdmin, error)) *[]string {
+func fakeDeclaredOperators(t *testing.T, answer func(app, id string, execute bool) (declaredOperator, error)) *[]string {
 	t.Helper()
 	var asked []string
-	saved := convergeDeclaredAdmin
-	convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredAdmin, error) {
+	saved := convergeDeclaredOperator
+	convergeDeclaredOperator = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredOperator, error) {
 		call := app + "/" + id
 		if execute {
 			call += "!"
 		}
 		asked = append(asked, call)
 		d, err := answer(app, id, execute)
-		d.App, d.ID, d.Email = app, id, cfg.Admins[id].Email
+		d.App, d.ID, d.Email = app, id, cfg.Operators[id].Email
 		return d, err
 	}
-	t.Cleanup(func() { convergeDeclaredAdmin = saved })
+	t.Cleanup(func() { convergeDeclaredOperator = saved })
 	return &asked
 }
 
 // registered is an admin who has a passkey: nothing to do.
-func registered(string, string, bool) (declaredAdmin, error) { return declaredAdmin{}, nil }
+func registered(string, string, bool) (declaredOperator, error) { return declaredOperator{}, nil }
 
 // unregistered is an admin with no account yet: created, linked, and emailed
 // when emailed is set.
-func unregistered(emailed bool) func(string, string, bool) (declaredAdmin, error) {
-	return func(_, id string, execute bool) (declaredAdmin, error) {
-		d := declaredAdmin{Titles: []string{"create administrator " + id, "issue login link for " + id}}
+func unregistered(emailed bool) func(string, string, bool) (declaredOperator, error) {
+	return func(_, id string, execute bool) (declaredOperator, error) {
+		d := declaredOperator{Titles: []string{"create administrator " + id, "issue login link for " + id}}
 		if execute {
-			d.Created, d.Link, d.ExpiresIn, d.Emailed = true, "https://id.example.org/lc/tok-not-real-"+id, adminLinkTTL, emailed
+			d.Created, d.Link, d.ExpiresIn, d.Emailed = true, "https://id.example.org/lc/tok-not-real-"+id, operatorLinkTTL, emailed
 		}
 		return d, nil
 	}
@@ -1935,7 +1936,7 @@ func recordLinks(t *testing.T) *strings.Builder {
 func TestConvergeDryRunAsksNoAdminBeforePocketIDRuns(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{"apply --site home-b": "2 changes"})
-	asked := fakeDeclaredAdmins(t, unregistered(false))
+	asked := fakeDeclaredOperators(t, unregistered(false))
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
@@ -1949,7 +1950,7 @@ func TestConvergeDryRunAsksNoAdminBeforePocketIDRuns(t *testing.T) {
 func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	asked := fakeDeclaredAdmins(t, unregistered(false))
+	asked := fakeDeclaredOperators(t, unregistered(false))
 	saved := convergeRead
 	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
 		cfg, st, err := readConvergeState(c, s)
@@ -1971,7 +1972,7 @@ func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{"apply --site watch": "1 change"})
-	asked := fakeDeclaredAdmins(t, unregistered(false))
+	asked := fakeDeclaredOperators(t, unregistered(false))
 	links := recordLinks(t)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
@@ -1992,7 +1993,7 @@ func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 func TestConvergeDryRunMarksARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, nil)
-	fakeDeclaredAdmins(t, registered)
+	fakeDeclaredOperators(t, registered)
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
@@ -2007,7 +2008,7 @@ func TestConvergeDryRunMarksARegisteredAdmin(t *testing.T) {
 // is around it.
 func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	fakeConverge(t, nil)
-	asked := fakeDeclaredAdmins(t, unregistered(false))
+	asked := fakeDeclaredOperators(t, unregistered(false))
 	links := recordLinks(t)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
@@ -2031,7 +2032,7 @@ func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 // A registered admin gets no link and the run prints none.
 func TestConvergeRunPrintsNoLinkForARegisteredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeDeclaredAdmins(t, registered)
+	fakeDeclaredOperators(t, registered)
 	links := recordLinks(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
@@ -2053,7 +2054,7 @@ func TestConvergeRunReportsEachEmail(t *testing.T) {
 		{map[string]string{"alice@example.org": "dial tcp: i/o timeout"}, "fail", "failed: dial tcp: i/o timeout"},
 	} {
 		fakeConverge(t, nil)
-		fakeDeclaredAdmins(t, unregistered(true))
+		fakeDeclaredOperators(t, unregistered(true))
 		asked := fakeEmailFailures(t, tc.failed, nil)
 		recordLinks(t)
 		rec := recordConverge(t)
@@ -2082,13 +2083,13 @@ func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
 	saved := convergeRead
 	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
 		cfg, st, err := readConvergeState(c, s)
-		cfg.Admins["bob"] = config.Admin{Email: "bob@example.org"}
+		cfg.Operators["bob"] = config.Operator{Email: "bob@example.org"}
 		return cfg, st, err
 	}
 	t.Cleanup(func() { convergeRead = saved })
-	fakeDeclaredAdmins(t, func(app, id string, execute bool) (declaredAdmin, error) {
+	fakeDeclaredOperators(t, func(app, id string, execute bool) (declaredOperator, error) {
 		if id == "bob" {
-			return declaredAdmin{}, errors.New("POST /api/users: 400 email already in use")
+			return declaredOperator{}, errors.New("POST /api/users: 400 email already in use")
 		}
 		return unregistered(false)(app, id, execute)
 	})
@@ -2113,7 +2114,7 @@ func TestConvergeWithoutDeclaredAdminsNamesAMissingAdmin(t *testing.T) {
 	saved := convergeRead
 	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
 		cfg, st, err := readConvergeState(c, s)
-		cfg.Admins = nil
+		cfg.Operators = nil
 		return cfg, st, err
 	}
 	t.Cleanup(func() { convergeRead = saved })
@@ -2131,7 +2132,7 @@ func TestConvergeWithoutDeclaredAdminsNamesAMissingAdmin(t *testing.T) {
 // A run that stopped asks about no admin.
 func TestConvergeStoppedRunAsksNoAdmin(t *testing.T) {
 	fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
-	asked := fakeDeclaredAdmins(t, unregistered(false))
+	asked := fakeDeclaredOperators(t, unregistered(false))
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("the run did not stop")
 	}
@@ -2140,13 +2141,13 @@ func TestConvergeStoppedRunAsksNoAdmin(t *testing.T) {
 	}
 }
 
-// apply asks for each declared admin as the table in the spec says: the key
+// apply asks for each declared operator as the table in the spec says: the key
 // as the username, the name split at its first space, verified, a 24 hour
 // link, emailed when the deployment has SMTP.
-func TestAdminRequest(t *testing.T) {
+func TestOperatorRequest(t *testing.T) {
 	cfg := fixture(t)
-	cfg.Admins["alice"] = config.Admin{Name: "Alice van Example", Email: "alice@example.org"}
-	req := adminRequest(cfg, "auth", "alice")
+	cfg.Operators["alice"] = config.Operator{Name: "Alice van Example", Email: "alice@example.org"}
+	req := operatorRequest(cfg, "auth", "alice")
 	if req.Username != "alice" || req.Email != "alice@example.org" || req.FirstName != "Alice" || req.LastName != "van Example" ||
 		!req.Declared || req.LinkTTL != 24*time.Hour || req.PublicURL != "https://"+cfg.Apps["auth"].Hostname {
 		t.Errorf("request %+v", req)
@@ -2156,20 +2157,43 @@ func TestAdminRequest(t *testing.T) {
 	}
 	cfg.SMTP = config.SMTP{}
 	cfg.Apps["auth"] = withoutSMTP(cfg.Apps["auth"])
-	if adminRequest(cfg, "auth", "alice").EmailLink {
+	if operatorRequest(cfg, "auth", "alice").EmailLink {
 		t.Error("emails without SMTP")
 	}
 }
 
 func withoutSMTP(a config.App) config.App { a.SMTP = nil; return a }
 
-// A declared admin joins every app's member group as well as its admin group,
+// An operator joins operators, members, and every app's admin and member
+// groups, and is a Pocket ID administrator only under management: pocket-id.
+func TestOperatorRequestFollowsManagement(t *testing.T) {
+	cfg := fixture(t)
+	for management, member := range map[string]bool{"paisans": true, "pocket-id": false} {
+		app := cfg.Apps["auth"]
+		settings := maps.Clone(app.Settings)
+		settings["management"] = management
+		app.Settings = settings
+		cfg.Apps["auth"] = app
+		req := operatorRequest(cfg, "auth", "alice")
+		if req.Member != member {
+			t.Errorf("%s: Member %t, want %t", management, req.Member, member)
+		}
+		groups := req.Groups()
+		for _, want := range append(append([]string{"operators", "members"}, adminGroups(cfg)...), memberGroups(cfg)...) {
+			if !slices.Contains(groups, want) {
+				t.Errorf("%s: groups %v lack %s", management, groups, want)
+			}
+		}
+	}
+}
+
+// A declared operator joins every app's member group as well as its admin group,
 // since an app whose member gate does not admit its administrator refuses
 // their first login.
-func TestAdminRequestJoinsTheMemberGroups(t *testing.T) {
+func TestOperatorRequestJoinsTheMemberGroups(t *testing.T) {
 	cfg := fixture(t)
-	cfg.Admins["alice"] = config.Admin{Name: "Alice Example", Email: "alice@example.org"}
-	req := adminRequest(cfg, "auth", "alice")
+	cfg.Operators["alice"] = config.Operator{Name: "Alice Example", Email: "alice@example.org"}
+	req := operatorRequest(cfg, "auth", "alice")
 	if want := memberGroups(cfg); len(want) == 0 || !slices.Equal(req.MemberGroups, want) {
 		t.Errorf("member groups %v, want %v", req.MemberGroups, want)
 	}
@@ -2229,9 +2253,9 @@ func TestConvergeRunAdminCheckHoldsTheRunsReporter(t *testing.T) {
 	}
 	run := recordHolds(t)
 	t.Cleanup(func() { convergeRun = saved; routeHolds(ui.Discard) })
-	fakeDeclaredAdmins(t, func(string, string, bool) (declaredAdmin, error) {
+	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
 		holdOutput()()
-		return declaredAdmin{}, nil
+		return declaredOperator{}, nil
 	})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
@@ -2296,9 +2320,9 @@ func TestAFailedChecksAdviceFollowsItsLine(t *testing.T) {
 // start in one column however long the names are.
 func TestPrintLoginLinksAlignsEachLink(t *testing.T) {
 	links := recordLinks(t)
-	printLoginLinks([]declaredAdmin{
-		{App: "auth", ID: "alice", Link: "https://id.example.org/lc/tok-a", ExpiresIn: adminLinkTTL},
-		{App: "auth-staff", ID: "bob", Link: "https://staff.example.org/lc/tok-b", ExpiresIn: adminLinkTTL},
+	printLoginLinks([]declaredOperator{
+		{App: "auth", ID: "alice", Link: "https://id.example.org/lc/tok-a", ExpiresIn: operatorLinkTTL},
+		{App: "auth-staff", ID: "bob", Link: "https://staff.example.org/lc/tok-b", ExpiresIn: operatorLinkTTL},
 	})
 	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n" +
 		"  alice on auth      https://id.example.org/lc/tok-a\n" +

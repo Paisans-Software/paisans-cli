@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// linkFake is a Pocket ID holding the fixture's declared admin alice, and
+// linkFake is a Pocket ID holding the fixture's declared operator alice, and
 // any other account it is told of, reached through curl configs.
 type linkFake struct {
 	registry *registryFake
@@ -64,13 +64,13 @@ func linkArgs(extra ...string) []string {
 	return append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "alice"}, extra...)
 }
 
-// A dry run finds the declared admin's account and says what it would issue,
+// A dry run finds the declared operator's account and says what it would issue,
 // and reaches nothing that changes: no link, no registry claim.
 func TestAdminMagicLinkDryRunChangesNothing(t *testing.T) {
 	fake := withLinkFake(t)
 	rec := withRecorder(t, true)
 	var err error
-	stdout := captureStdout(t, func() { err = runAdminMagicLink(linkArgs()) })
+	stdout := captureStdout(t, func() { err = runOperatorMagicLink(linkArgs()) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestAdminMagicLinkDryRunChangesNothing(t *testing.T) {
 }
 
 // An execute issues the link, prints it once on stdout and nowhere else, and
-// changes nothing about the account: no create, no group, no admin flag.
+// changes nothing about the account: no create, no group, no operator flag.
 func TestAdminMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 	fake := withLinkFake(t)
 	key := fixtureAPIKey(t)
@@ -95,7 +95,7 @@ func TestAdminMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 	saved := loginLinkOut
 	loginLinkOut = &out
 	t.Cleanup(func() { loginLinkOut = saved })
-	if err := runAdminMagicLink(linkArgs("--execute")); err != nil {
+	if err := runOperatorMagicLink(linkArgs("--execute")); err != nil {
 		t.Fatal(err)
 	}
 	stdout := out.String()
@@ -114,22 +114,22 @@ func TestAdminMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 	}
 }
 
-// Only a declared admin with an account is given a link: a name not under
-// admins is refused before any host is reached, and a declared admin apply has
+// Only a declared operator with an account is given a link: a name not under
+// operators is refused before any host is reached, and a declared operator apply has
 // not made yet, or whose account is disabled, is refused with why.
 func TestAdminMagicLinkRefusals(t *testing.T) {
 	fake := withLinkFake(t)
 	withRecorder(t, true)
-	err := runAdminMagicLink([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "mallory", "--execute"})
-	if err == nil || !strings.Contains(problemText(err), "not a declared admin") || len(fake.calls) != 0 {
+	err := runOperatorMagicLink([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "mallory", "--execute"})
+	if err == nil || !strings.Contains(problemText(err), "not a declared operator") || len(fake.calls) != 0 {
 		t.Errorf("an undeclared name: %v, %d calls", err, len(fake.calls))
 	}
 	fake.missing = true
-	if err := runAdminMagicLink(linkArgs("--execute")); err == nil || !strings.Contains(err.Error(), "apply makes every declared admin's account") || fake.issued {
+	if err := runOperatorMagicLink(linkArgs("--execute")); err == nil || !strings.Contains(err.Error(), "apply makes every declared operator's account") || fake.issued {
 		t.Errorf("no account yet: %v", err)
 	}
 	fake.missing, fake.disabled = false, true
-	if err := runAdminMagicLink(linkArgs("--execute")); err == nil || !strings.Contains(err.Error(), "disabled") || fake.issued {
+	if err := runOperatorMagicLink(linkArgs("--execute")); err == nil || !strings.Contains(err.Error(), "disabled") || fake.issued {
 		t.Errorf("a disabled account: %v", err)
 	}
 }

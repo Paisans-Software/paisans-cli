@@ -29,7 +29,7 @@ acme:
 # The people who may log in to the sites. Each becomes a Pocket ID
 # administrator on the first apply, and each key below an authorized key on
 # every site that names them.
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

@@ -15,7 +15,7 @@ acme:
   # An adopter's own image on `latest`, which crosses Caddy major versions.
   image: ghcr.io/example-org/caddy-route53:latest
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

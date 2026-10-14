@@ -50,8 +50,8 @@ func (s *Secrets) Get(key string) (string, bool) {
 		value = map[string]string{"client_id": client.ClientID, "client_secret": client.ClientSecret}[parts[2]]
 	case len(parts) >= 2 && parts[0] == "pocket_id_groups":
 		value = s.PocketIDGroups[strings.Join(parts[1:], ".")]
-	case len(parts) == 3 && parts[0] == "admins" && parts[2] == "dns_provider_email":
-		value = s.Admins[parts[1]].DNSProviderEmail
+	case len(parts) == 3 && parts[0] == "operators" && parts[2] == "dns_provider_email":
+		value = s.Operators[parts[1]].DNSProviderEmail
 	}
 	return value, value != ""
 }
@@ -153,22 +153,22 @@ func (s *Secrets) Set(key, value string) error {
 			s.PocketIDGroups = map[string]string{}
 		}
 		s.PocketIDGroups[strings.Join(parts[1:], ".")] = value
-	case len(parts) == 3 && parts[0] == "admins" && secretName.MatchString(parts[1]):
+	case len(parts) == 3 && parts[0] == "operators" && secretName.MatchString(parts[1]):
 		if parts[2] != "dns_provider_email" {
-			return fmt.Errorf("%s: an admin's entry has dns_provider_email, not %q", key, parts[2])
+			return fmt.Errorf("%s: an operator's entry has dns_provider_email, not %q", key, parts[2])
 		}
-		if s.Admins == nil {
-			s.Admins = map[string]AdminSecrets{}
+		if s.Operators == nil {
+			s.Operators = map[string]OperatorSecrets{}
 		}
-		a := s.Admins[parts[1]]
+		a := s.Operators[parts[1]]
 		a.DNSProviderEmail = value
-		if a == (AdminSecrets{}) {
-			delete(s.Admins, parts[1])
+		if a == (OperatorSecrets{}) {
+			delete(s.Operators, parts[1])
 		} else {
-			s.Admins[parts[1]] = a
+			s.Operators[parts[1]] = a
 		}
 	default:
-		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, backup, backup.destinations.<name>, sites.<site>, apps.<app>, external, oidc_clients.<app>, pocket_id_groups and admins.<admin>", key)
+		return fmt.Errorf("%s: names no secret this file holds. Secrets live under cluster, storage.garage, backup, backup.destinations.<name>, sites.<site>, apps.<app>, external, oidc_clients.<app>, pocket_id_groups and operators.<operator>", key)
 	}
 	return nil
 }

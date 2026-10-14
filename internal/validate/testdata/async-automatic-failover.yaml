@@ -12,7 +12,7 @@ mesh:
 acme:
   provider: desec
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

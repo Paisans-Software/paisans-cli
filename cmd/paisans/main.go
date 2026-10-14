@@ -95,8 +95,8 @@ func main() {
 		err = runGateway(os.Args[2:])
 	case "config":
 		err = runConfig(os.Args[2:], os.Stdin, os.Stdout)
-	case "admin":
-		err = runAdmin(os.Args[2:], os.Stdin, os.Stdout)
+	case "operator":
+		err = runOperator(os.Args[2:], os.Stdin, os.Stdout)
 	case "secrets":
 		err = runSecrets(os.Args[2:])
 	case "app":

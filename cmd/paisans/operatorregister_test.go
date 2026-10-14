@@ -29,7 +29,7 @@ func registerWorkstation(t *testing.T, answer string, f configstore.Files, runs 
 }
 
 // withAdminBob is the fixture's paisans-stack.yaml with alice's key replaced by alice
-// and a second admin, bob, holding bob.
+// and a second operator, bob, holding bob.
 func withAdminBob(t *testing.T, alice, bob string) string {
 	t.Helper()
 	return strings.Replace(fixtureAs(t, alice), "sites:\n", "  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      "+bob+"\nsites:\n", 1)
@@ -44,15 +44,15 @@ func pushed(runs []string) bool {
 	return false
 }
 
-// With no agent key any admin lists, register refuses, prints the agent's
+// With no agent key any operator lists, register refuses, prints the agent's
 // keys, and says where to add one.
 func TestAdminRegisterWithoutAnAdminKeyPrintsTheAgentsKeys(t *testing.T) {
 	shas, answer, files := storedHistory(t, 1, 0)
 	_, other := testKey(t)
 	l := registerWorkstation(t, answer, files[0], nil, other)
 	var out bytes.Buffer
-	err := runAdmin([]string{"register", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "admins") || !strings.Contains(problemText(err), "another admin") {
+	err := runOperator([]string{"register", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(problemText(err), "operators") || !strings.Contains(problemText(err), "another operator") {
 		t.Fatalf("got %v", problemText(err))
 	}
 	if !strings.Contains(out.String(), other) {
@@ -60,7 +60,7 @@ func TestAdminRegisterWithoutAnAdminKeyPrintsTheAgentsKeys(t *testing.T) {
 	}
 }
 
-// Keys of two admins in the agent refuse, naming both and asking for --key.
+// Keys of two operators in the agent refuse, naming both and asking for --key.
 func TestAdminRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
 	_, alice := testKey(t)
 	_, bob := testKey(t)
@@ -69,7 +69,7 @@ func TestAdminRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
 	var runs []string
 	l := registerWorkstation(t, "", f, &runs, alice, bob)
 	var out bytes.Buffer
-	err := runAdmin([]string{"register", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
+	err := runOperator([]string{"register", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
 	text := problemText(err)
 	if err == nil || !strings.Contains(text, "alice") || !strings.Contains(text, "bob") || !strings.Contains(text, "--key") {
 		t.Fatalf("got %v", text)
@@ -86,7 +86,7 @@ func TestAdminRegisterRefusesFilesThatDifferFromTheHead(t *testing.T) {
 	var runs []string
 	l := registerWorkstation(t, answer, files[0], &runs, pub)
 	var out bytes.Buffer
-	err := runAdmin([]string{"register", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runOperator([]string{"register", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(problemText(err), "differ") {
 		t.Fatalf("got %v", problemText(err))
 	}
@@ -116,7 +116,7 @@ func TestAdminRegisterDryRunThenExecute(t *testing.T) {
 	t.Cleanup(func() { configSignWith = savedSign })
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	if err := runAdmin([]string{"register", "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
 	for _, name := range []string{"signing-key", "config-head", "config-root", "config-seen"} {
@@ -127,7 +127,7 @@ func TestAdminRegisterDryRunThenExecute(t *testing.T) {
 	if synced(runs) || pushed(runs) {
 		t.Fatalf("a dry run changed a site: %q", runs)
 	}
-	if err := runAdmin([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
 	head, _ := l.Head()
@@ -166,7 +166,7 @@ func TestAdminRegisterWithoutAMajorityAsksPartial(t *testing.T) {
 	t.Cleanup(func() { configSignWith = savedSign })
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	err := runAdmin([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
+	err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "partial") {
 		t.Fatalf("got %v", problemText(err))
 	}
@@ -175,7 +175,7 @@ func TestAdminRegisterWithoutAMajorityAsksPartial(t *testing.T) {
 			t.Errorf("a refused register wrote %s", name)
 		}
 	}
-	if err := runAdmin([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, answering(t, "partial\n"), &out); err != nil {
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, answering(t, "partial\n"), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
 	if k, _ := l.SigningKey(); k != pub {

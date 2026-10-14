@@ -175,8 +175,8 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("does not load: %v\n%s", err, data)
 	}
-	if cfg.Community.Name != a.Name || cfg.Admins["alice"].Name != a.Admins[0].Name || cfg.SMTP.FromName != "yes" {
-		t.Errorf("read back %q, %q, %q", cfg.Community.Name, cfg.Admins["alice"].Name, cfg.SMTP.FromName)
+	if cfg.Community.Name != a.Name || cfg.Operators["alice"].Name != a.Admins[0].Name || cfg.SMTP.FromName != "yes" {
+		t.Errorf("read back %q, %q, %q", cfg.Community.Name, cfg.Operators["alice"].Name, cfg.SMTP.FromName)
 	}
 	if !strings.Contains(string(data), "id: "+testID) {
 		t.Errorf("the id is not written")

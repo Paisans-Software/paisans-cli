@@ -15,7 +15,7 @@ acme:
   # Upstream's own image, which carries no DNS provider module at all.
   image: caddy:2-alpine
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

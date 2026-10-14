@@ -25,7 +25,7 @@ mesh:
 acme:
   provider: cloudflare
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

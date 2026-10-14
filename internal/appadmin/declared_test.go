@@ -131,3 +131,48 @@ func TestDeclaredAdminTitles(t *testing.T) {
 		t.Errorf("titles %q", got)
 	}
 }
+
+// A member request, an operator under management: paisans, makes an account
+// that is not a Pocket ID administrator, and its title says so.
+func TestMemberRequestCreatesNoAdministrator(t *testing.T) {
+	f := &fakePocketID{}
+	req := declaredRequest()
+	req.Member = true
+	plan, err := Build(config.BlueprintPocketID, f, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Titles()[0]; got != "create user founder" {
+		t.Errorf("title %q, want create user founder", got)
+	}
+	if _, err := Execute(plan, f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.users) != 1 || f.users[0].IsAdmin {
+		t.Errorf("users %+v, want one that is not an administrator", f.users)
+	}
+	if !strings.Contains(f.bodies[0], `"isAdmin":false`) {
+		t.Errorf("create body %s, want isAdmin false", f.bodies[0])
+	}
+}
+
+// A member request never grants the flag and never clears one set by hand:
+// that flag is the operator reconciler's to report.
+func TestMemberRequestLeavesTheAdministratorFlag(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder",
+			Email: strptr("founder@example.org"), EmailVerified: true, IsAdmin: admin}},
+			passkeys: map[string]bool{"u-1": true}}
+		req := declaredRequest()
+		req.Member = true
+		req.AdminGroups = nil
+		req.MemberGroups = nil
+		plan, err := Build(config.BlueprintPocketID, f, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Actions) != 0 {
+			t.Errorf("isAdmin %t: actions %v, want none", admin, plan.Actions)
+		}
+	}
+}

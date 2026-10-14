@@ -68,12 +68,12 @@ func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
 		return hex.EncodeToString(mac.Sum(nil))
 	}
 	var pairs []string
-	for _, id := range sortedKeys(p.secrets.Admins) {
-		to := p.secrets.Admins[id].DNSProviderEmail
+	for _, id := range sortedKeys(p.secrets.Operators) {
+		to := p.secrets.Operators[id].DNSProviderEmail
 		if strings.TrimSpace(to) == "" {
 			continue
 		}
-		pairs = append(pairs, hash(p.cfg.Admins[id].Email)+"="+hash(to))
+		pairs = append(pairs, hash(p.cfg.Operators[id].Email)+"="+hash(to))
 	}
 	sort.Strings(pairs)
 	return dnsValues{
@@ -93,14 +93,14 @@ func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
 func (p *planner) checkDNSMapping() error {
 	expected := map[string]string{} // address to the admin expected there
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-	for _, id := range sortedKeys(p.secrets.Admins) {
-		if _, ok := p.cfg.Admins[id]; !ok {
+	for _, id := range sortedKeys(p.secrets.Operators) {
+		if _, ok := p.cfg.Operators[id]; !ok {
 			return fmt.Errorf("secrets admins.%s: names no admin %s declares. Its dns_provider_email maps an admin there by key", id, config.FileName)
 		}
 	}
-	for _, id := range sortedKeys(p.cfg.Admins) {
-		address := p.cfg.Admins[id].Email
-		if mapped := p.secrets.Admins[id].DNSProviderEmail; strings.TrimSpace(mapped) != "" {
+	for _, id := range sortedKeys(p.cfg.Operators) {
+		address := p.cfg.Operators[id].Email
+		if mapped := p.secrets.Operators[id].DNSProviderEmail; strings.TrimSpace(mapped) != "" {
 			address = mapped
 		}
 		if other, ok := expected[norm(address)]; ok && norm(address) != "" {

@@ -26,7 +26,7 @@ func withDNS(t *testing.T, twoMonitors bool) (*config.Config, *config.Secrets) {
 		cfg, secrets = withTwoMonitors(t)
 	}
 	cfg.ACME.Provider = "cloudflare"
-	cfg.Admins["bob"] = config.Admin{Name: "Bob Example", Email: "bob@example.org", Keys: cfg.Admins["alice"].Keys}
+	cfg.Operators["bob"] = config.Operator{Name: "Bob Example", Email: "bob@example.org", Keys: cfg.Operators["alice"].Keys}
 	if secrets.External == nil {
 		secrets.External = map[string]string{}
 	}
@@ -34,7 +34,7 @@ func withDNS(t *testing.T, twoMonitors bool) (*config.Config, *config.Secrets) {
 	secrets.Apps["auth"]["dns_email_hash_key"] = dnsHashKey
 	secrets.Apps["auth"]["dns_super_admins_heartbeat_token"] = superToken
 	secrets.Apps["auth"]["dns_2fa_heartbeat_token"] = twoFAToken
-	secrets.Admins = map[string]config.AdminSecrets{"bob": {DNSProviderEmail: bobAtWork}}
+	secrets.Operators = map[string]config.OperatorSecrets{"bob": {DNSProviderEmail: bobAtWork}}
 	return cfg, secrets
 }
 
@@ -162,16 +162,16 @@ func TestThePusherRelaysTheDNSAnswers(t *testing.T) {
 // names nobody, is refused by name, never by address.
 func TestABadMappingIsRefused(t *testing.T) {
 	for name, tc := range map[string]struct {
-		admins map[string]config.AdminSecrets
+		admins map[string]config.OperatorSecrets
 		want   string
 	}{
-		"unknown admin":         {map[string]config.AdminSecrets{"carol": {DNSProviderEmail: "carol@example.org"}}, "admins.carol"},
-		"two at one address":    {map[string]config.AdminSecrets{"alice": {DNSProviderEmail: bobAtWork}, "bob": {DNSProviderEmail: bobAtWork}}, "alice and bob"},
-		"another admin's email": {map[string]config.AdminSecrets{"bob": {DNSProviderEmail: " Alice@example.org"}}, "alice and bob"},
+		"unknown admin":         {map[string]config.OperatorSecrets{"carol": {DNSProviderEmail: "carol@example.org"}}, "admins.carol"},
+		"two at one address":    {map[string]config.OperatorSecrets{"alice": {DNSProviderEmail: bobAtWork}, "bob": {DNSProviderEmail: bobAtWork}}, "alice and bob"},
+		"another admin's email": {map[string]config.OperatorSecrets{"bob": {DNSProviderEmail: " Alice@example.org"}}, "alice and bob"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, secrets := withDNS(t, false)
-			secrets.Admins = tc.admins
+			secrets.Operators = tc.admins
 			_, err := render.Build(cfg, secrets)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want an error naming %q", err, tc.want)

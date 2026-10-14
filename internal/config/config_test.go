@@ -25,7 +25,7 @@ community:
   domain: example.org
 mesh:
   subnet: 10.44.0.0/24
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
@@ -60,7 +60,7 @@ mesh:
   subnet: 10.44.0.0/24
 acme:
   provider: desec
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
@@ -306,10 +306,10 @@ func loadErr(t *testing.T, body string) string {
 	return err.Error()
 }
 
-// withAdmin replaces minimal's admins section with the given one, which may be
+// withAdmin replaces minimal's operators section with the given one, which may be
 // empty to leave the section out.
 func withAdmin(body, section string) string {
-	start := strings.Index(body, "admins:\n")
+	start := strings.Index(body, "operators:\n")
 	end := strings.Index(body, "sites:\n")
 	return body[:start] + section + body[end:]
 }
@@ -317,7 +317,7 @@ func withAdmin(body, section string) string {
 // A site's ssh.keys names admins, and the keys it authorises are theirs,
 // merged in the order the site lists them.
 func TestSSHSectionLoads(t *testing.T) {
-	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n\n      " + fakeKeyC + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	admins := "operators:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n\n      " + fakeKeyC + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
 	body := withAdmin(withSSH("    ssh:\n      host: 203.0.113.10\n      user: ubuntu\n      port: 2222\n      keys: [bob, alice]\n"), admins)
 	cfg, err := config.Load(write(t, body))
 	if err != nil {
@@ -327,7 +327,7 @@ func TestSSHSectionLoads(t *testing.T) {
 	if site.SSHHost() != "203.0.113.10" || site.SSH.User != "ubuntu" || site.SSH.PortOrDefault() != 2222 {
 		t.Fatalf("section read as %+v", site.SSH)
 	}
-	if a := cfg.Admins["alice"]; a.Name != "Alice Example" || a.Email != "alice@example.org" {
+	if a := cfg.Operators["alice"]; a.Name != "Alice Example" || a.Email != "alice@example.org" {
 		t.Errorf("admin alice read as %+v", a)
 	}
 	keys, problems := site.SSH.AuthorizedKeys()
@@ -347,7 +347,7 @@ func TestSSHSectionLoads(t *testing.T) {
 
 // Each site gets only the keys of the admins it names.
 func TestSSHKeysAreOnlyTheListedAdmins(t *testing.T) {
-	admins := "admins:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
+	admins := "operators:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
 	cfg, err := config.Load(write(t, withAdmin(minimal, admins)))
 	if err != nil {
 		t.Fatal(err)
@@ -429,8 +429,8 @@ func TestSSHSectionRefusals(t *testing.T) {
 		{"user in host", "    ssh:\n      host: ubuntu@home-a.local\n      user: ubuntu\n" + key, "neither a hostname nor an IP address"},
 		{"no key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n", "ssh.keys: required"},
 		{"empty keys", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: []\n", "ssh.keys: required"},
-		{"keys a mapping", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n", "ssh.keys must list the admins who may log in"},
-		{"unknown admin", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: [alice, carol]\n", "sites.home-a.ssh.keys: carol is not in the admins section"},
+		{"keys a mapping", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys:\n        alice: " + fakeKeyA + "\n", "ssh.keys must list the operators who may log in"},
+		{"unknown admin", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: [alice, carol]\n", "sites.home-a.ssh.keys: carol is not in the operators section"},
 		{"admin twice", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      keys: [alice, alice]\n", "sites.home-a.ssh.keys: alice is listed twice"},
 		{"public_key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      public_key: |\n        " + fakeKeyA + "\n", "field public_key not found"},
 		{"unknown key", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      public_keys: " + fakeKeyA + "\n", "field public_keys not found"},
@@ -445,9 +445,9 @@ func TestSSHSectionRefusals(t *testing.T) {
 	}
 }
 
-func TestAdminSectionRefusals(t *testing.T) {
+func TestOperatorSectionRefusals(t *testing.T) {
 	admin := func(id, body string) string {
-		return "admins:\n  " + id + ":\n" + body
+		return "operators:\n  " + id + ":\n" + body
 	}
 	keyed := func(lines ...string) string {
 		return "    keys: |\n      " + strings.Join(lines, "\n      ") + "\n"
@@ -455,19 +455,19 @@ func TestAdminSectionRefusals(t *testing.T) {
 	cases := []struct {
 		name, section, want string
 	}{
-		{"missing", "", "sites.home-a.ssh.keys: alice is not in the admins section"},
-		{"no email", admin("alice", keyed(fakeKeyA)), "admins.alice.email: required"},
-		{"no name", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: required. Give the admin's first and last name, Eg: name: Alice Example."},
-		{"one word name", admin("alice", "    name: Alice\n    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: \"Alice\" is not a first and a last name"},
-		{"blank last name", admin("alice", "    name: \"Alice  \"\n    email: alice@example.org\n"+keyed(fakeKeyA)), "admins.alice.name: \"Alice  \" is not a first and a last name"},
-		{"not an email", admin("alice", "    email: Alice <alice@example.org>\n"+keyed(fakeKeyA)), "admins.alice.email: \"Alice <alice@example.org>\" is not an email address alone"},
-		{"no keys", admin("alice", "    email: alice@example.org\n"), "admins.alice.keys: required"},
-		{"not a key", admin("alice", "    email: alice@example.org\n"+keyed("ssh-ed25519 not-base64")), "admins.alice.keys: line 1 is not an OpenSSH public key"},
+		{"missing", "", "sites.home-a.ssh.keys: alice is not in the operators section"},
+		{"no email", admin("alice", keyed(fakeKeyA)), "operators.alice.email: required"},
+		{"no name", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)), "operators.alice.name: required. Give the operator's first and last name, Eg: name: Alice Example."},
+		{"one word name", admin("alice", "    name: Alice\n    email: alice@example.org\n"+keyed(fakeKeyA)), "operators.alice.name: \"Alice\" is not a first and a last name"},
+		{"blank last name", admin("alice", "    name: \"Alice  \"\n    email: alice@example.org\n"+keyed(fakeKeyA)), "operators.alice.name: \"Alice  \" is not a first and a last name"},
+		{"not an email", admin("alice", "    email: Alice <alice@example.org>\n"+keyed(fakeKeyA)), "operators.alice.email: \"Alice <alice@example.org>\" is not an email address alone"},
+		{"no keys", admin("alice", "    email: alice@example.org\n"), "operators.alice.keys: required"},
+		{"not a key", admin("alice", "    email: alice@example.org\n"+keyed("ssh-ed25519 not-base64")), "operators.alice.keys: line 1 is not an OpenSSH public key"},
 		{"private key path", admin("alice", "    email: alice@example.org\n"+keyed("~/.ssh/id_ed25519")), "not an OpenSSH public key"},
-		{"options", admin("alice", "    email: alice@example.org\n"+keyed("from=\"203.0.113.0/24\" "+fakeKeyA)), "admins.alice.keys: line 1 carries options"},
-		{"key twice", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA, strings.Replace(fakeKeyA, "alice@example.org", "alice@laptop", 1))), "admins.alice.keys: line 2 is a key the admin already lists"},
-		{"key shared", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)) + "  bob:\n    email: bob@example.org\n" + keyed(fakeKeyA), "admins.bob.keys: line 1 is admins.alice's key too"},
-		{"bad name", "admins:\n  \"Alice Smith\":\n    email: alice@example.org\n" + keyed(fakeKeyB) + admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA))[len("admins:\n"):], "admins.Alice Smith: not a name this toolkit accepts"},
+		{"options", admin("alice", "    email: alice@example.org\n"+keyed("from=\"203.0.113.0/24\" "+fakeKeyA)), "operators.alice.keys: line 1 carries options"},
+		{"key twice", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA, strings.Replace(fakeKeyA, "alice@example.org", "alice@laptop", 1))), "operators.alice.keys: line 2 is a key the operator already lists"},
+		{"key shared", admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA)) + "  bob:\n    email: bob@example.org\n" + keyed(fakeKeyA), "operators.bob.keys: line 1 is operators.alice's key too"},
+		{"bad name", "operators:\n  \"Alice Smith\":\n    email: alice@example.org\n" + keyed(fakeKeyB) + admin("alice", "    email: alice@example.org\n"+keyed(fakeKeyA))[len("operators:\n"):], "operators.Alice Smith: not a name this toolkit accepts"},
 		{"unknown field", admin("alice", "    email: alice@example.org\n    public_keys: x\n"+keyed(fakeKeyA)), "field public_keys not found"},
 	}
 	for _, c := range cases {
@@ -716,18 +716,18 @@ func TestTheOldGateKeysAreRefused(t *testing.T) {
 func TestControlCharactersAreRefused(t *testing.T) {
 	esc := `\e[1A\e[2K~ key`
 	alice := func(name, email, keys string) string {
-		return "admins:\n  alice:\n    name: \"" + name + "\"\n    email: \"" + email + "\"\n    keys: \"" + keys + "\"\n"
+		return "operators:\n  alice:\n    name: \"" + name + "\"\n    email: \"" + email + "\"\n    keys: \"" + keys + "\"\n"
 	}
 	cases := []struct {
 		name, body, want string
 	}{
-		{"key comment", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+" "+esc)), "admins.alice.keys: line 1 holds a control character (U+001B)"},
-		{"tab in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", strings.Replace(fakeKeyA, " alice", `\talice`, 1))), "admins.alice.keys: line 1 holds a control character (U+0009)"},
-		{"C1 in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+` \x9b2K`)), "admins.alice.keys: line 1 holds a control character (U+009B)"},
-		{"name", withAdmin(minimal, alice(`Alice `+esc, "alice@example.org", fakeKeyA)), "admins.alice.name holds a control character (U+001B)"},
-		{"email", withAdmin(minimal, alice("Alice Example", `alice\x7f@example.org`, fakeKeyA)), "admins.alice.email holds a control character (U+007F)"},
+		{"key comment", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+" "+esc)), "operators.alice.keys: line 1 holds a control character (U+001B)"},
+		{"tab in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", strings.Replace(fakeKeyA, " alice", `\talice`, 1))), "operators.alice.keys: line 1 holds a control character (U+0009)"},
+		{"C1 in a key", withAdmin(minimal, alice("Alice Example", "alice@example.org", fakeKeyA+` \x9b2K`)), "operators.alice.keys: line 1 holds a control character (U+009B)"},
+		{"name", withAdmin(minimal, alice(`Alice `+esc, "alice@example.org", fakeKeyA)), "operators.alice.name holds a control character (U+001B)"},
+		{"email", withAdmin(minimal, alice("Alice Example", `alice\x7f@example.org`, fakeKeyA)), "operators.alice.email holds a control character (U+007F)"},
 		{"image", strings.Replace(minimal, "    placement: cluster\n", "    placement: cluster\n    images:\n      app: \"ghcr.io/example/mbin:1.0"+esc+"\"\n", 1), "apps.talk.images.app holds a control character (U+001B)"},
-		{"acme image", strings.Replace(minimal, "admins:\n", "acme:\n  provider: desec\n  image: \"ghcr.io/example/caddy:1"+esc+"\"\nadmins:\n", 1), "acme.image holds a control character (U+001B)"},
+		{"acme image", strings.Replace(minimal, "operators:\n", "acme:\n  provider: desec\n  image: \"ghcr.io/example/caddy:1"+esc+"\"\noperators:\n", 1), "acme.image holds a control character (U+001B)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

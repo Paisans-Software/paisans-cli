@@ -104,7 +104,7 @@ func (c *checker) pocketIDAdminUsername() {
 	if len(c.pocketIDApps()) == 0 {
 		return
 	}
-	for _, id := range sortedKeys(c.cfg.Admins) {
+	for _, id := range sortedKeys(c.cfg.Operators) {
 		if last := id[len(id)-1]; last == '.' || last == '_' || last == '-' {
 			c.refuse("pocket-id-admin-username", "admins."+id,
 				"admin name is not a pocket id username",

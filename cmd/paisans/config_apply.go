@@ -83,7 +83,7 @@ type gathered struct {
 // without --site, whose steps each check that they load the same.
 // It refuses, before the review, what --execute could not publish: files
 // that are not the three of a version, a fork, a base that is not the
-// sites' newest version, a key no admin lists, and, with --execute, a run
+// sites' newest version, a key no operator lists, and, with --execute, a run
 // that reaches no site. No base at all is a deployment's first version.
 func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
 	l, err := workstationOf(configPath)
@@ -123,7 +123,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		return nil, &ui.Problem{Hint: "the local files are not based on the sites' newest version", Explain: err.Error() + ". Applying them would undo whatever that version changed. Nothing was applied.", Cause: err}
 	}
 	// After the gather, which brings the base into the local store: the
-	// key is checked against the admins the base lists.
+	// key is checked against the operators the base lists.
 	key, err := signingKeyFor(l, cfg)
 	if err != nil {
 		return nil, err

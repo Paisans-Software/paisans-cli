@@ -208,7 +208,7 @@ func TestPocketIDFileBackendWarnsOnlyWhenSetToOtherThanDatabase(t *testing.T) {
 // deployment runs Pocket ID, and only then.
 func TestPocketIDAdminUsername(t *testing.T) {
 	cfg := withAuth(t, nil, nil, nil)
-	cfg.Admins["joe-"] = config.Admin{Email: "joe@example.org"}
+	cfg.Operators["joe-"] = config.Operator{Email: "joe@example.org"}
 	r := validate.Check(cfg)
 	if got := findings(r, "pocket-id-admin-username"); len(got) != 1 || got[0] != "REFUSE admins.joe-" {
 		t.Errorf("findings %v", got)

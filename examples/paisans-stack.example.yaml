@@ -60,7 +60,7 @@ acme:
 # them, and host prepare makes every key they list an authorized key there, so
 # an admin's keys are written once however many sites they reach. email is
 # required; name is optional.
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

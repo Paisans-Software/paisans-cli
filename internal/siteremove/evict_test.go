@@ -381,7 +381,7 @@ id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 community: { name: Relay, domain: example.org }
 mesh: { subnet: 10.44.0.0/24 }
 acme: { provider: cloudflare }
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org

@@ -10,27 +10,27 @@ import (
 
 type fake struct {
 	vs     map[string]Version
-	admins map[string]map[string]string
+	operators map[string]map[string]string
 }
 
 func newFake() *fake {
-	return &fake{vs: map[string]Version{}, admins: map[string]map[string]string{}}
+	return &fake{vs: map[string]Version{}, operators: map[string]map[string]string{}}
 }
 
-// add records a version listing the given admins, each by the key "fp-<name>".
-func (f *fake) add(sha string, rev int, signer string, parents []string, admins ...string) {
+// add records a version listing the given operators, each by the key "fp-<name>".
+func (f *fake) add(sha string, rev int, signer string, parents []string, operators ...string) {
 	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true}
 	m := map[string]string{}
-	for _, n := range admins {
+	for _, n := range operators {
 		m["fp-"+n] = n
 	}
-	f.admins[sha] = m
+	f.operators[sha] = m
 }
 
 func (f *fake) graph() Graph {
 	return Graph{
 		Versions: f.vs,
-		Admins:   func(sha string) (map[string]string, error) { return f.admins[sha], nil },
+		Operators:   func(sha string) (map[string]string, error) { return f.operators[sha], nil },
 	}
 }
 
@@ -98,7 +98,7 @@ func TestJudgeLinearChain(t *testing.T) {
 func TestJudgeSignerAnchorIsNewest(t *testing.T) {
 	f := chain()
 	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
-	f.admins["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
+	f.operators["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
 	f.add("x3", 3, "fp-alice", on("v2"), "alice")
 	v := judgeOK(t, f, alice())
 	if v.AnchorAt != "v3" {
@@ -108,7 +108,7 @@ func TestJudgeSignerAnchorIsNewest(t *testing.T) {
 }
 
 // An attacker with root on every site writes a root signed by their own key,
-// listing themselves and the real admin's key. The operator's own signature on
+// listing themselves and the real operator's key. The operator's own signature on
 // the real chain is the anchor, so the forged chain is never trusted.
 func TestJudgeForgedRoot(t *testing.T) {
 	f := chain()
@@ -142,7 +142,7 @@ func TestJudgePinAloneAnchors(t *testing.T) {
 }
 
 // A pin is only an anchor when it is a root that passes shape and is signed
-// by an admin it lists itself.
+// by an operator it lists itself.
 func TestJudgePinMustBeAGoodRoot(t *testing.T) {
 	f := chain()
 	f.add("e1", 1, "fp-eve", nil, "alice")
@@ -221,7 +221,7 @@ func TestJudgeMutualRemovalOutsideHistoryIsAConflict(t *testing.T) {
 // A removal outside the anchor's history that nobody contests stands.
 func TestJudgeUncontestedRemovalOutsideHistory(t *testing.T) {
 	f := reviewAttack("fp-op")
-	f.admins["b2"] = map[string]string{"fp-op": "op", "fp-alice": "alice", "fp-bob": "bob"}
+	f.operators["b2"] = map[string]string{"fp-op": "op", "fp-alice": "alice", "fp-bob": "bob"}
 	f.add("b3", 3, "fp-alice", on("b2"), "op", "alice", "bob")
 	v := judgeOK(t, f, Anchor{Signer: "fp-op"})
 	wantUntrusted(t, v, "b2", "removal")
@@ -230,18 +230,18 @@ func TestJudgeUncontestedRemovalOutsideHistory(t *testing.T) {
 	wantHeads(t, v, "a3")
 }
 
-// Removal is per key: a key rotated out of an admin who stays can no longer
+// Removal is per key: a key rotated out of an operator who stays can no longer
 // sign on an older parent.
 func TestJudgeKeyRotation(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-old", nil)
-	f.admins["v1"] = map[string]string{"fp-old": "alice"}
+	f.operators["v1"] = map[string]string{"fp-old": "alice"}
 	f.add("v2", 2, "fp-old", on("v1"))
-	f.admins["v2"] = map[string]string{"fp-new": "alice"}
+	f.operators["v2"] = map[string]string{"fp-new": "alice"}
 	f.add("v3", 3, "fp-new", on("v2"))
-	f.admins["v3"] = map[string]string{"fp-new": "alice"}
+	f.operators["v3"] = map[string]string{"fp-new": "alice"}
 	f.add("x2", 2, "fp-old", on("v1"))
-	f.admins["x2"] = map[string]string{"fp-old": "alice"}
+	f.operators["x2"] = map[string]string{"fp-old": "alice"}
 	v := judgeOK(t, f, Anchor{Signer: "fp-new"})
 	wantUntrusted(t, v, "x2", "removal")
 	wantHeads(t, v, "v3")
@@ -280,7 +280,7 @@ func TestJudgeSignerNotInParentAdmins(t *testing.T) {
 	wantHeads(t, v, "v3")
 }
 
-// A merge's signer must be an admin in every parent, not only in one.
+// A merge's signer must be an operator in every parent, not only in one.
 func TestJudgeMergeSignerInEveryParent(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-alice", nil, "alice", "carol")
@@ -380,11 +380,11 @@ func TestJudgeUnreadableAdmins(t *testing.T) {
 	f := chain()
 	f.add("v4", 4, "fp-alice", on("v3"), "alice")
 	g := f.graph()
-	g.Admins = func(sha string) (map[string]string, error) {
+	g.Operators = func(sha string) (map[string]string, error) {
 		if sha == "v4" {
 			return nil, errors.New("bad yaml")
 		}
-		return f.admins[sha], nil
+		return f.operators[sha], nil
 	}
 	v, err := Judge(g, Anchor{Root: "v1"})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestJudgeInvalidPinWithSignerAnchor(t *testing.T) {
 	}
 }
 
-// A version in the anchor's history whose admins cannot be read would hide
+// A version in the anchor's history whose operators cannot be read would hide
 // its removals, so Judge refuses.
 func TestJudgeUnreadableAdminsInHistory(t *testing.T) {
 	f := newFake()
@@ -461,22 +461,22 @@ func TestJudgeUnreadableAdminsInHistory(t *testing.T) {
 	f.add("h3", 3, "fp-alice", on("h2"), "alice")
 	f.add("s2", 2, "fp-mallory", on("h1"), "alice", "mallory")
 	g := f.graph()
-	g.Admins = func(sha string) (map[string]string, error) {
+	g.Operators = func(sha string) (map[string]string, error) {
 		if sha == "h2" {
 			return nil, errors.New("bad yaml")
 		}
-		return f.admins[sha], nil
+		return f.operators[sha], nil
 	}
 	_, err := Judge(g, alice())
-	var u *UnreadableAdminsError
+	var u *UnreadableOperatorsError
 	if !errors.As(err, &u) || u.SHA != "h2" {
-		t.Fatalf("err = %v, want *UnreadableAdminsError for h2", err)
+		t.Fatalf("err = %v, want *UnreadableOperatorsError for h2", err)
 	}
 }
 
 func TestJudgeNilAdmins(t *testing.T) {
 	if _, err := Judge(Graph{Versions: chain().vs}, alice()); err == nil {
-		t.Fatal("no error with nil Admins")
+		t.Fatal("no error with nil Operators")
 	}
 }
 
@@ -496,7 +496,7 @@ func TestJudgeKeyRotatedTwice(t *testing.T) {
 		for _, fp := range fps {
 			m[fp] = "alice"
 		}
-		f.admins[sha] = m
+		f.operators[sha] = m
 	}
 	f.add("v1", 1, "k1", nil)
 	keys("v1", "k1")
@@ -519,18 +519,18 @@ func TestJudgeKeyRotatedTwice(t *testing.T) {
 	}
 }
 
-// An admin removed and later re-added with a new key signs again; their old
+// An operator removed and later re-added with a new key signs again; their old
 // key stays barred.
 func TestJudgeRemovedThenReaddedWithNewKey(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
 	f.add("v2", 2, "fp-alice", on("v1"), "alice")
 	f.add("v3", 3, "fp-alice", on("v2"), "alice")
-	f.admins["v3"]["fp-bob2"] = "bob"
+	f.operators["v3"]["fp-bob2"] = "bob"
 	f.add("v4", 4, "fp-bob2", on("v3"), "alice")
-	f.admins["v4"]["fp-bob2"] = "bob"
+	f.operators["v4"]["fp-bob2"] = "bob"
 	f.add("v5", 5, "fp-alice", on("v4"), "alice")
-	f.admins["v5"]["fp-bob2"] = "bob"
+	f.operators["v5"]["fp-bob2"] = "bob"
 	f.add("s2", 2, "fp-bob", on("v1"), "alice", "bob")
 	for _, a := range []Anchor{alice(), {Root: "v1"}} {
 		v := judgeOK(t, f, a)

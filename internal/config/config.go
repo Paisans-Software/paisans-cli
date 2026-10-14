@@ -87,9 +87,9 @@ type Config struct {
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
 	ACME ACME `yaml:"acme"`
-	// Admins is the people who may log in to the sites, under the name a
+	// Operators is the people who may log in to the sites, under the name a
 	// site's ssh.keys lists them by.
-	Admins  map[string]Admin `yaml:"admins"`
+	Operators  map[string]Operator `yaml:"operators"`
 	Sites   map[string]Site  `yaml:"sites"`
 	Cluster Cluster          `yaml:"cluster"`
 	Etcd    Etcd             `yaml:"etcd"`
@@ -1155,9 +1155,9 @@ func (c *Config) structural(noSubnet bool) error {
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
-		problems = append(problems, sshProblems(name, site, c.Admins)...)
+		problems = append(problems, sshProblems(name, site, c.Operators)...)
 	}
-	problems = append(problems, c.adminProblems()...)
+	problems = append(problems, c.operatorProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if !blueprintName.MatchString(name) {

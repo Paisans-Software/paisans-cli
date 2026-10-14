@@ -54,18 +54,24 @@ type Request struct {
 	// such app as well as of the provider.
 	AdminGroups []string
 	// MemberGroups is every group such an app admits as its members, sorted
-	// and without duplicates, for a Declared admin only. An administrator
+	// and without duplicates, for a Declared operator only. An administrator
 	// the apps cannot admit could not reach the instance they administer: an
 	// app's member gate reads its member group, and only an existing admin of
 	// that app is exempt, which a first login is not.
 	MemberGroups []string
 
-	// Declared is an admin the configuration's admins list declares, made by
+	// Declared is an operator the configuration's operators section declares, made by
 	// apply rather than by the operator naming them. Such an account may have
 	// been renamed by its owner since it was made, so it is also found by its
 	// email; and a link is issued whenever its owner has not registered a
 	// passkey yet, since until then nobody can sign in to it.
 	Declared bool
+	// Member makes the account a member of the identity provider and never
+	// its administrator: it is created without the flag, never granted it,
+	// and a flag set by hand is left for the operator reconciler to report.
+	// apply sets it for an operator under management: paisans, where the
+	// account service manages accounts and nobody administers Pocket ID.
+	Member bool
 	// LinkTTL is how long a login link is valid. Zero is the blueprint's
 	// own default.
 	LinkTTL time.Duration
@@ -240,9 +246,13 @@ func (p *Plan) Titles() []string {
 	for _, a := range p.Actions {
 		switch a {
 		case ActionCreate:
-			// The user is created as the app's administrator, which is the
-			// point of the command, so the title says so.
-			out = append(out, "create administrator "+p.req.Username)
+			// The user is created as the app's administrator unless the
+			// request is a member's, and the title says which.
+			if p.req.Member {
+				out = append(out, "create user "+p.req.Username)
+			} else {
+				out = append(out, "create administrator "+p.req.Username)
+			}
 		case ActionVerify:
 			out = append(out, "verify "+p.req.Username)
 		case ActionGrantAdmin:
@@ -261,7 +271,8 @@ func (p *Plan) Titles() []string {
 }
 
 // Execute runs the plan, then probes again and refuses to report success
-// unless the user now exists, is verified and is an admin. A command that
+// unless the user now exists, is verified and, unless the request is a
+// member's, is an admin. A command that
 // exits zero without doing its job is exactly what that second probe exists
 // to catch.
 func Execute(p *Plan, t Transport) (Outcome, error) {
@@ -276,7 +287,7 @@ func Execute(p *Plan, t Transport) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, redact(err, p.req.APIKey, outcome.LoginLink)
 	}
-	if !after.Exists || !after.Verified || !after.Admin {
+	if !after.Exists || !after.Verified || (!after.Admin && !p.req.Member) {
 		return Outcome{}, fmt.Errorf("%s: the commands succeeded but %s is now exists=%t verified=%t admin=%t", t.Describe(), p.req.Username, after.Exists, after.Verified, after.Admin)
 	}
 	if len(after.MissingGroups) > 0 {

@@ -73,13 +73,13 @@ func reach(sites map[string]*storeSite, names ...string) map[string]apply.Transp
 
 const testID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 
-// testConfig is a paisans-stack.yaml that loads, listing each admin's key. alice
+// testConfig is a paisans-stack.yaml that loads, listing each operator's key. alice
 // is always one, since the site's ssh section names her. note changes the
 // community's name, so two edits differ.
-func testConfig(note string, admins map[string]string) []byte {
+func testConfig(note string, operators map[string]string) []byte {
 	var a strings.Builder
-	for _, id := range slices.Sorted(maps.Keys(admins)) {
-		a.WriteString("  " + id + ":\n    name: " + strings.ToUpper(id[:1]) + id[1:] + " Example\n    email: " + id + "@example.org\n    keys: |\n      " + admins[id] + "\n")
+	for _, id := range slices.Sorted(maps.Keys(operators)) {
+		a.WriteString("  " + id + ":\n    name: " + strings.ToUpper(id[:1]) + id[1:] + " Example\n    email: " + id + "@example.org\n    keys: |\n      " + operators[id] + "\n")
 	}
 	return []byte(`version: 1
 id: ` + testID + `
@@ -90,7 +90,7 @@ mesh:
   subnet: 10.44.0.0/24
 acme:
   provider: desec
-admins:
+operators:
 ` + a.String() + `sites:
   home-a:
     roles: [data, apps]
@@ -131,8 +131,8 @@ func workstation(t *testing.T, f Files) Local {
 	return l
 }
 
-func edit(f Files, note string, admins map[string]string) Files {
-	f.Paisans = testConfig(note, admins)
+func edit(f Files, note string, operators map[string]string) Files {
+	f.Paisans = testConfig(note, operators)
 	return f
 }
 
@@ -221,10 +221,10 @@ func TestPublishResumesWithoutANewVersion(t *testing.T) {
 func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice, bob := newOperator(t), newOperator(t)
-	admins := map[string]string{"alice": alice.pub, "bob": bob.pub}
+	operators := map[string]string{"alice": alice.pub, "bob": bob.pub}
 	sites := storeSites(t, "home-a", "home-b")
 	all := reach(sites, "home-a", "home-b")
-	la := workstation(t, edit(testFiles(), "1", admins))
+	la := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, la, all, false)
 	if err != nil {
 		t.Fatal(err)
@@ -241,14 +241,14 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	if err := lb.Checkout(v1); err != nil {
 		t.Fatal(err)
 	}
-	if err := la.WriteFiles(edit(testFiles(), "2", admins)); err != nil {
+	if err := la.WriteFiles(edit(testFiles(), "2", operators)); err != nil {
 		t.Fatal(err)
 	}
 	v2, _, err := alice.publish(t, la, all, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := lb.WriteFiles(edit(testFiles(), "bob", admins)); err != nil {
+	if err := lb.WriteFiles(edit(testFiles(), "bob", operators)); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = bob.publish(t, lb, all, false)
@@ -260,13 +260,13 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	}
 }
 
-func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
+func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice, bob := newOperator(t), newOperator(t)
-	admins := map[string]string{"alice": alice.pub, "bob": bob.pub}
+	operators := map[string]string{"alice": alice.pub, "bob": bob.pub}
 	sites := storeSites(t, "home-a", "home-b")
 	all := reach(sites, "home-a", "home-b")
-	la := workstation(t, edit(testFiles(), "1", admins))
+	la := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, la, all, false)
 	if err != nil {
 		t.Fatal(err)
@@ -282,8 +282,8 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each reaches only one site, so neither sees the other's version.
-	la.WriteFiles(edit(testFiles(), "alice", admins))
-	lb.WriteFiles(edit(testFiles(), "bob", admins))
+	la.WriteFiles(edit(testFiles(), "alice", operators))
+	lb.WriteFiles(edit(testFiles(), "bob", operators))
 	a2, _, err := alice.publish(t, la, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestTwoAdminsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if !g.Verdict.Fork || len(g.Verdict.Heads) != 2 {
 		t.Fatalf("verdict %+v", g.Verdict)
 	}
-	la.WriteFiles(edit(testFiles(), "merged", admins))
+	la.WriteFiles(edit(testFiles(), "merged", operators))
 	if _, _, err := alice.publish(t, la, all, false); err == nil || !strings.Contains(err.Error(), "--merge") {
 		t.Fatalf("publish on a fork: %v", err)
 	}
@@ -375,15 +375,15 @@ func TestGatherWithoutAnAnchorIsRefused(t *testing.T) {
 func TestRecoverWritesTheFilesAndState(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
-	admins := map[string]string{"alice": alice.pub}
+	operators := map[string]string{"alice": alice.pub}
 	sites := storeSites(t, "home-a", "home-b")
 	all := reach(sites, "home-a", "home-b")
-	la := workstation(t, edit(testFiles(), "1", admins))
+	la := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, la, all, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := edit(testFiles(), "2", admins)
+	want := edit(testFiles(), "2", operators)
 	la.WriteFiles(want)
 	v2, _, err := alice.publish(t, la, all, false)
 	if err != nil {
@@ -415,14 +415,14 @@ func TestRecoverWritesTheFilesAndState(t *testing.T) {
 	}
 }
 
-// A publish signed by a key no admin of the parent lists is refused, and
+// A publish signed by a key no operator of the parent lists is refused, and
 // so is one that reaches no site.
 func TestPublishRefusesAKeyNotAnAdminsAndNoSite(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice, mallory := newOperator(t), newOperator(t)
 	sites := storeSites(t, "home-a")
 	l := workstation(t, edit(testFiles(), "1", map[string]string{"alice": alice.pub}))
-	if _, _, err := mallory.publish(t, l, reach(sites, "home-a"), false); err == nil || !strings.Contains(err.Error(), "admin") {
+	if _, _, err := mallory.publish(t, l, reach(sites, "home-a"), false); err == nil || !strings.Contains(err.Error(), "operator") {
 		t.Fatalf("mallory: %v", err)
 	}
 	sites["home-a"].down = true
@@ -532,14 +532,14 @@ func TestPublishSignsThroughTheAgent(t *testing.T) {
 func TestGatherRefusesARollbackTheWorkstationRemembers(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
-	admins := map[string]string{"alice": alice.pub}
+	operators := map[string]string{"alice": alice.pub}
 	sites := storeSites(t, "home-a", "home-b")
-	l := workstation(t, edit(testFiles(), "1", admins))
+	l := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, l, reach(sites, "home-a", "home-b"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.WriteFiles(edit(testFiles(), "2", admins))
+	l.WriteFiles(edit(testFiles(), "2", operators))
 	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -588,7 +588,7 @@ func TestGatherSyncsOnlyWhenAsked(t *testing.T) {
 }
 
 // forge adds a chain of n versions on parent to a site's store, each signed
-// by mallory and listing mallory as an admin in its own paisans-stack.yaml, which
+// by mallory and listing mallory as an operator in its own paisans-stack.yaml, which
 // is the history someone with root on a site can write.
 func forge(t *testing.T, s *storeSite, mallory operator, parent string, rev, n int) []string {
 	t.Helper()
@@ -604,20 +604,20 @@ func forge(t *testing.T, s *storeSite, mallory operator, parent string, rev, n i
 	return out
 }
 
-// A version mallory signs on v1, listing herself as an admin, is not trusted
+// A version mallory signs on v1, listing herself as an operator, is not trusted
 // and not a head, and nor is a longer chain of them that would outrank the
 // real head by revision.
 func TestForgedVersionsAreNeverHeads(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice, mallory := newOperator(t), newOperator(t)
-	admins := map[string]string{"alice": alice.pub}
+	operators := map[string]string{"alice": alice.pub}
 	sites := storeSites(t, "home-a")
-	l := workstation(t, edit(testFiles(), "1", admins))
+	l := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.WriteFiles(edit(testFiles(), "2", admins))
+	l.WriteFiles(edit(testFiles(), "2", operators))
 	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -644,14 +644,14 @@ func TestForgedVersionsAreNeverHeads(t *testing.T) {
 func TestAGatherCarriesTheSeenChangeAndRecordSeenWritesIt(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
-	admins := map[string]string{"alice": alice.pub}
+	operators := map[string]string{"alice": alice.pub}
 	sites := storeSites(t, "home-a")
-	l := workstation(t, edit(testFiles(), "1", admins))
+	l := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.WriteFiles(edit(testFiles(), "2", admins))
+	l.WriteFiles(edit(testFiles(), "2", operators))
 	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -699,25 +699,25 @@ func (o operator) attest(t *testing.T, l Local, sites map[string]apply.Transport
 	return attest(l, sites, o.pub, o.key, testNow, fakePull, fakePush)
 }
 
-// twoVersions is alice's v1 and v2 on every site, admins alice and bob, and
+// twoVersions is alice's v1 and v2 on every site, operators alice and bob, and
 // bob's workstation holding v2's files with nothing recorded.
 func twoVersions(t *testing.T) (alice, bob operator, sites map[string]*storeSite, v1, v2 string, lb Local) {
 	t.Helper()
 	needTools(t, "git", "ssh-keygen")
 	alice, bob = newOperator(t), newOperator(t)
-	admins := map[string]string{"alice": alice.pub, "bob": bob.pub}
+	operators := map[string]string{"alice": alice.pub, "bob": bob.pub}
 	sites = storeSites(t, "home-a", "home-b")
 	all := reach(sites, "home-a", "home-b")
-	la := workstation(t, edit(testFiles(), "1", admins))
+	la := workstation(t, edit(testFiles(), "1", operators))
 	v1, _, err := alice.publish(t, la, all, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	la.WriteFiles(edit(testFiles(), "2", admins))
+	la.WriteFiles(edit(testFiles(), "2", operators))
 	if v2, _, err = alice.publish(t, la, all, false); err != nil {
 		t.Fatal(err)
 	}
-	lb = workstation(t, edit(testFiles(), "2", admins))
+	lb = workstation(t, edit(testFiles(), "2", operators))
 	return alice, bob, sites, v1, v2, lb
 }
 

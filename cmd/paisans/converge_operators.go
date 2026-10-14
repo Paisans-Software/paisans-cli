@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,29 +17,29 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// adminLinkTTL is how long the login link apply issues a declared admin stays
+// operatorLinkTTL is how long the login link apply issues a declared operator stays
 // valid: a day, long enough to pass it on by hand and for its owner to open it.
 // Over 15 minutes it is also the 12 character code the login page takes
 // whether or not email login is on (see loginTTL in internal/appadmin).
-const adminLinkTTL = 24 * time.Hour
+const operatorLinkTTL = 24 * time.Hour
 
-// adminEmailWait is how long apply reads Pocket ID's log for a failed login
+// operatorEmailWait is how long apply reads Pocket ID's log for a failed login
 // link email. Pocket ID sends in the background after it answers and logs
 // only a failure, so a send is reported sent once this passes without one.
 // Tests shorten it.
-var adminEmailWait = 30 * time.Second
+var operatorEmailWait = 30 * time.Second
 
-// adminEmailPoll is how often the log is read while waiting.
-var adminEmailPoll = 5 * time.Second
+// operatorEmailPoll is how often the log is read while waiting.
+var operatorEmailPoll = 5 * time.Second
 
 // loginLinkOut is where the login links are written: standard output, once,
 // and nowhere else. Tests replace it.
 var loginLinkOut io.Writer = os.Stdout
 
-// declaredAdmin is the outcome of one admin on one Pocket ID app.
-type declaredAdmin struct {
+// declaredOperator is the outcome of one operator on one Pocket ID app.
+type declaredOperator struct {
 	App, ID, Email string
-	// Titles is the plan, one short phrase per action. Empty when the admin
+	// Titles is the plan, one short phrase per action. Empty when the operator
 	// has registered a passkey and there is nothing to do.
 	Titles []string
 	// Created, Link and ExpiresIn are what an execute did. Link is a
@@ -50,34 +51,48 @@ type declaredAdmin struct {
 	Emailed bool
 }
 
-// adminRequest is the request apply makes for a declared admin: the admin's
-// key as the username, their email, their name split at its first space,
-// every app's admin group, and every app's member group, since an app whose
-// member gate does not admit its administrator refuses their first login.
-// Founder decision. The username is fixed once the account exists:
-// nobody can edit their own account (blueprints.PocketIDAccountEditSetting),
-// and apply never renames one. validate holds the name to a first and a last.
-func adminRequest(cfg *config.Config, app, id string) appadmin.Request {
-	a := cfg.Admins[id]
+// operatorRequest is the request apply makes for a declared operator: the
+// operator's key as the username, their email, their name split at its first
+// space, the group operators and every app's admin group, and the member group
+// members and every app's member group, since an app whose member gate does
+// not admit its administrator refuses their first login. Founder decision.
+// Under management: paisans the account is a member, never a Pocket ID
+// administrator; under pocket-id it is one. The username is fixed once the
+// account exists: nobody can edit their own account
+// (blueprints.PocketIDAccountEditSetting), and apply never renames one.
+// validate holds the name to a first and a last.
+func operatorRequest(cfg *config.Config, app, id string) appadmin.Request {
+	a := cfg.Operators[id]
 	first, last, _ := strings.Cut(strings.TrimSpace(a.Name), " ")
+	admin := withGroup(adminGroups(cfg), blueprints.OperatorsGroup)
+	member := withGroup(memberGroups(cfg), blueprints.MembersGroup)
+	member = slices.DeleteFunc(member, func(g string) bool { return slices.Contains(admin, g) })
 	return appadmin.Request{App: app, Username: id, Email: a.Email,
-		FirstName: first, LastName: strings.TrimSpace(last), AdminGroups: adminGroups(cfg),
-		MemberGroups: memberGroups(cfg), Declared: true, LinkTTL: adminLinkTTL,
-		EmailLink: adminEmailOn(cfg, app),
+		FirstName: first, LastName: strings.TrimSpace(last), AdminGroups: admin,
+		MemberGroups: member, Declared: true, LinkTTL: operatorLinkTTL,
+		Member:    blueprints.PocketIDManagement(cfg.Apps[app].Settings) != blueprints.ManagementPocketID,
+		EmailLink: operatorEmailOn(cfg, app),
 		PublicURL: "https://" + cfg.Apps[app].Hostname,
 	}
 }
 
-// adminEmailOn reports whether a Pocket ID app emails its admins their links:
+// withGroup is groups with group added, sorted and without duplicates.
+func withGroup(groups []string, group string) []string {
+	out := append(slices.Clone(groups), group)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// operatorEmailOn reports whether a Pocket ID app emails its operators their links:
 // it can send mail and does not set email_one_time_access_as_admin false.
-func adminEmailOn(cfg *config.Config, app string) bool {
+func operatorEmailOn(cfg *config.Config, app string) bool {
 	return blueprints.PocketIDAdminEmail(cfg.Apps[app].Settings, cfg.CanMail(app))
 }
 
-// convergeDeclaredAdmin plans, and with execute makes, one declared admin of
+// convergeDeclaredOperator plans, and with execute makes, one declared operator of
 // a Pocket ID app, reaching it as convergeAdminCheck does. Tests replace it.
-var convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredAdmin, error) {
-	out := declaredAdmin{App: app, ID: id, Email: cfg.Admins[id].Email}
+var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredOperator, error) {
+	out := declaredOperator{App: app, ID: id, Email: cfg.Operators[id].Email}
 	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")
 	if err != nil {
 		return out, err
@@ -86,7 +101,7 @@ var convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeO
 	if err != nil {
 		return out, err
 	}
-	req := adminRequest(cfg, app, id)
+	req := operatorRequest(cfg, app, id)
 	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
 	plan, err := appadmin.Build(cfg.Apps[app].Blueprint, transport, req)
@@ -107,7 +122,7 @@ var convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeO
 }
 
 // convergeEmailFailures reads a Pocket ID app's log for failed login link
-// emails to addresses, for adminEmailWait, and returns each failure's error by
+// emails to addresses, for operatorEmailWait, and returns each failure's error by
 // address. It stops early once every address has failed. Tests replace it.
 var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptions, addresses []string) (map[string]string, error) {
 	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")
@@ -129,33 +144,33 @@ var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptio
 				failed[address] = why
 			}
 		}
-		if len(failed) == len(addresses) || time.Since(start) >= adminEmailWait {
+		if len(failed) == len(addresses) || time.Since(start) >= operatorEmailWait {
 			return failed, nil
 		}
-		time.Sleep(min(adminEmailPoll, adminEmailWait-time.Since(start)))
+		time.Sleep(min(operatorEmailPoll, operatorEmailWait-time.Since(start)))
 	}
 }
 
-// convergeAdmins makes every admin the configuration declares an
-// administrator of each Pocket ID app up says is running, and returns the
+// convergeOperators makes every operator the configuration declares a user of
+// each Pocket ID app up says is running, and returns the
 // login links issued. A dry run only plans, reading Pocket ID and changing
-// nothing. A deployment that declares no admins is checked for any admin
-// instead, as before admins were declared.
+// nothing. A deployment that declares no operators is checked for any operator
+// instead, as before operators were declared.
 //
-// An admin who could not be made fails the run, since the deployment cannot
-// be signed in to, but only after every other admin has been tried and the
+// An operator who could not be made fails the run, since the deployment cannot
+// be signed in to, but only after every other operator has been tried and the
 // links already issued are returned to be printed.
-func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execute bool, up func(app string) bool) ([]declaredAdmin, error) {
-	if len(cfg.Admins) == 0 {
-		convergeAnyAdmin(r, cfg, o, up)
+func convergeOperators(r ui.Reporter, cfg *config.Config, o convergeOptions, execute bool, up func(app string) bool) ([]declaredOperator, error) {
+	if len(cfg.Operators) == 0 {
+		convergeAnyOperator(r, cfg, o, up)
 		return nil, nil
 	}
-	ids := make([]string, 0, len(cfg.Admins))
-	for id := range cfg.Admins {
+	ids := make([]string, 0, len(cfg.Operators))
+	for id := range cfg.Operators {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	var links []declaredAdmin
+	var links []declaredOperator
 	var failures []error
 	section := false
 	for _, app := range cfg.AppNames() {
@@ -166,15 +181,15 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 			r.Section("pocket id")
 			section = true
 		}
-		var emailed []declaredAdmin
+		var emailed []declaredOperator
 		issued := len(links)
 		for _, id := range ids {
 			s := r.Step(id + " on " + app)
-			d, err := convergeDeclaredAdmin(cfg, app, id, o, execute)
+			d, err := convergeDeclaredOperator(cfg, app, id, o, execute)
 			switch {
 			case err != nil:
 				s.End(ui.Failed, errLine(err))
-				failures = append(failures, fmt.Errorf("making %s an administrator of %s: %w", id, app, err))
+				failures = append(failures, fmt.Errorf("making %s a user of %s: %w", id, app, err))
 			case len(d.Titles) == 0:
 				s.Done("registered")
 			case !execute:
@@ -183,7 +198,7 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 				}
 				s.End(ui.Pending, strings.Join(d.Titles, ", "))
 			default:
-				s.Done(adminDone(d))
+				s.Done(operatorDone(d))
 				if d.Link != "" {
 					links = append(links, d)
 				}
@@ -192,8 +207,8 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 				}
 			}
 		}
-		if execute && !adminEmailOn(cfg, app) && len(links) > issued {
-			r.Note("Pocket ID "+app+" emails no login links", adminEmailOffWhy(cfg, app))
+		if execute && !operatorEmailOn(cfg, app) && len(links) > issued {
+			r.Note("Pocket ID "+app+" emails no login links", operatorEmailOffWhy(cfg, app))
 		}
 		if len(emailed) > 0 {
 			convergeEmailResults(r, cfg, app, o, emailed)
@@ -202,8 +217,8 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 	return links, errors.Join(failures...)
 }
 
-// adminDone is what an execute did for one admin, in a few words.
-func adminDone(d declaredAdmin) string {
+// operatorDone is what an execute did for one operator, in a few words.
+func operatorDone(d declaredOperator) string {
 	var did []string
 	if d.Created {
 		did = append(did, "created")
@@ -217,18 +232,18 @@ func adminDone(d declaredAdmin) string {
 	return strings.Join(did, ", ")
 }
 
-// adminEmailOffWhy says why a Pocket ID app sends no login link email.
-func adminEmailOffWhy(cfg *config.Config, app string) string {
+// operatorEmailOffWhy says why a Pocket ID app sends no login link email.
+func operatorEmailOffWhy(cfg *config.Config, app string) string {
 	if !cfg.CanMail(app) {
 		return "Its smtp settings resolve no host or no from_address, so the links below are the only copies. Pass each one on yourself."
 	}
 	return "apps." + app + ".settings." + blueprints.PocketIDAdminEmailSetting + " is false, so the links below are the only copies. Pass each one on yourself."
 }
 
-// convergeEmailResults waits on Pocket ID's log and gives each emailed admin
+// convergeEmailResults waits on Pocket ID's log and gives each emailed operator
 // a line: sent, or failed with Pocket ID's own error. A failed email fails
 // nothing else: the printed link is still there.
-func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o convergeOptions, emailed []declaredAdmin) {
+func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o convergeOptions, emailed []declaredOperator) {
 	addresses := make([]string, len(emailed))
 	for i, d := range emailed {
 		addresses[i] = d.Email
@@ -254,7 +269,7 @@ func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o conve
 // is a credential: it goes to loginLinkOut once and is kept nowhere, so it is
 // printed whether output is a terminal or a pipe, which is how an operator
 // copies it to pass on.
-func printLoginLinks(links []declaredAdmin) {
+func printLoginLinks(links []declaredOperator) {
 	if len(links) == 0 {
 		return
 	}

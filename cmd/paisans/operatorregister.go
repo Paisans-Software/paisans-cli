@@ -15,28 +15,28 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// What follows is `paisans admin register` (docs/specs/2026-10-12-config-store.md,
-// *paisans admin register*). An admin who has never published has signed
+// What follows is `paisans operator register` (docs/specs/2026-10-12-config-store.md,
+// *paisans operator register*). An operator who has never published has signed
 // nothing, so their workstation has no anchor of its own to trust the sites'
 // versions from. register signs an attestation of the sites' newest version,
 // once it equals the files the operator already holds, and records the key:
 // from then on the operator's own signature is where trust starts.
 
-func runAdmin(args []string, stdin io.Reader, stdout io.Writer) error {
+func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "register" {
-		return runAdminRegister(args[1:], stdin, stdout)
+		return runOperatorRegister(args[1:], stdin, stdout)
 	}
 	if len(args) > 0 && args[0] == "magic-link" {
-		return runAdminMagicLink(args[1:])
+		return runOperatorMagicLink(args[1:])
 	}
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "admin takes one subcommand", Explain: "Use register or magic-link."}
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register or magic-link."}
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("admin has no subcommand %q", args[0]), Explain: "Use register or magic-link."}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register or magic-link."}
 }
 
-func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("admin register", flag.ExitOnError)
+func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("operator register", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	keyPath := fs.String("key", "", "the public key file (.pub) to sign with; the ssh-agent must hold it")
@@ -46,7 +46,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "admin register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+		return &ui.Problem{Hint: "operator register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -75,7 +75,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 	sites := configTransports(cfg)
 	m := gatherMode{
 		execute:  *execute,
-		noAnchor: "Pin the first version you trust with --root <sha>; an admin who has one can read its hash from paisans config log.",
+		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from paisans config log.",
 	}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)
 	if err != nil {
@@ -96,7 +96,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return &ui.Problem{
 			Hint:    "the local files differ from the sites' newest version",
-			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with paisans config pull, or check the difference above with the admin who signed it, then run this again. Nothing was written.", describe(g, de.Head)),
+			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with paisans config pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head)),
 		}
 	case err != nil:
 		return err
@@ -146,7 +146,7 @@ func runAdminRegister(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
-// registerConfig is the configuration register reads the admins and the
+// registerConfig is the configuration register reads the operators and the
 // sites from: the local paisans-stack.yaml, or, on a workstation without the files
 // and with a root pinned, the version the pin leads to in the workstation's
 // own store, which a recovery's dry run fills.
@@ -155,7 +155,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 		return config.Load(path)
 	}
 	if pin == "" {
-		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "admin register attests the version you hold, and reads the sites from " + config.FileName + ". Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
+		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "operator register attests the version you hold, and reads the sites from " + config.FileName + ". Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
 	}
 	g, err := configstore.GatherAnchored(l, nil, 0, "", configstore.Anchor{Root: pin}, configstore.GatherOptions{})
 	var rb *configstore.RollbackError
@@ -181,7 +181,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 
 // registerKey is the public key line register signs with: the one --key
 // names, else the one .paisans/signing-key records, else the one key in the
-// ssh-agent that an admin of cfg lists. Which admin the operator is, and
+// ssh-agent that an operator of cfg lists. Which operator the operator is, and
 // which key, are recorded and used from then on, so neither is guessed.
 func registerKey(l configstore.Local, cfg *config.Config, keyPath string, stdout io.Writer) (string, error) {
 	held := agentKeys()
@@ -202,17 +202,17 @@ func registerKey(l configstore.Local, cfg *config.Config, keyPath string, stdout
 	if recorded, err := recordedKey(l, held, ", or name the key to register with --key"); err != nil || recorded != "" {
 		return recorded, err
 	}
-	byAdmin := adminsHolding(cfg, held)
+	byAdmin := operatorsHolding(cfg, held)
 	switch len(byAdmin) {
 	case 0:
 		for _, line := range held {
 			fmt.Fprintln(stdout, line)
 		}
-		explain := "Your ssh-agent holds the keys above, and " + config.FileName + " lists none of them under admins."
+		explain := "Your ssh-agent holds the keys above, and " + config.FileName + " lists none of them under operators."
 		if len(held) == 0 {
 			explain = "Your ssh-agent holds no key. Load yours with ssh-add."
 		}
-		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an admin", Explain: explain + " Your public key goes under your own entry in admins (admins.<id>.keys), and another admin publishes that change, since only an admin the sites' newest version lists can sign. Then pull it and run this again."}
+		return "", &ui.Problem{Hint: "no key in your ssh-agent belongs to an operator", Explain: explain + " Your public key goes under your own entry in operators (operators.<id>.keys), and another operator publishes that change, since only an operator the sites' newest version lists can sign. Then pull it and run this again."}
 	case 1:
 		for id, lines := range byAdmin {
 			if len(lines) == 1 {
@@ -222,5 +222,5 @@ func registerKey(l configstore.Local, cfg *config.Config, keyPath string, stdout
 		}
 	}
 	ids := slices.Sorted(maps.Keys(byAdmin))
-	return "", &ui.Problem{Hint: "your ssh-agent holds keys of more than one admin: " + strings.Join(ids, ", "), Explain: "Which admin you are is not guessed. Name your own key with --key <path.pub>."}
+	return "", &ui.Problem{Hint: "your ssh-agent holds keys of more than one operator: " + strings.Join(ids, ", "), Explain: "Which operator you are is not guessed. Name your own key with --key <path.pub>."}
 }

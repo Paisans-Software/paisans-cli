@@ -188,7 +188,7 @@ func TestNothingToApproveAsksNothing(t *testing.T) {
 // it holds none or several admins' keys.
 func TestApprover(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	saved := agentFingerprints
 	t.Cleanup(func() { agentFingerprints = saved })
 	for want, held := range map[string][]string{"alice": {"SHA256:other", alice.Fingerprint}, "": {"SHA256:other"}} {
@@ -197,8 +197,8 @@ func TestApprover(t *testing.T) {
 			t.Errorf("held %v: %q, want %q", held, got, want)
 		}
 	}
-	cfg.Admins["bob"] = config.Admin{Name: "Bob Example", Email: "bob@example.org", Keys: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"}
-	bob, _, _ := config.ParseKeyLine(cfg.Admins["bob"].KeyLines()[0])
+	cfg.Operators["bob"] = config.Operator{Name: "Bob Example", Email: "bob@example.org", Keys: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"}
+	bob, _, _ := config.ParseKeyLine(cfg.Operators["bob"].KeyLines()[0])
 	agentFingerprints = func() []string { return []string{alice.Fingerprint, bob.Fingerprint} }
 	if got := approver(cfg); got != "" {
 		t.Errorf("two admins' keys named %q", got)
@@ -287,7 +287,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 // record as it was, so the next run reviews the same keys again.
 func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	for name, fail := range map[string]string{"succeeds": "", "a step fails": "awk -v fp="} {
 		t.Run(name, func(t *testing.T) {
 			loggingSSH(t, fail)
@@ -324,7 +324,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 // them once it succeeds.
 func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	cfg := fixture(t)
-	alice, _, _ := config.ParseKeyLine(cfg.Admins["alice"].KeyLines()[0])
+	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
 	loggingSSH(t, "awk -v fp=")
 	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 	agentFingerprints = func() []string { return []string{alice.Fingerprint} }

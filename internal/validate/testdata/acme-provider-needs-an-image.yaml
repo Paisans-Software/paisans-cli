@@ -15,7 +15,7 @@ acme:
   # module would never reach the gateway.
   provider: route53
 
-admins:
+operators:
   alice:
     name: Alice Example
     email: alice@example.org
