@@ -119,7 +119,7 @@ const (
 // the identity other apps sign people in as, such as an Mbin account's
 // fediverse handle, and those apps do not follow a rename. With editing off a
 // user can change neither their username nor their email, which also keeps
-// apply finding each declared admin's account by the two. Pocket ID's own admin
+// apply finding each declared operator's account by the two. Pocket ID's own admin
 // page can still edit any account, and a rename made there breaks the same
 // identities.
 const PocketIDAccountEditSetting = "allow_own_account_edit"

@@ -51,7 +51,7 @@ func adminGroups(cfg *config.Config) []string {
 
 // memberGroups is the member group of every app that signs in through the
 // identity provider, sorted and without duplicates, leaving out any that is
-// also an admin group: the groups a declared admin joins so that every such
+// also an admin group: the groups a declared operator joins so that every such
 // app admits them.
 func memberGroups(cfg *config.Config) []string {
 	seen := map[string]bool{}

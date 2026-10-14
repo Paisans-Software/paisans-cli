@@ -15,7 +15,7 @@ func TestRoleHostnames(t *testing.T) {
 	cfg := &config.Config{Community: config.Community{Domain: "example.org"}}
 	cfg.Storage.Garage.Sites = []string{"home-a"}
 	account := func(invites any, hostnames map[string]string) config.App {
-		settings := map[string]any{"identity_app": "auth"}
+		settings := map[string]any{}
 		if invites != nil {
 			settings["invites"] = invites
 		}

@@ -51,7 +51,7 @@ func (c *checker) pocketIDAccountEditOn() {
 		}
 		c.refuse("pocket-id-account-edit-on", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.PocketIDAccountEditSetting),
 			"pocket id account editing cannot be turned on",
-			"is true, and the pocket-id blueprint always renders ALLOW_OWN_ACCOUNT_EDIT=false. A Pocket ID username is the identity other apps know a person by, such as their fediverse handle in Mbin, and those apps do not follow a rename; with editing off nobody can change their own username or email, which is also how apply finds each declared admin's account. Set it false or remove it. An administrator can still edit any account from Pocket ID's admin page, and a rename made there breaks the same identities.")
+			"is true, and the pocket-id blueprint always renders ALLOW_OWN_ACCOUNT_EDIT=false. A Pocket ID username is the identity other apps know a person by, such as their fediverse handle in Mbin, and those apps do not follow a rename; with editing off nobody can change their own username or email, which is also how apply finds each declared operator's account. Set it false or remove it. An administrator can still edit any account from Pocket ID's admin page, and a rename made there breaks the same identities.")
 	}
 }
 

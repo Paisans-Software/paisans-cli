@@ -325,7 +325,7 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 // route the reconciler. It asks /livez, the reconciler service's own health,
 // which a standby passes too; the reconciler's answer is the push monitor's
 // (TestTheSeedExpectsAnOperatorsHeartbeatPerPocketID).
-func TestEveryPocketIDSiteHasAnAdminReconcilerCheck(t *testing.T) {
+func TestEveryPocketIDSiteHasAnOperatorReconcilerCheck(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	monitors := byName(renderSeed(t, cfg, secrets))
 	sites := render.AppSites(cfg)["auth"]

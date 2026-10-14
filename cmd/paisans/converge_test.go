@@ -555,7 +555,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase))...))
 }
 
-// The dry run names what is left, the declared admins among it.
+// The dry run names what is left, the declared operators among it.
 func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	fakeConverge(t, nil)
 	out := ""
@@ -1841,7 +1841,7 @@ func TestSSHFlagProblemSaysItOnce(t *testing.T) {
 	}
 }
 
-// fakeDeclaredOperators replaces making a declared admin: answer gives the
+// fakeDeclaredOperators replaces making a declared operator: answer gives the
 // outcome for each app and admin. It returns the calls, as "app/id", with
 // "!" after one that executes.
 func fakeDeclaredOperators(t *testing.T, answer func(app, id string, execute bool) (declaredOperator, error)) *[]string {
@@ -1937,7 +1937,7 @@ func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 	}
 }
 
-// With Pocket ID up, a dry run plans each declared admin on a line of its
+// With Pocket ID up, a dry run plans each declared operator on a line of its
 // own, pending with what would happen, and issues nothing.
 func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	fakeConverge(t, nil)

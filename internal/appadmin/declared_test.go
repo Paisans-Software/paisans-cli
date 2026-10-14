@@ -22,7 +22,7 @@ func declaredRequest() Request {
 
 func strptr(s string) *string { return &s }
 
-// A declared admin with no account is created, given a 24 hour link, and
+// A declared operator with no account is created, given a 24 hour link, and
 // emailed one of Pocket ID's own.
 func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 	f := &fakePocketID{}
@@ -48,7 +48,7 @@ func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 	}
 }
 
-// A declared admin who renamed themselves is found by their address, and no
+// A declared operator who renamed themselves is found by their address, and no
 // second account is made.
 func TestDeclaredAdminIsFoundByEmail(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-7", Username: "fern-renamed",
@@ -86,7 +86,7 @@ func TestDeclaredAdminEmailMatchIsWhole(t *testing.T) {
 	}
 }
 
-// A declared admin who has registered a passkey has taken the account up:
+// A declared operator who has registered a passkey has taken the account up:
 // no link, no email.
 func TestDeclaredAdminWithAPasskeyGetsNothing(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder",
