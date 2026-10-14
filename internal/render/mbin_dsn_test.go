@@ -18,6 +18,8 @@ func TestMailerDSN(t *testing.T) {
 			"smtp://u:p@smtp.example.org:587?require_tls=true"},
 		{"tls is smtps", smtpValues{Host: "smtp.example.org", Port: 465, Secure: true, Username: "u", Password: "p"},
 			"smtps://u:p@smtp.example.org:465"},
+		{"none turns off STARTTLS", smtpValues{Host: "relay", Port: 25, Security: "none", Username: "u", Password: "p"},
+			"smtp://u:p@relay:25?auto_tls=false"},
 		{"no username has no userinfo", smtpValues{Host: "smtp.example.org", Port: 25, Password: "unused"},
 			"smtp://smtp.example.org:25?require_tls=true"},
 		{"a username without a password", smtpValues{Host: "smtp.example.org", Port: 587, Username: "relay@example.org"},

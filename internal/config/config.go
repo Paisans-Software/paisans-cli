@@ -686,22 +686,26 @@ type SMTP struct {
 	FromName    string `yaml:"from_name"`
 }
 
-// SMTP security modes. There is no "none": no consumer needs it, and the
-// uptime fork cannot express it, since its smtp_secure is nodemailer's
-// boolean `secure` and false already means STARTTLS.
+// SMTP security modes. none is plaintext, which validate accepts only for a
+// host on a private network (smtp-plaintext-public-host); see "Mail is
+// declared once and overridden per app" in README.md.
 const (
 	SMTPStartTLS = "starttls"
 	SMTPTLS      = "tls"
+	SMTPNone     = "none"
 )
 
 // PortOrDefault is the declared port, or the conventional one for the
-// security mode: 465 for implicit TLS, 587 for STARTTLS.
+// security mode: 465 for implicit TLS, 25 for plaintext, 587 for STARTTLS.
 func (s SMTP) PortOrDefault() int {
 	if s.Port != 0 {
 		return s.Port
 	}
-	if s.Security == SMTPTLS {
+	switch s.Security {
+	case SMTPTLS:
 		return 465
+	case SMTPNone:
+		return 25
 	}
 	return 587
 }
@@ -745,11 +749,11 @@ func (c *Config) SMTPFor(app string) SMTP {
 // smtpProblems checks one smtp block's shape, wherever it is declared.
 func smtpProblems(key string, s SMTP) []string {
 	var out []string
-	if s.Security != "" && s.Security != SMTPStartTLS && s.Security != SMTPTLS {
-		out = append(out, fmt.Sprintf("%s.security: unknown value %q. Valid values are starttls and tls.", key, s.Security))
+	if s.Security != "" && s.Security != SMTPStartTLS && s.Security != SMTPTLS && s.Security != SMTPNone {
+		out = append(out, fmt.Sprintf("%s.security: unknown value %q. Valid values are starttls, tls and none.", key, s.Security))
 	}
 	if s.Port < 0 || s.Port > 65535 {
-		out = append(out, fmt.Sprintf("%s.port: %d is not a port. Give one from 1 to 65535, or leave it out for 587 with starttls and 465 with tls.", key, s.Port))
+		out = append(out, fmt.Sprintf("%s.port: %d is not a port. Give one from 1 to 65535, or leave it out for 587 with starttls, 465 with tls and 25 with none.", key, s.Port))
 	}
 	return out
 }

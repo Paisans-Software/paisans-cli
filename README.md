@@ -2809,7 +2809,7 @@ from the hosts first.
 ### Mail is declared once and overridden per app
 
 An app that sends mail reads a deployment wide `smtp:` block: `host`, `port`,
-`security` (`starttls` or `tls`), `username`, `from_address`, `from_name`. An
+`security` (`starttls`, `tls` or `none`), `username`, `from_address`, `from_name`. An
 app may declare its own `smtp:` with any of those fields, and each one it names
 replaces the deployment's while the rest are inherited, so a different sender
 or a different account is one line rather than a copy of the whole block. The
@@ -2845,10 +2845,47 @@ what Pocket ID can express (Mbin's own differences are in its section):
   A host with no sender at all starts and sends mail with an empty sender,
   which is a warning, `pocket-id-smtp-without-sender`.
 
-There is no `security: none`. Nothing needs it, and the uptime fork cannot say
-it: its `smtp_secure` is nodemailer's boolean `secure`, and `false` already
-means STARTTLS. Pocket ID is given `SMTP_TLS=tls` for `tls` and `starttls`
-otherwise, which is also what the port defaults assume.
+Each consumer is given the mode in its own terms. Pocket ID takes it as
+`SMTP_TLS` and the account service as `ACCOUNT_SMTP_TLS`, both spelled
+`starttls`, `tls` or `none`. Mbin's DSN is `smtps://` for `tls`,
+`smtp://...?require_tls=true` for `starttls` and `smtp://...?auto_tls=false`
+for `none`. The monitor's `smtp_secure` is nodemailer's boolean `secure`,
+`true` for `tls` alone; `false` upgrades with STARTTLS when the server offers
+it and otherwise sends in plaintext. A missing port defaults to 465 for `tls`,
+25 for `none` and 587 otherwise.
+
+**`security: none` is plaintext, and is accepted only for a host on a private
+network.** It exists for a relay the deployment runs itself, on the mesh or
+beside the app as a compose service, which takes mail without TLS and
+forwards it over TLS. On such a network the risk is accepted: anything that
+can read the network's traffic can read the mail and the SMTP password, and
+nothing else can. Every accepted `none` is a warning, `smtp-plaintext`, which
+says so. The host must be one of these, in the deployment's `smtp:` block or
+in an app's own after its overrides apply:
+
+* an IP address in loopback, RFC 1918, RFC 6598 (`100.64.0.0/10`) or IPv6
+  unique local space, or inside `mesh.subnet`;
+* a name with no dot that starts with a letter: a compose service name.
+
+Anything else is refused, `smtp-plaintext-public-host`. `validate` resolves
+no names, because the answer at validate time says nothing about the answer
+an app gets later, on another host, from another resolver; so a name with a
+dot is refused even when it resolves to a private address, and the refusal
+asks for the relay's mesh address instead. A service name must start with a
+letter because a resolver may read a name of digits, or a hex one such as
+`0x08080808`, as an IPv4 address.
+
+Pocket ID and the account service will not send a username and password over
+an unencrypted connection to any host but localhost (Go's `net/smtp`
+`PlainAuth`, and the same check in Pocket ID's mailer, `emailer/smtp/smtp.go`
+in `italypaleale/go-kit` v1.2.4 at Pocket ID v2.18.0; go-mail v0.8.1's
+`smtp/auth_plain.go` in the account service at v0.2.0). For either, `none`
+with a username is refused, `smtp-plaintext-with-username`: every mail would
+fail at authentication. Point them at a relay that needs no username, or give
+them `starttls` or `tls`. The monitor and Mbin send credentials over
+plaintext. The monitor also upgrades with STARTTLS when a `none` relay offers
+it, and then checks the relay's certificate, so a relay for `none` should not
+offer STARTTLS with a certificate the monitor cannot verify.
 
 ### Rendered configuration is a build artifact
 

@@ -2677,3 +2677,61 @@ are the same act, so one page does both. Sending the freshly read list with
 only the requested changes keeps two admins working at once from undoing each
 other. An operator is declared in a file and holds the deployment's keys, so
 the group that says who is one follows that file and nothing else.
+
+## 2026-10-14: Plaintext SMTP, to a private network only
+
+Founder decision.
+
+### What was decided
+
+* An `smtp:` block, the deployment's or an app's own, may declare
+  `security: none`: plaintext, with no TLS at all.
+* It is accepted only when the resolved host is private: an IP address in
+  loopback, RFC 1918, RFC 6598 or IPv6 unique local space, or inside
+  `mesh.subnet`; or a name with no dot that starts with a letter, a compose
+  service name. Anything else is refused, `smtp-plaintext-public-host`.
+  Names are not resolved, so a dotted name is refused even when it would
+  resolve privately, and the refusal asks for the mesh address.
+* Every accepted `none` is a warning, `smtp-plaintext`: the mail and the SMTP
+  credentials cross that network unencrypted.
+* Pocket ID renders `SMTP_TLS=none`, the account service
+  `ACCOUNT_SMTP_TLS=none`, Mbin `smtp://...?auto_tls=false`, and the monitor
+  `smtp_secure: false`. A missing port is 25.
+* Pocket ID and the account service refuse to authenticate over plaintext to
+  any host but localhost, so `none` with a username is refused for them,
+  `smtp-plaintext-with-username`.
+
+### Why
+
+A deployment may run its own relay, on the mesh or as a compose service
+beside the app, which takes mail without TLS and forwards it over TLS. TLS
+between the app and that relay protects nothing the private network does not
+already protect, and requiring it means issuing the relay a certificate the
+apps can verify. The risk of plaintext is accepted on a private network,
+where only the deployment's own hosts can read the traffic, and nowhere else.
+
+Validate cannot know what a name will resolve to on another host at another
+time, so it judges only what it can read: an address, or a name that cannot
+leave the compose network. A service name must start with a letter because a
+resolver may read digits, or `0x08080808`, as an IPv4 address.
+
+The consumers were checked at the versions the toolkit runs. Pocket ID
+accepts `none` (`dto/app_config_dto.go` at v2.18.0) and its mailer then skips
+STARTTLS (`emailer/smtp/smtp.go` in `italypaleale/go-kit` v1.2.4). The account
+service accepts `none` and sends with go-mail's `NoTLS` policy
+(`internal/config` and `internal/mail` at v0.2.0). Mbin's Symfony Mailer never
+sends STARTTLS with `auto_tls=false` (`EsmtpTransportFactory.php` at
+v7.4.14). The monitor's nodemailer 8.0.7 sends in plaintext with
+`secure: false` when the server offers no STARTTLS
+(`lib/smtp-connection/index.js`). Both Go mailers refuse credentials without
+TLS (Go's `net/smtp` `PlainAuth`; go-mail v0.8.1 `smtp/auth_plain.go`), which
+is the username refusal.
+
+### What was weighed
+
+* **Resolving the name at validate time.** Not chosen: the answer on the
+  workstation is not the answer the app gets, and a name that resolves
+  privately today can be repointed.
+* **Letting Pocket ID and the account service send without TLS and drop the
+  username.** Not chosen: a field-by-field override cannot unset an inherited
+  username, and a relay that wants one would refuse every mail.
