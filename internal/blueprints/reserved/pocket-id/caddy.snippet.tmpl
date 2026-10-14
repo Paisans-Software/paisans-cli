@@ -3,6 +3,18 @@
 # Routing for {{ .App.Name }}, imported by the gateway's block for
 # {{ .Hostname }}.
 #
+# An API key is the toolkit's administrator credential, and it works only on
+# the mesh. The web interface signs in with a session cookie and never sends
+# this header, so refusing it here costs a member nothing. Pocket ID reads an
+# API key from X-API-Key alone (middleware/api_key_auth.go:38 at v2.14.0), and
+# Caddy's header matcher compares the name case insensitively, so x-api-key
+# and X-API-KEY are refused too; * matches any value, an empty one included.
+# The refusal comes first, so a request with the header is refused on every
+# path, a valid session cookie notwithstanding. Members' own API keys are
+# refused the same way.
+@api_key header X-API-Key *
+respond @api_key 403
+#
 # POST /api/signup/setup takes no authentication and makes its caller an
 # administrator, answering with an admin session (usersignup/module.go:86-87
 # at v2.14.0). It is open while Pocket ID has no user besides its static API
@@ -54,9 +66,9 @@ respond @signup 404
 # route at onetimeaccess/module.go:71) and its sign-in page does not offer the
 # page that asks for it (frontend/src/routes/login/alternative/+page.svelte:30-36).
 # The administrator's route, /api/users/<id>/one-time-access-email, is a
-# different path and stays open. The account service calls it here, at the
-# public hostname, with the static API key. apply calls it on the mesh port over
-# ssh and never reaches the gateway.
+# different path and stays open. The account service calls it with the static
+# API key through its site's HAProxy on the mesh, and apply on the mesh port
+# over ssh, so neither reaches the gateway.
 @email_code path /api/one-time-access-email /api/one-time-access-email/* /login/alternative/email /login/alternative/email/*
 respond @email_code 404
 {{- end }}
