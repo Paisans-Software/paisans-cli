@@ -2,7 +2,7 @@
 
 Status: approved in session by the founder, 2026-10-14. Not implemented.
 The gateway rule was observed against a running Pocket ID (*Observed*); the
-private route for the invite service is reasoned.
+private route for the account service is reasoned.
 
 Pocket ID's static API key is a standing administrator credential: whoever
 presents it can create administrators, read every user and mint sign-in
@@ -41,15 +41,15 @@ Members' own API keys, which Pocket ID lets a user create, are refused at the
 gateway the same way. A member who wants to script against Pocket ID does it
 from a machine on the mesh or not at all.
 
-## The invite service reaches Pocket ID over the mesh
+## The account service reaches Pocket ID over the mesh
 
-The invite service is the one caller at the public hostname today:
-`internal/render/invite.go` sets `INVITE_IDP_URL` to
+The account service is the one caller at the public hostname today:
+`internal/render/account.go` sets `ACCOUNT_IDP_URL` to
 `https://<pocket-id hostname>`. It needs the instance that is active, on
 whichever apps site that is, and its site can be any apps site.
 
-Every site that runs the invite service already runs HAProxy on its mesh
-address, because the invite service has cluster placement and reaches
+Every site that runs the account service already runs HAProxy on its mesh
+address, because the account service has cluster placement and reaches
 Postgres through it. HAProxy gains a second listener, on the same pattern
 as the first:
 
@@ -74,12 +74,12 @@ with a pocket-id app, so a service added later that needs the API finds it
 already there. Port 1413 joins `render`'s port table beside the reconciler's
 1412, so a collision on a site is refused like any other.
 
-The invite service's two Pocket ID addresses then differ:
+The account service's two Pocket ID addresses then differ:
 
 | Variable | Value | Why |
 |----------|-------|-----|
-| `INVITE_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
-| `INVITE_IDP_URL` | `http://<site mesh address>:1413` | The API, with the key, over the mesh. WireGuard encrypts it between sites. |
+| `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
+| `ACCOUNT_IDP_URL` | `http://<site mesh address>:1413` | The API, with the key, over the mesh. WireGuard encrypts it between sites. |
 
 ## The client refuses to send the key off the mesh
 
@@ -145,12 +145,12 @@ Reasoned, not observed: the HAProxy listener and a takeover through it.
 * **Render.** The pocket-id snippet carries the matcher; the golden trees
   change accordingly. HAProxy's configuration carries `listen pocket-id` with
   one server per apps site running Pocket ID, on every site that runs HAProxy,
-  and none in a deployment without Pocket ID. The invite service's `.env`
-  carries the mesh URL for `INVITE_IDP_URL` and the public one for
-  `INVITE_OIDC_ISSUER`.
+  and none in a deployment without Pocket ID. The account service's `.env`
+  carries the mesh URL for `ACCOUNT_IDP_URL` and the public one for
+  `ACCOUNT_OIDC_ISSUER`.
 * **Docker, behind a build tag.** The table in *Observed*, against the
   pinned Pocket ID image and the Caddy image the foundation track resolves to.
 * **`pocketid-go`.** The private address check, for each kind of address it
   accepts and a public address and hostname it refuses, with no request sent.
-* **Staging.** A takeover with the invite service mid use: its next call to
+* **Staging.** A takeover with the account service mid use: its next call to
   Pocket ID succeeds on the new active site.

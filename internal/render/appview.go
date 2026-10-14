@@ -159,13 +159,9 @@ type appValues struct {
 	// deployment (uptime.go). Populated only for that blueprint.
 	UptimeSeed string
 
-	// IdentityClients names, sorted, every app whose settings.identity_app
-	// names this one: the apps that use it as their identity provider.
-	IdentityClients []string
-
-	// Invite is the invite blueprint's identity provider, settings and code of
-	// conduct (invite.go). Populated only for that blueprint.
-	Invite inviteValues
+	// Account is the account blueprint's identity provider, settings and code
+	// of conduct (account.go). Populated only for that blueprint.
+	Account accountValues
 
 	// AdminsHeartbeat is true for a Pocket ID app in a deployment with a
 	// monitor, whose stack then runs the admins heartbeat pusher on
@@ -445,7 +441,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.S3 = p.s3For(planned, app, v)
 	}
 	v.OIDC = p.oidcFor(planned)
-	v.IdentityClients = p.identityClients(planned.Name)
 	v.Upstreams = p.upstreams(planned.Name)
 	if blueprints.SendsMail(planned.Blueprint) {
 		v.SMTP = p.smtpFor(planned.Name)
@@ -473,12 +468,12 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.UptimeSeed = seed
 	}
-	if planned.Blueprint == config.BlueprintInvite {
-		invite, err := p.inviteValuesFor(planned.Name)
+	if planned.Blueprint == config.BlueprintAccount {
+		account, err := p.accountValuesFor(planned.Name)
 		if err != nil {
 			return appValues{}, err
 		}
-		v.Invite = invite
+		v.Account = account
 	}
 	for _, svc := range blueprints.ServicePorts(planned.Blueprint) {
 		if v.ServicePorts == nil {

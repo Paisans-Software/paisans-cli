@@ -113,14 +113,14 @@ apps:
       # two groups' IDs are recorded under pocket_id_groups in the secrets.
       app_name: Example ID
       session_duration: 10080
-      # Disabled, and the email-code sign-in on, because the invite app below
+      # Disabled, and the email-code sign-in on, because the account app below
       # names this one: new accounts come only from invites, and a member
       # whose sign-in link expired recovers by email code.
       allow_user_signups: disabled
       email_one_time_access_as_unauthenticated: true
       signup_default_groups: [members, newcomers]
       emails_verified: true
-      # Quoted in the .env, which the invite app's INVITE_ACCENT_COLOR follows.
+      # Quoted in the .env, which the account app's ACCOUNT_ACCENT_COLOR follows.
       accent_color: "#2f6f5e"
   chat:
     blueprint: synapse
@@ -166,12 +166,13 @@ apps:
     # Not show_labs_settings, which the template already writes.
     config:
       default_theme: dark
-  invite:
-    blueprint: invite
-    hostname: invite.example.org
+  account:
+    blueprint: account
+    hostname: account.example.org
     placement: cluster
     settings:
       identity_app: auth
+      invites: true
       # One setting declared, so the golden .env shows it beside the defaults.
       invite_quota: 5
       # The text itself, not a path: rendered byte for byte into

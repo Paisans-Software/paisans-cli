@@ -7,6 +7,21 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/account/.env",
+      "sha256": "10a964410213f536bb3e3e0cc2bac330a85464097c2a8129db6ecdbf54631d40",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/account/code-of-conduct.md",
+      "sha256": "6629eab7b44d509415c059291116cc674630874d244ae3fa5ddf9e9d3de7b978",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/account/compose.yaml",
+      "sha256": "36b3107ba61c24cecd0b6414914d23b8f4a36508aa63ae8836d6800d6a59236c",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/auth/.env",
       "sha256": "7583db2d8248543001da441ea36b98768251fe690b1c73f56e750d20da9dddea",
       "mode": "0600"
@@ -80,21 +95,6 @@
       "path": "srv/paisans/f2a9/infra/patroni.env",
       "sha256": "8e0fc9cabb23d9691d199819501571d557d123453cf726e488ee7923c99ec7aa",
       "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/invite/.env",
-      "sha256": "4f7f31206b33e8fdca6d4c39c8a2f429c48c712730e783bc7077c011183f2207",
-      "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/invite/code-of-conduct.md",
-      "sha256": "6629eab7b44d509415c059291116cc674630874d244ae3fa5ddf9e9d3de7b978",
-      "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/invite/compose.yaml",
-      "sha256": "4bcd16ba1e6e9fb006e067e2d23fe454fc43db8ed175a11e35739e30ff2ef6c2",
-      "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",

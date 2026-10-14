@@ -14,7 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
-// idpFake is a Pocket ID with the fixture's recorded clients (wiki, blog, invite)
+// idpFake is a Pocket ID with the fixture's recorded clients (wiki, blog, account)
 // already in place with live secrets, the groups members and admins, and no
 // talk client until one is created.
 type idpFake struct {
@@ -49,8 +49,8 @@ func newIDPFake() *idpFake {
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://wiki.example.org"), SkipConsent: true},
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org"), SkipConsent: true},
-		"invite": {ID: "fixture-not-a-secret-invite-id", Name: "invite", CallbackURLs: []string{"https://invite.example.org/auth/callback"},
-			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://invite.example.org"), SkipConsent: true},
+		"account": {ID: "fixture-not-a-secret-account-id", Name: "account", CallbackURLs: []string{"https://account.example.org/auth/callback"},
+			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://account.example.org"), SkipConsent: true},
 	}}
 }
 
@@ -261,7 +261,7 @@ func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
 	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", tempSecrets(t), "--app", "web"})
-	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: invite, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
+	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: account, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fake.commands) != 0 {

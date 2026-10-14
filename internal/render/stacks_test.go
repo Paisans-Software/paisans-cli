@@ -124,7 +124,7 @@ func TestSettingsInEnvFilesAreQuoted(t *testing.T) {
 	cfg := fixture(t)
 	cfg.Apps["auth"].Settings["file_backend"] = "database\nSTATIC_API_KEY=injected"
 	cfg.Apps["health"].Settings["admin_group"] = "admins\nOIDC_ISSUER=https://evil.example"
-	cfg.Apps["invite"].Settings["member_group"] = "members\nINVITE_IDP_URL=https://evil.example"
+	cfg.Apps["account"].Settings["member_group"] = "members\nACCOUNT_IDP_URL=https://evil.example"
 	plan, err := render.Build(cfg, fixtureSecrets(t))
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestSettingsInEnvFilesAreQuoted(t *testing.T) {
 			continue
 		}
 		for _, line := range strings.Split(f.Content, "\n") {
-			if strings.HasPrefix(line, "STATIC_API_KEY=injected") || strings.HasPrefix(line, "OIDC_ISSUER=https://evil.example") || strings.HasPrefix(line, "INVITE_IDP_URL=https://evil.example") {
+			if strings.HasPrefix(line, "STATIC_API_KEY=injected") || strings.HasPrefix(line, "OIDC_ISSUER=https://evil.example") || strings.HasPrefix(line, "ACCOUNT_IDP_URL=https://evil.example") {
 				t.Errorf("%s: a setting added the line %q", f.Path, line)
 			}
 		}

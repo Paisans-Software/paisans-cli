@@ -182,12 +182,13 @@ func Check(cfg *config.Config) Result {
 	c.configKeySteersCompose()
 	c.configKeyAlreadyRendered()
 	c.portCollision()
-	c.inviteMustBeClustered()
-	c.inviteIdentityApp()
-	c.inviteWithoutSMTP()
-	c.inviteCodeOfConduct()
-	c.inviteSettingInvalid()
-	c.inviteSettingUnknown()
+	c.accountMustBeClustered()
+	c.accountInvites()
+	c.accountIdentityApp()
+	c.accountWithoutSMTP()
+	c.accountCodeOfConduct()
+	c.accountSettingInvalid()
+	c.accountSettingUnknown()
 
 	c.evenVoters()
 	c.oneVoterNoFailover()
@@ -1275,8 +1276,8 @@ func (c *checker) autoLoginWithoutARule() {
 // The gate's session cookie is scoped to the community's domain, so a browser
 // never sends it to a hostname elsewhere. A gated app there would send every
 // member to sign in, back to the app with no cookie, and to sign in again,
-// forever; auto-login would never fire. A media hostname is never gated, so
-// it is not checked.
+// forever; auto-login would never fire. A media or invite hostname is never
+// gated, so it is not checked.
 func (c *checker) usesGateOutsideTheDomain() {
 	domain := c.cfg.Community.Domain
 	for _, name := range c.cfg.AppNames() {
@@ -1285,9 +1286,9 @@ func (c *checker) usesGateOutsideTheDomain() {
 			continue
 		}
 		hostnames := map[string]string{"hostname": app.Hostname}
-		for role, h := range app.Hostnames {
-			if role != blueprints.MediaRole {
-				hostnames["hostnames."+role] = h
+		for _, rh := range blueprints.RoleHostnames(c.cfg, app) {
+			if rh.Role != blueprints.MediaRole && rh.Role != blueprints.InviteRole {
+				hostnames["hostnames."+rh.Role] = rh.Hostname
 			}
 		}
 		for _, key := range sortedKeys(hostnames) {
@@ -1406,11 +1407,15 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostname", name), app.Hostname})
-		for _, role := range sortedKeys(app.Hostnames) {
-			if role == blueprints.MediaRole {
+		for _, rh := range blueprints.RoleHostnames(c.cfg, app) {
+			if rh.Role == blueprints.MediaRole {
 				continue
 			}
-			appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostnames.%s", name, role), app.Hostnames[role]})
+			key := fmt.Sprintf("apps.%s.hostnames.%s", name, rh.Role)
+			if rh.Derived {
+				key += " (derived)"
+			}
+			appHosts = append(appHosts, claim{key, rh.Hostname})
 		}
 	}
 	for _, name := range c.cfg.AppNames() {
@@ -1496,8 +1501,8 @@ func hostnameProblem(host string) string {
 func (c *checker) duplicateHostname() {
 	type claim struct {
 		key, hostname string
-		// derived is set for a hostname nobody wrote (a media hostname, or
-		// the gate's), so the message can say where the name came from
+		// derived is set for a hostname nobody wrote (a media or invite
+		// hostname, or the gate's), so the message can say where the name came from
 		// rather than quoting a line the file does not have; from says what
 		// it was derived from.
 		derived bool
@@ -1518,18 +1523,22 @@ func (c *checker) duplicateHostname() {
 			// auto_login, at a name under the community's domain.
 			claims[0].derived, claims[0].from = true, "the community's domain for the gate"
 		}
-		for _, role := range sortedKeys(app.Hostnames) {
-			claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, role), hostname: app.Hostnames[role]})
-		}
-		// A derived media hostname is claimed exactly as if it had been
-		// written, because it becomes a site address exactly as if it had
-		// been. It is the claim most likely to collide unseen: an app whose
-		// hostname is talk-media.example.org clashes with talk's media
-		// hostname, and neither line in the file says so.
-		if blueprints.MediaHostnameIsDerived(c.cfg, app) {
-			if media := blueprints.MediaHostname(c.cfg, app); media != "" {
-				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
+		// Every hostname beyond the primary that exists, derived ones claimed
+		// exactly as if they had been written, because each becomes a site
+		// address exactly as if it had been. A derived one is the claim most
+		// likely to collide unseen: an app whose hostname is
+		// talk-media.example.org clashes with talk's media hostname, and one
+		// on invite.example.org with an account app's invite hostname, and
+		// neither line in the file says so.
+		for _, rh := range blueprints.RoleHostnames(c.cfg, app) {
+			cl := claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, rh.Role), hostname: rh.Hostname, derived: rh.Derived}
+			if rh.Derived {
+				cl.from = "the app's own hostname"
+				if rh.Role == blueprints.InviteRole {
+					cl.from = "the community's domain"
+				}
 			}
+			claims = append(claims, cl)
 		}
 		for _, cl := range claims {
 			if cl.hostname == "" {
@@ -1542,7 +1551,7 @@ func (c *checker) duplicateHostname() {
 				}
 				c.refuse("duplicate-hostname", cl.key,
 					"two apps claim the same hostname",
-					"%s, which %s already claims. Every hostname becomes a site address in the gateway's Caddyfile, and Caddy refuses a configuration where two site blocks claim one address rather than choosing between them, so this takes every hostname in the deployment down rather than these two. Give each name to one app and one role; a media hostname can be chosen with hostnames.media.",
+					"%s, which %s already claims. Every hostname becomes a site address in the gateway's Caddyfile, and Caddy refuses a configuration where two site blocks claim one address rather than choosing between them, so this takes every hostname in the deployment down rather than these two. Give each name to one app and one role; a media or invite hostname can be chosen with hostnames.media or hostnames.invite.",
 					said, describe(earlier))
 				continue
 			}

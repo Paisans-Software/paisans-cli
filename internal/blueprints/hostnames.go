@@ -30,6 +30,11 @@ const WellknownRole = "wellknown"
 // cannot script against another's.
 const MediaRole = "media"
 
+// InviteRole is the hostname an account app's invitees are served on. Like
+// the media role it exists only under a condition, settings.invites, and has
+// a derived name: InviteHostname.
+const InviteRole = "invite"
+
 // MediaSuffix is what a derived media hostname appends to the label of the
 // app's own hostname.
 const MediaSuffix = "-media"
@@ -123,4 +128,64 @@ func MediaHostname(cfg *config.Config, app config.App) string {
 // hostname at all.
 func MediaHostnameIsDerived(cfg *config.Config, app config.App) bool {
 	return HasHostnameRole(app.Blueprint, MediaRole) && InObjectStorage(cfg, app) && strings.TrimSpace(app.Hostnames[MediaRole]) == ""
+}
+
+// InviteHostname is where an account app's invitees are served, and empty
+// unless settings.invites is true. A declared hostnames.invite wins;
+// otherwise invite.<domain>.
+//
+// The derived name is the fixed label invite under the community's domain.
+// One account app exists per identity app, so two cannot derive the same
+// name, and internal/validate refuses a clash with another app's hostname by
+// the key an operator has to edit.
+func InviteHostname(cfg *config.Config, app config.App) string {
+	if !HasHostnameRole(app.Blueprint, InviteRole) || !AccountInvites(app) {
+		return ""
+	}
+	if declared := strings.TrimSpace(app.Hostnames[InviteRole]); declared != "" {
+		return declared
+	}
+	if cfg.Community.Domain == "" {
+		return ""
+	}
+	return InviteRole + "." + cfg.Community.Domain
+}
+
+// RoleHostname is one active hostname of an app beyond its primary.
+type RoleHostname struct {
+	Role, Hostname string
+	// Derived is true when the configuration does not name it and the
+	// toolkit made it, so a message can say which key to change.
+	Derived bool
+}
+
+// RoleHostnames is every hostname an app answers on beyond its primary,
+// sorted by role: each declared role, the media hostname when the app keeps
+// objects in storage, and the invite hostname when invites are on. A role
+// whose condition does not hold is left out even when declared.
+//
+// It is the one place the gateway's routes, dns, and validate's collision
+// checks read these names from, so a hostname that does not exist reaches
+// none of them, whether or not validate has refused the line that names it.
+func RoleHostnames(cfg *config.Config, app config.App) []RoleHostname {
+	var out []RoleHostname
+	for _, role := range HostnameRoles(app.Blueprint) {
+		switch role {
+		case PrimaryRole:
+			continue
+		case MediaRole:
+			if h := MediaHostname(cfg, app); h != "" {
+				out = append(out, RoleHostname{role, h, MediaHostnameIsDerived(cfg, app)})
+			}
+		case InviteRole:
+			if h := InviteHostname(cfg, app); h != "" {
+				out = append(out, RoleHostname{role, h, strings.TrimSpace(app.Hostnames[InviteRole]) == ""})
+			}
+		default:
+			if h := strings.TrimSpace(app.Hostnames[role]); h != "" {
+				out = append(out, RoleHostname{role, h, false})
+			}
+		}
+	}
+	return out
 }

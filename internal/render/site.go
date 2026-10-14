@@ -897,34 +897,23 @@ func (p *planner) routesFor(site *siteView) []route {
 			AutoLogin: app.AutoLogin,
 			Bypass:    bypass,
 		})
-		roles := sortedKeys(app.Hostnames)
-		if blueprints.MediaHostnameIsDerived(p.cfg, app) {
-			// Every app keeping objects in Garage has a media hostname whether
-			// or not it names one, so the route exists either way.
-			roles = append(roles, blueprints.MediaRole)
-		}
-		for _, role := range roles {
-			if role == blueprints.MediaRole && blueprints.MediaHostname(p.cfg, app) == "" {
-				// An app keeping its files on its own disk serves them on its
-				// own hostname, and has no bucket for a media route to reach.
-				// validate refuses a declared hostnames.media on one.
-				continue
-			}
-			hostname := app.Hostnames[role]
+		// Every hostname beyond the primary that exists: a derived media
+		// hostname as well as a declared one, the invite hostname only with
+		// invites on, and nothing for a role whose condition does not hold.
+		for _, rh := range blueprints.RoleHostnames(p.cfg, app) {
 			routeGated, routeAutoLogin, routeBypass := app.Gated, app.AutoLogin, bypass
-			if role == blueprints.MediaRole {
-				hostname = blueprints.MediaHostname(p.cfg, app)
+			if rh.Role == blueprints.MediaRole || rh.Role == blueprints.InviteRole {
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
-				// redirect to a passkey prompt.
+				// redirect to a passkey prompt; an invitee has no account yet.
 				routeGated, routeAutoLogin, routeBypass = false, false, gateBypass{}
 			}
 			out = append(out, route{
 				App:       name,
-				Role:      role,
-				Hostname:  hostname,
+				Role:      rh.Role,
+				Hostname:  rh.Hostname,
 				Upstreams: p.upstreams(name),
-				Snippet:   snippetMount + name + "-" + role + ".caddy",
+				Snippet:   snippetMount + name + "-" + rh.Role + ".caddy",
 				Gated:     routeGated,
 				AutoLogin: routeAutoLogin,
 				Bypass:    routeBypass,

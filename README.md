@@ -239,9 +239,9 @@ general check, `cluster-placement-without-a-cluster`, refuses `element`, which
 is a static client with no server side state, `oauth2-proxy`, whose session is
 a cookie, and `uptime`, whose database is a SQLite file: a kind with no
 Postgres service has nothing to join, and cluster placement would render it
-onto every apps site with storage of its own. `invite` is the opposite case:
+onto every apps site with storage of its own. `account` is the opposite case:
 its state is in the cluster's Postgres and it must outlive a site, so it takes
-`cluster` and nothing else (`invite-must-be-clustered`).
+`cluster` and nothing else (`account-must-be-clustered`).
 
 `writefreely` is not in that list: the kind runs the
 [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp) fork,
@@ -509,58 +509,97 @@ lost quorum among them) is passed through unchanged, so it never hides an
 application's real answer. It does also turn an auth gate's failure into 503,
 which is the right answer there too.
 
-## Invites
+## Accounts
 
-The `invite` kind runs [`Paisans-Software/paisans-invite`](https://github.com/Paisans-Software/paisans-invite),
-the way a deployment admits new people. A signed in member makes an invite
-link. Whoever opens it reads the community's code of conduct, agrees to it, and
-chooses a username, a display name and an email address. With
-`require_approval` on, an admin then approves or declines the application;
-only after approval does an account exist at Pocket ID, and Pocket ID emails
-the new member a one-time sign-in link. The design is in
-`docs/specs/2026-10-12-invite-service.md`.
+The `account` blueprint runs [`Paisans-Software/paisans-account-service`](https://github.com/Paisans-Software/paisans-account-service),
+the community's account management. It carries invites and their approval
+today, so that admitting someone needs no Pocket ID administrator. With
+invites on, a signed in member makes an invite link. Whoever opens it reads
+the community's code of conduct, agrees to it, and chooses a username, a
+display name and an email address. With `require_approval` on, an admin then
+approves or declines the application; only after approval does an account
+exist at Pocket ID, and Pocket ID emails the new member a one-time sign-in
+link. The design is in `docs/specs/2026-10-12-invite-service.md` and
+`docs/specs/2026-10-14-account-service.md`.
+
+The app exists because it is declared. The toolkit never adds it or drops it
+because of another app's settings, so a public, self-service community leaves
+it out.
 
 ```yaml
 apps:
-  invite:
-    blueprint: invite
-    hostname: invite.example.org
+  account:
+    blueprint: account
+    hostname: account.example.org
     placement: cluster
     settings:
       identity_app: auth
+      invites: true
       invite_quota: 3
       require_approval: true
       code_of_conduct: |
         ## Our code of conduct
 
         Be kind. Keep what is shared here inside the community.
+    hostnames:
+      invite: invite.example.org   # optional; invite.<domain> when unset
 ```
 
 | Setting | Takes | Default |
 |---------|-------|---------|
 | `identity_app` | the name of a `pocket-id` app | required |
+| `invites` | `true` or `false` | required |
 | `invite_quota` | 1 to 100: live invites a member may hold at once; admins have no quota | `3` |
 | `require_approval` | `true` or `false` | `true` |
 | `invite_lifetime_days` | 1 to 365: how long an unused invite lasts | `14` |
 | `application_wait_days` | 1 to 365: how long an application waits for an admin before it is dropped | `14` |
 | `decline_retention_days` | 1 to 3650: how long a declined address is remembered | `183` |
 | `login_link_days` | 1 to 31: how long the sign-in link Pocket ID emails lasts, and the number of days the invitee's page says | `7` |
-| `code_of_conduct` | the Markdown text itself, a YAML block scalar | required |
+| `code_of_conduct` | the Markdown text itself, a YAML block scalar | required with invites on |
 | `member_group`, `admin_group` | the Pocket ID groups its OIDC client admits | `members`, `admins` |
 
-**It is cluster only** (`invite-must-be-clustered`). Its state is in the
+**`invites` is declared, never defaulted.** It is access policy, like
+`gated`, and it decides whether a hostname exists. The `invite_*` settings,
+`require_approval`, `application_wait_days`, `decline_retention_days`,
+`login_link_days` and `code_of_conduct` belong to invites and are refused with
+`invites: false`.
+
+### Two hostnames
+
+| Hostname | Serves |
+|---|---|
+| the app's `hostname`, `account.<domain>` in the example | everything a signed in member or admin uses: sign in, the home page, making and revoking invites, `/admin` and the application queue |
+| `invite.<domain>`, or `hostnames.invite` | only the pages an invitee opens before they have an account, `/i/<token>`, and their static files |
+
+The invite hostname exists only with `invites: true`. With invites off there
+is no DNS record, no Caddy block, no certificate and no route in the app for
+it. With them on, its name is `invite.` under `community.domain` unless
+`hostnames.invite` names another. Every consumer of an app's hostnames (the
+gateway, `dns init`, `validate`'s collision checks) reads them through one
+resolver, `blueprints.RoleHostnames`, so a stale `hostnames.invite` with
+invites off reaches none of them even if `validate` were bypassed.
+
+**Each hostname serves only its own routes**, enforced twice. The service
+registers each route with the host of its public URL, so a request for a
+route on the other hostname gets a 404, and that holds for a request that
+reaches it directly on the mesh. The gateway's invite snippet passes `/i/*`
+and `/static/*` and answers 404 to everything else, and the primary snippet
+answers 404 to `/i/*`. The session cookie carries no `Domain` attribute, so
+the origin an invitee opens never holds a session.
+
+**It is cluster only** (`account-must-be-clustered`). Its state is in the
 cluster's Postgres, under a role and database of its own, and it runs on every
 apps site, so an invite survives the loss of a site. It listens on
 container port `8082`, because `8080` belongs to a clustered Mbin on the same
-site, and answers `GET /healthz` with `200` when its database does. It is
-never put behind the gate: an invitee has no account when they open
-`/i/<token>`.
+site, and answers `GET /healthz` with `200` when its database does. Neither
+hostname is put behind the gate: an invitee has no account when they open
+`/i/<token>`, and the service checks every sign in itself.
 
 **The identity app** is the `pocket-id` app named in `identity_app`. The
-invite app's issuer, API key and accent colour all come from that app, never
+account app's issuer, API key and accent colour all come from that app, never
 from a search, and Pocket ID's address is that app's hostname: renaming it
-re-renders the invite service's `.env`, and the next `apply` recreates the
-invite stack.
+re-renders the account service's `.env`, and the next `apply` recreates the
+account stack.
 
 ### What it writes at Pocket ID
 
@@ -578,38 +617,50 @@ It authenticates with the Pocket ID app's `static_api_key`, the same key the
 toolkit uses, and a Pocket ID API key carries no scopes: the key is all of
 Pocket ID. **A leak is answered by rotating it across the deployment.** Run
 `paisans secrets rotate apps.<auth>.static_api_key`, which re-applies Pocket ID
-and every invite stack whose `identity_app` names the app, so the invite service
-is handed the next key with it. Then check Pocket ID for admins, clients and API
-keys nobody made.
+and every account stack whose `identity_app` names the app, so the account
+service is handed the next key with it. Then check Pocket ID for admins,
+clients and API keys nobody made.
 
-### What `validate` refuses on the Pocket ID app
+### What `validate` refuses
+
+| Rule | Refused or warned |
+|---|---|
+| `account-invites-unset` | `settings.invites` missing. Refused |
+| `account-invite-settings-without-invites` | an invite setting (see above) with `invites: false`. Refused: the service is never told it, so it would read as configured and do nothing |
+| `account-invite-hostname-without-invites` | `hostnames.invite` with `invites: false`. Refused: nothing would serve it |
+| `account-serves-nothing` | `invites: false`. A warning: invites are the service's one feature so far |
+
+With invites on, the identity app is held to what an invite community needs:
 
 | The identity app | Refused | Rule |
 |---|---|---|
-| `allow_user_signups` | anything but `disabled`; unset is fine, since `disabled` is Pocket ID's default. Its own signup links would admit people past the code of conduct | `invite-signups-not-disabled` |
-| `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send the sign-in link while it is off | `invite-login-link-disabled` |
-| `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `invite-recovery-disabled` |
+| `allow_user_signups` | anything but `disabled`; unset is fine, since `disabled` is Pocket ID's default. Its own signup links would admit people past the code of conduct | `account-signups-not-disabled` |
+| `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send the sign-in link while it is off | `account-login-link-disabled` |
+| `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `account-recovery-disabled` |
 
-Also refused: an `identity_app` that is missing or not a `pocket-id` app
-(`invite-identity-app`), a deployment with more than one `pocket-id` app
-while it has an invite app (`invite-one-identity-app`: the invite app's OIDC
-client is created at the one Pocket ID, its issuer and key come from
-`identity_app`), no SMTP host and sender for the app
-(`invite-without-smtp`), a `code_of_conduct` that is missing, empty or not text
-(`invite-code-of-conduct-missing`), and a setting out of range
-(`invite-setting-invalid`). A setting the kind does not read is a warning
-(`invite-setting-unknown`), since it renders nothing. The service sends its
-own notices (an application waiting, an invitee's outcome) through the
-deployment's `smtp:` block, which the app's own `smtp:` fields may override;
-the sign-in link is Pocket ID's mail.
+Also refused with invites on: a `code_of_conduct` that is missing, empty or
+not text (`account-code-of-conduct-missing`), and a setting out of range
+(`account-setting-invalid`, which also refuses an `invites` that is not a
+boolean). Refused either way, because every account app signs members in
+through Pocket ID and the service will not start without a mail server: an
+`identity_app` that is missing or not a `pocket-id` app
+(`account-identity-app`), a deployment with more than one `pocket-id` app
+(`account-one-identity-app`: the account app's OIDC client is created at the
+one Pocket ID, its issuer and key come from `identity_app`), and no SMTP host
+and sender for the app (`account-without-smtp`). A setting the
+blueprint does not read is a warning (`account-setting-unknown`), since it
+renders nothing. The service sends its own notices (an application waiting,
+an invitee's outcome) through the deployment's `smtp:` block, which the app's
+own `smtp:` fields may override; the sign-in link is Pocket ID's mail.
 
 ### The code of conduct
 
 `code_of_conduct` is the text, not a path, so it is versioned and synced with
 the rest of `paisans-stack.yaml` through every site's configuration store. `render`
 writes it to `code-of-conduct.md` in the app's data directory and the container
-mounts it read-only. Its SHA-256 is the version recorded with each person's
-agreement, so editing the text is a new version without anyone numbering it.
+mounts it read-only; with invites off the file is empty. Its SHA-256 is the
+version recorded with each person's agreement, so editing the text is a new
+version without anyone numbering it.
 
 ### Keys
 
@@ -617,8 +668,8 @@ agreement, so editing the text is a new version without anyone numbering it.
 
 | Secret | What it does | Rotating it |
 |---|---|---|
-| `apps.<invite>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | `secrets rotate` refuses it and `--all` keeps it; only `paisans secrets set` changes it, and that forgets every declined address |
-| `apps.<invite>.session_key` | signs the service's sign-in cookie | signs everyone out of the invite service and nothing else |
+| `apps.<account>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | `secrets rotate` refuses it and `--all` keeps it; only `paisans secrets set` changes it, and that forgets every declined address |
+| `apps.<account>.session_key` | signs the service's sign-in cookie | signs everyone out of the account service and nothing else |
 
 ## Monitoring
 
@@ -1893,7 +1944,7 @@ The toolkit names no image itself. Every image a deployment runs by default is
 named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
 in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
 gateway's Caddy, the heartbeat, Pocket ID and its admin reconciler, the gate,
-the invite service and the monitor) in its `foundation.yaml`. Each is a
+the account service and the monitor) in its `foundation.yaml`. Each is a
 **track**: a repository and a tag pattern in which each `*` matches one run of
 digits.
 
@@ -1988,7 +2039,7 @@ The kinds do not share a format, so a key means something different per kind:
 
 | Format | Kinds | File | A key means |
 |---|---|---|---|
-| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, invite | `.env` | the variable name |
+| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, account | `.env` | the variable name |
 | ini | writefreely | `config.ini` | `section.key`, exactly one dot |
 | yaml | synapse | `homeserver.yaml` | a nested path, any depth |
 | json | element | `config.json` | a nested path, any depth |
@@ -2427,11 +2478,11 @@ Finishing either command first costs nothing but its resume.
 | `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that sends mail with it | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
-| Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, invite `session_key` | the app | the app | signed in browser sessions of that app end |
+| Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
 | Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
 | `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
-| Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and every invite service naming that Pocket ID app (their stacks are re-applied with it) | none |
-| invite `email_hash_key` | the service | the service | kept: `secrets rotate` refuses it and `--all` leaves it alone; `paisans secrets set` changes it and forgets every declined address |
+| Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and every account service naming that Pocket ID app (their stacks are re-applied with it) | none |
+| account `email_hash_key` | the service | the service | kept: `secrets rotate` refuses it and `--all` leaves it alone; `paisans secrets set` changes it and forgets every declined address |
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
@@ -2544,7 +2595,7 @@ includes it (Founder decision).
   the role logs in, it is rotated like `standby`.
 * **Mbin's `rabbitmq_password`, where the queue is not `rabbitmq`.** No broker
   runs, so no account has the password, and it is kept unused.
-* **The invite service's `email_hash_key`.** The service stores only the
+* **The account service's `email_hash_key`.** The service stores only the
   keyed hash of each declined address, so a new key matches none of them and
   rotating it forgets every declined address. `secrets rotate` refuses it by
   name and `--all` keeps it; only `paisans secrets set` changes it.
@@ -2618,8 +2669,8 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 `external.smtp_password`, which `init` lists as owed once something resolves a
 mail host.
 
-Four kinds read it (`kinds.SendsMail`): the invite service, which takes it as
-`INVITE_SMTP_*` in its `.env` for its notices to admins and invitees; the
+Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
+`ACCOUNT_SMTP_*` in its `.env` for its notices to admins and invitees; the
 uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
 `SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
@@ -2753,7 +2804,7 @@ each app the leftovers belong to, which is the command that takes them off
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved four (`pocket-id`, the
-gate, `invite`, `uptime`). The first party ones, `mbin`, `wikijs` and the
+gate, `account`, `uptime`). The first party ones, `mbin`, `wikijs` and the
 rest, are the **core catalog**'s, which the toolkit fetches at its newest
 release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
@@ -6817,7 +6868,7 @@ for linux/amd64 alone:
 | wiki 2.5.316, read from its `dev/build/Dockerfile:49` | `/wiki/data/content` | bind, `/srv/paisans/<token>/<app>/content`. Uploads live in Postgres and no storage module the bootstrap turns on writes here, so it holds nothing a member wrote; the bind keeps Docker from making an anonymous volume at each recreate |
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, never at `/var/lib/postgresql/data` (below) |
-| invite (`paisans-invite`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-invite/code-of-conduct.md` |
+| account (`paisans-account-service`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-account-service/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
 | amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, wikijs-bootstrap 0.1 (read from its Dockerfile), curl (the heartbeat and the admins heartbeat) | nothing | |
 
@@ -7055,7 +7106,7 @@ which is a restart of a few seconds during which nobody can sign in.
 | `accent_color` | `ACCENT_COLOR` | a CSS colour, or `default` |
 | `disable_animations` | `DISABLE_ANIMATIONS` | `true` or `false` |
 | `allow_own_account_edit` | `ALLOW_OWN_ACCOUNT_EDIT` | `false` only, and rendered `false` when unset; see below |
-| `allow_user_signups` | `ALLOW_USER_SIGNUPS` | `disabled`, `withToken` or `open`; with an `invite` app naming this app, only `disabled` or unset (see *Invites*) |
+| `allow_user_signups` | `ALLOW_USER_SIGNUPS` | `disabled`, `withToken` or `open`; with an `account` app with invites on naming this app, only `disabled` or unset (see *Accounts*) |
 | `signup_default_groups` | `SIGNUP_DEFAULT_USER_GROUP_IDS` | a list of group names; see below |
 | `require_user_email` | `REQUIRE_USER_EMAIL` | `true` or `false` |
 | `email_login_notification` | `EMAIL_LOGIN_NOTIFICATION_ENABLED` | `true` or `false` |
@@ -7169,14 +7220,14 @@ configuration turns off is closed at the gateway**, which answers 404 to every
 method on it, because a feature that is off has no visitor to serve and an
 open route is one more way in. The pocket-id blueprint's Caddy snippet holds
 the rule, each route beside its condition and the Pocket ID source it rests
-on. It reads two things: the settings as the `.env` renders them, where a
-setting left out takes Pocket ID's default (`appconfig/model.go:120-175` at
-v2.14.0), and whether an app names this Pocket ID as its `identity_app`.
+on. It reads the settings as the `.env` renders them, where a setting left
+out takes Pocket ID's default (`appconfig/model.go:120-175` at v2.14.0), and
+nothing else.
 
 | Paths, and everything below each | Closed when | Pocket ID v2.14.0 |
 |---|---|---|
 | `/api/signup/setup`, `/signup/setup`, `/setup` | always | `POST /api/signup/setup` takes no authentication and makes its caller an administrator (`usersignup/module.go:86-87`) while no user exists besides the static API key's (`usersignup/service.go:220-229`). Nothing turns it off |
-| `/api/signup`, `/signup`, `/st/` | `allow_user_signups` is `disabled` or unset (the default, `appconfig/model.go:130`), or an app names this one as its `identity_app` | the signup page refuses when disabled (`frontend/src/routes/signup/+page.svelte:38-41`), but `POST /api/signup` takes an administrator's signup token whatever the setting (`usersignup/service.go:51-52`). `/st/<token>` redirects to `/signup` |
+| `/api/signup`, `/signup`, `/st/` | `allow_user_signups` is `disabled` or unset (the default, `appconfig/model.go:130`) | the signup page refuses when disabled (`frontend/src/routes/signup/+page.svelte:38-41`), but `POST /api/signup` takes an administrator's signup token whatever the setting (`usersignup/service.go:51-52`). `/st/<token>` redirects to `/signup` |
 | `/api/one-time-access-email`, `/login/alternative/email` | `email_one_time_access_as_unauthenticated` is not `true` (the default is false, `appconfig/model.go:144`) | Pocket ID refuses the request (`onetimeaccess/service.go:66-67`) and does not offer the page (`frontend/src/routes/login/alternative/+page.svelte:30-36`) |
 
 **The setup routes are closed on every deployment.** That route is open on
@@ -7185,20 +7236,21 @@ admins, and again after a restore that holds no users. On a public hostname
 whoever reaches it first in that window owns the identity provider.
 
 **An invite deployment closes signup and keeps the email code.** Accounts
-there come only from the invite app, after the code of conduct, which is why
-`validate` refuses any `allow_user_signups` but `disabled`; the gateway closes
-signup for any Pocket ID an app names as its `identity_app`, whatever the
-setting says, including the signup tokens an administrator could otherwise
-hand out. A member whose sign-in link expired recovers through the email
-code, which `validate` requires on (*What `validate` refuses on the Pocket ID
-app*), so those routes stay open. A Pocket ID with no invite app and
-`allow_user_signups: open` is a public self-service identity provider, and
-its signup pages stay open.
+there come only from the account app's invites, after the code of conduct,
+which is why `validate` refuses any `allow_user_signups` but `disabled` while
+an account app has invites on. The gateway closes signup on that setting
+alone, the signup tokens an administrator could otherwise hand out included,
+so an invite deployment always gets the closed routes, and with invites off,
+or with no account app, Pocket ID's own setting decides. A member whose
+sign-in link expired recovers through the email code, which `validate`
+requires on (*What `validate` refuses*, under *Accounts*), so those routes
+stay open. A Pocket ID with `allow_user_signups: open` is a public
+self-service identity provider, and its signup pages stay open.
 
-**Nothing the toolkit or the invite app calls is closed.** Apply, `admin
+**Nothing the toolkit or the account app calls is closed.** Apply, `admin
 magic-link` and `oidc client create` reach Pocket ID at a site's own address,
 from that host, and never pass the gateway; the admin reconciler reaches it on
-its stack's own network. The invite app does pass the gateway, with the static
+its stack's own network. The account app does pass the gateway, with the static
 API key, and calls only `/api/users`, `/api/user-groups` and
 `/api/users/<id>/one-time-access-email`, with sign in through OIDC. Sign in,
 `/lc/` login links, `/login/alternative/code` and `/api/signup-tokens`, an
@@ -7408,7 +7460,7 @@ control and the operator should know that nothing else stands behind it:
 | `mbin` | `/oauth/oidc/verify`, the paisans fork's verify route | on: the fork always sends a code challenge | read. `OAUTH_OIDC_MEMBER_GROUP` and `OAUTH_OIDC_ADMIN_GROUP` are rendered from the two settings (`.env.example_docker:243-273` at `v1.13.3+paisans`): a sign in outside the member group is refused by the fork as well, and the admin group's members become administrators. The fork asks for the `groups` scope only when one of the two is set (`src/Provider/Oidc.php:45-46`), which the defaults guarantee |
 | `wikijs` | `/login/pocketid/callback`, built from the key of the sign-in strategy the bootstrap names `pocketid` (`server/core/auth.js:85` at `v2.5.316`) | off: Wiki.js's OAuth2 module gives `passport-oauth2` no PKCE option, so it sends no code challenge (`server/modules/authentication/oauth2/authentication.js:13-23`) | read. The bootstrap asks for the `groups` scope, without which Pocket ID sends no groups claim (`oidc/claims_service.go:157` at `v2.14.0`), and on every sign in Wiki.js puts the person in each Wiki.js group the claim names and takes them out of every other (`oauth2/authentication.js:36-48`). Both group settings are read: `admin_group` gets every Wiki.js permission but `manage:system` and `manage:api` (see *Wiki.js is configured by its bootstrap*) |
 | `writefreely` | `/oauth/callback/generic`, built by `configureGenericOauth` and not configurable (`oauth.go:249` at writefreely-wisp `ff9dceb`) | off: nothing in the fork sends a code challenge | not read. The restriction at Pocket ID is the whole control |
-| `invite` | `/auth/callback` (`internal/web/auth.go`) | on: every sign in sends an S256 challenge | read. It tells members from admins by the groups claim, and the client admits `member_group` and `admin_group` (defaults `members`, `admins`) |
+| `account` | `/auth/callback` on the primary hostname (`internal/web/auth.go`) | on: every sign in sends an S256 challenge | read. It tells members from admins by the groups claim, and the client admits `member_group` and `admin_group` (defaults `members`, `admins`) |
 | `uptime` | `/login/oidc/callback` (`src/lib/oidc.js:26`) | on: every sign in sends an S256 challenge (`src/lib/oidc.js:96-103`) | read. `settings.admin_group` is both groups: its members administer the monitor and nobody else may sign in |
 | `synapse` | `/upstream/callback/<ulid>`, the authentication service's callback for its upstream provider (`crates/router/src/endpoints.rs:742-762` at MAS `v1.24.0`), with the id derived from the app's name | on: `mas.yaml` sets `pkce_method: always`, the S256 mode (`crates/config/src/sections/upstream_oauth2.rs:420-436`, `crates/cli/src/sync.rs:289-298`), so every sign in sends an S256 challenge (`crates/handlers/src/upstream_oauth2/cache.rs:137`, `crates/oidc-client/src/requests/authorization_code.rs:242-256`) | not read: `mas.yaml` requests no `groups` scope. The restriction at Pocket ID is the whole control |
 | `oauth2-proxy` | `/oauth2/callback` on the gate's hostname: no redirect URL is rendered, so oauth2-proxy builds it from the proxy prefix and the request's host (`oauthproxy.go:175-178,1113-1135` at `v7.15.4`) | on: the `.env` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, and with a method set every sign in sends a challenge (`oauthproxy.go:833-851`) | read. The gate admits a session in any group of `OAUTH2_PROXY_ALLOWED_GROUPS` (`providers/provider_default.go:125-138`), which is rendered as `members,admins`, the same two groups as its client; oauth2-proxy splits that value on commas (`pkg/apis/options/load.go:27-55`, viper `v1.21.0` `viper.go:977-1022`) |

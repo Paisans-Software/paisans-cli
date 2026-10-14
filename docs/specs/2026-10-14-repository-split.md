@@ -19,7 +19,7 @@ them need, the Pocket ID API client, a repository of its own:
 | `Paisans-Software/paisans-admin-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/admin-reconciler` |
 
 `paisans-account-service` moves onto `pocketid-go` as well, so the toolkit, the
-reconciler and the invite service speak to Pocket ID through one client.
+reconciler and the account service speak to Pocket ID through one client.
 
 ## Settled
 
@@ -64,7 +64,7 @@ is declared in the client so that it depends on a shape, and the CLI's
 `apply.SSHTransport` satisfies it from outside.
 
 **Every method takes a `context.Context` first.** Founder decision. A caller
-can then cancel a call or bound it: invite passes the request it is serving,
+can then cancel a call or bound it: the account service passes the request it is serving,
 so a Pocket ID call ends when the visitor leaves or the server shuts down, and
 the reconciler passes its pass's deadline. The `HTTP` path hands the context
 to `http.NewRequestWithContext`. The `Transport` path checks it before each
@@ -127,7 +127,7 @@ gateway, and it stays there.
 Pocket ID's whole API is reachable from the workstation at
 `https://<hostname>/api/...`: its Caddy snippet is a plain `reverse_proxy`,
 the gate never covers it, and the gateway's failover sends a request to the
-active instance. The invite service already calls the API that way with the
+active instance. The account service already calls the API that way with the
 same key. A command that only needs the active instance could therefore use
 the `HTTP` path from the workstation and skip ssh for its Pocket ID calls.
 
@@ -224,8 +224,8 @@ same images.
    done. The formula's build names `./cmd/paisans`, not the module path, so
    the install line is unchanged.
 5. **`paisans-account-service` onto `pocketid-go`.** Replace
-   `internal/idp/pocketid` with the shared client behind invite's `idp`
-   interface, keeping invite's contract and write surface tests. The
+   `internal/idp/pocketid` with the shared client behind the account service's `idp`
+   interface, keeping its contract and write surface tests. The
    account service must already reach Pocket ID over the mesh
    (`docs/specs/2026-10-14-pocket-id-api-private.md`), since the shared
    client refuses its public hostname.

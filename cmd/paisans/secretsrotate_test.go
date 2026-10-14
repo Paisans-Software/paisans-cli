@@ -216,19 +216,19 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	want := []string{
 		"external.acme_dns_token",
 		"external.smtp_password",
+		"oidc_clients.account.client_secret",
 		"oidc_clients.blog.client_secret",
 		"oidc_clients.chat.client_secret",
 		"oidc_clients.gate.client_secret",
 		"oidc_clients.health.client_secret",
-		"oidc_clients.invite.client_secret",
 		"oidc_clients.talk.client_secret",
 		"oidc_clients.wiki.client_secret",
 		"apps.talk.oauth",
+		"apps.account.session_key",
 		"apps.chat.mas_signing_key",
 		"apps.chat.mas_matrix_secret",
 		"apps.gate.cookie_secret",
 		"apps.health.session_secret",
-		"apps.invite.session_key",
 		"apps.talk.app_secret",
 		"apps.blog.s3_secret_access_key",
 		"apps.talk.s3_secret_access_key",
@@ -237,10 +237,10 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"cluster.superuser_password",
 		"cluster.admin_password",
 		"cluster.standby_password",
+		"apps.account.database_password",
 		"apps.auth.database_password",
 		"apps.blog.database_password",
 		"apps.chat.database_password",
-		"apps.invite.database_password",
 		"apps.talk.database_password",
 		"apps.wiki.database_password",
 		"apps.talk.rabbitmq_password",
@@ -270,7 +270,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	for _, p := range []string{
 		"apps.auth.encryption_key",
 		"apps.chat.mas_encryption_secret",
-		"apps.invite.email_hash_key",
+		"apps.account.email_hash_key",
 		"apps.wiki.local_admin_password",
 		"sites.*.wireguard_private_key",
 	} {
@@ -909,8 +909,8 @@ func TestSecretsRotateAllCoversEveryGeneratedSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	generated := append(append([]string{}, filled.Generated...), filled.Kept...)
-	if !slices.Contains(generated, "apps.invite.session_key") {
-		t.Fatalf("init's list lacks the invite keys, so this test reads the wrong list: %v", generated)
+	if !slices.Contains(generated, "apps.account.session_key") {
+		t.Fatalf("init's list lacks the account keys, so this test reads the wrong list: %v", generated)
 	}
 	rs, kept, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
 	if err != nil {

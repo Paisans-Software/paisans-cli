@@ -1229,7 +1229,7 @@ func noWait(t *testing.T) {
 	t.Cleanup(apply.SetPrimaryWait(9*time.Second, 3*time.Second, func(time.Duration) {}))
 }
 
-// The fixture's clustered apps are talk, wiki, auth and invite; the pinned ones keep
+// The fixture's clustered apps are talk, wiki, auth and account; the pinned ones keep
 // their own Postgres and are none of the cluster's business.
 func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	cfg, secrets := fixture(t)
@@ -1241,7 +1241,7 @@ func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	for _, db := range b.Databases {
 		got = append(got, db.App+"="+db.Role+"/"+db.Name)
 	}
-	if want := "auth=auth/auth invite=invite/invite talk=talk/talk wiki=wiki/wiki"; strings.Join(got, " ") != want {
+	if want := "account=account/account auth=auth/auth talk=talk/talk wiki=wiki/wiki"; strings.Join(got, " ") != want {
 		t.Errorf("bootstrapped %v, want %s", got, want)
 	}
 	if b.Patroni != "10.44.0.1:8008" {
@@ -1448,7 +1448,7 @@ func TestAReplicaLeavesTheDatabasesToTheLeader(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leader = "home-b"
-	host.replicaHas = []string{"auth", "invite", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "talk", "wiki"}
 	p := bootstrapPlan(t, host)
 	said := &ui.Recorder{}
 	p.Report = said
@@ -1483,14 +1483,14 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
 	}
 	var wait *apply.DatabasesWaitError
-	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"invite", "talk", "wiki"}) {
+	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"account", "talk", "wiki"}) {
 		t.Errorf("the replica's stop does not name the leader: %#v", wait)
 	}
 	if errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
 	}
 	q := problemOf(t, err)
-	if q.Hint != "home-a is waiting on home-b to create databases invite, talk, wiki" {
+	if q.Hint != "home-a is waiting on home-b to create databases account, talk, wiki" {
 		t.Errorf("hint: %q", q.Hint)
 	}
 	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
@@ -1515,7 +1515,7 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		}
 	}
 
-	host.replicaHas = []string{"auth", "invite", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "talk", "wiki"}
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}
@@ -1663,11 +1663,11 @@ func TestAnEnvFileChangeRecreates(t *testing.T) {
 	}
 }
 
-// The invite service learns Pocket ID's address only from the identity app's
+// The account service learns Pocket ID's address only from the identity app's
 // hostname, through its .env, which reaches the container only when Compose
-// creates it. So a renamed identity host recreates the invite stack rather
+// creates it. So a renamed identity host recreates the account stack rather
 // than leaving it signing members in against the old name.
-func TestInviteEnvChangedByIdentityHostnameRecreates(t *testing.T) {
+func TestAccountEnvChangedByIdentityHostnameRecreates(t *testing.T) {
 	host := applied(t, "home-a")
 	renamed := planWith(t, func(cfg *config.Config) {
 		auth := cfg.Apps["auth"]
@@ -1680,20 +1680,20 @@ func TestInviteEnvChangedByIdentityHostnameRecreates(t *testing.T) {
 	}
 	var changed bool
 	for _, change := range p.Writes() {
-		changed = changed || change.Path == "/srv/paisans/f2a9/invite/.env"
+		changed = changed || change.Path == "/srv/paisans/f2a9/account/.env"
 	}
 	if !changed {
-		t.Fatalf("the invite .env is not rewritten after the identity host moved: %v", p.Writes())
+		t.Fatalf("the account .env is not rewritten after the identity host moved: %v", p.Writes())
 	}
 	for _, action := range p.Actions {
-		if action.Stack == "invite" {
+		if action.Stack == "account" {
 			if !action.Recreate {
-				t.Fatalf("the invite stack is planned %+v, want it recreated", action)
+				t.Fatalf("the account stack is planned %+v, want it recreated", action)
 			}
 			return
 		}
 	}
-	t.Fatalf("the invite stack is not planned after its .env changed: %+v", p.Actions)
+	t.Fatalf("the account stack is not planned after its .env changed: %+v", p.Actions)
 }
 
 // A first apply that stops after writing its files must still record them.

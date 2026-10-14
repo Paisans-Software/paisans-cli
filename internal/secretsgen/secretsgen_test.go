@@ -616,19 +616,19 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	if _, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{External: map[string]string{"smtp_password": "x"}})["external.smtp_password"]; ok {
 		t.Error("owed although external.smtp_password is set")
 	}
-	// The fixture's Pocket ID, auth, its Mbin, talk, and its invite app send
+	// The fixture's Pocket ID, auth, its Mbin, talk, and its account app send
 	// mail too, so all four need their own.
-	perApp := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
+	perApp := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
 	if _, ok := owedBy(t, withUptime(t, smtp), perApp)["external.smtp_password"]; ok {
 		t.Error("owed although every app that sends mail has its own smtp_password")
 	}
-	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "invite": {"smtp_password": "x"}}}
+	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), allButMbin)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "talk") {
 		t.Errorf("not owed for Mbin, which has no smtp_password of its own: %q", why)
 	}
-	onlyUptime := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}}}
-	why, ok = owedBy(t, withUptime(t, smtp), onlyUptime)["external.smtp_password"]
+	uptimeAndAccount := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
+	why, ok = owedBy(t, withUptime(t, smtp), uptimeAndAccount)["external.smtp_password"]
 	if !ok || !strings.Contains(why, "auth") {
 		t.Errorf("not owed for Pocket ID, which has no smtp_password of its own: %q", why)
 	}
@@ -823,34 +823,34 @@ func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
 	}
 }
 
-// withInvite is the fixture deployment with an invite app added beside its
+// withAccount is the fixture deployment with an account app added beside its
 // other apps, pinned to the same site as the uptime fixture.
-func withInvite(t *testing.T) *config.Config {
+func withAccount(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := load(t)
-	cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Hostname: "invite.example.org",
+	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	return cfg
 }
 
-// The invite service's two keys are generated once: the email hash key keys
+// The account service's two keys are generated once: the email hash key keys
 // the hash of every declined address, and the session key signs the sign in
 // cookie, so a regenerated one signs everyone out and a regenerated hash key
 // stops matching the addresses already recorded.
-func TestInviteKeysAreStable(t *testing.T) {
-	cfg := withInvite(t)
+func TestAccountKeysAreStable(t *testing.T) {
+	cfg := withAccount(t)
 	s := &config.Secrets{}
 	if _, err := secretsgen.Fill(cfg, s); err != nil {
 		t.Fatal(err)
 	}
-	first, ok := s.Apps["invite"]["session_key"].(string)
+	first, ok := s.Apps["account"]["session_key"].(string)
 	if !ok {
-		t.Fatal("session_key missing from apps.invite after Fill")
+		t.Fatal("session_key missing from apps.account after Fill")
 	}
-	hashKey, ok := s.Apps["invite"]["email_hash_key"].(string)
+	hashKey, ok := s.Apps["account"]["email_hash_key"].(string)
 	if !ok {
-		t.Fatal("email_hash_key missing from apps.invite after Fill")
+		t.Fatal("email_hash_key missing from apps.account after Fill")
 	}
 	if len(first) != 43 || len(hashKey) != 43 {
 		t.Fatalf("want 32 bytes as unpadded base64url: session %q, hash %q", first, hashKey)
@@ -858,9 +858,9 @@ func TestInviteKeysAreStable(t *testing.T) {
 	if _, err := secretsgen.Fill(cfg, s); err != nil {
 		t.Fatal(err)
 	}
-	again, ok := s.Apps["invite"]["session_key"].(string)
+	again, ok := s.Apps["account"]["session_key"].(string)
 	if !ok {
-		t.Fatal("session_key missing from apps.invite after second Fill")
+		t.Fatal("session_key missing from apps.account after second Fill")
 	}
 	if again != first {
 		t.Fatal("init must never replace an existing key")

@@ -485,7 +485,7 @@ func resolve(cfg *config.Config) []string {
 			continue
 		}
 		if reservedName(name) {
-			problems = append(problems, fmt.Sprintf("%s: %q takes the name of a reserved blueprint, which no catalog may provide. The identity provider, the gate, the invite service and the monitor are built into the toolkit.", key, blueprint))
+			problems = append(problems, fmt.Sprintf("%s: %q takes the name of a reserved blueprint, which no catalog may provide. The identity provider, the gate, the account service and the monitor are built into the toolkit.", key, blueprint))
 			continue
 		}
 		dir, ok := fetch(catalog)

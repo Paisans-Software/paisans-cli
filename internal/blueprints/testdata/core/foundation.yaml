@@ -35,7 +35,7 @@ images:
   # blueprint renders for.
   admin-reconciler: "ghcr.io/paisans-software/admin-reconciler:0.2.*"
   uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
-  invite: "ghcr.io/paisans-software/paisans-invite:0.1.*"
+  account: "ghcr.io/paisans-software/paisans-account-service:0.2.*"
 # By Postgres major. A major is data, so a deployment's
 # cluster.postgres_version chooses it and no track moves it. Spilo
 # publishes one repository per major, each on its own release line.

@@ -9,13 +9,13 @@ import (
 )
 
 // withAuth is valid.yaml with the Pocket ID app's settings, config and smtp
-// replaced, so each case below changes exactly one thing. The invite app is
+// replaced, so each case below changes exactly one thing. The account app is
 // dropped: it constrains the Pocket ID app it names, and these cases are about
 // Pocket ID's own rules.
 func withAuth(t *testing.T, settings, cfgKeys map[string]any, smtp *config.SMTP) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
-	delete(cfg.Apps, "invite")
+	delete(cfg.Apps, "account")
 	app := cfg.Apps["auth"]
 	app.Settings = map[string]any{"file_backend": "database"}
 	for k, v := range settings {

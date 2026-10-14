@@ -866,7 +866,7 @@ func walk(t *testing.T, root string) map[string]string {
 func TestEveryBlueprintShipsACommittedTemplateSet(t *testing.T) {
 	for _, blueprint := range []config.Blueprint{
 		config.Blueprint("mbin"), config.Blueprint("wikijs"), config.BlueprintPocketID,
-		config.Blueprint("synapse"), config.Blueprint("writefreely"), config.BlueprintInvite,
+		config.Blueprint("synapse"), config.Blueprint("writefreely"), config.BlueprintAccount,
 	} {
 		files, err := render.TemplateSet(blueprint)
 		if err != nil {

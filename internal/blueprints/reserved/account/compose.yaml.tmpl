@@ -1,0 +1,36 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# {{ .App.Name }} has cluster placement: no Postgres service of its own, and a
+# connection to the local HAProxy on {{ .DBHost }}:{{ .DBPort }}. Its state is
+# all in that database, so the container has no volume of its own.
+name: {{ .Project }}
+
+services:
+  app:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "app") }}
+    restart: unless-stopped
+    # The image declares its own healthcheck, the binary probing /healthz on
+    # ACCOUNT_LISTEN_ADDR's port, which apply's health gate reads.
+    env_file:
+      - .env
+    # The mesh address only. Docker's own iptables rules bypass a host
+    # firewall, so a port published on every interface of a host with a
+    # public address is reachable from the internet whatever ufw says. The
+    # gateway, over the mesh, is the only thing that should reach it.
+    ports:
+      - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+    # The code of conduct, rendered from apps.{{ .App.Name }}.settings.code_of_conduct,
+    # and empty with invites off, when the service reads none.
+    # A root owned 0644 file: the image runs as distroless nonroot (uid
+    # 65532), which reads it as other. It carries nothing secret.
+    volumes:
+      - {{ .DataPath }}/code-of-conduct.md:/etc/paisans-account-service/code-of-conduct.md:ro
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"

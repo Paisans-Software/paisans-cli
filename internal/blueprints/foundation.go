@@ -37,14 +37,14 @@ const (
 	FoundationAdminReconciler = "admin-reconciler"
 	FoundationOAuth2Proxy     = "oauth2-proxy"
 	FoundationUptime          = "uptime"
-	FoundationInvite          = "invite"
+	FoundationAccount         = "account"
 )
 
 // foundationNames are the images every foundation names.
 var foundationNames = map[string]bool{
 	FoundationEtcd: true, FoundationHAProxy: true, FoundationGarage: true, FoundationCaddy: true,
 	FoundationHeartbeat: true, FoundationPocketID: true, FoundationAdminReconciler: true,
-	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationInvite: true,
+	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationAccount: true,
 }
 
 // supportedTags is, for each image the toolkit's code is written against, the

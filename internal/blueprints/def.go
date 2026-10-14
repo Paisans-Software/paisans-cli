@@ -145,7 +145,7 @@ type Def struct {
 	RequiredSecrets []RequiredSecret
 
 	// Reserved is whether the blueprint is one no catalog may provide: the
-	// identity provider, the gate, the invite service and the monitor.
+	// identity provider, the gate, the account service and the monitor.
 	Reserved bool
 
 	// SelfRotated are the app secrets `secrets rotate` replaces by

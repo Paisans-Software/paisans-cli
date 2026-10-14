@@ -43,7 +43,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "3b0732ef6b28993f18d8eed5bfef5f34257423322f6fb4ea96f37928b40e7781",
+      "sha256": "54f01f65665e733daab0c80a42e1ad0ef283ed31123880132f0435f92747cef3",
       "mode": "0644"
     },
     {
@@ -52,8 +52,18 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/account-invite.caddy",
+      "sha256": "157675ed8abf851d64ffd9083742118439f3fe41f3ef7b97140fbf0b051a1823",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/account.caddy",
+      "sha256": "8d864e4eace37c02371f356dd846f69e16f26def93eb658d17fc231ed11d5e3b",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/auth.caddy",
-      "sha256": "c79365f7a62e8a5f247095925e9ad2a153d26622563d0e0440f56154b147751d",
+      "sha256": "a76433c2c8511d32607ee7a84644781744a1ece74f06ce63831d7c449a2f9646",
       "mode": "0644"
     },
     {
@@ -84,11 +94,6 @@
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/gate.caddy",
       "sha256": "2fcf9e5e980af08b0c072c09c3b80b6c83e4ba1b1c4300f6ad6596f6612f870b",
-      "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/invite.caddy",
-      "sha256": "668cc9631da26e28f87f2d90c6e8c55c24bdef8d64239b988059aedf703b2d39",
       "mode": "0644"
     },
     {
