@@ -112,9 +112,10 @@ tier above.
 
 **`paisans apply` creating a missing group** takes no approval of its own
 either, but only a group the deployment's configuration names: `operators`,
-the member group, and each app's admin and member groups. Those groups are
-what the operators and the apps' clients are put in and restricted to, so an
-apply that could not create them could not set the deployment up, and
+the member group, each app's admin and member groups, and each group the
+`pocket-id` app's `signup_default_groups` lists. Those groups are what the
+operators, new members and the apps' clients are put in and restricted to, so
+an apply that could not create them could not set the deployment up, and
 declaring them is approval for them. Creating any other group, and every
 change to a group that exists, stays in the tier above.
 

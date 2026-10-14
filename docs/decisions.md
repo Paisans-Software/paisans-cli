@@ -2665,7 +2665,8 @@ Founder decision. The design is
 * `docs/deployment-agent-rules.md` approves the account service under
   *Services the deployment runs*, with these writes, and lets `apply` create
   a missing group only where the configuration names it: `operators`, the
-  member group, and each app's admin and member groups.
+  member group, each app's admin and member groups, and each group in the
+  `pocket-id` app's `signup_default_groups` (founder decision, the same day).
 
 ### Why
 
