@@ -31,9 +31,9 @@ respond @setup 404
 #
 # Self signup is closed while allow_user_signups is disabled, or unset, since
 # Pocket ID's default is disabled (appconfig/model.go:130). Here it is
-# {{ with $signups }}{{ . }}{{ else }}unset{{ end }}. An account app with invites on requires disabled,
-# so an invite community always gets this block; otherwise Pocket ID's own
-# setting decides.
+# {{ with $signups }}{{ . }}{{ else }}unset{{ end }}. management: paisans, which an account app
+# requires, renders it disabled, so a community whose account service takes
+# signups always gets this block; otherwise Pocket ID's own setting decides.
 #
 # With allow_user_signups disabled, Pocket ID's signup page refuses
 # (frontend/src/routes/signup/+page.svelte:38-41) and its admin page offers no

@@ -178,6 +178,6 @@ func TestAccountBlueprint(t *testing.T) {
 		t.Fatalf("%+v", spec)
 	}
 	if blueprints.GateFor(config.BlueprintAccount).Gateable {
-		t.Fatal("invitees are not members; the gate must never sit in front of account")
+		t.Fatal("people signing up are not members; the gate must never sit in front of account")
 	}
 }

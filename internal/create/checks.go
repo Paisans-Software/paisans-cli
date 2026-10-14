@@ -236,7 +236,7 @@ func checkDisplayName(s string) error {
 }
 
 // readCodeOfConduct is the Markdown file at path, refused when it cannot be
-// read or holds nothing: every invitee agrees to it before an account exists.
+// read or holds nothing: everyone who signs up agrees to it before an account exists.
 func readCodeOfConduct(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -244,7 +244,7 @@ func readCodeOfConduct(path string) (string, error) {
 	}
 	text := strings.TrimRight(string(data), "\n")
 	if strings.TrimSpace(text) == "" {
-		return "", errors.New("is empty; the code of conduct is the text every invitee agrees to")
+		return "", errors.New("is empty; the code of conduct is the text everyone who signs up agrees to")
 	}
 	for _, r := range text {
 		if r != '\n' && r != '\t' && (r < 0x20 || r == 0x7f) {
