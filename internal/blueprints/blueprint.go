@@ -119,7 +119,7 @@ type storageSpec struct {
 type oidcSpec struct {
 	// Callback is the redirect URI's path on the app's own hostname. It is a
 	// template, given .Hostname and .App and the helper stableULID, for a
-	// kind whose path depends on the app.
+	// blueprint whose path depends on the app.
 	Callback           string `yaml:"callback"`
 	NoLaunch           bool   `yaml:"no_launch"`
 	LaunchPath         string `yaml:"launch_path"`

@@ -225,8 +225,8 @@ func lastCore(url string) (config.Catalog, bool) {
 	return cat, true
 }
 
-// isCore reports whether a kind is named as a core blueprint is: unqualified
-// and not reserved.
+// isCore reports whether a blueprint is named the way a core one is:
+// unqualified and not reserved.
 func isCore(blueprint config.Blueprint) bool {
 	return !strings.Contains(string(blueprint), "/") && !reservedName(string(blueprint))
 }

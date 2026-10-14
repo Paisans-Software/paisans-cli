@@ -80,8 +80,8 @@ func (c *checker) duplicateClientName() {
 	}
 }
 
-// displayNameWithoutAClient warns about a display_name on an app whose kind
-// has no client at Pocket ID, where it names nothing.
+// displayNameWithoutAClient warns about a display_name on an app whose
+// blueprint has no client at Pocket ID, where it names nothing.
 func (c *checker) displayNameWithoutAClient() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]

@@ -9,8 +9,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Every kind says whether it can be gated, so a new kind fails here until
-// somebody decides, rather than defaulting to a gate it might not survive.
+// Every blueprint says whether it can be gated, so a new blueprint fails here
+// until somebody decides, rather than defaulting to a gate it might not
+// survive.
 func TestEveryBlueprintHasAGateRecord(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		if !blueprints.GateRecorded(blueprint) {
@@ -41,8 +42,8 @@ func TestGatePathsAreAbsolute(t *testing.T) {
 	}
 }
 
-// A kind that can be gated records nothing that would open it whole, and a
-// kind that cannot be gated records nothing at all.
+// A blueprint that can be gated records nothing that would open it whole, and a
+// blueprint that cannot be gated records nothing at all.
 func TestNoGateRecordOpensTheFrontPage(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		spec := blueprints.GateFor(blueprint)
@@ -66,7 +67,7 @@ func TestADedicatedHealthRouteIsOpen(t *testing.T) {
 	}
 }
 
-// A federating kind that can be gated records how it refuses an unsigned
+// A federating blueprint that can be gated records how it refuses an unsigned
 // read, because the gate leaves ActivityPub to the app.
 func TestAGateableFederatingBlueprintRecordsSignedFetch(t *testing.T) {
 	for _, blueprint := range []config.Blueprint{config.Blueprint("mbin"), config.Blueprint("writefreely")} {
@@ -138,8 +139,9 @@ func TestMbinOpensItsAPIToATokenOnly(t *testing.T) {
 	}
 }
 
-// A kind with auto-login names the sign-in page a public app sends through the
-// gate's sign-in, and a kind without has none, since nothing would fire after.
+// A blueprint with auto-login names the sign-in page a public app sends through
+// the gate's sign-in, and a blueprint without has none, since nothing would
+// fire after.
 func TestAutoLoginNamesTheSignInPage(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		spec := blueprints.GateFor(blueprint)

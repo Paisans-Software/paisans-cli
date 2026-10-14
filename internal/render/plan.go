@@ -45,15 +45,15 @@ type Plan struct {
 	Images map[string][]ComposeImage
 }
 
-// AppPort is the port a kind listens on, which is also the port it publishes
-// on its site's mesh address (blueprints.Def.Port). A command that calls an
-// application's own API from its host needs it.
+// AppPort is the port a blueprint's app listens on, which is also the port it
+// publishes on its site's mesh address (blueprints.Def.Port). A command that
+// calls an application's own API from its host needs it.
 func AppPort(blueprint config.Blueprint) int { return blueprints.Port(blueprint) }
 
-// reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
-// the mesh address for the uptime monitor. A literal:
-// the reconciler's own binary and the kind's compose template name the same
-// number.
+// reconcilerPort is the pocket-id blueprint's admin reconciler, which publishes
+// /healthz on the mesh address for the uptime monitor. A literal:
+// the reconciler's own binary and the blueprint's compose template name the
+// same number.
 const reconcilerPort = 1412
 
 // patroniAPIPort is where Patroni answers the health check HAProxy uses to
@@ -91,10 +91,10 @@ type plannedApp struct {
 	DBName    string
 	DBUser    string
 	MediaDirs []string
-	// Images is the reference each of the kind's services runs, resolved from
-	// the configuration where it declared one and from the kind's default
-	// otherwise. The template reads it rather than deciding, so what runs is
-	// decided in one place.
+	// Images is the reference each of the blueprint's services runs, resolved
+	// from the configuration where it declared one and from the blueprint's
+	// default otherwise. The template reads it rather than deciding, so what
+	// runs is decided in one place.
 	Images map[string]string
 }
 
@@ -289,9 +289,9 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 	return planned, nil
 }
 
-// appImages resolves what each of the kind's services runs.
+// appImages resolves what each of the blueprint's services runs.
 //
-// A declared reference wins, and an absent one takes the default the kind's
+// A declared reference wins, and an absent one takes the default the
 // blueprint names, usually a track apply resolves to its newest build. The
 // database is the one service with no fixed default: every database in the
 // deployment is the same major version, declared once in cluster, so it is

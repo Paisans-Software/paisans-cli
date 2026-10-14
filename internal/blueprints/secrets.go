@@ -206,7 +206,7 @@ func snakeName(s string) bool {
 	return true
 }
 
-// SecretOf is how a kind's blueprint generates one of its secrets, and false
+// SecretOf is how a blueprint generates one of its secrets, and false
 // for a key it does not declare.
 func SecretOf(blueprint config.Blueprint, key string) (SecretSpec, bool) {
 	for _, s := range of(blueprint).Secrets {
@@ -217,8 +217,8 @@ func SecretOf(blueprint config.Blueprint, key string) (SecretSpec, bool) {
 	return SecretSpec{}, false
 }
 
-// SecretGroup is the secrets of a kind that rotate as the unit group, in the
-// blueprint's order.
+// SecretGroup is the secrets of a blueprint that rotate as the unit group, in
+// the blueprint's order.
 func SecretGroup(blueprint config.Blueprint, group string) []SecretSpec {
 	var out []SecretSpec
 	for _, s := range of(blueprint).Secrets {
@@ -229,7 +229,7 @@ func SecretGroup(blueprint config.Blueprint, group string) []SecretSpec {
 	return out
 }
 
-// SecretGroups is the units a kind's secrets rotate as, in the order their
+// SecretGroups is the units a blueprint's secrets rotate as, in the order their
 // first member appears.
 func SecretGroups(blueprint config.Blueprint) []string {
 	var out []string

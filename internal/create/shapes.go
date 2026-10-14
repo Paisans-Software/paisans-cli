@@ -94,7 +94,7 @@ type capability struct {
 	apps          []appSpec
 }
 
-// appSpec is how a capability's app is declared: its key, its kind, the
+// appSpec is how a capability's app is declared: its key, its blueprint, the
 // label its hostname is under, whether the gate can stand in front of it
 // (blueprints.Gate's Gateable), and the roles its site must hold (on) and must
 // not (avoid).

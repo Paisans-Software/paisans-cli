@@ -37,7 +37,7 @@ const (
 // Listener is one address and port something on a site binds.
 type Listener struct {
 	// Owner names what binds it, as an operator would recognise it: an
-	// infrastructure service, or an app by name and kind.
+	// infrastructure service, or an app by name and blueprint.
 	Owner string
 	// Key is the paisans-stack.yaml key that makes the site bind it, for a
 	// message that has to tell the operator what to change. A listener

@@ -105,7 +105,7 @@ func TestTheSeedChecksEveryAppTwiceAndPingsEveryOtherSite(t *testing.T) {
 			t.Errorf("direct %s: headers %v", site, headers)
 		}
 		if d["expected_status"] != "200" {
-			t.Errorf("direct %s: a direct check bypasses the gate and expects the kind's own codes, got %v", site, d["expected_status"])
+			t.Errorf("direct %s: a direct check bypasses the gate and expects the blueprint's own codes, got %v", site, d["expected_status"])
 		}
 		// talk is gated, so Mbin runs as a private instance, and its API
 		// refuses a request with no token. The gate keeps anonymous /api/*

@@ -9,8 +9,8 @@ import (
 )
 
 // GateSetting is one setting an app must enforce while it uses the gate: the
-// gate leaves ActivityPub, and for some kinds a token holder's API calls, to
-// the app, so the app's own setting is part of what keeps it closed. Every
+// gate leaves ActivityPub, and for some blueprints a token holder's API calls,
+// to the app, so the app's own setting is part of what keeps it closed. Every
 // one is rendered into a file the app reads and named in that file's lock
 // list, so the app reads it from disk on every read and nothing inside the
 // app can change it. See docs/specs/2026-10-12-gate-settings.md.
@@ -25,16 +25,16 @@ type GateSetting struct {
 	// Why is what the gate leaves open without it.
 	Why string
 	// ConfigKey is the passthrough key that sets the same thing, in the
-	// kind's config syntax: a config: key equal to Want only repeats what
+	// blueprint's config syntax: a config: key equal to Want only repeats what
 	// the template writes, and any other value contradicts it.
 	ConfigKey string
 	// SettingKey is the settings: key that owns it, when one does.
 	SettingKey string
 }
 
-// LiveSettings reads a kind's gate settings in a running app: the value it
-// enforces and whether its file locks it. A kind with gate settings
-// names one in its record, so doctor reads every kind the same way.
+// LiveSettings reads a blueprint's gate settings in a running app: the value it
+// enforces and whether its file locks it. A blueprint with gate settings
+// names one in its record, so doctor reads every blueprint the same way.
 type LiveSettings interface {
 	// Service is the compose service to run ReadCommand in.
 	Service() string
@@ -71,8 +71,8 @@ func GateSettingsFor(app config.App) []GateSetting {
 	return out
 }
 
-// LiveSettingsFor is how to read a kind's gate settings in a running app,
-// false for a kind with none.
+// LiveSettingsFor is how to read a blueprint's gate settings in a running app,
+// false for a blueprint with none.
 func LiveSettingsFor(blueprint config.Blueprint) (LiveSettings, bool) {
 	l := of(blueprint).LiveSettings
 	return l, l != nil

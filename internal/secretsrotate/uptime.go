@@ -8,7 +8,7 @@ import (
 )
 
 // What the uptime fork does with the two secrets at boot, read in its source
-// (Paisans-Software/uptime) at v1.1.0-oidc.4, the tag the kind pins
+// (Paisans-Software/uptime) at v1.1.0-oidc.4, the tag the blueprint pins
 // (internal/blueprints):
 //
 //   - ADMIN_PASS is the env super admin's password and is never stored: the

@@ -72,7 +72,7 @@ apps:
     placement: cluster
     settings:
       file_backend: database
-    # media is a role only for a kind that stores objects, and Pocket ID
+    # media is a role only for a blueprint that stores objects, and Pocket ID
     # keeps its uploads in its database.
     hostnames:
       media: id-media.example.org

@@ -22,13 +22,13 @@ import (
 )
 
 // The `all:` prefix matters: without it embed skips files beginning with a
-// dot, and every kind configured by environment ships a `.env` template.
+// dot, and every blueprint configured by environment ships a `.env` template.
 //
 //go:embed all:templates
 var templateFS embed.FS
 
 // templates holds the infrastructure templates, which are shared by every
-// deployment. An application's templates are not here: each kind owns a
+// deployment. An application's templates are not here: each blueprint owns a
 // directory under templates/, rendered as a set, so that adding an application
 // adds a directory rather than a branch in a file every other application
 // shares.
@@ -186,7 +186,7 @@ type route struct {
 	// public hostname it is the only use the host block makes of the gate.
 	AutoLogin bool
 	// What a hostname using the gate lets past it, and its auto-login, from
-	// the kind's GateSpec. Empty on a hostname that does not use the gate.
+	// the blueprint's GateSpec. Empty on a hostname that does not use the gate.
 	// See docs/specs/2026-10-08-visibility-gate.md.
 	Bypass gateBypass
 }
@@ -225,7 +225,7 @@ const GateSessionCookie = "_oauth2_proxy"
 // body rather than the status alone, and fails when the gate is gone.
 const GateMarker = "Sign in required by the visibility gate."
 
-// bypassFor is what an app using the gate lets past it, from its kind's
+// bypassFor is what an app using the gate lets past it, from its blueprint's
 // GateSpec. Auto-login is carried only when the app sets auto_login.
 //
 // An app keeping public files on its own disk also opens the paths they are
@@ -483,8 +483,8 @@ func hostSitesMount(site *siteView) string {
 	return ""
 }
 
-// snippetTemplate is the file in a kind's set that describes how the gateway
-// routes to it on its primary hostname. It is rendered onto the gateway
+// snippetTemplate is the file in a blueprint's set that describes how the
+// gateway routes to it on its primary hostname. It is rendered onto the gateway
 // rather than beside the app, because that is where it is read.
 //
 // snippetPrefix matches it and every extra hostname's own snippet, such as
@@ -550,11 +550,12 @@ func (p *planner) renderSnippets(base string, site *siteView, routes []route) ([
 	return files, nil
 }
 
-// gateSnippetTemplate defines the oauth2-proxy kind's named Caddy snippets,
-// gate, gate_autologin and gate_signin. It is not a hostname's routing: nothing
-// imports it by path, and no host block is rendered for it. A later kind's
-// own snippet imports the names it defines, the same way the deployment this
-// toolkit generalises imports its single `(pocketid_gate)` snippet by name.
+// gateSnippetTemplate defines the oauth2-proxy blueprint's named Caddy
+// snippets, gate, gate_autologin and gate_signin. It is not a hostname's
+// routing: nothing imports it by path, and no host block is rendered for it. A
+// later blueprint's own snippet imports the names it defines, the same way the
+// deployment this toolkit generalises imports its single `(pocketid_gate)`
+// snippet by name.
 const gateSnippetTemplate = "caddy.snippet.gates.tmpl"
 
 // GatesSnippet is what an oauth2-proxy app's named gate snippets file is
@@ -629,10 +630,10 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 	}, nil
 }
 
-// TemplateSet lists the templates a kind ships, as paths inside the embedded
-// filesystem. It exists so a test can assert that a set is complete: embed sees
-// what git checked out, so a template left uncommitted is absent here even
-// though it is present on the machine that wrote it.
+// TemplateSet lists the templates a blueprint ships, as paths inside the
+// embedded filesystem. It exists so a test can assert that a set is complete:
+// embed sees what git checked out, so a template left uncommitted is absent
+// here even though it is present on the machine that wrote it.
 func TemplateSet(blueprint config.Blueprint) ([]string, error) {
 	dir := string(blueprint)
 	var out []string
@@ -644,26 +645,26 @@ func TemplateSet(blueprint config.Blueprint) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", blueprint, err)
+		return nil, fmt.Errorf("blueprint %s ships no template set: %w", blueprint, err)
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// renderTemplateSet renders every file in a kind's template directory.
+// renderTemplateSet renders every file in a blueprint's template directory.
 //
-// A template's path is its destination: <kind>/config/packages/x.yaml in the
-// blueprint's templates (internal/blueprints)
+// A template's path is its destination: <blueprint>/config/packages/x.yaml in
+// the blueprint's templates (internal/blueprints)
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
 	dir := string(app.Blueprint)
 	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Blueprint, err)
+		return nil, fmt.Errorf("blueprint %s ships no template set: %w", app.Blueprint, err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("kind %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Blueprint)
+		return nil, fmt.Errorf("blueprint %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Blueprint)
 	}
 
 	values, err := p.values(app, p.cfg.Apps[app.Name])
@@ -720,9 +721,9 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 	return files, nil
 }
 
-// renderFile renders one template from a kind's set. Each is parsed on its own
-// rather than into the shared set, so that two kinds may name a file the same
-// thing, which they routinely do.
+// renderFile renders one template from a blueprint's set. Each is parsed on its
+// own rather than into the shared set, so that two blueprints may name a file
+// the same thing, which they routinely do.
 func (p *planner) renderFile(path string, values appValues) (string, error) {
 	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(blueprints.Templates, path)
 	if err != nil {
@@ -958,8 +959,8 @@ func elsewhere(site *siteView, upstreams []string) bool {
 // upstreamsOnPort is upstreams with the port supplied rather than looked up,
 // for a service that answers on a second, explicitly declared port, such as
 // the homeserver's authentication service. It exists so that finding that
-// upstream never computes a port from another kind's port, only from the one
-// the blueprint declares.
+// upstream never computes a port from another blueprint's port, only from the
+// one the blueprint declares.
 func (p *planner) upstreamsOnPort(name string, port int) []string {
 	app, ok := p.cfg.Apps[name]
 	if !ok {

@@ -1,5 +1,5 @@
 # valid.yaml with one thing broken: the homeserver has cluster placement. Its
-# media store cannot follow a failover, and the kind renders its own Postgres
+# media store cannot follow a failover, and the blueprint renders its own Postgres
 # and the hook that creates the authentication service's database beside it,
 # neither of which exists on a clustered site.
 version: 1

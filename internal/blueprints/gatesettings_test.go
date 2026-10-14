@@ -8,8 +8,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// A gateable kind that federates leaves ActivityPub to the app, so it has
-// gate settings and a way to read them; Wiki.js and Element leave nothing to
+// A gateable blueprint that federates leaves ActivityPub to the app, so it
+// has gate settings and a way to read them; Wiki.js and Element leave nothing to
 // a setting.
 func TestEveryFederatingGateableBlueprintRecordsItsGateSettings(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {

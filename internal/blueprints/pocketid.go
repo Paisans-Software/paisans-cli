@@ -2,9 +2,10 @@ package blueprints
 
 // PocketIDStandbyMarker is the text a Pocket ID v2 log carries
 // when it refuses to start because another instance already holds the
-// database. The standby wrapper the pocket-id kind renders (README, "Pocket ID
-// runs on every apps site, and one of them is active") stands by on an exit
-// whose last lines contain it, and treats every other exit as a failure.
+// database. The standby wrapper the pocket-id blueprint renders (README,
+// "Pocket ID runs on every apps site, and one of them is active") stands by on
+// an exit whose last lines contain it, and treats every other exit as a
+// failure.
 //
 // v2.14.0: bootstrap.Bootstrap turns francis's ErrClusterFull into "it
 // appears that there's already one instance of Pocket ID running - running

@@ -9,8 +9,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Mbin's tile starts the fork's OIDC flow; every other kind opens its front
-// page, which is the bare host with no trailing slash.
+// Mbin's tile starts the fork's OIDC flow; every other blueprint opens its
+// front page, which is the bare host with no trailing slash.
 func TestLaunchURLDefaultsPerBlueprint(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		want := "https://app.example.org"
@@ -40,8 +40,8 @@ func TestADashboardLinkReplacesTheBlueprintsPath(t *testing.T) {
 	}
 }
 
-// The bare host is in every kind's list, because it is what every client made
-// before kinds named a path was given.
+// The bare host is in every blueprint's list, because it is what every client
+// made before blueprints named a path was given.
 func TestToolkitLaunchURLs(t *testing.T) {
 	got := fmt.Sprint(blueprints.ToolkitLaunchURLs(config.Blueprint("mbin"), "app.example.org"))
 	if got != "[https://app.example.org https://app.example.org/oauth/oidc/connect]" {

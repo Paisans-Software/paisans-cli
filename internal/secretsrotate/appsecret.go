@@ -18,10 +18,10 @@ import (
 // goes one site at a time, each healthy before the next, so with cluster
 // placement the second site runs the old value while the first is checked.
 
-// AppSelfKind is the kind whose secret key is, for each key AppSelf rotates,
-// and false for any other key: what `secrets rotate` reads to find, in a
-// deployment's apps, the ones whose secret it is. Each kind's record names
-// its keys (blueprints.Def.SelfRotated).
+// AppSelfBlueprint is the blueprint whose secret key is, for each key AppSelf
+// rotates, and false for any other key: what `secrets rotate` reads to find, in
+// a deployment's apps, the ones whose secret it is. Each blueprint's record
+// names its keys (blueprints.Def.SelfRotated).
 func AppSelfBlueprint(key string) (config.Blueprint, bool) {
 	return blueprints.SelfRotatedBlueprint(key)
 }

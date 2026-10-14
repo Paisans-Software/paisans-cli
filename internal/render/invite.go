@@ -7,7 +7,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
-// inviteValues is what the invite kind's templates need beyond any app's.
+// inviteValues is what the invite blueprint's templates need beyond any app's.
 type inviteValues struct {
 	// IdentityURL is the public URL of the pocket-id app identity_app names,
 	// from its hostname in paisans-stack.yaml and nothing else. The service is

@@ -113,8 +113,8 @@ func (c *checker) inviteSettingInvalid() {
 	}
 }
 
-// inviteSettingUnknown warns about an invite setting the kind does not read,
-// which renders nothing and is most likely a misspelling.
+// inviteSettingUnknown warns about an invite setting the blueprint does not
+// read, which renders nothing and is most likely a misspelling.
 func (c *checker) inviteSettingUnknown() {
 	for _, name := range c.inviteApps() {
 		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
@@ -123,7 +123,7 @@ func (c *checker) inviteSettingUnknown() {
 			}
 			c.warn("invite-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"invite setting is not read by the toolkit",
-				"is not a setting the invite kind reads, so it renders nothing. The settings are listed in README.md, \"Invites\".")
+				"is not a setting the invite blueprint reads, so it renders nothing. The settings are listed in README.md, \"Invites\".")
 		}
 	}
 }

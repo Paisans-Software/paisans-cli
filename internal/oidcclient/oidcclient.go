@@ -29,7 +29,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// Desired is the client an app needs, from its kind and its configuration.
+// Desired is the client an app needs, from its blueprint and its configuration.
 type Desired struct {
 	// App is the app's name, the client's key under oidc_clients in the
 	// secrets file.
@@ -47,7 +47,7 @@ type Desired struct {
 	// never overwritten.
 	ToolkitLaunchURLs []string
 	// LaunchURLChosen is whether the operator set LaunchURL through the app's
-	// sso_dashboard_link, rather than taking the kind's default. A custom
+	// sso_dashboard_link, rather than taking the blueprint's default. A custom
 	// value that differs from a chosen one is warned about, since the
 	// operator evidently wants the tile to go somewhere it does not.
 	LaunchURLChosen bool

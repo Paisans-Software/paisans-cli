@@ -348,7 +348,7 @@ func (r appDatabase) Cost() Cost { return Cost{Reconnects: true} }
 
 // ownPostgres reports whether the app runs its own Postgres, which is how
 // render decides it (render/plan.go, planApp: OwnsDB is a pinned app, and
-// its kind has a postgres service exactly when blueprints.UsesPostgres).
+// its blueprint has a postgres service exactly when blueprints.UsesPostgres).
 func (r appDatabase) ownPostgres(e Env) bool {
 	app := e.Cfg.Apps[r.app]
 	return app.Placement.Mode == config.PlacementPinned && blueprints.UsesPostgres(app.Blueprint)

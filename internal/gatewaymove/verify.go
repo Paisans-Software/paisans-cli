@@ -65,7 +65,7 @@ type Check struct {
 }
 
 // checks are every hostname the gateway serves, through each of site's
-// public addresses: an app's own hostname at its kind's health route, and
+// public addresses: an app's own hostname at its blueprint's health route, and
 // every other hostname at /.
 func checks(cfg *config.Config, site string) []Check {
 	s := cfg.Sites[site]

@@ -20,9 +20,9 @@ import (
 // loopback address is the container itself: a DSN naming 127.0.0.1 reaches
 // nothing, and the app fails at its first query. Two other ways round that
 // were rejected. Running the apps with host networking would put every
-// sidecar on the host's interfaces and make two kinds that listen on the same
-// port collide. Pointing at the Docker bridge gateway would need HAProxy to
-// bind an address that differs per compose network and does not exist until
+// sidecar on the host's interfaces and make two blueprints that listen on the
+// same port collide. Pointing at the Docker bridge gateway would need HAProxy
+// to bind an address that differs per compose network and does not exist until
 // Docker creates it. The mesh address exists from the moment the mesh interface is up, which
 // is before anything else starts, and it is already declared in the
 // configuration.
@@ -55,10 +55,10 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 		planned.Name)
 }
 
-// requireAppSecrets refuses an app whose kind needs a secret that is unset
+// requireAppSecrets refuses an app whose blueprint needs a secret that is unset
 // (blueprints.Def.RequiredSecrets). Most app secrets render as an empty value
-// when unset, because the kinds differ in what they need and an absent optional
-// one is not an error. These are not optional, and an empty one is a
+// when unset, because the blueprints differ in what they need and an absent
+// optional one is not an error. These are not optional, and an empty one is a
 // container that exits on a host after the apply has already moved, so
 // render refuses first and names the command that fixes it.
 func (p *planner) requireAppSecrets(planned plannedApp) error {

@@ -291,7 +291,7 @@ func withPinnedForum(t *testing.T) *config.Config {
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 	}
 	if !blueprints.Has(config.Blueprint("mbin"), blueprints.PostgresService) {
-		t.Fatal("mbin no longer declares a postgres service; pick a kind that does")
+		t.Fatal("mbin no longer declares a postgres service; pick a blueprint that does")
 	}
 	return cfg
 }

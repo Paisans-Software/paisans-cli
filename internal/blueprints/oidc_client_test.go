@@ -106,9 +106,9 @@ func TestWikiAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.T) 
 	}
 }
 
-// Every kind that can sit behind the gate and has a client gets a restricted
-// one from an empty declaration. An unrestricted client on a member facing
-// app would admit anyone with a Pocket ID account.
+// Every blueprint that can sit behind the gate and has a client gets a
+// restricted one from an empty declaration. An unrestricted client on a member
+// facing app would admit anyone with a Pocket ID account.
 func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 	for _, blueprint := range []config.Blueprint{config.Blueprint("mbin"), config.Blueprint("wikijs"), config.Blueprint("writefreely"), config.Blueprint("element"), config.BlueprintUptime} {
 		spec, ok := blueprints.OIDCClient(blueprint, "app.example.org", "app")

@@ -1,7 +1,7 @@
 package blueprints
 
-// InviteSettingRanges are the integer settings of the invite kind and their
-// inclusive ranges, from docs/specs/2026-10-12-invite-service.md.
+// InviteSettingRanges are the integer settings of the invite blueprint and
+// their inclusive ranges, from docs/specs/2026-10-12-invite-service.md.
 var InviteSettingRanges = map[string][2]int{
 	"invite_quota":           {1, 100},
 	"invite_lifetime_days":   {1, 365},

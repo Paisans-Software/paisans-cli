@@ -16,10 +16,10 @@ type Health struct {
 	TCP    bool
 }
 
-// HealthFor returns a kind's health route, false for a kind with none
+// HealthFor returns a blueprint's health route, false for a blueprint with none
 // recorded. Each route was established from the pinned tag's source and,
 // where its record says so, by running the pinned image. None of it is
-// recalled. A kind with no health route of its own gets `/`, which is a
+// recalled. A blueprint with no health route of its own gets `/`, which is a
 // deeper check than a health route (it renders a page) and is said so in its
 // record.
 func HealthFor(blueprint config.Blueprint) (Health, bool) {
@@ -27,6 +27,6 @@ func HealthFor(blueprint config.Blueprint) (Health, bool) {
 	return h, h.Path != ""
 }
 
-// HealthOf is a kind's health declaration whatever it holds, for the uptime
-// seed, which checks a kind with no route by the fallback.
+// HealthOf is a blueprint's health declaration whatever it holds, for the
+// uptime seed, which checks a blueprint with no route by the fallback.
 func HealthOf(blueprint config.Blueprint) Health { return of(blueprint).Health }

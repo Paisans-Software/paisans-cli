@@ -11,8 +11,8 @@ import (
 )
 
 // ClusterDatabaseApps returns, sorted, the apps that reach the cluster's
-// database through each apps site's HAProxy: cluster placement and a kind that
-// uses Postgres, the same test Databases makes. A pinned app has its own
+// database through each apps site's HAProxy: cluster placement and a blueprint
+// that uses Postgres, the same test Databases makes. A pinned app has its own
 // Postgres and is not among them.
 //
 // These are the apps a database path change breaks. A real `site add`

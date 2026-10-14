@@ -50,9 +50,9 @@ func TestLocalMediaPaths(t *testing.T) {
 		t.Errorf("mbin in garage: %v", got)
 	}
 	// The paths are only what a blueprint declares under local_media_paths,
-	// so a kind declaring none opens none. Wiki.js declares none because it
-	// keeps no files at all; this case proves a kind without declared paths
-	// gets an empty list, not anything about privacy.
+	// so a blueprint declaring none opens none. Wiki.js declares none because
+	// it keeps no files at all; this case proves a blueprint without declared
+	// paths gets an empty list, not anything about privacy.
 	if got := blueprints.LocalMediaPaths(cfg, config.App{Blueprint: config.Blueprint("wikijs"), Storage: config.StorageLocal}); len(got) != 0 {
 		t.Errorf("wikijs keeps no files: %v", got)
 	}

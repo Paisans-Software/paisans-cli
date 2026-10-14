@@ -17,7 +17,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
 
-// unpublished is a registry that does not have the mbin kind's default
+// unpublished is a registry that does not have the mbin blueprint's default
 // image: every other tag names one build.
 type unpublished struct{}
 

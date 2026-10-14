@@ -8,15 +8,15 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Def is everything the toolkit records about one kind, in one place, read
-// from the kind's blueprint.yaml (docs/specs/2026-10-12-blueprints-and-
+// Def is everything the toolkit records about one blueprint, in one place, read
+// from its blueprint.yaml (docs/specs/2026-10-12-blueprints-and-
 // catalogs.md). Parse documents the format.
 //
 // A field holds what is true of the software, never of a deployment. What an
 // app's declaration decides is read through the functions that take a
 // config.App, which take their answers from here.
 type Def struct {
-	// Services is every container the kind's compose template defines, in
+	// Services is every container the blueprint's compose template defines, in
 	// compose order: `app` first. The lists are short because the compose
 	// templates are short. They grow when a template gains a container, and
 	// that is the point of keying them on service names: an `images` key
@@ -30,7 +30,7 @@ type Def struct {
 	Port int
 
 	// ConfigFormat and ConfigFile are the syntax and the rendered path,
-	// relative to the stack, of the file the kind reads its passthrough
+	// relative to the stack, of the file the blueprint reads its passthrough
 	// configuration from. The renderer drops `.tmpl` and then `.secret`, so
 	// writefreely/config.ini.secret.tmpl is `config.ini` on the host.
 	ConfigFormat Format
@@ -42,29 +42,29 @@ type Def struct {
 	// the value that somebody will review.
 	SettingKeys []SettingKey
 
-	// OmittedKeys are keys the kind's template leaves out of its config file
-	// on purpose, because putting one back would undo a decision the toolkit
-	// made. A passthrough key that names one is refused.
+	// OmittedKeys are keys the blueprint's template leaves out of its config
+	// file on purpose, because putting one back would undo a decision the
+	// toolkit made. A passthrough key that names one is refused.
 	OmittedKeys []OmittedKey
 
-	// Health is the route a monitor checks. Every built in kind has one; a
+	// Health is the route a monitor checks. Every built in blueprint has one; a
 	// catalog blueprint may leave it out and is watched by a fallback.
 	Health Health
 
-	// Engine is the database engine the kind keeps its data in: postgres,
+	// Engine is the database engine the blueprint keeps its data in: postgres,
 	// mysql, sqlite or none.
 	Engine string
 
 	// Backup is how to dump and restore a database the backups do not reach
-	// as files, nil for a kind with none.
+	// as files, nil for a blueprint with none.
 	Backup *BackupSpec
 
-	// Checks are the kind's own validate rules, each a CEL condition every
-	// app of the kind must meet.
+	// Checks are the blueprint's own validate rules, each a CEL condition every
+	// app built from the blueprint must meet.
 	Checks []Check
 
-	// Settings are the `settings` keys the kind reads, with their types,
-	// for a blueprint that declares them; a built in kind's are checked by
+	// Settings are the `settings` keys the blueprint reads, with their types,
+	// for a blueprint that declares them; a built in blueprint's are checked by
 	// validate's own code instead.
 	Settings map[string]SettingSpec
 
@@ -72,26 +72,26 @@ type Def struct {
 	// written: ">= MAJOR.MINOR[.PATCH]", empty for none.
 	RequiresToolkit string
 
-	// Gate is what the kind needs from the gateway's Caddy to sit behind the
-	// gate, and GateSettings and LiveSettings what it must enforce itself
+	// Gate is what the blueprint needs from the gateway's Caddy to sit behind
+	// the gate, and GateSettings and LiveSettings what it must enforce itself
 	// while it does, and how to read that back from a running app.
 	Gate         GateSpec
 	GateSettings []GateSetting
 	LiveSettings LiveSettings
 
-	// Federates is whether the kind answers ActivityPub, and
+	// Federates is whether the blueprint answers ActivityPub, and
 	// FederationSetting the boolean setting that turns it off, empty for a
-	// kind that cannot turn it off.
+	// blueprint that cannot turn it off.
 	Federates         bool
 	FederationSetting string
 
-	// HostnameRoles are the hostname roles the kind understands beyond the
+	// HostnameRoles are the hostname roles the blueprint understands beyond the
 	// primary. The set is closed: a role selects which Caddy snippet that
-	// hostname gets, so a role the kind ships no snippet for would render a
-	// host block importing a file that does not exist.
+	// hostname gets, so a role the blueprint ships no snippet for would render
+	// a host block importing a file that does not exist.
 	HostnameRoles []string
 
-	// ObjectStorage is whether the kind can keep its uploads in S3 rather
+	// ObjectStorage is whether the blueprint can keep its uploads in S3 rather
 	// than on local disk; PublicObjects whether its objects must be readable
 	// without a credential; LocalFilesOnly whether it stores files that can
 	// live only on its own site's disk, with no object storage form at all.
@@ -99,41 +99,41 @@ type Def struct {
 	PublicObjects  bool
 	LocalFilesOnly bool
 
-	// LocalOnlyReason is why a kind with LocalFilesOnly has no object
+	// LocalOnlyReason is why a blueprint with LocalFilesOnly has no object
 	// storage form, for the refusal of `storage: s3` on it.
 	LocalOnlyReason string
 
-	// ExtraDatabases are databases the kind keeps beside its own in the same
-	// Postgres, each named <database>_<name>, which its templates create.
+	// ExtraDatabases are databases the blueprint keeps beside its own in the
+	// same Postgres, each named <database>_<name>, which its templates create.
 	ExtraDatabases []string
 
 	// LockedSettings are the settings the configuration is the only source
 	// of, which the app's own admin pages refuse to change.
 	LockedSettings []LockedSetting
 
-	// Provides and Consumes are the roles linking the kind to other apps.
+	// Provides and Consumes are the roles linking the blueprint to other apps.
 	Provides []provided
 	Consumes []Consume
 
-	// LocalMediaPaths are the paths on its own hostname a kind serves its
-	// stored files from when it keeps them locally, for a kind whose files
+	// LocalMediaPaths are the paths on its own hostname a blueprint serves its
+	// stored files from when it keeps them locally, for a blueprint whose files
 	// must be readable with no credential.
 	LocalMediaPaths []string
 
-	// SendsMail is whether the kind reads the deployment's smtp settings.
+	// SendsMail is whether the blueprint reads the deployment's smtp settings.
 	SendsMail bool
 
-	// OIDC is how the kind's client at the identity provider must look, nil
-	// for a kind that signs nobody in.
+	// OIDC is how the blueprint's client at the identity provider must look,
+	// nil for a blueprint that signs nobody in.
 	OIDC *OIDCDef
 
 	// DashboardPath is where the identity provider's dashboard tile sends a
 	// member, on the app's own hostname. Empty means `/`.
 	DashboardPath string
 
-	// AppSecrets are the generated secrets an app of the kind has beyond
-	// database_password, which every Postgres backed kind has, and its
-	// storage keys, which every app in object storage has.
+	// AppSecrets are the generated secrets an app built from the blueprint has
+	// beyond database_password, which every Postgres backed blueprint has, and
+	// its storage keys, which every app in object storage has.
 	AppSecrets []string
 
 	// Secrets is how each of AppSecrets is generated, and what rotating it
@@ -144,7 +144,7 @@ type Def struct {
 	// not start, and why. Render refuses an app missing one.
 	RequiredSecrets []RequiredSecret
 
-	// Reserved is whether the kind is one no catalog may provide: the
+	// Reserved is whether the blueprint is one no catalog may provide: the
 	// identity provider, the gate, the invite service and the monitor.
 	Reserved bool
 
@@ -154,7 +154,7 @@ type Def struct {
 	SelfRotated []string
 }
 
-// SettingKey is one passthrough key a setting owns. Key is in the kind's
+// SettingKey is one passthrough key a setting owns. Key is in the blueprint's
 // `config` syntax; File is the stack file it is rendered into.
 type SettingKey struct {
 	Key     string
@@ -163,7 +163,7 @@ type SettingKey struct {
 }
 
 // OmittedKey is one key a template leaves out on purpose. Key is in the
-// kind's `config` syntax and matches itself and any path beneath it, so
+// blueprint's `config` syntax and matches itself and any path beneath it, so
 // oidc_config.enabled is caught by oidc_config. Why completes the refusal's
 // "leaves <key> out of <file> on purpose: ".
 type OmittedKey struct {
@@ -171,13 +171,13 @@ type OmittedKey struct {
 	Why string
 }
 
-// RequiredSecret is one app secret a kind cannot start without.
+// RequiredSecret is one app secret a blueprint cannot start without.
 type RequiredSecret struct {
 	Key string
 	Why string
 }
 
-// defs is every kind's record: the reserved ones, read at init from the
+// defs is every blueprint's record: the reserved ones, read at init from the
 // blueprints built into the binary (internal/blueprints), and the core and
 // catalog ones as they are read.
 //
@@ -221,8 +221,8 @@ func loadBuiltins() (map[config.Blueprint]*Def, error) {
 	return out, nil
 }
 
-// For is a kind's record, and false for a kind this toolkit does not know.
-// A core blueprint is read from the catalog cache the first time any is
+// For is a blueprint's record, and false for a blueprint this toolkit does not
+// know. A core blueprint is read from the catalog cache the first time any is
 // asked for.
 func For(blueprint config.Blueprint) (*Def, bool) {
 	mu.RLock()
@@ -240,9 +240,9 @@ func For(blueprint config.Blueprint) (*Def, bool) {
 	return d, ok
 }
 
-// of is a kind's record, or an empty one for a kind this toolkit does not
-// know, so that every question asked of an unknown kind has the zero answer.
-// validate refuses the unknown kind itself.
+// of is a blueprint's record, or an empty one for a blueprint this toolkit does
+// not know, so that every question asked of an unknown blueprint has the zero
+// answer. validate refuses the unknown blueprint itself.
 func of(blueprint config.Blueprint) *Def {
 	if d, ok := For(blueprint); ok {
 		return d
@@ -262,7 +262,7 @@ func Builtin() []config.Blueprint {
 	return out
 }
 
-// known is every kind with a record, sorted. The core blueprints are read
+// known is every blueprint with a record, sorted. The core blueprints are read
 // first, so it holds them.
 func known() []config.Blueprint {
 	LoadCore("")
@@ -276,41 +276,41 @@ func known() []config.Blueprint {
 	return out
 }
 
-// Port is the port a kind listens on, which is also the port it publishes on
-// its site's mesh address.
+// Port is the port a blueprint listens on, which is also the port it publishes
+// on its site's mesh address.
 func Port(blueprint config.Blueprint) int { return of(blueprint).Port }
 
-// SettingKeys is every passthrough key a setting owns, for a kind.
+// SettingKeys is every passthrough key a setting owns, for a blueprint.
 func SettingKeys(blueprint config.Blueprint) []SettingKey {
 	return append([]SettingKey(nil), of(blueprint).SettingKeys...)
 }
 
-// OmittedKeys is every key a kind's template leaves out on purpose.
+// OmittedKeys is every key a blueprint's template leaves out on purpose.
 func OmittedKeys(blueprint config.Blueprint) []OmittedKey {
 	return append([]OmittedKey(nil), of(blueprint).OmittedKeys...)
 }
 
-// AppSecrets is a kind's own generated secrets, in the order they are
+// AppSecrets is a blueprint's own generated secrets, in the order they are
 // generated.
 func AppSecrets(blueprint config.Blueprint) []string {
 	return append([]string(nil), of(blueprint).AppSecrets...)
 }
 
-// RequiredSecrets is the app secrets a kind cannot start without.
+// RequiredSecrets is the app secrets a blueprint cannot start without.
 func RequiredSecrets(blueprint config.Blueprint) []RequiredSecret {
 	return append([]RequiredSecret(nil), of(blueprint).RequiredSecrets...)
 }
 
-// SelfRotated is the app secrets of a kind that `secrets rotate` replaces by
-// re-rendering the app's own stack.
+// SelfRotated is the app secrets of a blueprint that `secrets rotate` replaces
+// by re-rendering the app's own stack.
 func SelfRotated(blueprint config.Blueprint) []string {
 	return append([]string(nil), of(blueprint).SelfRotated...)
 }
 
-// SelfRotatedKind is the kind whose secret key is, for each key `secrets
-// rotate` replaces by re-rendering the app's own stack, and false for any
-// other key. No two kinds share such a key (TestSelfRotatedSecretsAreUnique),
-// so the answer is one kind.
+// SelfRotatedBlueprint is the blueprint whose secret key is, for each key
+// `secrets rotate` replaces by re-rendering the app's own stack, and false for
+// any other key. No two blueprints share such a key
+// (TestSelfRotatedSecretsAreUnique), so the answer is one blueprint.
 func SelfRotatedBlueprint(key string) (config.Blueprint, bool) {
 	for _, blueprint := range known() {
 		for _, k := range of(blueprint).SelfRotated {

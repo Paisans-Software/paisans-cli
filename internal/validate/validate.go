@@ -878,7 +878,7 @@ func (c *checker) consentIsABoolean() {
 // that diverge from the moment anybody writes to them, and a failover would
 // move readers between them.
 //
-// Three kinds are in this position: Element, which is a static client,
+// Three blueprints are in this position: Element, which is a static client,
 // oauth2-proxy, which keeps a session in a cookie, and uptime, which keeps
 // its database in SQLite under its own data directory. It is refused rather
 // than warned about because there is no reading of it that works, and pinning
@@ -938,8 +938,8 @@ func (c *checker) acmeImageIsNotStockCaddy() {
 		c.cfg.ACME.Image, c.cfg.ACME.Provider)
 }
 
-// imageServices refuses an image declared for a service the kind does not
-// have.
+// imageServices refuses an image declared for a service the blueprint
+// does not have.
 //
 // The map is keyed on compose service names precisely so this check can exist.
 // An unknown key is a typo, and a typo that renders nothing is the worst
@@ -1198,7 +1198,7 @@ func (c *checker) latestACMEImage() {
 		c.cfg.ACME.Image, why)
 }
 
-// gatedOnUngateableKind refuses gated: true on a kind that cannot sit
+// gatedOnUngateableKind refuses gated: true on a blueprint that cannot sit
 // behind one.
 //
 // README: "A Matrix hostname must never be gated." The gate answers a request
@@ -1220,16 +1220,16 @@ func (c *checker) gatedOnUngateableBlueprint() {
 		if !app.Gated || blueprints.GateFor(app.Blueprint).Gateable {
 			continue
 		}
-		c.refuse("gated-on-ungateable-kind", fmt.Sprintf("apps.%s.gated", name),
-			"gated is set on a kind that cannot sit behind the gate",
-			"is true on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt, and its blueprint says it cannot take one: its clients or federating servers would not follow the redirect, it is the sign-in flow itself, or it must stay readable while the gate is down. Remove gated.",
+		c.refuse("gated-on-ungateable-blueprint", fmt.Sprintf("apps.%s.gated", name),
+			"gated is set on a blueprint that cannot sit behind the gate",
+			"is true on a %s app, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt, and its blueprint says it cannot take one: its clients or federating servers would not follow the redirect, it is the sign-in flow itself, or it must stay readable while the gate is down. Remove gated.",
 			app.Blueprint)
 	}
 }
 
 // gatedWithoutSignedFetch refuses gated: true on a federating app that
-// does not refuse an unsigned ActivityPub read: one whose kind records no way
-// to, or whose settings.authorized_fetch is false.
+// does not refuse an unsigned ActivityPub read: one whose blueprint records no
+// way to, or whose settings.authorized_fetch is false.
 //
 // The gate sends every ActivityPub request to the app without asking for a
 // session, because a federating peer has none and proves who it is by
@@ -1246,15 +1246,16 @@ func (c *checker) gatedWithoutSignedFetch() {
 		}
 		c.refuse("gated-without-signed-fetch", fmt.Sprintf("apps.%s.gated", name),
 			"gated federating app still answers unsigned reads",
-			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and any setting the kind's blueprint says turns its signed reads off), turn federation off for this app, or remove gated.",
+			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and any setting its blueprint says turns its signed reads off), turn federation off for this app, or remove gated.",
 			app.Blueprint)
 	}
 }
 
-// autoLoginWithoutARule refuses auto_login: true on a kind with no auto-login
-// rule. The key would do nothing, and an operator reading it would believe a
-// member is signed straight in. A kind whose sign-in screen redirects itself
-// needs none, and the kinds that cannot sit behind the gate have none to take.
+// autoLoginWithoutARule refuses auto_login: true on a blueprint with no
+// auto-login rule. The key would do nothing, and an operator reading it would
+// believe a member is signed straight in. A blueprint whose sign-in screen
+// redirects itself needs none, and the blueprints that cannot sit behind the
+// gate have none to take.
 func (c *checker) autoLoginWithoutARule() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
@@ -1262,8 +1263,8 @@ func (c *checker) autoLoginWithoutARule() {
 			continue
 		}
 		c.refuse("auto-login-without-a-rule", fmt.Sprintf("apps.%s.auto_login", name),
-			"auto_login is set on a kind with no auto-login rule",
-			"is true on an app of kind %s, which has no auto-login rule, so it would do nothing: its blueprint declares none, because its sign-in screen already redirects itself or because it cannot sit behind the gate. Remove auto_login.",
+			"auto_login is set on a blueprint with no auto-login rule",
+			"is true on a %s app, which has no auto-login rule, so it would do nothing: its blueprint declares none, because its sign-in screen already redirects itself or because it cannot sit behind the gate. Remove auto_login.",
 			app.Blueprint)
 	}
 }
@@ -1395,7 +1396,7 @@ func (c *checker) mailDomains() {
 // with the app but the community's own domain.
 //
 // That domain is the one exception, because it cannot be otherwise: every
-// hostname in a deployment sits under it, and a synapse kind commonly serves
+// hostname in a deployment sits under it, and a synapse app commonly serves
 // its delegation documents on it. A cookie scoped to the community's domain is
 // a deliberate choice, made by the gate, and it already reaches every app.
 func (c *checker) mediaHostnameUnderAnAppHostname() {
@@ -1550,7 +1551,7 @@ func (c *checker) duplicateHostname() {
 	}
 }
 
-// hostnameRoles refuses a hostname role the kind ships no snippet for.
+// hostnameRoles refuses a hostname role the blueprint ships no snippet for.
 //
 // A role selects a Caddy snippet. A role nobody ships renders a host block
 // importing a file that does not exist, so the gateway fails to load its whole
@@ -1564,15 +1565,15 @@ func (c *checker) hostnameRoles() {
 				continue
 			}
 			c.refuse("unknown-hostname-role", fmt.Sprintf("apps.%s.hostnames.%s", name, role),
-				"hostname role is not known to this kind",
-				"names a hostname role %q, which the %s kind does not understand. A role selects the Caddy snippet that hostname gets, so an unknown one would import a file that does not exist and the gateway would fail to load at all. Roles for this kind: %s.",
+				"hostname role is not known to this blueprint",
+				"names a hostname role %q, which the %s blueprint does not understand. A role selects the Caddy snippet that hostname gets, so an unknown one would import a file that does not exist and the gateway would fail to load at all. Roles for this blueprint: %s.",
 				role, app.Blueprint, strings.Join(blueprints.HostnameRoles(app.Blueprint), ", "))
 		}
 	}
 }
 
-// configKeyIsNestedInAnEnvFile refuses a dotted key on a kind configured by
-// environment.
+// configKeyIsNestedInAnEnvFile refuses a dotted key on a blueprint configured
+// by environment.
 //
 // Env has no nesting. In ini and yaml a dot is a path and means something, so
 // the same habit carried over here produces a variable called `a.b` that the
@@ -1629,7 +1630,7 @@ func (c *checker) configKeyLooksLikeASecret() {
 }
 
 // composeSteeringPrefixes are the variable name prefixes refused on an env
-// kind by configKeySteersCompose.
+// blueprint by configKeySteersCompose.
 var composeSteeringPrefixes = []string{"COMPOSE_", "DOCKER_"}
 
 // configKeySteersCompose refuses an env key that would configure compose
@@ -1806,10 +1807,10 @@ func (c *checker) adminGroupNotAdmins() {
 // oidcMemberGroupNotAName refuses a member_group or admin_group setting that
 // is not a group name.
 //
-// A blank or non-string value is read as absent, and the kind's default
-// holds, so the client is still restricted. But the operator wrote something,
-// and what they wrote is not what the client admits; left alone, that reads
-// as a restriction to a group that does not exist.
+// A blank or non-string value is read as absent, and the blueprint's
+// default holds, so the client is still restricted. But the operator wrote
+// something, and what they wrote is not what the client admits; left alone,
+// that reads as a restriction to a group that does not exist.
 func (c *checker) oidcMemberGroupNotAName() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
@@ -1830,7 +1831,7 @@ func (c *checker) oidcMemberGroupNotAName() {
 			}
 			c.refuse("oidc-member-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"oidc member group is not a group name",
-				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the kind's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
+				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the blueprint's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
 		}
 		// Extra groups are created at Pocket ID by apply, so a name it
 		// refuses would otherwise fail there, after validate passed.
@@ -1880,11 +1881,11 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 // oidcClientUnrestricted refuses a gateable app whose client would admit
 // every Pocket ID account.
 //
-// A kind that can sit behind the gate is member facing, and its client is the
-// control that stops a person outside the community before the app sees them.
-// Every such kind has a default member group today, so this is the floor
-// under that: a kind added without one, or a change that empties one, is
-// refused here rather than shipping an open client.
+// A blueprint that can sit behind the gate is member facing, and its client
+// is the control that stops a person outside the community before the app
+// sees them. Every such blueprint has a default member group today, so this is
+// the floor under that: a blueprint added without one, or a change that empties
+// one, is refused here rather than shipping an open client.
 func (c *checker) oidcClientUnrestricted() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
@@ -1908,8 +1909,8 @@ func (c *checker) smtpOnABlueprintWithoutMail() {
 		if app.SMTP == nil || blueprints.SendsMail(app.Blueprint) {
 			continue
 		}
-		c.refuse("smtp-on-a-kind-without-mail", fmt.Sprintf("apps.%s.smtp", name),
-			"smtp is declared for a kind that sends no mail",
+		c.refuse("smtp-on-a-blueprint-without-mail", fmt.Sprintf("apps.%s.smtp", name),
+			"smtp is declared for a blueprint that sends no mail",
 			"is declared, but %s does not read the toolkit's smtp settings, so this override would be ignored without a word. Remove it, or configure that application's mail where it keeps it.",
 			app.Blueprint)
 	}

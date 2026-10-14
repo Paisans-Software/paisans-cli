@@ -12,7 +12,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// localStorageApps are the fixture's two apps of kinds that can use S3,
+// localStorageApps are the fixture's two apps whose blueprints can use S3,
 // each pinned and given `storage: local` by localStorageFixture.
 var localStorageApps = []string{"talk", "blog"}
 

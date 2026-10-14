@@ -13,8 +13,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/configmerge"
 )
 
-// owningSetting is the setting that owns a kind's rendered key, if any: the
-// `settings` key that is the sanctioned input for it
+// owningSetting is the setting that owns a blueprint's rendered key, if any:
+// the `settings` key that is the sanctioned input for it
 // (blueprints.Def.SettingKeys). When a passthrough key collides with one, the
 // refusal names the setting rather than the template, because that is the way
 // to change the value that somebody will review.
@@ -39,8 +39,8 @@ func owningSetting(blueprint config.Blueprint, key string) (string, bool) {
 	return "", false
 }
 
-// omittedOnPurpose is the key a kind's template leaves out of its config file
-// on purpose that a passthrough key falls under, if any
+// omittedOnPurpose is the key a blueprint's template leaves out of its config
+// file on purpose that a passthrough key falls under, if any
 // (blueprints.Def.OmittedKeys). Such a key is owned by the template exactly as
 // a key it writes is, and a passthrough key that names it is refused as
 // config-key-already-rendered. Only keys the template's own comments name as
@@ -63,7 +63,7 @@ var mergers = map[blueprints.Format]func(string, map[string]any) (string, error)
 	blueprints.ConfigJSON: configmerge.JSON,
 }
 
-// mergeConfig places an app's passthrough keys into the one file its kind
+// mergeConfig places an app's passthrough keys into the one file its blueprint
 // reads its configuration from, and into no other. files is the app's own
 // rendered set and sources maps each of its paths to the template it came
 // from, so a refusal can say which template owns the key.
@@ -74,10 +74,11 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 	format := blueprints.ConfigFormat(app.Blueprint)
 	merge, ok := mergers[format]
 	if !ok {
-		// Unreachable today: every kind renders a config file, so no rule in
-		// validate refuses this first (that refusal was dropped for having
-		// nothing to refuse). This is the guard for a future kind without one.
-		return fmt.Errorf("apps.%s.config: kind %s renders no configuration file, so there is nowhere for a passthrough key to go", app.Name, app.Blueprint)
+		// Unreachable today: every blueprint renders a config file, so no rule
+		// in validate refuses this first (that refusal was dropped for having
+		// nothing to refuse). This is the guard for a future blueprint without
+		// one.
+		return fmt.Errorf("apps.%s.config: blueprint %s renders no configuration file, so there is nowhere for a passthrough key to go", app.Name, app.Blueprint)
 	}
 	name := blueprints.ConfigFile(app.Blueprint)
 	target := -1
@@ -87,7 +88,7 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 		}
 	}
 	if target < 0 {
-		return fmt.Errorf("apps.%s.config: kind %s reads its configuration from %s, but its template set rendered no such file", app.Name, app.Blueprint, name)
+		return fmt.Errorf("apps.%s.config: blueprint %s reads its configuration from %s, but its template set rendered no such file", app.Name, app.Blueprint, name)
 	}
 
 	for _, key := range sortedKeys(keys) {

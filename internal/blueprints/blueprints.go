@@ -21,7 +21,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Service is one container in a kind's compose template.
+// Service is one container in a blueprint's compose template.
 type Service struct {
 	// Name is the compose service name, which is also the key an operator
 	// writes under `images`.
@@ -48,7 +48,7 @@ type Service struct {
 	Port int
 }
 
-// ServicePorts is the services of a kind that listen on a port of their
+// ServicePorts is the services of a blueprint that listen on a port of their
 // own, in compose order.
 func ServicePorts(blueprint config.Blueprint) []Service {
 	var out []Service
@@ -60,13 +60,13 @@ func ServicePorts(blueprint config.Blueprint) []Service {
 	return out
 }
 
-// ExtraDatabases is the names of the databases a kind keeps beside its
+// ExtraDatabases is the names of the databases a blueprint keeps beside its
 // own, each <database>_<name> in the same Postgres.
 func ExtraDatabases(blueprint config.Blueprint) []string {
 	return append([]string(nil), of(blueprint).ExtraDatabases...)
 }
 
-// LocalOnlyReason is why a kind that keeps its files only on its own disk
+// LocalOnlyReason is why a blueprint that keeps its files only on its own disk
 // has no object storage form, as its blueprint says, empty when it does not.
 func LocalOnlyReason(blueprint config.Blueprint) string { return of(blueprint).LocalOnlyReason }
 
@@ -82,14 +82,14 @@ const PostgresService = "postgres"
 // repository (docs/specs/2026-10-11-backups.md, "Pinned Postgres").
 const WALGImage = "ghcr.io/paisans-software/postgres-walg"
 
-// SendsMail reports whether a kind reads the deployment's smtp settings. An
-// app level smtp block on any other kind is refused, because an override
-// nothing reads is ignored without a word.
+// SendsMail reports whether a blueprint reads the deployment's smtp settings.
+// An app level smtp block on any other blueprint is refused, because an
+// override nothing reads is ignored without a word.
 func SendsMail(blueprint config.Blueprint) bool { return of(blueprint).SendsMail }
 
-// Services returns a kind's services in compose order, which is the order they
-// are declared in the kind's record rather than alphabetical: `app` first is what an operator
-// expects to read.
+// Services returns a blueprint's services in compose order, which is the order
+// they are declared in the blueprint's record rather than alphabetical: `app`
+// first is what an operator expects to read.
 func Services(blueprint config.Blueprint) []Service {
 	out := append([]Service(nil), of(blueprint).Services...)
 	for i := range out {
@@ -102,7 +102,7 @@ func Services(blueprint config.Blueprint) []Service {
 	return out
 }
 
-// ServiceImage is the image a kind's service runs when the configuration
+// ServiceImage is the image a blueprint's service runs when the configuration
 // says nothing, with why when the foundation that names it cannot be read.
 // Empty with no error for a default computed elsewhere (postgres).
 func ServiceImage(s Service) (string, error) {
@@ -112,7 +112,7 @@ func ServiceImage(s Service) (string, error) {
 	return s.Image, nil
 }
 
-// Has reports whether a kind defines a service.
+// Has reports whether a blueprint defines a service.
 func Has(blueprint config.Blueprint, service string) bool {
 	for _, s := range of(blueprint).Services {
 		if s.Name == service {
@@ -123,8 +123,8 @@ func Has(blueprint config.Blueprint, service string) bool {
 }
 
 // DefaultImage returns the reference a service runs when the configuration
-// says nothing. The second result is false when the kind computes it instead
-// of shipping one.
+// says nothing. The second result is false when the blueprint computes it
+// instead of shipping one.
 func DefaultImage(blueprint config.Blueprint, service string) (string, bool) {
 	for _, s := range Services(blueprint) {
 		if s.Name == service {
@@ -134,42 +134,43 @@ func DefaultImage(blueprint config.Blueprint, service string) (string, bool) {
 	return "", false
 }
 
-// UsesPostgres reports whether a kind stores its data in Postgres at all.
+// UsesPostgres reports whether a blueprint stores its data in Postgres at all.
 //
-// Two kinds do not: Element, which is a static client with no server side
+// Two blueprints do not: Element, which is a static client with no server side
 // state at all, and oauth2-proxy, which keeps a session in a cookie. The
 // difference is load bearing rather than cosmetic in two directions. An app
 // that uses no Postgres needs no database role, no password and no place in
 // the cluster, so requiring one would refuse a configuration that is entirely
-// correct. It is also what cluster-placement-without-a-cluster reads: a kind
-// answering false here can only be pinned, because cluster placement would
-// render it onto every apps site with storage of its own.
+// correct. It is also what cluster-placement-without-a-cluster reads: a
+// blueprint answering false here can only be pinned, because cluster placement
+// would render it onto every apps site with storage of its own.
 func UsesPostgres(blueprint config.Blueprint) bool {
 	return Has(blueprint, PostgresService)
 }
 
-// UsesObjectStorage reports whether a kind can keep its uploads in S3 rather
-// than on local disk. Whether one app of the kind does is InObjectStorage,
+// UsesObjectStorage reports whether a blueprint can keep its uploads in S3
+// rather than on local disk. Whether one of its apps does is InObjectStorage,
 // which also reads the app's `storage` key and whether the deployment has a
 // Garage at all.
 func UsesObjectStorage(blueprint config.Blueprint) bool { return of(blueprint).ObjectStorage }
 
-// ServesObjectsPublicly reports whether a kind's objects must be readable
-// without a credential. Each kind's record says why its answer is what it is.
+// ServesObjectsPublicly reports whether a blueprint's objects must be readable
+// without a credential. Each blueprint's record says why its answer is what it
+// is.
 //
 // This is deliberately not a configuration key. Garage's website access is per
 // bucket and opt in, so the only way a private bucket becomes world readable
-// is a change to a kind's record, which is a code change with a review rather
-// than a line somebody edits at two in the morning.
+// is a change to a blueprint's record, which is a code change with a review
+// rather than a line somebody edits at two in the morning.
 //
-// A kind storing objects (UsesObjectStorage) is not the same question as one
-// whose objects are fetched anonymously: a kind can keep its uploads in S3
-// while serving them through its own application route, or through
+// A blueprint storing objects (UsesObjectStorage) is not the same question as
+// one whose objects are fetched anonymously: a blueprint can keep its uploads
+// in S3 while serving them through its own application route, or through
 // signatures it issues, never exposing its bucket.
 func ServesObjectsPublicly(blueprint config.Blueprint) bool { return of(blueprint).PublicObjects }
 
-// ServiceNames returns a kind's service names, sorted, for an error message
-// that has to list them.
+// ServiceNames returns a blueprint's service names, sorted, for an error
+// message that has to list them.
 func ServiceNames(blueprint config.Blueprint) []string {
 	var out []string
 	for _, s := range of(blueprint).Services {
@@ -179,13 +180,14 @@ func ServiceNames(blueprint config.Blueprint) []string {
 	return out
 }
 
-// Format is the syntax of the file a kind reads its configuration from.
+// Format is the syntax of the file a blueprint reads its configuration from.
 type Format string
 
 const (
-	// ConfigNone is the zero value: a kind that renders no configuration file.
-	// Every kind today renders one, so nothing returns it yet; it is declared so
-	// that a kind added later without one has an honest answer to give.
+	// ConfigNone is the zero value: a blueprint that renders no configuration
+	// file. Every blueprint today renders one, so nothing returns it yet; it is
+	// declared so that a blueprint added later without one has an honest answer
+	// to give.
 	ConfigNone Format = ""
 	ConfigEnv  Format = "env"
 	ConfigINI  Format = "ini"
@@ -193,8 +195,8 @@ const (
 	ConfigJSON Format = "json"
 )
 
-// ConfigFormat is the syntax of the file a kind reads its configuration from,
-// or ConfigNone when it has none.
+// ConfigFormat is the syntax of the file a blueprint reads its configuration
+// from, or ConfigNone when it has none.
 func ConfigFormat(blueprint config.Blueprint) Format { return of(blueprint).ConfigFormat }
 
 // ConfigFile is the rendered path of that file, relative to the stack.

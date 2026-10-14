@@ -34,8 +34,8 @@ func pocketIDApp(cfg *config.Config) string {
 	return idp
 }
 
-// clientDesired is the client app name needs at Pocket ID, from its kind and
-// its declaration, and whether this toolkit knows its kind's client.
+// clientDesired is the client app name needs at Pocket ID, from its blueprint
+// and its declaration, and whether this toolkit knows its blueprint's client.
 func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Desired, bool) {
 	app := cfg.Apps[name]
 	spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
@@ -138,9 +138,9 @@ func listClientPlan(r ui.Reporter, app, idp, where string, plan *oidcclient.Plan
 }
 
 // clientStep is apply's identity step for one site. Every app the site runs
-// whose kind has a client shape (blueprints.OIDCClient) gets its client ensured
-// at the deployment's Pocket ID before it renders, with the same plan and
-// the same recorder as `oidc client create`. Declaring the app in
+// whose blueprint has a client shape (blueprints.OIDCClient) gets its client
+// ensured at the deployment's Pocket ID before it renders, with the same plan
+// and the same recorder as `oidc client create`. Declaring the app in
 // paisans-stack.yaml is the approval for its client (founder decision,
 // 2026-10-08), so apply does not ask again. It never rotates a secret;
 // `oidc client create --rotate-secret` does.
@@ -162,7 +162,8 @@ type clientStep struct {
 	secrets     *config.Secrets
 	recipients  []string
 	idp         string
-	// apps are the apps on this site whose kind has a client shape, sorted.
+	// apps are the apps on this site whose blueprint has a client shape,
+	// sorted.
 	apps []string
 	// held is every app held back from this apply, with why.
 	held map[string]string

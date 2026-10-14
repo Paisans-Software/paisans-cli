@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 )
 
-// appValues is everything a kind's template set may need about one app.
+// appValues is everything a blueprint's template set may need about one app.
 //
 // It exists because the template set, not this package, decides what an
 // application's configuration looks like. Go works out the values that require
@@ -18,9 +18,9 @@ import (
 // object storage endpoint is, which secret belongs to this app. The templates
 // decide which of those go into which file, under what names, in what format.
 //
-// The alternative was a switch on kind that assembled environment variables
-// here, which is what this replaces. It could only ever produce one file per
-// app, and two of the five applications this toolkit renders are not
+// The alternative was a switch on blueprint that assembled environment
+// variables here, which is what this replaces. It could only ever produce one
+// file per app, and two of the five applications this toolkit renders are not
 // configured by environment variables at all.
 type appValues struct {
 	App plannedApp
@@ -34,7 +34,7 @@ type appValues struct {
 	// hostname holding the wellknown role when the app declares one, and the
 	// primary hostname otherwise.
 	//
-	// Two kinds use it, and they must agree: a homeserver writes it into
+	// Two blueprints use it, and they must agree: a homeserver writes it into
 	// homeserver.yaml, and an Element client offers it to members as the name
 	// they have an account on. Element's is therefore resolved from the
 	// homeserver its `homeserver` setting names, not from its own hostname.
@@ -50,14 +50,14 @@ type appValues struct {
 	ServerName string
 
 	// Domain is the community's own domain, community.domain in the
-	// configuration, never an app's own hostname. The oauth2-proxy kind scopes
-	// its cookie to it with a leading dot so one login covers every current
-	// and future subdomain, the same shape as the live authgate stack's
+	// configuration, never an app's own hostname. The oauth2-proxy blueprint
+	// scopes its cookie to it with a leading dot so one login covers every
+	// current and future subdomain, the same shape as the live authgate stack's
 	// COOKIE_DOMAINS.
 	Domain string
 
 	// Gated is the app's gated key. A gated app that federates turns on its
-	// kind's signed fetch, because the gate leaves ActivityPub to the app.
+	// blueprint's signed fetch, because the gate leaves ActivityPub to the app.
 	Gated bool
 
 	// TrustedProxies is the mesh subnet, never a host address, so the gateway
@@ -105,7 +105,7 @@ type appValues struct {
 	// cannot render half an S3 configuration for it.
 	S3 s3Values
 
-	// LocalStorage is true for an app of a kind that can use S3 and keeps its
+	// LocalStorage is true for an app whose blueprint can use S3 and keeps its
 	// files in its own stack directory instead: `storage: local`, or the
 	// default in a deployment with no Garage (blueprints.InObjectStorage).
 	LocalStorage bool
@@ -146,21 +146,21 @@ type appValues struct {
 	ServiceUpstreams map[string][]string
 	Databases        map[string]string
 
-	// SMTP is this app's resolved mail settings, populated only for a kind
+	// SMTP is this app's resolved mail settings, populated only for a blueprint
 	// that sends mail (blueprints.SendsMail) and zero when no host resolves.
 	SMTP smtpValues
 
-	// PocketID is the pocket-id kind's application configuration from its
+	// PocketID is the pocket-id blueprint's application configuration from its
 	// settings and its recorded signup group IDs (pocketid.go). Populated
-	// only for that kind.
+	// only for that blueprint.
 	PocketID pocketIDConfig
 
-	// UptimeSeed is the uptime kind's monitors.json, built from the whole
-	// deployment (uptime.go). Populated only for that kind.
+	// UptimeSeed is the uptime blueprint's monitors.json, built from the whole
+	// deployment (uptime.go). Populated only for that blueprint.
 	UptimeSeed string
 
-	// Invite is the invite kind's identity provider, settings and code of
-	// conduct (invite.go). Populated only for that kind.
+	// Invite is the invite blueprint's identity provider, settings and code of
+	// conduct (invite.go). Populated only for that blueprint.
 	Invite inviteValues
 
 	// AdminsHeartbeat is true for a Pocket ID app in a deployment with a
@@ -189,7 +189,7 @@ type s3Values struct {
 
 	// MediaHostname is where this app's objects are served from: its own
 	// hostname, a sibling of the app's, from blueprints.MediaHostname. Empty
-	// for a kind that stores nothing.
+	// for a blueprint that stores nothing.
 	MediaHostname string
 
 	// PublicBase is what an app writes into a page, a feed or a federated
@@ -197,7 +197,7 @@ type s3Values struct {
 	// to resolve for a browser and for a server that will never join this
 	// mesh, which the endpoint above does not. It carries no bucket segment,
 	// because the media hostname is this app's alone. Empty when there is no
-	// media hostname, so a kind that stores nothing does not carry a
+	// media hostname, so a blueprint that stores nothing does not carry a
 	// half-built URL.
 	PublicBase string
 
@@ -214,7 +214,8 @@ type s3Values struct {
 
 	// WebHost is the Host Garage's web endpoint resolves this app's bucket
 	// from: the bucket name under an internal suffix that resolves nowhere.
-	// Only a media snippet for a kind that serves objects publicly sends it.
+	// Only a media snippet for a blueprint that serves objects publicly sends
+	// it.
 	WebHost string
 
 	AccessKeyID    string
@@ -312,8 +313,9 @@ func (v appValues) SettingInt(key string, fallback int) int {
 }
 
 // OIDCAdminGroup and OIDCMemberGroup are the groups the app's client at
-// Pocket ID admits, from the kind's client spec, so that the template renders
-// the same names the client is restricted to and never repeats a default.
+// Pocket ID admits, from the blueprint's client spec, so that the template
+// renders the same names the client is restricted to and never repeats a
+// default.
 func (v appValues) OIDCAdminGroup() string  { admin, _ := v.oidcGroups(); return admin }
 func (v appValues) OIDCMemberGroup() string { _, member := v.oidcGroups(); return member }
 
@@ -363,9 +365,9 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 		ForcePathStyle:  v.SettingBool("s3_force_path_style", true),
 	}
 	s3.WebHost = s3.Bucket + webEndpointSuffix
-	// Set only for a kind that stores objects, so a kind that stores nothing
-	// does not carry the literal string "https://" into a template that has
-	// never been written to check.
+	// Set only for a blueprint that stores objects, so a blueprint that stores
+	// nothing does not carry the literal string "https://" into a template
+	// that has never been written to check.
 	if media := blueprints.MediaHostname(p.cfg, app); media != "" {
 		s3.MediaHostname = media
 		s3.PublicBase = "https://" + media
@@ -518,8 +520,8 @@ func (p *planner) linked(role, hostname string) (map[string]string, error) {
 	return blueprints.LinkValuesAt(role, hostname)
 }
 
-// dsn is the app's connection URL, empty for a kind that uses no Postgres so
-// that a template cannot render a connection string to a database nobody
+// dsn is the app's connection URL, empty for a blueprint that uses no Postgres
+// so that a template cannot render a connection string to a database nobody
 // created.
 func dsn(planned plannedApp, password, host string, port int) string {
 	if !blueprints.UsesPostgres(planned.Blueprint) {

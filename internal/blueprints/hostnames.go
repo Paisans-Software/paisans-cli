@@ -18,10 +18,10 @@ const PrimaryRole = "primary"
 // be.
 const WellknownRole = "wellknown"
 
-// MediaRole is the hostname an app's stored objects are served on. Every kind
-// that keeps objects in S3 has one, and unlike any other role it exists
-// whether or not it is declared: MediaHostname derives it when the app does
-// not name one under `hostnames`.
+// MediaRole is the hostname an app's stored objects are served on. Every
+// blueprint that keeps objects in S3 has one, and unlike any other role it
+// exists whether or not it is declared: MediaHostname derives it when the app
+// does not name one under `hostnames`.
 //
 // It is one hostname per app rather than one for the deployment. A hostname
 // can be pointed by DNS at a CDN, another provider or another Garage, one app
@@ -34,15 +34,15 @@ const MediaRole = "media"
 // app's own hostname.
 const MediaSuffix = "-media"
 
-// HostnameRoles returns the roles a kind understands, sorted, always including
-// the primary.
+// HostnameRoles returns the roles a blueprint understands, sorted, always
+// including the primary.
 func HostnameRoles(blueprint config.Blueprint) []string {
 	out := append([]string{PrimaryRole}, of(blueprint).HostnameRoles...)
 	sort.Strings(out)
 	return out
 }
 
-// ExtraRoles is every role beyond the primary that any kind understands,
+// ExtraRoles is every role beyond the primary that any blueprint understands,
 // sorted and without duplicates. A route for one of them lands in a snippet
 // named <app>-<role>.caddy, so this is also the set of suffixes an app's
 // routing files can carry.
@@ -61,7 +61,7 @@ func ExtraRoles() []string {
 	return out
 }
 
-// HasHostnameRole reports whether a kind understands a role.
+// HasHostnameRole reports whether a blueprint understands a role.
 func HasHostnameRole(blueprint config.Blueprint, role string) bool {
 	if role == PrimaryRole {
 		return true
@@ -83,9 +83,9 @@ func SnippetFor(role string) string {
 }
 
 // MediaHostname is where an app's stored objects are served from, and empty
-// for an app that keeps none in object storage: a kind that stores none, and
-// an app that keeps its files on its own disk (InObjectStorage), which serves
-// them on its own hostname instead.
+// for an app that keeps none in object storage: a blueprint that stores none,
+// and an app that keeps its files on its own disk (InObjectStorage), which
+// serves them on its own hostname instead.
 //
 // An app that declares `hostnames.media` gets exactly that. Otherwise the name
 // is derived as a sibling of the app's own hostname: the first label of that

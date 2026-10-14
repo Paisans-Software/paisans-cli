@@ -140,18 +140,18 @@ func (c Check) Failure(cfg *config.Config, name string) (key, message string) {
 	return key, message
 }
 
-// ChecksFor is the checks of an app's kind.
+// ChecksFor is the checks of an app's blueprint.
 func ChecksFor(blueprint config.Blueprint) []Check {
 	return append([]Check(nil), of(blueprint).Checks...)
 }
 
-// EngineOf is a kind's database engine.
+// EngineOf is a blueprint's database engine.
 func EngineOf(blueprint config.Blueprint) string { return of(blueprint).Engine }
 
-// BackupOf is how a kind's database is dumped, nil for one with no dump.
+// BackupOf is how a blueprint's database is dumped, nil for one with no dump.
 func BackupOf(blueprint config.Blueprint) *BackupSpec { return of(blueprint).Backup }
 
-// NeedsDump reports whether a kind's engine is one the backups cannot read
+// NeedsDump reports whether a blueprint's engine is one the backups cannot read
 // as files.
 func NeedsDump(blueprint config.Blueprint) bool { return needsDump[of(blueprint).Engine] }
 
@@ -167,7 +167,7 @@ type SettingSpec struct {
 
 var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "email": true, "enum": true, "list": true}
 
-// SettingsOf is the settings a kind declares, nil for one that declares
+// SettingsOf is the settings a blueprint declares, nil for one that declares
 // none.
 func SettingsOf(blueprint config.Blueprint) map[string]SettingSpec { return of(blueprint).Settings }
 

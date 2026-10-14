@@ -14,8 +14,8 @@ import (
 
 // Every image the toolkit renders by default has its declared volumes mounted
 // at exactly those paths, for every Postgres major it knows and with every app
-// pinned as well as clustered, so each kind's own database is rendered too.
-// Each track is resolved to the build apply would run today, and what it
+// pinned as well as clustered, so each blueprint's own database is rendered
+// too. Each track is resolved to the build apply would run today, and what it
 // declares is read from the registry for every platform it is published for.
 // `paisans apply` makes the same check against the host's copy of every
 // image before it writes anything; this one says so before a release.

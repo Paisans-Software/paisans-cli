@@ -8,7 +8,7 @@ services:
   # root, and a seed entry's heartbeat_token taken as the monitor's
   # token, which the per site heartbeat in internal/render/heartbeat.go
   # depends on. Its database is SQLite under /data, which is why the
-  # kind is pinned only: it has no Postgres service, so
+  # blueprint is pinned only: it has no Postgres service, so
   # cluster-placement-without-a-cluster refuses it. Its image is the
   # core catalog's foundation.yaml's.
   - {name: "app", foundation: "uptime", purpose: "the monitor"}
@@ -27,7 +27,7 @@ health: {path: "/healthz", status: [200]}
 # The gate signs in at the identity provider on those sites, so a gated
 # monitor is unreadable at exactly the moment it exists for, and its
 # break glass password sign-in (README, "Sign in", under the uptime
-# kind) would sit behind the sign-in it is the fallback for. Its own
+# blueprint) would sit behind the sign-in it is the fallback for. Its own
 # OIDC client admits only settings.admin_group, so the gate would add no
 # access control, only a dependency.
 gate: {gateable: false}

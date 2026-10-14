@@ -47,7 +47,7 @@ oidc:
   reads_groups: true
 secrets:
   generate:
-    # The kind renders no session store, so oauth2-proxy keeps the whole
+    # The blueprint renders no session store, so oauth2-proxy keeps the whole
     # session in the cookie, encrypted with this secret: a cookie sealed with
     # the old one no longer opens.
     - {name: cookie_secret, rotation_cost: signs-out}

@@ -250,8 +250,9 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 }
 
 // appSecretKeys is what one app's stanza needs: a database role for a
-// Postgres backed kind, the kind's own secrets (blueprints.Def.AppSecrets,
-// which says why each is there), and storage keys for an app in object storage.
+// Postgres backed blueprint, the blueprint's own secrets
+// (blueprints.Def.AppSecrets, which says why each is there), and storage keys
+// for an app in object storage.
 func appSecretKeys(cfg *config.Config, app config.App) []string {
 	var keys []string
 	if blueprints.UsesPostgres(app.Blueprint) {
@@ -347,7 +348,7 @@ func (l keypairList) has(key string) bool {
 	return false
 }
 
-// keypairs is the encrypted keypairs a kind's blueprint declares. Keeping
+// keypairs is the encrypted keypairs an app's blueprint declares. Keeping
 // one in the secrets file means every apps site under cluster placement
 // renders the same pair, so a token one site signs verifies on another.
 func keypairs(blueprint config.Blueprint) keypairList {
@@ -542,7 +543,7 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 			continue
 		}
 		app := cfg.Apps[name]
-		// A kind with no client spec has no client: Pocket ID has none at
+		// A blueprint with no client spec has no client: Pocket ID has none at
 		// itself, and a Matrix client authenticates at the homeserver, whose
 		// authentication service is the relying party.
 		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)

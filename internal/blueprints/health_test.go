@@ -8,8 +8,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Every kind has a health route recorded, so a new kind cannot be seeded with
-// a guessed one: it fails here until somebody establishes it.
+// Every blueprint has a health route recorded, so a new blueprint cannot be
+// seeded with a guessed one: it fails here until somebody establishes it.
 func TestEveryBlueprintHasAHealthRoute(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		h, ok := blueprints.HealthFor(blueprint)

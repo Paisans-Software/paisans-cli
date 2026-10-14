@@ -8,7 +8,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// storage checks each app's `storage` key against its kind and placement.
+// storage checks each app's `storage` key against its blueprint and placement.
 // README, Rule 5, "A pinned app may keep its files on its own disk", says why
 // each combination is refused rather than warned about: every one of them
 // either renders an app that cannot store a file, or silently means something
@@ -29,15 +29,15 @@ func (c *checker) storage() {
 			}
 		case blueprints.KeepsFilesOnlyLocally(app.Blueprint):
 			if app.Storage == config.StorageS3 {
-				c.refuse("storage-s3-on-a-local-only-kind", key,
-					"this kind keeps its files only on its own disk",
+				c.refuse("storage-s3-on-a-local-only-blueprint", key,
+					"this blueprint keeps its files only on its own disk",
 					"is s3, but %s has no object storage form here: %s. Remove the key, or set storage: local, which is what it does anyway.",
 					app.Blueprint, localOnlyReason(app.Blueprint))
 			}
 		case !blueprints.UsesObjectStorage(app.Blueprint):
 			if app.Storage != "" {
-				c.refuse("storage-on-a-kind-without-files", key,
-					"storage is declared for a kind that stores no files",
+				c.refuse("storage-on-a-blueprint-without-files", key,
+					"storage is declared for a blueprint that stores no files",
 					"is %q, but %s stores no files, so this would be ignored without a word. Remove it.",
 					app.Storage, app.Blueprint)
 			}
@@ -47,7 +47,7 @@ func (c *checker) storage() {
 	}
 }
 
-// objectStorageApp checks an app of a kind that can keep its files in S3 or
+// objectStorageApp checks an app whose blueprint can keep its files in S3 or
 // on its own disk.
 func (c *checker) objectStorageApp(name string, app config.App) {
 	key := fmt.Sprintf("apps.%s.storage", name)
@@ -83,8 +83,8 @@ func (c *checker) objectStorageApp(name string, app config.App) {
 	}
 }
 
-// localOnlyReason is why a kind that keeps its files only on its own disk
-// has no S3 form, for the refusal of `storage: s3` on it.
+// localOnlyReason is why a blueprint that keeps its files only on its own
+// disk has no S3 form, for the refusal of `storage: s3` on it.
 func localOnlyReason(blueprint config.Blueprint) string {
 	if why := blueprints.LocalOnlyReason(blueprint); why != "" {
 		return why

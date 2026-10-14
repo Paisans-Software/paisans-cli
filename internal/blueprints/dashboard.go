@@ -8,14 +8,14 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// DashboardLinkSetting is the app setting that replaces the kind's
+// DashboardLinkSetting is the app setting that replaces the blueprint's
 // DashboardPath. It is a setting rather than a config key because the toolkit
 // reads it and sends it to the identity provider; nothing renders it.
 const DashboardLinkSetting = "sso_dashboard_link"
 
 // DashboardPath is the path on an app's own hostname that the identity
-// provider's dashboard tile opens, for a kind that knows a better one than
-// its front page. Every other kind gets "/".
+// provider's dashboard tile opens, for a blueprint that knows a better one than
+// its front page. Every other blueprint gets "/".
 func DashboardPath(blueprint config.Blueprint) string {
 	if p := of(blueprint).DashboardPath; p != "" {
 		return p
@@ -41,9 +41,9 @@ var genericSettings = []string{DashboardLinkSetting, ConsentSetting}
 func IsGenericSetting(key string) bool { return slices.Contains(genericSettings, key) }
 
 // LaunchURL is the address the identity provider's dashboard opens for an
-// app: https://<hostname> plus link, or the kind's DashboardPath when link is
-// empty. A bare "/" gives https://<hostname> with no trailing slash, which is
-// what this toolkit sent before it knew any path, so a client made then is
+// app: https://<hostname> plus link, or the blueprint's DashboardPath when link
+// is empty. A bare "/" gives https://<hostname> with no trailing slash, which
+// is what this toolkit sent before it knew any path, so a client made then is
 // already right and no update is planned for it.
 func LaunchURL(blueprint config.Blueprint, hostname, link string) string {
 	if link == "" {
@@ -57,10 +57,10 @@ func LaunchURL(blueprint config.Blueprint, hostname, link string) string {
 
 // ToolkitLaunchURLs are the launch URLs this toolkit itself would have set on
 // an app's client, by any release, without the operator choosing one: the
-// bare https://<hostname>, its only default before a kind could name a path,
-// and the kind's current default. A client holding one of these was shaped by
-// the toolkit, not by a person, so `oidc client create` may move it to the
-// effective launch URL. Any other value is an operator's and is never
+// bare https://<hostname>, its only default before a blueprint could name a
+// path, and the blueprint's current default. A client holding one of these was
+// shaped by the toolkit, not by a person, so `oidc client create` may move it
+// to the effective launch URL. Any other value is an operator's and is never
 // overwritten.
 //
 // A value is added here only when a release has actually sent it. Widening

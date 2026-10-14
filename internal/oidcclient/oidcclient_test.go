@@ -241,7 +241,7 @@ func api(f *fakeIDP) *pocketid.Client {
 	return &pocketid.Client{Transport: f, BaseURL: "http://10.44.0.1:1411", APIKey: testKey}
 }
 
-// bare is the launch URL the toolkit set before kinds named a path, and
+// bare is the launch URL the toolkit set before blueprints named a path, and
 // connect is Mbin's default now.
 const (
 	bare    = "https://talk.example.org"

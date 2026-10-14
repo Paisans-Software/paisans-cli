@@ -5,14 +5,14 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// SettingOwner is one setting that owns a rendered key, with its kind,
+// SettingOwner is one setting that owns a rendered key, with its blueprint,
 // exported so the external tests can check every one is true.
 type SettingOwner struct {
 	Blueprint config.Blueprint
 	blueprints.SettingKey
 }
 
-// SettingOwners is every kind's settings that own a rendered key.
+// SettingOwners is every blueprint's settings that own a rendered key.
 func SettingOwners() []SettingOwner {
 	var out []SettingOwner
 	for _, blueprint := range blueprints.Builtin() {

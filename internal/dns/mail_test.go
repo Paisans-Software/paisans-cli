@@ -103,7 +103,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 		t.Errorf("an app's sender: %v", names)
 	}
 	if _, ok := names["blog.example.org"]; ok {
-		t.Errorf("a kind that sends no mail made its sender a mail domain: %v", names)
+		t.Errorf("a blueprint that sends no mail made its sender a mail domain: %v", names)
 	}
 
 	got := wantsOf(t, cfg)

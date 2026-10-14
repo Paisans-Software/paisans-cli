@@ -253,8 +253,8 @@ func gatherDoctor(cfg *config.Config, sites []string, transports map[string]appl
 }
 
 // gatherSettings asks each running copy of every app using the gate for the
-// settings the gate leaves to it, with the read command its kind records, on
-// every site doctor reached that the app runs on.
+// settings the gate leaves to it, with the read command its blueprint records,
+// on every site doctor reached that the app runs on.
 func gatherSettings(cfg *config.Config, reached map[string]bool, transports map[string]apply.Transport) []doctor.SettingsProbe {
 	var out []doctor.SettingsProbe
 	placed := render.AppSites(cfg)

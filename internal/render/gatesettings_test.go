@@ -9,8 +9,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Every gate setting a kind records is rendered with the value it wants and
-// named in the file's lock list, which is what lets doctor read it from the
+// Every gate setting a blueprint records is rendered with the value it wants
+// and named in the file's lock list, which is what lets doctor read it from the
 // running app and call apply its only fix. A record that drifted from its
 // template fails here rather than in a doctor run on a live host.
 func TestGateSettingsAreRenderedAndLocked(t *testing.T) {

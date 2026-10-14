@@ -201,7 +201,7 @@ func FileApp(rel string) string {
 }
 
 // RouteSuffixes are what follows <app>- in the name of an app's snippet
-// other than its primary route: each hostname role a kind understands, and
+// other than its primary route: each hostname role a blueprint understands, and
 // an oauth2-proxy app's named gate snippets.
 func RouteSuffixes() []string {
 	return append(blueprints.ExtraRoles(), render.GatesSnippet)

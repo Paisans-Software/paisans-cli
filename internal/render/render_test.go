@@ -170,10 +170,10 @@ func TestPublishedPortsBindTheMeshAddress(t *testing.T) {
 }
 
 // No two stacks on one site publish the same address and port. Every app
-// publishes on its site's mesh address, so two kinds sharing a port cannot
+// publishes on its site's mesh address, so two blueprints sharing a port cannot
 // both start on one site, and the second fails only when its container does.
-// The fixture puts every kind beside every clustered one, so a kind given a
-// port another already uses fails here.
+// The fixture puts every blueprint beside every clustered one, so a blueprint
+// given a port another already uses fails here.
 func TestPublishedPortsAreDistinctPerSite(t *testing.T) {
 	seen := map[string]string{}
 	for _, p := range publishedPorts(build(t)) {
@@ -221,9 +221,9 @@ func publishedPorts(plan *render.Plan) []publishedPort {
 }
 
 // A declared image reaches the compose file, and a service nobody declared
-// takes the default its kind ships. Both halves matter: the first is what makes
-// running a fork a config edit, and the second is what an adopter who never
-// opens the stanza receives.
+// takes the default its blueprint ships. Both halves matter: the first is what
+// makes running a fork a config edit, and the second is what an adopter who
+// never opens the stanza receives.
 func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 	files := map[string]string{}
 	for _, f := range build(t).Files {
@@ -241,7 +241,7 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 		t.Fatal("wikijs ships no default image")
 	}
 	if !strings.Contains(wiki, "image: "+fallback) {
-		t.Errorf("an app that declared no image did not take its kind default %q:\n%s", fallback, wiki)
+		t.Errorf("an app that declared no image did not take its blueprint's default %q:\n%s", fallback, wiki)
 	}
 
 	// A pinned app may choose its own database image; a clustered one has no
@@ -277,9 +277,9 @@ func TestRenderedImagesArePinned(t *testing.T) {
 }
 
 // Not every application is configured by environment variables, and a design
-// that can only render an .env cannot configure two of the five kinds here.
-// WriteFreely reads an INI file and Synapse reads homeserver.yaml, and both
-// carry credentials, so both must be rendered and both must be 0600.
+// that can only render an .env cannot configure two of the five blueprints
+// here. WriteFreely reads an INI file and Synapse reads homeserver.yaml, and
+// both carry credentials, so both must be rendered and both must be 0600.
 func TestTemplateSetsRenderEachBlueprintsOwnFiles(t *testing.T) {
 	files := map[string]render.File{}
 	for _, f := range build(t).Files {
@@ -427,9 +427,9 @@ func TestEverySecretBearingFileIs0600(t *testing.T) {
 	}
 }
 
-// Routing is assembled from per kind snippets rather than written into one
-// file that knows every kind. The gateway keeps what is cross cutting; each app
-// brings its own block, wherever it runs.
+// Routing is assembled from per blueprint snippets rather than written into one
+// file that knows every blueprint. The gateway keeps what is cross cutting;
+// each app brings its own block, wherever it runs.
 func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 	files := map[string]render.File{}
 	for _, f := range build(t).Files {
@@ -482,9 +482,9 @@ func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 // Trusted proxies are the mesh subnet and never a host address, which is what
 // lets the gateway role move later without breaking client address handling.
 func TestTrustedProxiesAreTheMeshSubnet(t *testing.T) {
-	// Not every kind takes a trusted proxy setting, and one of those that does
-	// is not configured by environment at all, so the assertion is about every
-	// rendered file that mentions one rather than about `.env` files.
+	// Not every blueprint takes a trusted proxy setting, and one of those that
+	// does is not configured by environment at all, so the assertion is about
+	// every rendered file that mentions one rather than about `.env` files.
 	var saw int
 	for _, f := range build(t).Files {
 		if !strings.Contains(f.Content, "TRUSTED_PROXIES") {
@@ -854,7 +854,7 @@ func walk(t *testing.T, root string) map[string]string {
 	return out
 }
 
-// Every template a kind ships has to be committed, and the templates that
+// Every template a blueprint ships has to be committed, and the templates that
 // render an .env are the ones at risk: the repository ignores `.env.*` so that
 // no real credential is ever committed, and the four files named
 // `.env.secret.tmpl` match that rule by accident.
@@ -1165,7 +1165,7 @@ func TestTheGateIsDeclaredPerApp(t *testing.T) {
 // oidc_providers block is rendered and the delegation to MAS is.
 //
 // The brief for this task asked for `msc3861` here, which is the experimental
-// form. Synapse v1.160.0, the version this kind pins, documents the stable
+// form. Synapse v1.160.0, the version this blueprint pins, documents the stable
 // `matrix_authentication_service` block instead and its configuration manual
 // no longer mentions msc3861 at all: checked against
 // docs/usage/configuration/config_documentation.md at tag v1.160.0 on
@@ -1446,7 +1446,7 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/media.caddy"]; ok {
 		t.Error("the deployment wide media snippet should no longer be rendered")
 	}
-	// Only kinds that store objects get one.
+	// Only blueprints that store objects get one.
 	for _, app := range []string{"auth", "chat", "web", "gate"} {
 		if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+"-media.caddy"]; ok {
 			t.Errorf("%s stores no objects, so it has no media hostname", app)
@@ -1563,13 +1563,13 @@ var requiredComposeVar = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):\?`)
 // that loss is exactly this. `.env.secret.tmpl` matches the `.env.*` ignore
 // rule, so deleting one, or failing to commit it, is invisible: every other
 // test still passes, the golden tree regenerates happily without it, and
-// TestEveryKindShipsACommittedTemplateSet is satisfied by any one of several
-// configuration file suffixes, so a kind that ships a `config.ini.secret.tmpl`
-// passes with its `.env.secret.tmpl` gone.
+// TestEveryBlueprintShipsACommittedTemplateSet is satisfied by any one of
+// several configuration file suffixes, so a blueprint that ships a
+// `config.ini.secret.tmpl` passes with its `.env.secret.tmpl` gone.
 //
-// Checking the references rather than a per kind file list is what makes this
-// catch the class: a new kind, a new variable or a renamed template is covered
-// without anybody remembering to extend a list.
+// Checking the references rather than a per blueprint file list is what makes
+// this catch the class: a new blueprint, a new variable or a renamed template
+// is covered without anybody remembering to extend a list.
 func TestEveryRequiredComposeVariableIsSetInTheStacksEnv(t *testing.T) {
 	files := map[string]string{}
 	var paths []string
@@ -1666,9 +1666,9 @@ func withConfig(t *testing.T, app string, keys map[string]any) *config.Config {
 	return cfg
 }
 
-// A passthrough key reaches the file its kind actually reads, in that file's
-// syntax. One key per format, so the rendered output for each is visible in
-// the tree an operator receives.
+// A passthrough key reaches the file its blueprint actually reads, in that
+// file's syntax. One key per format, so the rendered output for each is visible
+// in the tree an operator receives.
 func TestAPassthroughKeyReachesTheRenderedFile(t *testing.T) {
 	files := planFiles(build(t))
 
@@ -1713,7 +1713,7 @@ var passthroughFixtureKeys = []struct {
 	{"web", "default_theme", "default_theme", "config.json"},
 }
 
-// A passthrough key reaches the kind's config file and no other: not
+// A passthrough key reaches the blueprint's config file and no other: not
 // compose.yaml, not a Caddy snippet, not the second .env that the blog and the
 // homeserver render for their Postgres password, and not a manifest. The whole
 // written tree is searched rather than a list of places it might go wrong,
@@ -2851,7 +2851,7 @@ func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
 // The ActivityPub read filter rides into the app's own reverse_proxy through
 // its snippet's {block}. A snippet without one would take the import and
 // drop the filter, and an ActivityPub Accept header would then reach every
-// HTML and API route unfiltered, so every kind that can be gated while it
+// HTML and API route unfiltered, so every blueprint that can be gated while it
 // federates must carry it.
 func TestAFederatingBlueprintsSnippetTakesTheFilter(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {

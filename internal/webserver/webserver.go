@@ -37,7 +37,7 @@ type Target struct {
 	// PublicAddress and PublicAddress6 are where the hostname must resolve.
 	PublicAddress  string
 	PublicAddress6 string
-	// HealthPath and HealthExpect are the kind's health route and the
+	// HealthPath and HealthExpect are the blueprint's health route and the
 	// statuses that mean it is up, from blueprints.HealthFor.
 	HealthPath   string
 	HealthExpect string

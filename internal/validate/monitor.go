@@ -47,7 +47,7 @@ func (c *checker) monitorRoles() {
 		if !c.hostsUptime(name) {
 			c.refuse("monitor-without-uptime", key,
 				"monitor site runs no uptime app",
-				"holds the monitor role, but no app of kind uptime is pinned to %s, so the site would run nothing the role exists for. Pin the uptime app here, or drop the role.", name)
+				"holds the monitor role, but no uptime app is pinned to %s, so the site would run nothing the role exists for. Pin the uptime app here, or drop the role.", name)
 		}
 		if site.PublicAddress == "" {
 			c.refuse("monitor-without-public-address", fmt.Sprintf("sites.%s.public_address", name),
@@ -70,7 +70,7 @@ func (c *checker) monitorRoles() {
 	}
 }
 
-// nothingWatches warns when the deployment declares no app of kind uptime.
+// nothingWatches warns when the deployment declares no uptime app.
 // README.md: "The monitor has a site of its own".
 //
 // Every other rule here is about where a monitor may run, and a deployment
@@ -86,7 +86,7 @@ func (c *checker) nothingWatches() {
 	}
 	c.warn("no-uptime-monitor", "apps",
 		"no uptime monitor is declared",
-		"declares no app of kind uptime, so nothing watches this deployment: a site, the gateway or the database going down is noticed by a member before an admin. Declare an uptime app pinned to a site with the monitor role, ideally a small machine of its own with a public_address, and apply it (README.md, \"Monitoring\").")
+		"declares no uptime app, so nothing watches this deployment: a site, the gateway or the database going down is noticed by a member before an admin. Declare an uptime app pinned to a site with the monitor role, ideally a small machine of its own with a public_address, and apply it (README.md, \"Monitoring\").")
 }
 
 // hostsUptime reports whether an uptime app is pinned to a site.

@@ -10,7 +10,7 @@ import (
 
 // Pocket ID's application configuration, rendered from the app's settings.
 //
-// The pocket-id kind runs with UI_CONFIG_DISABLED=true (founder decision,
+// The pocket-id blueprint runs with UI_CONFIG_DISABLED=true (founder decision,
 // 2026-10-08). Pocket ID then reads its whole application configuration from
 // the environment at startup and ignores what its database holds
 // (backend/internal/appconfig/service.go:33-40 and loadDbConfigFromEnv at
@@ -66,7 +66,7 @@ type PocketIDSetting struct {
 	Choices []string
 }
 
-// PocketIDSettings is every setting the kind renders into its .env besides
+// PocketIDSettings is every setting the blueprint renders into its .env besides
 // signup_default_groups, which is resolved rather than copied (see
 // PocketIDSignupGroupsSetting). The order is the order they are rendered in,
 // which is model.go's.
@@ -113,22 +113,23 @@ const (
 	PocketIDSignupGroupsEnv     = "SIGNUP_DEFAULT_USER_GROUP_IDS"
 )
 
-// PocketIDAccountEditSetting is the one setting whose value is fixed: the kind
-// always renders ALLOW_OWN_ACCOUNT_EDIT=false, declared or not, and validate
-// refuses true (pocket-id-account-edit-on). A Pocket ID username is the
-// identity other apps sign people in as, such as an Mbin account's fediverse
-// handle, and those apps do not follow a rename. With editing off a user can
-// change neither their username nor their email, which also keeps apply
-// finding each declared admin's account by the two. Pocket ID's own admin
+// PocketIDAccountEditSetting is the one setting whose value is fixed: the
+// blueprint always renders ALLOW_OWN_ACCOUNT_EDIT=false, declared or not, and
+// validate refuses true (pocket-id-account-edit-on). A Pocket ID username is
+// the identity other apps sign people in as, such as an Mbin account's
+// fediverse handle, and those apps do not follow a rename. With editing off a
+// user can change neither their username nor their email, which also keeps
+// apply finding each declared admin's account by the two. Pocket ID's own admin
 // page can still edit any account, and a rename made there breaks the same
 // identities.
 const PocketIDAccountEditSetting = "allow_own_account_edit"
 
 // PocketIDUIConfigDisabledEnv is the variable that locks the admin page and
-// makes the environment the configuration. The kind always renders it true.
+// makes the environment the configuration. The blueprint always renders it
+// true.
 const PocketIDUIConfigDisabledEnv = "UI_CONFIG_DISABLED"
 
-// PocketIDSMTPEnv are the SMTP variables the kind renders from the
+// PocketIDSMTPEnv are the SMTP variables the blueprint renders from the
 // deployment's smtp block (blueprints.SendsMail). Pocket ID has no sender name
 // of its own: it sends as APP_NAME (email/module.go:212).
 var PocketIDSMTPEnv = []string{"SMTP_HOST", "SMTP_PORT", "SMTP_TLS", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"}
@@ -159,7 +160,7 @@ func PocketIDEnvOwner(env string) (string, bool) {
 	case PocketIDSignupGroupsEnv:
 		return "settings." + PocketIDSignupGroupsSetting, true
 	case PocketIDUIConfigDisabledEnv:
-		return "the kind itself, which always renders it true", true
+		return "the blueprint itself, which always renders it true", true
 	}
 	for _, e := range PocketIDSMTPEnv {
 		if e == env {
@@ -336,11 +337,11 @@ func PocketIDEnv(settings map[string]any) []PocketIDEnvVar {
 // theirs.
 const PocketIDAdminEmailSetting = "email_one_time_access_as_admin"
 
-// PocketIDSettingsFor is an app's settings with the defaults the kind adds:
-// when the app can send mail, PocketIDAdminEmailSetting is true unless the
-// settings set it, so a deployment that can send mail emails its admins their
-// login links. canMail is an SMTP host and a sender both resolving, which is
-// what Pocket ID's admin page asks before it turns any email on (see
+// PocketIDSettingsFor is an app's settings with the defaults the blueprint
+// adds: when the app can send mail, PocketIDAdminEmailSetting is true unless
+// the settings set it, so a deployment that can send mail emails its admins
+// their login links. canMail is an SMTP host and a sender both resolving, which
+// is what Pocket ID's admin page asks before it turns any email on (see
 // pocketIDEmailWithoutSMTP in internal/validate). The settings passed in are
 // not changed.
 func PocketIDSettingsFor(settings map[string]any, canMail bool) map[string]any {

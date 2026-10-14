@@ -42,15 +42,15 @@ func TestPinning(t *testing.T) {
 
 const hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// Every kind ships a pinned default for every service it declares, other than
-// postgres, whose default is computed from cluster.postgres_version rather
+// Every blueprint ships a pinned default for every service it declares, other
+// than postgres, whose default is computed from cluster.postgres_version rather
 // than fixed. An adopter who never opens the images stanza has to get a
 // tested set, and none of those defaults may float, or the toolkit would
 // refuse configuration it produces itself.
 //
-// It walks Builtin() and each kind's own blueprints.Services() rather than a
-// list of service names written out here, so a kind given a record,
-// or a kind whose services are not all named "app" (Eg: mbin's messenger),
+// It walks Builtin() and each blueprint's own blueprints.Services() rather than
+// a list of service names written out here, so a blueprint given a record,
+// or a blueprint whose services are not all named "app" (Eg: mbin's messenger),
 // still gets checked: there is no second list this one can fall out of step
 // with.
 func TestDefaultsArePinned(t *testing.T) {

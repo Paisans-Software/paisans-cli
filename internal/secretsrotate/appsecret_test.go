@@ -14,9 +14,9 @@ import (
 )
 
 // selfWorld is a deployment with two apps sites and an apps site that is not
-// one, an Mbin with cluster placement, and one pinned app of each other kind
-// that checks a secret of its own. presented is the value each site's stack
-// presents for a key, keyed site/app/key, as the last apply rendered it.
+// one, an Mbin with cluster placement, and one pinned app of each other
+// blueprint that checks a secret of its own. presented is the value each site's
+// stack presents for a key, keyed site/app/key, as the last apply rendered it.
 type selfWorld struct {
 	t         *testing.T
 	cfg       *config.Config
@@ -298,7 +298,7 @@ func TestInviteSessionKeyIsAnAppSelfSecret(t *testing.T) {
 	w := newSelfWorld(t)
 	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
 	if blueprint, ok := AppSelfBlueprint("session_key"); !ok || blueprint != config.BlueprintInvite {
-		t.Fatalf("session_key is %v %v, want the invite kind's", blueprint, ok)
+		t.Fatalf("session_key is %v %v, want the invite blueprint's", blueprint, ok)
 	}
 	r := AppSelf("invite", "session_key", CostOf(w.cfg, "invite", "session_key"))
 	e := w.env()

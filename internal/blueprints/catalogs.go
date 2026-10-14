@@ -38,7 +38,7 @@ const CatalogAPIVersion = "paisans.catalog/v1"
 // mu guards defs and sources, which a configuration's catalogs add to.
 var mu sync.RWMutex
 
-// sources is, for each kind read from a catalog, the directory holding its
+// sources is, for each blueprint read from a catalog, the directory holding its
 // blueprint: its templates are read from there.
 var sources = map[config.Blueprint]string{}
 

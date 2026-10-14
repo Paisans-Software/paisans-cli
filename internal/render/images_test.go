@@ -77,7 +77,7 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 		}
 	}
 	// The gate, which no file declares, is listed on the gateway like any
-	// other app, under its kind's default image.
+	// other app, under its blueprint's default image.
 	gateImage, _ := blueprints.FoundationImage(blueprints.FoundationOAuth2Proxy)
 	gate, n := siteImage(plan, "vm", "gate", gateImage)
 	if n != 1 || gate.Lines != 1 || strings.Join(gate.Services, ",") != "app" {

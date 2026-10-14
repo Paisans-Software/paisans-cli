@@ -12,7 +12,7 @@ import (
 // Mbin and the writefreely-wisp fork keep uploads in S3; Synapse is
 // deliberately excluded because its media store is a directory the homeserver
 // owns, not a bucket, and Wiki.js keeps its uploads in Postgres. The other
-// kinds have no uploads at all.
+// blueprints have no uploads at all.
 func TestUsesObjectStorage(t *testing.T) {
 	cases := map[config.Blueprint]bool{
 		config.Blueprint("mbin"):        true,
@@ -32,7 +32,7 @@ func TestUsesObjectStorage(t *testing.T) {
 
 // Mbin's media must be fetchable by a federating server with no credential,
 // and so must the blog's images now that the wisp fork serves them only from
-// image_url_base. No other kind's objects are.
+// image_url_base. No other blueprint's objects are.
 func TestMbinAndTheBlogServeObjectsPublicly(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
 		want := blueprint == config.Blueprint("mbin") || blueprint == config.Blueprint("writefreely")
@@ -63,13 +63,13 @@ func TestWriteFreelyUsesPostgresAndPublicObjectStorage(t *testing.T) {
 		}
 	}
 	if !sawPostgres {
-		t.Error("a pinned blog runs its own Postgres beside itself, so the kind needs that service")
+		t.Error("a pinned blog runs its own Postgres beside itself, so the blueprint needs that service")
 	}
 }
 
 // The media role and object storage are one fact stated twice, and they must
-// agree: a kind that stores objects without the role would publish URLs
-// nothing routes, and a kind with the role and no bucket would route a
+// agree: a blueprint that stores objects without the role would publish URLs
+// nothing routes, and a blueprint with the role and no bucket would route a
 // hostname to nothing.
 func TestEveryBlueprintThatStoresObjectsHasAMediaRole(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
@@ -114,9 +114,9 @@ func TestMediaHostnameIsDerivedAsASiblingAndCanBeOverridden(t *testing.T) {
 	}
 }
 
-// Each kind reads its configuration from a different file in a different
-// syntax, so a passthrough key means something different per kind. This is a
-// fact about the applications rather than a choice, and getting it wrong puts
+// Each blueprint reads its configuration from a different file in a different
+// syntax, so a passthrough key means something different per blueprint. This is
+// a fact about the applications rather than a choice, and getting it wrong puts
 // a key in a file nothing reads.
 func TestEachBlueprintsConfigFileAndFormat(t *testing.T) {
 	cases := map[config.Blueprint]struct {

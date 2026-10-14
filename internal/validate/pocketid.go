@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// The pocket-id kind's application configuration is rendered from its
+// The pocket-id blueprint's application configuration is rendered from its
 // settings and the smtp block, with UI_CONFIG_DISABLED=true (see
 // blueprints.PocketIDSettings). Pocket ID validates that configuration when it
 // starts and refuses to start on a value it does not accept, so every rule
@@ -40,9 +40,10 @@ func (c *checker) pocketIDSettingInvalid() {
 	}
 }
 
-// pocketIDAccountEditOn refuses allow_own_account_edit set true. The kind
-// renders it false regardless (see blueprints.PocketIDAccountEditSetting), so a
-// true here would say something the deployment does not do.
+// pocketIDAccountEditOn refuses allow_own_account_edit set true. The
+// blueprint renders it false regardless (see
+// blueprints.PocketIDAccountEditSetting), so a true here would say something
+// the deployment does not do.
 func (c *checker) pocketIDAccountEditOn() {
 	for _, name := range c.pocketIDApps() {
 		if on, _ := c.cfg.Apps[name].Settings[blueprints.PocketIDAccountEditSetting].(bool); !on {
@@ -50,14 +51,14 @@ func (c *checker) pocketIDAccountEditOn() {
 		}
 		c.refuse("pocket-id-account-edit-on", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.PocketIDAccountEditSetting),
 			"pocket id account editing cannot be turned on",
-			"is true, and the pocket-id kind always renders ALLOW_OWN_ACCOUNT_EDIT=false. A Pocket ID username is the identity other apps know a person by, such as their fediverse handle in Mbin, and those apps do not follow a rename; with editing off nobody can change their own username or email, which is also how apply finds each declared admin's account. Set it false or remove it. An administrator can still edit any account from Pocket ID's admin page, and a rename made there breaks the same identities.")
+			"is true, and the pocket-id blueprint always renders ALLOW_OWN_ACCOUNT_EDIT=false. A Pocket ID username is the identity other apps know a person by, such as their fediverse handle in Mbin, and those apps do not follow a rename; with editing off nobody can change their own username or email, which is also how apply finds each declared admin's account. Set it false or remove it. An administrator can still edit any account from Pocket ID's admin page, and a rename made there breaks the same identities.")
 	}
 }
 
 // pocketIDSettingUnknown warns about a pocket-id setting the toolkit does not
-// read. A setting no template asks for renders nothing, which for this kind
-// most likely means a misspelt Pocket ID option that its admin page can no
-// longer set either.
+// read. A setting no template asks for renders nothing, which for this
+// blueprint most likely means a misspelt Pocket ID option that its admin page
+// can no longer set either.
 func (c *checker) pocketIDSettingUnknown() {
 	for _, name := range c.pocketIDApps() {
 		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
@@ -66,13 +67,13 @@ func (c *checker) pocketIDSettingUnknown() {
 			}
 			c.warn("pocket-id-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"pocket id setting is not read by the toolkit",
-				"is not a setting the pocket-id kind reads, so it renders nothing. The settings are listed in README.md, \"Pocket ID's configuration is rendered from "+config.FileName+"\"; an option the toolkit does not model goes under config, by its variable name.")
+				"is not a setting the pocket-id blueprint reads, so it renders nothing. The settings are listed in README.md, \"Pocket ID's configuration is rendered from "+config.FileName+"\"; an option the toolkit does not model goes under config, by its variable name.")
 		}
 	}
 }
 
 // pocketIDConfigKeyHasASetting refuses a passthrough key for a variable the
-// kind renders from a setting or from the smtp block, whether or not that
+// blueprint renders from a setting or from the smtp block, whether or not that
 // setting is declared. Rendering refuses a key the .env already holds; this
 // also refuses one whose setting is absent today, because the day somebody
 // declares the setting the two would collide, and until then the value has
@@ -171,8 +172,8 @@ func (c *checker) pocketIDSMTPSender() {
 // pocketIDSMTPFromName warns about a sender name set on the Pocket ID app's
 // own smtp block. Pocket ID has no such setting: its mail goes out under
 // APP_NAME (email/module.go:212), so the name is not used. The deployment's
-// own from_name is not warned about, because the other kinds that send mail
-// use it.
+// own from_name is not warned about, because the other blueprints that send
+// mail use it.
 func (c *checker) pocketIDSMTPFromName() {
 	for _, name := range c.pocketIDApps() {
 		o := c.cfg.Apps[name].SMTP

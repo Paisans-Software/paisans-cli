@@ -261,7 +261,7 @@ func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
 	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", tempSecrets(t), "--app", "web"})
-	if err == nil || !strings.Contains(err.Error(), "Kinds with one: invite, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
+	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: invite, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fake.commands) != 0 {
@@ -269,7 +269,8 @@ func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	}
 }
 
-// sso_dashboard_link replaces the kind's path, and the host stays the app's.
+// sso_dashboard_link replaces the blueprint's path, and the host stays the
+// app's.
 func TestOIDCClientCreateUsesTheDashboardLinkSetting(t *testing.T) {
 	raw, err := os.ReadFile(fixtureConfig())
 	if err != nil {

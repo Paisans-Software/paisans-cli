@@ -9,7 +9,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// The uptime kind's seed file: what the fork reconciles its monitors and
+// The uptime blueprint's seed file: what the fork reconciles its monitors and
 // settings from at every boot. See docs/specs/2026-10-07-uptime-monitoring.md.
 //
 // Field names are the fork's own column names (src/lib/sitePayload.js
@@ -146,12 +146,12 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		}
 		// A gated app is checked three ways through the edge. The public
 		// check reaches the app only when its health route is one of the
-		// kind's open paths, which a dedicated route is and `/` never is, so a
-		// gated app whose health route is its front page has no public check:
-		// the gate would answer it, not the app. The gate check proves the
-		// edge and the gate are in the path; the signed fetch check proves the
-		// app still refuses an unsigned ActivityPub read, which an admin can
-		// turn off in the app with nothing in this configuration to say so.
+		// blueprint's open paths, which a dedicated route is and `/` never is,
+		// so a gated app whose health route is its front page has no public
+		// check: the gate would answer it, not the app. The gate check proves
+		// the edge and the gate are in the path; the signed fetch check proves
+		// the app still refuses an unsigned ActivityPub read, which an admin
+		// can turn off in the app with nothing in this configuration to say so.
 		// See docs/specs/2026-10-08-visibility-gate.md.
 		gated := app.Gated
 		if !gated || health.Path != "/" {

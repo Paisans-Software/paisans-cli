@@ -333,7 +333,7 @@ func certNames(c *x509.Certificate) []string {
 }
 
 // expected reports whether a status is one of the comma separated codes the
-// kind's health route answers with.
+// blueprint's health route answers with.
 func expected(codes string, status int) bool {
 	for _, code := range strings.Split(codes, ",") {
 		if strings.TrimSpace(code) == strconv.Itoa(status) {

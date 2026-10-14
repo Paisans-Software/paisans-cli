@@ -132,7 +132,7 @@ func TestFillCoversWhatWasAddedLater(t *testing.T) {
 	}
 }
 
-// Secrets differ per app and per kind. The writefreely-wisp fork keeps its
+// Secrets differ per app and per blueprint. The writefreely-wisp fork keeps its
 // data in Postgres, and only Mbin runs a broker and a cache of its own, so
 // generating a password for a role nobody creates would be noise in a file an
 // operator has to trust.
@@ -216,9 +216,9 @@ func TestAPendingClientWritesNothing(t *testing.T) {
 }
 
 // A homeserver's client returns to its authentication service, at a redirect
-// URI no other kind uses, and an operator checking an existing client needs
-// it BEFORE anything is rendered: the only other place it appears is a 0600
-// file that exists after apply. Apply creates the client, with PKCE on.
+// URI no other blueprint uses, and an operator checking an existing client
+// needs it BEFORE anything is rendered: the only other place it appears is a
+// 0600 file that exists after apply. Apply creates the client, with PKCE on.
 func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	secrets := &config.Secrets{}
@@ -249,9 +249,9 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	}
 }
 
-// Every kind with a client spec has a pending client whose reason says that
-// apply makes it and names its redirect URI, and a kind without one, the
-// identity provider itself and a Matrix client, has none.
+// Every blueprint with a client spec has a pending client whose reason says
+// that apply makes it and names its redirect URI, and a blueprint without one,
+// the identity provider itself and a Matrix client, has none.
 func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	cfg := load(t)
 	for _, blueprint := range []config.Blueprint{config.Blueprint("mbin"), config.Blueprint("wikijs"), config.Blueprint("writefreely"), config.BlueprintUptime, config.Blueprint("synapse"), config.BlueprintOAuth2Proxy, config.Blueprint("element"), config.BlueprintPocketID} {
@@ -276,9 +276,9 @@ func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	}
 }
 
-// The gate's client is created by apply like every other kind's, returns to
-// oauth2-proxy's own callback, and is restricted to the groups the gate admits,
-// members and admins.
+// The gate's client is created by apply like every other blueprint's, returns
+// to oauth2-proxy's own callback, and is restricted to the groups the gate
+// admits, members and admins.
 func TestTheGatesPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	cfg.Apps["gate"] = config.App{Blueprint: config.BlueprintOAuth2Proxy, Hostname: "auth-gate.example.org"}
@@ -714,7 +714,7 @@ func TestWikiAndWriteFreelyPendingClientsNameTheirCallbackAndRestriction(t *test
 			}
 		}
 		if strings.Contains(why, "/oauth/callback\"") || strings.Contains(why, "/oauth/callback ") {
-			t.Errorf("%s offers the callback no kind uses:\n%s", name, why)
+			t.Errorf("%s offers the callback no blueprint uses:\n%s", name, why)
 		}
 	}
 }

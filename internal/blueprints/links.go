@@ -38,7 +38,7 @@ type Consume struct {
 	Setting string `yaml:"setting"`
 }
 
-// Provides is the roles a kind provides.
+// Provides is the roles a blueprint provides.
 func Provides(blueprint config.Blueprint) []string {
 	var out []string
 	for _, p := range of(blueprint).Provides {
@@ -47,7 +47,7 @@ func Provides(blueprint config.Blueprint) []string {
 	return out
 }
 
-// Consumes is the roles a kind consumes.
+// Consumes is the roles a blueprint consumes.
 func Consumes(blueprint config.Blueprint) []Consume {
 	return append([]Consume(nil), of(blueprint).Consumes...)
 }

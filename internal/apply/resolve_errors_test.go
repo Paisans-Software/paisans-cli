@@ -25,12 +25,12 @@ func denied(ref string) error {
 	return fmt.Errorf("asking ghcr.io for %s: the token service answered 403 Forbidden: %w", ref, imagedigest.ErrDenied)
 }
 
-// mbinDefault is the fixture with talk on the mbin kind's default image.
+// mbinDefault is the fixture with talk on the mbin blueprint's default image.
 func mbinDefault(t *testing.T) (*render.Plan, string) {
 	t.Helper()
 	def, ok := blueprints.DefaultImage(config.Blueprint("mbin"), "app")
 	if !ok || blueprints.ParseReference(def).Tag == "" {
-		t.Fatalf("the mbin kind's default %q names no tag", def)
+		t.Fatalf("the mbin blueprint's default %q names no tag", def)
 	}
 	return planWith(t, func(cfg *config.Config) {
 		app := cfg.Apps["talk"]

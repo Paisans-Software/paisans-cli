@@ -6,9 +6,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// Every kind the configuration accepts has a record, and every record is a
-// kind the configuration accepts, so a kind cannot be added to one list and
-// answer zero to every question the other asks.
+// Every blueprint the configuration accepts has a record, and every record is a
+// blueprint the configuration accepts, so a blueprint cannot be added to one
+// list and answer zero to every question the other asks.
 func TestEveryBlueprintHasARecord(t *testing.T) {
 	accepted := map[config.Blueprint]bool{}
 	for _, blueprint := range Builtin() {
@@ -48,8 +48,8 @@ func TestEveryRecordIsComplete(t *testing.T) {
 	}
 }
 
-// No two kinds rotate a secret of the same name by re-rendering their own
-// stack, so the kind a key belongs to has one answer.
+// No two blueprints rotate a secret of the same name by re-rendering their own
+// stack, so the blueprint a key belongs to has one answer.
 func TestSelfRotatedSecretsAreUnique(t *testing.T) {
 	owner := map[string]config.Blueprint{}
 	for _, blueprint := range known() {
@@ -69,7 +69,7 @@ func TestSelfRotatedSecretsAreUnique(t *testing.T) {
 	}
 }
 
-// A kind with gate settings can read them back from a running app, and one
+// A blueprint with gate settings can read them back from a running app, and one
 // with a live reader has settings for it to read.
 func TestGateSettingsAndTheirReaderComeTogether(t *testing.T) {
 	for _, blueprint := range known() {
