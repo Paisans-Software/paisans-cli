@@ -19,6 +19,11 @@ operators:
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO04gQe+cdriVt0QrP7GCmv4mU7M1DrHDEV0olLvv8v9 bob@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -27,7 +32,7 @@ sites:
     endpoint: 203.0.113.10:51820
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   home-b:
     roles: [data]
     address: 10.44.0.2
@@ -35,7 +40,7 @@ sites:
     endpoint: 203.0.113.20:51820
     ssh:
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -44,7 +49,7 @@ sites:
     ssh:
       user: ubuntu
       port: 2222
-      keys: [alice]
+      keys: [alice, bob]
 
 cluster:
   sites: [home-a, home-b]
@@ -69,6 +74,7 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      management: pocket-id
       file_backend: database
   blog:
     blueprint: writefreely

@@ -9,8 +9,8 @@ import (
 // Graph is every version the workstation holds, with a way to read each
 // version's operators.
 type Graph struct {
-	Versions map[string]Version
-	Operators   func(sha string) (map[string]string, error) // fingerprint -> operator id, from that version's paisans-stack.yaml
+	Versions  map[string]Version
+	Operators func(sha string) (map[string]string, error) // fingerprint -> operator id, from that version's paisans-stack.yaml
 }
 
 // Anchor is what the operator holds that nobody else can forge: their own
@@ -307,9 +307,9 @@ type operatorsResult struct {
 }
 
 type judgement struct {
-	g      Graph
+	g         Graph
 	operators map[string]operatorsResult
-	anc    map[string]map[string]bool
+	anc       map[string]map[string]bool
 }
 
 func (j *judgement) operatorsOf(sha string) operatorsResult {

@@ -9,7 +9,7 @@ import (
 )
 
 type fake struct {
-	vs     map[string]Version
+	vs        map[string]Version
 	operators map[string]map[string]string
 }
 
@@ -29,8 +29,8 @@ func (f *fake) add(sha string, rev int, signer string, parents []string, operato
 
 func (f *fake) graph() Graph {
 	return Graph{
-		Versions: f.vs,
-		Operators:   func(sha string) (map[string]string, error) { return f.operators[sha], nil },
+		Versions:  f.vs,
+		Operators: func(sha string) (map[string]string, error) { return f.operators[sha], nil },
 	}
 }
 

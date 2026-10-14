@@ -89,11 +89,11 @@ type Config struct {
 	ACME ACME `yaml:"acme"`
 	// Operators is the people who may log in to the sites, under the name a
 	// site's ssh.keys lists them by.
-	Operators  map[string]Operator `yaml:"operators"`
-	Sites   map[string]Site  `yaml:"sites"`
-	Cluster Cluster          `yaml:"cluster"`
-	Etcd    Etcd             `yaml:"etcd"`
-	Storage Storage          `yaml:"storage"`
+	Operators map[string]Operator `yaml:"operators"`
+	Sites     map[string]Site     `yaml:"sites"`
+	Cluster   Cluster             `yaml:"cluster"`
+	Etcd      Etcd                `yaml:"etcd"`
+	Storage   Storage             `yaml:"storage"`
 	// SMTP is how apps send mail, the default for every app that sends any.
 	// An app's own smtp block overrides it field by field: see SMTPFor.
 	SMTP SMTP `yaml:"smtp"`
@@ -1004,6 +1004,22 @@ func (c *Config) DataSites() []string {
 		}
 	}
 	return out
+}
+
+// PocketIDApp is the deployment's one pocket-id app, and false when it has
+// none or more than one. The account app signs in and creates accounts
+// there, and validate refuses an account app without exactly one.
+func (c *Config) PocketIDApp() (string, bool) {
+	var found []string
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintPocketID {
+			found = append(found, name)
+		}
+	}
+	if len(found) != 1 {
+		return "", false
+	}
+	return found[0], true
 }
 
 // AppsSites returns the sites holding the apps role, sorted.

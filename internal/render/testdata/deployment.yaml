@@ -21,6 +21,11 @@ operators:
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO04gQe+cdriVt0QrP7GCmv4mU7M1DrHDEV0olLvv8v9 bob@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -29,7 +34,7 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
@@ -40,7 +45,7 @@ sites:
     ssh:
       host: home-b.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -49,7 +54,7 @@ sites:
     ssh:
       host: vm.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   # The monitor's own machine, in `managed_by: paisans`: it runs the
   # gateway's Caddy image and serves the monitor's hostname itself.
   watch:
@@ -61,7 +66,7 @@ sites:
     ssh:
       host: watch.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
 
 cluster:
   sites: [home-a, home-b]
@@ -108,16 +113,14 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      # The account app below manages accounts, so the toolkit renders
+      # signup closed and the email-code sign-in open.
+      management: paisans
       file_backend: database
       # Pocket ID's application configuration, rendered into its .env. The
       # two groups' IDs are recorded under pocket_id_groups in the secrets.
       app_name: Example ID
       session_duration: 10080
-      # Disabled, and the email-code sign-in on, because the account app below
-      # names this one: new accounts come only from invites, and a member
-      # whose sign-in link expired recovers by email code.
-      allow_user_signups: disabled
-      email_one_time_access_as_unauthenticated: true
       signup_default_groups: [members, newcomers]
       emails_verified: true
       # Quoted in the .env, which the account app's ACCOUNT_ACCENT_COLOR follows.
@@ -171,7 +174,6 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       invites: true
       # One setting declared, so the golden .env shows it beside the defaults.
       invite_quota: 5

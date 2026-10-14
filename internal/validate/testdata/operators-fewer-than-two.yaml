@@ -1,5 +1,5 @@
-# A coherent three site deployment. Every fixture in this directory is a
-# variation on this one, so that a test names exactly the thing it breaks.
+# valid.yaml with one operator: one lost workstation would leave nobody
+# able to run the deployment.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -75,20 +75,24 @@ apps:
     blueprint: wikijs
     hostname: wiki.example.org
     placement: cluster
+  # WriteFreely keeps its images in Garage, so the deployment's object
+  # storage has an app to serve.
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
   auth:
     blueprint: pocket-id
     hostname: id.example.org
     placement: cluster
     settings:
+      management: paisans
       file_backend: database
-      email_one_time_access_as_unauthenticated: true
-      allow_user_signups: withToken
   account:
     blueprint: account
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       invites: true
       code_of_conduct: |
         # Be kind
@@ -106,3 +110,18 @@ smtp:
   security: starttls
   username: health@example.org
   from_address: health@example.org
+
+backup:
+  schedule: daily
+  at: "03:00"
+  destinations:
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: fixture-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage
+      bucket: fixture-backups
+      keep: { weekly: 4, monthly: 12 }

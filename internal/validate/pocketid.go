@@ -92,23 +92,74 @@ func (c *checker) pocketIDConfigKeyHasASetting() {
 	}
 }
 
-// pocketIDAdminUsername refuses an admin whose name Pocket ID would not take
-// as a username, when the deployment runs Pocket ID: apply makes each
-// declared admin a Pocket ID user under that name. Pocket ID wants a letter
-// or digit at both ends (dto/validations.go:21-25 at tag v2.14.0). The admins
-// section already holds names to a letter or digit first and lowercase
-// letters, digits, dots, underscores and hyphens after, so the one rule left
-// is the last character. Refused here, it stops before any host is reached,
-// rather than as a 400 from Pocket ID halfway through a run.
-func (c *checker) pocketIDAdminUsername() {
+// pocketIDOperatorUsername refuses an operator whose name Pocket ID would
+// not take as a username, when the deployment runs Pocket ID: apply makes
+// each declared operator a Pocket ID user under that name. Pocket ID wants a
+// letter or digit at both ends (dto/validations.go:21-25 at tag v2.14.0). The
+// operators section already holds names to a letter or digit first and
+// lowercase letters, digits, dots, underscores and hyphens after, so the one
+// rule left is the last character. Refused here, it stops before any host is
+// reached, rather than as a 400 from Pocket ID halfway through a run.
+func (c *checker) pocketIDOperatorUsername() {
 	if len(c.pocketIDApps()) == 0 {
 		return
 	}
 	for _, id := range sortedKeys(c.cfg.Operators) {
 		if last := id[len(id)-1]; last == '.' || last == '_' || last == '-' {
-			c.refuse("pocket-id-admin-username", "admins."+id,
-				"admin name is not a pocket id username",
-				"ends in %q. apply makes each admin a Pocket ID user under this name, and Pocket ID takes a username only if it ends in a letter or digit. Rename the admin, and every site's ssh.keys entry for them.", string(last))
+			c.refuse("pocket-id-operator-username", "operators."+id,
+				"operator name is not a pocket id username",
+				"ends in %q. apply makes each operator a Pocket ID user under this name, and Pocket ID takes a username only if it ends in a letter or digit. Rename the operator, and every site's ssh.keys entry for them.", string(last))
+		}
+	}
+}
+
+// pocketIDManagement checks who manages accounts. management is required and
+// never defaulted, because it decides whether anybody is a Pocket ID
+// administrator. Under paisans the account service manages signup, bans and
+// recovery: an account app is required, the settings the toolkit renders for
+// it are refused when declared, since a declared one could only disagree,
+// and mail is required, since recovery is an email code. Under pocket-id,
+// Pocket ID's own admin pages do, and an account app is refused: two places
+// that each think they decide who joins would disagree.
+func (c *checker) pocketIDManagement() {
+	accounts := c.accountApps()
+	for _, name := range c.pocketIDApps() {
+		app := c.cfg.Apps[name]
+		key := fmt.Sprintf("apps.%s.settings.%s", name, blueprints.PocketIDManagementSetting)
+		switch blueprints.PocketIDManagement(app.Settings) {
+		case "":
+			v, set := app.Settings[blueprints.PocketIDManagementSetting]
+			why := "is missing."
+			if set {
+				why = fmt.Sprintf("is %v.", v)
+			}
+			c.refuse("pocket-id-management-unset", key,
+				"who manages accounts must be declared",
+				"%s Set management: paisans, where the account service manages signup, bans and recovery and nobody is a Pocket ID administrator, or management: pocket-id, where Pocket ID's own admin pages do and every operator is its administrator. It is never defaulted, because it decides who administers the identity provider.", why)
+		case blueprints.ManagementPaisans:
+			for _, k := range sortedKeys(blueprints.PocketIDManagedSettings) {
+				if _, set := app.Settings[k]; set {
+					c.refuse("pocket-id-setting-managed", fmt.Sprintf("apps.%s.settings.%s", name, k),
+						"the toolkit renders this setting under management: paisans",
+						"is set, and under management: paisans the toolkit renders it as %v, because the account service manages accounts. A declared value could only disagree. Remove it.", blueprints.PocketIDManagedSettings[k])
+				}
+			}
+			if len(accounts) == 0 {
+				c.refuse("pocket-id-without-account", key,
+					"management: paisans needs an account app",
+					"is paisans, and no app has blueprint: account. Under paisans the account service manages signup, bans and recovery, and nobody else can: Pocket ID's signup is closed and nobody is its administrator. Declare an account app, or set management: pocket-id.")
+			}
+			if !c.cfg.CanMail(name) {
+				c.refuse("pocket-id-paisans-without-smtp", key,
+					"management: paisans needs mail",
+					"is paisans, and %s's smtp settings resolve no host or no from_address. A member whose sign-in link expired recovers with an email code, which the toolkit turns on under paisans and which cannot be sent without mail. Declare an smtp block with a host and from_address, in the top level or in apps.%s.smtp.", name, name)
+			}
+		case blueprints.ManagementPocketID:
+			for _, a := range accounts {
+				c.refuse("account-under-pocket-id-management", fmt.Sprintf("apps.%s", a),
+					"an account app needs management: paisans",
+					"is an account app, and %s declares management: pocket-id, where Pocket ID's own admin pages manage signup, bans and recovery. The account service would manage the same accounts from a second place. Remove the account app, or set %s's management to paisans.", key, name)
+			}
 		}
 	}
 }

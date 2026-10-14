@@ -10,14 +10,14 @@ import (
 
 // withAuth is valid.yaml with the Pocket ID app's settings, config and smtp
 // replaced, so each case below changes exactly one thing. The account app is
-// dropped: it constrains the Pocket ID app it names, and these cases are about
-// Pocket ID's own rules.
+// dropped and management is pocket-id: under paisans the toolkit renders some
+// settings itself, and these cases are about Pocket ID's own rules.
 func withAuth(t *testing.T, settings, cfgKeys map[string]any, smtp *config.SMTP) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
 	delete(cfg.Apps, "account")
 	app := cfg.Apps["auth"]
-	app.Settings = map[string]any{"file_backend": "database"}
+	app.Settings = map[string]any{"file_backend": "database", "management": "pocket-id"}
 	for k, v := range settings {
 		app.Settings[k] = v
 	}
@@ -204,13 +204,13 @@ func TestPocketIDFileBackendWarnsOnlyWhenSetToOtherThanDatabase(t *testing.T) {
 	}
 }
 
-// An admin name Pocket ID would not take as a username is refused when the
+// An operator name Pocket ID would not take as a username is refused when the
 // deployment runs Pocket ID, and only then.
-func TestPocketIDAdminUsername(t *testing.T) {
+func TestPocketIDOperatorUsername(t *testing.T) {
 	cfg := withAuth(t, nil, nil, nil)
 	cfg.Operators["joe-"] = config.Operator{Email: "joe@example.org"}
 	r := validate.Check(cfg)
-	if got := findings(r, "pocket-id-admin-username"); len(got) != 1 || got[0] != "REFUSE admins.joe-" {
+	if got := findings(r, "pocket-id-operator-username"); len(got) != 1 || got[0] != "REFUSE operators.joe-" {
 		t.Errorf("findings %v", got)
 	}
 
@@ -219,11 +219,11 @@ func TestPocketIDAdminUsername(t *testing.T) {
 			delete(cfg.Apps, name)
 		}
 	}
-	if r := validate.Check(cfg); r.Has("pocket-id-admin-username") {
-		t.Errorf("refused without a Pocket ID app: %v", findings(r, "pocket-id-admin-username"))
+	if r := validate.Check(cfg); r.Has("pocket-id-operator-username") {
+		t.Errorf("refused without a Pocket ID app: %v", findings(r, "pocket-id-operator-username"))
 	}
 
-	if r := validate.Check(withAuth(t, nil, nil, nil)); r.Has("pocket-id-admin-username") {
-		t.Errorf("refused the fixture's admins: %v", findings(r, "pocket-id-admin-username"))
+	if r := validate.Check(withAuth(t, nil, nil, nil)); r.Has("pocket-id-operator-username") {
+		t.Errorf("refused the fixture's operators: %v", findings(r, "pocket-id-operator-username"))
 	}
 }

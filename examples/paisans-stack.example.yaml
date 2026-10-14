@@ -319,6 +319,13 @@ apps:
     hostname: id.example.org
     placement: cluster
     settings:
+      # Required. paisans: the account service (the account app below)
+      # manages signup, bans and recovery, nobody is a Pocket ID
+      # administrator, and the toolkit renders allow_user_signups and
+      # email_one_time_access_as_unauthenticated itself. pocket-id: Pocket
+      # ID's own admin pages do, every operator is its administrator, and
+      # there is no account app.
+      management: paisans
       # Not `s3`. Uploads are ~1 MB of avatars and branding; in Postgres they
       # ride streaming replication with no sync job, and the service that gates
       # every other one gains no dependency on object storage being up.
@@ -330,14 +337,10 @@ apps:
       # configuration is rendered from paisans-stack.yaml".
       app_name: Example ID       # also the sender name on its mail
       session_duration: 10080    # minutes
-      # New accounts come only from invites (the account app below), so
-      # Pocket ID's own signup links stay off.
-      allow_user_signups: disabled
       # By name. apply finds or creates each group at the running Pocket ID
       # and records its ID under pocket_id_groups in the secrets. members is
       # the group the gate and every member facing app admit.
       signup_default_groups: [members]
-      email_one_time_access_as_unauthenticated: true
       # Always false, and validate refuses true. A username is the identity
       # other apps know a person by, such as their fediverse handle in Mbin,
       # and those apps do not follow a rename.
@@ -441,7 +444,8 @@ apps:
     # smtp:
     #   from_name: Example Health
 
-  # The community's account service, on account.example.org. With invites
+  # The community's account service, on account.example.org, signing in
+  # through the one pocket-id app above. With invites
   # on, members bring new people in: the invitee opens their link on
   # invite.example.org, agrees to the code of conduct below and chooses
   # their details before any account exists; with require_approval an admin
@@ -451,7 +455,6 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       # Required. true serves invite.example.org as well, unless
       # hostnames.invite names another hostname for it.
       invites: true

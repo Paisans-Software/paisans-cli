@@ -1,5 +1,5 @@
-# A coherent three site deployment. Every fixture in this directory is a
-# variation on this one, so that a test names exactly the thing it breaks.
+# valid.yaml with no pocket-id app: the account app has no identity
+# provider to sign members in through.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -19,6 +19,11 @@ operators:
     email: alice@example.org
     keys: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO04gQe+cdriVt0QrP7GCmv4mU7M1DrHDEV0olLvv8v9 bob@example.org
 sites:
   home-a:
     roles: [data, apps]
@@ -27,14 +32,14 @@ sites:
     ssh:
       host: home-a.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]
     address: 10.44.0.3
@@ -42,7 +47,7 @@ sites:
     ssh:
       host: vm.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   # The monitor's own machine, so that something watches the deployment.
   watch:
     roles: [monitor]
@@ -51,7 +56,7 @@ sites:
     ssh:
       host: watch.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
 
 cluster:
   sites: [home-a, home-b]
@@ -75,18 +80,17 @@ apps:
     blueprint: wikijs
     hostname: wiki.example.org
     placement: cluster
-  auth:
-    blueprint: pocket-id
-    hostname: id.example.org
+  # WriteFreely keeps its images in Garage, so the deployment's object
+  # storage has an app to serve.
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
     placement: cluster
-    settings:
-      file_backend: database
   account:
     blueprint: account
     hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: auth
       invites: true
       code_of_conduct: |
         # Be kind
@@ -104,3 +108,18 @@ smtp:
   security: starttls
   username: health@example.org
   from_address: health@example.org
+
+backup:
+  schedule: daily
+  at: "03:00"
+  destinations:
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: fixture-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage
+      bucket: fixture-backups
+      keep: { weekly: 4, monthly: 12 }

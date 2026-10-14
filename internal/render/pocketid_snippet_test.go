@@ -75,24 +75,30 @@ var openPaths = []string{
 	"/api/application-images/logo", "/api/audit-logs/all", "/settings", "/settings/admin/users",
 }
 
+// exposureCase is one deployment: management paisans, with the account app
+// and neither setting declared, since the toolkit renders both; or
+// management pocket-id, with no account app and the two settings as given.
 type exposureCase struct {
 	name      string
-	account   bool
+	paisans   bool
 	signups   any // nil is unset
 	emailCode any // nil is unset
 }
 
-// signupClosed is the rendered allow_user_signups alone: whether an account
-// app names this Pocket ID does not enter into it.
+// signupClosed is the rendered allow_user_signups: disabled under paisans,
+// and the declared value, whose default is disabled, under pocket-id.
 func (c exposureCase) signupClosed() bool {
-	return c.signups == nil || c.signups == "disabled"
+	return c.paisans || c.signups == nil || c.signups == "disabled"
 }
 
-func (c exposureCase) emailCodeClosed() bool { return c.emailCode != true }
+// emailCodeClosed is the rendered email_one_time_access_as_unauthenticated:
+// true under paisans, and the declared value, whose default is false, under
+// pocket-id.
+func (c exposureCase) emailCodeClosed() bool { return !c.paisans && c.emailCode != true }
 
-// renderAuthSnippet renders the fixture with the Pocket ID app's two settings
-// replaced, with or without the account app that names it, and returns the
-// gateway's snippet for it.
+// renderAuthSnippet renders the fixture with the Pocket ID app's management
+// and its two settings replaced, keeping the account app under paisans and
+// dropping it under pocket-id, and returns the gateway's snippet for it.
 func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	t.Helper()
 	cfg, secrets := fixture(t), fixtureSecrets(t)
@@ -103,6 +109,10 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	}
 	delete(settings, "allow_user_signups")
 	delete(settings, "email_one_time_access_as_unauthenticated")
+	settings["management"] = "pocket-id"
+	if c.paisans {
+		settings["management"] = "paisans"
+	}
 	if c.signups != nil {
 		settings["allow_user_signups"] = c.signups
 	}
@@ -111,7 +121,7 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	}
 	app.Settings = settings
 	cfg.Apps["auth"] = app
-	if !c.account {
+	if !c.paisans {
 		delete(cfg.Apps, "account")
 		delete(secrets.Apps, "account")
 		delete(secrets.OIDCClients, "account")
@@ -129,17 +139,15 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 
 func exposureCases() []exposureCase {
 	cases := []exposureCase{
-		{name: "public self-service without an account app", signups: "open", emailCode: true},
-		{name: "standard invite deployment", account: true, signups: "disabled", emailCode: true},
+		{name: "public self-service under pocket-id", signups: "open", emailCode: true},
+		{name: "management paisans", paisans: true},
 	}
-	for _, account := range []bool{false, true} {
-		for _, signups := range []any{nil, "disabled", "withToken", "open"} {
-			for _, emailCode := range []any{nil, false, true} {
-				cases = append(cases, exposureCase{
-					name:    fmt.Sprintf("account=%v signups=%v email_code=%v", account, signups, emailCode),
-					account: account, signups: signups, emailCode: emailCode,
-				})
-			}
+	for _, signups := range []any{nil, "disabled", "withToken", "open"} {
+		for _, emailCode := range []any{nil, false, true} {
+			cases = append(cases, exposureCase{
+				name:    fmt.Sprintf("pocket-id signups=%v email_code=%v", signups, emailCode),
+				signups: signups, emailCode: emailCode,
+			})
 		}
 	}
 	return cases
@@ -168,18 +176,19 @@ func TestPocketIDSnippetExposesOnlyWhatTheConfigurationTurnsOn(t *testing.T) {
 }
 
 // The two deployments the rule is written for, spelled out: a public
-// self-service Pocket ID keeps its signup pages, and an invite deployment
-// closes them and keeps the email-code recovery its members rely on.
+// self-service Pocket ID under management pocket-id keeps its signup pages,
+// and a deployment under management paisans closes them and keeps the
+// email-code recovery its members rely on.
 func TestPocketIDSnippetNamedDeployments(t *testing.T) {
 	public := refusedPaths(renderAuthSnippet(t, exposureCase{signups: "open", emailCode: true}))
 	if refused(public, "/signup") || refused(public, "/api/signup") {
 		t.Errorf("a public self-service Pocket ID refuses signup: %v", public)
 	}
-	invite := refusedPaths(renderAuthSnippet(t, exposureCase{account: true, signups: "disabled", emailCode: true}))
+	invite := refusedPaths(renderAuthSnippet(t, exposureCase{paisans: true}))
 	if !refused(invite, "/signup") || !refused(invite, "/api/signup") {
-		t.Errorf("an invite deployment leaves signup open: %v", invite)
+		t.Errorf("management paisans leaves signup open: %v", invite)
 	}
 	if refused(invite, "/api/one-time-access-email") || refused(invite, "/login/alternative/email") {
-		t.Errorf("an invite deployment refuses the email-code recovery: %v", invite)
+		t.Errorf("management paisans refuses the email-code recovery: %v", invite)
 	}
 }

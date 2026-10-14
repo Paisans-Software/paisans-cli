@@ -187,6 +187,8 @@ func TestABadMappingIsRefused(t *testing.T) {
 // key, since the seed tells monitors apart by name.
 func TestTwoPocketIDAppsPrefixTheirContinuityMonitors(t *testing.T) {
 	cfg, secrets := withDNS(t, false)
+	// An account app needs exactly one pocket-id app.
+	delete(cfg.Apps, "account")
 	second := cfg.Apps["auth"]
 	second.Hostname = "auth2.example.org"
 	cfg.Apps["auth2"] = second

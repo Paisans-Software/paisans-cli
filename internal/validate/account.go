@@ -84,40 +84,33 @@ func (c *checker) accountMustBeClustered() {
 	}
 }
 
-// accountIdentityApp checks the pocket-id app an account app names, which
-// every account app signs in through, and, with invites on, the settings of
-// that app the invite flow depends on.
-func (c *checker) accountIdentityApp() {
+// accountIdentityProvider checks the pocket-id app every account app signs
+// in through and creates accounts at. It is the deployment's one pocket-id
+// app, found rather than named: with none there is nothing to sign in to, and
+// with more than one the account service's client, issuer and API key could
+// come from different identity providers. With invites on it also checks the
+// one setting of that app the invite flow depends on that the toolkit does
+// not render itself.
+func (c *checker) accountIdentityProvider() {
 	for _, name := range c.accountApps() {
-		idp, _ := c.cfg.Apps[name].Settings["identity_app"].(string)
-		app, ok := c.cfg.Apps[idp]
-		if !ok || app.Blueprint != config.BlueprintPocketID {
-			c.refuse("account-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
-				"identity_app must name a pocket-id app",
-				"is %q, which is not a pocket-id app in this configuration. The account service creates each approved member's account at the pocket-id app named here, and signs members in through it.", idp)
+		n := len(c.pocketIDApps())
+		if n == 0 {
+			c.refuse("account-without-pocket-id", fmt.Sprintf("apps.%s", name),
+				"an account app needs a pocket-id app",
+				"is an account app, and no app has blueprint: pocket-id. The account service signs members in through the deployment's pocket-id app and creates each approved member's account there. Declare one.")
 			continue
 		}
-		if n := len(c.pocketIDApps()); n > 1 {
-			c.refuse("account-one-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
+		if n > 1 {
+			c.refuse("account-one-identity-app", fmt.Sprintf("apps.%s", name),
 				"an account app needs exactly one pocket-id app",
-				"is %q, but this configuration has %d pocket-id apps. The account service's OIDC client is created at the deployment's pocket-id app, while its issuer and API key come from identity_app; with more than one, the two could be different identity providers. Declare one pocket-id app.", idp, n)
+				"is an account app, and this configuration has %d pocket-id apps. The account service's OIDC client, its issuer and its API key all come from the deployment's pocket-id app; with more than one, they could be different identity providers. Declare one pocket-id app.", n)
 			continue
 		}
 		if !blueprints.AccountInvites(c.cfg.Apps[name]) {
 			continue
 		}
-		s := app.Settings
-		if v, set := s["allow_user_signups"]; set && v != "disabled" {
-			c.refuse("account-signups-not-disabled", fmt.Sprintf("apps.%s.settings.allow_user_signups", idp),
-				"pocket id signups bypass the code of conduct",
-				"is %v. With invites on, new accounts come only from invites, after the code of conduct; Pocket ID's own signup links would admit people past it. Set allow_user_signups: disabled or remove it.", v)
-		}
-		if v := s["email_one_time_access_as_unauthenticated"]; v != true {
-			c.refuse("account-recovery-disabled", fmt.Sprintf("apps.%s.settings.email_one_time_access_as_unauthenticated", idp),
-				"members could not recover an expired sign-in link",
-				"is not true. A new member whose sign-in link expired gets a fresh one from Pocket ID's sign-in page with an email code. Set email_one_time_access_as_unauthenticated: true.")
-		}
-		if v, set := s["email_one_time_access_as_admin"]; set && v == false {
+		idp, _ := c.cfg.PocketIDApp()
+		if v, set := c.cfg.Apps[idp].Settings["email_one_time_access_as_admin"]; set && v == false {
 			c.refuse("account-login-link-disabled", fmt.Sprintf("apps.%s.settings.email_one_time_access_as_admin", idp),
 				"approved members could not be sent a sign-in link",
 				"is false. The account service has Pocket ID email each approved member a one-time sign-in link, which Pocket ID refuses while email_one_time_access_as_admin is false. Set it true or remove it.")
@@ -176,11 +169,19 @@ func (c *checker) accountSettingInvalid() {
 }
 
 // accountSettingUnknown warns about an account setting the blueprint does not
-// read, which renders nothing and is most likely a misspelling.
+// read, which renders nothing and is most likely a misspelling. It refuses
+// identity_app: the account app uses the deployment's one pocket-id app, and
+// a setting that names one would read as a choice that is not made there.
 func (c *checker) accountSettingUnknown() {
 	for _, name := range c.accountApps() {
 		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
 			if _, ranged := blueprints.AccountSettingRanges[key]; ranged || slices.Contains(blueprints.AccountOtherSettings, key) {
+				continue
+			}
+			if key == "identity_app" {
+				c.refuse("account-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
+					"account setting is not read by the toolkit",
+					"is set, and the account app takes no identity_app: it signs in through the deployment's one pocket-id app. Remove it.")
 				continue
 			}
 			c.warn("account-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),

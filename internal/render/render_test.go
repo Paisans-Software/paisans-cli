@@ -1904,6 +1904,11 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 				settings[k] = v
 			}
 			settings[o.Setting] = value
+			// Under management: paisans the toolkit renders some settings
+			// itself, so each is checked where the operator's value holds.
+			if o.Blueprint == config.BlueprintPocketID {
+				settings[blueprints.PocketIDManagementSetting] = blueprints.ManagementPocketID
+			}
 			a.Settings = settings
 			c.Apps[app] = a
 			plan, err := render.Build(c, fixtureSecrets(t))
