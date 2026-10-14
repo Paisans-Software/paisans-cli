@@ -2,9 +2,12 @@ package main
 
 import (
 	"errors"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/pocketid-go"
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -59,35 +62,35 @@ func (f *pidFake) RunInput(command, stdin string) (string, error) {
 	switch {
 	case strings.Contains(stdin, `request = "GET"`) && strings.Contains(stdin, "/api/user-groups"):
 		if f.group {
-			return `{"data":[{"id":"g-1","name":"admins","friendlyName":"admins"}],"pagination":{"totalPages":1}}` + "\npaisans-http-status:200", nil
+			return `{"data":[{"id":"g-1","name":"admins","friendlyName":"admins"}],"pagination":{"totalPages":1}}` + "\npocketid-http-status:200", nil
 		}
-		return `{"data":[],"pagination":{"totalPages":0}}` + "\npaisans-http-status:200", nil
+		return `{"data":[],"pagination":{"totalPages":0}}` + "\npocketid-http-status:200", nil
 	case strings.Contains(stdin, `request = "POST"`) && strings.Contains(stdin, "/api/user-groups"):
 		f.mutated = true
 		f.group = true
-		return `{"id":"g-1","name":"admins","friendlyName":"admins"}` + "\npaisans-http-status:201", nil
+		return `{"id":"g-1","name":"admins","friendlyName":"admins"}` + "\npocketid-http-status:201", nil
 	case strings.Contains(stdin, `request = "PUT"`) && strings.Contains(stdin, "/api/users/u-1/user-groups"):
 		f.mutated = true
 		f.joined = strings.Contains(stdin, "g-1")
-		return `{}` + "\npaisans-http-status:200", nil
+		return `{}` + "\npocketid-http-status:200", nil
 	case strings.Contains(stdin, `request = "GET"`) && strings.Contains(stdin, "/api/users?"):
 		if f.created {
 			groups := ""
 			if f.joined {
 				groups = `,"userGroups":[{"id":"g-1","name":"admins"}]`
 			}
-			return `{"data":[{"id":"u-1","username":"founder","isAdmin":true` + groups + `}],"pagination":{"totalPages":1}}` + "\npaisans-http-status:200", nil
+			return `{"data":[{"id":"u-1","username":"founder","isAdmin":true` + groups + `}],"pagination":{"totalPages":1}}` + "\npocketid-http-status:200", nil
 		}
-		return `{"data":[],"pagination":{"totalPages":0}}` + "\npaisans-http-status:200", nil
+		return `{"data":[],"pagination":{"totalPages":0}}` + "\npocketid-http-status:200", nil
 	case strings.Contains(stdin, "one-time-access-token"):
 		f.mutated = true
-		return `{"token":"tok-not-real-0009"}` + "\npaisans-http-status:201", nil
+		return `{"token":"tok-not-real-0009"}` + "\npocketid-http-status:201", nil
 	case strings.Contains(stdin, `request = "POST"`):
 		f.mutated = true
 		f.created = true
-		return `{"id":"u-1","username":"founder","isAdmin":true}` + "\npaisans-http-status:201", nil
+		return `{"id":"u-1","username":"founder","isAdmin":true}` + "\npocketid-http-status:201", nil
 	}
-	return `{"error":"no route"}` + "\npaisans-http-status:404", nil
+	return `{"error":"no route"}` + "\npocketid-http-status:404", nil
 }
 
 func withPIDFake(t *testing.T) *pidFake {
@@ -149,4 +152,21 @@ func fixtureAPIKey(t *testing.T) string {
 		t.Fatal("the fixture has no static API key")
 	}
 	return key
+}
+
+// The mesh is private to the Pocket ID client wherever mesh.subnet puts it,
+// so a deployment whose mesh is outside the private ranges still reaches
+// Pocket ID's API, and only its own mesh is added.
+func TestMeshNetworksIsTheDeploymentsMesh(t *testing.T) {
+	cfg := &config.Config{Mesh: config.Mesh{Subnet: "203.0.113.0/24"}}
+	got := meshNetworks(cfg)
+	if len(got) != 1 || got[0] != netip.MustParsePrefix("203.0.113.0/24") {
+		t.Fatalf("got %v", got)
+	}
+	if !pocketid.Private("203.0.113.7", got...) || pocketid.Private("198.51.100.7", got...) {
+		t.Error("the mesh is not exactly what the client accepts")
+	}
+	if meshNetworks(&config.Config{}) != nil {
+		t.Error("a deployment without a subnet added a network")
+	}
 }

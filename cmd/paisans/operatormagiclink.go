@@ -66,7 +66,7 @@ func runOperatorMagicLink(args []string) error {
 		return fmt.Errorf("operator magic-link: %w", err)
 	}
 	req := operatorRequest(cfg, pid, id)
-	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
+	req.APIKey, req.APIBase, req.APINetworks = key, pocketIDBase(cfg, where), meshNetworks(cfg)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], *destination, false))
 
 	r.Section(fmt.Sprintf("%s on %s", pid, where))

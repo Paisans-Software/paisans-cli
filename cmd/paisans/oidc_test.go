@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
 // idpFake is a Pocket ID with the fixture's recorded clients (wiki, blog, account)
@@ -71,7 +72,7 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 	f.commands = append(f.commands, command)
 	reply := func(status int, v any) (string, error) {
 		raw, _ := json.Marshal(v)
-		return fmt.Sprintf("%s\npaisans-http-status:%d", raw, status), nil
+		return fmt.Sprintf("%s\npocketid-http-status:%d", raw, status), nil
 	}
 	get := strings.Contains(stdin, `request = "GET"`)
 	search := ""

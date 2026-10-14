@@ -2,17 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -78,7 +80,7 @@ func recordedClient(secrets *config.Secrets, app string) oidcclient.Recorded {
 // site's ssh section or destination verbatim, and without sudo: curl needs
 // no root.
 func clientAPI(cfg *config.Config, site, destination, key string) *pocketid.Client {
-	return &pocketid.Client{Transport: oidcTransport(siteTransport(site, cfg.Sites[site], destination, false)), BaseURL: pocketIDBase(cfg, site), APIKey: key}
+	return &pocketid.Client{Transport: oidcTransport(siteTransport(site, cfg.Sites[site], destination, false)), BaseURL: pocketIDBase(cfg, site), APIKey: key, Networks: meshNetworks(cfg)}
 }
 
 // probeError is a client plan that failed because Pocket ID could not be
@@ -101,7 +103,8 @@ func planClient(api *pocketid.Client, d oidcclient.Desired, rec oidcclient.Recor
 // probeClient reads what Pocket ID holds for one app's client, by its name or
 // the client ID recordedID. It only reads, and a failure is a *probeError.
 func probeClient(api *pocketid.Client, d oidcclient.Desired, recordedID string) (oidcclient.State, error) {
-	state, err := oidcclient.Probe(api, d, recordedID)
+	ctx := context.Background()
+	state, err := oidcclient.Probe(ctx, api, d, recordedID)
 	if err != nil {
 		return state, &probeError{err}
 	}
@@ -318,6 +321,7 @@ func (c *clientStep) heldApps() []string {
 // first: a Pocket ID that does not answer yet is then no reason to hold an
 // app back, since the apply will start it before the clients are made.
 func (c *clientStep) ensure(execute, waiting bool) error {
+	ctx := context.Background()
 	c.reset()
 	r := c.reporter()
 	if len(c.apps) > 0 {
@@ -394,7 +398,7 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 		if down != "" {
 			c.groupsCannotAsk(c.signupGroups, down, waiting)
 		} else {
-			c.ensureGroups(api, where, false, creating, waiting)
+			c.ensureGroups(ctx, api, where, false, creating, waiting)
 		}
 		return nil
 	}
@@ -427,7 +431,7 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 		}
 		rec := &secretsRecorder{app: p.app, path: c.secretsPath, secrets: c.secrets, recipients: c.recipients}
 		p.plan.Report = r
-		if err := oidcclient.Execute(p.plan, api, rec, secretsgen.ClientSecret); err != nil {
+		if err := oidcclient.Execute(ctx, p.plan, api, rec, secretsgen.ClientSecret); err != nil {
 			c.refuse(p.app, err)
 			continue
 		}
@@ -443,7 +447,7 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 	if down != "" {
 		c.groupsCannotAsk(c.signupGroups, down, false)
 	} else {
-		c.ensureGroups(api, where, true, nil, false)
+		c.ensureGroups(ctx, api, where, true, nil, false)
 	}
 	return nil
 }

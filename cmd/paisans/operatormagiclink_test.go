@@ -29,23 +29,23 @@ func (f *linkFake) RunInput(command, stdin string) (string, error) {
 	switch {
 	case strings.Contains(stdin, `request = "GET"`) && strings.Contains(stdin, "/api/users?"):
 		if f.missing {
-			return `{"data":[],"pagination":{"totalPages":0}}` + "\npaisans-http-status:200", nil
+			return `{"data":[],"pagination":{"totalPages":0}}` + "\npocketid-http-status:200", nil
 		}
 		disabled := "false"
 		if f.disabled {
 			disabled = "true"
 		}
-		return `{"data":[{"id":"u-1","username":"alice","email":"alice@example.org","emailVerified":true,"isAdmin":true,"disabled":` + disabled + `}],"pagination":{"totalPages":1}}` + "\npaisans-http-status:200", nil
+		return `{"data":[{"id":"u-1","username":"alice","email":"alice@example.org","emailVerified":true,"isAdmin":true,"disabled":` + disabled + `}],"pagination":{"totalPages":1}}` + "\npocketid-http-status:200", nil
 	case strings.Contains(stdin, "one-time-access-token"):
 		f.issued = true
-		return `{"token":"tok-not-real-0009"}` + "\npaisans-http-status:201", nil
+		return `{"token":"tok-not-real-0009"}` + "\npocketid-http-status:201", nil
 	case strings.Contains(stdin, "one-time-access-email"):
 		f.emailed = true
-		return `{}` + "\npaisans-http-status:204", nil
+		return `{}` + "\npocketid-http-status:204", nil
 	case !strings.Contains(stdin, `request = "GET"`):
 		f.mutated = true
 	}
-	return `{"error":"no route"}` + "\npaisans-http-status:404", nil
+	return `{"error":"no route"}` + "\npocketid-http-status:404", nil
 }
 
 func withLinkFake(t *testing.T) *linkFake {

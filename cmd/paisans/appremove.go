@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -123,7 +124,8 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		clients = removeClients(cfg, where, key)
 		if in.Client, err = ui.Get(r, "read "+app+"'s client", func() (appremove.ClientState, error) {
-			return appremove.ProbeClient(clients, app, cfg.ClientName(app), idp, where, secrets.OIDCClients[app].ClientID)
+			ctx := context.Background()
+			return appremove.ProbeClient(ctx, clients, app, cfg.ClientName(app), idp, where, secrets.OIDCClients[app].ClientID)
 		}); err != nil {
 			return fmt.Errorf("app remove: %w. Nothing was changed", err)
 		}

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -48,12 +50,12 @@ type groupPlan struct {
 // ensureGroups plans each signup group against Pocket ID and, with execute,
 // creates what is missing and records every ID that is not recorded yet.
 // creating names groups a client plan in the same dry run creates.
-func (c *clientStep) ensureGroups(api *pocketid.Client, where string, execute bool, creating map[string]bool, waiting bool) {
+func (c *clientStep) ensureGroups(ctx context.Context, api *pocketid.Client, where string, execute bool, creating map[string]bool, waiting bool) {
 	if len(c.signupGroups) == 0 {
 		return
 	}
 	r := c.reporter()
-	plans, err := c.planGroups(api, creating)
+	plans, err := c.planGroups(ctx, api, creating)
 	if err != nil {
 		c.groupsCannotAsk(c.signupGroups, unreachable(fmt.Errorf("Pocket ID on %s could not be asked: %w", where, err)), waiting)
 		return
@@ -88,7 +90,7 @@ func (c *clientStep) ensureGroups(api *pocketid.Client, where string, execute bo
 			continue
 		case groupCreate:
 			s := r.Step("create signup group " + p.name)
-			g, err := api.CreateGroup(p.name)
+			g, err := api.CreateGroup(ctx, p.name)
 			if err != nil {
 				c.groupsErr = fmt.Errorf("signup group %s could not be created at Pocket ID: %w. Pocket ID runs without it until a re-run creates it", p.name, err)
 				s.Fail(c.groupsErr)
@@ -121,7 +123,7 @@ func (c *clientStep) ensureGroups(api *pocketid.Client, where string, execute bo
 	}
 	// As the client step does: a call that answered and did not do its job
 	// is the failure nobody notices, so ask again and expect nothing to do.
-	again, err := c.planGroups(api, nil)
+	again, err := c.planGroups(ctx, api, nil)
 	if err != nil {
 		c.groupsErr = fmt.Errorf("checking the signup groups after recording them: %w", err)
 		return
@@ -136,10 +138,10 @@ func (c *clientStep) ensureGroups(api *pocketid.Client, where string, execute bo
 
 // planGroups reads each signup group at Pocket ID and decides its step. It
 // only reads.
-func (c *clientStep) planGroups(api *pocketid.Client, creating map[string]bool) ([]groupPlan, error) {
+func (c *clientStep) planGroups(ctx context.Context, api *pocketid.Client, creating map[string]bool) ([]groupPlan, error) {
 	var out []groupPlan
 	for _, name := range c.signupGroups {
-		g, err := api.FindGroup(name)
+		g, err := api.FindGroup(ctx, name)
 		if err != nil {
 			return nil, fmt.Errorf("looking up group %s: %w", name, err)
 		}

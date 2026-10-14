@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -113,6 +115,7 @@ func runOIDCClientCreate(args []string) error {
 		return fmt.Errorf("oidc client create: secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans apply` to render it into Pocket ID, then re-run", idp)
 	}
 
+	ctx := context.Background()
 	api := clientAPI(cfg, where, *destination, key)
 	plan, err := ui.Get(r, "read "+*appName+"'s client", func() (*oidcclient.Plan, error) {
 		return planClient(api, desired, recordedClient(secrets, *appName))
@@ -138,7 +141,7 @@ func runOIDCClientCreate(args []string) error {
 
 	rec := &secretsRecorder{app: *appName, path: *secretsPath, secrets: secrets, recipients: recipients}
 	plan.Report = r
-	if err := oidcclient.Execute(plan, api, rec, secretsgen.ClientSecret); err != nil {
+	if err := oidcclient.Execute(ctx, plan, api, rec, secretsgen.ClientSecret); err != nil {
 		return fmt.Errorf("oidc client create: %w", err)
 	}
 	if rec.wrote {

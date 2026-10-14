@@ -1,4 +1,4 @@
-package pocketid
+package pocketidlog
 
 import (
 	"encoding/json"

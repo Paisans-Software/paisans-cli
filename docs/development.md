@@ -1480,7 +1480,7 @@ installed, on a workstation or anywhere else.
 | `internal/storageadd` | `storage add`: joining every Garage site into one cluster, and a change of replication factor, in staged, gated, resumable stages |
 | `internal/rotatekey` | `storage rotate-key`: replacing one app's S3 key in staged, gated stages, resumed from the secrets file |
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
-| `internal/pocketid` | Pocket ID's REST API, called through curl on the host with everything variable on stdin, or over HTTP from beside it |
+| `internal/pocketidlog` | a deployed Pocket ID's container log, read for the failed login link email its API does not report. Pocket ID's REST API itself is `github.com/paisans-software/pocketid-go` |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
 | `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostarch` | a host's architecture (`dpkg --print-architecture`): which are supported, the refusal when a host contradicts the one recorded for its site, and whether an image's platforms include it |

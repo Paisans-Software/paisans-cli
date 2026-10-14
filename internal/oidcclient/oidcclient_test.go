@@ -1,6 +1,7 @@
 package oidcclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -53,7 +55,7 @@ func (f *fakeIDP) RunInput(command, stdin string) (string, error) {
 		}
 	}
 	status, out := f.serve(method, u, body)
-	return fmt.Sprintf("%s\npaisans-http-status:%d", out, status), nil
+	return fmt.Sprintf("%s\npocketid-http-status:%d", out, status), nil
 }
 
 func page[T any](data []T) string {
@@ -262,7 +264,7 @@ func secretSource(values ...string) func() (string, error) {
 
 func plan(t *testing.T, f *fakeIDP, d Desired, rec Recorded) *Plan {
 	t.Helper()
-	s, err := Probe(api(f), d, rec.ClientID)
+	s, err := Probe(context.Background(), api(f), d, rec.ClientID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +315,7 @@ func TestExecuteReportsAStepPerMutation(t *testing.T) {
 	p := plan(t, f, talk(), Recorded{})
 	r := &ui.Recorder{Verbose_: true}
 	p.Report = r
-	if err := Execute(p, api(f), &memRecorder{}, secretSource("reported-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), p, api(f), &memRecorder{}, secretSource("reported-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	if i := r.Index("done", "create OIDC client talk"); i < 0 || r.Events[i].Extra != "created" {
@@ -337,7 +339,7 @@ func TestExecuteMarksTheFailedStep(t *testing.T) {
 	p := plan(t, f, talk(), Recorded{})
 	r := &ui.Recorder{}
 	p.Report = r
-	err := Execute(p, api(f), &memRecorder{fail: true}, secretSource("failed-secret-not-real-0001"))
+	err := Execute(context.Background(), p, api(f), &memRecorder{fail: true}, secretSource("failed-secret-not-real-0001"))
 	if err == nil {
 		t.Fatal("a failed record was not an error")
 	}
@@ -358,7 +360,7 @@ func TestExecuteRecordsFirstAndConverges(t *testing.T) {
 	}
 	secret := "generated-client-secret-not-real-01"
 	p := plan(t, f, talk(), Recorded{})
-	if err := Execute(p, api(f), rec, secretSource(secret)); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, secretSource(secret)); err != nil {
 		t.Fatal(err)
 	}
 	if rec.rec != (Recorded{ClientID: "c-1", ClientSecret: secret}) {
@@ -386,7 +388,7 @@ func TestExecuteRecordsFirstAndConverges(t *testing.T) {
 func TestRotateAddsASecretAndKeepsTheOldOne(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	d := talk()
@@ -395,7 +397,7 @@ func TestRotateAddsASecretAndKeepsTheOldOne(t *testing.T) {
 	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{AddSecret}) || !strings.Contains(p.Steps[0].Detail, "stay valid") {
 		t.Fatalf("rotation planned %v: %v", kinds(p), p.Steps)
 	}
-	if err := Execute(p, api(f), rec, secretSource("second-secret-not-real-0002")); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, secretSource("second-secret-not-real-0002")); err != nil {
 		t.Fatal(err)
 	}
 	if rec.rec.ClientSecret != "second-secret-not-real-0002" || len(f.secrets["c-1"]) != 2 {
@@ -408,7 +410,7 @@ func TestRotateAddsASecretAndKeepsTheOldOne(t *testing.T) {
 func TestAnInterruptedRunSendsTheRecordedSecret(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	f.secrets["c-1"] = nil // as if the POST never landed
@@ -416,7 +418,7 @@ func TestAnInterruptedRunSendsTheRecordedSecret(t *testing.T) {
 	if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{SendRecordedSecret}) {
 		t.Fatalf("planned %v", kinds(p))
 	}
-	if err := Execute(p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
 		t.Fatal(err)
 	}
 	if f.sent[len(f.sent)-1] != "first-secret-not-real-0001" {
@@ -446,7 +448,7 @@ func TestRecordedCredentialsForAMissingClientAreReplaced(t *testing.T) {
 		}
 	}
 	rec := &memRecorder{rec: stale}
-	if err := Execute(p, api(f), rec, secretSource("replacing-secret-not-real-01")); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, secretSource("replacing-secret-not-real-01")); err != nil {
 		t.Fatal(err)
 	}
 	if rec.rec != (Recorded{ClientID: "c-1", ClientSecret: "replacing-secret-not-real-01"}) {
@@ -460,7 +462,7 @@ func TestRecordedCredentialsForAMissingClientAreReplaced(t *testing.T) {
 // If the secret cannot be recorded, Pocket ID is sent nothing.
 func TestARecordFailureSendsNothing(t *testing.T) {
 	f := newFake()
-	err := Execute(plan(t, f, talk(), Recorded{}), api(f), &memRecorder{fail: true}, secretSource("never-sent-secret-not-real-01"))
+	err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), &memRecorder{fail: true}, secretSource("never-sent-secret-not-real-01"))
 	if err == nil || !strings.Contains(err.Error(), "sent nothing") {
 		t.Fatalf("got %v", err)
 	}
@@ -475,7 +477,7 @@ func TestARecordFailureSendsNothing(t *testing.T) {
 func TestAnExistingClientThatDiffersIsRefused(t *testing.T) {
 	f := newFake()
 	f.clients = []*pocketid.OIDCClient{{ID: "c-9", Name: "talk", CallbackURLs: []string{"https://talk.example.org/oauth/callback"}}}
-	s, err := Probe(api(f), talk(), "")
+	s, err := Probe(context.Background(), api(f), talk(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +498,7 @@ func TestAMemberGroupRestrictsTheClient(t *testing.T) {
 		t.Fatalf("planned %v", kinds(p))
 	}
 	rec := &memRecorder{}
-	if err := Execute(p, api(f), rec, secretSource("member-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, secretSource("member-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	c := f.clients[0]
@@ -513,7 +515,7 @@ func TestAClientWithoutALaunchURLGetsOne(t *testing.T) {
 	d := talk()
 	d.MemberGroup = "members"
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, d, Recorded{}), api(f), rec, secretSource("launch-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, Recorded{}), api(f), rec, secretSource("launch-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	c := f.clients[0]
@@ -528,7 +530,7 @@ func TestAClientWithoutALaunchURLGetsOne(t *testing.T) {
 		t.Errorf("line %q", p.Steps[0].Detail)
 	}
 	f.mutations = nil
-	if err := Execute(p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(f.mutations) != "[PUT /api/oidc/clients/c-1]" {
@@ -569,7 +571,7 @@ func TestAClientWithoutALaunchURLGetsOne(t *testing.T) {
 func TestACustomisedLaunchURLIsLeftAlone(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("custom-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("custom-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	custom := "https://talk.example.org/magazines"
@@ -592,7 +594,7 @@ func TestACustomisedLaunchURLIsLeftAlone(t *testing.T) {
 func TestAClientOnTheOldDefaultMovesToTheConnectRoute(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("bare-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("bare-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	old := bare
@@ -604,7 +606,7 @@ func TestAClientOnTheOldDefaultMovesToTheConnectRoute(t *testing.T) {
 	if !strings.Contains(p.Steps[0].Detail, `with launchURL "https://talk.example.org/oauth/oidc/connect"`) {
 		t.Errorf("line %q", p.Steps[0].Detail)
 	}
-	if err := Execute(p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
 		t.Fatal(err)
 	}
 	if got := *f.clients[0].LaunchURL; got != connect {
@@ -631,7 +633,7 @@ func TestAClientOnTheOldDefaultMovesToTheConnectRoute(t *testing.T) {
 func TestAChosenLinkNeverOverwritesACustomValue(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("chosen-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("chosen-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	d := talk()
@@ -668,7 +670,7 @@ func TestAnOverPermissiveClientIsRefused(t *testing.T) {
 		AllowedUserGroups: []pocketid.Group{f.groups[0], f.groups[1], f.groups[2]}}}
 	d := talk()
 	d.MemberGroup = "members"
-	s, err := Probe(api(f), d, "")
+	s, err := Probe(context.Background(), api(f), d, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +691,7 @@ func TestPKCEOnIsRefusedForAnAppThatSendsNoChallenge(t *testing.T) {
 	f := newFake()
 	f.clients = []*pocketid.OIDCClient{{ID: "c-9", Name: "docs", PkceEnabled: true, CallbackURLs: []string{"https://docs.example.org/auth/oidc.callback"}}}
 	d := Desired{App: "docs", Name: "docs", CallbackURL: "https://docs.example.org/auth/oidc.callback", PKCE: false}
-	s, err := Probe(api(f), d, "")
+	s, err := Probe(context.Background(), api(f), d, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +708,7 @@ func TestAllowSendsExactlyTheDesiredGroups(t *testing.T) {
 	d := talk()
 	d.MemberGroup = "members"
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, d, Recorded{}), api(f), rec, secretSource("exact-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, Recorded{}), api(f), rec, secretSource("exact-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -724,12 +726,12 @@ func rotated(t *testing.T) (*fakeIDP, *memRecorder) {
 	t.Helper()
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("first-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	d := talk()
 	d.RotateSecret = true
-	if err := Execute(plan(t, f, d, rec.rec), api(f), rec, secretSource("second-secret-not-real-0002")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, rec.rec), api(f), rec, secretSource("second-secret-not-real-0002")); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.secrets["c-1"]) != 2 {
@@ -743,7 +745,7 @@ func rotated(t *testing.T) (*fakeIDP, *memRecorder) {
 func TestRetireDeletesEverySecretButTheRecordedOne(t *testing.T) {
 	f, rec := rotated(t)
 	f.mutations = nil
-	if err := Retire(api(f), "talk", rec.rec, nil); err != nil {
+	if err := Retire(context.Background(), api(f), "talk", rec.rec, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := fmt.Sprint(f.mutations); got != "[DELETE /api/oidc/clients/c-1/secrets/s-1]" {
@@ -760,7 +762,7 @@ func TestRetireDeletesEverySecretButTheRecordedOne(t *testing.T) {
 	}
 	// Run again, it finds nothing to delete.
 	f.mutations = nil
-	if err := Retire(api(f), "talk", rec.rec, nil); err != nil || len(f.mutations) != 0 {
+	if err := Retire(context.Background(), api(f), "talk", rec.rec, nil); err != nil || len(f.mutations) != 0 {
 		t.Errorf("a second retire: %v, %v", err, f.mutations)
 	}
 }
@@ -770,7 +772,7 @@ func TestRetireDeletesEverySecretButTheRecordedOne(t *testing.T) {
 func TestRetireDeletesNothingWhenTheRecordedSecretIsNotLive(t *testing.T) {
 	f, _ := rotated(t)
 	f.mutations = nil
-	err := Retire(api(f), "talk", Recorded{ClientID: "c-1", ClientSecret: "third-secret-not-real-0003"}, nil)
+	err := Retire(context.Background(), api(f), "talk", Recorded{ClientID: "c-1", ClientSecret: "third-secret-not-real-0003"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "Nothing was deleted") {
 		t.Fatalf("got %v", err)
 	}
@@ -789,7 +791,7 @@ func TestRetireKeepsSecretsThatShareTheRecordedPrefix(t *testing.T) {
 	f, rec := rotated(t)
 	f.secrets["c-1"] = append(f.secrets["c-1"], pocketid.ClientSecret{ID: "s-9", Prefix: "seco", IsActive: true})
 	f.mutations = nil
-	err := Retire(api(f), "talk", rec.rec, nil)
+	err := Retire(context.Background(), api(f), "talk", rec.rec, nil)
 	if err == nil || !strings.Contains(err.Error(), "s-2, s-9") {
 		t.Fatalf("got %v", err)
 	}
@@ -802,7 +804,7 @@ func TestRetireKeepsSecretsThatShareTheRecordedPrefix(t *testing.T) {
 func TestRetireRefusesWithoutARecordedClient(t *testing.T) {
 	f, _ := rotated(t)
 	f.mutations = nil
-	if err := Retire(api(f), "talk", Recorded{ClientSecret: "second-secret-not-real-0002"}, nil); err == nil || len(f.mutations) != 0 {
+	if err := Retire(context.Background(), api(f), "talk", Recorded{ClientSecret: "second-secret-not-real-0002"}, nil); err == nil || len(f.mutations) != 0 {
 		t.Fatalf("got %v, %v", err, f.mutations)
 	}
 }
@@ -811,7 +813,7 @@ func TestRetireRefusesWithoutARecordedClient(t *testing.T) {
 func TestRetireReportsEachDeletion(t *testing.T) {
 	f, rec := rotated(t)
 	r := &ui.Recorder{Verbose_: true}
-	if err := Retire(api(f), "talk", rec.rec, r); err != nil {
+	if err := Retire(context.Background(), api(f), "talk", rec.rec, r); err != nil {
 		t.Fatal(err)
 	}
 	if !r.Has("done", "delete old client secret s-1 of talk") {
@@ -829,7 +831,7 @@ func TestTheClientIsCreatedUnderItsName(t *testing.T) {
 	if !strings.Contains(p.Steps[1].Detail, `"name":"Example Community"`) {
 		t.Errorf("create line %s", p.Steps[1].Detail)
 	}
-	if err := Execute(p, api(f), &memRecorder{}, secretSource("named-secret-not-real-00001")); err != nil {
+	if err := Execute(context.Background(), p, api(f), &memRecorder{}, secretSource("named-secret-not-real-00001")); err != nil {
 		t.Fatal(err)
 	}
 	if f.clients[0].Name != "Example Community" {
@@ -845,7 +847,7 @@ func TestTheRecordedClientIsRenamed(t *testing.T) {
 	d := talk()
 	d.MemberGroup = "members"
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, d, Recorded{}), api(f), rec, secretSource("rename-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, Recorded{}), api(f), rec, secretSource("rename-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	d.Name = "Example Community"
@@ -858,7 +860,7 @@ func TestTheRecordedClientIsRenamed(t *testing.T) {
 		t.Errorf("line %q", p.Steps[0].Detail)
 	}
 	f.mutations = nil
-	if err := Execute(p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(f.mutations) != "[PUT /api/oidc/clients/c-1]" {
@@ -908,7 +910,7 @@ func TestExtraGroupsAreCreatedButNotAllowed(t *testing.T) {
 		t.Fatalf("extra group steps %v", extra)
 	}
 	rec := &memRecorder{}
-	if err := Execute(p, api(f), rec, secretSource("extra-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), p, api(f), rec, secretSource("extra-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	var allowed []string
@@ -926,7 +928,7 @@ func TestAnExistingExtraGroupIsPresent(t *testing.T) {
 	d := talk()
 	d.MemberGroup = "members"
 	d.ExtraGroups = []string{"moderators"}
-	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("extra-secret-not-real-0002")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("extra-secret-not-real-0002")); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range plan(t, f, d, Recorded{}).Steps {
@@ -942,7 +944,7 @@ func TestANewClientSkipsConsent(t *testing.T) {
 	f := newFake()
 	d := talk()
 	d.SkipConsent = true
-	if err := Execute(plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("consent-secret-not-real-0001")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, d, Recorded{}), api(f), &memRecorder{}, secretSource("consent-secret-not-real-0001")); err != nil {
 		t.Fatal(err)
 	}
 	if !f.clients[0].SkipConsent {
@@ -955,7 +957,7 @@ func TestANewClientSkipsConsent(t *testing.T) {
 func TestAnExistingClientsConsentIsCorrected(t *testing.T) {
 	f := newFake()
 	rec := &memRecorder{}
-	if err := Execute(plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("consent-secret-not-real-0002")); err != nil {
+	if err := Execute(context.Background(), plan(t, f, talk(), Recorded{}), api(f), rec, secretSource("consent-secret-not-real-0002")); err != nil {
 		t.Fatal(err)
 	}
 	before := *f.clients[0]
@@ -969,7 +971,7 @@ func TestAnExistingClientsConsentIsCorrected(t *testing.T) {
 	if fmt.Sprint(ks) != fmt.Sprint([]StepKind{SetSkipConsent}) {
 		t.Fatalf("planned %v", ks)
 	}
-	if err := Execute(p, api(f), &memRecorder{}, secretSource("unused-not-real-0003")); err != nil {
+	if err := Execute(context.Background(), p, api(f), &memRecorder{}, secretSource("unused-not-real-0003")); err != nil {
 		t.Fatal(err)
 	}
 	if !f.clients[0].SkipConsent {

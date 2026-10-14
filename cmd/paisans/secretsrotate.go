@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -300,7 +301,7 @@ func retireClientSecrets(r ui.Reporter, cfg *config.Config, store secretsrotate.
 	if key == "" {
 		return fmt.Errorf("secrets apps.%s.static_api_key is empty, so Pocket ID cannot be asked to delete %s's old client secrets", idp, app)
 	}
-	return oidcclient.Retire(clientAPI(cfg, where, "", key), app, recordedClient(s, app), r)
+	return oidcclient.Retire(context.Background(), clientAPI(cfg, where, "", key), app, recordedClient(s, app), r)
 }
 
 // reachEverySite refuses the run when any site does not answer over ssh: a

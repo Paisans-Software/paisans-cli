@@ -1,6 +1,7 @@
 package appremove
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -132,6 +133,7 @@ func (e *Executor) Execute(p *Plan) error {
 }
 
 func (e *Executor) execute(p *Plan) error {
+	ctx := context.Background()
 	d := p.Deployment
 	for _, s := range p.Sites {
 		if s.Empty() {
@@ -183,7 +185,7 @@ func (e *Executor) execute(p *Plan) error {
 		if e.Clients == nil {
 			return fmt.Errorf("no way to reach Pocket ID to delete client %s", c.ID)
 		}
-		if err := e.Clients.DeleteOIDCClient(c.ID); err != nil {
+		if err := e.Clients.DeleteOIDCClient(ctx, c.ID); err != nil {
 			return fmt.Errorf("deleting client %s (id %s) at %s: %w", c.Name, c.ID, p.Client.Provider, err)
 		}
 	}
