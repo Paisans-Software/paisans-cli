@@ -3,13 +3,13 @@
 Status: approved in session by the founder, 2026-10-14. Not implemented.
 
 This repository holds two programs. `cmd/paisans` is the toolkit an operator
-runs on a workstation. `cmd/operator-reconciler` is a service every deployment runs
-beside Pocket ID, published as `ghcr.io/paisans-software/operator-reconciler`. The
-reconciler is the read-only operator reconciler of
-`docs/specs/2026-10-14-operators-and-management.md`. They
-share one Go module, one tag namespace and one set of workflows, and the
-reconciler's image is cut by tags in the toolkit's repository although it is
-not a toolkit release.
+runs on a workstation. `cmd/operator-reconciler` is a service every deployment
+runs beside Pocket ID, published as
+`ghcr.io/paisans-software/operator-reconciler`: the read-only operator
+reconciler of `docs/specs/2026-10-14-operators-and-management.md`. They share
+one Go module, one tag namespace and one set of workflows, so the reconciler's
+image workflow answers to `operator-reconciler-v*` tags beside the toolkit's
+own `v*` releases.
 
 The split gives each program its own repository, and gives the code both of
 them need, the Pocket ID API client, a repository of its own:
@@ -44,6 +44,12 @@ Founder decisions, 2026-10-14, in session:
   named for that one job. Code two programs happen to share does not go into
   it on that ground alone; it earns a module of its own the same way this one
   did.
+* **The operator reconciler's first release comes from its own
+  repository.** It is a plain `v0.3.0` there, after steps 1 and 2 of *Order*;
+  no `operator-reconciler-v*` tag is made in this repository. The core catalog
+  and toolkit releases that carry the operators change wait for it. Outside
+  this repository a release needs no prefix, since nothing else shares its
+  tags.
 * **This repository is renamed `paisans-cli`,** with its Go module path. The
   product is the paisans CLI, `paisans` on the command line, and the
   documentation calls it that.
@@ -66,13 +72,13 @@ is declared in the client so that it depends on a shape, and the CLI's
 `apply.SSHTransport` satisfies it from outside.
 
 **Every method takes a `context.Context` first.** Founder decision. A caller
-can then cancel a call or bound it: the account service passes the request it is serving,
-so a Pocket ID call ends when the visitor leaves or the server shuts down, and
-the reconciler passes its pass's deadline. The `HTTP` path hands the context
-to `http.NewRequestWithContext`. The `Transport` path checks it before each
-call; `Transport.RunInput` takes no context, so a curl already running on a
-host runs to its end. The context goes in at extraction, in `v0.1.0`, so each
-caller is edited once.
+can then cancel a call or bound it: the account service passes the request
+it is serving, so a Pocket ID call ends when the visitor leaves or the server
+shuts down, and the reconciler passes its pass's deadline. The `HTTP` path
+hands the context to `http.NewRequestWithContext`. The `Transport` path
+checks it before each call; `Transport.RunInput` takes no context, so a curl
+already running on a host runs to its end. The context goes in at
+extraction, in `v0.1.0`, so each caller is edited once.
 
 **The CLI makes every Pocket ID API call through `pocketid-go`.** No command
 builds its own request to Pocket ID's API. *CLI calls to Pocket ID* below
@@ -91,8 +97,8 @@ What the module carries:
   release.
 * **The integration test,** behind the `pocketid_integration` build tag,
   against the Pocket ID image the `pocket-id` blueprint's track resolves to
-  today. It moves from `internal/operatorreconciler/integration_test.go`, keeping
-  only what exercises the client; the reconciler keeps its own.
+  today. It moves from `internal/operatorreconciler/integration_test.go`,
+  keeping only what exercises the client; the reconciler keeps its own.
 * **Its own CI:** `go vet` and `go test` on every pull request, and the
   integration test on `develop`.
 
@@ -156,6 +162,16 @@ It depends on `pocketid-go` for the client. It writes nothing: the tests that
 fail on any request other than a `GET` move with it, and they are what keeps
 it a reader.
 
+Its tests import the toolkit in two places, and neither import can cross a
+module boundary. `operatorreconciler_test.go` checks that the reconciler's
+`OperatorsGroup`, `ManagementPaisans` and `ManagementPocketID` equal the
+toolkit's in `internal/blueprints`; each side's tests instead pin the values
+the operators spec states, so either side changing one fails its own tests.
+`integration_test.go` takes the Pocket ID image from
+`blueprints.DefaultImage`; in the new repository it takes the image from an
+environment variable, defaulting to the Pocket ID release the `pocket-id`
+blueprint's track resolves to when the move is made.
+
 Releases are tags `vX.Y.Z` on its own repository, and only a tag publishes:
 the workflow publishes `X.Y.Z` from a tag and nothing from a push to a
 branch. **The first release is `v0.3.0`:** it publishes
@@ -171,8 +187,9 @@ or the workflow's `GITHUB_TOKEN` cannot push.
 
 After the two moves, this repository is the CLI:
 
-* `cmd/operator-reconciler`, `internal/operatorreconciler`, `internal/dnscontinuity`
-  and `.github/workflows/operator-reconciler-image.yml` are removed.
+* `cmd/operator-reconciler`, `internal/operatorreconciler`,
+  `internal/dnscontinuity` and
+  `.github/workflows/operator-reconciler-image.yml` are removed.
 * `internal/pocketid` is removed, and every import of it names
   `github.com/paisans-software/pocketid-go`.
 * The group `operators` is named by `blueprints.OperatorsGroup` here and by
@@ -210,9 +227,11 @@ same images.
    history. Tag `v0.1.0`. Switch this repository's imports to it, reconciler
    included, and remove `internal/pocketid`.
 2. **`paisans-admin-reconciler-service`.** Create the repository with its
-   history. Grant it the GHCR package. Tag `v0.3.0` and confirm the image
-   resolves on the `0.3.*` track. Remove the reconciler from this
-   repository and delete its two `admin-reconciler-v*` tags here.
+   history. If the GHCR package `operator-reconciler` already exists, grant
+   the repository write access to it. Tag `v0.3.0` and confirm the image
+   resolves on the `0.3.*` track; the operators change's core catalog and
+   toolkit releases follow. Remove the reconciler from this repository and
+   delete its two `admin-reconciler-v*` tags here.
 3. **The rename.** Rename the repository, change the module path, update the
    documentation, the core catalog's references and `paisans-account-service`'s.
 4. **The Homebrew tap.** In `Paisans-Software/homebrew-paisans`, point
@@ -224,8 +243,8 @@ same images.
    done. The formula's build names `./cmd/paisans`, not the module path, so
    the install line is unchanged.
 5. **`paisans-account-service` onto `pocketid-go`.** Replace
-   `internal/idp/pocketid` with the shared client behind the account service's `idp`
-   interface, keeping its contract and write surface tests. The
+   `internal/idp/pocketid` with the shared client behind the account
+   service's `idp` interface, keeping its contract and write surface tests. The
    account service must already reach Pocket ID over the mesh
    (`docs/specs/2026-10-14-pocket-id-api-private.md`), since the shared
    client refuses its public hostname.
