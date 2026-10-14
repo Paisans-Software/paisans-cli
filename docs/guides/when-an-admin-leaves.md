@@ -178,11 +178,14 @@ community's decision.
       hand: README, *A rotation that cannot finish*.
 
    Closes: every secret they could read, except the ones the plan lists as
-   kept. Open: Pocket ID's `encryption_key`, Matrix Authentication
-   Service's `mas_encryption_secret` and Outline's `outline_secret_key`,
-   which encrypt stored data and cannot be
+   kept. Open: Pocket ID's `encryption_key` and Matrix Authentication
+   Service's `mas_encryption_secret`, which encrypt stored data and cannot be
    changed without losing it; each is useful only to someone who also holds
-   the data it encrypts. And sessions in apps whose sessions no rotated
+   the data it encrypts. Wiki.js's `local_admin_password`, which `secrets
+   rotate` keeps because Wiki.js holds it hashed in its own database and the
+   bootstrap signs in with it; on a gated wiki it opens nothing to someone
+   Pocket ID no longer admits, since the gate stands in front of the sign-in
+   page. And sessions in apps whose sessions no rotated
    secret signs, Pocket ID's own among them, and Mbin's open sessions, until
    they expire.
 
@@ -364,10 +367,12 @@ included, and refuses while one does not answer.
 * every secret it was rendered, until step 10 rotates it. The Postgres and
   Garage ones reach nothing once the mesh is closed; Mbin's keypair signs
   tokens that work from the internet;
-* Pocket ID's `encryption_key`, Matrix Authentication Service's
-  `mas_encryption_secret` and Outline's `outline_secret_key`, which
-  `secrets rotate` keeps because they encrypt
+* Pocket ID's `encryption_key` and Matrix Authentication Service's
+  `mas_encryption_secret`, which `secrets rotate` keeps because they encrypt
   stored data, and which open only what the copy above already holds;
+* Wiki.js's `local_admin_password`, which `secrets rotate` keeps because
+  Wiki.js holds it hashed in its own database; on a gated wiki the gate
+  stands in front of its sign-in page;
 * members' sessions in every app, until they expire or step 10 ends them;
   sessions no rotated secret signs, Pocket ID's own among them, and Mbin's
   open sessions, last until they expire;
