@@ -171,3 +171,12 @@ func TestTheToolkitsImageLinesAreQuoted(t *testing.T) {
 		t.Errorf("pinned %q, %v", got, err)
 	}
 }
+
+// jsonquote writes a string as a JSON string, for a catalog template that
+// writes a setting into JSON.
+func TestJSONQuote(t *testing.T) {
+	got, err := render.JSONQuote(`a "b" \ c`)
+	if err != nil || got != `"a \"b\" \\ c"` {
+		t.Errorf("%s, %v", got, err)
+	}
+}

@@ -539,6 +539,49 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// keyPath is a mapping key as an error message prints it in a key's path:
+// as written when it is a plain word, and quoted otherwise, so a key holding
+// a line break or a terminal control cannot change what the message shows.
+func keyPath(k string) string {
+	if plainKey.MatchString(k) {
+		return k
+	}
+	return fmt.Sprintf("%q", k)
+}
+
+var plainKey = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// settingControlRune is the first control character (ControlRune) in a
+// setting's value: a string, or any string in a list or a mapping. A
+// multi-line text setting, written into a file of its own, may hold line
+// breaks and tabs.
+func settingControlRune(v any, multiline bool) (rune, bool) {
+	switch x := v.(type) {
+	case string:
+		for _, r := range x {
+			if multiline && (r == '\n' || r == '\t') {
+				continue
+			}
+			if c, ok := ControlRune(string(r)); ok {
+				return c, true
+			}
+		}
+	case []any:
+		for _, item := range x {
+			if r, ok := settingControlRune(item, multiline); ok {
+				return r, true
+			}
+		}
+	case map[string]any:
+		for _, item := range x {
+			if r, ok := settingControlRune(item, multiline); ok {
+				return r, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // acmeProvider is a DNS provider's name as caddy-dns modules take it
 // (dns.providers.<name>).
 var acmeProvider = regexp.MustCompile(`^[a-z0-9_]+$`)
@@ -1134,11 +1177,11 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
-				add("apps.%s.images.%s %s", name, service, controlProblem(r))
+				add("apps.%s.images.%s %s", name, keyPath(service), controlProblem(r))
 			} else if strings.TrimSpace(app.Images[service]) == "" {
-				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, service)
+				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, keyPath(service))
 			} else if !imageRef.MatchString(app.Images[service]) {
-				add("apps.%s.images.%s: %s", name, service, imageRefProblem(app.Images[service]))
+				add("apps.%s.images.%s: %s", name, keyPath(service), imageRefProblem(app.Images[service]))
 			}
 		}
 		for _, role := range sortedKeys(app.Hostnames) {
@@ -1146,9 +1189,15 @@ func (c *Config) structural(noSubnet bool) error {
 				add("apps.%s.hostnames.primary: use the `hostname` key for the primary name. A role here names an additional hostname, and two places to write the same name is one place to get it wrong.", name)
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
-				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, role)
+				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, keyPath(role))
 			} else if !nameChars(app.Hostnames[role]) {
-				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, role, app.Hostnames[role])
+				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role])
+			}
+		}
+		for _, key := range sortedKeys(app.Settings) {
+			multiline := app.Blueprint == BlueprintInvite && key == "code_of_conduct"
+			if r, ok := settingControlRune(app.Settings[key], multiline); ok {
+				add("apps.%s.settings.%s %s A setting is written into the application's own configuration (JSON, INI, env or YAML), where a line break or another control character could add to it.", name, keyPath(key), controlProblem(r))
 			}
 		}
 		if app.SMTP != nil {

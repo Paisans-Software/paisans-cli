@@ -38,3 +38,6 @@ func ListImages(cfg *config.Config, secrets *config.Secrets, files []File) (map[
 
 // InfraServices is infraServices, for the test that keeps it the template's.
 var InfraServices = infraServices
+
+// JSONQuote is the jsonquote template function.
+var JSONQuote = templateFuncs["jsonquote"].(func(string) (string, error))

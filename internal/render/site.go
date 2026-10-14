@@ -61,6 +61,10 @@ var templateFuncs = template.FuncMap{
 	// an operator supplied: a JSON string is one, with every quote, backslash
 	// and line break escaped, so the value cannot end the scalar early.
 	"yamlquote": yamlquote,
+	// jsonquote writes a string as a JSON string, quotes included, for a
+	// template that writes an operator's setting into JSON: a quote or a
+	// backslash in it cannot end the string early.
+	"jsonquote": jsonquote,
 	// stableULID is a ULID derived from an app's name (blueprints.StableULID),
 	// for software that must be told one and given the same one every run.
 	"stableULID": blueprints.StableULID,
@@ -1084,4 +1088,10 @@ func PublicKey(private string) (string, error) { return publicKey(private) }
 func yamlquote(v string) (string, error) {
 	raw, err := json.Marshal(v)
 	return strings.ReplaceAll(string(raw), "$", "$$"), err
+}
+
+// jsonquote is the template function of that name.
+func jsonquote(v string) (string, error) {
+	raw, err := json.Marshal(v)
+	return string(raw), err
 }

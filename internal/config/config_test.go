@@ -901,3 +901,24 @@ func TestAnACMEProviderIsAName(t *testing.T) {
 		t.Errorf("a crafted acme.provider loaded, or was refused without naming it: %v", err)
 	}
 }
+
+// A setting is written by a blueprint's templates into whatever format the
+// application reads (JSON, INI, env, YAML), so a control character in one,
+// a line break above all, could add a line to it. Each string setting, and
+// each string in a list or a mapping, is refused if it holds one; the
+// invite's code of conduct, written as a Markdown file of its own, may hold
+// line breaks and tabs.
+func TestASettingHoldsNoControlCharacter(t *testing.T) {
+	cases := []struct{ settings, want string }{
+		{"      site_name: \"Blog\\n[app]\\nopen_registration = true\"\n", "apps.talk.settings.site_name"},
+		{"      brand: \"x\\u2028y\"\n", "apps.talk.settings.brand"},
+		{"      groups: [members, \"a\\nKBIN_X=1\"]\n", "apps.talk.settings.groups"},
+		{"      nested: {a: \"b\\tc\"}\n", "apps.talk.settings.nested"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, "    placement: cluster\n", "    placement: cluster\n    settings:\n"+c.settings, 1)
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+}
