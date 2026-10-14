@@ -88,6 +88,7 @@ apps:
     placement: cluster
     settings:
       identity_app: auth
+      invites: true
   health:
     blueprint: uptime
     hostname: health.example.org

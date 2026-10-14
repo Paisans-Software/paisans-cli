@@ -20,6 +20,9 @@ type accountValues struct {
 	// Accent is that app's accent_color, quoted for a .env, and empty when
 	// it is unset or `default`, so the service keeps its own.
 	Accent string
+	// Invites is settings.invites. With it off the service is told nothing
+	// that belongs to invites, and the code of conduct renders empty.
+	Invites bool
 	// CoC is the code_of_conduct setting's text, rendered verbatim.
 	CoC string
 	// Settings is every setting in blueprints.AccountSettingDefaults, declared
@@ -38,6 +41,7 @@ func (p *planner) accountValuesFor(name string) (accountValues, error) {
 	}
 	coc, _ := app.Settings["code_of_conduct"].(string)
 	v := accountValues{
+		Invites:     blueprints.AccountInvites(app),
 		IdentityURL: "https://" + idApp.Hostname,
 		APIKey:      p.appSecret(idp, "static_api_key"),
 		CoC:         coc,

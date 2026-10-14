@@ -172,6 +172,7 @@ apps:
     placement: cluster
     settings:
       identity_app: auth
+      invites: true
       # One setting declared, so the golden .env shows it beside the defaults.
       invite_quota: 5
       # The text itself, not a path: rendered byte for byte into

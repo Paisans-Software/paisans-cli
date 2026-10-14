@@ -3,6 +3,8 @@ package validate_test
 import (
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
@@ -104,5 +106,59 @@ func TestAnAccountAppWithTwoPocketIDAppsIsRefused(t *testing.T) {
 	r := validate.Check(load(t, "account-one-identity-app"))
 	if got := findings(r, "account-one-identity-app"); len(got) != 1 || got[0] != "REFUSE apps.account.settings.identity_app" {
 		t.Errorf("got %v", got)
+	}
+}
+
+// withInvitesOff is valid.yaml with the account app's invites false and every
+// setting that belongs to invites removed.
+func withInvitesOff(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := load(t, "valid")
+	app := cfg.Apps["account"]
+	app.Settings["invites"] = false
+	for _, k := range blueprints.AccountInviteSettings {
+		delete(app.Settings, k)
+	}
+	cfg.Apps["account"] = app
+	return cfg
+}
+
+// With invites off, Pocket ID's own settings decide who signs up, so none of
+// the rules an invite community needs fires.
+func TestInvitesOffLeavesThePocketIDSettingsAlone(t *testing.T) {
+	cfg := withInvitesOff(t)
+	cfg.Apps["auth"].Settings["allow_user_signups"] = "open"
+	delete(cfg.Apps["auth"].Settings, "email_one_time_access_as_unauthenticated")
+	r := validate.Check(cfg)
+	for _, rule := range []string{"account-signups-not-disabled", "account-recovery-disabled", "account-code-of-conduct-missing", "account-setting-unknown"} {
+		if f := findings(r, rule); len(f) != 0 {
+			t.Errorf("%s fired with invites off: %v", rule, f)
+		}
+	}
+	if f := findings(r, "account-serves-nothing"); len(f) != 1 || f[0] != "WARN apps.account.settings.invites" {
+		t.Errorf("account-serves-nothing: %v", f)
+	}
+	if r.Refused() {
+		t.Errorf("refused: %v", r.Refusals())
+	}
+}
+
+// invites is a YAML boolean; a quoted one is a typo for something else.
+func TestInvitesMustBeABoolean(t *testing.T) {
+	r := withAccountSetting(t, "invites", "yes")
+	if f := findings(r, "account-setting-invalid"); len(f) != 1 || f[0] != "REFUSE apps.account.settings.invites" {
+		t.Errorf("account-setting-invalid: %v", f)
+	}
+}
+
+// Every setting that belongs to invites is refused with invites off, each by
+// its own key.
+func TestEveryInviteSettingIsRefusedWithInvitesOff(t *testing.T) {
+	for _, k := range blueprints.AccountInviteSettings {
+		cfg := withInvitesOff(t)
+		cfg.Apps["account"].Settings[k] = 3
+		if f := findings(validate.Check(cfg), "account-invite-settings-without-invites"); len(f) != 1 || f[0] != "REFUSE apps.account.settings."+k {
+			t.Errorf("%s: %v", k, f)
+		}
 	}
 }

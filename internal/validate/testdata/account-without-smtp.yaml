@@ -91,6 +91,7 @@ apps:
     placement: cluster
     settings:
       identity_app: auth
+      invites: true
       code_of_conduct: |
         # Be kind
 

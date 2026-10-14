@@ -21,7 +21,8 @@ services:
     # gateway, over the mesh, is the only thing that should reach it.
     ports:
       - "10.44.0.2:8082:8082"
-    # The code of conduct, rendered from apps.account.settings.code_of_conduct.
+    # The code of conduct, rendered from apps.account.settings.code_of_conduct,
+    # and empty with invites off, when the service reads none.
     # A root owned 0644 file: the image runs as distroless nonroot (uid
     # 65532), which reads it as other. It carries nothing secret.
     volumes:

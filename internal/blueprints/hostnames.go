@@ -30,6 +30,11 @@ const WellknownRole = "wellknown"
 // cannot script against another's.
 const MediaRole = "media"
 
+// InviteRole is the hostname an account app's invitees are served on. Like
+// the media role it exists only under a condition, settings.invites, and has
+// a derived name: InviteHostname.
+const InviteRole = "invite"
+
 // MediaSuffix is what a derived media hostname appends to the label of the
 // app's own hostname.
 const MediaSuffix = "-media"

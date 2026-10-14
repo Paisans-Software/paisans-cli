@@ -183,6 +183,7 @@ func Check(cfg *config.Config) Result {
 	c.configKeyAlreadyRendered()
 	c.portCollision()
 	c.accountMustBeClustered()
+	c.accountInvites()
 	c.accountIdentityApp()
 	c.accountWithoutSMTP()
 	c.accountCodeOfConduct()

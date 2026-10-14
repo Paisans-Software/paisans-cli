@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
@@ -19,7 +20,7 @@ const (
 // toolkit does not render is a setting nobody can change, and a required one
 // is a container that refuses to start.
 var accountServiceEnv = []string{
-	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_DATABASE_URL",
+	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_INVITES", "ACCOUNT_DATABASE_URL",
 	"ACCOUNT_SESSION_KEY", "ACCOUNT_EMAIL_HASH_KEY",
 	"ACCOUNT_OIDC_ISSUER", "ACCOUNT_OIDC_CLIENT_ID", "ACCOUNT_OIDC_CLIENT_SECRET",
 	"ACCOUNT_MEMBER_GROUP", "ACCOUNT_ADMIN_GROUP",
@@ -292,5 +293,46 @@ func TestAccountIsRoutedToEveryAppsSiteUngated(t *testing.T) {
 	}
 	if strings.Contains(snippet, "forward_auth") {
 		t.Errorf("the account snippet is gated:\n%s", snippet)
+	}
+}
+
+// invitesOff turns the account app's invites off and removes every setting
+// that belongs to them, as validate requires.
+func invitesOff(cfg *config.Config, _ *config.Secrets) {
+	app := cfg.Apps["account"]
+	settings := map[string]any{}
+	for k, v := range app.Settings {
+		settings[k] = v
+	}
+	settings["invites"] = false
+	for _, k := range blueprints.AccountInviteSettings {
+		delete(settings, k)
+	}
+	app.Settings = settings
+	cfg.Apps["account"] = app
+}
+
+// The service is told whether invites are on, and with them off it is told
+// nothing that belongs to them.
+func TestAccountInvitesReachTheService(t *testing.T) {
+	if got := envValue(buildAccount(t, nil)[accountEnvA], "ACCOUNT_INVITES"); got != "true" {
+		t.Errorf("ACCOUNT_INVITES=%q with invites on", got)
+	}
+	files := buildAccount(t, invitesOff)
+	env := files[accountEnvA]
+	if got := envValue(env, "ACCOUNT_INVITES"); got != "false" {
+		t.Errorf("ACCOUNT_INVITES=%q with invites off", got)
+	}
+	for _, name := range []string{
+		"ACCOUNT_INVITE_QUOTA", "ACCOUNT_REQUIRE_APPROVAL", "ACCOUNT_INVITE_LIFETIME_DAYS",
+		"ACCOUNT_APPLICATION_WAIT_DAYS", "ACCOUNT_DECLINE_RETENTION_DAYS", "ACCOUNT_LOGIN_LINK_DAYS",
+		"ACCOUNT_COC_PATH", "ACCOUNT_INVITE_PUBLIC_URL",
+	} {
+		if assignsEnvVar(env, name) {
+			t.Errorf("%s is rendered with invites off", name)
+		}
+	}
+	if got := files[accountCoCA]; got != "" {
+		t.Errorf("code-of-conduct.md is %q with invites off, want empty", got)
 	}
 }
