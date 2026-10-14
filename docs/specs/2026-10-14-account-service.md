@@ -1,6 +1,6 @@
 # The account service: `account.` for members and admins, `invite.` for invitees
 
-Status: approved in session on 2026-10-14, not implemented.
+Status: approved in session on 2026-10-14, implemented in paisans-stack and paisans-account-service; not yet run end to end.
 
 The invite service (`2026-10-12-invite-service.md`) becomes the account service.
 It is the community's account management tool: today it carries invites and

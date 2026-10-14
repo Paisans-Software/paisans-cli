@@ -14,4 +14,9 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `paisans version` and `paisans --version` print the toolkit version and the commit the binary was built from, and blueprints' `requires_toolkit` is checked against that version.
 
+### Changed
+
+- The `invite` blueprint is the `account` blueprint, running paisans-account-service: `settings.invites` is required, and `invite.<domain>` exists only with invites on, beside `account.<domain>`.
+- The Pocket ID gateway closes its signup routes on `allow_user_signups` alone.
+
 [Unreleased]: https://github.com/Paisans-Software/paisans-stack/commits/develop

@@ -2487,3 +2487,51 @@ its bytes came from; only a checkout's origin and `HEAD` do.
 * **Exempting a `foundation:` service in any blueprint**, a third party
   catalog's included, since its image is then the reviewed reference. This was
   the first version; the founder narrowed it to the toolkit's own services.
+
+## 2026-10-14: The invite service is the account service, on account. and invite.
+
+Founder decision. The design is `docs/specs/2026-10-14-account-service.md`.
+
+### What was decided
+
+* The invite service becomes the account service: repository
+  `Paisans-Software/paisans-account-service`, image
+  `ghcr.io/paisans-software/paisans-account-service`, the reserved `account`
+  blueprint and `foundation.yaml` key, the `ACCOUNT_` environment prefix. No
+  name keeps an alias and nothing converts an older deployment: a deployment
+  is redeployed.
+* `settings.invites` is required and never defaulted.
+* One app answers on two hostnames: `account.` for everything a signed in
+  member or admin uses, and `invite.` for the pages an invitee opens, which
+  exists only with `invites: true`. Each hostname serves only its own routes,
+  in the service and again at the gateway.
+* The `pocket-id` snippet closes its signup routes on `allow_user_signups`
+  alone.
+* First-party service repositories of the organisation end in `-service`. A
+  helper that runs beside another application, such as `wikijs-bootstrap`, is
+  named for the application it serves.
+
+### Why
+
+The service is the community's account management: invites and their
+approval today, and promotion and banning next, so that none of them needs a
+Pocket ID administrator. A name that says invite would be wrong for most of
+what it is to carry. Invites are access policy, like `gated`, and they decide
+whether a hostname exists, so they are declared rather than inferred. The
+invitee's pages are on an origin of their own, which never holds a session: a
+link opened by someone without an account never reaches the origin where
+members are signed in. The signup condition reads one setting because an
+account app with invites on already requires it disabled, and a snippet that
+also read which apps name the identity app would keep a second answer to a
+question the setting already answers.
+
+### What was weighed
+
+* **Two apps sharing one database**, one per hostname. Not chosen: one app
+  that registers each route on its own host keeps the routes apart without a
+  second deployment of the same service.
+* **One hostname split by path.** Not chosen: the invitee's pages would share
+  the origin that holds a member's session.
+* **Deploying the app automatically from Pocket ID's settings**, when signups
+  are disabled. Not chosen: the app exists because it is declared, and the
+  toolkit never adds or drops an app because of another app's settings.
