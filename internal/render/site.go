@@ -376,6 +376,11 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			"PostgresPort":   postgresPort,
 			"PatroniAPIPort": patroniAPIPort,
 			"StatsPort":      haproxyStatsPort,
+			// Pocket ID's API on the mesh: README, "Pocket ID runs on every
+			// apps site, and one of them is active".
+			"PocketIDServers": p.pocketIDServers(),
+			"PocketIDPort":    blueprints.Port(config.BlueprintPocketID),
+			"PocketIDAPIPort": pocketIDAPIPort,
 		})
 		if err != nil {
 			return nil, err
@@ -997,6 +1002,26 @@ func (p *planner) clusterMembers() []clusterMember {
 			continue
 		}
 		out = append(out, clusterMember{Name: name, Address: site.Address})
+	}
+	return out
+}
+
+// pocketIDServers is every site that runs the deployment's one pocket-id app,
+// sorted, at its mesh address: the servers of each HAProxy's `listen
+// pocket-id`. Nil without exactly one pocket-id app, and then no site renders
+// the listener.
+func (p *planner) pocketIDServers() []clusterMember {
+	idp, ok := p.cfg.PocketIDApp()
+	if !ok {
+		return nil
+	}
+	names := append([]string(nil), AppSites(p.cfg)[idp]...)
+	sort.Strings(names)
+	var out []clusterMember
+	for _, name := range names {
+		if site, ok := p.sites[name]; ok {
+			out = append(out, clusterMember{Name: name, Address: site.Address})
+		}
 	}
 	return out
 }

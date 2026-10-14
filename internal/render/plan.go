@@ -57,6 +57,11 @@ func AppPort(blueprint config.Blueprint) int { return blueprints.Port(blueprint)
 // same number.
 const reconcilerPort = 1412
 
+// pocketIDAPIPort is where every site's HAProxy serves the active Pocket ID
+// instance on the mesh, for a service that calls its API with the static key
+// (README, "The account service"). Beside the reconciler's 1412.
+const pocketIDAPIPort = 1413
+
 // patroniAPIPort is where Patroni answers the health check HAProxy uses to
 // find the primary. It is fixed by Spilo.
 const patroniAPIPort = 8008

@@ -30,6 +30,21 @@ listen postgres
 {{- range .ClusterMembers }}
     server {{ .Name }} {{ .Address }}:{{ $.PostgresPort }} maxconn 100 check port {{ $.PatroniAPIPort }}
 {{- end }}
+{{- if .PocketIDServers }}
+
+# Pocket ID's API, for a service on this site that calls it with the static
+# API key, which then travels only over the mesh. Every site that runs Pocket ID is a server, and only the active instance answers
+# /healthz, since a standby refuses connections on its port, so a takeover
+# moves this route within three failed checks with no change here.
+listen pocket-id
+    bind {{ .Address }}:{{ .PocketIDAPIPort }}
+    option httpchk GET /healthz
+    http-check expect status 204
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+{{- range .PocketIDServers }}
+    server {{ .Name }} {{ .Address }}:{{ $.PocketIDPort }} check
+{{- end }}
+{{- end }}
 
 # Which backend HAProxy routes to, as CSV at /stats;csv, for `paisans site
 # add` to check that only the primary is UP. Loopback only, and this is

@@ -17,6 +17,9 @@ func ElectionTimeoutMS(cfg *config.Config) int { return (&planner{cfg: cfg}).ele
 // ClusterPort is where a site's HAProxy listens for clustered applications.
 func ClusterPort(cfg *config.Config) int { return (&planner{cfg: cfg}).clusterPort() }
 
+// PocketIDAPIPort is where a site's HAProxy serves Pocket ID's API on the mesh.
+const PocketIDAPIPort = pocketIDAPIPort
+
 // PostgresPort is Patroni's Postgres port on a data site.
 const PostgresPort = postgresPort
 
