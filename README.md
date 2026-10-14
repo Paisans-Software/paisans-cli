@@ -92,7 +92,6 @@ toolkit should not overstate it:
 |-------|-----------|-------|
 | Mbin | full | `S3_KEY`/`S3_SECRET`/`S3_BUCKET`/`S3_REGION`/`S3_ENDPOINT`. The Docker image's entrypoint then switches `public_uploads_filesystem` to the S3 adapter itself; only a bare metal or VM install edits `config/packages/oneup_flysystem.yaml` by hand. Upstream strongly advises a media reverse proxy so URLs stay stable across provider changes |
 | Wiki.js | none needed | Wiki.js 2.x writes every upload to its `assetData` table in Postgres and serves it from there (`server/models/assets.js:128-139,226-228` at `v2.5.316`); its S3 storage modules only push copies outward (`supportedModes: [push]`). So the `wikijs` blueprint has no bucket and no media hostname, and the database's backup is the wiki's |
-| Outline, no longer a core blueprint | full | `FILE_STORAGE=s3` with the `AWS_*` variables; non-AWS endpoints need `AWS_S3_FORCE_PATH_STYLE=true`. Known upstream bug: the bucket must not be named `outline` |
 | Synapse | partial | `synapse-s3-storage-provider` is a *storage provider* that supplements the media store. **A local media directory is still required.** `store_synchronous: True` writes to S3 immediately; the bucket prefix cannot be changed once media exists |
 | Pocket ID | full, plus better | `FILE_BACKEND` takes `filesystem` (default), `s3`, or **`database`**. See the note below — `database` is the recommendation |
 | WriteFreely | full, and public | the kind means the [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp) fork, which adds `[storage] type = s3`. With S3 the fork is direct only: it writes images and never serves them, requires `[storage] image_url_base`, and redirects its own `/uploads/` route there, so the blog's bucket is served on the blog's media hostname like Mbin's. That needs a fork build containing writefreely-wisp#171; an older one ignores the key and streams images itself |
@@ -179,19 +178,10 @@ The gateway is what joins the two, one site block per media hostname:
 |------|---------|----------------------------|--------------|
 | Mbin | public | Garage's web endpoint on 3902, `Host` rewritten to `<bucket>.web.garage.internal` | `KBIN_STORAGE_URL=https://<media host>` |
 | WriteFreely (the fork) | public | the same | `[storage] image_url_base = https://<media host>` |
-| Outline, while the core catalog carried it | private | Garage's S3 API on 3900, `Host` forwarded unchanged | `AWS_S3_UPLOAD_BUCKET_URL=https://<media host>`, path style |
 
 The rewritten `Host` is an internal suffix that resolves nowhere on purpose, so
 there is no DNS record or certificate for it. Because a hostname is one bucket,
-the path is the object key and nothing is stripped from it. Outline's
-forwarding was load bearing rather than tidy: Outline presigns its object URLs
-and the upload a browser submits, a SigV4 signature covers the host it was
-signed with, and rewriting that header would invalidate every URL Outline
-issues. Its URLs were path style, `https://<media host>/<bucket>/<key>`, because
-the media hostname is not under Garage's S3 root domain and Garage then reads
-the bucket from the path. Outline also decides path style by looking for the
-bucket name anywhere in that URL, so its blueprint refused a bucket whose name
-appears in it as `outline-bucket-in-media-url`.
+the path is the object key and nothing is stripped from it.
 
 **Every public media hostname sends `Content-Security-Policy: default-src
 'none'; style-src 'unsafe-inline'; sandbox` and `X-Content-Type-Options:
@@ -199,12 +189,6 @@ nosniff`.** Mbin and the blog store what they are given byte for byte, an SVG
 that carries script among it, and no S3 provider can store a response header on
 an object, so the gateway is the only place one can be set. The sandbox keeps
 such a file inert when it is opened directly rather than through an `<img>`.
-Outline's media hostname sent nosniff and not the policy, because Outline
-embeds PDF attachments in the page and a browser will not run its PDF viewer in
-a sandboxed document. What the policy would protect against there is already
-handled upstream: Outline stores every type outside a short list of images,
-PDF, audio and video as `Content-Disposition: attachment`, and leaves SVG off
-that list deliberately.
 
 Which kinds are public is a property of the kind, in `internal/kinds`, not a
 setting. A kind whose objects only signed in people read has its bucket
@@ -2440,7 +2424,6 @@ Finishing either command first costs nothing but its resume.
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
-| Outline `redis_password`, `utils_secret`, while the core catalog carried it | Valkey, Outline | Outline | a restart of the Outline stack on each site in turn |
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
@@ -2534,8 +2517,7 @@ includes it (Founder decision).
 **Some secrets are kept, and the plan lists each with why:**
 
 * **Pocket ID's `encryption_key` and Matrix Authentication Service's
-  `mas_encryption_secret`** encrypt data already stored, as Outline's
-  `outline_secret_key` did while the core catalog carried it. Changing any of
+  `mas_encryption_secret`** encrypt data already stored. Changing either of
   them makes that data unreadable, and none of those projects offers a
   re-encryption the toolkit could drive. An admin who held one also holds a copy of the data it
   protects, so rotating it would take nothing back.
@@ -6352,9 +6334,6 @@ exists and one that does not (`server/controllers/common.js:144-170,260-271`).
 The gate closes both, and puts everything Wiki.js exposes before sign in
 behind Pocket ID; the OAuth2 start and callback paths stay open, as an app's
 own sign-in routes are for every gateable blueprint.
-
-A deployment that ran Outline as its wiki is redeployed with Wiki.js, not
-converted.
 
 #### Recovering the break glass admin
 
