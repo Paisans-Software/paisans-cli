@@ -84,7 +84,8 @@ The invite service's two Pocket ID addresses then differ:
 ## The client refuses to send the key off the mesh
 
 `pocketid-go` (`docs/specs/2026-10-14-repository-split.md`) refuses a
-`BaseURL` whose host is not private before it sends anything. Private is a
+`BaseURL` whose host is not private before it sends anything, from its first
+release, `v0.1.0`. Founder decision. Private is a
 loopback, RFC 1918, RFC 6598 or IPv6 unique local address, an address in a
 network the caller names (the deployment's `mesh.subnet`), or a hostname with
 no dot, such as `app` on a compose network. Anything else is refused with an
