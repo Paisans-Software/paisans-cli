@@ -78,7 +78,7 @@ stricter one.
 * Bringing up a new container or stack on a shared host — a first deployment,
   not a restart of something already sanctioned
 * Any mutation of the identity provider's clients, groups or users, except
-  the one below
+  the ones below
 * Deleting documentation
 
 The exception: **`paisans apply` creating the OIDC client an app declared in
@@ -92,8 +92,9 @@ the gate's client. It holds whoever wrote the app's blueprint: an app whose
 blueprint comes from a third party catalog is approved by being declared, the
 same as one from the toolkit's own. The exception covers
 creating a missing client, and restricting it to the app's group, only. Rotating
-a client's secret, deleting a client, and every change to groups or users stay
-in the tier above, and `apply` never replaces a client it has already recorded.
+a client's secret, deleting a client, and every other change to groups or
+users stay in the tier above, and `apply` never replaces a client it has
+already recorded.
 
 The same holds for the deployment's own operators. **`paisans apply`
 making each operator `paisans-stack.yaml` declares an account at the identity
@@ -108,6 +109,14 @@ identity provider only where the identity provider's app declares
 `management: pocket-id`; under `management: paisans` `apply` makes nobody one.
 Doing any of these by hand, and every other change to a user, stays in the
 tier above.
+
+**`paisans apply` creating a missing group** takes no approval of its own
+either, but only a group the deployment's configuration names: `operators`,
+the member group, and each app's admin and member groups. Those groups are
+what the operators and the apps' clients are put in and restricted to, so an
+apply that could not create them could not set the deployment up, and
+declaring them is approval for them. Creating any other group, and every
+change to a group that exists, stays in the tier above.
 
 **Never without the human present**
 
@@ -131,7 +140,8 @@ does to a running deployment. Some changes the tiers gate can instead be made by
 a service the deployment runs, on its own schedule, with no agent involved.
 That is a different context, and the tiers do not apply to it write by write.
 The operator reconciler makes no such change: it reads the identity provider
-and writes nothing.
+and writes nothing. The account service does, and is approved under this
+section (see *The account service* below).
 
 **A service is approved once, as a whole.** A human approves its design, and
 it is deployed. What it may change is then fixed in its code rather than
@@ -152,6 +162,41 @@ decided at run time. That approval stands only while:
   change by hand, use the service's credential to make it, or change what the
   service reads in order to steer what it writes. Each of those is an agent's
   action, in the tier of the change itself.
+
+### The account service
+
+The account service writes to the identity provider with the identity
+provider's static API key, and makes these writes and no others:
+
+* **Signup:** creating a user when a signup is accepted. It sends no group;
+  the identity provider puts the new user in the member group, its signup
+  default group, as `apply` configured it.
+* **Bans:** disabling a user, and re-enabling them when the ban is lifted.
+* **A member's address and name:** setting a user's email address, marked
+  verified, after an address change or a recovery, and setting a user's
+  display, first and last names.
+* **Sign-in links:** asking the identity provider to email a user a one-time
+  access link, after a signup or a recovery.
+* **Groups:** replacing a user's groups (`PUT /api/users/:id/user-groups`)
+  with the list it has just read, plus the groups an admin added and minus
+  those the admin removed. It never changes membership of `operators`, which
+  only `paisans-stack.yaml` decides (the toolkit's
+  `docs/specs/2026-10-14-account-promotion.md`).
+
+It meets the three conditions:
+
+* Every write is named in its specs, in the toolkit's `docs/specs/`
+  (`2026-10-14-account-service.md`, `2026-10-14-account-signup-bans-recovery.md`
+  and `2026-10-14-account-promotion.md`), and in the toolkit's
+  `docs/decisions.md`.
+* Its write-surface test fails on any other write to the identity provider:
+  another route, another method, or another field in a request body.
+* Every admin action is an entry in its audit log, and every write to the
+  identity provider is logged.
+
+Any write beyond these is a widening, and a decision for a human as above.
+Changing a user's groups by hand, or with the service's key, stays in the
+tier above, as every other change to a user does.
 
 ## If you are an agent reading this because the wiki is unreachable
 
