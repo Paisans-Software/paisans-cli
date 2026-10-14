@@ -2415,15 +2415,18 @@ Founder decision, 2026-10-13. It amends the grant review of
 
 ### What was decided
 
-An image the render takes from the core catalog's `foundation.yaml` (the
-infrastructure stack's, the gateway's Caddy by default, the heartbeats, a
-pinned app's own database by default, and the services of the blueprints built
-into the toolkit) needs no `approve` in `apply`'s grant review when it is added
+Any image the render takes from the core catalog's `foundation.yaml` needs no
+`approve` in `apply`'s grant review when it is added
 or changed. The review lists it apart, under `foundation images, reviewed in
-the core catalog:`, and the host's record holds it like every other image.
+the core catalog:`, and the host's record holds it like every other image. That is the
+infrastructure stack's images, the gateway's Caddy unless `acme.image` declares
+one, a pinned app's own database unless the configuration declares one, the
+services the toolkit adds to a stack (the admins heartbeat), and a service
+written with `foundation:` in any blueprint, a third party catalog's included,
+since its image is then the reviewed `foundation.yaml` reference.
 
-Everything else is approved as it was: an image a blueprint names itself
-(Wiki.js, Mbin, WriteFreely, any third party catalog's), an image the
+Everything else is approved as it was: an image a blueprint names itself with
+`image:` (Wiki.js, Mbin, WriteFreely, any third party catalog's), an image the
 configuration declares, keys, the web server's directory and catalog
 blueprints. Whether an image is the foundation's is decided by where the render
 took it, never by matching its repository, so a catalog blueprint writing the

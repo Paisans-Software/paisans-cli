@@ -5105,17 +5105,19 @@ run review everything again. `site remove` deletes it with the registry entry.
 
 A removal is shown and not approved, because it only takes away.
 
-**A foundation image is shown and not approved.** The core catalog's
-`foundation.yaml` names the images of the toolkit's own templates: the
-infrastructure stack's, the gateway's Caddy, the heartbeats, a pinned app's own
-database, and the services of the blueprints built into the toolkit (see
-*Images follow tracks*). The team reviews that file in the core catalog's pull
+**A foundation image is shown and not approved.** A foundation image is any
+image the render takes from the core catalog's `foundation.yaml`: the
+infrastructure stack's, the gateway's Caddy unless `acme.image` declares one, a
+pinned app's own database unless `apps.<name>.images` declares one, the
+services the toolkit adds to a stack (Eg: the admins heartbeat), and any
+service of any blueprint, a third party catalog's included, written with
+`foundation:` (see *Images follow tracks*). The team reviews that file in the core catalog's pull
 requests, so its images were checked before any deployment reads them, and
 asking every operator to approve them again at every apply would repeat a
 check already made.
 They are still listed, apart from the rest, so the operator sees what moves.
-An image a blueprint names itself (Eg: Wiki.js, Mbin, WriteFreely, or any
-third party catalog's) needs approval, and so does any image the
+An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,
+WriteFreely, or any third party catalog's) needs approval, and so does any image the
 configuration declares in `apps.<name>.images` or `acme.image`, since nobody
 reviewed those choices but the admin who made them. Whether an image is the
 foundation's is decided by where the render took it, never by its name: a
@@ -5123,8 +5125,9 @@ catalog blueprint whose `image:` names the foundation's own reference needs
 approval, because a name is what anyone can write. Keys, the web server's
 directory and catalog blueprints need approval whatever they name. The record
 holds foundation images like every other, marked as the foundation's, so it
-stays the complete baseline the next review compares with. The review
-is one line per site, pending when anything needs approval, with every change
+stays the complete baseline the next review compares with.
+
+The review is one line per site, pending when anything needs approval, with every change
 under it at every verbosity, with `--execute` as well as without: the login and
 the keys first, then the images stack by stack, then the web server, so a long
 list stays readable. A host with no record of the parts a review covers counts its

@@ -34,9 +34,9 @@ type Service struct {
 	// foundation's image.
 	Image string
 	// Foundation is the name of the core catalog's foundation image the
-	// service runs (FoundationPocketID and the rest), for a reserved
-	// blueprint, whose images are the toolkit's own. Services and
-	// DefaultImage fill Image from it.
+	// service runs (FoundationPocketID and the rest), in any blueprint that
+	// writes foundation: for it. Services and DefaultImage fill Image from
+	// it.
 	Foundation string
 	// Purpose is one line, quoted back when an operator names a service that
 	// does not exist so the message can list what does.

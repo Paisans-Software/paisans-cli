@@ -144,6 +144,8 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
+			// A literal reference equal to one the foundation chose in this
+			// stack shares its mark, harmlessly: it is the same reviewed reference.
 			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}

@@ -240,3 +240,40 @@ services:
 	}
 	return cfg
 }
+
+// A part where only foundation images were added or changed keeps who
+// approved the rest of it, since nobody approved the foundation's.
+func TestAFoundationOnlyChangeKeepsWhoApproved(t *testing.T) {
+	was := grant.Grant{Images: []grant.Image{
+		{Stack: "infra", Service: "etcd", Reference: "quay.io/coreos/etcd:v3.5.*", Foundation: true},
+		{Stack: "talk", Service: "app", Reference: "ghcr.io/example/mbin:1.15"},
+	}}
+	rec := grant.Update(grant.Record{}, was, grant.ApplyScope(), time.Unix(0, 0), "alice")
+	now := grant.Grant{Images: []grant.Image{
+		{Stack: "infra", Service: "etcd", Reference: "quay.io/coreos/etcd:v3.6.*", Foundation: true},
+		{Stack: "talk", Service: "app", Reference: "ghcr.io/example/mbin:1.15"},
+	}}
+	next := grant.Update(rec, now, grant.ApplyScope(), time.Unix(100, 0), "")
+	if next.Images.ApprovedBy != "alice" || next.Images.Entries[0].Reference != "quay.io/coreos/etcd:v3.6.*" {
+		t.Errorf("images part: %+v", next.Images)
+	}
+	// A change outside the foundation names who approved it.
+	now.Images[1].Reference = "ghcr.io/example/mbin:1.16"
+	if next := grant.Update(rec, now, grant.ApplyScope(), time.Unix(100, 0), "bob"); next.Images.ApprovedBy != "bob" {
+		t.Errorf("approved by %q, want bob", next.Images.ApprovedBy)
+	}
+}
+
+// A record written before images were marked differs from the grant only in
+// the mark, which is no change: the part is left as it is, applied_at and
+// approved_by included.
+func TestOnlyTheMarkIsNoChange(t *testing.T) {
+	older := grant.Record{Version: grant.Version, Images: &grant.ImagesPart{AppliedAt: "2026-10-01T00:00:00Z", ApprovedBy: "alice", Entries: []grant.Image{
+		{Stack: "infra", Service: "etcd", Reference: "quay.io/coreos/etcd:v3.6.*"},
+	}}}
+	g := grant.Grant{Images: []grant.Image{{Stack: "infra", Service: "etcd", Reference: "quay.io/coreos/etcd:v3.6.*", Foundation: true}}}
+	next := grant.Update(older, g, grant.ApplyScope(), time.Unix(100, 0), "")
+	if grant.Encode(next) != grant.Encode(older) {
+		t.Errorf("rewrote an unchanged part:\n%s", grant.Encode(next))
+	}
+}
