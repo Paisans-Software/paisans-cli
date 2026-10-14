@@ -192,3 +192,36 @@ func TestPocketIDSnippetNamedDeployments(t *testing.T) {
 		t.Errorf("management paisans refuses the email-code recovery: %v", invite)
 	}
 }
+
+// The gateway refuses any request that carries Pocket ID's API key header,
+// with 403, on every Pocket ID whatever its configuration, before any other
+// matcher and before the proxy, so the static API key works only on the mesh.
+func TestPocketIDSnippetRefusesAPIKeys(t *testing.T) {
+	for _, c := range exposureCases() {
+		t.Run(c.name, func(t *testing.T) {
+			snippet := renderAuthSnippet(t, c)
+			lines := strings.Split(snippet, "\n")
+			at := func(want string) int {
+				for i, l := range lines {
+					if strings.TrimSpace(l) == want {
+						return i
+					}
+				}
+				return -1
+			}
+			matcher, respond := at("@api_key header X-API-Key *"), at("respond @api_key 403")
+			if matcher < 0 || respond < 0 {
+				t.Fatalf("the snippet does not refuse X-API-Key with 403:\n%s", snippet)
+			}
+			first := len(lines)
+			for i, l := range lines {
+				if strings.HasPrefix(l, "@") && i != matcher || strings.HasPrefix(l, "reverse_proxy") {
+					first = min(first, i)
+				}
+			}
+			if !(matcher < respond && respond < first) {
+				t.Errorf("the X-API-Key refusal is not ahead of every other matcher and the proxy:\n%s", snippet)
+			}
+		})
+	}
+}

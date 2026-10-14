@@ -1,6 +1,7 @@
 # Pocket ID's API is reachable only over the mesh
 
-Status: approved in session by the founder, 2026-10-14. Not implemented.
+Status: approved in session by the founder, 2026-10-14; implemented; not yet
+run end to end.
 The gateway rule was observed against a running Pocket ID (*Observed*); the
 private route for the account service is reasoned.
 

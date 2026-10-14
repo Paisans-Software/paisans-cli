@@ -3,6 +3,18 @@
 # Routing for auth, imported by the gateway's block for
 # id.example.org.
 #
+# An API key is the toolkit's administrator credential, and it works only on
+# the mesh. The web interface signs in with a session cookie and never sends
+# this header, so refusing it here costs a member nothing. Pocket ID reads an
+# API key from X-API-Key alone (middleware/api_key_auth.go:38 at v2.14.0), and
+# Caddy's header matcher compares the name case insensitively, so x-api-key
+# and X-API-KEY are refused too; * matches any value, an empty one included.
+# The refusal comes first, so a request with the header is refused on every
+# path, a valid session cookie notwithstanding. Members' own API keys are
+# refused the same way.
+@api_key header X-API-Key *
+respond @api_key 403
+#
 # POST /api/signup/setup takes no authentication and makes its caller an
 # administrator, answering with an admin session (usersignup/module.go:86-87
 # at v2.14.0). It is open while Pocket ID has no user besides its static API

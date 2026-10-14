@@ -34,8 +34,9 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `init` and `secrets set` ask for an SMTP password, and `secrets rotate --all` rotates one, only when an app's mail settings name a username, so a relay with no login needs none.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/commits/develop
-
 ### Security
 
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
+- The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
+
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/commits/develop
