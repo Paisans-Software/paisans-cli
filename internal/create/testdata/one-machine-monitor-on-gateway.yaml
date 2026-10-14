@@ -86,9 +86,9 @@ apps:
     blueprint: mbin
     hostname: talk.example.org
     placement: cluster
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
   blog:
     blueprint: writefreely

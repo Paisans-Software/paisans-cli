@@ -1067,7 +1067,7 @@ func (c *Config) structural(noSubnet bool) error {
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
 		if app.Kind == "" {
-			add("apps.%s.blueprint: required. Say which application this is, for example mbin or outline: the blueprint it runs.", name)
+			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
