@@ -68,7 +68,7 @@ type Def struct {
 	// validate's own code instead.
 	Settings map[string]SettingSpec
 
-	// RequiresToolkit is the oldest toolkit release the blueprint needs, as
+	// RequiresToolkit is the oldest toolkit version the blueprint needs, as
 	// written: ">= MAJOR.MINOR[.PATCH]", empty for none.
 	RequiresToolkit string
 

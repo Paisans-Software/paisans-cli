@@ -921,6 +921,19 @@ would add, since one already in `authorized_keys` is never added again.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
 
+### `paisans version`
+
+Prints the toolkit version the binary was built from and, in parentheses, its
+commit, with `-dirty` when the tree had uncommitted changes:
+`paisans 0.1.0 (519299d5cb00)`. A build with no commit recorded prints the
+version alone. The version is the constant in `internal/version`, so a build
+between releases prints the last release cut on its branch. A blueprint's
+`requires_toolkit` is checked against it.
+
+* **Alone:** always.
+* **Flags:** none of its own. `paisans --version` is the same command.
+* **Hosts:** none.
+
 ## Object storage
 
 ### `paisans storage init`

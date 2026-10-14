@@ -63,7 +63,7 @@ var helpSections = []helpSection{
 	{"Most of the time", []string{"apply"}},
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
 	{"Hosts and sites", []string{"host", "site", "mesh", "gateway", "storage", "prune"}},
-	{"Check", []string{"doctor", "preflight", "failover", "web-server"}},
+	{"Check", []string{"doctor", "preflight", "failover", "web-server", "version"}},
 	{"Configuration and secrets", []string{"config", "admin", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
 }
@@ -270,6 +270,13 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--sudo]"},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
 			"Prints how to recover. Reaches hosts, changes nothing; exits 1 on any FAIL.",
+	},
+	{
+		name:    "version",
+		summary: "Print this binary's version.",
+		usage:   []string{"paisans version", "paisans --version"},
+		detail: "Print the toolkit version the binary was built from and, in parentheses, its commit, with -dirty when the tree had uncommitted changes: paisans 0.1.0 (519299d5cb00). A build with no commit recorded prints the version alone. " +
+			"Blueprints' requires_toolkit is checked against the version.",
 	},
 	{
 		name:    "dns init",
