@@ -18,7 +18,7 @@ them need, the Pocket ID API client, a repository of its own:
 |------------|-------|--------------|
 | `Paisans-Software/paisans-cli` | `cmd/paisans` and everything only it uses. This repository, renamed. | the `paisans` binary |
 | `Paisans-Software/pocketid-go` | the Pocket ID API client and its types | Go module `github.com/paisans-software/pocketid-go` |
-| `Paisans-Software/paisans-admin-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/operator-reconciler` |
+| `Paisans-Software/paisans-operator-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/operator-reconciler` |
 
 `paisans-account-service` moves onto `pocketid-go` as well, so the toolkit, the
 reconciler and the account service speak to Pocket ID through one client.
@@ -35,7 +35,7 @@ Founder decisions, 2026-10-14, in session:
   service is a container a deployment runs, beside an app or as an app. A
   library, a catalog, a tap and the CLI are not services and keep names of
   their own. The reconciler's repository is
-  `paisans-admin-reconciler-service`.
+  `paisans-operator-reconciler-service`.
 * **The Pocket ID client is shared through a module of its own,** not copied
   into each program. Its types mirror Pocket ID's API, so a change on Pocket
   ID's side is fixed once, and one contract test covers every program that
@@ -151,7 +151,7 @@ the `HTTP` path from the workstation and skip ssh for its Pocket ID calls.
 Moving any command to HTTPS is a separate decision and not part of this split.
 `pocketid-go` keeps both paths, so either is available to every command.
 
-## `paisans-admin-reconciler-service`
+## `paisans-operator-reconciler-service`
 
 The repository receives `cmd/operator-reconciler` as the module root's
 `main.go`, `internal/operatorreconciler` and `internal/dnscontinuity`, the
@@ -226,7 +226,7 @@ same images.
 1. **`pocketid-go`.** Create the repository from `internal/pocketid` with its
    history. Tag `v0.1.0`. Switch this repository's imports to it, reconciler
    included, and remove `internal/pocketid`.
-2. **`paisans-admin-reconciler-service`.** Create the repository with its
+2. **`paisans-operator-reconciler-service`.** Create the repository with its
    history. If the GHCR package `operator-reconciler` already exists, grant
    the repository write access to it. Tag `v0.3.0` and confirm the image
    resolves on the `0.3.*` track; the operators change's core catalog and
