@@ -463,7 +463,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Part B — the toolkit (`paisans-stack`)
 
-**Where:** worktree `.worktrees/account-blueprint`, branch `feat/account-blueprint` created from `docs/account-service-spec` (so the spec and this plan ride in the same PR). One PR into `develop`. No CHANGELOG on `develop`.
+**Where:** worktree `.worktrees/account-blueprint`, branch `feat/account-blueprint` created from `docs/account-service-spec` (so the spec and this plan ride in the same PR). One PR into `develop`. It records its change in `CHANGELOG.md` under `[Unreleased]` (AGENTS.md: one bullet per change, one sentence, at most 35 words).
 
 Golden tree: `go test ./internal/render -update`, then read the diff. Main suite: `go vet ./... && go test ./...`.
 
@@ -797,11 +797,20 @@ Append `## 2026-10-14: The invite service is the account service, on account. an
 
 In `docs/specs/2026-10-14-pocket-id-api-private.md` and `docs/specs/2026-10-14-repository-split.md`: `INVITE_IDP_URL` → `ACCOUNT_IDP_URL`, `INVITE_OIDC_ISSUER` → `ACCOUNT_OIDC_ISSUER`, `internal/render/invite.go` → `internal/render/account.go`, "the invite service" → "the account service", "the invite app" → "the account app". Change nothing else in them: their design stands.
 
-- [ ] **Step 4: Status line**
+- [ ] **Step 4: CHANGELOG**
+
+Under `## [Unreleased]`, `### Changed`:
+
+```markdown
+- The `invite` blueprint is the `account` blueprint, running paisans-account-service: `settings.invites` is required, and `invite.<domain>` exists only with invites on, beside `account.<domain>`.
+- The Pocket ID gateway closes its signup routes on `allow_user_signups` alone.
+```
+
+- [ ] **Step 5: Status line**
 
 Spec: `Status: approved in session on 2026-10-14, implemented in paisans-stack and paisans-account-service; not yet run end to end.`
 
-- [ ] **Step 5: Fresh clone, PR, merge**
+- [ ] **Step 6: Fresh clone, PR, merge**
 
 Fresh clone of `feat/account-blueprint` → `go vet ./... && go test ./...` PASS. Push, `gh pr create --base develop` (body: what and why, test results, the end-to-end check still owed; footer). No CI on this repo; `gh pr view --json mergeStateStatus` must be `CLEAN`. `gh pr merge --squash`. Remove the worktree and the local `feat/account-blueprint` and `docs/account-service-spec` branches.
 
