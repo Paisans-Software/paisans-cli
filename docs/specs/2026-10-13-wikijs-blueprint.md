@@ -420,12 +420,22 @@ the database password every Postgres app has.
 User 1, `local`, in `Administrators`, created by `/finalize` with an address on
 the community's domain and the generated password. It is how the bootstrap
 logs in and the one account with `manage:system`. Wiki.js protects it from
-being removed from `Administrators` (`resolvers/group.js:137`). With auto-login
-on and the local form hidden, nobody reaches it in a browser by accident:
-`/login?all=1` skips auto-login (`controllers/auth.js:37`) but `authHideLocal`
-still hides the form, so using it by hand means first turning `authHideLocal`
-off in the `settings` table and restarting the app. That is deliberate. It is
-written up as a recovery procedure in the README, not as a workflow.
+being removed from `Administrators` (`resolvers/group.js:137`).
+
+`authHideLocal` is cosmetic: it hides the local form from Wiki.js's sign-in
+page, not the account. A request for `/login` with `legacy` in its query string,
+or from a user agent containing `Trident`, gets Wiki.js's legacy sign-in page,
+which skips auto-login and `authHideLocal` (`server/controllers/auth.js:28-34`)
+and lists every form strategy, `local` among them
+(`server/models/authentication.js:46-57`); a `POST /login` under the same
+condition signs in with no `authHideLocal` check
+(`server/controllers/auth.js:101-113`). The legacy form posts to `/login` with
+no query string (`server/views/legacy/login.pug:10`), so a browser reaches it
+with a `Trident` user agent. What protects the account is the gate on a gated
+wiki, the generated password and the sign-in rate limit on that route
+(`bruteforce.prevent`, `:101`). The legacy page is also the recovery, with no
+change to the database; it is written up as a recovery procedure in the
+README, not as a workflow.
 
 ## Removing Outline
 
