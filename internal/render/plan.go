@@ -48,7 +48,7 @@ type Plan struct {
 // AppPort is the port a kind listens on, which is also the port it publishes
 // on its site's mesh address (blueprints.Def.Port). A command that calls an
 // application's own API from its host needs it.
-func AppPort(kind config.Kind) int { return blueprints.Port(kind) }
+func AppPort(blueprint config.Blueprint) int { return blueprints.Port(blueprint) }
 
 // reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
 // the mesh address for the uptime monitor. A literal:
@@ -82,7 +82,7 @@ type plannedApp struct {
 	Name string
 	// Dir is the app's stack directory on a host, under the deployment's root.
 	Dir       string
-	Kind      config.Kind
+	Blueprint config.Blueprint
 	Hostname  string
 	Pinned    bool
 	Site      string
@@ -270,16 +270,16 @@ func (p *planner) placeApps() error {
 
 func (p *planner) planApp(name string, app config.App, site *siteView, pinned bool) (plannedApp, error) {
 	planned := plannedApp{
-		Name:     name,
-		Dir:      p.dep().Dir(name),
-		Kind:     app.Kind,
-		Hostname: app.Hostname,
-		Pinned:   pinned,
-		Site:     site.Name,
-		Port:     blueprints.Port(app.Kind),
-		OwnsDB:   pinned,
-		DBName:   dbIdentifier(name),
-		DBUser:   dbIdentifier(name),
+		Name:      name,
+		Dir:       p.dep().Dir(name),
+		Blueprint: app.Blueprint,
+		Hostname:  app.Hostname,
+		Pinned:    pinned,
+		Site:      site.Name,
+		Port:      blueprints.Port(app.Blueprint),
+		OwnsDB:    pinned,
+		DBName:    dbIdentifier(name),
+		DBUser:    dbIdentifier(name),
 	}
 	images, err := p.appImages(app)
 	if err != nil {
@@ -302,13 +302,13 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // changing it under an existing data directory.
 func (p *planner) appImages(app config.App) (map[string]string, error) {
 	out := map[string]string{}
-	for _, service := range blueprints.Services(app.Kind) {
+	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
 		switch {
 		case app.Images[service.Name] != "":
 			out[service.Name] = app.Images[service.Name]
 		case err != nil:
-			return nil, fmt.Errorf("the image of %s's %s: %w", app.Kind, service.Name, err)
+			return nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
 		case image != "":
 			out[service.Name] = image
 		case service.Name == blueprints.PostgresService:

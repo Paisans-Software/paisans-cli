@@ -28,7 +28,7 @@ func rotatable() *config.Secrets {
 // declared is a deployment whose apps' blueprints say how their secrets are
 // made, as Replacement reads them through ReplacementIn.
 var declared = &config.Config{Apps: map[string]config.App{
-	"id": {Kind: config.KindPocketID}, "mas": {Kind: "synapse"}, "mbin": {Kind: "mbin"}, "invite": {Kind: config.KindInvite},
+	"id": {Blueprint: config.BlueprintPocketID}, "mas": {Blueprint: "synapse"}, "mbin": {Blueprint: "mbin"}, "invite": {Blueprint: config.BlueprintInvite},
 }}
 
 func replacement(path string, s *config.Secrets) (string, error) {

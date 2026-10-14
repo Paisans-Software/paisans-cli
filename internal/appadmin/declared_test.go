@@ -26,7 +26,7 @@ func strptr(s string) *string { return &s }
 // emailed one of Pocket ID's own.
 func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 	f := &fakePocketID{}
-	plan, err := Build(config.KindPocketID, f, declaredRequest())
+	plan, err := Build(config.BlueprintPocketID, f, declaredRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDeclaredAdminIsCreatedLinkedAndEmailed(t *testing.T) {
 func TestDeclaredAdminIsFoundByEmail(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-7", Username: "fern-renamed",
 		Email: strptr("founder@example.org"), EmailVerified: true, IsAdmin: true}}}
-	plan, err := Build(config.KindPocketID, f, declaredRequest())
+	plan, err := Build(config.BlueprintPocketID, f, declaredRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestDeclaredAdminIsFoundByEmail(t *testing.T) {
 func TestDeclaredAdminEmailMatchIsWhole(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-7", Username: "other",
 		Email: strptr("cofounder@example.org"), EmailVerified: true, IsAdmin: true}}}
-	plan, err := Build(config.KindPocketID, f, declaredRequest())
+	plan, err := Build(config.BlueprintPocketID, f, declaredRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestDeclaredAdminWithAPasskeyGetsNothing(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder",
 		Email: strptr("founder@example.org"), EmailVerified: true, IsAdmin: true}},
 		passkeys: map[string]bool{"u-1": true}}
-	plan, err := Build(config.KindPocketID, f, declaredRequest())
+	plan, err := Build(config.BlueprintPocketID, f, declaredRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestDeclaredAdminWithoutAPasskeyGetsANewLinkEachRun(t *testing.T) {
 	req := declaredRequest()
 	req.EmailLink = false
 	for run := 1; run <= 2; run++ {
-		plan, err := Build(config.KindPocketID, f, req)
+		plan, err := Build(config.BlueprintPocketID, f, req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,7 @@ func TestDeclaredAdminWithoutAPasskeyGetsANewLinkEachRun(t *testing.T) {
 
 // The dry run's titles say what will happen and carry no credential.
 func TestDeclaredAdminTitles(t *testing.T) {
-	plan, err := Build(config.KindPocketID, &fakePocketID{}, declaredRequest())
+	plan, err := Build(config.BlueprintPocketID, &fakePocketID{}, declaredRequest())
 	if err != nil {
 		t.Fatal(err)
 	}

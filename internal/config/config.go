@@ -61,15 +61,15 @@ func KnownRole(r Role) bool { return knownRoles[r] }
 
 // Kind is an application the toolkit knows how to render: a blueprint's
 // name, qualified by its catalog unless it is the core catalog's.
-type Kind string
+type Blueprint string
 
 // The reserved blueprints, the only ones Go names: no catalog may provide
 // them, so their names never change with a catalog commit.
 const (
-	KindOAuth2Proxy Kind = "oauth2-proxy"
-	KindPocketID    Kind = "pocket-id"
-	KindUptime      Kind = "uptime"
-	KindInvite      Kind = "invite"
+	BlueprintOAuth2Proxy Blueprint = "oauth2-proxy"
+	BlueprintPocketID    Blueprint = "pocket-id"
+	BlueprintUptime      Blueprint = "uptime"
+	BlueprintInvite      Blueprint = "invite"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
@@ -436,8 +436,8 @@ const (
 )
 
 type App struct {
-	Kind     Kind   `yaml:"blueprint"`
-	Hostname string `yaml:"hostname"`
+	Blueprint Blueprint `yaml:"blueprint"`
+	Hostname  string    `yaml:"hostname"`
 	// DisplayName is the name of the app's OIDC client at the identity
 	// provider, which is what a person signing in is shown. Empty names the
 	// client after the app (see ClientName).
@@ -587,7 +587,7 @@ func (c *Config) deriveGate() {
 		return
 	}
 	c.Apps[GateApp] = App{
-		Kind:      KindOAuth2Proxy,
+		Blueprint: BlueprintOAuth2Proxy,
 		Hostname:  c.GateHostname(),
 		Placement: Placement{Mode: PlacementPinned, Site: gateways[0]},
 		Derived:   true,
@@ -1067,7 +1067,7 @@ func (c *Config) structural(noSubnet bool) error {
 	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
-		if app.Kind == "" {
+		if app.Blueprint == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}
 		if app.Hostname == "" {
@@ -1091,7 +1091,7 @@ func (c *Config) structural(noSubnet bool) error {
 		if app.SMTP != nil {
 			problems = append(problems, smtpProblems("apps."+name+".smtp", *app.SMTP)...)
 		}
-		if app.Kind == KindOAuth2Proxy && !app.Derived {
+		if app.Blueprint == BlueprintOAuth2Proxy && !app.Derived {
 			add("apps.%s.blueprint: oauth2-proxy is the gate, which the toolkit runs itself whenever an app sets gated or auto_login. Remove this app, and set gated: true or auto_login: true on the apps it was for.", name)
 		}
 		switch app.Storage {

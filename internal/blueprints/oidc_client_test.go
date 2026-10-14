@@ -14,7 +14,7 @@ import (
 // a person must be in to sign in at all, so the client is restricted to it at
 // Pocket ID and a non-admin is refused before the monitor sees them.
 func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
-	spec, ok := blueprints.OIDCClient(config.KindUptime, "health.example.org", "health")
+	spec, ok := blueprints.OIDCClient(config.BlueprintUptime, "health.example.org", "health")
 	if !ok {
 		t.Fatal("the toolkit does not know an uptime client")
 	}
@@ -24,7 +24,7 @@ func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
 	if !spec.PKCE {
 		t.Error("the fork always sends a code challenge, so PKCE must be on")
 	}
-	app := config.App{Kind: config.KindUptime, Hostname: "health.example.org", Settings: map[string]any{"admin_group": "admins"}}
+	app := config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org", Settings: map[string]any{"admin_group": "admins"}}
 	admin, member := spec.Groups(app)
 	if admin != "admins" || member != "admins" {
 		t.Errorf("groups admin=%q member=%q, want both admins", admin, member)
@@ -38,15 +38,15 @@ func TestUptimesClientIsRestrictedToItsAdminGroup(t *testing.T) {
 // names neither gets a client restricted to members and admins, and the fork
 // reads the same two names, so a member-only Mbin needs nothing declared.
 func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
-	spec, _ := blueprints.OIDCClient(config.Kind("mbin"), "talk.example.org", "talk")
-	admin, member := spec.Groups(config.App{Kind: config.Kind("mbin")})
+	spec, _ := blueprints.OIDCClient(config.Blueprint("mbin"), "talk.example.org", "talk")
+	admin, member := spec.Groups(config.App{Blueprint: config.Blueprint("mbin")})
 	if admin != blueprints.AdminsGroup || member != blueprints.MembersGroup {
 		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, blueprints.AdminsGroup, blueprints.MembersGroup)
 	}
 	if !spec.ReadsGroups {
 		t.Error("the fork reads the groups claim, so the spec must say so")
 	}
-	chosen := config.App{Kind: config.Kind("mbin"), Settings: map[string]any{"admin_group": "mods", "member_group": "crew"}}
+	chosen := config.App{Blueprint: config.Blueprint("mbin"), Settings: map[string]any{"admin_group": "mods", "member_group": "crew"}}
 	admin, member = spec.Groups(chosen)
 	if admin != "mods" || member != "crew" {
 		t.Errorf("groups admin=%q member=%q", admin, member)
@@ -56,7 +56,7 @@ func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
 	}
 	// A blank or non-string value is as good as absent: the default holds
 	// rather than an unrestricted client slipping through on a typo.
-	blank := config.App{Kind: config.Kind("mbin"), Settings: map[string]any{"admin_group": "  ", "member_group": false}}
+	blank := config.App{Blueprint: config.Blueprint("mbin"), Settings: map[string]any{"admin_group": "  ", "member_group": false}}
 	admin, member = spec.Groups(blank)
 	if admin != blueprints.AdminsGroup || member != blueprints.MembersGroup {
 		t.Errorf("blank settings gave admin=%q member=%q", admin, member)
@@ -70,38 +70,38 @@ func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
 // Pocket ID client with PKCE on refuses a request without one, so PKCE is off.
 func TestWikiAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.T) {
 	cases := []struct {
-		kind        config.Kind
+		blueprint   config.Blueprint
 		callback    string
 		readsGroups bool
 	}{
-		{config.Kind("wikijs"), "https://app.example.org/login/pocketid/callback", true},
-		{config.Kind("writefreely"), "https://app.example.org/oauth/callback/generic", false},
+		{config.Blueprint("wikijs"), "https://app.example.org/login/pocketid/callback", true},
+		{config.Blueprint("writefreely"), "https://app.example.org/oauth/callback/generic", false},
 	}
 	for _, tc := range cases {
-		spec, ok := blueprints.OIDCClient(tc.kind, "app.example.org", "app")
+		spec, ok := blueprints.OIDCClient(tc.blueprint, "app.example.org", "app")
 		if !ok {
-			t.Errorf("the toolkit does not know a %s client", tc.kind)
+			t.Errorf("the toolkit does not know a %s client", tc.blueprint)
 			continue
 		}
 		if spec.CallbackURL != tc.callback {
-			t.Errorf("%s callback %s, want %s", tc.kind, spec.CallbackURL, tc.callback)
+			t.Errorf("%s callback %s, want %s", tc.blueprint, spec.CallbackURL, tc.callback)
 		}
 		if spec.PKCE {
-			t.Errorf("%s: PKCE on, but the app sends no code challenge", tc.kind)
+			t.Errorf("%s: PKCE on, but the app sends no code challenge", tc.blueprint)
 		}
 		if spec.ReadsGroups != tc.readsGroups {
-			t.Errorf("%s: reads the groups claim %v, want %v", tc.kind, spec.ReadsGroups, tc.readsGroups)
+			t.Errorf("%s: reads the groups claim %v, want %v", tc.blueprint, spec.ReadsGroups, tc.readsGroups)
 		}
 		if spec.LaunchURL != "https://app.example.org" {
-			t.Errorf("%s launch URL %s", tc.kind, spec.LaunchURL)
+			t.Errorf("%s launch URL %s", tc.blueprint, spec.LaunchURL)
 		}
-		admin, member := spec.Groups(config.App{Kind: tc.kind})
+		admin, member := spec.Groups(config.App{Blueprint: tc.blueprint})
 		if admin != blueprints.AdminsGroup || member != blueprints.MembersGroup {
-			t.Errorf("%s groups admin=%q member=%q", tc.kind, admin, member)
+			t.Errorf("%s groups admin=%q member=%q", tc.blueprint, admin, member)
 		}
-		_, member = spec.Groups(config.App{Kind: tc.kind, Settings: map[string]any{"member_group": "crew"}})
+		_, member = spec.Groups(config.App{Blueprint: tc.blueprint, Settings: map[string]any{"member_group": "crew"}})
 		if member != "crew" {
-			t.Errorf("%s member group %q with member_group set", tc.kind, member)
+			t.Errorf("%s member group %q with member_group set", tc.blueprint, member)
 		}
 	}
 }
@@ -110,17 +110,17 @@ func TestWikiAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.T) 
 // one from an empty declaration. An unrestricted client on a member facing
 // app would admit anyone with a Pocket ID account.
 func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
-	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("wikijs"), config.Kind("writefreely"), config.Kind("element"), config.KindUptime} {
-		spec, ok := blueprints.OIDCClient(kind, "app.example.org", "app")
-		if !ok || !blueprints.GateFor(kind).Gateable {
+	for _, blueprint := range []config.Blueprint{config.Blueprint("mbin"), config.Blueprint("wikijs"), config.Blueprint("writefreely"), config.Blueprint("element"), config.BlueprintUptime} {
+		spec, ok := blueprints.OIDCClient(blueprint, "app.example.org", "app")
+		if !ok || !blueprints.GateFor(blueprint).Gateable {
 			continue
 		}
-		app := config.App{Kind: kind}
-		if kind == config.KindUptime {
+		app := config.App{Blueprint: blueprint}
+		if blueprint == config.BlueprintUptime {
 			app.Settings = map[string]any{"admin_group": "admins"}
 		}
 		if _, member := spec.Groups(app); member == "" {
-			t.Errorf("%s: an empty declaration gives an unrestricted client", kind)
+			t.Errorf("%s: an empty declaration gives an unrestricted client", blueprint)
 		}
 	}
 }
@@ -131,7 +131,7 @@ func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
 // to the member group and admins, which is the whole control, since the
 // service reads no groups claim. It has no dashboard tile.
 func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
-	spec, ok := blueprints.OIDCClient(config.Kind("synapse"), "matrix.example.org", "chat")
+	spec, ok := blueprints.OIDCClient(config.Blueprint("synapse"), "matrix.example.org", "chat")
 	if !ok {
 		t.Fatal("the toolkit does not know a synapse client")
 	}
@@ -147,11 +147,11 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 	if spec.LaunchURL != "" {
 		t.Errorf("launch URL %s, want none", spec.LaunchURL)
 	}
-	admin, member := spec.Groups(config.App{Kind: config.Kind("synapse")})
+	admin, member := spec.Groups(config.App{Blueprint: config.Blueprint("synapse")})
 	if admin != blueprints.AdminsGroup || member != blueprints.MembersGroup {
 		t.Errorf("groups admin=%q member=%q", admin, member)
 	}
-	_, member = spec.Groups(config.App{Kind: config.Kind("synapse"), Settings: map[string]any{"member_group": "crew"}})
+	_, member = spec.Groups(config.App{Blueprint: config.Blueprint("synapse"), Settings: map[string]any{"member_group": "crew"}})
 	if member != "crew" {
 		t.Errorf("member group %q with member_group set", member)
 	}
@@ -162,7 +162,7 @@ func TestSynapsesClientIsTheAuthenticationServices(t *testing.T) {
 // members and admins, whatever the settings say: an admin can see everything
 // a member can, and the gate's compose file renders the same two groups.
 func TestTheGatesClientAdmitsMembersAndAdmins(t *testing.T) {
-	spec, ok := blueprints.OIDCClient(config.KindOAuth2Proxy, "auth-gate.example.org", "gate")
+	spec, ok := blueprints.OIDCClient(config.BlueprintOAuth2Proxy, "auth-gate.example.org", "gate")
 	if !ok {
 		t.Fatal("the toolkit does not know an oauth2-proxy client")
 	}
@@ -178,7 +178,7 @@ func TestTheGatesClientAdmitsMembersAndAdmins(t *testing.T) {
 	if spec.LaunchURL != "" {
 		t.Errorf("launch URL %s, want none", spec.LaunchURL)
 	}
-	app := config.App{Kind: config.KindOAuth2Proxy, Settings: map[string]any{"member_group": "crew", "admin_group": "mods"}}
+	app := config.App{Blueprint: config.BlueprintOAuth2Proxy, Settings: map[string]any{"member_group": "crew", "admin_group": "mods"}}
 	admin, member := spec.Groups(app)
 	if admin != blueprints.AdminsGroup || member != blueprints.MembersGroup {
 		t.Errorf("groups admin=%q member=%q, want %s and %s", admin, member, blueprints.AdminsGroup, blueprints.MembersGroup)

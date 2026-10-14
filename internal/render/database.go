@@ -62,7 +62,7 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 // container that exits on a host after the apply has already moved, so
 // render refuses first and names the command that fixes it.
 func (p *planner) requireAppSecrets(planned plannedApp) error {
-	for _, need := range blueprints.RequiredSecrets(planned.Kind) {
+	for _, need := range blueprints.RequiredSecrets(planned.Blueprint) {
 		if p.appSecret(planned.Name, need.Key) == "" {
 			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
 		}
@@ -73,7 +73,7 @@ func (p *planner) requireAppSecrets(planned plannedApp) error {
 	// template turns that on whenever the app has a client, and without one
 	// the password is the first anybody would guess. `paisans secrets set`
 	// or a hand edit can still write it, so render refuses it.
-	if planned.Kind == config.KindUptime && p.appSecret(planned.Name, "admin_password") == "admin" {
+	if planned.Blueprint == config.BlueprintUptime && p.appSecret(planned.Name, "admin_password") == "admin" {
 		return fmt.Errorf("secrets apps.%s.admin_password: is the literal `admin`, which the monitor treats as unset and refuses to start with when sign-in is SSO only. Set it to a generated value", planned.Name)
 	}
 	return nil

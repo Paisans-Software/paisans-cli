@@ -74,7 +74,7 @@ func TestACatalogBlueprintsExpressionsSeeItsDefaults(t *testing.T) {
 // A built in blueprint's settings are what the app declares and nothing
 // more, so the meaning Go and validate give an absent setting is kept.
 func TestABuiltInBlueprintGetsNoDefaults(t *testing.T) {
-	app := config.App{Kind: config.Kind("mbin")}
+	app := config.App{Blueprint: config.Blueprint("mbin")}
 	if seen := SettingsSeen(app); seen != nil {
 		t.Errorf("an mbin app with no settings sees %v", seen)
 	}

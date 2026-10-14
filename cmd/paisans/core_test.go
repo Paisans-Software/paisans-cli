@@ -35,7 +35,7 @@ func (platformsAt) Track(ref string) (string, error)  { return firstTag(ref) }
 func (publishedFor) Track(ref string) (string, error) { return firstTag(ref) }
 
 func (unpublished) Track(ref string) (string, error) {
-	if def, _ := blueprints.DefaultImage(config.Kind("mbin"), "app"); ref == def {
+	if def, _ := blueprints.DefaultImage(config.Blueprint("mbin"), "app"); ref == def {
 		return "", fmt.Errorf("ghcr.io answered that %s has no tag on its track: %w", ref, imagedigest.ErrNotFound)
 	}
 	return firstTag(ref)

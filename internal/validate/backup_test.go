@@ -286,11 +286,11 @@ func withPinnedForum(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
 	cfg.Apps["forum"] = config.App{
-		Kind:      config.Kind("mbin"),
+		Blueprint: config.Blueprint("mbin"),
 		Hostname:  "forum.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 	}
-	if !blueprints.Has(config.Kind("mbin"), blueprints.PostgresService) {
+	if !blueprints.Has(config.Blueprint("mbin"), blueprints.PostgresService) {
 		t.Fatal("mbin no longer declares a postgres service; pick a kind that does")
 	}
 	return cfg
@@ -328,7 +328,7 @@ func TestBackupWarnings(t *testing.T) {
 		{"one destination", "backup-single-destination", func(cfg *config.Config) { cfg.Backup.Destinations = cfg.Backup.Destinations[:1] }},
 		{"no uptime app", "backup-without-a-monitor", func(cfg *config.Config) {
 			for name, a := range cfg.Apps {
-				if a.Kind == config.KindUptime {
+				if a.Blueprint == config.BlueprintUptime {
 					delete(cfg.Apps, name)
 				}
 			}

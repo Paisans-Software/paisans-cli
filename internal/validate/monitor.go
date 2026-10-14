@@ -57,7 +57,7 @@ func (c *checker) monitorRoles() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Kind != config.KindUptime || app.Placement.Mode != config.PlacementPinned {
+		if app.Blueprint != config.BlueprintUptime || app.Placement.Mode != config.PlacementPinned {
 			continue
 		}
 		site, ok := c.cfg.Sites[app.Placement.Site]
@@ -80,7 +80,7 @@ func (c *checker) monitorRoles() {
 // deployment is coherent without one.
 func (c *checker) nothingWatches() {
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindUptime {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintUptime {
 			return
 		}
 	}
@@ -92,7 +92,7 @@ func (c *checker) nothingWatches() {
 // hostsUptime reports whether an uptime app is pinned to a site.
 func (c *checker) hostsUptime(site string) bool {
 	for _, name := range c.cfg.PinnedTo(site) {
-		if c.cfg.Apps[name].Kind == config.KindUptime {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintUptime {
 			return true
 		}
 	}

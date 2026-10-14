@@ -50,9 +50,9 @@ type Service struct {
 
 // ServicePorts is the services of a kind that listen on a port of their
 // own, in compose order.
-func ServicePorts(kind config.Kind) []Service {
+func ServicePorts(blueprint config.Blueprint) []Service {
 	var out []Service
-	for _, svc := range of(kind).Services {
+	for _, svc := range of(blueprint).Services {
 		if svc.Port != 0 {
 			out = append(out, svc)
 		}
@@ -62,13 +62,13 @@ func ServicePorts(kind config.Kind) []Service {
 
 // ExtraDatabases is the names of the databases a kind keeps beside its
 // own, each <database>_<name> in the same Postgres.
-func ExtraDatabases(kind config.Kind) []string {
-	return append([]string(nil), of(kind).ExtraDatabases...)
+func ExtraDatabases(blueprint config.Blueprint) []string {
+	return append([]string(nil), of(blueprint).ExtraDatabases...)
 }
 
 // LocalOnlyReason is why a kind that keeps its files only on its own disk
 // has no object storage form, as its blueprint says, empty when it does not.
-func LocalOnlyReason(kind config.Kind) string { return of(kind).LocalOnlyReason }
+func LocalOnlyReason(blueprint config.Blueprint) string { return of(blueprint).LocalOnlyReason }
 
 // PostgresService is the database container a pinned app runs beside itself. A
 // clustered app has no such service: it connects to the local HAProxy, so
@@ -85,13 +85,13 @@ const WALGImage = "ghcr.io/paisans-software/postgres-walg"
 // SendsMail reports whether a kind reads the deployment's smtp settings. An
 // app level smtp block on any other kind is refused, because an override
 // nothing reads is ignored without a word.
-func SendsMail(kind config.Kind) bool { return of(kind).SendsMail }
+func SendsMail(blueprint config.Blueprint) bool { return of(blueprint).SendsMail }
 
 // Services returns a kind's services in compose order, which is the order they
 // are declared in the kind's record rather than alphabetical: `app` first is what an operator
 // expects to read.
-func Services(kind config.Kind) []Service {
-	out := append([]Service(nil), of(kind).Services...)
+func Services(blueprint config.Blueprint) []Service {
+	out := append([]Service(nil), of(blueprint).Services...)
 	for i := range out {
 		if out[i].Foundation != "" {
 			// A foundation that cannot be read leaves Image empty, and
@@ -113,8 +113,8 @@ func ServiceImage(s Service) (string, error) {
 }
 
 // Has reports whether a kind defines a service.
-func Has(kind config.Kind, service string) bool {
-	for _, s := range of(kind).Services {
+func Has(blueprint config.Blueprint, service string) bool {
+	for _, s := range of(blueprint).Services {
 		if s.Name == service {
 			return true
 		}
@@ -125,8 +125,8 @@ func Has(kind config.Kind, service string) bool {
 // DefaultImage returns the reference a service runs when the configuration
 // says nothing. The second result is false when the kind computes it instead
 // of shipping one.
-func DefaultImage(kind config.Kind, service string) (string, bool) {
-	for _, s := range Services(kind) {
+func DefaultImage(blueprint config.Blueprint, service string) (string, bool) {
+	for _, s := range Services(blueprint) {
 		if s.Name == service {
 			return s.Image, s.Image != ""
 		}
@@ -144,15 +144,15 @@ func DefaultImage(kind config.Kind, service string) (string, bool) {
 // correct. It is also what cluster-placement-without-a-cluster reads: a kind
 // answering false here can only be pinned, because cluster placement would
 // render it onto every apps site with storage of its own.
-func UsesPostgres(kind config.Kind) bool {
-	return Has(kind, PostgresService)
+func UsesPostgres(blueprint config.Blueprint) bool {
+	return Has(blueprint, PostgresService)
 }
 
 // UsesObjectStorage reports whether a kind can keep its uploads in S3 rather
 // than on local disk. Whether one app of the kind does is InObjectStorage,
 // which also reads the app's `storage` key and whether the deployment has a
 // Garage at all.
-func UsesObjectStorage(kind config.Kind) bool { return of(kind).ObjectStorage }
+func UsesObjectStorage(blueprint config.Blueprint) bool { return of(blueprint).ObjectStorage }
 
 // ServesObjectsPublicly reports whether a kind's objects must be readable
 // without a credential. Each kind's record says why its answer is what it is.
@@ -166,13 +166,13 @@ func UsesObjectStorage(kind config.Kind) bool { return of(kind).ObjectStorage }
 // whose objects are fetched anonymously: a kind can keep its uploads in S3
 // while serving them through its own application route, or through
 // signatures it issues, never exposing its bucket.
-func ServesObjectsPublicly(kind config.Kind) bool { return of(kind).PublicObjects }
+func ServesObjectsPublicly(blueprint config.Blueprint) bool { return of(blueprint).PublicObjects }
 
 // ServiceNames returns a kind's service names, sorted, for an error message
 // that has to list them.
-func ServiceNames(kind config.Kind) []string {
+func ServiceNames(blueprint config.Blueprint) []string {
 	var out []string
-	for _, s := range of(kind).Services {
+	for _, s := range of(blueprint).Services {
 		out = append(out, s.Name)
 	}
 	sort.Strings(out)
@@ -195,10 +195,10 @@ const (
 
 // ConfigFormat is the syntax of the file a kind reads its configuration from,
 // or ConfigNone when it has none.
-func ConfigFormat(kind config.Kind) Format { return of(kind).ConfigFormat }
+func ConfigFormat(blueprint config.Blueprint) Format { return of(blueprint).ConfigFormat }
 
 // ConfigFile is the rendered path of that file, relative to the stack.
-func ConfigFile(kind config.Kind) string { return of(kind).ConfigFile }
+func ConfigFile(blueprint config.Blueprint) string { return of(blueprint).ConfigFile }
 
 // BucketName is the bucket an app that stores objects keeps them in: the
 // `s3_bucket` setting when one is declared, and the app's name with

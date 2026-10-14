@@ -55,8 +55,8 @@ func (r uptimeAdmin) Precheck(e Env) error {
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if app.Kind != config.KindUptime {
-		return fmt.Errorf("apps.%s is %s, and admin_password is a secret of %s", r.app, app.Kind, config.KindUptime)
+	if app.Blueprint != config.BlueprintUptime {
+		return fmt.Errorf("apps.%s is %s, and admin_password is a secret of %s", r.app, app.Blueprint, config.BlueprintUptime)
 	}
 	return runsSomewhere(e, r.app)
 }
@@ -123,7 +123,7 @@ func (r heartbeat) Users(e Env) []Use {
 	var out []Use
 	placed := render.AppSites(e.Cfg)
 	for _, name := range e.Cfg.AppNames() {
-		if e.Cfg.Apps[name].Kind != config.KindUptime {
+		if e.Cfg.Apps[name].Blueprint != config.BlueprintUptime {
 			continue
 		}
 		for _, site := range placed[name] {
@@ -196,8 +196,8 @@ func (r adminsHeartbeat) Precheck(e Env) error {
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if app.Kind != config.KindPocketID {
-		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Kind, r.key, config.KindPocketID)
+	if app.Blueprint != config.BlueprintPocketID {
+		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Blueprint, r.key, config.BlueprintPocketID)
 	}
 	return runsSomewhere(e, r.app)
 }
@@ -215,7 +215,7 @@ func (r adminsHeartbeat) Users(e Env) []Use {
 	var out []Use
 	placed := render.AppSites(e.Cfg)
 	for _, name := range e.Cfg.AppNames() {
-		if e.Cfg.Apps[name].Kind != config.KindUptime {
+		if e.Cfg.Apps[name].Blueprint != config.BlueprintUptime {
 			continue
 		}
 		for _, site := range placed[name] {

@@ -123,7 +123,7 @@ type probe struct {
 func (p *Plan) publicProbe() *probe {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if !blueprints.InObjectStorage(p.cfg, app) || !blueprints.ServesObjectsPublicly(app.Kind) {
+		if !blueprints.InObjectStorage(p.cfg, app) || !blueprints.ServesObjectsPublicly(app.Blueprint) {
 			continue
 		}
 		keyID, _ := garage.SecretString(p.secrets, name, "s3_access_key_id")

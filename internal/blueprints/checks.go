@@ -141,17 +141,19 @@ func (c Check) Failure(cfg *config.Config, name string) (key, message string) {
 }
 
 // ChecksFor is the checks of an app's kind.
-func ChecksFor(kind config.Kind) []Check { return append([]Check(nil), of(kind).Checks...) }
+func ChecksFor(blueprint config.Blueprint) []Check {
+	return append([]Check(nil), of(blueprint).Checks...)
+}
 
 // EngineOf is a kind's database engine.
-func EngineOf(kind config.Kind) string { return of(kind).Engine }
+func EngineOf(blueprint config.Blueprint) string { return of(blueprint).Engine }
 
 // BackupOf is how a kind's database is dumped, nil for one with no dump.
-func BackupOf(kind config.Kind) *BackupSpec { return of(kind).Backup }
+func BackupOf(blueprint config.Blueprint) *BackupSpec { return of(blueprint).Backup }
 
 // NeedsDump reports whether a kind's engine is one the backups cannot read
 // as files.
-func NeedsDump(kind config.Kind) bool { return needsDump[of(kind).Engine] }
+func NeedsDump(blueprint config.Blueprint) bool { return needsDump[of(blueprint).Engine] }
 
 // SettingSpec is the type of one `settings` key a blueprint reads: string,
 // bool, int, email, enum with its values, or list (of strings). Default, when set, is the value
@@ -167,7 +169,7 @@ var settingTypes = map[string]bool{"string": true, "bool": true, "int": true, "e
 
 // SettingsOf is the settings a kind declares, nil for one that declares
 // none.
-func SettingsOf(kind config.Kind) map[string]SettingSpec { return of(kind).Settings }
+func SettingsOf(blueprint config.Blueprint) map[string]SettingSpec { return of(blueprint).Settings }
 
 // SettingsSeen is the settings map an app's blueprint templates and CEL
 // expressions read: the app's own settings, and for a blueprint read from a
@@ -182,11 +184,11 @@ func SettingsOf(kind config.Kind) map[string]SettingSpec { return of(kind).Setti
 // written into the configuration would change those answers without anyone
 // asking. A built in blueprint gets its own settings back unchanged.
 func SettingsSeen(app config.App) map[string]any {
-	if _, fromCatalog := Source(app.Kind); !fromCatalog {
+	if _, fromCatalog := Source(app.Blueprint); !fromCatalog {
 		return app.Settings
 	}
 	var out map[string]any
-	for key, spec := range SettingsOf(app.Kind) {
+	for key, spec := range SettingsOf(app.Blueprint) {
 		if _, set := app.Settings[key]; set || spec.Default == nil {
 			continue
 		}

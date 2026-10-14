@@ -216,7 +216,7 @@ func schedulePeriod(s config.Schedule) string {
 func (c *checker) pinnedPostgresWithoutWALG() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.BacksUp() || app.Placement.Mode != config.PlacementPinned || !blueprints.Has(app.Kind, blueprints.PostgresService) {
+		if !app.BacksUp() || app.Placement.Mode != config.PlacementPinned || !blueprints.Has(app.Blueprint, blueprints.PostgresService) {
 			continue
 		}
 		image := app.Images[blueprints.PostgresService]
@@ -256,7 +256,7 @@ func imageRepository(ref string) string {
 // failure is silent.
 func (c *checker) backupMonitor() {
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindUptime {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintUptime {
 			return
 		}
 	}

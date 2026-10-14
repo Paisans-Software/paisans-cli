@@ -28,7 +28,7 @@ func startPocketID(t *testing.T) *pocketid.Client {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not on PATH; skipping the Pocket ID integration test")
 	}
-	image, ok := blueprints.DefaultImage(config.KindPocketID, "app")
+	image, ok := blueprints.DefaultImage(config.BlueprintPocketID, "app")
 	if !ok {
 		t.Fatal("the pocket-id kind names no app image")
 	}

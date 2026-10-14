@@ -61,7 +61,7 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 	}
 	named := map[string]bool{}
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			for _, g := range blueprints.PocketIDSignupGroups(cfg.Apps[name].Settings) {
 				named[g] = true
 			}

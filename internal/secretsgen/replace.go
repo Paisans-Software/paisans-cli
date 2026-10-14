@@ -31,7 +31,7 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
 	if cfg != nil && len(parts) == 3 && parts[0] == "apps" {
-		if spec, ok := blueprints.SecretOf(cfg.Apps[parts[1]].Kind, last); ok {
+		if spec, ok := blueprints.SecretOf(cfg.Apps[parts[1]].Blueprint, last); ok {
 			if _, held := s.Get(path); !held {
 				return "", fmt.Errorf("%s: the secrets file holds no value to replace", path)
 			}

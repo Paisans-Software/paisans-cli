@@ -124,7 +124,7 @@ func (p *planner) continuityName(app, function string) string {
 	}
 	n := 0
 	for _, a := range p.cfg.AppNames() {
-		if p.cfg.Apps[a].Kind == config.KindPocketID {
+		if p.cfg.Apps[a].Blueprint == config.BlueprintPocketID {
 			n++
 		}
 	}

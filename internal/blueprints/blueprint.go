@@ -476,11 +476,11 @@ func (o *oidcSpec) def() (*OIDCDef, error) {
 // reservedExtras is what a reserved blueprint's record gets from the Go that
 // drives it, beyond its blueprint.yaml. Only a reserved blueprint has any:
 // that Go is in the binary, released with the blueprint.
-var reservedExtras = map[config.Kind]func(*Def){
+var reservedExtras = map[config.Blueprint]func(*Def){
 	// Every setting in PocketIDSettings owns its variable, taken from that
 	// table rather than listed again in the blueprint, so a setting added
 	// there is an owner without a second edit.
-	config.KindPocketID: func(d *Def) {
+	config.BlueprintPocketID: func(d *Def) {
 		for _, s := range PocketIDSettings {
 			d.SettingKeys = append(d.SettingKeys, SettingKey{Key: s.Env, File: ".env", Setting: s.Key})
 		}

@@ -307,7 +307,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 			plan.Steps = append(plan.Steps, step)
 		}
 
-		if blueprints.ServesObjectsPublicly(app.Kind) {
+		if blueprints.ServesObjectsPublicly(app.Blueprint) {
 			// Website access is what lets a request with no credential read
 			// this bucket. `garage bucket website --allow` is a set rather
 			// than a create: established by running it twice against a real

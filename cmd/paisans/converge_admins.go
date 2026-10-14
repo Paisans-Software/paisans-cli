@@ -89,7 +89,7 @@ var convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeO
 	req := adminRequest(cfg, app, id)
 	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
-	plan, err := appadmin.Build(cfg.Apps[app].Kind, transport, req)
+	plan, err := appadmin.Build(cfg.Apps[app].Blueprint, transport, req)
 	if err != nil {
 		return out, err
 	}
@@ -159,7 +159,7 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 	var failures []error
 	section := false
 	for _, app := range cfg.AppNames() {
-		if cfg.Apps[app].Kind != config.KindPocketID || !up(app) {
+		if cfg.Apps[app].Blueprint != config.BlueprintPocketID || !up(app) {
 			continue
 		}
 		if !section {

@@ -249,14 +249,14 @@ func minus(a, b []string) []string {
 // BuiltinNames is every reserved and core blueprint's name, reserved ones
 // apart.
 func BuiltinNames() (reserved, core []string) {
-	for _, kind := range known() {
-		if _, fromCatalog := Source(kind); fromCatalog && strings.Contains(string(kind), "/") {
+	for _, blueprint := range known() {
+		if _, fromCatalog := Source(blueprint); fromCatalog && strings.Contains(string(blueprint), "/") {
 			continue
 		}
-		if of(kind).Reserved {
-			reserved = append(reserved, string(kind))
+		if of(blueprint).Reserved {
+			reserved = append(reserved, string(blueprint))
 		} else {
-			core = append(core, string(kind))
+			core = append(core, string(blueprint))
 		}
 	}
 	return reserved, core
@@ -273,10 +273,10 @@ func BuiltinSpec(name string) ([]byte, bool) {
 			return b.Spec, true
 		}
 	}
-	if _, ok := For(config.Kind(name)); !ok || strings.Contains(name, "/") {
+	if _, ok := For(config.Blueprint(name)); !ok || strings.Contains(name, "/") {
 		return nil, false
 	}
-	dir, ok := Source(config.Kind(name))
+	dir, ok := Source(config.Blueprint(name))
 	if !ok {
 		return nil, false
 	}

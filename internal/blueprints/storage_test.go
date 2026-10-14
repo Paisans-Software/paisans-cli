@@ -20,14 +20,14 @@ func TestInObjectStorageDefaultsToGarageWhereThereIsOne(t *testing.T) {
 		app  config.App
 		want bool
 	}{
-		{"default with garage", withGarage, config.App{Kind: config.Kind("mbin")}, true},
-		{"default without garage", without, config.App{Kind: config.Kind("mbin")}, false},
-		{"local with garage", withGarage, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageLocal}, false},
-		{"s3 says so", withGarage, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageS3}, true},
+		{"default with garage", withGarage, config.App{Blueprint: config.Blueprint("mbin")}, true},
+		{"default without garage", without, config.App{Blueprint: config.Blueprint("mbin")}, false},
+		{"local with garage", withGarage, config.App{Blueprint: config.Blueprint("writefreely"), Storage: config.StorageLocal}, false},
+		{"s3 says so", withGarage, config.App{Blueprint: config.Blueprint("writefreely"), Storage: config.StorageS3}, true},
 		// No S3 form at all, whatever the key says; validate refuses the s3.
-		{"synapse", withGarage, config.App{Kind: config.Kind("synapse"), Storage: config.StorageS3}, false},
-		{"uptime", withGarage, config.App{Kind: config.KindUptime}, false},
-		{"pocket-id", withGarage, config.App{Kind: config.KindPocketID}, false},
+		{"synapse", withGarage, config.App{Blueprint: config.Blueprint("synapse"), Storage: config.StorageS3}, false},
+		{"uptime", withGarage, config.App{Blueprint: config.BlueprintUptime}, false},
+		{"pocket-id", withGarage, config.App{Blueprint: config.BlueprintPocketID}, false},
 	} {
 		if got := blueprints.InObjectStorage(tc.cfg, tc.app); got != tc.want {
 			t.Errorf("%s: InObjectStorage = %v, want %v", tc.name, got, tc.want)
@@ -40,20 +40,20 @@ func TestInObjectStorageDefaultsToGarageWhereThereIsOne(t *testing.T) {
 func TestLocalMediaPaths(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Storage.Garage.Sites = []string{"home-a"}
-	if got := blueprints.LocalMediaPaths(cfg, config.App{Kind: config.Kind("mbin"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/media/*"}) {
+	if got := blueprints.LocalMediaPaths(cfg, config.App{Blueprint: config.Blueprint("mbin"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/media/*"}) {
 		t.Errorf("mbin local: %v", got)
 	}
-	if got := blueprints.LocalMediaPaths(cfg, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/uploads/*"}) {
+	if got := blueprints.LocalMediaPaths(cfg, config.App{Blueprint: config.Blueprint("writefreely"), Storage: config.StorageLocal}); !slices.Equal(got, []string{"/uploads/*"}) {
 		t.Errorf("writefreely local: %v", got)
 	}
-	if got := blueprints.LocalMediaPaths(cfg, config.App{Kind: config.Kind("mbin")}); got != nil {
+	if got := blueprints.LocalMediaPaths(cfg, config.App{Blueprint: config.Blueprint("mbin")}); got != nil {
 		t.Errorf("mbin in garage: %v", got)
 	}
 	// The paths are only what a blueprint declares under local_media_paths,
 	// so a kind declaring none opens none. Wiki.js declares none because it
 	// keeps no files at all; this case proves a kind without declared paths
 	// gets an empty list, not anything about privacy.
-	if got := blueprints.LocalMediaPaths(cfg, config.App{Kind: config.Kind("wikijs"), Storage: config.StorageLocal}); len(got) != 0 {
+	if got := blueprints.LocalMediaPaths(cfg, config.App{Blueprint: config.Blueprint("wikijs"), Storage: config.StorageLocal}); len(got) != 0 {
 		t.Errorf("wikijs keeps no files: %v", got)
 	}
 }

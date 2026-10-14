@@ -118,7 +118,7 @@ func celApp(app config.App) map[string]any {
 		"app.settings":     settings,
 		"app.smtp":         map[string]any{},
 		"app.name":         "",
-		"app.oidc":         of(app.Kind).OIDC != nil,
+		"app.oidc":         of(app.Blueprint).OIDC != nil,
 		"app.own_smtp":     map[string]any{},
 		"app.sites":        []string{},
 		"app.storage":      map[string]string{},

@@ -30,8 +30,8 @@ import (
 // TestEverySettingThatOwnsAKeyReallyControlsIt renders each one with the
 // setting changed and checks the key's line changes, so an entry that goes
 // stale fails a test rather than misdirecting an operator.
-func owningSetting(kind config.Kind, key string) (string, bool) {
-	for _, o := range blueprints.SettingKeys(kind) {
+func owningSetting(blueprint config.Blueprint, key string) (string, bool) {
+	for _, o := range blueprints.SettingKeys(blueprint) {
 		if o.Key == key {
 			return o.Setting, true
 		}
@@ -46,8 +46,8 @@ func owningSetting(kind config.Kind, key string) (string, bool) {
 // config-key-already-rendered. Only keys the template's own comments name as
 // deliberately absent are recorded, so that the list records decisions rather
 // than guesses.
-func omittedOnPurpose(kind config.Kind, key string) (blueprints.OmittedKey, bool) {
-	for _, o := range blueprints.OmittedKeys(kind) {
+func omittedOnPurpose(blueprint config.Blueprint, key string) (blueprints.OmittedKey, bool) {
+	for _, o := range blueprints.OmittedKeys(blueprint) {
 		if key == o.Key || strings.HasPrefix(key, o.Key+".") {
 			return o, true
 		}
@@ -71,15 +71,15 @@ var mergers = map[blueprints.Format]func(string, map[string]any) (string, error)
 // It is called only when the app declares keys, so an app without them
 // renders exactly what its templates wrote.
 func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File, sources map[string]string) error {
-	format := blueprints.ConfigFormat(app.Kind)
+	format := blueprints.ConfigFormat(app.Blueprint)
 	merge, ok := mergers[format]
 	if !ok {
 		// Unreachable today: every kind renders a config file, so no rule in
 		// validate refuses this first (that refusal was dropped for having
 		// nothing to refuse). This is the guard for a future kind without one.
-		return fmt.Errorf("apps.%s.config: kind %s renders no configuration file, so there is nowhere for a passthrough key to go", app.Name, app.Kind)
+		return fmt.Errorf("apps.%s.config: kind %s renders no configuration file, so there is nowhere for a passthrough key to go", app.Name, app.Blueprint)
 	}
-	name := blueprints.ConfigFile(app.Kind)
+	name := blueprints.ConfigFile(app.Blueprint)
 	target := -1
 	for i, f := range files {
 		if f.Path == stack+name {
@@ -87,11 +87,11 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 		}
 	}
 	if target < 0 {
-		return fmt.Errorf("apps.%s.config: kind %s reads its configuration from %s, but its template set rendered no such file", app.Name, app.Kind, name)
+		return fmt.Errorf("apps.%s.config: kind %s reads its configuration from %s, but its template set rendered no such file", app.Name, app.Blueprint, name)
 	}
 
 	for _, key := range sortedKeys(keys) {
-		if o, ok := omittedOnPurpose(app.Kind, key); ok {
+		if o, ok := omittedOnPurpose(app.Blueprint, key); ok {
 			return collision(app, key, fmt.Sprintf("the template %s leaves %s out of %s/%s on purpose: %s. A key a template omits by decision is owned by the template as surely as one it writes, so a passthrough key may not put it back; that is a template change, and it is reviewable.",
 				sources[files[target].Path], o.Key, app.Dir, name, o.Why))
 		}
@@ -138,7 +138,7 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 // quietly undone, so it stops the build rather than overwriting.
 func alreadyRendered(app plannedApp, key, file, template, why string) error {
 	where := app.Dir + "/" + file
-	if setting, ok := owningSetting(app.Kind, key); ok {
+	if setting, ok := owningSetting(app.Blueprint, key); ok {
 		return collision(app, key, fmt.Sprintf("%s already sets this key, and apps.%s.settings.%s is the sanctioned input for it. Set that instead and remove the key from config.%s",
 			where, app.Name, setting, why))
 	}

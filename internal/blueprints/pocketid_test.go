@@ -11,7 +11,7 @@ import (
 // The Pocket ID image the foundation names is the repository the refusal
 // text was read from.
 func TestDefaultPocketIDImageHasItsStandbyMarker(t *testing.T) {
-	image, ok := blueprints.DefaultImage(config.KindPocketID, "app")
+	image, ok := blueprints.DefaultImage(config.BlueprintPocketID, "app")
 	if !ok {
 		t.Fatal("pocket-id ships no default app image")
 	}

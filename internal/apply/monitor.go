@@ -47,7 +47,7 @@ func PlanMonitorReseeds(cfg *config.Config, rendered *render.Plan, acmeModule st
 	var out []*MonitorReseed
 	for _, site := range cfg.MonitorSites() {
 		for _, app := range cfg.PinnedTo(site) {
-			if cfg.Apps[app].Kind != config.KindUptime {
+			if cfg.Apps[app].Blueprint != config.BlueprintUptime {
 				continue
 			}
 			t, ok := transports[site]

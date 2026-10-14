@@ -11,31 +11,31 @@ import (
 
 // Mbin's tile starts the fork's OIDC flow; every other kind opens its front
 // page, which is the bare host with no trailing slash.
-func TestLaunchURLDefaultsPerKind(t *testing.T) {
-	for _, kind := range blueprints.Builtin() {
+func TestLaunchURLDefaultsPerBlueprint(t *testing.T) {
+	for _, blueprint := range blueprints.Builtin() {
 		want := "https://app.example.org"
-		if kind == config.Kind("mbin") {
+		if blueprint == config.Blueprint("mbin") {
 			want = "https://app.example.org/oauth/oidc/connect"
 		}
-		if got := blueprints.LaunchURL(kind, "app.example.org", ""); got != want {
-			t.Errorf("%s: LaunchURL = %q, want %q", kind, got, want)
+		if got := blueprints.LaunchURL(blueprint, "app.example.org", ""); got != want {
+			t.Errorf("%s: LaunchURL = %q, want %q", blueprint, got, want)
 		}
 	}
 }
 
-func TestADashboardLinkReplacesTheKindsPath(t *testing.T) {
+func TestADashboardLinkReplacesTheBlueprintsPath(t *testing.T) {
 	cases := []struct {
-		kind config.Kind
-		link string
-		want string
+		blueprint config.Blueprint
+		link      string
+		want      string
 	}{
-		{config.Kind("mbin"), "/magazines", "https://app.example.org/magazines"},
-		{config.Kind("mbin"), "/", "https://app.example.org"},
-		{config.Kind("wikijs"), "/home", "https://app.example.org/home"},
+		{config.Blueprint("mbin"), "/magazines", "https://app.example.org/magazines"},
+		{config.Blueprint("mbin"), "/", "https://app.example.org"},
+		{config.Blueprint("wikijs"), "/home", "https://app.example.org/home"},
 	}
 	for _, tc := range cases {
-		if got := blueprints.LaunchURL(tc.kind, "app.example.org", tc.link); got != tc.want {
-			t.Errorf("%s %q: got %q, want %q", tc.kind, tc.link, got, tc.want)
+		if got := blueprints.LaunchURL(tc.blueprint, "app.example.org", tc.link); got != tc.want {
+			t.Errorf("%s %q: got %q, want %q", tc.blueprint, tc.link, got, tc.want)
 		}
 	}
 }
@@ -43,11 +43,11 @@ func TestADashboardLinkReplacesTheKindsPath(t *testing.T) {
 // The bare host is in every kind's list, because it is what every client made
 // before kinds named a path was given.
 func TestToolkitLaunchURLs(t *testing.T) {
-	got := fmt.Sprint(blueprints.ToolkitLaunchURLs(config.Kind("mbin"), "app.example.org"))
+	got := fmt.Sprint(blueprints.ToolkitLaunchURLs(config.Blueprint("mbin"), "app.example.org"))
 	if got != "[https://app.example.org https://app.example.org/oauth/oidc/connect]" {
 		t.Errorf("mbin: %s", got)
 	}
-	got = fmt.Sprint(blueprints.ToolkitLaunchURLs(config.Kind("wikijs"), "app.example.org"))
+	got = fmt.Sprint(blueprints.ToolkitLaunchURLs(config.Blueprint("wikijs"), "app.example.org"))
 	if got != "[https://app.example.org]" {
 		t.Errorf("wikijs: %s", got)
 	}

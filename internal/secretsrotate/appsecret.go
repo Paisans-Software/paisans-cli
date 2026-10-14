@@ -22,7 +22,9 @@ import (
 // and false for any other key: what `secrets rotate` reads to find, in a
 // deployment's apps, the ones whose secret it is. Each kind's record names
 // its keys (blueprints.Def.SelfRotated).
-func AppSelfKind(key string) (config.Kind, bool) { return blueprints.SelfRotatedKind(key) }
+func AppSelfBlueprint(key string) (config.Blueprint, bool) {
+	return blueprints.SelfRotatedBlueprint(key)
+}
 
 // appSelf rotates one secret an app checks itself.
 type appSelf struct {
@@ -48,15 +50,15 @@ func (r appSelf) Precheck(e Env) error {
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if spec, ok := blueprints.SecretOf(app.Kind, r.key); ok && spec.Group != "" {
+	if spec, ok := blueprints.SecretOf(app.Blueprint, r.key); ok && spec.Group != "" {
 		return fmt.Errorf("%s is rotated with the rest of its unit as apps.%s.%s", r.Path(), r.app, spec.Group)
 	}
-	kind, ok := AppSelfKind(r.key)
+	blueprint, ok := AppSelfBlueprint(r.key)
 	if !ok {
 		return fmt.Errorf("%s is not a secret its app checks itself", r.Path())
 	}
-	if app.Kind != kind {
-		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Kind, r.key, kind)
+	if app.Blueprint != blueprint {
+		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Blueprint, r.key, blueprint)
 	}
 	return runsSomewhere(e, r.app)
 }
@@ -89,7 +91,7 @@ func (r appSelf) Users(e Env) []Use {
 	}
 	for _, name := range e.Cfg.AppNames() {
 		app := e.Cfg.Apps[name]
-		if app.Kind != config.KindInvite {
+		if app.Blueprint != config.BlueprintInvite {
 			continue
 		}
 		if idp, _ := app.Settings["identity_app"].(string); idp != r.app {

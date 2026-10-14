@@ -39,21 +39,23 @@ type Consume struct {
 }
 
 // Provides is the roles a kind provides.
-func Provides(kind config.Kind) []string {
+func Provides(blueprint config.Blueprint) []string {
 	var out []string
-	for _, p := range of(kind).Provides {
+	for _, p := range of(blueprint).Provides {
 		out = append(out, p.role)
 	}
 	return out
 }
 
 // Consumes is the roles a kind consumes.
-func Consumes(kind config.Kind) []Consume { return append([]Consume(nil), of(kind).Consumes...) }
+func Consumes(blueprint config.Blueprint) []Consume {
+	return append([]Consume(nil), of(blueprint).Consumes...)
+}
 
 // LinkValues is what the app called name in cfg offers as a provider of
 // role: each value its blueprint declares, evaluated over the app.
 func LinkValues(cfg *config.Config, name, role string) (map[string]string, error) {
-	return linkValues(cfg.Apps[name].Kind, celAppIn(cfg, name), role)
+	return linkValues(cfg.Apps[name].Blueprint, celAppIn(cfg, name), role)
 }
 
 // LinkValuesAt is what a provider of role outside the deployment, at
@@ -61,18 +63,18 @@ func LinkValues(cfg *config.Config, name, role string) (map[string]string, error
 // an app at that hostname with nothing else declared. It is how a consumer
 // pointed at a server the deployment does not run still gets its address.
 func LinkValuesAt(role, hostname string) (map[string]string, error) {
-	for _, kind := range known() {
-		for _, p := range of(kind).Provides {
+	for _, blueprint := range known() {
+		for _, p := range of(blueprint).Provides {
 			if p.role == role {
-				return linkValues(kind, celApp(config.App{Kind: kind, Hostname: hostname}), role)
+				return linkValues(blueprint, celApp(config.App{Blueprint: blueprint, Hostname: hostname}), role)
 			}
 		}
 	}
 	return nil, fmt.Errorf("no blueprint provides the role %s", role)
 }
 
-func linkValues(kind config.Kind, vars map[string]any, role string) (map[string]string, error) {
-	for _, p := range of(kind).Provides {
+func linkValues(blueprint config.Blueprint, vars map[string]any, role string) (map[string]string, error) {
+	for _, p := range of(blueprint).Provides {
 		if p.role != role {
 			continue
 		}
@@ -80,17 +82,17 @@ func linkValues(kind config.Kind, vars map[string]any, role string) (map[string]
 		for value, prg := range p.values {
 			v, _, err := prg.Eval(vars)
 			if err != nil {
-				return nil, fmt.Errorf("%s's provides %s.%s: %w", kind, role, value, err)
+				return nil, fmt.Errorf("%s's provides %s.%s: %w", blueprint, role, value, err)
 			}
 			s, ok := v.Value().(string)
 			if !ok {
-				return nil, fmt.Errorf("%s's provides %s.%s is not a string", kind, role, value)
+				return nil, fmt.Errorf("%s's provides %s.%s is not a string", blueprint, role, value)
 			}
 			out[value] = s
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("%s does not provide the role %s", kind, role)
+	return nil, fmt.Errorf("%s does not provide the role %s", blueprint, role)
 }
 
 func checkLinks(provides []Provide, consumes []Consume) ([]provided, error) {
@@ -180,7 +182,7 @@ func LockedSettingsFor(app config.App, oidc bool) []string {
 	var out []string
 	vars := celApp(app)
 	vars["app.oidc"] = oidc
-	for _, l := range of(app.Kind).LockedSettings {
+	for _, l := range of(app.Blueprint).LockedSettings {
 		if l.when != nil {
 			if v, _, err := l.when.Eval(vars); err == nil && v.Value() == false {
 				continue

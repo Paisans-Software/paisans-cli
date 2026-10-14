@@ -445,7 +445,7 @@ func TestASiteApplyHoldsAMultiSiteAppOnItsDeployedBuild(t *testing.T) {
 				t.Errorf("no warning says the app stays and a newer build exists: %+v", p.Notes)
 			}
 			// An app with no other site in the plan's word moves as usual.
-			wikiImage, _ := blueprints.DefaultImage(config.Kind("wikijs"), "app")
+			wikiImage, _ := blueprints.DefaultImage(config.Blueprint("wikijs"), "app")
 			if wiki := pinOf(p, "wiki", wikiImage); wiki == nil || !strings.HasSuffix(wiki.Reference, buildB) {
 				t.Errorf("wiki planned %+v", wiki)
 			}

@@ -22,7 +22,7 @@ import (
 type unpublished struct{}
 
 func (unpublished) Digest(ref string) (string, error) {
-	if def, _ := blueprints.DefaultImage(config.Kind("mbin"), "app"); ref != def {
+	if def, _ := blueprints.DefaultImage(config.Blueprint("mbin"), "app"); ref != def {
 		return "sha256:" + strings.Repeat("a", 64), nil
 	}
 	return "", fmt.Errorf("ghcr.io answered that %s does not exist: %w", ref, imagedigest.ErrNotFound)

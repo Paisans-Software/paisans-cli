@@ -256,7 +256,7 @@ func TestOIDCClientCreateExecuteRecordsTheSecretWithoutPrintingIt(t *testing.T) 
 	}
 }
 
-func TestOIDCClientCreateRefusesAKindItDoesNotKnow(t *testing.T) {
+func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	fake := withIDPFake(t)
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.

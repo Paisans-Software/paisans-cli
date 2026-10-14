@@ -56,7 +56,7 @@ func (c *checker) duplicateClientName() {
 	first := map[string]string{} // client name -> the app that took it first
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if _, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name); !ok {
+		if _, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name); !ok {
 			continue
 		}
 		client := c.cfg.ClientName(name)
@@ -88,11 +88,11 @@ func (c *checker) displayNameWithoutAClient() {
 		if app.DisplayName == "" {
 			continue
 		}
-		if _, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name); ok {
+		if _, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name); ok {
 			continue
 		}
 		c.warn("display-name-without-a-client", fmt.Sprintf("apps.%s.display_name", name),
 			"display name does nothing on this app",
-			"is set, but the %s blueprint has no client at Pocket ID, so nothing shows it. Remove it.", app.Kind)
+			"is set, but the %s blueprint has no client at Pocket ID, so nothing shows it. Remove it.", app.Blueprint)
 	}
 }

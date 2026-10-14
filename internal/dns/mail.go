@@ -83,7 +83,7 @@ func MailNames(cfg *config.Config) map[string][]string {
 	}
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
-		if !blueprints.SendsMail(app.Kind) || app.SMTP == nil {
+		if !blueprints.SendsMail(app.Blueprint) || app.SMTP == nil {
 			continue
 		}
 		if domain := sender(app.SMTP.FromAddress); domain != "" {

@@ -21,7 +21,7 @@ import (
 func (c *checker) pocketIDApps() []string {
 	var out []string
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindPocketID {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			out = append(out, name)
 		}
 	}

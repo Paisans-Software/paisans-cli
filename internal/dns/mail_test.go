@@ -90,10 +90,10 @@ func TestMailDomainLeavesTheDomainAlone(t *testing.T) {
 func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	cfg := declared()
 	cfg.SMTP = config.SMTP{FromAddress: "hello@example.org"}
-	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org", SMTP: &config.SMTP{FromAddress: "noreply@Talk.Example.org"}}
+	cfg.Apps["auth"] = config.App{Blueprint: config.BlueprintPocketID, Hostname: "id.example.org", SMTP: &config.SMTP{FromAddress: "noreply@Talk.Example.org"}}
 	// An app that sends no mail has no say, even with a block (validate
 	// refuses one, but this must not depend on it).
-	cfg.Apps["blog"] = config.App{Kind: config.Kind("writefreely"), Hostname: "blog.example.org", SMTP: &config.SMTP{FromAddress: "x@blog.example.org"}}
+	cfg.Apps["blog"] = config.App{Blueprint: config.Blueprint("writefreely"), Hostname: "blog.example.org", SMTP: &config.SMTP{FromAddress: "x@blog.example.org"}}
 
 	names := MailNames(cfg)
 	if s := names["example.org"]; len(s) != 1 || s[0] != "smtp.from_address" {
@@ -124,7 +124,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 // Mbin sends mail, so an Mbin app's own sender is a mail name the same way.
 func TestMbinSenderIsAMailDomain(t *testing.T) {
 	cfg := declared()
-	cfg.Apps["forum"] = config.App{Kind: config.Kind("mbin"), Hostname: "forum.example.org", SMTP: &config.SMTP{FromAddress: "noreply@forum.example.org"}}
+	cfg.Apps["forum"] = config.App{Blueprint: config.Blueprint("mbin"), Hostname: "forum.example.org", SMTP: &config.SMTP{FromAddress: "noreply@forum.example.org"}}
 	names := MailNames(cfg)
 	if s := names["forum.example.org"]; len(s) != 1 || s[0] != "apps.forum.smtp.from_address" {
 		t.Errorf("an mbin app's sender: %v", names)
@@ -340,7 +340,7 @@ func TestNoMailRecordLeftAtAMailNameIsAConflict(t *testing.T) {
 	cfg := declared()
 	cfg.Community.MailDomains = []string{"example.org"}
 	cfg.SMTP = config.SMTP{FromAddress: "hello@talk.example.org"}
-	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+	cfg.Apps["auth"] = config.App{Blueprint: config.BlueprintPocketID, Hostname: "id.example.org"}
 	p := plan(t, c, cfg)
 
 	got := map[string]Entry{}
@@ -403,7 +403,7 @@ func TestNoMailRecordNotOursAtAMailNameIsLeftAlone(t *testing.T) {
 		cfg := declared()
 		cfg.Community.MailDomains = []string{"example.org"}
 		cfg.SMTP = config.SMTP{FromAddress: "hello@talk.example.org"}
-		cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+		cfg.Apps["auth"] = config.App{Blueprint: config.BlueprintPocketID, Hostname: "id.example.org"}
 		p := plan(t, fake.serve(t), cfg)
 		if n := len(p.Conflicts()); n != 0 {
 			t.Errorf("comment %q: %d conflict(s): %+v", other, n, p.Conflicts())
@@ -418,7 +418,7 @@ func TestMailNameOutsideTheDomainIsNotRead(t *testing.T) {
 	fake.zones["example.org"] = "zone-1"
 	cfg := declared()
 	cfg.SMTP = config.SMTP{FromAddress: "community@mail.example.net"}
-	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}
+	cfg.Apps["auth"] = config.App{Blueprint: config.BlueprintPocketID, Hostname: "id.example.org"}
 	plan(t, fake.serve(t), cfg)
 	for _, name := range fake.lookups {
 		if strings.HasSuffix(name, "example.net") {

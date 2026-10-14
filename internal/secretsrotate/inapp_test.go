@@ -31,9 +31,9 @@ func newMQWorld(t *testing.T) *mqWorld {
 			"home-b": {Roles: []config.Role{config.RoleApps}, Address: "10.0.0.2"},
 		},
 		Apps: map[string]config.App{
-			"forum": {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}, Settings: map[string]any{"queue": "rabbitmq"}},
-			"plain": {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
-			"gate":  {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"forum": {Blueprint: config.Blueprint("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}, Settings: map[string]any{"queue": "rabbitmq"}},
+			"plain": {Blueprint: config.Blueprint("mbin"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"gate":  {Blueprint: config.BlueprintOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}
 	s := &config.Secrets{Apps: map[string]map[string]any{"forum": {"rabbitmq_password": "mq-old"}, "plain": {"rabbitmq_password": "mq-plain"}}}

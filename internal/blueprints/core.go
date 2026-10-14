@@ -171,7 +171,7 @@ func readCoreAt(dir string, cat config.Catalog) error {
 	}
 	dropCore()
 	for name, d := range read {
-		register(config.Kind(name), d, at[name])
+		register(config.Blueprint(name), d, at[name])
 	}
 	setFoundation(f)
 	core.wizard = wizard
@@ -227,8 +227,8 @@ func lastCore(url string) (config.Catalog, bool) {
 
 // isCore reports whether a kind is named as a core blueprint is: unqualified
 // and not reserved.
-func isCore(kind config.Kind) bool {
-	return !strings.Contains(string(kind), "/") && !reservedName(string(kind))
+func isCore(blueprint config.Blueprint) bool {
+	return !strings.Contains(string(blueprint), "/") && !reservedName(string(blueprint))
 }
 
 // dropCore drops every core blueprint recorded so far.

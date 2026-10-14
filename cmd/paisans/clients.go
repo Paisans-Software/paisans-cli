@@ -27,7 +27,7 @@ import (
 func pocketIDApp(cfg *config.Config) string {
 	idp := ""
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			idp = name
 		}
 	}
@@ -38,7 +38,7 @@ func pocketIDApp(cfg *config.Config) string {
 // its declaration, and whether this toolkit knows its kind's client.
 func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Desired, bool) {
 	app := cfg.Apps[name]
-	spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
+	spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 	if !ok {
 		return oidcclient.Desired{}, false
 	}
@@ -48,7 +48,7 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		Name:              cfg.ClientName(name),
 		CallbackURL:       spec.CallbackURL,
 		LaunchURL:         spec.LaunchURL,
-		ToolkitLaunchURLs: blueprints.ToolkitLaunchURLs(app.Kind, app.Hostname),
+		ToolkitLaunchURLs: blueprints.ToolkitLaunchURLs(app.Blueprint, app.Hostname),
 		PKCE:              spec.PKCE,
 		AdminGroup:        adminGroup,
 		MemberGroup:       memberGroup,
@@ -60,7 +60,7 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 	}
 	// validate.Check has refused a malformed one already.
 	if link, ok := app.Settings[blueprints.DashboardLinkSetting].(string); ok {
-		d.LaunchURL = blueprints.LaunchURL(app.Kind, app.Hostname, link)
+		d.LaunchURL = blueprints.LaunchURL(app.Blueprint, app.Hostname, link)
 		d.LaunchURLChosen = true
 	}
 	return d, true
@@ -207,7 +207,7 @@ func newClientStep(r ui.Reporter, cfg *config.Config, site, destination, secrets
 		if !slices.Contains(sites[name], site) || (len(only) > 0 && !slices.Contains(only, name)) {
 			continue
 		}
-		if _, ok := blueprints.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname, name); ok {
+		if _, ok := blueprints.OIDCClient(cfg.Apps[name].Blueprint, cfg.Apps[name].Hostname, name); ok {
 			c.apps = append(c.apps, name)
 		}
 		if name == c.idp {

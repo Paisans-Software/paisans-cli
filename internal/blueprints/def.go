@@ -185,7 +185,7 @@ type RequiredSecret struct {
 // gate setting's condition asks Federates), which Go's package initialisation
 // would refuse as a cycle. A built in blueprint that does not parse is a bug
 // in this binary, found by every test in this package, so it panics.
-var defs map[config.Kind]*Def
+var defs map[config.Blueprint]*Def
 
 func init() {
 	loaded, err := loadBuiltins()
@@ -196,12 +196,12 @@ func init() {
 }
 
 // loadBuiltins reads every blueprint built into the binary.
-func loadBuiltins() (map[config.Kind]*Def, error) {
+func loadBuiltins() (map[config.Blueprint]*Def, error) {
 	builtins, err := embeddedBlueprints()
 	if err != nil {
 		return nil, err
 	}
-	out := map[config.Kind]*Def{}
+	out := map[config.Blueprint]*Def{}
 	for _, b := range builtins {
 		hasTemplate := func(file string) bool {
 			_, err := fs.Stat(embeddedTemplates, b.Name+"/"+file)
@@ -211,12 +211,12 @@ func loadBuiltins() (map[config.Kind]*Def, error) {
 		if err != nil {
 			return nil, err
 		}
-		kind := config.Kind(b.Name)
-		if extra, ok := reservedExtras[kind]; ok {
+		blueprint := config.Blueprint(b.Name)
+		if extra, ok := reservedExtras[blueprint]; ok {
 			extra(d)
 		}
 		d.Reserved = true
-		out[kind] = d
+		out[blueprint] = d
 	}
 	return out, nil
 }
@@ -224,11 +224,11 @@ func loadBuiltins() (map[config.Kind]*Def, error) {
 // For is a kind's record, and false for a kind this toolkit does not know.
 // A core blueprint is read from the catalog cache the first time any is
 // asked for.
-func For(kind config.Kind) (*Def, bool) {
+func For(blueprint config.Blueprint) (*Def, bool) {
 	mu.RLock()
-	d, ok := defs[kind]
+	d, ok := defs[blueprint]
 	mu.RUnlock()
-	if ok || strings.Contains(string(kind), "/") {
+	if ok || strings.Contains(string(blueprint), "/") {
 		return d, ok
 	}
 	if LoadCore("") != nil {
@@ -236,15 +236,15 @@ func For(kind config.Kind) (*Def, bool) {
 	}
 	mu.RLock()
 	defer mu.RUnlock()
-	d, ok = defs[kind]
+	d, ok = defs[blueprint]
 	return d, ok
 }
 
 // of is a kind's record, or an empty one for a kind this toolkit does not
 // know, so that every question asked of an unknown kind has the zero answer.
 // validate refuses the unknown kind itself.
-func of(kind config.Kind) *Def {
-	if d, ok := For(kind); ok {
+func of(blueprint config.Blueprint) *Def {
+	if d, ok := For(blueprint); ok {
 		return d
 	}
 	return &Def{}
@@ -252,8 +252,8 @@ func of(kind config.Kind) *Def {
 
 // Builtin is every reserved and core blueprint, sorted, and none a
 // configuration's catalogs added.
-func Builtin() []config.Kind {
-	var out []config.Kind
+func Builtin() []config.Blueprint {
+	var out []config.Blueprint
 	for _, k := range known() {
 		if !strings.Contains(string(k), "/") {
 			out = append(out, k)
@@ -264,11 +264,11 @@ func Builtin() []config.Kind {
 
 // known is every kind with a record, sorted. The core blueprints are read
 // first, so it holds them.
-func known() []config.Kind {
+func known() []config.Blueprint {
 	LoadCore("")
 	mu.RLock()
 	defer mu.RUnlock()
-	out := make([]config.Kind, 0, len(defs))
+	out := make([]config.Blueprint, 0, len(defs))
 	for k := range defs {
 		out = append(out, k)
 	}
@@ -278,44 +278,44 @@ func known() []config.Kind {
 
 // Port is the port a kind listens on, which is also the port it publishes on
 // its site's mesh address.
-func Port(kind config.Kind) int { return of(kind).Port }
+func Port(blueprint config.Blueprint) int { return of(blueprint).Port }
 
 // SettingKeys is every passthrough key a setting owns, for a kind.
-func SettingKeys(kind config.Kind) []SettingKey {
-	return append([]SettingKey(nil), of(kind).SettingKeys...)
+func SettingKeys(blueprint config.Blueprint) []SettingKey {
+	return append([]SettingKey(nil), of(blueprint).SettingKeys...)
 }
 
 // OmittedKeys is every key a kind's template leaves out on purpose.
-func OmittedKeys(kind config.Kind) []OmittedKey {
-	return append([]OmittedKey(nil), of(kind).OmittedKeys...)
+func OmittedKeys(blueprint config.Blueprint) []OmittedKey {
+	return append([]OmittedKey(nil), of(blueprint).OmittedKeys...)
 }
 
 // AppSecrets is a kind's own generated secrets, in the order they are
 // generated.
-func AppSecrets(kind config.Kind) []string {
-	return append([]string(nil), of(kind).AppSecrets...)
+func AppSecrets(blueprint config.Blueprint) []string {
+	return append([]string(nil), of(blueprint).AppSecrets...)
 }
 
 // RequiredSecrets is the app secrets a kind cannot start without.
-func RequiredSecrets(kind config.Kind) []RequiredSecret {
-	return append([]RequiredSecret(nil), of(kind).RequiredSecrets...)
+func RequiredSecrets(blueprint config.Blueprint) []RequiredSecret {
+	return append([]RequiredSecret(nil), of(blueprint).RequiredSecrets...)
 }
 
 // SelfRotated is the app secrets of a kind that `secrets rotate` replaces by
 // re-rendering the app's own stack.
-func SelfRotated(kind config.Kind) []string {
-	return append([]string(nil), of(kind).SelfRotated...)
+func SelfRotated(blueprint config.Blueprint) []string {
+	return append([]string(nil), of(blueprint).SelfRotated...)
 }
 
 // SelfRotatedKind is the kind whose secret key is, for each key `secrets
 // rotate` replaces by re-rendering the app's own stack, and false for any
 // other key. No two kinds share such a key (TestSelfRotatedSecretsAreUnique),
 // so the answer is one kind.
-func SelfRotatedKind(key string) (config.Kind, bool) {
-	for _, kind := range known() {
-		for _, k := range of(kind).SelfRotated {
+func SelfRotatedBlueprint(key string) (config.Blueprint, bool) {
+	for _, blueprint := range known() {
+		for _, k := range of(blueprint).SelfRotated {
 			if k == key {
-				return kind, true
+				return blueprint, true
 			}
 		}
 	}

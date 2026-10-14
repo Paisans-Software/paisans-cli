@@ -134,19 +134,19 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 	}
 	sort.Strings(apps)
 	for _, name := range apps {
-		kind := cfg.Apps[name].Kind
-		owner := fmt.Sprintf("app %s (%s)", name, kind)
+		blueprint := cfg.Apps[name].Blueprint
+		owner := fmt.Sprintf("app %s (%s)", name, blueprint)
 		// With managed_by: external the app is published on listen alone, for
 		// the operator's own web server; nothing dials its mesh address.
 		if host, port, ok := ExternalListen(cfg, name); ok {
 			add(owner, fmt.Sprintf("sites.%s.web_server.listen", site), "tcp", host, port)
-		} else if port := blueprints.Port(kind); port != 0 {
+		} else if port := blueprints.Port(blueprint); port != 0 {
 			add(owner, "apps."+name, "tcp", addr, port)
 		}
-		for _, svc := range blueprints.ServicePorts(kind) {
+		for _, svc := range blueprints.ServicePorts(blueprint) {
 			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
 		}
-		if kind == config.KindPocketID {
+		if blueprint == config.BlueprintPocketID {
 			add(owner+" admin reconciler", "apps."+name, "tcp", addr, reconcilerPort)
 		}
 	}

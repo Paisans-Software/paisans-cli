@@ -36,8 +36,8 @@ const MediaSuffix = "-media"
 
 // HostnameRoles returns the roles a kind understands, sorted, always including
 // the primary.
-func HostnameRoles(kind config.Kind) []string {
-	out := append([]string{PrimaryRole}, of(kind).HostnameRoles...)
+func HostnameRoles(blueprint config.Blueprint) []string {
+	out := append([]string{PrimaryRole}, of(blueprint).HostnameRoles...)
 	sort.Strings(out)
 	return out
 }
@@ -49,8 +49,8 @@ func HostnameRoles(kind config.Kind) []string {
 func ExtraRoles() []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, kind := range known() {
-		for _, role := range of(kind).HostnameRoles {
+	for _, blueprint := range known() {
+		for _, role := range of(blueprint).HostnameRoles {
 			if !seen[role] {
 				seen[role] = true
 				out = append(out, role)
@@ -62,11 +62,11 @@ func ExtraRoles() []string {
 }
 
 // HasHostnameRole reports whether a kind understands a role.
-func HasHostnameRole(kind config.Kind, role string) bool {
+func HasHostnameRole(blueprint config.Blueprint, role string) bool {
 	if role == PrimaryRole {
 		return true
 	}
-	for _, r := range of(kind).HostnameRoles {
+	for _, r := range of(blueprint).HostnameRoles {
 		if r == role {
 			return true
 		}
@@ -103,7 +103,7 @@ func SnippetFor(role string) string {
 // with another app's hostname), and internal/validate refuses those by the
 // key an operator has to edit, which this package cannot name.
 func MediaHostname(cfg *config.Config, app config.App) string {
-	if !HasHostnameRole(app.Kind, MediaRole) || !InObjectStorage(cfg, app) {
+	if !HasHostnameRole(app.Blueprint, MediaRole) || !InObjectStorage(cfg, app) {
 		return ""
 	}
 	domain := cfg.Community.Domain
@@ -122,5 +122,5 @@ func MediaHostname(cfg *config.Config, app config.App) string {
 // say which one the operator has to change. False for an app with no media
 // hostname at all.
 func MediaHostnameIsDerived(cfg *config.Config, app config.App) bool {
-	return HasHostnameRole(app.Kind, MediaRole) && InObjectStorage(cfg, app) && strings.TrimSpace(app.Hostnames[MediaRole]) == ""
+	return HasHostnameRole(app.Blueprint, MediaRole) && InObjectStorage(cfg, app) && strings.TrimSpace(app.Hostnames[MediaRole]) == ""
 }

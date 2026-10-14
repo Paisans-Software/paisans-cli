@@ -75,7 +75,7 @@ func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Boots
 	}
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Placement.Mode != config.PlacementCluster || !blueprints.UsesPostgres(app.Kind) {
+		if app.Placement.Mode != config.PlacementCluster || !blueprints.UsesPostgres(app.Blueprint) {
 			continue
 		}
 		id := render.DBIdentifier(name)

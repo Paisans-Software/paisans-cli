@@ -8,7 +8,7 @@ import "github.com/paisans-software/paisans-stack/internal/config"
 // A kind like that is pinned only for that reason, and an app's `storage`
 // key has nothing to choose between for it: local is accepted, because it is
 // what the kind does anyway, and s3 is refused.
-func KeepsFilesOnlyLocally(kind config.Kind) bool { return of(kind).LocalFilesOnly }
+func KeepsFilesOnlyLocally(blueprint config.Blueprint) bool { return of(blueprint).LocalFilesOnly }
 
 // InObjectStorage reports whether an app keeps its files in the deployment's
 // Garage, which is what decides whether it has a bucket, a key, a media
@@ -26,7 +26,7 @@ func KeepsFilesOnlyLocally(kind config.Kind) bool { return of(kind).LocalFilesOn
 // under cluster placement, whether written or the default, and s3 with no
 // Garage site.
 func InObjectStorage(cfg *config.Config, app config.App) bool {
-	if !UsesObjectStorage(app.Kind) {
+	if !UsesObjectStorage(app.Blueprint) {
 		return false
 	}
 	switch app.Storage {
@@ -42,7 +42,7 @@ func InObjectStorage(cfg *config.Config, app config.App) bool {
 // its own site's disk instead, by `storage: local` or by the default in a
 // deployment with no Garage.
 func KeepsFilesLocally(cfg *config.Config, app config.App) bool {
-	return UsesObjectStorage(app.Kind) && !InObjectStorage(cfg, app)
+	return UsesObjectStorage(app.Blueprint) && !InObjectStorage(cfg, app)
 }
 
 // LocalMediaPaths is the paths an app's locally kept files are served on,
@@ -56,5 +56,5 @@ func LocalMediaPaths(cfg *config.Config, app config.App) []string {
 	if !KeepsFilesLocally(cfg, app) {
 		return nil
 	}
-	return append([]string(nil), of(app.Kind).LocalMediaPaths...)
+	return append([]string(nil), of(app.Blueprint).LocalMediaPaths...)
 }

@@ -53,7 +53,7 @@ func Settings(cfg *config.Config, probes []SettingsProbe) []Finding {
 	for _, p := range probes {
 		app := cfg.Apps[p.App]
 		wanted := blueprints.GateSettingsFor(app)
-		live, ok := blueprints.LiveSettingsFor(app.Kind)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		if len(wanted) == 0 || !ok {
 			continue
 		}

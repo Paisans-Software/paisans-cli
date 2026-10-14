@@ -261,7 +261,7 @@ func gatherSettings(cfg *config.Config, reached map[string]bool, transports map[
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
 		wanted := blueprints.GateSettingsFor(app)
-		live, ok := blueprints.LiveSettingsFor(app.Kind)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		if len(wanted) == 0 || !ok {
 			continue
 		}

@@ -86,8 +86,8 @@ func BlueprintName(name string) bool { return blueprintName.MatchString(name) }
 // ("example/blueprints", "journal"), `notes/journal` is ("notes", "journal"),
 // and an unqualified `mbin` is ("", "mbin"), which always means the built in
 // blueprints.
-func SplitBlueprint(kind Kind) (catalog, name string) {
-	s := string(kind)
+func SplitBlueprint(blueprint Blueprint) (catalog, name string) {
+	s := string(blueprint)
 	if i := strings.LastIndex(s, "/"); i >= 0 {
 		return s[:i], s[i+1:]
 	}
@@ -119,28 +119,28 @@ func (c *Config) catalogProblems() []string {
 		}
 	}
 	for _, name := range c.AppNames() {
-		kind := c.Apps[name].Kind
-		if kind == "" {
+		blueprint := c.Apps[name].Blueprint
+		if blueprint == "" {
 			continue
 		}
-		catalog, bp := SplitBlueprint(kind)
+		catalog, bp := SplitBlueprint(blueprint)
 		key := "apps." + name + ".blueprint"
 		switch {
-		case strings.Count(string(kind), "/") > 2 || !blueprintName.MatchString(bp):
-			add("%s: %q is not a blueprint name. Write a built in one (mbin) or one from a declared catalog (example/blueprints/journal).", key, kind)
+		case strings.Count(string(blueprint), "/") > 2 || !blueprintName.MatchString(bp):
+			add("%s: %q is not a blueprint name. Write a built in one (mbin) or one from a declared catalog (example/blueprints/journal).", key, blueprint)
 		case catalog == "":
 			// A reserved or core blueprint. Which the core catalog holds is
 			// known only once its pin is read, so ResolveBlueprints says
 			// whether this one is among them.
 		case catalog == CoreCatalog:
-			add("%s: %q names the core catalog, whose blueprints are written unqualified: %s.", key, kind, bp)
+			add("%s: %q names the core catalog, whose blueprints are written unqualified: %s.", key, blueprint, bp)
 		default:
 			if _, ok := c.Catalogs[catalog]; !ok {
 				how := "paisans catalog add " + catalog + " <url>"
 				if strings.Contains(catalog, "/") {
 					how = "paisans catalog add " + catalog + "`, which reads https://github.com/" + strings.Replace(catalog, "/", "/"+CatalogRepoPrefix, 1) + ", or `paisans catalog add " + catalog + " <url>"
 				}
-				add("%s: %q names the catalog %q, which catalogs does not declare. Add it with `%s`.", key, kind, catalog, how)
+				add("%s: %q names the catalog %q, which catalogs does not declare. Add it with `%s`.", key, blueprint, catalog, how)
 			}
 		}
 	}

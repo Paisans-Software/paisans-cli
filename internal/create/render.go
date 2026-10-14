@@ -134,14 +134,14 @@ func build(a Answers, id string) view {
 	// provides it, through the setting the blueprint names.
 	providers := map[string]string{}
 	for _, app := range a.Apps {
-		for _, role := range blueprints.Provides(app.Kind) {
+		for _, role := range blueprints.Provides(app.Blueprint) {
 			providers[role] = app.Hostname
 		}
 	}
 	objects := false
 	for _, app := range a.Apps {
 		av := appView{App: app}
-		for _, c := range blueprints.Consumes(app.Kind) {
+		for _, c := range blueprints.Consumes(app.Blueprint) {
 			if host, ok := providers[c.Role]; ok {
 				if av.Links == nil {
 					av.Links = map[string]string{}
@@ -150,16 +150,16 @@ func build(a Answers, id string) view {
 			}
 		}
 		switch {
-		case app.Kind == config.KindUptime && monitor != "":
+		case app.Blueprint == config.BlueprintUptime && monitor != "":
 			av.Placement = pinned(monitor)
 		case placedApart(app.Key):
 			av.Placement = pinned(siteFor(app.Key, sites, pinTo))
-		case blueprints.UsesPostgres(app.Kind) && len(data) > 0:
+		case blueprints.UsesPostgres(app.Blueprint) && len(data) > 0:
 			// Clustered whenever any site holds data, so that adding a data
 			// site later is an addition rather than a move. A clustered app
 			// keeps its files in object storage when its blueprint can.
 			av.Placement = "cluster"
-			if blueprints.UsesObjectStorage(app.Kind) {
+			if blueprints.UsesObjectStorage(app.Blueprint) {
 				objects = true
 			}
 		default:

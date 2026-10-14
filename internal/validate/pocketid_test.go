@@ -214,7 +214,7 @@ func TestPocketIDAdminUsername(t *testing.T) {
 	}
 
 	for name, app := range cfg.Apps {
-		if app.Kind == config.KindPocketID {
+		if app.Blueprint == config.BlueprintPocketID {
 			delete(cfg.Apps, name)
 		}
 	}

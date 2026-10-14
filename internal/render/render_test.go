@@ -236,7 +236,7 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 	}
 
 	wiki := files["home-a/srv/paisans/f2a9/wiki/compose.yaml"]
-	fallback, ok := blueprints.DefaultImage(config.Kind("wikijs"), "app")
+	fallback, ok := blueprints.DefaultImage(config.Blueprint("wikijs"), "app")
 	if !ok {
 		t.Fatal("wikijs ships no default image")
 	}
@@ -280,7 +280,7 @@ func TestRenderedImagesArePinned(t *testing.T) {
 // that can only render an .env cannot configure two of the five kinds here.
 // WriteFreely reads an INI file and Synapse reads homeserver.yaml, and both
 // carry credentials, so both must be rendered and both must be 0600.
-func TestTemplateSetsRenderEachKindsOwnFiles(t *testing.T) {
+func TestTemplateSetsRenderEachBlueprintsOwnFiles(t *testing.T) {
 	files := map[string]render.File{}
 	for _, f := range build(t).Files {
 		files[f.Path] = f
@@ -863,14 +863,14 @@ func walk(t *testing.T, root string) map[string]string {
 // stay on the machine that wrote them, where every test passes, and a fresh
 // checkout renders a stack with no environment at all. Reading the embedded
 // filesystem catches it, because embed sees exactly what git checked out.
-func TestEveryKindShipsACommittedTemplateSet(t *testing.T) {
-	for _, kind := range []config.Kind{
-		config.Kind("mbin"), config.Kind("wikijs"), config.KindPocketID,
-		config.Kind("synapse"), config.Kind("writefreely"), config.KindInvite,
+func TestEveryBlueprintShipsACommittedTemplateSet(t *testing.T) {
+	for _, blueprint := range []config.Blueprint{
+		config.Blueprint("mbin"), config.Blueprint("wikijs"), config.BlueprintPocketID,
+		config.Blueprint("synapse"), config.Blueprint("writefreely"), config.BlueprintInvite,
 	} {
-		files, err := render.TemplateSet(kind)
+		files, err := render.TemplateSet(blueprint)
 		if err != nil {
-			t.Errorf("%s: %v", kind, err)
+			t.Errorf("%s: %v", blueprint, err)
 			continue
 		}
 		var compose, config bool
@@ -885,10 +885,10 @@ func TestEveryKindShipsACommittedTemplateSet(t *testing.T) {
 			}
 		}
 		if !compose {
-			t.Errorf("%s ships no compose template", kind)
+			t.Errorf("%s ships no compose template", blueprint)
 		}
 		if !config {
-			t.Errorf("%s ships no configuration template, so the stack would start unconfigured. Check that it is committed: the repository ignores .env.*", kind)
+			t.Errorf("%s ships no configuration template, so the stack would start unconfigured. Check that it is committed: the repository ignores .env.*", blueprint)
 		}
 	}
 }
@@ -1886,13 +1886,13 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 	for _, o := range owners {
 		var app string
 		for _, name := range cfg.AppNames() {
-			if cfg.Apps[name].Kind == o.Kind {
+			if cfg.Apps[name].Blueprint == o.Blueprint {
 				app = name
 				break
 			}
 		}
 		if app == "" {
-			t.Errorf("the fixture declares no %s app, so the entry for %s cannot be checked", o.Kind, o.Key)
+			t.Errorf("the fixture declares no %s app, so the entry for %s cannot be checked", o.Blueprint, o.Key)
 			continue
 		}
 
@@ -1928,7 +1928,7 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 			return ""
 		}
 
-		if o.Kind == config.KindPocketID && o.Setting == blueprints.PocketIDAccountEditSetting {
+		if o.Blueprint == config.BlueprintPocketID && o.Setting == blueprints.PocketIDAccountEditSetting {
 			if got := line(true); got != "ALLOW_OWN_ACCOUNT_EDIT=false" {
 				t.Errorf("allow_own_account_edit set true rendered %q", got)
 			}
@@ -1936,7 +1936,7 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 		}
 		changed := line("owner-check-a") != line("owner-check-b") || line(true) != line(false)
 		if !changed {
-			t.Errorf("%s says settings.%s owns %s in %s, but changing the setting does not change that line", o.Kind, o.Setting, o.Key, o.File)
+			t.Errorf("%s says settings.%s owns %s in %s, but changing the setting does not change that line", o.Blueprint, o.Setting, o.Key, o.File)
 		}
 	}
 }
@@ -2853,18 +2853,18 @@ func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
 // drop the filter, and an ActivityPub Accept header would then reach every
 // HTML and API route unfiltered, so every kind that can be gated while it
 // federates must carry it.
-func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
-	for _, kind := range blueprints.Builtin() {
-		spec := blueprints.GateFor(kind)
+func TestAFederatingBlueprintsSnippetTakesTheFilter(t *testing.T) {
+	for _, blueprint := range blueprints.Builtin() {
+		spec := blueprints.GateFor(blueprint)
 		if !spec.Gateable || spec.SignedFetch == nil {
 			continue
 		}
-		body, err := fs.ReadFile(blueprints.Templates, string(kind)+"/caddy.snippet.tmpl")
+		body, err := fs.ReadFile(blueprints.Templates, string(blueprint)+"/caddy.snippet.tmpl")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !regexp.MustCompile(`(?m)^\t\{block\}$`).Match(body) {
-			t.Errorf("%s federates and can be gated, but its snippet has no {block} inside reverse_proxy for the ActivityPub filter", kind)
+			t.Errorf("%s federates and can be gated, but its snippet has no {block} inside reverse_proxy for the ActivityPub filter", blueprint)
 		}
 	}
 }

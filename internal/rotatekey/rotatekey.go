@@ -164,8 +164,8 @@ func Build(opts Options) (*Plan, error) {
 	if !ok {
 		return nil, fmt.Errorf("storage rotate-key: the configuration declares no app %q. Declared apps are %s", opts.App, strings.Join(cfg.AppNames(), ", "))
 	}
-	if !blueprints.UsesObjectStorage(app.Kind) {
-		return nil, fmt.Errorf("storage rotate-key: %s is %s, which stores no objects, so it has no Garage key to rotate", opts.App, app.Kind)
+	if !blueprints.UsesObjectStorage(app.Blueprint) {
+		return nil, fmt.Errorf("storage rotate-key: %s is %s, which stores no objects, so it has no Garage key to rotate", opts.App, app.Blueprint)
 	}
 	if !blueprints.InObjectStorage(cfg, app) {
 		return nil, fmt.Errorf("storage rotate-key: %s keeps its files on its own disk (storage: local, or no Garage in the deployment), so it has no Garage key to rotate", opts.App)

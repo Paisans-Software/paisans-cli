@@ -61,7 +61,7 @@ func Path(d deployment.Deployment) string {
 func FromConfig(cfg *config.Config) Record {
 	r := Record{Sites: cfg.SiteNames(), Apps: cfg.AppNames()}
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			r.PocketIDGroups = append(r.PocketIDGroups, blueprints.PocketIDSignupGroups(cfg.Apps[name].Settings)...)
 		}
 	}

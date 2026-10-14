@@ -77,7 +77,7 @@ func SiteNetworks(cfg *config.Config, site string) []Network {
 	for _, name := range cfg.PinnedTo(site) {
 		if _, _, ok := ExternalListen(cfg, name); ok {
 			out = append(out, Network{
-				Owner:   fmt.Sprintf("app %s (%s)", name, cfg.Apps[name].Kind),
+				Owner:   fmt.Sprintf("app %s (%s)", name, cfg.Apps[name].Blueprint),
 				Key:     fmt.Sprintf("sites.%s.web_server", site),
 				Subnet:  WebServerNetwork,
 				Project: cfg.Deployment().Project(name),

@@ -112,14 +112,14 @@ func runAdminMagicLink(args []string) error {
 func magicLinkApp(cfg *config.Config, named string) (string, error) {
 	var pids []string
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			pids = append(pids, name)
 		}
 	}
 	sort.Strings(pids)
 	switch {
 	case named != "":
-		if cfg.Apps[named].Kind != config.KindPocketID {
+		if cfg.Apps[named].Blueprint != config.BlueprintPocketID {
 			return "", &ui.Problem{Hint: named + " is not a Pocket ID app", Explain: "--app names the Pocket ID app to issue the link at: " + strings.Join(pids, ", ") + "."}
 		}
 		return named, nil

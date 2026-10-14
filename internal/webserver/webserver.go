@@ -63,7 +63,7 @@ func For(cfg *config.Config, app string) (Target, error) {
 		return Target{}, fmt.Errorf("web-server: %s is served by the gateway's Caddy, which the toolkit runs, so there is nothing to hand off. Only an app pinned to a site holding the monitor role has one", app)
 	}
 	s := cfg.Sites[site]
-	health, _ := blueprints.HealthFor(a.Kind)
+	health, _ := blueprints.HealthFor(a.Blueprint)
 	t := Target{
 		App: app, Site: site, Hostname: a.Hostname, Mode: s.WebServerManagedBy(),
 		PublicAddress: s.PublicAddress, PublicAddress6: s.PublicAddress6,

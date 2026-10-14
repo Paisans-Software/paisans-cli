@@ -12,7 +12,7 @@ import (
 func (c *checker) inviteApps() []string {
 	var out []string
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindInvite {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintInvite {
 			out = append(out, name)
 		}
 	}
@@ -35,7 +35,7 @@ func (c *checker) inviteIdentityApp() {
 	for _, name := range c.inviteApps() {
 		idp, _ := c.cfg.Apps[name].Settings["identity_app"].(string)
 		app, ok := c.cfg.Apps[idp]
-		if !ok || app.Kind != config.KindPocketID {
+		if !ok || app.Blueprint != config.BlueprintPocketID {
 			c.refuse("invite-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
 				"identity_app must name a pocket-id app",
 				"is %q, which is not a pocket-id app in this configuration. The invite service creates each approved member's account at the pocket-id app named here, and signs members in through it.", idp)

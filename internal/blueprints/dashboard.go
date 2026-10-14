@@ -16,8 +16,8 @@ const DashboardLinkSetting = "sso_dashboard_link"
 // DashboardPath is the path on an app's own hostname that the identity
 // provider's dashboard tile opens, for a kind that knows a better one than
 // its front page. Every other kind gets "/".
-func DashboardPath(kind config.Kind) string {
-	if p := of(kind).DashboardPath; p != "" {
+func DashboardPath(blueprint config.Blueprint) string {
+	if p := of(blueprint).DashboardPath; p != "" {
 		return p
 	}
 	return "/"
@@ -45,9 +45,9 @@ func IsGenericSetting(key string) bool { return slices.Contains(genericSettings,
 // empty. A bare "/" gives https://<hostname> with no trailing slash, which is
 // what this toolkit sent before it knew any path, so a client made then is
 // already right and no update is planned for it.
-func LaunchURL(kind config.Kind, hostname, link string) string {
+func LaunchURL(blueprint config.Blueprint, hostname, link string) string {
 	if link == "" {
-		link = DashboardPath(kind)
+		link = DashboardPath(blueprint)
 	}
 	if link == "/" {
 		return "https://" + hostname
@@ -66,9 +66,9 @@ func LaunchURL(kind config.Kind, hostname, link string) string {
 // A value is added here only when a release has actually sent it. Widening
 // this list is the one way a toolkit change could overwrite an operator's
 // choice, so it is a list of observed defaults, not a pattern.
-func ToolkitLaunchURLs(kind config.Kind, hostname string) []string {
+func ToolkitLaunchURLs(blueprint config.Blueprint, hostname string) []string {
 	out := []string{"https://" + hostname}
-	if d := LaunchURL(kind, hostname, ""); d != out[0] {
+	if d := LaunchURL(blueprint, hostname, ""); d != out[0] {
 		out = append(out, d)
 	}
 	return out

@@ -522,7 +522,7 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		case "admins_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
 			return secretsrotate.ContinuityHeartbeat(app, last), nil
 		}
-		if _, ok := secretsrotate.AppSelfKind(last); ok {
+		if _, ok := secretsrotate.AppSelfBlueprint(last); ok {
 			return secretsrotate.AppSelf(app, last, costOf(w.cfg, app, last)), nil
 		}
 	}
@@ -537,11 +537,11 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 	if cfg == nil {
 		return nil, nil, false
 	}
-	kind := cfg.Apps[app].Kind
-	if slices.Contains(blueprints.SecretGroups(kind), key) {
+	blueprint := cfg.Apps[app].Blueprint
+	if slices.Contains(blueprints.SecretGroups(blueprint), key) {
 		return secretsrotate.AppGroup(cfg, app, key), nil, true
 	}
-	spec, ok := blueprints.SecretOf(kind, key)
+	spec, ok := blueprints.SecretOf(blueprint, key)
 	switch {
 	case !ok:
 		return nil, nil, false
@@ -593,10 +593,10 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	var rs []secretsrotate.Rotator
 	var kept []keptSecret
 	has := func(path string) bool { v, ok := s.Get(path); return ok && v != "" }
-	appsOf := func(kind config.Kind) []string {
+	appsOf := func(blueprint config.Blueprint) []string {
 		var out []string
 		for _, name := range cfg.AppNames() {
-			if cfg.Apps[name].Kind == kind {
+			if cfg.Apps[name].Blueprint == blueprint {
 				out = append(out, name)
 			}
 		}
@@ -607,9 +607,9 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	// signing keys, early; those that only restart a stack go last.
 	self := func(cost string) {
 		for _, app := range cfg.AppNames() {
-			kind := cfg.Apps[app].Kind
-			for _, key := range blueprints.SelfRotated(kind) {
-				if spec, _ := blueprints.SecretOf(kind, key); spec.RotationCost == cost && has("apps."+app+"."+key) {
+			blueprint := cfg.Apps[app].Blueprint
+			for _, key := range blueprints.SelfRotated(blueprint) {
+				if spec, _ := blueprints.SecretOf(blueprint, key); spec.RotationCost == cost && has("apps."+app+"."+key) {
 					rs = append(rs, secretsrotate.AppSelf(app, key, secretsrotate.CostOf(cfg, app, key)))
 				}
 			}
@@ -646,9 +646,9 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	// Each unit of secrets a blueprint groups.
 	for _, app := range cfg.AppNames() {
-		groups := blueprints.SecretGroups(cfg.Apps[app].Kind)
+		groups := blueprints.SecretGroups(cfg.Apps[app].Blueprint)
 		for _, group := range groups {
-			if members := blueprints.SecretGroup(cfg.Apps[app].Kind, group); has("apps." + app + "." + members[0].Name) {
+			if members := blueprints.SecretGroup(cfg.Apps[app].Blueprint, group); has("apps." + app + "." + members[0].Name) {
 				rs = append(rs, secretsrotate.AppGroup(cfg, app, group))
 			}
 		}
@@ -660,7 +660,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 	}
 	self("")
-	for _, app := range appsOf(config.KindUptime) {
+	for _, app := range appsOf(config.BlueprintUptime) {
 		if has("apps." + app + ".admin_password") {
 			rs = append(rs, secretsrotate.UptimeAdmin(app))
 		}
@@ -673,15 +673,15 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 	}
 	for _, app := range cfg.AppNames() {
-		if blueprints.UsesPostgres(cfg.Apps[app].Kind) && has("apps."+app+".database_password") {
+		if blueprints.UsesPostgres(cfg.Apps[app].Blueprint) && has("apps."+app+".database_password") {
 			rs = append(rs, secretsrotate.AppDatabase(app))
 		}
 	}
 	// Each secret a blueprint changes inside the running app.
 	for _, app := range cfg.AppNames() {
-		kind := cfg.Apps[app].Kind
-		for _, key := range blueprints.AppSecrets(kind) {
-			if spec, _ := blueprints.SecretOf(kind, key); spec.Rotate != nil && has("apps."+app+"."+key) {
+		blueprint := cfg.Apps[app].Blueprint
+		for _, key := range blueprints.AppSecrets(blueprint) {
+			if spec, _ := blueprints.SecretOf(blueprint, key); spec.Rotate != nil && has("apps."+app+"."+key) {
 				rs = append(rs, secretsrotate.InApp(cfg, app, key))
 			}
 		}
@@ -700,7 +700,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			rs = append(rs, secretsrotate.Heartbeat(site))
 		}
 	}
-	for _, app := range appsOf(config.KindPocketID) {
+	for _, app := range appsOf(config.BlueprintPocketID) {
 		for _, key := range secretsrotate.ContinuityHeartbeats {
 			if has("apps." + app + "." + key) {
 				rs = append(rs, secretsrotate.ContinuityHeartbeat(app, key))
@@ -710,9 +710,9 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 
 	// Each secret a blueprint says is never rotated, with why.
 	for _, app := range cfg.AppNames() {
-		kind := cfg.Apps[app].Kind
-		for _, key := range blueprints.AppSecrets(kind) {
-			if spec, _ := blueprints.SecretOf(kind, key); spec.NeverRotate != "" && has("apps."+app+"."+key) {
+		blueprint := cfg.Apps[app].Blueprint
+		for _, key := range blueprints.AppSecrets(blueprint) {
+			if spec, _ := blueprints.SecretOf(blueprint, key); spec.NeverRotate != "" && has("apps."+app+"."+key) {
 				kept = append(kept, keptSecret{"apps." + app + "." + key, spec.NeverRotate})
 			}
 		}

@@ -22,11 +22,11 @@ type Health struct {
 // recalled. A kind with no health route of its own gets `/`, which is a
 // deeper check than a health route (it renders a page) and is said so in its
 // record.
-func HealthFor(kind config.Kind) (Health, bool) {
-	h := of(kind).Health
+func HealthFor(blueprint config.Blueprint) (Health, bool) {
+	h := of(blueprint).Health
 	return h, h.Path != ""
 }
 
 // HealthOf is a kind's health declaration whatever it holds, for the uptime
 // seed, which checks a kind with no route by the fallback.
-func HealthOf(kind config.Kind) Health { return of(kind).Health }
+func HealthOf(blueprint config.Blueprint) Health { return of(blueprint).Health }

@@ -40,7 +40,7 @@ var mu sync.RWMutex
 
 // sources is, for each kind read from a catalog, the directory holding its
 // blueprint: its templates are read from there.
-var sources = map[config.Kind]string{}
+var sources = map[config.Blueprint]string{}
 
 // catalogFile is a catalog's catalog.yaml.
 type catalogFile struct {
@@ -434,18 +434,18 @@ func resolve(cfg *config.Config) []string {
 	}
 
 	for _, app := range cfg.AppNames() {
-		kind := cfg.Apps[app].Kind
-		catalog, name := config.SplitBlueprint(kind)
+		blueprint := cfg.Apps[app].Blueprint
+		catalog, name := config.SplitBlueprint(blueprint)
 		key := "apps." + app + ".blueprint"
 		if catalog == "" {
-			if _, ok := For(kind); !ok {
+			if _, ok := For(blueprint); !ok {
 				reserved, core := BuiltinNames()
-				problems = append(problems, fmt.Sprintf("%s: unknown blueprint %q. The reserved ones are %s, the core catalog's are %s, and one from a catalog is written <catalog>/<name>.", key, kind, strings.Join(reserved, ", "), strings.Join(core, ", ")))
+				problems = append(problems, fmt.Sprintf("%s: unknown blueprint %q. The reserved ones are %s, the core catalog's are %s, and one from a catalog is written <catalog>/<name>.", key, blueprint, strings.Join(reserved, ", "), strings.Join(core, ", ")))
 			}
 			continue
 		}
 		if reservedName(name) {
-			problems = append(problems, fmt.Sprintf("%s: %q takes the name of a reserved blueprint, which no catalog may provide. The identity provider, the gate, the invite service and the monitor are built into the toolkit.", key, kind))
+			problems = append(problems, fmt.Sprintf("%s: %q takes the name of a reserved blueprint, which no catalog may provide. The identity provider, the gate, the invite service and the monitor are built into the toolkit.", key, blueprint))
 			continue
 		}
 		dir, ok := fetch(catalog)
@@ -457,7 +457,7 @@ func resolve(cfg *config.Config) []string {
 			problems = append(problems, fmt.Sprintf("%s: %v.", key, err))
 			continue
 		}
-		register(kind, d, filepath.Join(dir, "blueprints", name))
+		register(blueprint, d, filepath.Join(dir, "blueprints", name))
 	}
 	return problems
 }
@@ -466,24 +466,24 @@ func resolve(cfg *config.Config) []string {
 func reservedName(name string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
-	d, ok := defs[config.Kind(name)]
+	d, ok := defs[config.Blueprint(name)]
 	return ok && d.Reserved
 }
 
 // register records a blueprint read from a catalog.
-func register(kind config.Kind, d *Def, dir string) {
+func register(blueprint config.Blueprint, d *Def, dir string) {
 	mu.Lock()
 	defer mu.Unlock()
-	defs[kind] = d
-	sources[kind] = dir
+	defs[blueprint] = d
+	sources[blueprint] = dir
 }
 
 // Source is the directory a catalog blueprint was read from, and false for a
 // built in one.
-func Source(kind config.Kind) (string, bool) {
+func Source(blueprint config.Blueprint) (string, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
-	dir, ok := sources[kind]
+	dir, ok := sources[blueprint]
 	return dir, ok
 }
 
@@ -611,13 +611,13 @@ func snapshotDir(commit string) (string, bool) {
 func Snapshot(cfg *config.Config) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	for _, app := range cfg.AppNames() {
-		kind := cfg.Apps[app].Kind
-		catalog, name := config.SplitBlueprint(kind)
+		blueprint := cfg.Apps[app].Blueprint
+		catalog, name := config.SplitBlueprint(blueprint)
 		if catalog == "" {
 			catalog = config.CoreCatalog
 		}
 		cat := CorePin(cfg, catalog)
-		dir, fromCatalog := Source(kind)
+		dir, fromCatalog := Source(blueprint)
 		if !fromCatalog || cat.Commit == "" {
 			continue
 		}

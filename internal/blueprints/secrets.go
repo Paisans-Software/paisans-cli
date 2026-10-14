@@ -208,8 +208,8 @@ func snakeName(s string) bool {
 
 // SecretOf is how a kind's blueprint generates one of its secrets, and false
 // for a key it does not declare.
-func SecretOf(kind config.Kind, key string) (SecretSpec, bool) {
-	for _, s := range of(kind).Secrets {
+func SecretOf(blueprint config.Blueprint, key string) (SecretSpec, bool) {
+	for _, s := range of(blueprint).Secrets {
 		if s.Name == key {
 			return s, true
 		}
@@ -219,9 +219,9 @@ func SecretOf(kind config.Kind, key string) (SecretSpec, bool) {
 
 // SecretGroup is the secrets of a kind that rotate as the unit group, in the
 // blueprint's order.
-func SecretGroup(kind config.Kind, group string) []SecretSpec {
+func SecretGroup(blueprint config.Blueprint, group string) []SecretSpec {
 	var out []SecretSpec
-	for _, s := range of(kind).Secrets {
+	for _, s := range of(blueprint).Secrets {
 		if s.Group == group {
 			out = append(out, s)
 		}
@@ -231,9 +231,9 @@ func SecretGroup(kind config.Kind, group string) []SecretSpec {
 
 // SecretGroups is the units a kind's secrets rotate as, in the order their
 // first member appears.
-func SecretGroups(kind config.Kind) []string {
+func SecretGroups(blueprint config.Blueprint) []string {
 	var out []string
-	for _, s := range of(kind).Secrets {
+	for _, s := range of(blueprint).Secrets {
 		if s.Group != "" && !slices.Contains(out, s.Group) {
 			out = append(out, s.Group)
 		}

@@ -37,7 +37,7 @@ type ComposeImage struct {
 	Lines int
 
 	// kind is the app's kind, for Setting.
-	kind config.Kind
+	blueprint config.Blueprint
 }
 
 // Setting is the configuration key that decides Image, for a message that
@@ -52,7 +52,7 @@ func (c ComposeImage) Setting() string {
 		}
 		return ""
 	}
-	if len(c.Services) == 0 || !blueprints.Has(c.kind, c.Services[0]) {
+	if len(c.Services) == 0 || !blueprints.Has(c.blueprint, c.Services[0]) {
 		return ""
 	}
 	return fmt.Sprintf("apps.%s.images.%s", c.App, c.Services[0])
@@ -114,7 +114,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, kind: p.cfg.Apps[app].Kind})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {

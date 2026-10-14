@@ -109,10 +109,10 @@ func TestAConditionReadsTheApp(t *testing.T) {
 
 // Every reserved blueprint is marked reserved, and no core one is.
 func TestTheReservedBlueprintsAreTheFour(t *testing.T) {
-	want := map[config.Kind]bool{config.KindPocketID: true, config.KindOAuth2Proxy: true, config.KindInvite: true, config.KindUptime: true}
-	for _, kind := range known() {
-		if defs[kind].Reserved != want[kind] {
-			t.Errorf("%s reserved is %v", kind, defs[kind].Reserved)
+	want := map[config.Blueprint]bool{config.BlueprintPocketID: true, config.BlueprintOAuth2Proxy: true, config.BlueprintInvite: true, config.BlueprintUptime: true}
+	for _, blueprint := range known() {
+		if defs[blueprint].Reserved != want[blueprint] {
+			t.Errorf("%s reserved is %v", blueprint, defs[blueprint].Reserved)
 		}
 	}
 }

@@ -38,7 +38,7 @@ func TestExampleSecretsMatchAppSecretKeys(t *testing.T) {
 
 		if !equal(want, got) {
 			t.Errorf("apps.%s (kind %s): appSecretKeys wants %v, examples/secrets.example.yaml has %v",
-				name, cfg.Apps[name].Kind, want, got)
+				name, cfg.Apps[name].Blueprint, want, got)
 		}
 	}
 }
@@ -106,15 +106,15 @@ func TestExampleOIDCClientsCoverEveryApp(t *testing.T) {
 	}
 
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			continue // the identity provider has no client at itself
 		}
-		if cfg.Apps[name].Kind == config.Kind("element") {
+		if cfg.Apps[name].Blueprint == config.Blueprint("element") {
 			continue // a Matrix client authenticates at the homeserver, not here
 		}
 		if _, ok := secrets.OIDCClients[name]; !ok {
 			t.Errorf("apps.%s (kind %s): no oidc_clients entry in examples/secrets.example.yaml",
-				name, cfg.Apps[name].Kind)
+				name, cfg.Apps[name].Blueprint)
 		}
 	}
 }

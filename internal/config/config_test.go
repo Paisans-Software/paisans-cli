@@ -659,12 +659,12 @@ func TestTheGateIsDerivedWhenAnAppUsesIt(t *testing.T) {
 			t.Fatalf("%s: true derived no gate", key)
 		}
 		want := config.App{
-			Kind:      config.KindOAuth2Proxy,
+			Blueprint: config.BlueprintOAuth2Proxy,
 			Hostname:  "gate.example.org",
 			Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
 			Derived:   true,
 		}
-		if gate.Kind != want.Kind || gate.Hostname != want.Hostname || gate.Placement != want.Placement || !gate.Derived {
+		if gate.Blueprint != want.Blueprint || gate.Hostname != want.Hostname || gate.Placement != want.Placement || !gate.Derived {
 			t.Errorf("%s: true derived %+v, want %+v", key, gate, want)
 		}
 	}

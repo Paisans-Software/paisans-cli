@@ -62,7 +62,7 @@ func GateSettingsFor(app config.App) []GateSetting {
 		return nil
 	}
 	var out []GateSetting
-	for _, s := range of(app.Kind).GateSettings {
+	for _, s := range of(app.Blueprint).GateSettings {
 		if s.When(app) {
 			out = append(out, s)
 		}
@@ -73,8 +73,8 @@ func GateSettingsFor(app config.App) []GateSetting {
 
 // LiveSettingsFor is how to read a kind's gate settings in a running app,
 // false for a kind with none.
-func LiveSettingsFor(kind config.Kind) (LiveSettings, bool) {
-	l := of(kind).LiveSettings
+func LiveSettingsFor(blueprint config.Blueprint) (LiveSettings, bool) {
+	l := of(blueprint).LiveSettings
 	return l, l != nil
 }
 

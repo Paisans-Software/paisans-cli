@@ -52,7 +52,7 @@ func testCatalog(t *testing.T, extra map[string]string) (string, string) {
 func catalogConfig(url, commit, tag, blueprint string) *config.Config {
 	return &config.Config{
 		Catalogs: map[string]config.Catalog{"example": {URL: url, Commit: commit, Tag: tag}},
-		Apps:     map[string]config.App{"notes": {Kind: config.Kind(blueprint), Hostname: "notes.example.org"}},
+		Apps:     map[string]config.App{"notes": {Blueprint: config.Blueprint(blueprint), Hostname: "notes.example.org"}},
 	}
 }
 
@@ -181,7 +181,7 @@ func TestACorePinReplacesTheBuiltinCopy(t *testing.T) {
 	t.Cleanup(forgetCore)
 	cfg := &config.Config{
 		Catalogs: map[string]config.Catalog{"core": {URL: url, Tag: "v1.0.0", Commit: commit}},
-		Apps:     map[string]config.App{"notes": {Kind: "journal", Hostname: "notes.example.org"}},
+		Apps:     map[string]config.App{"notes": {Blueprint: "journal", Hostname: "notes.example.org"}},
 	}
 	if problems := resolve(cfg); len(problems) > 0 {
 		t.Fatalf("problems %v", problems)

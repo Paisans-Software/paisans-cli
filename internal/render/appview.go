@@ -318,11 +318,11 @@ func (v appValues) OIDCAdminGroup() string  { admin, _ := v.oidcGroups(); return
 func (v appValues) OIDCMemberGroup() string { _, member := v.oidcGroups(); return member }
 
 func (v appValues) oidcGroups() (admin, member string) {
-	spec, ok := blueprints.OIDCClient(v.App.Kind, v.App.Hostname, v.App.Name)
+	spec, ok := blueprints.OIDCClient(v.App.Blueprint, v.App.Hostname, v.App.Name)
 	if !ok {
 		return "", ""
 	}
-	return spec.Groups(config.App{Kind: v.App.Kind, Hostname: v.App.Hostname, Settings: v.set})
+	return spec.Groups(config.App{Blueprint: v.App.Blueprint, Hostname: v.App.Hostname, Settings: v.set})
 }
 
 // Image returns the reference a service runs, so a compose template never
@@ -376,7 +376,7 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 // values assembles what the template set is given.
 func (p *planner) values(planned plannedApp, app config.App) (appValues, error) {
 	var password string
-	if blueprints.UsesPostgres(planned.Kind) {
+	if blueprints.UsesPostgres(planned.Blueprint) {
 		var err error
 		password, err = p.appDatabasePassword(planned)
 		if err != nil {
@@ -424,7 +424,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	if delegated := app.Hostnames[blueprints.WellknownRole]; delegated != "" {
 		v.ServerName = delegated
 	}
-	for _, c := range blueprints.Consumes(planned.Kind) {
+	for _, c := range blueprints.Consumes(planned.Blueprint) {
 		if v.links == nil {
 			v.links = map[string]map[string]string{}
 		}
@@ -440,10 +440,10 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	}
 	v.OIDC = p.oidcFor(planned)
 	v.Upstreams = p.upstreams(planned.Name)
-	if blueprints.SendsMail(planned.Kind) {
+	if blueprints.SendsMail(planned.Blueprint) {
 		v.SMTP = p.smtpFor(planned.Name)
 	}
-	if planned.Kind == config.KindPocketID {
+	if planned.Blueprint == config.BlueprintPocketID {
 		pid, err := p.pocketIDConfigFor(planned.Name, app)
 		if err != nil {
 			return appValues{}, err
@@ -459,28 +459,28 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.DNS = dns
 	}
-	if planned.Kind == config.KindUptime {
+	if planned.Blueprint == config.BlueprintUptime {
 		seed, err := p.uptimeSeed(planned.Name)
 		if err != nil {
 			return appValues{}, err
 		}
 		v.UptimeSeed = seed
 	}
-	if planned.Kind == config.KindInvite {
+	if planned.Blueprint == config.BlueprintInvite {
 		invite, err := p.inviteValuesFor(planned.Name)
 		if err != nil {
 			return appValues{}, err
 		}
 		v.Invite = invite
 	}
-	for _, svc := range blueprints.ServicePorts(planned.Kind) {
+	for _, svc := range blueprints.ServicePorts(planned.Blueprint) {
 		if v.ServicePorts == nil {
 			v.ServicePorts, v.ServiceUpstreams = map[string]int{}, map[string][]string{}
 		}
 		v.ServicePorts[svc.Name] = svc.Port
 		v.ServiceUpstreams[svc.Name] = p.upstreamsOnPort(planned.Name, svc.Port)
 	}
-	for _, extra := range blueprints.ExtraDatabases(planned.Kind) {
+	for _, extra := range blueprints.ExtraDatabases(planned.Blueprint) {
 		if v.Databases == nil {
 			v.Databases = map[string]string{}
 		}
@@ -511,7 +511,7 @@ func (v appValues) Linked(role, value string) (string, error) {
 func (p *planner) linked(role, hostname string) (map[string]string, error) {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if app.Hostname == hostname && slices.Contains(blueprints.Provides(app.Kind), role) {
+		if app.Hostname == hostname && slices.Contains(blueprints.Provides(app.Blueprint), role) {
 			return blueprints.LinkValues(p.cfg, name, role)
 		}
 	}
@@ -522,7 +522,7 @@ func (p *planner) linked(role, hostname string) (map[string]string, error) {
 // that a template cannot render a connection string to a database nobody
 // created.
 func dsn(planned plannedApp, password, host string, port int) string {
-	if !blueprints.UsesPostgres(planned.Kind) {
+	if !blueprints.UsesPostgres(planned.Blueprint) {
 		return ""
 	}
 	return fmt.Sprintf("postgresql://%s:%s@%s:%d/%s", planned.DBUser, password, host, port, planned.DBName)
@@ -542,7 +542,7 @@ func (p *planner) oidcFor(planned plannedApp) oidcValues {
 	// The callback is the one the blueprint declares, which is also the one
 	// apply registers at the identity provider.
 	redirect := "https://" + planned.Hostname + "/oauth/callback"
-	if spec, ok := blueprints.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
+	if spec, ok := blueprints.OIDCClient(planned.Blueprint, planned.Hostname, planned.Name); ok {
 		redirect = spec.CallbackURL
 	}
 	return oidcValues{
@@ -574,7 +574,7 @@ const (
 // deployment declares none.
 func (p *planner) identityProviderURL() string {
 	for _, name := range p.cfg.AppNames() {
-		if p.cfg.Apps[name].Kind == config.KindPocketID {
+		if p.cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			return "https://" + p.cfg.Apps[name].Hostname
 		}
 	}

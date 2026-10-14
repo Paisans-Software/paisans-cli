@@ -60,7 +60,7 @@ func TestStorageRefusals(t *testing.T) {
 			c.Apps["blog"] = blog
 		}, "media-hostname-without-object-storage", "apps.blog.hostnames.media"},
 		{"a kind with no files", func(c *config.Config) {
-			c.Apps["web"] = config.App{Kind: config.Kind("element"), Hostname: "web.example.org",
+			c.Apps["web"] = config.App{Blueprint: config.Blueprint("element"), Hostname: "web.example.org",
 				Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"},
 				Storage:   config.StorageLocal, Settings: map[string]any{"homeserver": "chat.example.org"}}
 		}, "storage-on-a-kind-without-files", "apps.web.storage"},
@@ -78,7 +78,7 @@ func TestStorageRefusals(t *testing.T) {
 
 // storage: local on a kind that keeps its files only locally is what it does
 // anyway, so it is accepted rather than refused as redundant.
-func TestLocalStorageOnALocalOnlyKindIsAccepted(t *testing.T) {
+func TestLocalStorageOnALocalOnlyBlueprintIsAccepted(t *testing.T) {
 	cfg := load(t, "valid")
 	health := cfg.Apps["health"]
 	health.Storage = config.StorageLocal

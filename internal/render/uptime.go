@@ -98,7 +98,7 @@ const unroutedStatuses = "200,301,302,303,307,308,401,403,404"
 func (p *planner) fallbackChecks(name string, app config.App, sites []string) []seedMonitor {
 	noRedirects := false
 	var out []seedMonitor
-	if !blueprints.HealthOf(app.Kind).TCP {
+	if !blueprints.HealthOf(app.Blueprint).TCP {
 		out = append(out, seedMonitor{
 			Name: PublicCheckName(name) + " (no health route)", MonitorType: "active", Method: "GET", CheckType: "status",
 			URL: "https://" + app.Hostname + "/", ExpectedStatus: unroutedStatuses, FollowRedirects: &noRedirects,
@@ -117,7 +117,7 @@ func (p *planner) fallbackChecks(name string, app config.App, sites []string) []
 	for _, site := range sorted {
 		out = append(out, seedMonitor{
 			Name: reachableCheckName(name, site), MonitorType: "tcp",
-			TCPHost: p.sites[site].Address, TCPPort: blueprints.Port(app.Kind),
+			TCPHost: p.sites[site].Address, TCPPort: blueprints.Port(app.Blueprint),
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})
 	}
@@ -132,14 +132,14 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	var monitors []seedMonitor
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if app.Kind == config.KindUptime {
+		if app.Blueprint == config.BlueprintUptime {
 			// A monitor does not watch itself: down, it cannot report that,
 			// and a direct check of its own container can only ever pass.
 			// Every other monitor's public URL is checked below, after every
 			// other app.
 			continue
 		}
-		health, ok := blueprints.HealthFor(app.Kind)
+		health, ok := blueprints.HealthFor(app.Blueprint)
 		if !ok {
 			monitors = append(monitors, p.fallbackChecks(name, app, placed[name])...)
 			continue
@@ -188,24 +188,24 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		for _, site := range sites {
 			monitors = append(monitors, seedMonitor{
 				Name: directCheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Kind), health.Path),
+				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Blueprint), health.Path),
 				ExpectedStatus: health.Expect, FollowRedirects: &noRedirects,
 				// What the gateway would send, minus the gateway.
 				RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
-			if probe := blueprints.GateFor(app.Kind).PrivateProbe; probe != nil && gated {
+			if probe := blueprints.GateFor(app.Blueprint).PrivateProbe; probe != nil && gated {
 				// Through the edge the gate answers first, so this is asked
 				// of the app directly (blueprints.GateSpec.PrivateProbe).
 				monitors = append(monitors, seedMonitor{
 					Name: privateAPICheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Kind), probe.Path),
+					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Blueprint), probe.Path),
 					ExpectedStatus: probe.Expect, FollowRedirects: &noRedirects,
 					RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 				})
 			}
-			if app.Kind == config.KindPocketID {
+			if app.Blueprint == config.BlueprintPocketID {
 				// The admin reconciler service beside each instance, which
 				// /livez answers 200 while its pass loop runs, standby or
 				// not, and 503 once it is stale
@@ -233,10 +233,10 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	// broken DNS, web server or certificate there leaves every heartbeat
 	// stale. A monitor on this same site dies with this host, so checking it
 	// would add nothing about losing the host, and it is left out.
-	if health, ok := blueprints.HealthFor(config.KindUptime); ok {
+	if health, ok := blueprints.HealthFor(config.BlueprintUptime); ok {
 		for _, name := range p.cfg.AppNames() {
 			other := p.cfg.Apps[name]
-			if name == self || other.Kind != config.KindUptime || other.Placement.Site == monitorSite {
+			if name == self || other.Blueprint != config.BlueprintUptime || other.Placement.Site == monitorSite {
 				continue
 			}
 			monitors = append(monitors, seedMonitor{
@@ -287,7 +287,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	// every monitor, wherever the app runs: every instance pushes to every
 	// monitor.
 	for _, name := range p.cfg.AppNames() {
-		if p.cfg.Apps[name].Kind != config.KindPocketID {
+		if p.cfg.Apps[name].Blueprint != config.BlueprintPocketID {
 			continue
 		}
 		token, err := p.adminsHeartbeatToken(name)

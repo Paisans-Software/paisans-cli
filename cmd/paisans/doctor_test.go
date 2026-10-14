@@ -89,7 +89,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		live, ok := blueprints.LiveSettingsFor(app.Kind)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		var names []string
 		for _, s := range blueprints.GateSettingsFor(app) {
 			names = append(names, s.Name)

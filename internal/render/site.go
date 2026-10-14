@@ -234,11 +234,11 @@ const GateMarker = "Sign in required by the visibility gate."
 // and a federating server fetching an image will not follow a redirect to a
 // passkey prompt any more than it would there.
 func bypassFor(cfg *config.Config, name string, app config.App) gateBypass {
-	spec := blueprints.GateFor(app.Kind)
+	spec := blueprints.GateFor(app.Blueprint)
 	b := gateBypass{
 		ActivityPub: blueprints.Federates(app),
 		InboxPaths:  spec.InboxPaths,
-		OpenPaths:   append(blueprints.OpenPathsFor(app.Kind), blueprints.LocalMediaPaths(cfg, app)...),
+		OpenPaths:   append(blueprints.OpenPathsFor(app.Blueprint), blueprints.LocalMediaPaths(cfg, app)...),
 		TokenPaths:  spec.TokenPaths,
 	}
 	if app.AutoLogin {
@@ -536,7 +536,7 @@ func (p *planner) renderSnippets(base string, site *siteView, routes []route) ([
 		values.UpstreamElsewhere = elsewhere(site, values.Upstreams)
 		values.S3.GarageElsewhere = elsewhere(site, values.S3.GarageAddresses)
 
-		path := string(app.Kind) + "/" + blueprints.SnippetFor(r.Role)
+		path := string(app.Blueprint) + "/" + blueprints.SnippetFor(r.Role)
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
@@ -573,7 +573,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 	var files []File
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if app.Kind != config.KindOAuth2Proxy {
+		if app.Blueprint != config.BlueprintOAuth2Proxy {
 			continue
 		}
 		planned, err := p.plannedFor(name, app)
@@ -584,7 +584,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		path := string(app.Kind) + "/" + gateSnippetTemplate
+		path := string(app.Blueprint) + "/" + gateSnippetTemplate
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
@@ -601,7 +601,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 func (p *planner) gateSnippetMounts() []string {
 	var out []string
 	for _, name := range p.cfg.AppNames() {
-		if p.cfg.Apps[name].Kind == config.KindOAuth2Proxy {
+		if p.cfg.Apps[name].Blueprint == config.BlueprintOAuth2Proxy {
 			out = append(out, snippetMount+name+"-gates.caddy")
 		}
 	}
@@ -616,16 +616,16 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 		return plannedApp{}, err
 	}
 	return plannedApp{
-		Name:     name,
-		Dir:      p.dep().Dir(name),
-		Kind:     app.Kind,
-		Hostname: app.Hostname,
-		Pinned:   app.Placement.Mode == config.PlacementPinned,
-		Site:     app.Placement.Site,
-		Port:     blueprints.Port(app.Kind),
-		DBName:   dbIdentifier(name),
-		DBUser:   dbIdentifier(name),
-		Images:   images,
+		Name:      name,
+		Dir:       p.dep().Dir(name),
+		Blueprint: app.Blueprint,
+		Hostname:  app.Hostname,
+		Pinned:    app.Placement.Mode == config.PlacementPinned,
+		Site:      app.Placement.Site,
+		Port:      blueprints.Port(app.Blueprint),
+		DBName:    dbIdentifier(name),
+		DBUser:    dbIdentifier(name),
+		Images:    images,
 	}, nil
 }
 
@@ -633,8 +633,8 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 // filesystem. It exists so a test can assert that a set is complete: embed sees
 // what git checked out, so a template left uncommitted is absent here even
 // though it is present on the machine that wrote it.
-func TemplateSet(kind config.Kind) ([]string, error) {
-	dir := string(kind)
+func TemplateSet(blueprint config.Blueprint) ([]string, error) {
+	dir := string(blueprint)
 	var out []string
 	err := fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
@@ -644,7 +644,7 @@ func TemplateSet(kind config.Kind) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", kind, err)
+		return nil, fmt.Errorf("kind %s ships no template set: %w", blueprint, err)
 	}
 	sort.Strings(out)
 	return out, nil
@@ -657,13 +657,13 @@ func TemplateSet(kind config.Kind) ([]string, error) {
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
-	dir := string(app.Kind)
+	dir := string(app.Blueprint)
 	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Kind, err)
+		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Blueprint, err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("kind %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Kind)
+		return nil, fmt.Errorf("kind %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Blueprint)
 	}
 
 	values, err := p.values(app, p.cfg.Apps[app.Name])
@@ -696,9 +696,9 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 		if err != nil {
 			return err
 		}
-		if _, fromCatalog := blueprints.Source(app.Kind); fromCatalog && rel == "compose.yaml" {
+		if _, fromCatalog := blueprints.Source(app.Blueprint); fromCatalog && rel == "compose.yaml" {
 			if err := checkComposePolicy(content, values.DataPath); err != nil {
-				return fmt.Errorf("apps.%s: blueprint %s: %w", app.Name, app.Kind, err)
+				return fmt.Errorf("apps.%s: blueprint %s: %w", app.Name, app.Blueprint, err)
 			}
 		}
 		dest := base + p.dep().RelPath(app.Name, rel)
@@ -936,7 +936,7 @@ func (p *planner) upstreams(name string) []string {
 	if !ok {
 		return nil
 	}
-	return p.upstreamsOnPort(name, blueprints.Port(app.Kind))
+	return p.upstreamsOnPort(name, blueprints.Port(app.Blueprint))
 }
 
 // elsewhere reports whether a route has exactly one upstream and it is on a

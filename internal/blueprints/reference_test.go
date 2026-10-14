@@ -54,10 +54,10 @@ const hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 // still gets checked: there is no second list this one can fall out of step
 // with.
 func TestDefaultsArePinned(t *testing.T) {
-	for _, kind := range blueprints.Builtin() {
-		services := blueprints.Services(kind)
+	for _, blueprint := range blueprints.Builtin() {
+		services := blueprints.Services(blueprint)
 		if len(services) == 0 {
-			t.Errorf("%s ships no services", kind)
+			t.Errorf("%s ships no services", blueprint)
 			continue
 		}
 		var sawFixedDefault bool
@@ -65,19 +65,19 @@ func TestDefaultsArePinned(t *testing.T) {
 			if service.Name == blueprints.PostgresService {
 				continue
 			}
-			ref, ok := blueprints.DefaultImage(kind, service.Name)
+			ref, ok := blueprints.DefaultImage(blueprint, service.Name)
 			if !ok {
-				t.Errorf("%s ships no default image for its %s service", kind, service.Name)
+				t.Errorf("%s ships no default image for its %s service", blueprint, service.Name)
 				continue
 			}
 			if !blueprints.ParseReference(ref).Pinned() {
-				t.Errorf("%s's %s service defaults to %q, which does not name one build", kind, service.Name, ref)
+				t.Errorf("%s's %s service defaults to %q, which does not name one build", blueprint, service.Name, ref)
 				continue
 			}
 			sawFixedDefault = true
 		}
 		if !sawFixedDefault {
-			t.Errorf("%s ships no service with a fixed, pinned default image", kind)
+			t.Errorf("%s ships no service with a fixed, pinned default image", blueprint)
 		}
 	}
 }
@@ -85,10 +85,10 @@ func TestDefaultsArePinned(t *testing.T) {
 // The database default is computed from cluster.postgres_version rather than
 // fixed, so every database in a deployment is one major version.
 func TestPostgresHasNoFixedDefault(t *testing.T) {
-	if _, ok := blueprints.DefaultImage(config.Kind("mbin"), blueprints.PostgresService); ok {
+	if _, ok := blueprints.DefaultImage(config.Blueprint("mbin"), blueprints.PostgresService); ok {
 		t.Fatal("postgres ships a fixed default, which would let two apps disagree about the major version")
 	}
-	if !blueprints.Has(config.Kind("mbin"), blueprints.PostgresService) {
+	if !blueprints.Has(config.Blueprint("mbin"), blueprints.PostgresService) {
 		t.Fatal("postgres is not a declarable service, so a pinned app could not choose its database image")
 	}
 }

@@ -161,17 +161,17 @@ type describer interface {
 	Describe(Action, Request) string
 }
 
-var creators = map[config.Kind]Creator{
-	config.KindPocketID: pocketID{},
+var creators = map[config.Blueprint]Creator{
+	config.BlueprintPocketID: pocketID{},
 }
 
 // For returns the Creator for a kind, or an error naming the kinds that have
 // one.
-func For(kind config.Kind) (Creator, error) {
-	if c, ok := creators[kind]; ok {
+func For(blueprint config.Blueprint) (Creator, error) {
+	if c, ok := creators[blueprint]; ok {
 		return c, nil
 	}
-	return nil, fmt.Errorf("%s admin creation is not implemented yet. Implemented kinds: %s", kind, strings.Join(Implemented(), ", "))
+	return nil, fmt.Errorf("%s admin creation is not implemented yet. Implemented kinds: %s", blueprint, strings.Join(Implemented(), ", "))
 }
 
 // Implemented lists the kinds with a Creator, sorted.
@@ -186,19 +186,19 @@ func Implemented() []string {
 
 // Plan is a probe and the steps it implies.
 type Plan struct {
-	Kind    config.Kind
-	State   State
-	Actions []Action
-	creator Creator
-	req     Request
+	Blueprint config.Blueprint
+	State     State
+	Actions   []Action
+	creator   Creator
+	req       Request
 }
 
 // Build probes and plans. It changes nothing.
-func Build(kind config.Kind, t Transport, req Request) (*Plan, error) {
+func Build(blueprint config.Blueprint, t Transport, req Request) (*Plan, error) {
 	if req.Username == "" {
 		return nil, errors.New("a username is required")
 	}
-	c, err := For(kind)
+	c, err := For(blueprint)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func Build(kind config.Kind, t Transport, req Request) (*Plan, error) {
 	if req.Email == "" && slices.Contains(actions, ActionCreate) {
 		return nil, fmt.Errorf("%s does not exist yet, and creating it needs --email. An administrator without an address cannot be matched to an app account it signs in to, and the address is set only when the account is created", req.Username)
 	}
-	return &Plan{Kind: kind, State: state, Actions: actions, creator: c, req: req}, nil
+	return &Plan{Blueprint: blueprint, State: state, Actions: actions, creator: c, req: req}, nil
 }
 
 // Lines is the plan as printed: one line per action, or the user's name alone

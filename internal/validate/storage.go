@@ -18,7 +18,7 @@ func (c *checker) storage() {
 		app := c.cfg.Apps[name]
 		key := fmt.Sprintf("apps.%s.storage", name)
 		switch {
-		case app.Kind == config.KindPocketID:
+		case app.Blueprint == config.BlueprintPocketID:
 			// Pocket ID has a storage setting of its own, which this key
 			// would shadow without replacing.
 			if app.Storage != "" {
@@ -27,19 +27,19 @@ func (c *checker) storage() {
 					"is %q, and pocket-id does not read it. Pocket ID chooses where it keeps its files with its own FILE_BACKEND, set here as apps.%s.settings.file_backend; database is the recommendation (README, Rule 3). Remove storage.",
 					app.Storage, name)
 			}
-		case blueprints.KeepsFilesOnlyLocally(app.Kind):
+		case blueprints.KeepsFilesOnlyLocally(app.Blueprint):
 			if app.Storage == config.StorageS3 {
 				c.refuse("storage-s3-on-a-local-only-kind", key,
 					"this kind keeps its files only on its own disk",
 					"is s3, but %s has no object storage form here: %s. Remove the key, or set storage: local, which is what it does anyway.",
-					app.Kind, localOnlyReason(app.Kind))
+					app.Blueprint, localOnlyReason(app.Blueprint))
 			}
-		case !blueprints.UsesObjectStorage(app.Kind):
+		case !blueprints.UsesObjectStorage(app.Blueprint):
 			if app.Storage != "" {
 				c.refuse("storage-on-a-kind-without-files", key,
 					"storage is declared for a kind that stores no files",
 					"is %q, but %s stores no files, so this would be ignored without a word. Remove it.",
-					app.Storage, app.Kind)
+					app.Storage, app.Blueprint)
 			}
 		default:
 			c.objectStorageApp(name, app)
@@ -85,8 +85,8 @@ func (c *checker) objectStorageApp(name string, app config.App) {
 
 // localOnlyReason is why a kind that keeps its files only on its own disk
 // has no S3 form, for the refusal of `storage: s3` on it.
-func localOnlyReason(kind config.Kind) string {
-	if why := blueprints.LocalOnlyReason(kind); why != "" {
+func localOnlyReason(blueprint config.Blueprint) string {
+	if why := blueprints.LocalOnlyReason(blueprint); why != "" {
 		return why
 	}
 	return "it keeps its files on local disk"

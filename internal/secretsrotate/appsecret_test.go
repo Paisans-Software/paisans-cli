@@ -48,11 +48,11 @@ func newSelfWorld(t *testing.T) *selfWorld {
 		},
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}},
 		Apps: map[string]config.App{
-			"forum":  {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
-			"gate":   {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
-			"health": {Kind: config.KindUptime, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
-			"chat":   {Kind: config.Kind("synapse"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
-			"id":     {Kind: config.KindPocketID, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"forum":  {Blueprint: config.Blueprint("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
+			"gate":   {Blueprint: config.BlueprintOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"health": {Blueprint: config.BlueprintUptime, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-c"}},
+			"chat":   {Blueprint: config.Blueprint("synapse"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
+			"id":     {Blueprint: config.BlueprintPocketID, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}
 	s := &config.Secrets{Apps: map[string]map[string]any{}}
@@ -202,7 +202,7 @@ func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 // Each secret's cost is the one its blueprint declares.
 func TestAppSelfCosts(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
+	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
 	for _, c := range []struct {
 		app, key string
 		signsOut bool
@@ -230,7 +230,7 @@ func TestAppSelfCosts(t *testing.T) {
 	}
 }
 
-func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
+func TestAppSelfEachBlueprintOnItsOwnSite(t *testing.T) {
 	w := newSelfWorld(t)
 	for _, tc := range []struct{ app, key, use string }{
 		{"forum", "mercure_jwt_secret", ""},
@@ -277,9 +277,9 @@ func TestAppSelfEachKindOnItsOwnSite(t *testing.T) {
 // identity app is left alone.
 func TestStaticAPIKeyReachesTheInviteAppsThatNameIt(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster},
 		Settings: map[string]any{"identity_app": "id"}}
-	w.cfg.Apps["elsewhere"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+	w.cfg.Apps["elsewhere"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster},
 		Settings: map[string]any{"identity_app": "other-id"}}
 	e := w.env()
 	got := usesOf(e, AppSelf("id", "static_api_key", CostOf(w.cfg, "id", "static_api_key")))
@@ -296,9 +296,9 @@ func TestStaticAPIKeyReachesTheInviteAppsThatNameIt(t *testing.T) {
 // rotating it signs members out of it.
 func TestInviteSessionKeyIsAnAppSelfSecret(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
-	if kind, ok := AppSelfKind("session_key"); !ok || kind != config.KindInvite {
-		t.Fatalf("session_key is %v %v, want the invite kind's", kind, ok)
+	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
+	if blueprint, ok := AppSelfBlueprint("session_key"); !ok || blueprint != config.BlueprintInvite {
+		t.Fatalf("session_key is %v %v, want the invite kind's", blueprint, ok)
 	}
 	r := AppSelf("invite", "session_key", CostOf(w.cfg, "invite", "session_key"))
 	e := w.env()

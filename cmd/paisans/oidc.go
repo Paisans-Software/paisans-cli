@@ -73,7 +73,7 @@ func runOIDCClientCreate(args []string) error {
 	}
 	desired, ok := clientDesired(cfg, *appName, *rotate)
 	if !ok {
-		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: %s", app.Kind, strings.Join(kindsWithClients(), ", "))
+		return fmt.Errorf("oidc client create: a %s app has no client at the identity provider. Kinds with one: %s", app.Blueprint, strings.Join(blueprintsWithClients(), ", "))
 	}
 	idp := pocketIDApp(cfg)
 	if idp == "" {
@@ -190,11 +190,11 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 
 // kindsWithClients is every built in kind whose blueprint signs in through
 // the identity provider, for a refusal that lists them.
-func kindsWithClients() []string {
+func blueprintsWithClients() []string {
 	var out []string
-	for _, kind := range blueprints.Builtin() {
-		if _, ok := blueprints.OIDCClient(kind, "example.org", "app"); ok {
-			out = append(out, string(kind))
+	for _, blueprint := range blueprints.Builtin() {
+		if _, ok := blueprints.OIDCClient(blueprint, "example.org", "app"); ok {
+			out = append(out, string(blueprint))
 		}
 	}
 	return out

@@ -77,7 +77,7 @@ func checks(cfg *config.Config, site string) []Check {
 	for _, h := range dns.GatewayHostnames(cfg) {
 		path := "/"
 		if h.Main {
-			if health, ok := blueprints.HealthFor(cfg.Apps[h.App].Kind); ok && health.Path != "" {
+			if health, ok := blueprints.HealthFor(cfg.Apps[h.App].Blueprint); ok && health.Path != "" {
 				path = health.Path
 			}
 		}

@@ -98,21 +98,21 @@ type SignedFetch struct {
 
 // GateFor returns a kind's gate record. A kind with none recorded is not
 // gateable.
-func GateFor(kind config.Kind) GateSpec { return of(kind).Gate }
+func GateFor(blueprint config.Blueprint) GateSpec { return of(blueprint).Gate }
 
 // GateRecorded reports whether a kind has a gate record at all, so a new kind
 // cannot ship without somebody deciding whether it can be gated.
-func GateRecorded(kind config.Kind) bool {
-	_, ok := For(kind)
+func GateRecorded(blueprint config.Blueprint) bool {
+	_, ok := For(blueprint)
 	return ok
 }
 
 // OpenPathsFor is a kind's open paths with its health route added when that
 // route is dedicated. `/` is never added: it is the front page, and opening
 // it would ungate the app.
-func OpenPathsFor(kind config.Kind) []string {
-	out := append([]string(nil), of(kind).Gate.OpenPaths...)
-	if h, ok := HealthFor(kind); ok && h.Path != "/" {
+func OpenPathsFor(blueprint config.Blueprint) []string {
+	out := append([]string(nil), of(blueprint).Gate.OpenPaths...)
+	if h, ok := HealthFor(blueprint); ok && h.Path != "/" {
 		out = append(out, h.Path)
 	}
 	return out
@@ -122,7 +122,7 @@ func OpenPathsFor(kind config.Kind) []string {
 // when it does not: when settings.authorized_fetch turns authorized fetch
 // off, or when the setting its SignedFetch Requires is false.
 func SignedFetchFor(app config.App) *SignedFetch {
-	sf := of(app.Kind).Gate.SignedFetch
+	sf := of(app.Blueprint).Gate.SignedFetch
 	if sf == nil || !AuthorizedFetch(app) {
 		return nil
 	}
@@ -159,7 +159,7 @@ func (s SignedFetch) SignedFetchProbe(hostname string) string {
 // Federates reports whether an app answers ActivityPub: whether its kind
 // does, unless the kind's FederationSetting is false.
 func Federates(app config.App) bool {
-	d := of(app.Kind)
+	d := of(app.Blueprint)
 	if !d.Federates {
 		return false
 	}

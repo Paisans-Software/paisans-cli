@@ -25,7 +25,7 @@ func ClusterDatabaseApps(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Placement.Mode == config.PlacementCluster && blueprints.UsesPostgres(app.Kind) {
+		if app.Placement.Mode == config.PlacementCluster && blueprints.UsesPostgres(app.Blueprint) {
 			out = append(out, name)
 		}
 	}

@@ -87,8 +87,8 @@ type OIDCDef struct {
 
 // OIDCClient is the client spec for app, an app of a kind served at
 // hostname, and whether this toolkit knows one for it.
-func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
-	o := of(kind).OIDC
+func OIDCClient(blueprint config.Blueprint, hostname, app string) (OIDCClientSpec, bool) {
+	o := of(blueprint).OIDC
 	if o == nil {
 		return OIDCClientSpec{}, false
 	}
@@ -103,7 +103,7 @@ func OIDCClient(kind config.Kind, hostname, app string) (OIDCClientSpec, bool) {
 		ExtraGroupsSetting: o.ExtraGroupsSetting,
 	}
 	if !o.NoLaunch {
-		spec.LaunchURL = LaunchURL(kind, hostname, "")
+		spec.LaunchURL = LaunchURL(blueprint, hostname, "")
 	}
 	return spec, true
 }

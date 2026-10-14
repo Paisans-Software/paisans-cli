@@ -83,7 +83,7 @@ func (p *Plan) reseeded(site, rel string) bool {
 		return false
 	}
 	for _, app := range p.end.PinnedTo(site) {
-		if p.end.Apps[app].Kind == config.KindUptime && strings.HasPrefix(rel, p.dep().RelPath(app)+"/") {
+		if p.end.Apps[app].Blueprint == config.BlueprintUptime && strings.HasPrefix(rel, p.dep().RelPath(app)+"/") {
 			return true
 		}
 	}

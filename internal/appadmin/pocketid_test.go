@@ -169,7 +169,7 @@ func pidRequest() Request {
 // plan shows the exact body a create would send.
 func TestPocketIDPlanShowsTheBodyAndChangesNothing(t *testing.T) {
 	f := &fakePocketID{}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestPocketIDPlanShowsTheBodyAndChangesNothing(t *testing.T) {
 
 func TestPocketIDExecuteCreatesAndReturnsTheLinkOnce(t *testing.T) {
 	f := &fakePocketID{}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestPocketIDExecuteCreatesAndReturnsTheLinkOnce(t *testing.T) {
 func TestPocketIDIsIdempotent(t *testing.T) {
 	email := "founder@example.org"
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", Email: &email, EmailVerified: true, FirstName: "Fern", IsAdmin: true}}}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestPocketIDIsIdempotent(t *testing.T) {
 	}
 
 	f.users[0].IsAdmin = false
-	plan, err = Build(config.KindPocketID, f, pidRequest())
+	plan, err = Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestPocketIDIsIdempotent(t *testing.T) {
 
 func TestPocketIDErrorsCarryNoKey(t *testing.T) {
 	f := &fakePocketID{echo: true}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestPocketIDErrorsCarryNoKey(t *testing.T) {
 
 func TestPocketIDRefusesADisabledAccount(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", Disabled: true}}}
-	if _, err := Build(config.KindPocketID, f, pidRequest()); err == nil || !strings.Contains(err.Error(), "disabled") {
+	if _, err := Build(config.BlueprintPocketID, f, pidRequest()); err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestPocketIDVerifiesAnExistingAdminsEmail(t *testing.T) {
 	email := "founder@example.org"
 	last := "Founder"
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", Email: &email, FirstName: "Fern", LastName: &last, DisplayName: "Fern Founder", IsAdmin: true}}}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestPocketIDVerifiesAnExistingAdminsEmail(t *testing.T) {
 			t.Errorf("ran %q", c)
 		}
 	}
-	plan, err = Build(config.KindPocketID, f, pidRequest())
+	plan, err = Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestPocketIDVerifiesAnExistingAdminsEmail(t *testing.T) {
 func TestPocketIDVerifyAndGrantBothLand(t *testing.T) {
 	email := "founder@example.org"
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", Email: &email, FirstName: "Fern"}}}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestPocketIDVerifyAndGrantBothLand(t *testing.T) {
 // An account with no email has nothing to verify.
 func TestPocketIDAnAccountWithoutEmailNeedsNoVerify(t *testing.T) {
 	f := &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", IsAdmin: true}}}
-	plan, err := Build(config.KindPocketID, f, pidRequest())
+	plan, err := Build(config.BlueprintPocketID, f, pidRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestPocketIDCreateNeedsAnEmail(t *testing.T) {
 	f := &fakePocketID{}
 	req := pidRequest()
 	req.Email = ""
-	if _, err := Build(config.KindPocketID, f, req); err == nil || !strings.Contains(err.Error(), "--email") {
+	if _, err := Build(config.BlueprintPocketID, f, req); err == nil || !strings.Contains(err.Error(), "--email") {
 		t.Fatalf("a create without an email was planned: %v", err)
 	}
 	if len(f.users) != 0 {
@@ -370,7 +370,7 @@ func TestPocketIDCreateNeedsAnEmail(t *testing.T) {
 	}
 
 	f = &fakePocketID{users: []pocketid.User{{ID: "u-1", Username: "founder", FirstName: "Fern"}}}
-	if _, err := Build(config.KindPocketID, f, req); err != nil {
+	if _, err := Build(config.BlueprintPocketID, f, req); err != nil {
 		t.Errorf("an existing account was asked for an email: %v", err)
 	}
 }
@@ -386,7 +386,7 @@ func TestPocketIDPutsTheAdminInEveryAdminGroup(t *testing.T) {
 	}
 	req := pidRequest()
 	req.AdminGroups = []string{"admins", "editors"}
-	plan, err := Build(config.KindPocketID, f, req)
+	plan, err := Build(config.BlueprintPocketID, f, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestPocketIDPutsTheAdminInEveryAdminGroup(t *testing.T) {
 	if fmt.Sprint(names) != "[admins editors friends]" {
 		t.Errorf("founder is in %v", names)
 	}
-	again, err := Build(config.KindPocketID, f, req)
+	again, err := Build(config.BlueprintPocketID, f, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestPocketIDPutsADeclaredAdminInTheMemberGroups(t *testing.T) {
 	req := pidRequest()
 	req.AdminGroups = []string{"admins"}
 	req.MemberGroups = []string{"members"}
-	plan, err := Build(config.KindPocketID, f, req)
+	plan, err := Build(config.BlueprintPocketID, f, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestPocketIDPutsADeclaredAdminInTheMemberGroups(t *testing.T) {
 	if fmt.Sprint(names) != "[admins members]" {
 		t.Errorf("founder is in %v", names)
 	}
-	again, err := Build(config.KindPocketID, f, req)
+	again, err := Build(config.BlueprintPocketID, f, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestPocketIDNewAdminJoinsTheGroupsBeforeTheLink(t *testing.T) {
 	f := &fakePocketID{}
 	req := pidRequest()
 	req.AdminGroups = []string{"admins"}
-	plan, err := Build(config.KindPocketID, f, req)
+	plan, err := Build(config.BlueprintPocketID, f, req)
 	if err != nil {
 		t.Fatal(err)
 	}

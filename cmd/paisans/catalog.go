@@ -215,11 +215,11 @@ func runCatalogUpdate(args []string) error {
 		}
 		s.Done(fmt.Sprintf("%s, %s, was %s", next.Tag, next.Commit[:12], old.Tag))
 		for _, app := range cfg.AppNames() {
-			catalog, bp := config.SplitBlueprint(cfg.Apps[app].Kind)
+			catalog, bp := config.SplitBlueprint(cfg.Apps[app].Blueprint)
 			if catalog != name {
 				continue
 			}
-			before, _ := blueprints.For(cfg.Apps[app].Kind)
+			before, _ := blueprints.For(cfg.Apps[app].Blueprint)
 			after, err := blueprints.ReadFrom(dir, bp)
 			if err != nil {
 				return &ui.Problem{Hint: "apps." + app + " would lose its blueprint", Explain: fmt.Sprintf("%s at %s: %v. Nothing was changed.", name, next.Tag, err)}
@@ -266,7 +266,7 @@ func runCatalogRemove(args []string) error {
 	}
 	var users []string
 	for _, app := range cfg.AppNames() {
-		if c, _ := config.SplitBlueprint(cfg.Apps[app].Kind); c == name {
+		if c, _ := config.SplitBlueprint(cfg.Apps[app].Blueprint); c == name {
 			users = append(users, app)
 		}
 	}
@@ -384,7 +384,7 @@ func runBlueprintShow(args []string, stdout io.Writer) error {
 	if len(pos) != 1 {
 		return &ui.Problem{Hint: "blueprint show takes one blueprint", Explain: "paisans blueprint show <name>, or <catalog>/<name>"}
 	}
-	catalog, name := config.SplitBlueprint(config.Kind(pos[0]))
+	catalog, name := config.SplitBlueprint(config.Blueprint(pos[0]))
 	if catalog == "" {
 		spec, ok := blueprints.BuiltinSpec(name)
 		if !ok {

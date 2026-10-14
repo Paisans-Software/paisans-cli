@@ -35,7 +35,7 @@ func TestLockedSettingsFollowTheirConditions(t *testing.T) {
 		{true, false, "SITE_NAME,PRIVATE"},
 		{true, true, "SITE_NAME,SSO_ONLY,PRIVATE"},
 	} {
-		got := strings.Join(LockedSettingsFor(config.App{Kind: "test/locked", Gated: c.gated}, c.oidc), ",")
+		got := strings.Join(LockedSettingsFor(config.App{Blueprint: "test/locked", Gated: c.gated}, c.oidc), ",")
 		if got != c.want {
 			t.Errorf("gated %v, oidc %v: %s, want %s", c.gated, c.oidc, got, c.want)
 		}
@@ -68,7 +68,7 @@ func TestALinkMistakeIsRefused(t *testing.T) {
 // outside the deployment offers what any provider of the role says of its
 // hostname alone.
 func TestLinkValuesAreTheProvidersExpressions(t *testing.T) {
-	cfg := &config.Config{Apps: map[string]config.App{"chat": {Kind: "synapse", Hostname: "chat.example.org", Hostnames: map[string]string{WellknownRole: "example.org"}}}}
+	cfg := &config.Config{Apps: map[string]config.App{"chat": {Blueprint: "synapse", Hostname: "chat.example.org", Hostnames: map[string]string{WellknownRole: "example.org"}}}}
 	got, err := LinkValues(cfg, "chat", "matrix-homeserver")
 	if err != nil || got["base_url"] != "https://chat.example.org" || got["server_name"] != "example.org" {
 		t.Errorf("got %v, %v", got, err)

@@ -357,7 +357,7 @@ func (w *Wizard) apps() error {
 	// Pocket ID, since that is all it names. The app's key is the default,
 	// which is the client's name when display_name is not set.
 	displayName := func(spec appSpec, host string) (string, error) {
-		if _, ok := blueprints.OIDCClient(spec.kind, host, spec.key); !ok {
+		if _, ok := blueprints.OIDCClient(spec.blueprint, host, spec.key); !ok {
 			return "", nil
 		}
 		def := spec.key
@@ -372,7 +372,7 @@ func (w *Wizard) apps() error {
 	if err != nil {
 		return err
 	}
-	apps := []App{{Key: signIn.key, Kind: signIn.kind, Hostname: host}}
+	apps := []App{{Key: signIn.key, Blueprint: signIn.blueprint, Hostname: host}}
 
 	offered, err := capabilities()
 	if err != nil {
@@ -400,7 +400,7 @@ func (w *Wizard) apps() error {
 			if err != nil {
 				return err
 			}
-			app := App{Key: spec.key, Kind: spec.kind, Hostname: host}
+			app := App{Key: spec.key, Blueprint: spec.blueprint, Hostname: host}
 			if app.DisplayName, err = displayName(spec, host); err != nil {
 				return err
 			}

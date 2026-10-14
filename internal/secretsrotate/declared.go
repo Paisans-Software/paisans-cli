@@ -24,7 +24,7 @@ import (
 // CostOf is what rotating an app's secret costs, as its blueprint says:
 // nothing a member notices, for a secret it says nothing of.
 func CostOf(cfg *config.Config, app, key string) Cost {
-	spec, _ := blueprints.SecretOf(cfg.Apps[app].Kind, key)
+	spec, _ := blueprints.SecretOf(cfg.Apps[app].Blueprint, key)
 	return declaredCost(app, spec.RotationCost)
 }
 
@@ -60,7 +60,7 @@ func (r appGroup) Path() string { return "apps." + r.app + "." + r.group }
 func (r appGroup) key(k string) string { return "apps." + r.app + "." + k }
 
 func (r appGroup) members() []blueprints.SecretSpec {
-	return blueprints.SecretGroup(r.cfg.Apps[r.app].Kind, r.group)
+	return blueprints.SecretGroup(r.cfg.Apps[r.app].Blueprint, r.group)
 }
 
 // Cost is the dearest of the members': signing out, then a restart.
@@ -215,7 +215,7 @@ type inApp struct {
 // the same value. A value handed to a command never begins with a dash,
 // which a command would read as an option.
 func InApp(cfg *config.Config, app, key string) Rotator {
-	spec, _ := blueprints.SecretOf(cfg.Apps[app].Kind, key)
+	spec, _ := blueprints.SecretOf(cfg.Apps[app].Blueprint, key)
 	r := inApp{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key, cost: declaredCost(app, spec.RotationCost)}
 	if spec.Rotate != nil {
 		r.rot = *spec.Rotate
