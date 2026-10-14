@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/hostarch"
-	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/render"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostarch"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Resolver says which build a tag names now, as the digest `docker pull`

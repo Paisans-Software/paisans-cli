@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 // VolumeCheck is the guard against image declared volumes nothing mounts.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // etcdLogs is the tail of an etcd that cannot bind its peer address, as

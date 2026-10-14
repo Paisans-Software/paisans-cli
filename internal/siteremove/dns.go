@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 )
 
 // dnsStage is the stage number of the DNS stage: after the host is cleaned,

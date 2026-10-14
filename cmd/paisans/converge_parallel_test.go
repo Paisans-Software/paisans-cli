@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // preparedSites are the fixture's sites, each with a prepare line, in name order.

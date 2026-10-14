@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/pocketidlog"
+	"github.com/paisans-software/paisans-cli/internal/pocketidlog"
 )
 
 const textFailure = `Oct 11 18:53:41 INF HTTP request completed method=POST path=/api/users/u-1/one-time-access-email status=204

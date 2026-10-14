@@ -31,8 +31,8 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // garageKeyIDPattern and garageSecretPattern are the only shapes Garage

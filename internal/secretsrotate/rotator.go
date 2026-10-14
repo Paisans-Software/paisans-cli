@@ -1,8 +1,8 @@
 package secretsrotate
 
 import (
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 )
 
 // Cost is what a rotation costs the members, as the plan states it before

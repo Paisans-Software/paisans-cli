@@ -4,9 +4,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // claimHosts is what every command that writes to a host does before

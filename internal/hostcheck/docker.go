@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // The host check accepts Docker from any source except a snap, provided the

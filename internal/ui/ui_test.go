@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 func clock() func() time.Time {

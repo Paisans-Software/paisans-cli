@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // manual is a clock that moves only when the test moves it.

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // Two files the render writes at one path would leave one of them unwritten

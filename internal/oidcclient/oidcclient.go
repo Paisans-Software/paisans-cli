@@ -28,7 +28,7 @@ import (
 
 	"github.com/paisans-software/pocketid-go"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Desired is the client an app needs, from its blueprint and its configuration.

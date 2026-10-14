@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A name that publishes an address can be the sender of a forged message,

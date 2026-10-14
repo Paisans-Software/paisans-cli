@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/hostcheck"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 func check(t *testing.T, site string, h *fakeHost) *hostcheck.Report {

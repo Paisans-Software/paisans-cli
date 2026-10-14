@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/doctor"
-	"github.com/paisans-software/paisans-stack/internal/hostcheck"
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/mesh"
-	"github.com/paisans-software/paisans-stack/internal/patroni"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/doctor"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/patroni"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // doctorHost answers doctor's read commands from a table, records every

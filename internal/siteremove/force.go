@@ -6,11 +6,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // BuildForced plans `site remove --force`: the host at dest cleaned of this

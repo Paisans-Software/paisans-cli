@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The uptime blueprint's seed file: what the fork reconciles its monitors and

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/appadmin"
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/appadmin"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // linkFake is a Pocket ID holding the fixture's declared operator alice, and

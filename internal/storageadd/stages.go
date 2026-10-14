@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/acme"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/garage"
 )
 
 // differs reports whether a node's garage.toml names another factor than the

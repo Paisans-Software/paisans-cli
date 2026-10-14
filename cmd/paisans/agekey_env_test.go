@@ -12,9 +12,9 @@ import (
 	"filippo.io/age"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/keystore"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 func ageIdentity(t *testing.T) *age.X25519Identity {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
 )
 
 const indexDigest = "sha256:b401d1cb18074026a535a1facc5f6d9d35bc62fdff480f3b1fd91042c8e48186"

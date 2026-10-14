@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
 // What every login shell parses: nothing inside the single quotes that any

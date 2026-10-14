@@ -13,13 +13,13 @@ import (
 
 	"github.com/paisans-software/pocketid-go"
 
-	"github.com/paisans-software/paisans-stack/internal/acme"
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/oidcclient"
-	"github.com/paisans-software/paisans-stack/internal/render"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/acme"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/oidcclient"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // The recorder is the one way a client's credentials reach the secrets file,

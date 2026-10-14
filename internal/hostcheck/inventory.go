@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // Transport is how the inventory reads a host. apply.SSHTransport and the

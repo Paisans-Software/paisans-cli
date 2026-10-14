@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Run's work happens while its step is open, so the spinner shows for as

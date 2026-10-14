@@ -1,5 +1,5 @@
 # The mbin blueprint, in the core catalog.
-# paisans-stack reads it; internal/blueprints.Parse there documents every key.
+# Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
 apiVersion: paisans.blueprint/v1
 name: mbin
 services:
@@ -9,7 +9,7 @@ services:
   # settings.queue (postgres) needs: on an image without it,
   # MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
   #
-  # A track: paisans-stack runs the newest of the fork's 1.x releases,
+  # A track: Paisans runs the newest of the fork's 1.x releases,
   # published as image tags like 1.15.1-paisans for the release
   # 1.15.1+paisans (linux/amd64 only, so an arm64 apps site cannot run
   # it). This kind's templates need four things the fork has carried

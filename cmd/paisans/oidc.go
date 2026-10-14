@@ -9,14 +9,14 @@ import (
 
 	"github.com/paisans-software/pocketid-go"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/oidcclient"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/secretsgen"
-	"github.com/paisans-software/paisans-stack/internal/ui"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/oidcclient"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // oidcTransport is how `oidc client create` reaches the identity provider's

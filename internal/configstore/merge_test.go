@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 func secretsWith(kv ...string) *config.Secrets {

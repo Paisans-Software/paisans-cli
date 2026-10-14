@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"gopkg.in/yaml.v3"
 )
 

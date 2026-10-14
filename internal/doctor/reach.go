@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // ReachCommand is the trivial command that proves a site answers: ssh

@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The units are Garage's, as dxflrs/garage:v1.0.1 displays them back:

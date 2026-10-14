@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // The sweep is the last step of a whole apply. Pruning after each healthy

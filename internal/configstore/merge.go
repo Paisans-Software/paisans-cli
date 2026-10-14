@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // MergeSecrets merges two edits of the secrets file made from one base: ours,

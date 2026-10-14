@@ -50,9 +50,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
 )
 
 // Dir holds the registry and its lock. It is root's and 0711: others may

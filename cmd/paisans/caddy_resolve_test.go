@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/secretsgen"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // apply plans the gateway with Caddy's tag resolved to the build it names,

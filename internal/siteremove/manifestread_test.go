@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
-	"github.com/paisans-software/paisans-stack/internal/siteremove"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/siteremove"
 )
 
 // addManifestFiles puts n more files on the host, each listed in its manifest

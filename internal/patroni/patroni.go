@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // Exec is how every Patroni command reaches the container: the

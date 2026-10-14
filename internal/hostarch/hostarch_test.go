@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/hostarch"
+	"github.com/paisans-software/paisans-cli/internal/hostarch"
 )
 
 type host struct {

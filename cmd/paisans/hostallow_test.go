@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // allowFake is a host's /etc/paisans, in memory: it lists the sidecars and

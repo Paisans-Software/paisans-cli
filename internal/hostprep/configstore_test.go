@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const (

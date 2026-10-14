@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // garage-key-is-malformed has to stop `render`, not only `init`: `render` and

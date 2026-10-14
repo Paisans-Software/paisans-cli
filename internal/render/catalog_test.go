@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/render"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // A blueprint from a third party catalog renders like a built in one: the

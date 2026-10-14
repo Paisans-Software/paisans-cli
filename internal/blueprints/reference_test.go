@@ -3,8 +3,8 @@ package blueprints_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A reference pins when two runs of apply would fetch the same bytes. The

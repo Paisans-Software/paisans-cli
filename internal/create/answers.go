@@ -1,6 +1,6 @@
 package create
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // Answers is what the questions collected, in the order they were asked. It
 // holds no YAML and decides nothing: placement, storage and the rest follow

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
 )
 
 // Builds names each platform with what its configuration declares, read by

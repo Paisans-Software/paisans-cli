@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A locked setting with a condition is locked only while it holds, and its

@@ -3,7 +3,7 @@ package blueprints
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // Every blueprint the configuration accepts has a record, and every record is a

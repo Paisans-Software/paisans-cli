@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
 )
 
 func prefix(t *testing.T, s string) netip.Prefix {

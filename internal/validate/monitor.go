@@ -5,8 +5,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // monitorRoles checks where the uptime monitor may run. README.md: "The

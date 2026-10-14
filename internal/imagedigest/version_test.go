@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
 )
 
 const attestation = "sha256:3333333333333333333333333333333333333333333333333333333333333333"

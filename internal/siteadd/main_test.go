@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/siteadd"
 )
 
 // TestMain stands a passing preflight in for stage 1. These tests drive stages

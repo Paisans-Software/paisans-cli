@@ -3,7 +3,9 @@
 Status: approved in session by the founder, 2026-10-14. Steps 1 and 2 are
 implemented: `pocketid-go` v0.1.0 and the operator reconciler's v0.3.0 are
 released from their own repositories, and this repository uses the first and
-does not hold the second. Steps 3 to 5 are not implemented.
+does not hold the second. Step 3 is implemented: the repository is
+`Paisans-Software/paisans-cli` and its module path matches. Steps 4 and 5
+are not implemented.
 
 This repository holds two programs. `cmd/paisans` is the toolkit an operator
 runs on a workstation. `cmd/operator-reconciler` is a service every deployment
@@ -55,8 +57,8 @@ Founder decisions, 2026-10-14, in session:
   this repository a release needs no prefix, since nothing else shares its
   tags.
 * **This repository is renamed `paisans-cli`,** with its Go module path. The
-  product is the paisans CLI, `paisans` on the command line, and the
-  documentation calls it that.
+  documentation calls the product Paisans, and the command `paisans`. Founder
+  direction.
 * **The deployment's file stays `paisans-stack.yaml`.** It describes the
   stack being deployed, not the tool deploying it.
 
@@ -213,8 +215,8 @@ The rename:
    in `go.mod`.
 2. `go.mod` becomes `module github.com/paisans-software/paisans-cli`, and every
    import follows, in one commit.
-3. The documentation calls the product the paisans CLI, or `paisans` where it
-   means the command. `paisans-stack.yaml` keeps its name everywhere.
+3. The documentation calls the product Paisans, or `paisans` where it means
+   the command. `paisans-stack.yaml` keeps its name everywhere.
 4. References in the sibling repositories follow: the core catalog's README
    and comments, `paisans-account-service`'s, and the Homebrew tap's (step 4 of
    *Order*).

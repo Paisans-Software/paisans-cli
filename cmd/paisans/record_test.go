@@ -7,16 +7,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployrecord"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // recordFake is a gateway that runs the deployment record's write command as

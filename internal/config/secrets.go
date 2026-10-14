@@ -14,9 +14,9 @@ import (
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	"gopkg.in/yaml.v3"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/keystore"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // SecretsVersion is the format of the secrets file this toolkit reads and

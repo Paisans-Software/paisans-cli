@@ -3,7 +3,7 @@ package apply
 import (
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // step starts one thing an apply does on the host. It is reported before the

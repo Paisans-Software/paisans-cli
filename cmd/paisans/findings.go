@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // reportFindings shows a configuration's findings under its path, for a

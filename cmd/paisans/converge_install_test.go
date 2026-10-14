@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // inSection is the events between section's header and the next header.

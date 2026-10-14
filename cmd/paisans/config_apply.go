@@ -9,11 +9,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/configstore"
-	"github.com/paisans-software/paisans-stack/internal/grant"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // What follows is apply's part in the signed copies of the configuration

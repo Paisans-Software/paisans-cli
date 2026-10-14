@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
 // The fixture's Mbin image is an operator override, so only the apply time

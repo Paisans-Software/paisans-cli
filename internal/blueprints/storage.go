@@ -1,6 +1,6 @@
 package blueprints
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // KeepsFilesOnlyLocally reports whether a blueprint stores files that can live
 // only on its own site's disk, with no object storage form at all.

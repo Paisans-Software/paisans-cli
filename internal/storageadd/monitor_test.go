@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/storageadd"
 )
 
 const seed = "/srv/paisans/f2a9/health/monitors.json"

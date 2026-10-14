@@ -11,7 +11,7 @@ import (
 
 	"github.com/paisans-software/pocketid-go"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const testKey = "not-a-real-api-key-0003"

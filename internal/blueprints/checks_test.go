@@ -3,7 +3,7 @@ package blueprints
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/version"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 func TestAListSettingTakesNonEmptyStrings(t *testing.T) {

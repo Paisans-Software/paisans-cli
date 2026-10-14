@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/gatewaymove"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 )
 
 // probeHost answers the gateway Caddy probe and file reads.

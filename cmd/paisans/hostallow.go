@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ui"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // host allow and host disallow change a host's key allowlist: the

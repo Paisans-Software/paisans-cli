@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // ubuntu is the profile for Ubuntu releases. Its shell lives in

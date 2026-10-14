@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 // nullDSN is Symfony Mailer's discard transport (NullTransportFactory at

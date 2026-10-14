@@ -14,7 +14,7 @@ import (
 	"github.com/google/shlex"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // AgeVariablesSet is every SOPS_AGE_* variable that is set, in the order

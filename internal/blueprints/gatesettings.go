@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // GateSetting is one setting an app must enforce while it uses the gate: the

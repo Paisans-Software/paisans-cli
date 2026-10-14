@@ -1,5 +1,5 @@
-# The core catalog: the first party blueprints every paisans-stack
-# deployment can use. paisans-stack resolves an unqualified blueprint name
+# The core catalog: the first party blueprints every Paisans
+# deployment can use. Paisans resolves an unqualified blueprint name
 # (`blueprint: mbin`) here.
 apiVersion: paisans.catalog/v1
 name: core

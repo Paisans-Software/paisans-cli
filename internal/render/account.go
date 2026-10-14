@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 // accountValues is what the account blueprint's templates need beyond any app's.

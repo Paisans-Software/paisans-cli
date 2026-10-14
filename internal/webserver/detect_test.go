@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/webserver"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // fakeHost answers a command by the first key it contains, in order, and

@@ -3,7 +3,7 @@ package hostprep
 import (
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // What `site remove` reads of what host prepare left, so a deployment leaving

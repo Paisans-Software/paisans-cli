@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-cli/internal/acme"
 )
 
 // Every provider the toolkit claims to support needs both halves: a module

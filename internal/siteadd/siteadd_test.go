@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/preflight"
-	"github.com/paisans-software/paisans-stack/internal/siteadd"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/preflight"
+	"github.com/paisans-software/paisans-cli/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 func build(t *testing.T, w *world) *siteadd.Plan {

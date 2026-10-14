@@ -1,6 +1,6 @@
 package blueprints
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // Health is the route a monitor requests to learn whether an app is up, and
 // the status codes that mean it is. Expect is the uptime fork's own syntax: a

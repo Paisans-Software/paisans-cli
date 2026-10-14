@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"runtime"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // Service is the service name every item is stored under.

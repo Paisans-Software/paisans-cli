@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // RoleHostnames is the one place every consumer reads an app's hostnames

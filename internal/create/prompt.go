@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // ErrAborted is input ending before every question was answered: Ctrl-D, a

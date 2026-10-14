@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // Every command reads the secrets through config.LoadDeploymentSecrets, which

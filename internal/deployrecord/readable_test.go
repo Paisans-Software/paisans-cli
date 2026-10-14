@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/deployrecord"
-	"github.com/paisans-software/paisans-stack/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 )
 
 // The record holds names only, so a write leaves it readable by the ssh user

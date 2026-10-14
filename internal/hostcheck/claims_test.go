@@ -3,8 +3,8 @@ package hostcheck_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
 
 func fixture(t *testing.T) *config.Config {

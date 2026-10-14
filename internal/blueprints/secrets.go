@@ -7,7 +7,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"gopkg.in/yaml.v3"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A blueprint's generated secrets say how each is made and what replacing it

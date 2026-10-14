@@ -2,7 +2,7 @@
 // without the network. It is imported only from test files, in a
 // core_test.go beside coretest's:
 //
-//	import _ "github.com/paisans-software/paisans-stack/internal/apply/applytest"
+//	import _ "github.com/paisans-software/paisans-cli/internal/apply/applytest"
 //
 // At init it sets apply.FreshImages to Registry, as `paisans` sets it to the
 // real registry, so a command that starts a stack where none ran puts each
@@ -10,10 +10,10 @@
 package applytest
 
 import (
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
 // Digest is the build Registry names for every tag.

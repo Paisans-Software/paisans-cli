@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/deployrecord"
-	"github.com/paisans-software/paisans-stack/internal/keystore"
-	"github.com/paisans-software/paisans-stack/internal/mesh"
-	"github.com/paisans-software/paisans-stack/internal/registry"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // initFake is one site as init sees it: its registry, its networks, or no

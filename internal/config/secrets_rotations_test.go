@@ -8,7 +8,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The next values and the paths a --all run has left are state the toolkit

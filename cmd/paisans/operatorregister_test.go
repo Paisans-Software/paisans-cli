@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 )
 
 // registerWorkstation is a workstation holding files, nothing recorded, the

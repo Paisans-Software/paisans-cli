@@ -1,8 +1,8 @@
 package render
 
 import (
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // SettingOwner is one setting that owns a rendered key, with its blueprint,

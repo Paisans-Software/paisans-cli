@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/configstore"
-	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/grant"
-	"github.com/paisans-software/paisans-stack/internal/keystore"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // TestMain stands a refusal in for the DNS provider site remove builds, so

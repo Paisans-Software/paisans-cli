@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The DNS continuity check: the operator reconciler holds every operator to

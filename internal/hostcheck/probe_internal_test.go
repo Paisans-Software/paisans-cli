@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // hostSites runs the host sites probe against dir in place of

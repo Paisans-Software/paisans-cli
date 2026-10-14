@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // ContainersCommand lists every container of deployment d on a host, running

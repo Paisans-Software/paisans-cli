@@ -1,3 +1,3 @@
 package failover
 
-import _ "github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
+import _ "github.com/paisans-software/paisans-cli/internal/blueprints/coretest"

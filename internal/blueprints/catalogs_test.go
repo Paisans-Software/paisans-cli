@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // testCatalog makes a git repository holding a catalog with one blueprint,

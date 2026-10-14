@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 const authSnippet = "vm/srv/paisans/f2a9/infra/caddy/snippets/auth.caddy"

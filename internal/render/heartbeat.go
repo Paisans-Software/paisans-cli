@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The per site heartbeat, the reverse of the per site ping. The monitor pings

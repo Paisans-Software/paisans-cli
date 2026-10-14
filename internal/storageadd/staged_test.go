@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/storageadd"
 )
 
 // current is `garage layout show`'s current layout as dxflrs/garage:v1.0.1

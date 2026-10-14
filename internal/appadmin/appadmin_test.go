@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // stubCreator is a blueprint whose probes come from a queue, so the shared

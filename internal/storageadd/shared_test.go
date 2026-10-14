@@ -3,7 +3,7 @@ package storageadd_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/storageadd"
 )
 
 // A site the host check found shared keeps its images through every apply

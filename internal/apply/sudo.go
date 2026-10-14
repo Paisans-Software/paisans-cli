@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // sudoProbe asks whether sudo runs without a password. -n makes sudo fail at

@@ -3,7 +3,7 @@ package doctor
 import (
 	"fmt"
 
-	"github.com/paisans-software/paisans-stack/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/ownership"
 )
 
 // LeftoverProbe is one site's ownership report, or why it could not be made.

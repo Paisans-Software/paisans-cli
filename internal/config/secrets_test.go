@@ -18,8 +18,8 @@ import (
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	"github.com/getsops/sops/v3/version"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const plaintextSecrets = `version: 1

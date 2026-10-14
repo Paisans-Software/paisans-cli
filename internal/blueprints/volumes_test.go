@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 func TestComposeMountsReadsEverySyntax(t *testing.T) {

@@ -1,4 +1,4 @@
-# paisans-stack
+# Paisans
 
 Toolkit for installing and operating a paisans community stack: a private,
 federated community on hardware its organizers control.
@@ -9279,13 +9279,10 @@ it *from*.
 
 ## Where this repository lives
 
-`Paisans-Software/paisans-stack`, public, since 2026-09-15. It was
-`josephquigley/paisans-stack` until then. GitHub redirects the old path, and a
-redirect is a courtesy rather than a contract, so a clone that predates the move
-should have its remote updated rather than relying on one.
-
-The Go module path moved with it, to
-`github.com/paisans-software/paisans-stack`.
+`Paisans-Software/paisans-cli`, public. Its Go module path is
+`github.com/paisans-software/paisans-cli`. GitHub redirects the repository's
+earlier names, and a redirect is a courtesy rather than a contract, so a clone
+made under one should have its remote updated rather than relying on it.
 
 ## Relationship to `paisans.community`
 
@@ -9295,7 +9292,7 @@ organizer could adopt without inheriting this community's specifics.
 
 ## License
 
-Copyright the paisans-stack contributors.
+Copyright the Paisans contributors.
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Affero General Public License as published by the Free

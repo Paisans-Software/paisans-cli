@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 // clientNameMax is the longest client name Pocket ID accepts:

@@ -13,7 +13,7 @@
 // would be wrong from that day on.
 package hostcheck
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // Run computes the site's claims, inventories its host and classifies it.
 // It changes nothing.

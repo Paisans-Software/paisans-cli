@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // How long to wait for the peers' endpoint names to resolve before WireGuard

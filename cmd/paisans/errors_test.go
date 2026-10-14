@@ -10,9 +10,9 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/storageadd"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // withoutAgeKey leaves sops nothing to find a key in: no variable naming

@@ -1,14 +1,14 @@
 # The foundation: the image of every service whose template is
-# paisans-stack's own, the infrastructure stack's and the reserved
-# blueprints'. paisans-stack names none of them itself, so a new release
+# the toolkit's own, the infrastructure stack's and the reserved
+# blueprints'. The toolkit names none of them itself, so a new release
 # of any of them reaches a deployment on its next apply, without a
 # toolkit release.
 #
 # Each is a track: a repository and a tag pattern in which each `*`
-# matches one run of digits. paisans-stack's apply runs the newest tag
+# matches one run of digits. The toolkit's apply runs the newest tag
 # the registry publishes that matches the whole pattern, pinned by its
 # digest. A pattern says exactly how far a track may move, so each one
-# below stops where an upgrade stops being routine. paisans-stack refuses
+# below stops where an upgrade stops being routine. The toolkit refuses
 # a track that leaves the versions its own code is written against
 # (internal/blueprints, supportedTags), and skips this catalog's release for
 # an older one when it does.
@@ -21,7 +21,7 @@ images:
   haproxy: "docker.io/library/haproxy:3.0.*-alpine"
   garage: "docker.io/dxflrs/garage:v1.*.*"
   # Paisans-Software/caddy-dns, Caddy 2 with every DNS provider module
-  # paisans-stack publishes for. It rebuilds whenever upstream Caddy or
+  # Paisans publishes for. It rebuilds whenever upstream Caddy or
   # its base image ships a fix.
   caddy: "ghcr.io/paisans-software/caddy:2.*.*"
   # The per site heartbeat: curl's own image, Alpine with curl and a
