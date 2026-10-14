@@ -25,8 +25,8 @@ func script(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 var (
 	communityAnswers = []string{"Example Community", "example.org", ""}
 	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
-	// management: the account service, its hostname, invites, and the code
-	// of conduct's file.
+	// management: the account service, its hostname, signup by invite, and
+	// the code of conduct's file.
 	managementAnswers = []string{"", "", "", "testdata/code-of-conduct.md"}
 	mailAnswers       = []string{"smtp.example.org", "", "", "community@example.org", "", ""}
 )
@@ -467,5 +467,38 @@ func TestCheckDisplayName(t *testing.T) {
 		if err := checkDisplayName(tc.in); (err == nil) != tc.ok {
 			t.Errorf("checkDisplayName(%q) = %v, want ok=%v", tc.in, err, tc.ok)
 		}
+	}
+}
+
+// The second answer to how people join writes signup: open, with the code
+// of conduct still asked for and written, since everyone who registers
+// agrees to it too.
+func TestWizardWritesOpenSignup(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	apps := appAnswers(false)
+	apps[3] = "2" // sign in hostname, who manages accounts, its hostname, how people join
+	lines = append(lines, apps...)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if w.Answers.Account.Signup != "open" {
+		t.Fatalf("signup is %q, want open", w.Answers.Account.Signup)
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"      signup: open\n", "      code_of_conduct: |\n        # Be kind"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the file lacks %q", want)
+		}
+	}
+	for _, f := range check(t, data).Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
 	}
 }

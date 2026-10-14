@@ -35,12 +35,13 @@ type Answers struct {
 	SMTP SMTP
 }
 
-// Account is what the account app's settings need: whether it admits new
-// members by invite, and with invites on the code of conduct, read from the
-// Markdown file named.
+// Account is what the account app's settings need: how people join, invite
+// or open, and the code of conduct everyone who signs up agrees to, read from
+// the Markdown file named.
 type Account struct {
-	Hostname          string
-	Invites           bool
+	Hostname string
+	// Signup is blueprints.SignupInvite or blueprints.SignupOpen.
+	Signup            string
 	CodeOfConductPath string
 	CodeOfConduct     string
 }

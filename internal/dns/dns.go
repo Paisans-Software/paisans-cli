@@ -300,13 +300,12 @@ func hostnames(cfg *config.Config) []Hostname {
 		}
 	}
 	// A hostname nobody declared, after every declared one: each app keeping
-	// objects in Garage serves them on a media hostname of its own, and an
-	// account app with invites on serves its invitees on invite.<domain>,
-	// unless the app names another under hostnames. A role whose condition
-	// does not hold (an app keeping its files on its own disk, an account app
-	// with invites off) gets no record, even if a stale line declares one:
-	// validate refuses that line, and this keeps dns from publishing it if
-	// that is ever bypassed.
+	// objects in Garage serves them on a media hostname of its own, and every
+	// account app serves people signing up on join.<domain>, unless the app
+	// names another under hostnames. A role whose condition does not hold (an
+	// app keeping its files on its own disk) gets no record, even if a stale
+	// line declares one: validate refuses that line, and this keeps dns from
+	// publishing it if that is ever bypassed.
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
 		for _, rh := range blueprints.RoleHostnames(cfg, app) {

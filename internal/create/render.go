@@ -111,19 +111,17 @@ func build(a Answers, id string) view {
 		ids[i] = op.ID
 	}
 	v.OperatorIDs = strings.Join(ids, ", ")
-	if a.Account.Invites {
-		// A block scalar under code_of_conduct: each line indented eight
-		// spaces, a blank line left blank.
-		lines := strings.Split(a.Account.CodeOfConduct, "\n")
-		for i, l := range lines {
-			if strings.TrimSpace(l) != "" {
-				lines[i] = "        " + l
-			} else {
-				lines[i] = ""
-			}
+	// A block scalar under code_of_conduct: each line indented eight spaces,
+	// a blank line left blank.
+	lines := strings.Split(a.Account.CodeOfConduct, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			lines[i] = "        " + l
+		} else {
+			lines[i] = ""
 		}
-		v.CodeOfConduct = strings.Join(lines, "\n")
 	}
+	v.CodeOfConduct = strings.Join(lines, "\n")
 
 	sites := a.AllSites()
 	var data []string
