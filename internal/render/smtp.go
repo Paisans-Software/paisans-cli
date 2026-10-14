@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // nullDSN is Symfony Mailer's discard transport (NullTransportFactory at
@@ -24,8 +25,10 @@ const nullDSN = "null://null"
 // connects with implicit TLS. starttls is smtp:// with require_tls=true:
 // plain smtp:// upgrades with STARTTLS only when the server offers it and
 // otherwise carries on in plaintext, and require_tls makes it refuse to send
-// without TLS instead (EsmtpTransport.php at v7.4.14). The port is always
-// written, since a DSN without one makes Symfony guess from the scheme.
+// without TLS instead (EsmtpTransport.php at v7.4.14). none is smtp:// with
+// auto_tls=false, which never sends STARTTLS (EsmtpTransportFactory.php at
+// v7.4.14). The port is always written, since a DSN without one makes
+// Symfony guess from the scheme.
 func (v appValues) SMTPDSN() string { return mailerDSN(v.SMTP) }
 
 // SMTPSender is the From address of the app's mail: the resolved
@@ -49,8 +52,11 @@ func mailerDSN(s smtpValues) string {
 		return nullDSN
 	}
 	scheme, query := "smtp", "require_tls=true"
-	if s.Secure {
+	switch {
+	case s.Secure:
 		scheme, query = "smtps", ""
+	case s.Security == config.SMTPNone:
+		query = "auto_tls=false"
 	}
 	out := scheme + "://"
 	if s.Username != "" {

@@ -14,6 +14,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - The `pocket-id` app declares `management`, `paisans` or `pocket-id`: under `paisans` the account service manages signup, bans and recovery, and the toolkit renders Pocket ID's signup and email-code settings.
 - `validate` refuses fewer than two operators with a key on every site that runs Pocket ID.
+- An `smtp:` block may declare `security: none` for a relay at a private or mesh address, with a warning; a public address or a dotted name is refused.
 - `paisans version` and `paisans --version` print the toolkit version and the commit the binary was built from, and blueprints' `requires_toolkit` is checked against that version.
 
 ### Changed

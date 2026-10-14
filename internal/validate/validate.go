@@ -165,6 +165,8 @@ func Check(cfg *config.Config) Result {
 	c.monitorRoles()
 	c.webServer()
 	c.smtpOnABlueprintWithoutMail()
+	c.smtpPlaintext()
+	c.smtpPlaintextWithUsername()
 	c.pocketIDSettingInvalid()
 	c.pocketIDAccountEditOn()
 	c.pocketIDConfigKeyHasASetting()

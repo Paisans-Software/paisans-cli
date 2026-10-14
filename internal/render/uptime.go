@@ -345,17 +345,27 @@ func (p *planner) smtpFor(app string) smtpValues {
 	if password == "" {
 		password = p.secrets.External["smtp_password"]
 	}
+	security := s.Security
+	if security == "" {
+		security = config.SMTPStartTLS
+	}
 	return smtpValues{
-		Host: s.Host, Port: s.PortOrDefault(), Secure: s.Security == config.SMTPTLS,
+		Host: s.Host, Port: s.PortOrDefault(), Secure: s.Security == config.SMTPTLS, Security: security,
 		Username: s.Username, Password: password, FromAddress: s.FromAddress, FromName: s.FromName,
 	}
 }
 
 // smtpValues is an app's resolved mail settings, zero when no host resolves.
 type smtpValues struct {
-	Host        string
-	Port        int
+	Host string
+	Port int
+	// Secure is implicit TLS. Security is the resolved mode, starttls, tls
+	// or none, spelled as Pocket ID's SMTP_TLS and the account service's
+	// ACCOUNT_SMTP_TLS both take it. The monitor's smtp_secure is Secure:
+	// false is nodemailer's STARTTLS when the server offers it and plaintext
+	// otherwise, which is what none needs.
 	Secure      bool
+	Security    string
 	Username    string
 	Password    string
 	FromAddress string
