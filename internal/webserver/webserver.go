@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -38,7 +38,7 @@ type Target struct {
 	PublicAddress  string
 	PublicAddress6 string
 	// HealthPath and HealthExpect are the kind's health route and the
-	// statuses that mean it is up, from kinds.HealthFor.
+	// statuses that mean it is up, from blueprints.HealthFor.
 	HealthPath   string
 	HealthExpect string
 }
@@ -63,7 +63,7 @@ func For(cfg *config.Config, app string) (Target, error) {
 		return Target{}, fmt.Errorf("web-server: %s is served by the gateway's Caddy, which the toolkit runs, so there is nothing to hand off. Only an app pinned to a site holding the monitor role has one", app)
 	}
 	s := cfg.Sites[site]
-	health, _ := kinds.HealthFor(a.Kind)
+	health, _ := blueprints.HealthFor(a.Kind)
 	t := Target{
 		App: app, Site: site, Hostname: a.Hostname, Mode: s.WebServerManagedBy(),
 		PublicAddress: s.PublicAddress, PublicAddress6: s.PublicAddress6,

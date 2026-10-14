@@ -3,8 +3,8 @@ package create
 import (
 	"fmt"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Shape is a layout of sites and roles.
@@ -96,7 +96,7 @@ type capability struct {
 
 // appSpec is how a capability's app is declared: its key, its kind, the
 // label its hostname is under, whether the gate can stand in front of it
-// (kinds.Gate's Gateable), and the roles its site must hold (on) and must
+// (blueprints.Gate's Gateable), and the roles its site must hold (on) and must
 // not (avoid).
 type appSpec struct {
 	key      string
@@ -109,7 +109,7 @@ type appSpec struct {
 }
 
 // health is the one capability the toolkit asks about itself, after the
-// core catalog's (kinds.Wizard), since the monitor is its own blueprint.
+// core catalog's (blueprints.Wizard), since the monitor is its own blueprint.
 var health = capability{question: "A health page (uptime monitor)?", def: true, apps: []appSpec{
 	{key: healthApp, kind: config.KindUptime, sub: "health", what: "health page"},
 }}
@@ -117,7 +117,7 @@ var health = capability{question: "A health page (uptime monitor)?", def: true, 
 // capabilities is what the wizard offers: the core catalog's menu, then the
 // health page.
 func capabilities() ([]capability, error) {
-	entries, err := kinds.Wizard()
+	entries, err := blueprints.Wizard()
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +126,10 @@ func capabilities() ([]capability, error) {
 		c := capability{question: e.Question, name: e.Name, def: e.Default, separateSites: e.SeparateSites}
 		for _, app := range e.Apps {
 			kind := config.Kind(app.Blueprint)
-			if _, ok := kinds.For(kind); !ok {
+			if _, ok := blueprints.For(kind); !ok {
 				return nil, fmt.Errorf("the core catalog's wizard offers %s, which it does not hold", app.Blueprint)
 			}
-			c.apps = append(c.apps, appSpec{key: app.Key, kind: kind, sub: app.Subdomain, gateable: kinds.GateFor(kind).Gateable, what: app.What, on: app.On, avoid: app.Avoid})
+			c.apps = append(c.apps, appSpec{key: app.Key, kind: kind, sub: app.Subdomain, gateable: blueprints.GateFor(kind).Gateable, what: app.What, on: app.On, avoid: app.Avoid})
 		}
 		out = append(out, c)
 	}

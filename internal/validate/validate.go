@@ -21,8 +21,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -844,12 +844,12 @@ func (c *checker) placementShape() {
 // any client is planned, rather than at the provider.
 func (c *checker) dashboardLinkIsAPath() {
 	for _, name := range c.cfg.AppNames() {
-		v, ok := c.cfg.Apps[name].Settings[kinds.DashboardLinkSetting]
+		v, ok := c.cfg.Apps[name].Settings[blueprints.DashboardLinkSetting]
 		if !ok {
 			continue
 		}
-		if err := kinds.CheckDashboardLink(v); err != nil {
-			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, kinds.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
+		if err := blueprints.CheckDashboardLink(v); err != nil {
+			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
 		}
 	}
 }
@@ -859,9 +859,9 @@ func (c *checker) dashboardLinkIsAPath() {
 // member would never see the screen the operator asked for.
 func (c *checker) consentIsABoolean() {
 	for _, name := range c.cfg.AppNames() {
-		v, ok := c.cfg.Apps[name].Settings[kinds.ConsentSetting]
+		v, ok := c.cfg.Apps[name].Settings[blueprints.ConsentSetting]
 		if _, isBool := v.(bool); ok && !isBool {
-			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.ConsentSetting),
+			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.ConsentSetting),
 				"sso_consent is not true or false",
 				"is %v. Write true to show Pocket ID's consent screen on a member's first sign in, or leave it out.", v)
 		}
@@ -887,7 +887,7 @@ func (c *checker) consentIsABoolean() {
 func (c *checker) clusterPlacementWithoutACluster() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Placement.Mode != config.PlacementCluster || kinds.UsesPostgres(app.Kind) {
+		if app.Placement.Mode != config.PlacementCluster || blueprints.UsesPostgres(app.Kind) {
 			continue
 		}
 		c.refuse("cluster-placement-without-a-cluster", fmt.Sprintf("apps.%s.placement", name),
@@ -949,13 +949,13 @@ func (c *checker) imageServices() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			if kinds.Has(app.Kind, service) {
+			if blueprints.Has(app.Kind, service) {
 				continue
 			}
 			c.refuse("unknown-image-service", fmt.Sprintf("apps.%s.images.%s", name, service),
 				"image names a service the template does not define",
 				"names a service %q, which the %s template does not define. Its services are %s. A key that matches nothing renders nothing, so the deployment would keep running the default image while the file says otherwise.",
-				service, app.Kind, strings.Join(kinds.ServiceNames(app.Kind), ", "))
+				service, app.Kind, strings.Join(blueprints.ServiceNames(app.Kind), ", "))
 		}
 	}
 }
@@ -975,7 +975,7 @@ func (c *checker) floatingImages() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			ref := kinds.ParseReference(app.Images[service])
+			ref := blueprints.ParseReference(app.Images[service])
 			why := ref.Floating()
 			if why == "" {
 				continue
@@ -1001,10 +1001,10 @@ func (c *checker) imageForAbsentPostgres() {
 		if app.Placement.Mode != config.PlacementCluster {
 			continue
 		}
-		if _, ok := app.Images[kinds.PostgresService]; !ok {
+		if _, ok := app.Images[blueprints.PostgresService]; !ok {
 			continue
 		}
-		c.warn("image-for-absent-postgres", fmt.Sprintf("apps.%s.images.%s", name, kinds.PostgresService),
+		c.warn("image-for-absent-postgres", fmt.Sprintf("apps.%s.images.%s", name, blueprints.PostgresService),
 			"database image is declared but nothing uses it",
 			"declares a database image, but the app has cluster placement and runs no database of its own: it connects to the local HAProxy, and the cluster's version comes from cluster.postgres_version. Nothing renders this. Remove it, or pin the app if it was meant to have its own database.")
 	}
@@ -1145,7 +1145,7 @@ func (c *checker) pocketIDFileBackend() {
 
 // pocketIDStandbyMarkerUnknown warns when a Pocket ID on more than one apps
 // site runs an image whose refusal text the toolkit has not recorded. Every
-// site but one stands by on that text (kinds.PocketIDStandbyMarker); an
+// site but one stands by on that text (blueprints.PocketIDStandbyMarker); an
 // unknown image gets the default image's, which may not match. A warning,
 // not a refusal: a marker that does not match fails safe, the standby site's
 // container restarting under Docker's policy rather than running twice, and
@@ -1161,7 +1161,7 @@ func (c *checker) pocketIDStandbyMarkerUnknown() {
 		if image == "" {
 			continue
 		}
-		if _, known := kinds.StandbyMarker(image); known {
+		if _, known := blueprints.StandbyMarker(image); known {
 			continue
 		}
 		c.warn("pocket-id-standby-marker-unknown", fmt.Sprintf("apps.%s.images.app", name),
@@ -1188,7 +1188,7 @@ func (c *checker) latestACMEImage() {
 	if c.cfg.ACME.Image == "" {
 		return
 	}
-	why := kinds.ParseReference(c.cfg.ACME.Image).Floating()
+	why := blueprints.ParseReference(c.cfg.ACME.Image).Floating()
 	if why == "" {
 		return
 	}
@@ -1217,7 +1217,7 @@ func (c *checker) latestACMEImage() {
 func (c *checker) gatedOnUngateableKind() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.Gated || kinds.GateFor(app.Kind).Gateable {
+		if !app.Gated || blueprints.GateFor(app.Kind).Gateable {
 			continue
 		}
 		c.refuse("gated-on-ungateable-kind", fmt.Sprintf("apps.%s.gated", name),
@@ -1241,7 +1241,7 @@ func (c *checker) gatedOnUngateableKind() {
 func (c *checker) gatedWithoutSignedFetch() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.Gated || !kinds.Federates(app) || kinds.SignedFetchFor(app) != nil {
+		if !app.Gated || !blueprints.Federates(app) || blueprints.SignedFetchFor(app) != nil {
 			continue
 		}
 		c.refuse("gated-without-signed-fetch", fmt.Sprintf("apps.%s.gated", name),
@@ -1258,7 +1258,7 @@ func (c *checker) gatedWithoutSignedFetch() {
 func (c *checker) autoLoginWithoutARule() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.AutoLogin || len(kinds.GateFor(app.Kind).AutoLogin) > 0 {
+		if !app.AutoLogin || len(blueprints.GateFor(app.Kind).AutoLogin) > 0 {
 			continue
 		}
 		c.refuse("auto-login-without-a-rule", fmt.Sprintf("apps.%s.auto_login", name),
@@ -1285,7 +1285,7 @@ func (c *checker) usesGateOutsideTheDomain() {
 		}
 		hostnames := map[string]string{"hostname": app.Hostname}
 		for role, h := range app.Hostnames {
-			if role != kinds.MediaRole {
+			if role != blueprints.MediaRole {
 				hostnames["hostnames."+role] = h
 			}
 		}
@@ -1321,12 +1321,12 @@ func (c *checker) mediaHostnameShape() {
 	domain := strings.ToLower(c.cfg.Community.Domain)
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := kinds.MediaHostname(c.cfg, app)
+		media := blueprints.MediaHostname(c.cfg, app)
 		if media == "" {
 			continue
 		}
-		key := fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole)
-		derived := kinds.MediaHostnameIsDerived(c.cfg, app)
+		key := fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole)
+		derived := blueprints.MediaHostnameIsDerived(c.cfg, app)
 		if problem := hostnameProblem(media); problem != "" {
 			if derived {
 				c.refuse("media-hostname-is-not-a-hostname", key,
@@ -1337,7 +1337,7 @@ func (c *checker) mediaHostnameShape() {
 				c.refuse("media-hostname-is-not-a-hostname", key,
 					"media hostname is not a valid hostname",
 					"is %q, which is not a hostname: %s. It becomes a site address on the gateway and a URL the app publishes to readers, so it has to be a name a browser can fetch, for example %s.",
-					media, problem, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+					media, problem, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 			}
 			continue
 		}
@@ -1348,7 +1348,7 @@ func (c *checker) mediaHostnameShape() {
 			c.refuse("media-hostname-outside-the-domain", key,
 				"media hostname is outside community.domain",
 				"is %q, which is not under community.domain (%s). Its certificate is issued over DNS-01 against the deployment's own zone, so the configured DNS provider cannot answer for a name outside it. Use a name under %s, for example %s.",
-				media, c.cfg.Community.Domain, c.cfg.Community.Domain, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+				media, c.cfg.Community.Domain, c.cfg.Community.Domain, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 		}
 	}
 }
@@ -1406,7 +1406,7 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 		app := c.cfg.Apps[name]
 		appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostname", name), app.Hostname})
 		for _, role := range sortedKeys(app.Hostnames) {
-			if role == kinds.MediaRole {
+			if role == blueprints.MediaRole {
 				continue
 			}
 			appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostnames.%s", name, role), app.Hostnames[role]})
@@ -1414,7 +1414,7 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := strings.ToLower(kinds.MediaHostname(c.cfg, app))
+		media := strings.ToLower(blueprints.MediaHostname(c.cfg, app))
 		if media == "" {
 			continue
 		}
@@ -1426,10 +1426,10 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 			if !strings.HasSuffix(media, "."+parent) {
 				continue
 			}
-			c.refuse("media-hostname-under-an-app-hostname", fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole),
+			c.refuse("media-hostname-under-an-app-hostname", fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole),
 				"media hostname sits under an app hostname",
 				"is %q, a child of %q (%s). Cookies an app scopes to its own host reach every name under it, so a media hostname there shares the cookie scope it exists to be outside of. Use a sibling instead, for example %s.",
-				media, host.hostname, host.key, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+				media, host.hostname, host.key, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 			break
 		}
 	}
@@ -1525,9 +1525,9 @@ func (c *checker) duplicateHostname() {
 		// been. It is the claim most likely to collide unseen: an app whose
 		// hostname is talk-media.example.org clashes with talk's media
 		// hostname, and neither line in the file says so.
-		if kinds.MediaHostnameIsDerived(c.cfg, app) {
-			if media := kinds.MediaHostname(c.cfg, app); media != "" {
-				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
+		if blueprints.MediaHostnameIsDerived(c.cfg, app) {
+			if media := blueprints.MediaHostname(c.cfg, app); media != "" {
+				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
 			}
 		}
 		for _, cl := range claims {
@@ -1560,13 +1560,13 @@ func (c *checker) hostnameRoles() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, role := range sortedKeys(app.Hostnames) {
-			if kinds.HasHostnameRole(app.Kind, role) {
+			if blueprints.HasHostnameRole(app.Kind, role) {
 				continue
 			}
 			c.refuse("unknown-hostname-role", fmt.Sprintf("apps.%s.hostnames.%s", name, role),
 				"hostname role is not known to this kind",
 				"names a hostname role %q, which the %s kind does not understand. A role selects the Caddy snippet that hostname gets, so an unknown one would import a file that does not exist and the gateway would fail to load at all. Roles for this kind: %s.",
-				role, app.Kind, strings.Join(kinds.HostnameRoles(app.Kind), ", "))
+				role, app.Kind, strings.Join(blueprints.HostnameRoles(app.Kind), ", "))
 		}
 	}
 }
@@ -1582,7 +1582,7 @@ func (c *checker) hostnameRoles() {
 func (c *checker) configKeyIsNestedInAnEnvFile() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if kinds.ConfigFormat(app.Kind) != kinds.ConfigEnv {
+		if blueprints.ConfigFormat(app.Kind) != blueprints.ConfigEnv {
 			continue
 		}
 		for _, key := range sortedKeys(app.Config) {
@@ -1592,7 +1592,7 @@ func (c *checker) configKeyIsNestedInAnEnvFile() {
 			c.refuse("config-key-is-nested-in-an-env-file", fmt.Sprintf("apps.%s.config.%s", name, key),
 				"config key has a dot in an env file",
 				"is a dotted key, and %s is an env file. Env has no nesting, so a dot is a typo here rather than a path. Write the variable name the application reads, for example with underscores.",
-				kinds.ConfigFile(app.Kind))
+				blueprints.ConfigFile(app.Kind))
 		}
 	}
 }
@@ -1649,7 +1649,7 @@ var composeSteeringPrefixes = []string{"COMPOSE_", "DOCKER_"}
 func (c *checker) configKeySteersCompose() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if kinds.ConfigFormat(app.Kind) != kinds.ConfigEnv {
+		if blueprints.ConfigFormat(app.Kind) != blueprints.ConfigEnv {
 			continue
 		}
 		for _, key := range sortedKeys(app.Config) {
@@ -1660,7 +1660,7 @@ func (c *checker) configKeySteersCompose() {
 				c.refuse("config-key-steers-compose", fmt.Sprintf("apps.%s.config.%s", name, key),
 					"config key would steer compose itself",
 					"starts with %s. When apply runs compose for this stack, compose reads the stack's %s for its own settings as well as handing it to the application, and a variable there can rename the project or change which services are active. That is compose's configuration, not the application's: it belongs in the toolkit, not in config.",
-					prefix, kinds.ConfigFile(app.Kind))
+					prefix, blueprints.ConfigFile(app.Kind))
 				break
 			}
 		}
@@ -1696,13 +1696,13 @@ func (c *checker) configKeyAlreadyRendered() {
 		// this file's; render meets the same keys at apply.
 		return
 	}
-	redundant := map[kinds.RedundantKey]bool{}
-	for _, k := range kinds.RedundantGateConfig(c.cfg) {
+	redundant := map[blueprints.RedundantKey]bool{}
+	for _, k := range blueprints.RedundantGateConfig(c.cfg) {
 		redundant[k] = true
 	}
 	for _, col := range collisions {
 		detail := col.Detail
-		if redundant[kinds.RedundantKey{App: col.App, Key: col.Key}] {
+		if redundant[blueprints.RedundantKey{App: col.App, Key: col.Key}] {
 			detail += " It repeats the value gating requires, so `paisans doctor --execute` removes it, and changes nothing else."
 		}
 		c.refuse("config-key-already-rendered", col.ConfigKey(),
@@ -1788,7 +1788,7 @@ func (c *checker) adminGroupNotAdmins() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -1813,7 +1813,7 @@ func (c *checker) adminGroupNotAdmins() {
 func (c *checker) oidcMemberGroupNotAName() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -1862,18 +1862,18 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 		if !app.UsesGate() {
 			continue
 		}
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
 		_, member := spec.Groups(app)
-		if member == kinds.MembersGroup {
+		if member == blueprints.MembersGroup {
 			continue
 		}
 		c.refuse("oidc-member-group-disagrees-with-gate", fmt.Sprintf("apps.%s.settings.%s", name, spec.MemberGroupSetting),
 			"member group differs between gate and client",
 			"is %s, but the gate's member group is %s, and this app sets gated or auto_login. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Remove the setting, so the app admits %s too.",
-			member, kinds.MembersGroup, kinds.MembersGroup)
+			member, blueprints.MembersGroup, blueprints.MembersGroup)
 	}
 }
 
@@ -1888,8 +1888,8 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 func (c *checker) oidcClientUnrestricted() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
-		if !ok || !kinds.GateFor(app.Kind).Gateable {
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
+		if !ok || !blueprints.GateFor(app.Kind).Gateable {
 			continue
 		}
 		if _, member := spec.Groups(app); member != "" {
@@ -1905,7 +1905,7 @@ func (c *checker) oidcClientUnrestricted() {
 func (c *checker) smtpOnAKindWithoutMail() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.SMTP == nil || kinds.SendsMail(app.Kind) {
+		if app.SMTP == nil || blueprints.SendsMail(app.Kind) {
 			continue
 		}
 		c.refuse("smtp-on-a-kind-without-mail", fmt.Sprintf("apps.%s.smtp", name),

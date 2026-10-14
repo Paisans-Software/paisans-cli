@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Every gate setting a kind records is rendered with the value it wants and
@@ -19,7 +19,7 @@ func TestGateSettingsAreRenderedAndLocked(t *testing.T) {
 	env := renderTalk(t, fixtureSMTP, nil, gated)
 	talk := config.App{Kind: config.Kind("mbin"), Gated: true}
 	locked := strings.Split(envValue(env, "MBIN_LOCKED_SETTINGS"), ",")
-	for _, s := range kinds.GateSettingsFor(talk) {
+	for _, s := range blueprints.GateSettingsFor(talk) {
 		if got := envValue(env, s.Name); got != s.Want {
 			t.Errorf("mbin: %s = %q, want %q", s.Name, got, s.Want)
 		}
@@ -35,7 +35,7 @@ func TestGateSettingsAreRenderedAndLocked(t *testing.T) {
 	for _, n := range strings.Split(value, ",") {
 		lockedINI = append(lockedINI, strings.TrimSpace(n))
 	}
-	for _, s := range kinds.GateSettingsFor(blog) {
+	for _, s := range blueprints.GateSettingsFor(blog) {
 		section, key, _ := strings.Cut(s.Name, ".")
 		if got, _ := iniValue(ini, section, key); got != s.Want {
 			t.Errorf("writefreely: %s = %q, want %q", s.Name, got, s.Want)

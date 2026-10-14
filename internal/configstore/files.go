@@ -20,7 +20,7 @@ type Files struct {
 // SnapshotBlueprints, when set, is the snapshot a configuration's apps need,
 // read from its paisans-stack.yaml. Local.Files calls it, so every version a
 // workstation publishes carries its snapshot. The command sets it, because
-// only internal/kinds can resolve a blueprint.
+// only internal/blueprints can resolve a blueprint.
 var SnapshotBlueprints func(paisans []byte) (map[string][]byte, error)
 
 // InstallBlueprints, when set, makes a snapshot readable where blueprints are

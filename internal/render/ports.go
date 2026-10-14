@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // The infrastructure's fixed ports. Each is what a rendered file says, and is
@@ -140,10 +140,10 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		// the operator's own web server; nothing dials its mesh address.
 		if host, port, ok := ExternalListen(cfg, name); ok {
 			add(owner, fmt.Sprintf("sites.%s.web_server.listen", site), "tcp", host, port)
-		} else if port := kinds.Port(kind); port != 0 {
+		} else if port := blueprints.Port(kind); port != 0 {
 			add(owner, "apps."+name, "tcp", addr, port)
 		}
-		for _, svc := range kinds.ServicePorts(kind) {
+		for _, svc := range blueprints.ServicePorts(kind) {
 			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
 		}
 		if kind == config.KindPocketID {

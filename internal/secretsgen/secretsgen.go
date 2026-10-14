@@ -31,8 +31,8 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // garageKeyIDPattern and garageSecretPattern are the only shapes Garage
@@ -250,15 +250,15 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 }
 
 // appSecretKeys is what one app's stanza needs: a database role for a
-// Postgres backed kind, the kind's own secrets (kinds.Def.AppSecrets, which
-// says why each is there), and storage keys for an app in object storage.
+// Postgres backed kind, the kind's own secrets (blueprints.Def.AppSecrets,
+// which says why each is there), and storage keys for an app in object storage.
 func appSecretKeys(cfg *config.Config, app config.App) []string {
 	var keys []string
-	if kinds.UsesPostgres(app.Kind) {
+	if blueprints.UsesPostgres(app.Kind) {
 		keys = append(keys, "database_password")
 	}
-	keys = append(keys, kinds.AppSecrets(app.Kind)...)
-	if kinds.InObjectStorage(cfg, app) {
+	keys = append(keys, blueprints.AppSecrets(app.Kind)...)
+	if blueprints.InObjectStorage(cfg, app) {
 		// Only for an app keeping its files in Garage: one keeping them on
 		// its own disk has no bucket for a key to open.
 		//
@@ -282,7 +282,7 @@ func appSecret(kind config.Kind, key string) (string, error) {
 	case "s3_secret_access_key":
 		return garageSecretKey()
 	}
-	if spec, ok := kinds.SecretOf(kind, key); ok {
+	if spec, ok := blueprints.SecretOf(kind, key); ok {
 		return generate(spec.Format)
 	}
 	return password()
@@ -320,13 +320,13 @@ func rsaPrivateKeyPEM() (string, error) {
 // formats are made with their passphrase, by keypairOf.
 func generate(format string) (string, error) {
 	switch format {
-	case kinds.FormatHex16:
+	case blueprints.FormatHex16:
 		return hexSecret(16)
-	case kinds.FormatHex32:
+	case blueprints.FormatHex32:
 		return hexSecret(32)
-	case kinds.FormatRSAPEM:
+	case blueprints.FormatRSAPEM:
 		return rsaPrivateKeyPEM()
-	case kinds.FormatPassword, "":
+	case blueprints.FormatPassword, "":
 		return password()
 	}
 	return "", fmt.Errorf("a %s secret is made with the secret it depends on", format)
@@ -352,14 +352,14 @@ func (l keypairList) has(key string) bool {
 // renders the same pair, so a token one site signs verifies on another.
 func keypairs(kind config.Kind) keypairList {
 	var out keypairList
-	for _, s := range kinds.AppSecrets(kind) {
-		spec, _ := kinds.SecretOf(kind, s)
-		if spec.Format != kinds.FormatRSAKeypair {
+	for _, s := range blueprints.AppSecrets(kind) {
+		spec, _ := blueprints.SecretOf(kind, s)
+		if spec.Format != blueprints.FormatRSAKeypair {
 			continue
 		}
 		p := keypair{private: spec.Name, passphrase: spec.Passphrase}
-		for _, t := range kinds.AppSecrets(kind) {
-			if half, _ := kinds.SecretOf(kind, t); half.Format == kinds.FormatRSAPublic && half.Of == spec.Name {
+		for _, t := range blueprints.AppSecrets(kind) {
+			if half, _ := blueprints.SecretOf(kind, t); half.Format == blueprints.FormatRSAPublic && half.Of == spec.Name {
 				p.public = half.Name
 			}
 		}
@@ -545,7 +545,7 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 		// A kind with no client spec has no client: Pocket ID has none at
 		// itself, and a Matrix client authenticates at the homeserver, whose
 		// authentication service is the relying party.
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -591,7 +591,7 @@ func owedSMTPPassword(cfg *config.Config, secrets *config.Secrets) (Owed, bool) 
 		return Owed{}, false
 	}
 	for _, name := range cfg.AppNames() {
-		if !kinds.SendsMail(cfg.Apps[name].Kind) {
+		if !blueprints.SendsMail(cfg.Apps[name].Kind) {
 			continue
 		}
 		host := cfg.SMTPFor(name).Host
@@ -722,7 +722,7 @@ func garageKeyIsMalformed(appName, key, value string) error {
 func CheckGarageKeys(cfg *config.Config, secrets *config.Secrets) error {
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.InObjectStorage(cfg, app) {
+		if !blueprints.InObjectStorage(cfg, app) {
 			continue
 		}
 		entries := secrets.Apps[name]

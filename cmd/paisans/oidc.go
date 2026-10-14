@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -192,8 +192,8 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 // the identity provider, for a refusal that lists them.
 func kindsWithClients() []string {
 	var out []string
-	for _, kind := range kinds.Builtin() {
-		if _, ok := kinds.OIDCClient(kind, "example.org", "app"); ok {
+	for _, kind := range blueprints.Builtin() {
+		if _, ok := blueprints.OIDCClient(kind, "example.org", "app"); ok {
 			out = append(out, string(kind))
 		}
 	}

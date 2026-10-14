@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
@@ -126,7 +126,7 @@ func TestLocalStorageRendersNoObjectStorage(t *testing.T) {
 
 	for path := range files {
 		for _, name := range localStorageApps {
-			if strings.HasSuffix(path, "/snippets/"+name+"-"+kinds.MediaRole+".caddy") {
+			if strings.HasSuffix(path, "/snippets/"+name+"-"+blueprints.MediaRole+".caddy") {
 				t.Errorf("%s was rendered for an app with no bucket", path)
 			}
 		}

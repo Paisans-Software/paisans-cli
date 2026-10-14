@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
 // fakePocketID stands in for /app/pocket-id. Each server start counts itself
@@ -78,7 +78,7 @@ func standbyImage(t *testing.T) string {
 	if image := os.Getenv("PAISANS_STANDBY_IMAGE"); image != "" {
 		return image
 	}
-	image, _ := kinds.DefaultImage("pocket-id", "app")
+	image, _ := blueprints.DefaultImage("pocket-id", "app")
 	return image
 }
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -42,13 +42,13 @@ func TestEveryDeclaredImageVolumeIsMounted(t *testing.T) {
 				if !strings.HasSuffix(path, "/compose.yaml") {
 					continue
 				}
-				services, err := kinds.ComposeMounts(content)
+				services, err := blueprints.ComposeMounts(content)
 				if err != nil {
 					t.Fatalf("%s: %v", path, err)
 				}
 				for name, s := range services {
 					for _, declared := range declaredVolumes(t, registry, s.Image) {
-						if u := kinds.Uncovered(declared, s.Targets); len(u) > 0 {
+						if u := blueprints.Uncovered(declared, s.Targets); len(u) > 0 {
 							t.Errorf("postgres %s, pinned %v: %s service %s runs %s, which declares %v, and nothing is mounted at exactly that path, so every container would get an anonymous volume there", major, pinned, path, name, s.Image, u)
 						}
 					}

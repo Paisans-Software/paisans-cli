@@ -1,5 +1,5 @@
 # The oauth2-proxy blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
-# internal/kinds reads it; Parse there documents every key.
+# internal/blueprints reads it; Parse there documents every key.
 apiVersion: paisans.blueprint/v1
 name: oauth2-proxy
 services:

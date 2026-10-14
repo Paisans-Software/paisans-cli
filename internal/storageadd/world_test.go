@@ -15,9 +15,9 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/apply/applytest"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
 	"github.com/paisans-software/paisans-stack/internal/ui"
@@ -229,7 +229,7 @@ func (h *host) run(command, stdin string) (string, error) {
 		m := mediaRe.FindStringSubmatch(command)
 		for _, app := range w.cfg.AppNames() {
 			a := w.cfg.Apps[app]
-			if kinds.MediaHostname(w.cfg, a) != m[1] {
+			if blueprints.MediaHostname(w.cfg, a) != m[1] {
 				continue
 			}
 			if body, ok := w.objects[garage.BucketName(a, app)+"/"+m[2]]; ok {

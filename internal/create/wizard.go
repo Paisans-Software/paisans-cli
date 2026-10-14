@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Section is a group of questions that can be answered again on its own.
@@ -357,7 +357,7 @@ func (w *Wizard) apps() error {
 	// Pocket ID, since that is all it names. The app's key is the default,
 	// which is the client's name when display_name is not set.
 	displayName := func(spec appSpec, host string) (string, error) {
-		if _, ok := kinds.OIDCClient(spec.kind, host, spec.key); !ok {
+		if _, ok := blueprints.OIDCClient(spec.kind, host, spec.key); !ok {
 			return "", nil
 		}
 		def := spec.key

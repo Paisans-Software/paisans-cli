@@ -28,7 +28,7 @@ type Catalog struct {
 // ResolveBlueprints, when set, resolves every app's blueprint once the
 // configuration is structurally sound: it fetches and reads the catalogs the
 // apps name, and returns a problem for each app whose blueprint it cannot
-// find. internal/kinds sets it, because only it can read a blueprint; this
+// find. internal/blueprints sets it, because only it can read a blueprint; this
 // package checks only that a qualified name's catalog is declared.
 var ResolveBlueprints func(*Config) []string
 

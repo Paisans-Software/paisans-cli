@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
@@ -28,7 +28,7 @@ func startPocketID(t *testing.T) *pocketid.Client {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not on PATH; skipping the Pocket ID integration test")
 	}
-	image, ok := kinds.DefaultImage(config.KindPocketID, "app")
+	image, ok := blueprints.DefaultImage(config.KindPocketID, "app")
 	if !ok {
 		t.Fatal("the pocket-id kind names no app image")
 	}

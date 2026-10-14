@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // appValues is everything a kind's template set may need about one app.
@@ -107,7 +107,7 @@ type appValues struct {
 
 	// LocalStorage is true for an app of a kind that can use S3 and keeps its
 	// files in its own stack directory instead: `storage: local`, or the
-	// default in a deployment with no Garage (kinds.InObjectStorage).
+	// default in a deployment with no Garage (blueprints.InObjectStorage).
 	LocalStorage bool
 
 	// OIDC is this app's client at the identity provider, empty when the app
@@ -147,7 +147,7 @@ type appValues struct {
 	Databases        map[string]string
 
 	// SMTP is this app's resolved mail settings, populated only for a kind
-	// that sends mail (kinds.SendsMail) and zero when no host resolves.
+	// that sends mail (blueprints.SendsMail) and zero when no host resolves.
 	SMTP smtpValues
 
 	// PocketID is the pocket-id kind's application configuration from its
@@ -175,7 +175,7 @@ type appValues struct {
 
 	secrets map[string]any
 	// set is the app's settings as its blueprint sees them, with a catalog
-	// blueprint's defaults filled in (kinds.SettingsSeen).
+	// blueprint's defaults filled in (blueprints.SettingsSeen).
 	set map[string]any
 	// decl is the app as the configuration declares it.
 	decl config.App
@@ -188,8 +188,8 @@ type s3Values struct {
 	Endpoint string
 
 	// MediaHostname is where this app's objects are served from: its own
-	// hostname, a sibling of the app's, from kinds.MediaHostname. Empty for a
-	// kind that stores nothing.
+	// hostname, a sibling of the app's, from blueprints.MediaHostname. Empty
+	// for a kind that stores nothing.
 	MediaHostname string
 
 	// PublicBase is what an app writes into a page, a feed or a federated
@@ -274,7 +274,7 @@ func (v appValues) Setting(key, fallback string) string {
 // WriteFreely render it always, and lock it, so the configuration is its only
 // source.
 func (v appValues) AuthorizedFetch() bool {
-	return kinds.AuthorizedFetch(config.App{Settings: v.set})
+	return blueprints.AuthorizedFetch(config.App{Settings: v.set})
 }
 
 // SettingBool returns a declared boolean setting, or a catalog blueprint's
@@ -318,7 +318,7 @@ func (v appValues) OIDCAdminGroup() string  { admin, _ := v.oidcGroups(); return
 func (v appValues) OIDCMemberGroup() string { _, member := v.oidcGroups(); return member }
 
 func (v appValues) oidcGroups() (admin, member string) {
-	spec, ok := kinds.OIDCClient(v.App.Kind, v.App.Hostname, v.App.Name)
+	spec, ok := blueprints.OIDCClient(v.App.Kind, v.App.Hostname, v.App.Name)
 	if !ok {
 		return "", ""
 	}
@@ -331,21 +331,21 @@ func (v appValues) Image(service string) string { return v.App.Images[service] }
 
 // StandbyMarker is the text a Pocket ID app's image logs when another
 // instance already holds the database, for the standby wrapper. See
-// kinds.PocketIDStandbyMarker.
+// blueprints.PocketIDStandbyMarker.
 func (v appValues) StandbyMarker() string {
-	marker, _ := kinds.StandbyMarker(v.Image("app"))
+	marker, _ := blueprints.StandbyMarker(v.Image("app"))
 	return marker
 }
 
 // PostgresDataMount is where a pinned app's Postgres container mounts its data
 // directory, which moved in the official image's 18. See
-// kinds.PostgresDataMount.
+// blueprints.PostgresDataMount.
 func (v appValues) PostgresDataMount() string {
-	return kinds.PostgresDataMount(v.Image(kinds.PostgresService), v.PostgresVersion)
+	return blueprints.PostgresDataMount(v.Image(blueprints.PostgresService), v.PostgresVersion)
 }
 
 // s3For is an app's object storage settings, for an app that keeps its files
-// in Garage (kinds.InObjectStorage).
+// in Garage (blueprints.InObjectStorage).
 func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Values {
 	var s3Endpoint string
 	if garage := garageEndpointHost(p); garage != "" {
@@ -358,7 +358,7 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 		GarageAddresses: garageAddresses(p),
 		AccessKeyID:     v.Secret("s3_access_key_id"),
 		SecretKey:       v.Secret("s3_secret_access_key"),
-		Bucket:          kinds.BucketName(planned.Name, app),
+		Bucket:          blueprints.BucketName(planned.Name, app),
 		Region:          v.Setting("s3_region", "garage"),
 		ForcePathStyle:  v.SettingBool("s3_force_path_style", true),
 	}
@@ -366,7 +366,7 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 	// Set only for a kind that stores objects, so a kind that stores nothing
 	// does not carry the literal string "https://" into a template that has
 	// never been written to check.
-	if media := kinds.MediaHostname(p.cfg, app); media != "" {
+	if media := blueprints.MediaHostname(p.cfg, app); media != "" {
 		s3.MediaHostname = media
 		s3.PublicBase = "https://" + media
 	}
@@ -376,7 +376,7 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 // values assembles what the template set is given.
 func (p *planner) values(planned plannedApp, app config.App) (appValues, error) {
 	var password string
-	if kinds.UsesPostgres(planned.Kind) {
+	if blueprints.UsesPostgres(planned.Kind) {
 		var err error
 		password, err = p.appDatabasePassword(planned)
 		if err != nil {
@@ -412,7 +412,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		DeploymentID:    p.dep().ID,
 		MeshAddress:     p.meshAddress(planned.Site),
 		secrets:         p.secrets.Apps[planned.Name],
-		set:             kinds.SettingsSeen(app),
+		set:             blueprints.SettingsSeen(app),
 		decl:            app,
 	}
 	v.TrustProxy = trustProxy(p.cfg, planned.Name)
@@ -421,10 +421,10 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.WebServerNetwork, v.WebServerGateway = WebServerNetwork, WebServerGateway
 	}
 	v.ServerName = planned.Hostname
-	if delegated := app.Hostnames[kinds.WellknownRole]; delegated != "" {
+	if delegated := app.Hostnames[blueprints.WellknownRole]; delegated != "" {
 		v.ServerName = delegated
 	}
-	for _, c := range kinds.Consumes(planned.Kind) {
+	for _, c := range blueprints.Consumes(planned.Kind) {
 		if v.links == nil {
 			v.links = map[string]map[string]string{}
 		}
@@ -434,13 +434,13 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.links[c.Role] = links
 	}
-	v.LocalStorage = kinds.KeepsFilesLocally(p.cfg, app)
-	if kinds.InObjectStorage(p.cfg, app) {
+	v.LocalStorage = blueprints.KeepsFilesLocally(p.cfg, app)
+	if blueprints.InObjectStorage(p.cfg, app) {
 		v.S3 = p.s3For(planned, app, v)
 	}
 	v.OIDC = p.oidcFor(planned)
 	v.Upstreams = p.upstreams(planned.Name)
-	if kinds.SendsMail(planned.Kind) {
+	if blueprints.SendsMail(planned.Kind) {
 		v.SMTP = p.smtpFor(planned.Name)
 	}
 	if planned.Kind == config.KindPocketID {
@@ -450,7 +450,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.PocketID = pid
 		v.AdminsHeartbeat = len(adminsHeartbeatTargets(p.cfg)) > 0
-		if v.HeartbeatImage, err = kinds.FoundationImage(kinds.FoundationHeartbeat); err != nil {
+		if v.HeartbeatImage, err = blueprints.FoundationImage(blueprints.FoundationHeartbeat); err != nil {
 			return appValues{}, err
 		}
 		dns, err := p.dnsValuesFor(planned.Name)
@@ -473,14 +473,14 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		}
 		v.Invite = invite
 	}
-	for _, svc := range kinds.ServicePorts(planned.Kind) {
+	for _, svc := range blueprints.ServicePorts(planned.Kind) {
 		if v.ServicePorts == nil {
 			v.ServicePorts, v.ServiceUpstreams = map[string]int{}, map[string][]string{}
 		}
 		v.ServicePorts[svc.Name] = svc.Port
 		v.ServiceUpstreams[svc.Name] = p.upstreamsOnPort(planned.Name, svc.Port)
 	}
-	for _, extra := range kinds.ExtraDatabases(planned.Kind) {
+	for _, extra := range blueprints.ExtraDatabases(planned.Kind) {
 		if v.Databases == nil {
 			v.Databases = map[string]string{}
 		}
@@ -511,18 +511,18 @@ func (v appValues) Linked(role, value string) (string, error) {
 func (p *planner) linked(role, hostname string) (map[string]string, error) {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if app.Hostname == hostname && slices.Contains(kinds.Provides(app.Kind), role) {
-			return kinds.LinkValues(p.cfg, name, role)
+		if app.Hostname == hostname && slices.Contains(blueprints.Provides(app.Kind), role) {
+			return blueprints.LinkValues(p.cfg, name, role)
 		}
 	}
-	return kinds.LinkValuesAt(role, hostname)
+	return blueprints.LinkValuesAt(role, hostname)
 }
 
 // dsn is the app's connection URL, empty for a kind that uses no Postgres so
 // that a template cannot render a connection string to a database nobody
 // created.
 func dsn(planned plannedApp, password, host string, port int) string {
-	if !kinds.UsesPostgres(planned.Kind) {
+	if !blueprints.UsesPostgres(planned.Kind) {
 		return ""
 	}
 	return fmt.Sprintf("postgresql://%s:%s@%s:%d/%s", planned.DBUser, password, host, port, planned.DBName)
@@ -542,7 +542,7 @@ func (p *planner) oidcFor(planned plannedApp) oidcValues {
 	// The callback is the one the blueprint declares, which is also the one
 	// apply registers at the identity provider.
 	redirect := "https://" + planned.Hostname + "/oauth/callback"
-	if spec, ok := kinds.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
+	if spec, ok := blueprints.OIDCClient(planned.Kind, planned.Hostname, planned.Name); ok {
 		redirect = spec.CallbackURL
 	}
 	return oidcValues{

@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/storageadd"
 )
@@ -353,7 +353,7 @@ func mediaBuckets(cfg *config.Config) map[string]string {
 	out := map[string]string{}
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if media := kinds.MediaHostname(cfg, app); media != "" {
+		if media := blueprints.MediaHostname(cfg, app); media != "" {
 			out[media] = garage.BucketName(app, name)
 		}
 	}

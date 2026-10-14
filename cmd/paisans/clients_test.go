@@ -13,8 +13,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -787,10 +787,10 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if !ok {
 		t.Fatal("no client for the homeserver")
 	}
-	if want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + kinds.StableULID("chat"); chat.CallbackURL != want || !chat.PKCE {
+	if want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + blueprints.StableULID("chat"); chat.CallbackURL != want || !chat.PKCE {
 		t.Errorf("chat's client: callback %s PKCE %v, want %s with PKCE", chat.CallbackURL, chat.PKCE, want)
 	}
-	if chat.MemberGroup != kinds.MembersGroup || chat.AdminGroup != kinds.AdminsGroup || chat.LaunchURL != "" {
+	if chat.MemberGroup != blueprints.MembersGroup || chat.AdminGroup != blueprints.AdminsGroup || chat.LaunchURL != "" {
 		t.Errorf("chat's client: member %q admin %q launch URL %q", chat.MemberGroup, chat.AdminGroup, chat.LaunchURL)
 	}
 	gate, ok := clientDesired(cfg, config.GateApp, true)
@@ -805,7 +805,7 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	if cfg.Community.Name == "" || gate.Name != cfg.Community.Name || chat.Name != "chat" {
 		t.Errorf("client names: the gate's %q, chat's %q; want %q and chat", gate.Name, chat.Name, cfg.Community.Name)
 	}
-	if gate.MemberGroup != kinds.MembersGroup || gate.AdminGroup != kinds.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
+	if gate.MemberGroup != blueprints.MembersGroup || gate.AdminGroup != blueprints.AdminsGroup || gate.LaunchURL != "" || !gate.RotateSecret {
 		t.Errorf("the gate's client: member %q admin %q launch URL %q rotate %v", gate.MemberGroup, gate.AdminGroup, gate.LaunchURL, gate.RotateSecret)
 	}
 
@@ -816,7 +816,7 @@ func TestClientDesiredForTheHomeserverAndTheGate(t *testing.T) {
 	}
 	original := cfg.Apps["chat"]
 	withConsent := original
-	withConsent.Settings = map[string]any{kinds.ConsentSetting: true}
+	withConsent.Settings = map[string]any{blueprints.ConsentSetting: true}
 	cfg.Apps["chat"] = withConsent
 	if again, _ := clientDesired(cfg, "chat", false); again.SkipConsent {
 		t.Error("sso_consent: true still skips consent")

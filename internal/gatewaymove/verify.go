@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Probes are how a move reaches the world besides ssh and the DNS
@@ -77,7 +77,7 @@ func checks(cfg *config.Config, site string) []Check {
 	for _, h := range dns.GatewayHostnames(cfg) {
 		path := "/"
 		if h.Main {
-			if health, ok := kinds.HealthFor(cfg.Apps[h.App].Kind); ok && health.Path != "" {
+			if health, ok := blueprints.HealthFor(cfg.Apps[h.App].Kind); ok && health.Path != "" {
 				path = health.Path
 			}
 		}

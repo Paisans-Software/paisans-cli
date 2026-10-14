@@ -1,5 +1,5 @@
 # The wikijs blueprint, in the core catalog.
-# paisans-stack reads it; internal/kinds.Parse there documents every key.
+# paisans-stack reads it; internal/blueprints.Parse there documents every key.
 # Spec: paisans-stack docs/specs/2026-10-13-wikijs-blueprint.md.
 apiVersion: paisans.blueprint/v1
 name: wikijs

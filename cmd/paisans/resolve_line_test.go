@@ -10,9 +10,9 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
@@ -22,7 +22,7 @@ import (
 type unpublished struct{}
 
 func (unpublished) Digest(ref string) (string, error) {
-	if def, _ := kinds.DefaultImage(config.Kind("mbin"), "app"); ref != def {
+	if def, _ := blueprints.DefaultImage(config.Kind("mbin"), "app"); ref != def {
 		return "sha256:" + strings.Repeat("a", 64), nil
 	}
 	return "", fmt.Errorf("ghcr.io answered that %s does not exist: %w", ref, imagedigest.ErrNotFound)

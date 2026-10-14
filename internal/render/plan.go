@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // File is one rendered artifact. Content is complete: rendering never appends
@@ -46,9 +46,9 @@ type Plan struct {
 }
 
 // AppPort is the port a kind listens on, which is also the port it publishes
-// on its site's mesh address (kinds.Def.Port). A command that calls an
+// on its site's mesh address (blueprints.Def.Port). A command that calls an
 // application's own API from its host needs it.
-func AppPort(kind config.Kind) int { return kinds.Port(kind) }
+func AppPort(kind config.Kind) int { return blueprints.Port(kind) }
 
 // reconcilerPort is the pocket-id kind's admin reconciler, which publishes /healthz on
 // the mesh address for the uptime monitor. A literal:
@@ -276,7 +276,7 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 		Hostname: app.Hostname,
 		Pinned:   pinned,
 		Site:     site.Name,
-		Port:     kinds.Port(app.Kind),
+		Port:     blueprints.Port(app.Kind),
 		OwnsDB:   pinned,
 		DBName:   dbIdentifier(name),
 		DBUser:   dbIdentifier(name),
@@ -302,8 +302,8 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // changing it under an existing data directory.
 func (p *planner) appImages(app config.App) (map[string]string, error) {
 	out := map[string]string{}
-	for _, service := range kinds.Services(app.Kind) {
-		image, err := kinds.ServiceImage(service)
+	for _, service := range blueprints.Services(app.Kind) {
+		image, err := blueprints.ServiceImage(service)
 		switch {
 		case app.Images[service.Name] != "":
 			out[service.Name] = app.Images[service.Name]
@@ -311,8 +311,8 @@ func (p *planner) appImages(app config.App) (map[string]string, error) {
 			return nil, fmt.Errorf("the image of %s's %s: %w", app.Kind, service.Name, err)
 		case image != "":
 			out[service.Name] = image
-		case service.Name == kinds.PostgresService:
-			pg, err := kinds.PostgresImage(p.postgresVersion())
+		case service.Name == blueprints.PostgresService:
+			pg, err := blueprints.PostgresImage(p.postgresVersion())
 			if err != nil {
 				return nil, err
 			}

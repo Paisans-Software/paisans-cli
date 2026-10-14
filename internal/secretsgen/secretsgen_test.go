@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
@@ -235,7 +235,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	if why == "" {
 		t.Fatal("the homeserver's client was not reported as pending at all")
 	}
-	want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + kinds.StableULID("chat")
+	want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + blueprints.StableULID("chat")
 	if !strings.Contains(why, want) {
 		t.Errorf("the pending client does not name the redirect URI to register (%s):\n%s", want, why)
 	}
@@ -261,7 +261,7 @@ func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
 		why, isPending := pending["oidc_clients."+name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			if isPending {
 				t.Errorf("%s (%s) has no client, and one is pending: %q", name, app.Kind, why)
@@ -283,7 +283,7 @@ func TestTheGatesPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	cfg.Apps["gate"] = config.App{Kind: config.KindOAuth2Proxy, Hostname: "auth-gate.example.org"}
 	why := pendingBy(t, cfg, &config.Secrets{})["oidc_clients.gate"]
-	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + kinds.MembersGroup + " and " + kinds.AdminsGroup} {
+	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + blueprints.MembersGroup + " and " + blueprints.AdminsGroup} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not say %q:\n%s", want, why)
 		}
@@ -330,7 +330,7 @@ func TestGeneratedS3CredentialsMatchGaragesFormat(t *testing.T) {
 	secret := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.UsesObjectStorage(app.Kind) {
+		if !blueprints.UsesObjectStorage(app.Kind) {
 			if _, ok := secrets.Apps[name]["s3_access_key_id"]; ok {
 				t.Errorf("%s is a %s and stores no objects, but was given an S3 key", name, app.Kind)
 			}

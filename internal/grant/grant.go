@@ -20,7 +20,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -111,7 +110,7 @@ func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
 			continue
 		}
 		kind := cfg.Apps[app].Kind
-		dir, fromCatalog := kinds.Source(kind)
+		dir, fromCatalog := blueprints.Source(kind)
 		if !fromCatalog {
 			continue
 		}
@@ -119,7 +118,7 @@ func BlueprintsOf(cfg *config.Config, site string) ([]Blueprint, error) {
 		if catalog == "" {
 			catalog = config.CoreCatalog
 		}
-		cat := kinds.CorePin(cfg, catalog)
+		cat := blueprints.CorePin(cfg, catalog)
 		sum, err := blueprints.Digest(os.DirFS(dir), ".")
 		if err != nil {
 			return nil, fmt.Errorf("reading the blueprint of apps.%s: %w", app, err)
@@ -155,7 +154,7 @@ func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 		if !ok || rest != "compose.yaml" {
 			continue
 		}
-		services, err := kinds.ComposeMounts(file.Content)
+		services, err := blueprints.ComposeMounts(file.Content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the images %s names: %w", file.Path, err)
 		}

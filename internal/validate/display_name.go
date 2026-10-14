@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
 // clientNameMax is the longest client name Pocket ID accepts:
@@ -56,7 +56,7 @@ func (c *checker) duplicateClientName() {
 	first := map[string]string{} // client name -> the app that took it first
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if _, ok := kinds.OIDCClient(app.Kind, app.Hostname, name); !ok {
+		if _, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name); !ok {
 			continue
 		}
 		client := c.cfg.ClientName(name)
@@ -88,7 +88,7 @@ func (c *checker) displayNameWithoutAClient() {
 		if app.DisplayName == "" {
 			continue
 		}
-		if _, ok := kinds.OIDCClient(app.Kind, app.Hostname, name); ok {
+		if _, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name); ok {
 			continue
 		}
 		c.warn("display-name-without-a-client", fmt.Sprintf("apps.%s.display_name", name),

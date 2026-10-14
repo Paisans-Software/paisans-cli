@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // ComposeImage is one image reference a site's compose file names, as the
@@ -52,7 +52,7 @@ func (c ComposeImage) Setting() string {
 		}
 		return ""
 	}
-	if len(c.Services) == 0 || !kinds.Has(c.kind, c.Services[0]) {
+	if len(c.Services) == 0 || !blueprints.Has(c.kind, c.Services[0]) {
 		return ""
 	}
 	return fmt.Sprintf("apps.%s.images.%s", c.App, c.Services[0])
@@ -74,7 +74,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		if !ok || rest != "compose.yaml" {
 			continue
 		}
-		services, err := kinds.ComposeMounts(file.Content)
+		services, err := blueprints.ComposeMounts(file.Content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the images %s names: %w", file.Path, err)
 		}

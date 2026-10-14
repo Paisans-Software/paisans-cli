@@ -397,10 +397,11 @@ type Storage struct {
 	Garage Garage `yaml:"garage"`
 	// There is no deployment wide media hostname. Each app that stores objects
 	// serves them on a hostname of its own, derived from its own hostname and
-	// overridable as `hostnames.media` on that app: see kinds.MediaHostname.
-	// A single hostname with a bucket as a path under it was the earlier
-	// shape, and it was replaced because a path cannot be pointed at a CDN or
-	// another provider one app at a time, while a hostname can.
+	// overridable as `hostnames.media` on that app: see
+	// blueprints.MediaHostname. A single hostname with a bucket as a path under
+	// it was the earlier shape, and it was replaced because a path cannot be
+	// pointed at a CDN or another provider one app at a time, while a hostname
+	// can.
 }
 
 type Garage struct {
@@ -480,7 +481,7 @@ type App struct {
 	//
 	// `media` is the one role that exists without being declared: every kind
 	// that stores objects serves them on <label>-media.<domain>, and declaring
-	// it here only chooses another name. See kinds.MediaHostname.
+	// it here only chooses another name. See blueprints.MediaHostname.
 	Hostnames map[string]string `yaml:"hostnames"`
 
 	// Gated puts the app behind the gate: every request on its hostnames
@@ -512,7 +513,7 @@ type App struct {
 	// on the site it is pinned to. Empty means the default, which depends on
 	// the deployment rather than on this file: s3 when storage.garage.sites
 	// names a site, local when it names none. Read it through
-	// kinds.InObjectStorage, never by comparing this field, so that the
+	// blueprints.InObjectStorage, never by comparing this field, so that the
 	// default is decided in one place.
 	//
 	// local is valid only with pinned placement, because a clustered app runs

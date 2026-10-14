@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 func (c *checker) inviteApps() []string {
@@ -92,12 +92,12 @@ func (c *checker) inviteCodeOfConduct() {
 func (c *checker) inviteSettingInvalid() {
 	for _, name := range c.inviteApps() {
 		s := c.cfg.Apps[name].Settings
-		for _, key := range sortedKeys(kinds.InviteSettingRanges) {
+		for _, key := range sortedKeys(blueprints.InviteSettingRanges) {
 			v, set := s[key]
 			if !set {
 				continue
 			}
-			rng := kinds.InviteSettingRanges[key]
+			rng := blueprints.InviteSettingRanges[key]
 			if n, ok := v.(int); !ok || n < rng[0] || n > rng[1] {
 				c.refuse("invite-setting-invalid", fmt.Sprintf("apps.%s.settings.%s", name, key),
 					"invite setting out of range",
@@ -118,7 +118,7 @@ func (c *checker) inviteSettingInvalid() {
 func (c *checker) inviteSettingUnknown() {
 	for _, name := range c.inviteApps() {
 		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
-			if _, ranged := kinds.InviteSettingRanges[key]; ranged || slices.Contains(kinds.InviteOtherSettings, key) {
+			if _, ranged := blueprints.InviteSettingRanges[key]; ranged || slices.Contains(blueprints.InviteOtherSettings, key) {
 				continue
 			}
 			c.warn("invite-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),

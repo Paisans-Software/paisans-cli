@@ -3,8 +3,8 @@ package render
 import (
 	"fmt"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // clusteredDatabaseHost is what a clustered application instance connects to:
@@ -56,13 +56,13 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 }
 
 // requireAppSecrets refuses an app whose kind needs a secret that is unset
-// (kinds.Def.RequiredSecrets). Most app secrets render as an empty value when
-// unset, because the kinds differ in what they need and an absent optional
+// (blueprints.Def.RequiredSecrets). Most app secrets render as an empty value
+// when unset, because the kinds differ in what they need and an absent optional
 // one is not an error. These are not optional, and an empty one is a
 // container that exits on a host after the apply has already moved, so
 // render refuses first and names the command that fixes it.
 func (p *planner) requireAppSecrets(planned plannedApp) error {
-	for _, need := range kinds.RequiredSecrets(planned.Kind) {
+	for _, need := range blueprints.RequiredSecrets(planned.Kind) {
 		if p.appSecret(planned.Name, need.Key) == "" {
 			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
 		}

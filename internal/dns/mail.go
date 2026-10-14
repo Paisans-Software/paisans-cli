@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // A name that publishes an address can be the sender of a forged message,
@@ -83,7 +83,7 @@ func MailNames(cfg *config.Config) map[string][]string {
 	}
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
-		if !kinds.SendsMail(app.Kind) || app.SMTP == nil {
+		if !blueprints.SendsMail(app.Kind) || app.SMTP == nil {
 			continue
 		}
 		if domain := sender(app.SMTP.FromAddress); domain != "" {

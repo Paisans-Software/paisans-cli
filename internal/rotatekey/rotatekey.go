@@ -23,9 +23,9 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -164,10 +164,10 @@ func Build(opts Options) (*Plan, error) {
 	if !ok {
 		return nil, fmt.Errorf("storage rotate-key: the configuration declares no app %q. Declared apps are %s", opts.App, strings.Join(cfg.AppNames(), ", "))
 	}
-	if !kinds.UsesObjectStorage(app.Kind) {
+	if !blueprints.UsesObjectStorage(app.Kind) {
 		return nil, fmt.Errorf("storage rotate-key: %s is %s, which stores no objects, so it has no Garage key to rotate", opts.App, app.Kind)
 	}
-	if !kinds.InObjectStorage(cfg, app) {
+	if !blueprints.InObjectStorage(cfg, app) {
 		return nil, fmt.Errorf("storage rotate-key: %s keeps its files on its own disk (storage: local, or no Garage in the deployment), so it has no Garage key to rotate", opts.App)
 	}
 	if len(cfg.Storage.Garage.Sites) == 0 {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"gopkg.in/yaml.v3"
 )
 
@@ -13,8 +13,8 @@ import (
 // decided at start, not by the render.
 func TestPocketIDStandsByOnEveryAppsSite(t *testing.T) {
 	files := planFiles(build(t))
-	image, _ := kinds.DefaultImage("pocket-id", "app")
-	marker, known := kinds.StandbyMarker(image)
+	image, _ := blueprints.DefaultImage("pocket-id", "app")
+	marker, known := blueprints.StandbyMarker(image)
 	if !known {
 		t.Fatalf("no marker for %s", image)
 	}

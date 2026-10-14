@@ -26,6 +26,7 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/configstore"
 	"github.com/paisans-software/paisans-stack/internal/dns"
@@ -35,7 +36,6 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -982,7 +982,7 @@ func cacheDigests() (restore func()) {
 	if _, real := saved.(imagedigest.Registry); real {
 		// Only the real registry's answers are kept across runs: a test's
 		// fake answers what the test needs.
-		if dir, err := kinds.CacheDir(); err == nil {
+		if dir, err := blueprints.CacheDir(); err == nil {
 			c.Store = filepath.Join(dir, "platforms")
 		}
 	}

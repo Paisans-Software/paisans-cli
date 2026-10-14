@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/validate"
@@ -236,7 +236,7 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 	}
 
 	wiki := files["home-a/srv/paisans/f2a9/wiki/compose.yaml"]
-	fallback, ok := kinds.DefaultImage(config.Kind("wikijs"), "app")
+	fallback, ok := blueprints.DefaultImage(config.Kind("wikijs"), "app")
 	if !ok {
 		t.Fatal("wikijs ships no default image")
 	}
@@ -269,7 +269,7 @@ func TestRenderedImagesArePinned(t *testing.T) {
 			if strings.Contains(ref, "{{") || strings.Contains(ref, "$") {
 				continue
 			}
-			if !kinds.ParseReference(ref).Pinned() {
+			if !blueprints.ParseReference(ref).Pinned() {
 				t.Errorf("%s renders %q, which does not name one build", f.Path, ref)
 			}
 		}
@@ -932,7 +932,7 @@ func TestTheGatewayRunsAnImageWithTheModule(t *testing.T) {
 	if !acme.Published("desec") {
 		t.Fatal("the published image does not carry desec")
 	}
-	want, err := kinds.FoundationImage(kinds.FoundationCaddy)
+	want, err := blueprints.FoundationImage(blueprints.FoundationCaddy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -973,7 +973,7 @@ func TestADeclaredImageReachesTheGateway(t *testing.T) {
 	if !strings.Contains(infra, "image: "+cfg.ACME.Image) {
 		t.Errorf("the gateway does not run the declared image:\n%s", infra)
 	}
-	published, _ := kinds.FoundationImage(kinds.FoundationCaddy)
+	published, _ := blueprints.FoundationImage(blueprints.FoundationCaddy)
 	if strings.Contains(infra, published) {
 		t.Errorf("the published image survived a declared one:\n%s", infra)
 	}
@@ -1928,7 +1928,7 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 			return ""
 		}
 
-		if o.Kind == config.KindPocketID && o.Setting == kinds.PocketIDAccountEditSetting {
+		if o.Kind == config.KindPocketID && o.Setting == blueprints.PocketIDAccountEditSetting {
 			if got := line(true); got != "ALLOW_OWN_ACCOUNT_EDIT=false" {
 				t.Errorf("allow_own_account_edit set true rendered %q", got)
 			}
@@ -2854,12 +2854,12 @@ func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
 // HTML and API route unfiltered, so every kind that can be gated while it
 // federates must carry it.
 func TestAFederatingKindsSnippetTakesTheFilter(t *testing.T) {
-	for _, kind := range kinds.Builtin() {
-		spec := kinds.GateFor(kind)
+	for _, kind := range blueprints.Builtin() {
+		spec := blueprints.GateFor(kind)
 		if !spec.Gateable || spec.SignedFetch == nil {
 			continue
 		}
-		body, err := fs.ReadFile(kinds.Templates, string(kind)+"/caddy.snippet.tmpl")
+		body, err := fs.ReadFile(blueprints.Templates, string(kind)+"/caddy.snippet.tmpl")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2891,9 +2891,9 @@ func TestMbinEnvCarriesItsGroupsByDefault(t *testing.T) {
 	t.Fatal("no talk/.env was rendered")
 }
 
-// The gate admits kinds.MembersGroup and kinds.AdminsGroup, the same groups
-// every member facing app's client is restricted to by default and the ones
-// the gate's own client admits, so the gate and its client agree.
+// The gate admits blueprints.MembersGroup and blueprints.AdminsGroup, the same
+// groups every member facing app's client is restricted to by default and the
+// ones the gate's own client admits, so the gate and its client agree.
 func TestGateAdmitsMembersAndAdmins(t *testing.T) {
 	plan, err := render.Build(fixture(t), fixtureSecrets(t))
 	if err != nil {
@@ -2903,8 +2903,8 @@ func TestGateAdmitsMembersAndAdmins(t *testing.T) {
 		if !strings.HasSuffix(f.Path, "/srv/paisans/f2a9/gate/compose.yaml") {
 			continue
 		}
-		if !strings.Contains(f.Content, `OAUTH2_PROXY_ALLOWED_GROUPS: "`+kinds.MembersGroup+`,`+kinds.AdminsGroup+`"`) {
-			t.Errorf("%s does not admit %s and %s", f.Path, kinds.MembersGroup, kinds.AdminsGroup)
+		if !strings.Contains(f.Content, `OAUTH2_PROXY_ALLOWED_GROUPS: "`+blueprints.MembersGroup+`,`+blueprints.AdminsGroup+`"`) {
+			t.Errorf("%s does not admit %s and %s", f.Path, blueprints.MembersGroup, blueprints.AdminsGroup)
 		}
 		return
 	}

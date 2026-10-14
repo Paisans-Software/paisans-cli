@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // ClusterDatabaseApps returns, sorted, the apps that reach the cluster's
@@ -25,7 +25,7 @@ func ClusterDatabaseApps(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Placement.Mode == config.PlacementCluster && kinds.UsesPostgres(app.Kind) {
+		if app.Placement.Mode == config.PlacementCluster && blueprints.UsesPostgres(app.Kind) {
 			out = append(out, name)
 		}
 	}

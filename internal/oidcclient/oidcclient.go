@@ -42,8 +42,8 @@ type Desired struct {
 	// client without one is not listed there. Empty plans nothing for it.
 	LaunchURL string
 	// ToolkitLaunchURLs are the launch URLs this toolkit has set by default
-	// (kinds.ToolkitLaunchURLs). An existing client holding one of them, or
-	// none, is moved to LaunchURL. Any other value is the operator's and is
+	// (blueprints.ToolkitLaunchURLs). An existing client holding one of them,
+	// or none, is moved to LaunchURL. Any other value is the operator's and is
 	// never overwritten.
 	ToolkitLaunchURLs []string
 	// LaunchURLChosen is whether the operator set LaunchURL through the app's

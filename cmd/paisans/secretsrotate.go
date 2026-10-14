@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/meshrekey"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -538,10 +538,10 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 		return nil, nil, false
 	}
 	kind := cfg.Apps[app].Kind
-	if slices.Contains(kinds.SecretGroups(kind), key) {
+	if slices.Contains(blueprints.SecretGroups(kind), key) {
 		return secretsrotate.AppGroup(cfg, app, key), nil, true
 	}
-	spec, ok := kinds.SecretOf(kind, key)
+	spec, ok := blueprints.SecretOf(kind, key)
 	switch {
 	case !ok:
 		return nil, nil, false
@@ -608,8 +608,8 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	self := func(cost string) {
 		for _, app := range cfg.AppNames() {
 			kind := cfg.Apps[app].Kind
-			for _, key := range kinds.SelfRotated(kind) {
-				if spec, _ := kinds.SecretOf(kind, key); spec.RotationCost == cost && has("apps."+app+"."+key) {
+			for _, key := range blueprints.SelfRotated(kind) {
+				if spec, _ := blueprints.SecretOf(kind, key); spec.RotationCost == cost && has("apps."+app+"."+key) {
 					rs = append(rs, secretsrotate.AppSelf(app, key, secretsrotate.CostOf(cfg, app, key)))
 				}
 			}
@@ -646,14 +646,14 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	// Each unit of secrets a blueprint groups.
 	for _, app := range cfg.AppNames() {
-		groups := kinds.SecretGroups(cfg.Apps[app].Kind)
+		groups := blueprints.SecretGroups(cfg.Apps[app].Kind)
 		for _, group := range groups {
-			if members := kinds.SecretGroup(cfg.Apps[app].Kind, group); has("apps." + app + "." + members[0].Name) {
+			if members := blueprints.SecretGroup(cfg.Apps[app].Kind, group); has("apps." + app + "." + members[0].Name) {
 				rs = append(rs, secretsrotate.AppGroup(cfg, app, group))
 			}
 		}
 	}
-	self(kinds.CostSignsOut)
+	self(blueprints.CostSignsOut)
 	for _, app := range cfg.AppNames() {
 		if has("apps." + app + ".s3_access_key_id") {
 			rs = append(rs, secretsrotate.AppS3(app, w.s3Run))
@@ -673,20 +673,20 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		}
 	}
 	for _, app := range cfg.AppNames() {
-		if kinds.UsesPostgres(cfg.Apps[app].Kind) && has("apps."+app+".database_password") {
+		if blueprints.UsesPostgres(cfg.Apps[app].Kind) && has("apps."+app+".database_password") {
 			rs = append(rs, secretsrotate.AppDatabase(app))
 		}
 	}
 	// Each secret a blueprint changes inside the running app.
 	for _, app := range cfg.AppNames() {
 		kind := cfg.Apps[app].Kind
-		for _, key := range kinds.AppSecrets(kind) {
-			if spec, _ := kinds.SecretOf(kind, key); spec.Rotate != nil && has("apps."+app+"."+key) {
+		for _, key := range blueprints.AppSecrets(kind) {
+			if spec, _ := blueprints.SecretOf(kind, key); spec.Rotate != nil && has("apps."+app+"."+key) {
 				rs = append(rs, secretsrotate.InApp(cfg, app, key))
 			}
 		}
 	}
-	self(kinds.CostRestart)
+	self(blueprints.CostRestart)
 	if len(cfg.Storage.Garage.Sites) > 0 {
 		if has("storage.garage.admin_token") {
 			rs = append(rs, secretsrotate.GarageAdminToken())
@@ -711,8 +711,8 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	// Each secret a blueprint says is never rotated, with why.
 	for _, app := range cfg.AppNames() {
 		kind := cfg.Apps[app].Kind
-		for _, key := range kinds.AppSecrets(kind) {
-			if spec, _ := kinds.SecretOf(kind, key); spec.NeverRotate != "" && has("apps."+app+"."+key) {
+		for _, key := range blueprints.AppSecrets(kind) {
+			if spec, _ := blueprints.SecretOf(kind, key); spec.NeverRotate != "" && has("apps."+app+"."+key) {
 				kept = append(kept, keptSecret{"apps." + app + "." + key, spec.NeverRotate})
 			}
 		}

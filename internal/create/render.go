@@ -9,8 +9,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 //go:embed paisans-stack.yaml.tmpl
@@ -134,14 +134,14 @@ func build(a Answers, id string) view {
 	// provides it, through the setting the blueprint names.
 	providers := map[string]string{}
 	for _, app := range a.Apps {
-		for _, role := range kinds.Provides(app.Kind) {
+		for _, role := range blueprints.Provides(app.Kind) {
 			providers[role] = app.Hostname
 		}
 	}
 	objects := false
 	for _, app := range a.Apps {
 		av := appView{App: app}
-		for _, c := range kinds.Consumes(app.Kind) {
+		for _, c := range blueprints.Consumes(app.Kind) {
 			if host, ok := providers[c.Role]; ok {
 				if av.Links == nil {
 					av.Links = map[string]string{}
@@ -154,12 +154,12 @@ func build(a Answers, id string) view {
 			av.Placement = pinned(monitor)
 		case placedApart(app.Key):
 			av.Placement = pinned(siteFor(app.Key, sites, pinTo))
-		case kinds.UsesPostgres(app.Kind) && len(data) > 0:
+		case blueprints.UsesPostgres(app.Kind) && len(data) > 0:
 			// Clustered whenever any site holds data, so that adding a data
 			// site later is an addition rather than a move. A clustered app
 			// keeps its files in object storage when its blueprint can.
 			av.Placement = "cluster"
-			if kinds.UsesObjectStorage(app.Kind) {
+			if blueprints.UsesObjectStorage(app.Kind) {
 				objects = true
 			}
 		default:

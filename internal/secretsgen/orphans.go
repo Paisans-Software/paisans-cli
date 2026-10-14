@@ -4,9 +4,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployrecord"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Orphan is a secret naming something the configuration no longer declares:
@@ -62,7 +62,7 @@ func Orphans(cfg *config.Config, secrets *config.Secrets, deployed *deployrecord
 	named := map[string]bool{}
 	for _, name := range cfg.AppNames() {
 		if cfg.Apps[name].Kind == config.KindPocketID {
-			for _, g := range kinds.PocketIDSignupGroups(cfg.Apps[name].Settings) {
+			for _, g := range blueprints.PocketIDSignupGroups(cfg.Apps[name].Settings) {
 				named[g] = true
 			}
 		}

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
@@ -252,9 +252,9 @@ func TestPinnedPostgresWithoutWALG(t *testing.T) {
 		refuse    bool
 	}{
 		{"another image", "postgres:17-trixie", false, false, true},
-		{"the walg image by tag", kinds.WALGImage + ":17", false, false, false},
-		{"the walg image by digest", kinds.WALGImage + "@sha256:" + strings.Repeat("a", 64), false, false, false},
-		{"a lookalike repository", kinds.WALGImage + "-fork:17", false, false, true},
+		{"the walg image by tag", blueprints.WALGImage + ":17", false, false, false},
+		{"the walg image by digest", blueprints.WALGImage + "@sha256:" + strings.Repeat("a", 64), false, false, false},
+		{"a lookalike repository", blueprints.WALGImage + "-fork:17", false, false, true},
 		{"the app opted out", "postgres:17-trixie", true, false, false},
 		{"backups off", "postgres:17-trixie", false, true, false},
 		{"no backup section", "postgres:17-trixie", false, false, false},
@@ -262,7 +262,7 @@ func TestPinnedPostgresWithoutWALG(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := withPinnedForum(t)
 			app := cfg.Apps["forum"]
-			app.Images = map[string]string{kinds.PostgresService: tc.image}
+			app.Images = map[string]string{blueprints.PostgresService: tc.image}
 			if tc.appOff {
 				app.Backup = &no
 			}
@@ -290,7 +290,7 @@ func withPinnedForum(t *testing.T) *config.Config {
 		Hostname:  "forum.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 	}
-	if !kinds.Has(config.Kind("mbin"), kinds.PostgresService) {
+	if !blueprints.Has(config.Kind("mbin"), blueprints.PostgresService) {
 		t.Fatal("mbin no longer declares a postgres service; pick a kind that does")
 	}
 	return cfg

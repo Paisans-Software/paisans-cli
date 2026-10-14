@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // The uptime kind's seed file: what the fork reconciles its monitors and
@@ -98,7 +98,7 @@ const unroutedStatuses = "200,301,302,303,307,308,401,403,404"
 func (p *planner) fallbackChecks(name string, app config.App, sites []string) []seedMonitor {
 	noRedirects := false
 	var out []seedMonitor
-	if !kinds.HealthOf(app.Kind).TCP {
+	if !blueprints.HealthOf(app.Kind).TCP {
 		out = append(out, seedMonitor{
 			Name: PublicCheckName(name) + " (no health route)", MonitorType: "active", Method: "GET", CheckType: "status",
 			URL: "https://" + app.Hostname + "/", ExpectedStatus: unroutedStatuses, FollowRedirects: &noRedirects,
@@ -117,7 +117,7 @@ func (p *planner) fallbackChecks(name string, app config.App, sites []string) []
 	for _, site := range sorted {
 		out = append(out, seedMonitor{
 			Name: reachableCheckName(name, site), MonitorType: "tcp",
-			TCPHost: p.sites[site].Address, TCPPort: kinds.Port(app.Kind),
+			TCPHost: p.sites[site].Address, TCPPort: blueprints.Port(app.Kind),
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})
 	}
@@ -139,7 +139,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			// other app.
 			continue
 		}
-		health, ok := kinds.HealthFor(app.Kind)
+		health, ok := blueprints.HealthFor(app.Kind)
 		if !ok {
 			monitors = append(monitors, p.fallbackChecks(name, app, placed[name])...)
 			continue
@@ -173,7 +173,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				FollowRedirects: &noRedirects,
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
-			if sf := kinds.SignedFetchFor(app); sf != nil && kinds.Federates(app) {
+			if sf := blueprints.SignedFetchFor(app); sf != nil && blueprints.Federates(app) {
 				monitors = append(monitors, seedMonitor{
 					Name: SignedFetchCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
 					URL: "https://" + app.Hostname + sf.SignedFetchProbe(app.Hostname), ExpectedStatus: sf.Expect,
@@ -188,18 +188,18 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		for _, site := range sites {
 			monitors = append(monitors, seedMonitor{
 				Name: directCheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, kinds.Port(app.Kind), health.Path),
+				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Kind), health.Path),
 				ExpectedStatus: health.Expect, FollowRedirects: &noRedirects,
 				// What the gateway would send, minus the gateway.
 				RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
-			if probe := kinds.GateFor(app.Kind).PrivateProbe; probe != nil && gated {
+			if probe := blueprints.GateFor(app.Kind).PrivateProbe; probe != nil && gated {
 				// Through the edge the gate answers first, so this is asked
-				// of the app directly (kinds.GateSpec.PrivateProbe).
+				// of the app directly (blueprints.GateSpec.PrivateProbe).
 				monitors = append(monitors, seedMonitor{
 					Name: privateAPICheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
-					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, kinds.Port(app.Kind), probe.Path),
+					URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Kind), probe.Path),
 					ExpectedStatus: probe.Expect, FollowRedirects: &noRedirects,
 					RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
 					IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
@@ -233,7 +233,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 	// broken DNS, web server or certificate there leaves every heartbeat
 	// stale. A monitor on this same site dies with this host, so checking it
 	// would add nothing about losing the host, and it is left out.
-	if health, ok := kinds.HealthFor(config.KindUptime); ok {
+	if health, ok := blueprints.HealthFor(config.KindUptime); ok {
 		for _, name := range p.cfg.AppNames() {
 			other := p.cfg.Apps[name]
 			if name == self || other.Kind != config.KindUptime || other.Placement.Site == monitorSite {

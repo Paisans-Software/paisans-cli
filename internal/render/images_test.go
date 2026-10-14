@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -28,7 +28,7 @@ func TestTheCaddyImageIsListedAsConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	published, err := kinds.FoundationImage(kinds.FoundationCaddy)
+	published, err := blueprints.FoundationImage(blueprints.FoundationCaddy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 	}
 	// The gate, which no file declares, is listed on the gateway like any
 	// other app, under its kind's default image.
-	gateImage, _ := kinds.FoundationImage(kinds.FoundationOAuth2Proxy)
+	gateImage, _ := blueprints.FoundationImage(blueprints.FoundationOAuth2Proxy)
 	gate, n := siteImage(plan, "vm", "gate", gateImage)
 	if n != 1 || gate.Lines != 1 || strings.Join(gate.Services, ",") != "app" {
 		t.Errorf("the gate lists %+v (%d times)", gate, n)

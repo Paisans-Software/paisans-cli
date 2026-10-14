@@ -1,5 +1,5 @@
 # The mbin blueprint, in the core catalog.
-# paisans-stack reads it; internal/kinds.Parse there documents every key.
+# paisans-stack reads it; internal/blueprints.Parse there documents every key.
 apiVersion: paisans.blueprint/v1
 name: mbin
 services:
@@ -144,7 +144,7 @@ gate:
   # (security.yaml:90 at v1.15.0+paisans).
   sign_in_path: "/login"
   # A gated Mbin runs as a private instance, so its API refuses a read
-  # with no token (see MbinPrivateAPIProbe in internal/kinds).
+  # with no token (see MbinPrivateAPIProbe in internal/blueprints).
   private_probe: {path: "/api/entries", status: [401]}
   # MBIN_AUTHORIZED_FETCH, on unless settings.authorized_fetch turns it
   # off, and MBIN_USE_FEDERATION_ALLOW_LIST when gated, both named in

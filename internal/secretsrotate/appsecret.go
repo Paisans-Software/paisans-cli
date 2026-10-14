@@ -3,8 +3,8 @@ package secretsrotate
 import (
 	"fmt"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -21,8 +21,8 @@ import (
 // AppSelfKind is the kind whose secret key is, for each key AppSelf rotates,
 // and false for any other key: what `secrets rotate` reads to find, in a
 // deployment's apps, the ones whose secret it is. Each kind's record names
-// its keys (kinds.Def.SelfRotated).
-func AppSelfKind(key string) (config.Kind, bool) { return kinds.SelfRotatedKind(key) }
+// its keys (blueprints.Def.SelfRotated).
+func AppSelfKind(key string) (config.Kind, bool) { return blueprints.SelfRotatedKind(key) }
 
 // appSelf rotates one secret an app checks itself.
 type appSelf struct {
@@ -48,7 +48,7 @@ func (r appSelf) Precheck(e Env) error {
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if spec, ok := kinds.SecretOf(app.Kind, r.key); ok && spec.Group != "" {
+	if spec, ok := blueprints.SecretOf(app.Kind, r.key); ok && spec.Group != "" {
 		return fmt.Errorf("%s is rotated with the rest of its unit as apps.%s.%s", r.Path(), r.app, spec.Group)
 	}
 	kind, ok := AppSelfKind(r.key)

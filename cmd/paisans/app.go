@@ -11,8 +11,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -36,7 +36,7 @@ func adminGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -61,7 +61,7 @@ func memberGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 		if !ok {
 			continue
 		}

@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/configstore"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Every version the workstation publishes carries the catalog blueprints its
@@ -11,6 +11,6 @@ import (
 // the configuration store"). configstore cannot read a blueprint itself, so
 // the command connects the two.
 func init() {
-	configstore.SnapshotBlueprints = kinds.SnapshotOf
-	configstore.InstallBlueprints = kinds.InstallSnapshot
+	configstore.SnapshotBlueprints = blueprints.SnapshotOf
+	configstore.InstallBlueprints = blueprints.InstallSnapshot
 }

@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/oidcclient"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
@@ -38,7 +38,7 @@ func pocketIDApp(cfg *config.Config) string {
 // its declaration, and whether this toolkit knows its kind's client.
 func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Desired, bool) {
 	app := cfg.Apps[name]
-	spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+	spec, ok := blueprints.OIDCClient(app.Kind, app.Hostname, name)
 	if !ok {
 		return oidcclient.Desired{}, false
 	}
@@ -48,7 +48,7 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		Name:              cfg.ClientName(name),
 		CallbackURL:       spec.CallbackURL,
 		LaunchURL:         spec.LaunchURL,
-		ToolkitLaunchURLs: kinds.ToolkitLaunchURLs(app.Kind, app.Hostname),
+		ToolkitLaunchURLs: blueprints.ToolkitLaunchURLs(app.Kind, app.Hostname),
 		PKCE:              spec.PKCE,
 		AdminGroup:        adminGroup,
 		MemberGroup:       memberGroup,
@@ -56,11 +56,11 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		RotateSecret:      rotate,
 		// Off unless the app asks for the screen; the gate has no settings
 		// and so skips it too. validate.Check has refused a non-boolean.
-		SkipConsent: app.Settings[kinds.ConsentSetting] != true,
+		SkipConsent: app.Settings[blueprints.ConsentSetting] != true,
 	}
 	// validate.Check has refused a malformed one already.
-	if link, ok := app.Settings[kinds.DashboardLinkSetting].(string); ok {
-		d.LaunchURL = kinds.LaunchURL(app.Kind, app.Hostname, link)
+	if link, ok := app.Settings[blueprints.DashboardLinkSetting].(string); ok {
+		d.LaunchURL = blueprints.LaunchURL(app.Kind, app.Hostname, link)
 		d.LaunchURLChosen = true
 	}
 	return d, true
@@ -138,7 +138,7 @@ func listClientPlan(r ui.Reporter, app, idp, where string, plan *oidcclient.Plan
 }
 
 // clientStep is apply's identity step for one site. Every app the site runs
-// whose kind has a client shape (kinds.OIDCClient) gets its client ensured
+// whose kind has a client shape (blueprints.OIDCClient) gets its client ensured
 // at the deployment's Pocket ID before it renders, with the same plan and
 // the same recorder as `oidc client create`. Declaring the app in
 // paisans-stack.yaml is the approval for its client (founder decision,
@@ -207,11 +207,11 @@ func newClientStep(r ui.Reporter, cfg *config.Config, site, destination, secrets
 		if !slices.Contains(sites[name], site) || (len(only) > 0 && !slices.Contains(only, name)) {
 			continue
 		}
-		if _, ok := kinds.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname, name); ok {
+		if _, ok := blueprints.OIDCClient(cfg.Apps[name].Kind, cfg.Apps[name].Hostname, name); ok {
 			c.apps = append(c.apps, name)
 		}
 		if name == c.idp {
-			c.signupGroups = kinds.PocketIDSignupGroups(cfg.Apps[name].Settings)
+			c.signupGroups = blueprints.PocketIDSignupGroups(cfg.Apps[name].Settings)
 		}
 	}
 	if len(c.apps) == 0 && len(c.signupGroups) == 0 {

@@ -8,16 +8,16 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/configmerge"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // owningSetting is the setting that owns a kind's rendered key, if any: the
-// `settings` key that is the sanctioned input for it (kinds.Def.SettingKeys).
-// When a passthrough key collides with one, the refusal names the setting
-// rather than the template, because that is the way to change the value that
-// somebody will review.
+// `settings` key that is the sanctioned input for it
+// (blueprints.Def.SettingKeys). When a passthrough key collides with one, the
+// refusal names the setting rather than the template, because that is the way
+// to change the value that somebody will review.
 //
 // Only keys a setting genuinely controls are recorded. A rendered key that
 // merely depends on a setting among other things, such as Mbin's
@@ -31,7 +31,7 @@ import (
 // setting changed and checks the key's line changes, so an entry that goes
 // stale fails a test rather than misdirecting an operator.
 func owningSetting(kind config.Kind, key string) (string, bool) {
-	for _, o := range kinds.SettingKeys(kind) {
+	for _, o := range blueprints.SettingKeys(kind) {
 		if o.Key == key {
 			return o.Setting, true
 		}
@@ -41,26 +41,26 @@ func owningSetting(kind config.Kind, key string) (string, bool) {
 
 // omittedOnPurpose is the key a kind's template leaves out of its config file
 // on purpose that a passthrough key falls under, if any
-// (kinds.Def.OmittedKeys). Such a key is owned by the template exactly as a
-// key it writes is, and a passthrough key that names it is refused as
+// (blueprints.Def.OmittedKeys). Such a key is owned by the template exactly as
+// a key it writes is, and a passthrough key that names it is refused as
 // config-key-already-rendered. Only keys the template's own comments name as
 // deliberately absent are recorded, so that the list records decisions rather
 // than guesses.
-func omittedOnPurpose(kind config.Kind, key string) (kinds.OmittedKey, bool) {
-	for _, o := range kinds.OmittedKeys(kind) {
+func omittedOnPurpose(kind config.Kind, key string) (blueprints.OmittedKey, bool) {
+	for _, o := range blueprints.OmittedKeys(kind) {
 		if key == o.Key || strings.HasPrefix(key, o.Key+".") {
 			return o, true
 		}
 	}
-	return kinds.OmittedKey{}, false
+	return blueprints.OmittedKey{}, false
 }
 
 // mergers is the configmerge function for each format.
-var mergers = map[kinds.Format]func(string, map[string]any) (string, error){
-	kinds.ConfigEnv:  configmerge.Env,
-	kinds.ConfigINI:  configmerge.INI,
-	kinds.ConfigYAML: configmerge.YAML,
-	kinds.ConfigJSON: configmerge.JSON,
+var mergers = map[blueprints.Format]func(string, map[string]any) (string, error){
+	blueprints.ConfigEnv:  configmerge.Env,
+	blueprints.ConfigINI:  configmerge.INI,
+	blueprints.ConfigYAML: configmerge.YAML,
+	blueprints.ConfigJSON: configmerge.JSON,
 }
 
 // mergeConfig places an app's passthrough keys into the one file its kind
@@ -71,7 +71,7 @@ var mergers = map[kinds.Format]func(string, map[string]any) (string, error){
 // It is called only when the app declares keys, so an app without them
 // renders exactly what its templates wrote.
 func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File, sources map[string]string) error {
-	format := kinds.ConfigFormat(app.Kind)
+	format := blueprints.ConfigFormat(app.Kind)
 	merge, ok := mergers[format]
 	if !ok {
 		// Unreachable today: every kind renders a config file, so no rule in
@@ -79,7 +79,7 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 		// nothing to refuse). This is the guard for a future kind without one.
 		return fmt.Errorf("apps.%s.config: kind %s renders no configuration file, so there is nowhere for a passthrough key to go", app.Name, app.Kind)
 	}
-	name := kinds.ConfigFile(app.Kind)
+	name := blueprints.ConfigFile(app.Kind)
 	target := -1
 	for i, f := range files {
 		if f.Path == stack+name {
@@ -102,7 +102,7 @@ func mergeConfig(app plannedApp, keys map[string]any, stack string, files []File
 	// already sets would be silently shadowed, and one it reads would change
 	// the compose file rather than the application, so both are refused here
 	// against the rendered compose.yaml.
-	if format == kinds.ConfigEnv {
+	if format == blueprints.ConfigEnv {
 		for _, f := range files {
 			if f.Path != stack+"compose.yaml" {
 				continue

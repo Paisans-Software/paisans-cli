@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -75,7 +75,7 @@ func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Boots
 	}
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Placement.Mode != config.PlacementCluster || !kinds.UsesPostgres(app.Kind) {
+		if app.Placement.Mode != config.PlacementCluster || !blueprints.UsesPostgres(app.Kind) {
 			continue
 		}
 		id := render.DBIdentifier(name)

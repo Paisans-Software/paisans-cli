@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/failover"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
@@ -348,10 +348,10 @@ func (r appDatabase) Cost() Cost { return Cost{Reconnects: true} }
 
 // ownPostgres reports whether the app runs its own Postgres, which is how
 // render decides it (render/plan.go, planApp: OwnsDB is a pinned app, and
-// its kind has a postgres service exactly when kinds.UsesPostgres).
+// its kind has a postgres service exactly when blueprints.UsesPostgres).
 func (r appDatabase) ownPostgres(e Env) bool {
 	app := e.Cfg.Apps[r.app]
-	return app.Placement.Mode == config.PlacementPinned && kinds.UsesPostgres(app.Kind)
+	return app.Placement.Mode == config.PlacementPinned && blueprints.UsesPostgres(app.Kind)
 }
 
 func (r appDatabase) role() string { return render.DBIdentifier(r.app) }
@@ -361,7 +361,7 @@ func (r appDatabase) Precheck(e Env) error {
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if !kinds.UsesPostgres(app.Kind) {
+	if !blueprints.UsesPostgres(app.Kind) {
 		return fmt.Errorf("apps.%s is a %s, which keeps no data in Postgres, so no role checks this password", r.app, app.Kind)
 	}
 	if !pgIdentifier.MatchString(r.role()) {
