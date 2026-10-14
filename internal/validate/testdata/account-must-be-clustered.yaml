@@ -92,7 +92,7 @@ apps:
     hostname: account.example.org
     placement: { pinned: home-a }
     settings:
-      invites: true
+      signup: invite
       code_of_conduct: |
         # Be kind
 

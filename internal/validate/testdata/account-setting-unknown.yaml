@@ -92,7 +92,7 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      invites: true
+      signup: invite
       invite_qouta: 3
       code_of_conduct: |
         # Be kind

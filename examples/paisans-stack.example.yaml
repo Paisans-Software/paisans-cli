@@ -452,19 +452,21 @@ apps:
     #   from_name: Example Health
 
   # The community's account service, on account.example.org, signing in
-  # through the one pocket-id app above. With invites
-  # on, members bring new people in: the invitee opens their link on
-  # invite.example.org, agrees to the code of conduct below and chooses
-  # their details before any account exists; with require_approval an admin
-  # approves first. See "Accounts" in the README.
+  # through the one pocket-id app above. People sign up on join.example.org:
+  # with signup: invite by opening a member's invite link, with signup: open
+  # on a registration page. Either way they agree to the code of conduct
+  # below and choose their details before any account exists; with
+  # require_approval an admin approves first. See "Accounts" in the README.
   account:
     blueprint: account
     hostname: account.example.org
     placement: cluster
     settings:
-      # Required. true serves invite.example.org as well, unless
-      # hostnames.invite names another hostname for it.
-      invites: true
+      # Required: invite (a member's invite link) or open (a registration
+      # page anyone can use). Either way people sign up on join.example.org,
+      # unless hostnames.join names another hostname for it.
+      signup: invite
+      # invite_quota belongs to invite links, and is refused with open.
       invite_quota: 3
       require_approval: true
       # Replace this with the community's own code of conduct. Its SHA-256 is
@@ -473,10 +475,10 @@ apps:
         ## Code of conduct
 
         This is an example. Replace it with the community's own code of
-        conduct before inviting anyone.
+        conduct before anyone signs up.
 
 # How apps that send mail send it: the uptime monitor's alerts, the account
-# service's notices to admins and invitees, Pocket ID's
+# service's notices to admins and applicants, Pocket ID's
 # login codes and notices, which go out under its app_name rather than
 # from_name, and Mbin's contact form and account mails, which go out under its
 # hostname rather than from_name.

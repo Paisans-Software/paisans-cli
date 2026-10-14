@@ -92,7 +92,7 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      invites: true
+      signup: invite
   health:
     blueprint: uptime
     hostname: health.example.org
