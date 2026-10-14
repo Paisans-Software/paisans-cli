@@ -10,8 +10,11 @@ Contributors need a Go toolchain; operators need nothing.
 go build ./cmd/paisans
 ```
 
-Go 1.25.8 or newer, the `go` line in `go.mod`. There is no code generation step
-and no Makefile.
+Go 1.25.8 or newer, the `go` line in `go.mod`. There is no code generation step.
+The `Makefile` holds only the release targets (`make bump` and its
+`bump-patch`, `bump-minor` and `bump-major` forms), which set the version
+constant in `internal/version` and cut `CHANGELOG.md`; *Releases* in
+`AGENTS.md` describes the flow.
 
 ## Run
 
