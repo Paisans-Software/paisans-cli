@@ -322,6 +322,12 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		settings["smtp_host"] = smtp.Host
 		settings["smtp_port"] = smtp.Port
 		settings["smtp_secure"] = smtp.Secure
+		// STARTTLS required, not offered: without it nodemailer sends in
+		// plaintext, credentials included, when the server does not
+		// advertise STARTTLS or someone strips the offer. A fork older than
+		// 1.1.0-oidc.5 ignores the key, as its seed reads only the settings
+		// it knows.
+		settings["smtp_require_tls"] = smtp.Security == config.SMTPStartTLS
 		settings["smtp_user"] = smtp.Username
 		settings["smtp_pass"] = smtp.Password
 		settings["smtp_from_address"] = smtp.FromAddress
@@ -361,9 +367,10 @@ type smtpValues struct {
 	Port int
 	// Secure is implicit TLS. Security is the resolved mode, starttls, tls
 	// or none, spelled as Pocket ID's SMTP_TLS and the account service's
-	// ACCOUNT_SMTP_TLS both take it. The monitor's smtp_secure is Secure:
-	// false is nodemailer's STARTTLS when the server offers it and plaintext
-	// otherwise, which is what none needs.
+	// ACCOUNT_SMTP_TLS both take it. The monitor's smtp_secure is Secure,
+	// and its smtp_require_tls is Security being starttls: smtp_secure false
+	// alone is nodemailer's STARTTLS when the server offers it and plaintext
+	// otherwise, which is what none needs and starttls must not allow.
 	Secure      bool
 	Security    string
 	Username    string

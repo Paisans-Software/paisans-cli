@@ -243,7 +243,7 @@ func TestTheSeedCarriesSettings(t *testing.T) {
 	secrets.Apps["health"]["smtp_password"] = "own"
 	settings = renderSeed(t, cfg, secrets).Settings
 	want := map[string]any{"status_page_enabled": false, "smtp_host": "smtp.example.org", "smtp_port": float64(465),
-		"smtp_secure": true, "smtp_user": "robot", "smtp_pass": "own", "smtp_from_address": "hello@example.org", "smtp_from_name": "Example Health"}
+		"smtp_secure": true, "smtp_require_tls": false, "smtp_user": "robot", "smtp_pass": "own", "smtp_from_address": "hello@example.org", "smtp_from_name": "Example Health"}
 	for k, v := range want {
 		if settings[k] != v {
 			t.Errorf("settings.%s = %v, want %v", k, settings[k], v)
@@ -714,5 +714,25 @@ func TestAnSSOOnlyMonitorRefusesTheDefaultAdminPassword(t *testing.T) {
 	delete(secrets.OIDCClients, "health")
 	if _, err := render.Build(cfg, secrets); err == nil {
 		t.Error("the literal admin password was accepted without a client")
+	}
+}
+
+// starttls is required, not offered: smtp_secure false alone lets nodemailer
+// send in plaintext when the server does not offer STARTTLS, so the seed
+// asks the monitor to refuse instead. Implicit TLS and none never set it.
+func TestUptimeSeedRequiresSTARTTLS(t *testing.T) {
+	for _, c := range []struct {
+		security      string
+		secure, needs bool
+	}{
+		{"starttls", false, true},
+		{"", false, true},
+		{"tls", true, false},
+	} {
+		cfg, secrets := withMonitor(t, config.SMTP{Host: "smtp.example.org", Security: c.security, Username: "robot", FromAddress: "hello@example.org"}, nil)
+		settings := renderSeed(t, cfg, secrets).Settings
+		if settings["smtp_secure"] != c.secure || settings["smtp_require_tls"] != c.needs {
+			t.Errorf("security %q: smtp_secure %v, smtp_require_tls %v", c.security, settings["smtp_secure"], settings["smtp_require_tls"])
+		}
 	}
 }

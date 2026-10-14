@@ -38,7 +38,7 @@ func TestPlaintextSMTPRendersForEveryConsumer(t *testing.T) {
 	t.Run("uptime", func(t *testing.T) {
 		cfg, secrets := withMonitor(t, plaintextSMTP, nil)
 		settings := renderSeed(t, cfg, secrets).Settings
-		if settings["smtp_secure"] != false || settings["smtp_port"] != float64(25) || settings["smtp_host"] != "10.44.0.25" {
+		if settings["smtp_secure"] != false || settings["smtp_require_tls"] != false || settings["smtp_port"] != float64(25) || settings["smtp_host"] != "10.44.0.25" {
 			t.Errorf("smtp settings are %v", settings)
 		}
 	})
