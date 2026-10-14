@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
@@ -68,17 +67,4 @@ func (p *planner) accountValuesFor(name string) (accountValues, error) {
 		}
 	}
 	return v, nil
-}
-
-// identityClients names, sorted, every app whose settings.identity_app names
-// the app called name.
-func (p *planner) identityClients(name string) []string {
-	var out []string
-	for client, app := range p.cfg.Apps {
-		if idp, _ := app.Settings["identity_app"].(string); idp == name {
-			out = append(out, client)
-		}
-	}
-	sort.Strings(out)
-	return out
 }

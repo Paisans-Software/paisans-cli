@@ -65,7 +65,7 @@ var emailCodePaths = []string{
 	"/login/alternative/email", "/login/alternative/email/__data.json",
 }
 
-// Never refused: sign in, the toolkit's and the invite app's API calls, and
+// Never refused: sign in, the toolkit's and the account app's API calls, and
 // administrators' routes.
 var openPaths = []string{
 	"/", "/login", "/login/alternative", "/login/alternative/code", "/lc/ABCDEF",
@@ -77,19 +77,21 @@ var openPaths = []string{
 
 type exposureCase struct {
 	name      string
-	invite    bool
+	account   bool
 	signups   any // nil is unset
 	emailCode any // nil is unset
 }
 
+// signupClosed is the rendered allow_user_signups alone: whether an account
+// app names this Pocket ID does not enter into it.
 func (c exposureCase) signupClosed() bool {
-	return c.invite || c.signups == nil || c.signups == "disabled"
+	return c.signups == nil || c.signups == "disabled"
 }
 
 func (c exposureCase) emailCodeClosed() bool { return c.emailCode != true }
 
 // renderAuthSnippet renders the fixture with the Pocket ID app's two settings
-// replaced, with or without the invite app that names it, and returns the
+// replaced, with or without the account app that names it, and returns the
 // gateway's snippet for it.
 func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	t.Helper()
@@ -109,7 +111,7 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	}
 	app.Settings = settings
 	cfg.Apps["auth"] = app
-	if !c.invite {
+	if !c.account {
 		delete(cfg.Apps, "account")
 		delete(secrets.Apps, "account")
 		delete(secrets.OIDCClients, "account")
@@ -127,15 +129,15 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 
 func exposureCases() []exposureCase {
 	cases := []exposureCase{
-		{name: "public self-service without invite", signups: "open", emailCode: true},
-		{name: "standard invite deployment", invite: true, signups: "disabled", emailCode: true},
+		{name: "public self-service without an account app", signups: "open", emailCode: true},
+		{name: "standard invite deployment", account: true, signups: "disabled", emailCode: true},
 	}
-	for _, invite := range []bool{false, true} {
+	for _, account := range []bool{false, true} {
 		for _, signups := range []any{nil, "disabled", "withToken", "open"} {
 			for _, emailCode := range []any{nil, false, true} {
 				cases = append(cases, exposureCase{
-					name:   fmt.Sprintf("invite=%v signups=%v email_code=%v", invite, signups, emailCode),
-					invite: invite, signups: signups, emailCode: emailCode,
+					name:    fmt.Sprintf("account=%v signups=%v email_code=%v", account, signups, emailCode),
+					account: account, signups: signups, emailCode: emailCode,
 				})
 			}
 		}
@@ -145,7 +147,7 @@ func exposureCases() []exposureCase {
 
 // The gateway refuses Pocket ID's first-admin setup always, and each route
 // that serves only a feature the rendered configuration turns off, while
-// sign in and every route the toolkit and the invite app call stay open.
+// sign in and every route the toolkit and the account app call stay open.
 func TestPocketIDSnippetExposesOnlyWhatTheConfigurationTurnsOn(t *testing.T) {
 	for _, c := range exposureCases() {
 		t.Run(c.name, func(t *testing.T) {
@@ -173,20 +175,11 @@ func TestPocketIDSnippetNamedDeployments(t *testing.T) {
 	if refused(public, "/signup") || refused(public, "/api/signup") {
 		t.Errorf("a public self-service Pocket ID refuses signup: %v", public)
 	}
-	invite := refusedPaths(renderAuthSnippet(t, exposureCase{invite: true, signups: "disabled", emailCode: true}))
+	invite := refusedPaths(renderAuthSnippet(t, exposureCase{account: true, signups: "disabled", emailCode: true}))
 	if !refused(invite, "/signup") || !refused(invite, "/api/signup") {
 		t.Errorf("an invite deployment leaves signup open: %v", invite)
 	}
 	if refused(invite, "/api/one-time-access-email") || refused(invite, "/login/alternative/email") {
 		t.Errorf("an invite deployment refuses the email-code recovery: %v", invite)
-	}
-}
-
-// IdentityClients is a fact about the configuration, so the snippet names the
-// app that closed signup.
-func TestPocketIDSnippetNamesTheInviteApp(t *testing.T) {
-	snippet := renderAuthSnippet(t, exposureCase{invite: true, signups: "disabled", emailCode: true})
-	if !strings.Contains(snippet, "the identity_app of account.") {
-		t.Errorf("the snippet does not name the invite app:\n%s", snippet)
 	}
 }

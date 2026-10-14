@@ -27,13 +27,13 @@ respond @setup 404
 # those the .env renders, and a setting left out takes Pocket ID's default
 # (appconfig/model.go:120-175 at v2.14.0).
 {{- $signups := index .PocketID.Settings "allow_user_signups" }}
-{{- if or .IdentityClients (not $signups) (eq $signups "disabled") }}
+{{- if or (not $signups) (eq $signups "disabled") }}
 #
 # Self signup is closed while allow_user_signups is disabled, or unset, since
-# Pocket ID's default is disabled (appconfig/model.go:130), and whenever an
-# app names this one as its identity_app, since accounts then come only from
-# that app's invites. Here allow_user_signups is {{ with $signups }}{{ . }}{{ else }}unset{{ end }}{{ with .IdentityClients }}, and this app is
-# the identity_app of {{ range $i, $c := . }}{{ if $i }}, {{ end }}{{ $c }}{{ end }}{{ end }}.
+# Pocket ID's default is disabled (appconfig/model.go:130). Here it is
+# {{ with $signups }}{{ . }}{{ else }}unset{{ end }}. An account app with invites on requires disabled,
+# so an invite community always gets this block; otherwise Pocket ID's own
+# setting decides.
 #
 # With allow_user_signups disabled, Pocket ID's signup page refuses
 # (frontend/src/routes/signup/+page.svelte:38-41) and its admin page offers no
@@ -54,8 +54,8 @@ respond @signup 404
 # route at onetimeaccess/module.go:71) and its sign-in page does not offer the
 # page that asks for it (frontend/src/routes/login/alternative/+page.svelte:30-36).
 # The administrator's route, /api/users/<id>/one-time-access-email, is a
-# different path and stays open. The invite app calls it here, at the public
-# hostname, with the static API key. apply calls it on the mesh port over
+# different path and stays open. The account service calls it here, at the
+# public hostname, with the static API key. apply calls it on the mesh port over
 # ssh and never reaches the gateway.
 @email_code path /api/one-time-access-email /api/one-time-access-email/* /login/alternative/email /login/alternative/email/*
 respond @email_code 404
