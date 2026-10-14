@@ -10,9 +10,9 @@ import (
 func TestCatalogDeclarationsAreChecked(t *testing.T) {
 	commit := strings.Repeat("a", 40)
 	cases := []struct {
-		catalogs map[string]Catalog
-		kind     Kind
-		want     string
+		catalogs  map[string]Catalog
+		blueprint Blueprint
+		want      string
 	}{
 		{nil, "example/journal", "which catalogs does not declare"},
 		{map[string]Catalog{"example": {Commit: commit}}, "example/journal", "catalogs.example.url: required"},
@@ -26,16 +26,16 @@ func TestCatalogDeclarationsAreChecked(t *testing.T) {
 		{map[string]Catalog{"Example/Blueprints": {URL: "https://example.org/x/paisans-c", Commit: commit}}, "mbin", "is not a catalog name"},
 	}
 	for _, c := range cases {
-		cfg := &Config{Catalogs: c.catalogs, Apps: map[string]App{"notes": {Kind: c.kind}}}
+		cfg := &Config{Catalogs: c.catalogs, Apps: map[string]App{"notes": {Blueprint: c.blueprint}}}
 		got := strings.Join(cfg.catalogProblems(), "\n")
 		if !strings.Contains(got, c.want) {
-			t.Errorf("%v %s: want %q, got %q", c.catalogs, c.kind, c.want, got)
+			t.Errorf("%v %s: want %q, got %q", c.catalogs, c.blueprint, c.want, got)
 		}
 	}
 	ok := &Config{Catalogs: map[string]Catalog{
 		"example":            {URL: "https://example.org/x/paisans-c", Commit: commit},
 		"example/blueprints": {URL: "https://github.com/example/paisans-blueprints.git", Commit: commit},
-	}, Apps: map[string]App{"notes": {Kind: "example/journal"}, "talk": {Kind: "mbin"}, "wiki": {Kind: "example/blueprints/journal"}}}
+	}, Apps: map[string]App{"notes": {Blueprint: "example/journal"}, "talk": {Blueprint: "mbin"}, "wiki": {Blueprint: "example/blueprints/journal"}}}
 	if p := ok.catalogProblems(); len(p) > 0 {
 		t.Errorf("a sound declaration was refused: %v", p)
 	}

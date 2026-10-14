@@ -10,7 +10,7 @@
 # digest. A pattern says exactly how far a track may move, so each one
 # below stops where an upgrade stops being routine. paisans-stack refuses
 # a track that leaves the versions its own code is written against
-# (internal/kinds, supportedTags), and skips this catalog's release for
+# (internal/blueprints, supportedTags), and skips this catalog's release for
 # an older one when it does.
 apiVersion: paisans.foundation/v1
 images:

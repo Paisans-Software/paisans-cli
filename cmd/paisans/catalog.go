@@ -12,7 +12,6 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -59,21 +58,21 @@ func catalogRelease(url, tag string) (config.Catalog, string, []string, error) {
 	var commit string
 	var err error
 	if tag == "" {
-		tag, commit, err = kinds.Newest(url)
+		tag, commit, err = blueprints.Newest(url)
 	} else {
-		commit, err = kinds.TagCommit(url, tag)
+		commit, err = blueprints.TagCommit(url, tag)
 	}
 	if err != nil {
 		return config.Catalog{}, "", nil, &ui.Problem{Hint: "the catalog's release cannot be read", Explain: err.Error() + "."}
 	}
 	cat := config.Catalog{URL: url, Tag: tag, Commit: commit}
-	dir, err := kinds.Fetch(cat)
+	dir, err := blueprints.Fetch(cat)
 	if err == nil {
-		_, err = kinds.ReadCatalog(dir)
+		_, err = blueprints.ReadCatalog(dir)
 	}
 	var names []string
 	if err == nil {
-		names, err = kinds.Blueprints(dir)
+		names, err = blueprints.Blueprints(dir)
 	}
 	if err != nil {
 		return config.Catalog{}, "", nil, &ui.Problem{Hint: url + " at " + tag + " is not a catalog this toolkit can read", Explain: err.Error() + "."}
@@ -216,16 +215,16 @@ func runCatalogUpdate(args []string) error {
 		}
 		s.Done(fmt.Sprintf("%s, %s, was %s", next.Tag, next.Commit[:12], old.Tag))
 		for _, app := range cfg.AppNames() {
-			catalog, bp := config.SplitBlueprint(cfg.Apps[app].Kind)
+			catalog, bp := config.SplitBlueprint(cfg.Apps[app].Blueprint)
 			if catalog != name {
 				continue
 			}
-			before, _ := kinds.For(cfg.Apps[app].Kind)
-			after, err := kinds.ReadFrom(dir, bp)
+			before, _ := blueprints.For(cfg.Apps[app].Blueprint)
+			after, err := blueprints.ReadFrom(dir, bp)
 			if err != nil {
 				return &ui.Problem{Hint: "apps." + app + " would lose its blueprint", Explain: fmt.Sprintf("%s at %s: %v. Nothing was changed.", name, next.Tag, err)}
 			}
-			changes := kinds.Changes(before, after)
+			changes := blueprints.Changes(before, after)
 			if len(changes) == 0 {
 				r.Detail("%s: %s/%s changes nothing it grants", app, name, bp)
 				continue
@@ -267,7 +266,7 @@ func runCatalogRemove(args []string) error {
 	}
 	var users []string
 	for _, app := range cfg.AppNames() {
-		if c, _ := config.SplitBlueprint(cfg.Apps[app].Kind); c == name {
+		if c, _ := config.SplitBlueprint(cfg.Apps[app].Blueprint); c == name {
 			users = append(users, app)
 		}
 	}
@@ -302,9 +301,9 @@ func runCatalogList(args []string, stdout io.Writer) error {
 	if core.Commit == "" {
 		coreHow = "its newest release"
 	}
-	cat := kinds.CorePin(cfg, config.CoreCatalog)
+	cat := blueprints.CorePin(cfg, config.CoreCatalog)
 	if cat.Commit == "" {
-		if err := kinds.LoadCore(core.URL); err != nil {
+		if err := blueprints.LoadCore(core.URL); err != nil {
 			return err
 		}
 	}
@@ -344,7 +343,7 @@ func runBlueprintList(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reserved, core := kinds.BuiltinNames()
+	reserved, core := blueprints.BuiltinNames()
 	for _, n := range reserved {
 		fmt.Fprintf(stdout, "%s\treserved\n", n)
 	}
@@ -359,11 +358,11 @@ func runBlueprintList(args []string, stdout io.Writer) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		dir, err := kinds.Fetch(cfg.Catalogs[name])
+		dir, err := blueprints.Fetch(cfg.Catalogs[name])
 		if err != nil {
 			return &ui.Problem{Hint: "catalogs." + name + " cannot be read", Explain: err.Error() + "."}
 		}
-		bps, err := kinds.Blueprints(dir)
+		bps, err := blueprints.Blueprints(dir)
 		if err != nil {
 			return &ui.Problem{Hint: "catalogs." + name + " cannot be read", Explain: err.Error() + "."}
 		}
@@ -385,9 +384,9 @@ func runBlueprintShow(args []string, stdout io.Writer) error {
 	if len(pos) != 1 {
 		return &ui.Problem{Hint: "blueprint show takes one blueprint", Explain: "paisans blueprint show <name>, or <catalog>/<name>"}
 	}
-	catalog, name := config.SplitBlueprint(config.Kind(pos[0]))
+	catalog, name := config.SplitBlueprint(config.Blueprint(pos[0]))
 	if catalog == "" {
-		spec, ok := kinds.BuiltinSpec(name)
+		spec, ok := blueprints.BuiltinSpec(name)
 		if !ok {
 			return &ui.Problem{Hint: name + " is not a built in blueprint"}
 		}
@@ -402,11 +401,11 @@ func runBlueprintShow(args []string, stdout io.Writer) error {
 	if !ok {
 		return &ui.Problem{Hint: "catalogs." + catalog + " is not declared"}
 	}
-	dir, err := kinds.Fetch(cat)
+	dir, err := blueprints.Fetch(cat)
 	if err != nil {
 		return &ui.Problem{Hint: "catalogs." + catalog + " cannot be read", Explain: err.Error() + "."}
 	}
-	if _, err := kinds.ReadFrom(dir, name); err != nil {
+	if _, err := blueprints.ReadFrom(dir, name); err != nil {
 		return &ui.Problem{Hint: pos[0] + " cannot be read", Explain: err.Error() + "."}
 	}
 	spec, err := readFile(dir, "blueprints", name, blueprints.File)
@@ -431,7 +430,7 @@ func runBlueprintLint(args []string) error {
 	failed := 0
 	for _, dir := range pos {
 		s := r.Step("lint " + dir)
-		_, problems, err := kinds.Lint(dir)
+		_, problems, err := blueprints.Lint(dir)
 		switch {
 		case err != nil:
 			s.Fail(err)

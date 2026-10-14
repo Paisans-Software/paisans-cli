@@ -11,7 +11,7 @@ import (
 // examples/secrets.example.yaml exists so a reader can see WHICH secrets a
 // deployment needs without holding any of them. That purpose fails silently
 // the moment the example drifts from appSecretKeys: nothing else in the repo
-// reads the example, so a kind that grows a new secret leaves the example
+// reads the example, so a blueprint that grows a new secret leaves the example
 // looking complete while it is not. This is a white-box test, in the package
 // rather than package secretsgen_test, because appSecretKeys is unexported
 // and the whole point is to check the example against the real list rather
@@ -37,8 +37,8 @@ func TestExampleSecretsMatchAppSecretKeys(t *testing.T) {
 		sort.Strings(got)
 
 		if !equal(want, got) {
-			t.Errorf("apps.%s (kind %s): appSecretKeys wants %v, examples/secrets.example.yaml has %v",
-				name, cfg.Apps[name].Kind, want, got)
+			t.Errorf("apps.%s (blueprint %s): appSecretKeys wants %v, examples/secrets.example.yaml has %v",
+				name, cfg.Apps[name].Blueprint, want, got)
 		}
 	}
 }
@@ -106,15 +106,15 @@ func TestExampleOIDCClientsCoverEveryApp(t *testing.T) {
 	}
 
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
 			continue // the identity provider has no client at itself
 		}
-		if cfg.Apps[name].Kind == config.Kind("element") {
+		if cfg.Apps[name].Blueprint == config.Blueprint("element") {
 			continue // a Matrix client authenticates at the homeserver, not here
 		}
 		if _, ok := secrets.OIDCClients[name]; !ok {
-			t.Errorf("apps.%s (kind %s): no oidc_clients entry in examples/secrets.example.yaml",
-				name, cfg.Apps[name].Kind)
+			t.Errorf("apps.%s (blueprint %s): no oidc_clients entry in examples/secrets.example.yaml",
+				name, cfg.Apps[name].Blueprint)
 		}
 	}
 }

@@ -58,7 +58,7 @@ func StandbyApps(cfg *config.Config) []string {
 	var out []string
 	sites := render.AppSites(cfg)
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID && len(sites[name]) > 1 {
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID && len(sites[name]) > 1 {
 			out = append(out, name)
 		}
 	}
@@ -111,7 +111,7 @@ const noDocker = "nodocker"
 // LookAtInstances asks every site an app runs on what its instance is doing,
 // in the order the gateway lists them.
 func LookAtInstances(cfg *config.Config, app string, transports map[string]Transport) []Instance {
-	port := render.AppPort(config.KindPocketID)
+	port := render.AppPort(config.BlueprintPocketID)
 	var out []Instance
 	for _, site := range render.AppSites(cfg)[app] {
 		address := cfg.Sites[site].Address

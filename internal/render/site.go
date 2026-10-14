@@ -16,19 +16,19 @@ import (
 	"golang.org/x/crypto/curve25519"
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // The `all:` prefix matters: without it embed skips files beginning with a
-// dot, and every kind configured by environment ships a `.env` template.
+// dot, and every blueprint configured by environment ships a `.env` template.
 //
 //go:embed all:templates
 var templateFS embed.FS
 
 // templates holds the infrastructure templates, which are shared by every
-// deployment. An application's templates are not here: each kind owns a
+// deployment. An application's templates are not here: each blueprint owns a
 // directory under templates/, rendered as a set, so that adding an application
 // adds a directory rather than a branch in a file every other application
 // shares.
@@ -55,9 +55,9 @@ var templateFuncs = template.FuncMap{
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,
-	// stableULID is a ULID derived from an app's name (kinds.StableULID),
+	// stableULID is a ULID derived from an app's name (blueprints.StableULID),
 	// for software that must be told one and given the same one every run.
-	"stableULID": kinds.StableULID,
+	"stableULID": blueprints.StableULID,
 	"yesno": func(b bool) string {
 		if b {
 			return "true"
@@ -109,16 +109,16 @@ func (p *planner) infraImages() (infraImages, error) {
 		name string
 		into *string
 	}{
-		{kinds.FoundationEtcd, &out.etcd},
-		{kinds.FoundationHAProxy, &out.haproxy},
-		{kinds.FoundationGarage, &out.garage},
-		{kinds.FoundationHeartbeat, &out.heartbeat},
+		{blueprints.FoundationEtcd, &out.etcd},
+		{blueprints.FoundationHAProxy, &out.haproxy},
+		{blueprints.FoundationGarage, &out.garage},
+		{blueprints.FoundationHeartbeat, &out.heartbeat},
 	} {
-		if *image.into, err = kinds.FoundationImage(image.name); err != nil {
+		if *image.into, err = blueprints.FoundationImage(image.name); err != nil {
 			return infraImages{}, err
 		}
 	}
-	if out.spilo, err = kinds.SpiloImage(p.postgresVersion()); err != nil {
+	if out.spilo, err = blueprints.SpiloImage(p.postgresVersion()); err != nil {
 		return infraImages{}, fmt.Errorf("cluster.postgres_version: %w", err)
 	}
 	return out, nil
@@ -151,7 +151,7 @@ func (p *planner) caddyImage() (string, error) {
 			"acme.provider %q has no image in this toolkit and acme.image declares none. A DNS provider is a module compiled into Caddy, so an image carrying it is the only way it reaches a gateway. Published providers: %s",
 			p.cfg.ACME.Provider, strings.Join(acme.Providers(), ", "))
 	}
-	return kinds.FoundationImage(kinds.FoundationCaddy)
+	return blueprints.FoundationImage(blueprints.FoundationCaddy)
 }
 
 type clusterMember struct {
@@ -186,7 +186,7 @@ type route struct {
 	// public hostname it is the only use the host block makes of the gate.
 	AutoLogin bool
 	// What a hostname using the gate lets past it, and its auto-login, from
-	// the kind's GateSpec. Empty on a hostname that does not use the gate.
+	// the blueprint's GateSpec. Empty on a hostname that does not use the gate.
 	// See docs/specs/2026-10-08-visibility-gate.md.
 	Bypass gateBypass
 }
@@ -199,7 +199,7 @@ type gateBypass struct {
 	// federating app with none.
 	ActivityPub bool
 	InboxPaths  []string
-	AutoLogin   []kinds.AutoLoginRule
+	AutoLogin   []blueprints.AutoLoginRule
 	// LoopBreaker is the cookie an auto-login redirect sets, so a user the
 	// app refuses after the gate admitted them is redirected once rather
 	// than forever.
@@ -225,20 +225,20 @@ const GateSessionCookie = "_oauth2_proxy"
 // body rather than the status alone, and fails when the gate is gone.
 const GateMarker = "Sign in required by the visibility gate."
 
-// bypassFor is what an app using the gate lets past it, from its kind's
+// bypassFor is what an app using the gate lets past it, from its blueprint's
 // GateSpec. Auto-login is carried only when the app sets auto_login.
 //
 // An app keeping public files on its own disk also opens the paths they are
-// served on (kinds.LocalMediaPaths). In object storage they are on a media
+// served on (blueprints.LocalMediaPaths). In object storage they are on a media
 // hostname, which is never gated; on the app's own hostname they would be,
 // and a federating server fetching an image will not follow a redirect to a
 // passkey prompt any more than it would there.
 func bypassFor(cfg *config.Config, name string, app config.App) gateBypass {
-	spec := kinds.GateFor(app.Kind)
+	spec := blueprints.GateFor(app.Blueprint)
 	b := gateBypass{
-		ActivityPub: kinds.Federates(app),
+		ActivityPub: blueprints.Federates(app),
 		InboxPaths:  spec.InboxPaths,
-		OpenPaths:   append(kinds.OpenPathsFor(app.Kind), kinds.LocalMediaPaths(cfg, app)...),
+		OpenPaths:   append(blueprints.OpenPathsFor(app.Blueprint), blueprints.LocalMediaPaths(cfg, app)...),
 		TokenPaths:  spec.TokenPaths,
 	}
 	if app.AutoLogin {
@@ -483,8 +483,8 @@ func hostSitesMount(site *siteView) string {
 	return ""
 }
 
-// snippetTemplate is the file in a kind's set that describes how the gateway
-// routes to it on its primary hostname. It is rendered onto the gateway
+// snippetTemplate is the file in a blueprint's set that describes how the
+// gateway routes to it on its primary hostname. It is rendered onto the gateway
 // rather than beside the app, because that is where it is read.
 //
 // snippetPrefix matches it and every extra hostname's own snippet, such as
@@ -536,13 +536,13 @@ func (p *planner) renderSnippets(base string, site *siteView, routes []route) ([
 		values.UpstreamElsewhere = elsewhere(site, values.Upstreams)
 		values.S3.GarageElsewhere = elsewhere(site, values.S3.GarageAddresses)
 
-		path := string(app.Kind) + "/" + kinds.SnippetFor(r.Role)
+		path := string(app.Blueprint) + "/" + blueprints.SnippetFor(r.Role)
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
 		}
 		name := r.App
-		if r.Role != kinds.PrimaryRole {
+		if r.Role != blueprints.PrimaryRole {
 			name = r.App + "-" + r.Role
 		}
 		files = append(files, File{Path: base + p.snippetDir() + name + ".caddy", Content: content, Mode: 0o644, App: r.App})
@@ -550,11 +550,12 @@ func (p *planner) renderSnippets(base string, site *siteView, routes []route) ([
 	return files, nil
 }
 
-// gateSnippetTemplate defines the oauth2-proxy kind's named Caddy snippets,
-// gate, gate_autologin and gate_signin. It is not a hostname's routing: nothing
-// imports it by path, and no host block is rendered for it. A later kind's
-// own snippet imports the names it defines, the same way the deployment this
-// toolkit generalises imports its single `(pocketid_gate)` snippet by name.
+// gateSnippetTemplate defines the oauth2-proxy blueprint's named Caddy
+// snippets, gate, gate_autologin and gate_signin. It is not a hostname's
+// routing: nothing imports it by path, and no host block is rendered for it. A
+// later blueprint's own snippet imports the names it defines, the same way the
+// deployment this toolkit generalises imports its single `(pocketid_gate)`
+// snippet by name.
 const gateSnippetTemplate = "caddy.snippet.gates.tmpl"
 
 // GatesSnippet is what an oauth2-proxy app's named gate snippets file is
@@ -573,7 +574,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 	var files []File
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if app.Kind != config.KindOAuth2Proxy {
+		if app.Blueprint != config.BlueprintOAuth2Proxy {
 			continue
 		}
 		planned, err := p.plannedFor(name, app)
@@ -584,7 +585,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		path := string(app.Kind) + "/" + gateSnippetTemplate
+		path := string(app.Blueprint) + "/" + gateSnippetTemplate
 		content, err := p.renderFile(path, values)
 		if err != nil {
 			return nil, err
@@ -601,7 +602,7 @@ func (p *planner) renderGateSnippets(base string) ([]File, error) {
 func (p *planner) gateSnippetMounts() []string {
 	var out []string
 	for _, name := range p.cfg.AppNames() {
-		if p.cfg.Apps[name].Kind == config.KindOAuth2Proxy {
+		if p.cfg.Apps[name].Blueprint == config.BlueprintOAuth2Proxy {
 			out = append(out, snippetMount+name+"-gates.caddy")
 		}
 	}
@@ -616,27 +617,27 @@ func (p *planner) plannedFor(name string, app config.App) (plannedApp, error) {
 		return plannedApp{}, err
 	}
 	return plannedApp{
-		Name:     name,
-		Dir:      p.dep().Dir(name),
-		Kind:     app.Kind,
-		Hostname: app.Hostname,
-		Pinned:   app.Placement.Mode == config.PlacementPinned,
-		Site:     app.Placement.Site,
-		Port:     kinds.Port(app.Kind),
-		DBName:   dbIdentifier(name),
-		DBUser:   dbIdentifier(name),
-		Images:   images,
+		Name:      name,
+		Dir:       p.dep().Dir(name),
+		Blueprint: app.Blueprint,
+		Hostname:  app.Hostname,
+		Pinned:    app.Placement.Mode == config.PlacementPinned,
+		Site:      app.Placement.Site,
+		Port:      blueprints.Port(app.Blueprint),
+		DBName:    dbIdentifier(name),
+		DBUser:    dbIdentifier(name),
+		Images:    images,
 	}, nil
 }
 
-// TemplateSet lists the templates a kind ships, as paths inside the embedded
-// filesystem. It exists so a test can assert that a set is complete: embed sees
-// what git checked out, so a template left uncommitted is absent here even
-// though it is present on the machine that wrote it.
-func TemplateSet(kind config.Kind) ([]string, error) {
-	dir := string(kind)
+// TemplateSet lists the templates a blueprint ships, as paths inside the
+// embedded filesystem. It exists so a test can assert that a set is complete:
+// embed sees what git checked out, so a template left uncommitted is absent
+// here even though it is present on the machine that wrote it.
+func TemplateSet(blueprint config.Blueprint) ([]string, error) {
+	dir := string(blueprint)
 	var out []string
-	err := fs.WalkDir(kinds.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -644,26 +645,26 @@ func TemplateSet(kind config.Kind) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", kind, err)
+		return nil, fmt.Errorf("blueprint %s ships no template set: %w", blueprint, err)
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// renderTemplateSet renders every file in a kind's template directory.
+// renderTemplateSet renders every file in a blueprint's template directory.
 //
-// A template's path is its destination: <kind>/config/packages/x.yaml in the
-// blueprint's templates (internal/blueprints)
+// A template's path is its destination: <blueprint>/config/packages/x.yaml in
+// the blueprint's templates (internal/blueprints)
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
-	dir := string(app.Kind)
-	entries, err := fs.ReadDir(kinds.Templates, dir)
+	dir := string(app.Blueprint)
+	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
-		return nil, fmt.Errorf("kind %s ships no template set: %w", app.Kind, err)
+		return nil, fmt.Errorf("blueprint %s ships no template set: %w", app.Blueprint, err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("kind %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Kind)
+		return nil, fmt.Errorf("blueprint %s ships an empty template set, so the stack would be rendered with no configuration at all", app.Blueprint)
 	}
 
 	values, err := p.values(app, p.cfg.Apps[app.Name])
@@ -673,7 +674,7 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 
 	var files []File
 	sources := map[string]string{}
-	err = fs.WalkDir(kinds.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(blueprints.Templates, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -696,9 +697,9 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 		if err != nil {
 			return err
 		}
-		if _, fromCatalog := kinds.Source(app.Kind); fromCatalog && rel == "compose.yaml" {
+		if _, fromCatalog := blueprints.Source(app.Blueprint); fromCatalog && rel == "compose.yaml" {
 			if err := checkComposePolicy(content, values.DataPath); err != nil {
-				return fmt.Errorf("apps.%s: blueprint %s: %w", app.Name, app.Kind, err)
+				return fmt.Errorf("apps.%s: blueprint %s: %w", app.Name, app.Blueprint, err)
 			}
 		}
 		dest := base + p.dep().RelPath(app.Name, rel)
@@ -720,11 +721,11 @@ func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error)
 	return files, nil
 }
 
-// renderFile renders one template from a kind's set. Each is parsed on its own
-// rather than into the shared set, so that two kinds may name a file the same
-// thing, which they routinely do.
+// renderFile renders one template from a blueprint's set. Each is parsed on its
+// own rather than into the shared set, so that two blueprints may name a file
+// the same thing, which they routinely do.
 func (p *planner) renderFile(path string, values appValues) (string, error) {
-	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(kinds.Templates, path)
+	tmpl, err := template.New(filepath.Base(path)).Funcs(templateFuncs).ParseFS(blueprints.Templates, path)
 	if err != nil {
 		return "", fmt.Errorf("parsing %s: %w", path, err)
 	}
@@ -871,7 +872,7 @@ func (p *planner) routesFor(site *siteView) []route {
 		}
 		out = append(out, route{
 			App:       name,
-			Role:      kinds.PrimaryRole,
+			Role:      blueprints.PrimaryRole,
 			Hostname:  app.Hostname,
 			Upstreams: p.upstreams(name),
 			Snippet:   snippetMount + name + ".caddy",
@@ -880,13 +881,13 @@ func (p *planner) routesFor(site *siteView) []route {
 			Bypass:    bypass,
 		})
 		roles := sortedKeys(app.Hostnames)
-		if kinds.MediaHostnameIsDerived(p.cfg, app) {
+		if blueprints.MediaHostnameIsDerived(p.cfg, app) {
 			// Every app keeping objects in Garage has a media hostname whether
 			// or not it names one, so the route exists either way.
-			roles = append(roles, kinds.MediaRole)
+			roles = append(roles, blueprints.MediaRole)
 		}
 		for _, role := range roles {
-			if role == kinds.MediaRole && kinds.MediaHostname(p.cfg, app) == "" {
+			if role == blueprints.MediaRole && blueprints.MediaHostname(p.cfg, app) == "" {
 				// An app keeping its files on its own disk serves them on its
 				// own hostname, and has no bucket for a media route to reach.
 				// validate refuses a declared hostnames.media on one.
@@ -894,8 +895,8 @@ func (p *planner) routesFor(site *siteView) []route {
 			}
 			hostname := app.Hostnames[role]
 			routeGated, routeAutoLogin, routeBypass := app.Gated, app.AutoLogin, bypass
-			if role == kinds.MediaRole {
-				hostname = kinds.MediaHostname(p.cfg, app)
+			if role == blueprints.MediaRole {
+				hostname = blueprints.MediaHostname(p.cfg, app)
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
 				// redirect to a passkey prompt.
@@ -936,7 +937,7 @@ func (p *planner) upstreams(name string) []string {
 	if !ok {
 		return nil
 	}
-	return p.upstreamsOnPort(name, kinds.Port(app.Kind))
+	return p.upstreamsOnPort(name, blueprints.Port(app.Blueprint))
 }
 
 // elsewhere reports whether a route has exactly one upstream and it is on a
@@ -958,8 +959,8 @@ func elsewhere(site *siteView, upstreams []string) bool {
 // upstreamsOnPort is upstreams with the port supplied rather than looked up,
 // for a service that answers on a second, explicitly declared port, such as
 // the homeserver's authentication service. It exists so that finding that
-// upstream never computes a port from another kind's port, only from the one
-// the blueprint declares.
+// upstream never computes a port from another blueprint's port, only from the
+// one the blueprint declares.
 func (p *planner) upstreamsOnPort(name string, port int) []string {
 	app, ok := p.cfg.Apps[name]
 	if !ok {

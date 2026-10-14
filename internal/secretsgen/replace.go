@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Replacement is a new value for the secret at a dotted path, in the shape
@@ -31,14 +31,14 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 	parts := strings.Split(path, ".")
 	last := parts[len(parts)-1]
 	if cfg != nil && len(parts) == 3 && parts[0] == "apps" {
-		if spec, ok := kinds.SecretOf(cfg.Apps[parts[1]].Kind, last); ok {
+		if spec, ok := blueprints.SecretOf(cfg.Apps[parts[1]].Blueprint, last); ok {
 			if _, held := s.Get(path); !held {
 				return "", fmt.Errorf("%s: the secrets file holds no value to replace", path)
 			}
 			switch {
 			case spec.NeverRotate != "":
 				return "", fmt.Errorf("%s: %s, so nothing here replaces it", path, spec.NeverRotate)
-			case spec.Format == kinds.FormatRSAKeypair, spec.Format == kinds.FormatRSAPublic:
+			case spec.Format == blueprints.FormatRSAKeypair, spec.Format == blueprints.FormatRSAPublic:
 				return "", fmt.Errorf("%s: a keypair is replaced with the rest of apps.%s.%s", path, parts[1], spec.Group)
 			}
 			return generate(spec.Format)

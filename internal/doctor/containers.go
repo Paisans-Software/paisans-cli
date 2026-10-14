@@ -133,7 +133,7 @@ type SiteContainers struct {
 }
 
 // databaseTrouble is what an app that cannot reach its database prints, in
-// the forms the kinds here use.
+// the forms the blueprints here use.
 var databaseTrouble = regexp.MustCompile(`(?i)failed to connect|connection refused|ping postgres|database`)
 
 // networkUnreachable is a container whose own network has no route to the

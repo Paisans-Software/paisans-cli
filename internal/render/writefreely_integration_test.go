@@ -23,7 +23,7 @@
 //	go test -tags writefreely_integration -timeout 30m ./internal/render/
 //
 // PAISANS_WF_IMAGE, when set, replaces the rendered app image: a local build
-// of a release newer than the one the kind names, for example.
+// of a release newer than the one the blueprint names, for example.
 package render_test
 
 import (

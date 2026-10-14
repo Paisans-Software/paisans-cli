@@ -111,8 +111,8 @@ func TestPocketIDAccountEditingCannotBeTurnedOn(t *testing.T) {
 	}
 }
 
-// A setting the kind does not read renders nothing, which for this kind is
-// most likely a misspelling, so it is said.
+// A setting the blueprint does not read renders nothing, which for this
+// blueprint is most likely a misspelling, so it is said.
 func TestAnUnknownPocketIDSettingIsWarnedAbout(t *testing.T) {
 	r := validate.Check(withAuth(t, map[string]any{"sesion_duration": 60}, nil, nil))
 	if got := findings(r, "pocket-id-setting-unknown"); len(got) != 1 || got[0] != "WARN apps.auth.settings.sesion_duration" {
@@ -140,7 +140,7 @@ func TestAPocketIDConfigKeyWithASettingIsRefused(t *testing.T) {
 // inherits field by field, and its email toggles need a host and a sender.
 func TestPocketIDReadsTheSMTPBlock(t *testing.T) {
 	r := validate.Check(withAuth(t, nil, nil, &config.SMTP{FromAddress: "id@example.org"}))
-	if r.Has("smtp-on-a-kind-without-mail") || r.Refused() {
+	if r.Has("smtp-on-a-blueprint-without-mail") || r.Refused() {
 		t.Errorf("an smtp override on pocket-id was refused: %v", r.Findings)
 	}
 
@@ -176,7 +176,8 @@ func TestPocketIDsSenderIsAnEmailAddress(t *testing.T) {
 }
 
 // Pocket ID sends as its app name. A sender name on its own smtp block is
-// not used, and is said; the deployment's, which other kinds use, is not.
+// not used, and is said; the deployment's, which other blueprints use, is
+// not.
 func TestASenderNameOnPocketIDIsWarnedAbout(t *testing.T) {
 	r := validate.Check(withAuth(t, nil, nil, &config.SMTP{FromName: "Example ID"}))
 	if got := findings(r, "pocket-id-smtp-from-name"); len(got) != 1 || got[0] != "WARN apps.auth.smtp.from_name" {
@@ -214,7 +215,7 @@ func TestPocketIDAdminUsername(t *testing.T) {
 	}
 
 	for name, app := range cfg.Apps {
-		if app.Kind == config.KindPocketID {
+		if app.Blueprint == config.BlueprintPocketID {
 			delete(cfg.Apps, name)
 		}
 	}

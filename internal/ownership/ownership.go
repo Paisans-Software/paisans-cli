@@ -23,10 +23,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -201,10 +201,10 @@ func FileApp(rel string) string {
 }
 
 // RouteSuffixes are what follows <app>- in the name of an app's snippet
-// other than its primary route: each hostname role a kind understands, and
+// other than its primary route: each hostname role a blueprint understands, and
 // an oauth2-proxy app's named gate snippets.
 func RouteSuffixes() []string {
-	return append(kinds.ExtraRoles(), render.GatesSnippet)
+	return append(blueprints.ExtraRoles(), render.GatesSnippet)
 }
 
 // RouteOf reports whether a snippet name, without .caddy, is one an app's

@@ -37,9 +37,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -299,7 +299,7 @@ func hostnames(cfg *config.Config) []Hostname {
 		}
 		sort.Strings(roles)
 		for _, role := range roles {
-			if role == kinds.MediaRole && kinds.MediaHostname(cfg, app) == "" {
+			if role == blueprints.MediaRole && blueprints.MediaHostname(cfg, app) == "" {
 				// An app keeping its files on its own disk serves them on its
 				// own hostname, so a media hostname would point at no route.
 				// validate refuses a declared one; this keeps dns from
@@ -315,10 +315,10 @@ func hostnames(cfg *config.Config) []Hostname {
 	// on its own disk has none, and gets no record for one.
 	for _, appName := range cfg.AppNames() {
 		app := cfg.Apps[appName]
-		if !kinds.MediaHostnameIsDerived(cfg, app) {
+		if !blueprints.MediaHostnameIsDerived(cfg, app) {
 			continue
 		}
-		if media := kinds.MediaHostname(cfg, app); media != "" {
+		if media := blueprints.MediaHostname(cfg, app); media != "" {
 			out = append(out, Hostname{Key: fmt.Sprintf("apps.%s.hostnames.media (derived)", appName), Name: media, App: appName})
 		}
 	}

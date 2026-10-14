@@ -59,17 +59,17 @@ var knownRoles = map[Role]bool{RoleData: true, RoleApps: true, RoleGateway: true
 // KnownRole reports whether r is a site role.
 func KnownRole(r Role) bool { return knownRoles[r] }
 
-// Kind is an application the toolkit knows how to render: a blueprint's
-// name, qualified by its catalog unless it is the core catalog's.
-type Kind string
+// Blueprint names an application the toolkit knows how to render, qualified
+// by its catalog unless it is the core catalog's.
+type Blueprint string
 
 // The reserved blueprints, the only ones Go names: no catalog may provide
 // them, so their names never change with a catalog commit.
 const (
-	KindOAuth2Proxy Kind = "oauth2-proxy"
-	KindPocketID    Kind = "pocket-id"
-	KindUptime      Kind = "uptime"
-	KindInvite      Kind = "invite"
+	BlueprintOAuth2Proxy Blueprint = "oauth2-proxy"
+	BlueprintPocketID    Blueprint = "pocket-id"
+	BlueprintUptime      Blueprint = "uptime"
+	BlueprintInvite      Blueprint = "invite"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
@@ -397,10 +397,11 @@ type Storage struct {
 	Garage Garage `yaml:"garage"`
 	// There is no deployment wide media hostname. Each app that stores objects
 	// serves them on a hostname of its own, derived from its own hostname and
-	// overridable as `hostnames.media` on that app: see kinds.MediaHostname.
-	// A single hostname with a bucket as a path under it was the earlier
-	// shape, and it was replaced because a path cannot be pointed at a CDN or
-	// another provider one app at a time, while a hostname can.
+	// overridable as `hostnames.media` on that app: see
+	// blueprints.MediaHostname. A single hostname with a bucket as a path under
+	// it was the earlier shape, and it was replaced because a path cannot be
+	// pointed at a CDN or another provider one app at a time, while a hostname
+	// can.
 }
 
 type Garage struct {
@@ -435,16 +436,16 @@ const (
 )
 
 type App struct {
-	Kind     Kind   `yaml:"blueprint"`
-	Hostname string `yaml:"hostname"`
+	Blueprint Blueprint `yaml:"blueprint"`
+	Hostname  string    `yaml:"hostname"`
 	// DisplayName is the name of the app's OIDC client at the identity
 	// provider, which is what a person signing in is shown. Empty names the
 	// client after the app (see ClientName).
 	DisplayName string    `yaml:"display_name"`
 	Placement   Placement `yaml:"placement"`
 	// Images overrides the container image a service runs, keyed by service
-	// name in the kind's compose template. Every key is optional and an unset
-	// one takes the default that kind ships.
+	// name in the blueprint's compose template. Every key is optional and an
+	// unset one takes the default that blueprint ships.
 	//
 	// It is a map rather than a single reference because a stack is several
 	// containers, and it is one full reference per key rather than a repository
@@ -452,40 +453,42 @@ type App struct {
 	// tag together: split into two fields, a half finished switch parses
 	// cleanly and pulls something nobody intended.
 	//
-	// Changing this is not changing Kind. A fork that renames a variable or
-	// moves a config path needs a different template set, which is a different
-	// kind; this is for a different build of the same software.
+	// Changing this is not changing Blueprint. A fork that renames a variable
+	// or moves a config path needs a different template set, which is a
+	// different blueprint; this is for a different build of the same software.
 	Images map[string]string `yaml:"images"`
 	// Backup is nil unless written. `backup: false` excludes everything the
 	// app owns from backups, and validate warns about it on every run.
 	Backup   *bool          `yaml:"backup"`
 	Settings map[string]any `yaml:"settings"`
 
-	// Config is passed through to the file this app's kind reads, in that file's
-	// own syntax, without the toolkit interpreting the key.
+	// Config is passed through to the file this app's blueprint reads, in that
+	// file's own syntax, without the toolkit interpreting the key.
 	//
 	// It is not `settings`. A setting is an input the toolkit reasons about: it
 	// reads it, sometimes validates it, and decides things with it. A config key
 	// is one the toolkit has no opinion about and only places.
 	//
-	// A key the kind's template already writes is refused rather than overridden,
-	// because two sources of truth for one value is how a deployment ends up with
-	// a setting nobody can locate.
+	// A key the blueprint's template already writes is refused rather than
+	// overridden, because two sources of truth for one value is how a
+	// deployment ends up with a setting nobody can locate.
 	Config map[string]any `yaml:"config"`
 
 	// Hostnames are the additional names this app answers on, keyed by a role
-	// the kind understands. The primary hostname stays in Hostname; a role here
-	// selects a different Caddy snippet, because a second hostname usually
+	// the blueprint understands. The primary hostname stays in Hostname; a role
+	// here selects a different Caddy snippet, because a second hostname usually
 	// exists to serve something different rather than the same thing twice.
 	//
-	// `media` is the one role that exists without being declared: every kind
-	// that stores objects serves them on <label>-media.<domain>, and declaring
-	// it here only chooses another name. See kinds.MediaHostname.
+	// `media` is the one role that exists without being declared: every
+	// blueprint that stores objects serves them on <label>-media.<domain>, and
+	// declaring it here only chooses another name. See
+	// blueprints.MediaHostname.
 	Hostnames map[string]string `yaml:"hostnames"`
 
 	// Gated puts the app behind the gate: every request on its hostnames
 	// meets the community's sign-in, and only members get through, except
-	// the paths that carry their own authentication, which the kind names.
+	// the paths that carry their own authentication, which the blueprint
+	// names.
 	//
 	// It is declared rather than inferred because it is access policy. It is
 	// also the setting most likely to be wrong in a way nothing notices: a
@@ -494,8 +497,8 @@ type App struct {
 	Gated bool `yaml:"gated"`
 
 	// AutoLogin skips the app's own "Log in with" button for a member the
-	// gate has already signed in, on a gated app or a public one. Only kinds
-	// with an auto-login rule take it.
+	// gate has already signed in, on a gated app or a public one. Only
+	// blueprints with an auto-login rule take it.
 	AutoLogin bool `yaml:"auto_login"`
 
 	// Derived marks the gate app, which no file declares: Load adds it when
@@ -503,8 +506,9 @@ type App struct {
 	Derived bool `yaml:"-"`
 
 	// SMTP overrides the deployment's smtp block for this app, field by
-	// field: a field left out is inherited. Only kinds that send mail read
-	// it, and validate refuses it on any other (smtp-on-a-kind-without-mail).
+	// field: a field left out is inherited. Only blueprints that send mail
+	// read it, and validate refuses it on any other
+	// (smtp-on-a-blueprint-without-mail).
 	SMTP *SMTP `yaml:"smtp"`
 
 	// Storage is where an app that stores files keeps them: s3, a bucket in
@@ -512,12 +516,13 @@ type App struct {
 	// on the site it is pinned to. Empty means the default, which depends on
 	// the deployment rather than on this file: s3 when storage.garage.sites
 	// names a site, local when it names none. Read it through
-	// kinds.InObjectStorage, never by comparing this field, so that the
+	// blueprints.InObjectStorage, never by comparing this field, so that the
 	// default is decided in one place.
 	//
 	// local is valid only with pinned placement, because a clustered app runs
 	// on every apps site and each would keep its own copy of the files.
-	// validate refuses the rest of the incoherent combinations by kind.
+	// validate refuses the rest of the incoherent combinations by
+	// blueprint.
 	Storage string `yaml:"storage"`
 }
 
@@ -546,8 +551,8 @@ func (c *Config) GateHostname() string { return "gate." + c.Community.Domain }
 // the gate is the community's one sign in rather than an app a member chose,
 // so its client carries the community's name, and falls back to the app's
 // only when the configuration gives the community none. The gate is decided
-// by name rather than by kind so that `app remove gate`, run after the gate
-// has left the configuration, still finds the client.
+// by name rather than by blueprint so that `app remove gate`, run after the
+// gate has left the configuration, still finds the client.
 func (c *Config) ClientName(app string) string {
 	if name := c.Apps[app].DisplayName; name != "" {
 		return name
@@ -586,7 +591,7 @@ func (c *Config) deriveGate() {
 		return
 	}
 	c.Apps[GateApp] = App{
-		Kind:      KindOAuth2Proxy,
+		Blueprint: BlueprintOAuth2Proxy,
 		Hostname:  c.GateHostname(),
 		Placement: Placement{Mode: PlacementPinned, Site: gateways[0]},
 		Derived:   true,
@@ -1066,7 +1071,7 @@ func (c *Config) structural(noSubnet bool) error {
 	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
-		if app.Kind == "" {
+		if app.Blueprint == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}
 		if app.Hostname == "" {
@@ -1076,7 +1081,7 @@ func (c *Config) structural(noSubnet bool) error {
 			if r, ok := ControlRune(app.Images[service]); ok {
 				add("apps.%s.images.%s %s", name, service, controlProblem(r))
 			} else if strings.TrimSpace(app.Images[service]) == "" {
-				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this kind ships.", name, service)
+				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, service)
 			}
 		}
 		for _, role := range sortedKeys(app.Hostnames) {
@@ -1090,7 +1095,7 @@ func (c *Config) structural(noSubnet bool) error {
 		if app.SMTP != nil {
 			problems = append(problems, smtpProblems("apps."+name+".smtp", *app.SMTP)...)
 		}
-		if app.Kind == KindOAuth2Proxy && !app.Derived {
+		if app.Blueprint == BlueprintOAuth2Proxy && !app.Derived {
 			add("apps.%s.blueprint: oauth2-proxy is the gate, which the toolkit runs itself whenever an app sets gated or auto_login. Remove this app, and set gated: true or auto_login: true on the apps it was for.", name)
 		}
 		switch app.Storage {

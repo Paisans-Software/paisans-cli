@@ -80,7 +80,7 @@ func TestRulesFire(t *testing.T) {
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
 		{"unknown-hostname-role", "unknown-hostname-role", validate.Refuse},
 		{"duplicate-hostname", "duplicate-hostname", validate.Refuse},
-		{"gated-on-ungateable-kind", "gated-on-ungateable-kind", validate.Refuse},
+		{"gated-on-ungateable-blueprint", "gated-on-ungateable-blueprint", validate.Refuse},
 		{"gated-without-signed-fetch", "gated-without-signed-fetch", validate.Refuse},
 		{"gated-without-authorized-fetch", "gated-without-signed-fetch", validate.Refuse},
 		{"auto-login-without-a-rule", "auto-login-without-a-rule", validate.Refuse},
@@ -88,11 +88,11 @@ func TestRulesFire(t *testing.T) {
 		{"uses-gate-outside-the-domain", "uses-gate-outside-the-domain", validate.Refuse},
 		{"authorized-fetch-not-a-boolean", "authorized-fetch-not-a-boolean", validate.Refuse},
 		{"writefreely-setting-invalid", "writefreely-setting-invalid", validate.Refuse},
-		{"gated-on-pocket-id", "gated-on-ungateable-kind", validate.Refuse},
-		{"gated-on-the-monitor", "gated-on-ungateable-kind", validate.Refuse},
+		{"gated-on-pocket-id", "gated-on-ungateable-blueprint", validate.Refuse},
+		{"gated-on-the-monitor", "gated-on-ungateable-blueprint", validate.Refuse},
 		{"homeserver-must-be-pinned", "homeserver-must-be-pinned", validate.Refuse},
 		{"storage-local-on-cluster", "storage-local-on-cluster", validate.Refuse},
-		{"storage-s3-on-a-local-only-kind", "storage-s3-on-a-local-only-kind", validate.Refuse},
+		{"storage-s3-on-a-local-only-blueprint", "storage-s3-on-a-local-only-blueprint", validate.Refuse},
 		{"storage-on-pocket-id", "storage-on-pocket-id", validate.Refuse},
 		{"media-hostname-is-not-a-hostname", "media-hostname-is-not-a-hostname", validate.Refuse},
 		{"media-hostname-outside-the-domain", "media-hostname-outside-the-domain", validate.Refuse},
@@ -108,7 +108,7 @@ func TestRulesFire(t *testing.T) {
 		{"oidc-member-group-not-a-name", "oidc-member-group-not-a-name", validate.Refuse},
 		{"oidc-extra-groups-not-names", "oidc-group-not-a-name", validate.Refuse},
 		{"wikijs-synced-groups-lack-admin-group", "wikijs-synced-groups-lack-admin-group", validate.Refuse},
-		{"smtp-on-a-kind-without-mail", "smtp-on-a-kind-without-mail", validate.Refuse},
+		{"smtp-on-a-blueprint-without-mail", "smtp-on-a-blueprint-without-mail", validate.Refuse},
 		{"uptime-without-smtp", "uptime-without-smtp", validate.Warn},
 		{"mbin-without-smtp", "mbin-without-smtp", validate.Warn},
 		{"mbin-smtp-without-sender", "mbin-smtp-without-sender", validate.Warn},
@@ -164,8 +164,8 @@ func TestRulesFire(t *testing.T) {
 }
 
 // withConfig is the valid fixture plus the element app of the secret fixture,
-// so that env (wiki, auth) and json (web) kinds are all present, with every
-// passthrough map emptied and then one app's replaced by keys.
+// so that env (wiki, auth) and json (web) blueprints are all present, with
+// every passthrough map emptied and then one app's replaced by keys.
 func withConfig(t *testing.T, app string, keys map[string]any) *config.Config {
 	t.Helper()
 	cfg := load(t, "config-key-looks-like-a-secret")
@@ -226,9 +226,9 @@ func TestTheSecretCheckIgnoresSeparatorsAndCase(t *testing.T) {
 	}
 }
 
-// Both prefixes are refused on an env kind, whose .env compose also reads,
-// and on no other kind, whose config file compose never sees.
-func TestComposeSteeringKeysAreRefusedOnEnvKindsOnly(t *testing.T) {
+// Both prefixes are refused on an env blueprint, whose .env compose also
+// reads, and on no other blueprint, whose config file compose never sees.
+func TestComposeSteeringKeysAreRefusedOnEnvBlueprintsOnly(t *testing.T) {
 	cases := []struct {
 		app, key string
 		refused  bool
@@ -266,7 +266,7 @@ func TestPocketIDOnTwoAppsSitesIsAllowed(t *testing.T) {
 	if n := len(cfg.AppsSites()); n < 2 {
 		t.Fatalf("the valid fixture has %d apps site(s), so this proves nothing", n)
 	}
-	if app := cfg.Apps["auth"]; app.Kind != config.KindPocketID || app.Placement.Mode != config.PlacementCluster {
+	if app := cfg.Apps["auth"]; app.Blueprint != config.BlueprintPocketID || app.Placement.Mode != config.PlacementCluster {
 		t.Fatalf("the valid fixture's auth is not a clustered pocket-id: %+v", app)
 	}
 	if result := validate.Check(cfg); len(result.Findings) != 0 {
@@ -612,14 +612,14 @@ func TestAMonitorOnlySiteIsQuiet(t *testing.T) {
 	}
 }
 
-// A role-less site stays legal for any kind but uptime, which needs a site
+// A role-less site stays legal for any blueprint but uptime, which needs a site
 // holding the monitor role.
-func TestARolelessSiteStillHostsOtherKinds(t *testing.T) {
+func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 	cfg := load(t, "uptime-without-smtp")
 	watch := cfg.Sites["watch"]
 	watch.Roles = nil
 	cfg.Sites["watch"] = watch
-	web := config.App{Kind: config.Kind("element"), Hostname: "web.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	web := config.App{Blueprint: config.Blueprint("element"), Hostname: "web.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
 	cfg.Apps["web"] = web
 	result := validate.Check(cfg)
 	if !refusedFor(result, "uptime-needs-a-monitor-site", "apps.health.placement") {
@@ -889,7 +889,7 @@ func TestAnAppOnTheGatesHostnameIsRefused(t *testing.T) {
 	blog.Gated = true
 	blog.Hostname = cfg.GateHostname()
 	cfg.Apps["blog"] = blog
-	cfg.Apps[config.GateApp] = config.App{Kind: config.KindOAuth2Proxy, Hostname: cfg.GateHostname(), Derived: true}
+	cfg.Apps[config.GateApp] = config.App{Blueprint: config.BlueprintOAuth2Proxy, Hostname: cfg.GateHostname(), Derived: true}
 	var found bool
 	for _, f := range validate.Check(cfg).Refusals() {
 		if f.Rule == "duplicate-hostname" {

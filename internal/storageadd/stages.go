@@ -8,10 +8,10 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // differs reports whether a node's garage.toml names another factor than the
@@ -321,7 +321,7 @@ func (p *Plan) buckets() []string {
 	var out []string
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if kinds.InObjectStorage(p.cfg, app) {
+		if blueprints.InObjectStorage(p.cfg, app) {
 			out = append(out, garage.BucketName(app, name))
 		}
 	}

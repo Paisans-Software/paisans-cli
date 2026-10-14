@@ -22,7 +22,7 @@ func withMonitor(t *testing.T, smtp config.SMTP, own *config.SMTP) (*config.Conf
 	t.Helper()
 	cfg := fixture(t)
 	cfg.SMTP = smtp
-	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org",
+	cfg.Apps["health"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 		Settings:  map[string]any{"admin_group": "admins"}, SMTP: own}
 	secrets := fixtureSecrets(t)
@@ -105,7 +105,7 @@ func TestTheSeedChecksEveryAppTwiceAndPingsEveryOtherSite(t *testing.T) {
 			t.Errorf("direct %s: headers %v", site, headers)
 		}
 		if d["expected_status"] != "200" {
-			t.Errorf("direct %s: a direct check bypasses the gate and expects the kind's own codes, got %v", site, d["expected_status"])
+			t.Errorf("direct %s: a direct check bypasses the gate and expects the blueprint's own codes, got %v", site, d["expected_status"])
 		}
 		// talk is gated, so Mbin runs as a private instance, and its API
 		// refuses a request with no token. The gate keeps anonymous /api/*
@@ -386,7 +386,7 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 	watchB.PublicAddress = "203.0.113.21"
 	watchB.SSH.Host = "watch-b.example.org"
 	cfg.Sites["watch-b"] = watchB
-	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
+	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}
@@ -434,7 +434,7 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 // validate, so the seed holds the rule itself rather than leaning on that.
 func TestMonitorsOnOneSiteDoNotCheckEachOther(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
-	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
+	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
@@ -577,7 +577,7 @@ func withTwoMonitors(t *testing.T) (*config.Config, *config.Secrets) {
 	watchB.PublicAddress = "203.0.113.21"
 	watchB.SSH.Host = "watch-b.example.org"
 	cfg.Sites["watch-b"] = watchB
-	cfg.Apps["health-b"] = config.App{Kind: config.KindUptime, Hostname: "health-b.example.org",
+	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}

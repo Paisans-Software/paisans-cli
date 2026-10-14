@@ -9,10 +9,10 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/garage"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // mediaSnippetDir is where render places each app's media routing on the
@@ -48,7 +48,7 @@ func (p *Plan) buildMedia() (*Stage, error) {
 	var paths []string
 	for _, f := range p.rendered.Files {
 		rel, ok := strings.CutPrefix(f.Path, p.gateway+"/")
-		if !ok || !strings.HasPrefix(rel, mediaSnippetDir(p.dep())) || !strings.HasSuffix(rel, "-"+kinds.MediaRole+".caddy") {
+		if !ok || !strings.HasPrefix(rel, mediaSnippetDir(p.dep())) || !strings.HasSuffix(rel, "-"+blueprints.MediaRole+".caddy") {
 			continue
 		}
 		want[rel] = f.Content
@@ -123,7 +123,7 @@ type probe struct {
 func (p *Plan) publicProbe() *probe {
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
-		if !kinds.InObjectStorage(p.cfg, app) || !kinds.ServesObjectsPublicly(app.Kind) {
+		if !blueprints.InObjectStorage(p.cfg, app) || !blueprints.ServesObjectsPublicly(app.Blueprint) {
 			continue
 		}
 		keyID, _ := garage.SecretString(p.secrets, name, "s3_access_key_id")
@@ -139,7 +139,7 @@ func (p *Plan) publicProbe() *probe {
 		rand.Read(buf)
 		return &probe{
 			app: name, bucket: garage.BucketName(app, name), keyID: keyID, secret: secret, region: region,
-			media: kinds.MediaHostname(p.cfg, app),
+			media: blueprints.MediaHostname(p.cfg, app),
 			// One fixed key, overwritten by every run and deleted at the end,
 			// so an interrupted run leaves at most this one object behind.
 			key:  "paisans-probe/storage-add",

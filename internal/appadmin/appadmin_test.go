@@ -8,8 +8,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// stubCreator is a kind whose probes come from a queue, so the shared
-// planning and the check after Execute can be tested apart from any one kind.
+// stubCreator is a blueprint whose probes come from a queue, so the shared
+// planning and the check after Execute can be tested apart from any one
+// blueprint.
 type stubCreator struct {
 	probes []State
 	ran    int
@@ -67,15 +68,15 @@ func TestExecuteRefusesWhenTheResultIsNotAnAdmin(t *testing.T) {
 	}
 }
 
-func TestUnsupportedKind(t *testing.T) {
-	_, err := Build(config.Kind("wikijs"), nullTransport{}, Request{Username: "founder"})
-	if err == nil || err.Error() != "wikijs admin creation is not implemented yet. Implemented kinds: pocket-id" {
+func TestUnsupportedBlueprint(t *testing.T) {
+	_, err := Build(config.Blueprint("wikijs"), nullTransport{}, Request{Username: "founder"})
+	if err == nil || err.Error() != "wikijs admin creation is not implemented yet. Implemented blueprints: pocket-id" {
 		t.Errorf("got %v", err)
 	}
 }
 
 func TestMbinHasNoCreator(t *testing.T) {
-	if _, err := For(config.Kind("mbin")); err == nil {
+	if _, err := For(config.Blueprint("mbin")); err == nil {
 		t.Error("mbin has a Creator; its administrators come only through single sign on")
 	}
 }

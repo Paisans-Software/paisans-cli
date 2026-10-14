@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // SettingsProbe is what one app's container on one site said when asked for
@@ -25,8 +25,8 @@ type SettingsProbe struct {
 // apart from a read that failed.
 const NotRunningMarker = "paisans: no running container"
 
-// SettingsCommand runs a kind's read command inside the running container of
-// one of an app's compose services on a site. The container is found by its
+// SettingsCommand runs a blueprint's read command inside the running container
+// of one of an app's compose services on a site. The container is found by its
 // compose labels, never by name, as ContainersCommand finds this deployment's.
 func SettingsCommand(d deployment.Deployment, app, service string, argv []string) string {
 	quoted := make([]string, len(argv))
@@ -42,18 +42,18 @@ func SettingsCommand(d deployment.Deployment, app, service string, argv []string
 
 // Settings checks, for every app using the gate, that each running copy
 // enforces the settings the gate leaves to it, and that its file locks them.
-// What each kind needs, and how to read it, is the kind's own record
-// (kinds.GateSettingsFor, kinds.LiveSettingsFor); nothing here knows one kind
-// from another. A wrong or unlocked setting is a file on the host that is
-// wrong or an app not restarted since it changed, so the fix is apply, which
-// renders the file and recreates the stack; nothing here writes an app's
+// What each blueprint needs, and how to read it, is the blueprint's own record
+// (blueprints.GateSettingsFor, blueprints.LiveSettingsFor); nothing here knows
+// one blueprint from another. A wrong or unlocked setting is a file on the host
+// that is wrong or an app not restarted since it changed, so the fix is apply,
+// which renders the file and recreates the stack; nothing here writes an app's
 // database. See docs/specs/2026-10-12-gate-settings.md.
 func Settings(cfg *config.Config, probes []SettingsProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
 		app := cfg.Apps[p.App]
-		wanted := kinds.GateSettingsFor(app)
-		live, ok := kinds.LiveSettingsFor(app.Kind)
+		wanted := blueprints.GateSettingsFor(app)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		if len(wanted) == 0 || !ok {
 			continue
 		}

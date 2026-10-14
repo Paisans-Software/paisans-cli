@@ -49,7 +49,7 @@ func answersFor(sh Shape, all, gated bool) Answers {
 		}
 		a.Sites = append(a.Sites, site)
 	}
-	a.Apps = []App{{Key: signIn.key, Kind: signIn.kind, Hostname: "id.example.org"}}
+	a.Apps = []App{{Key: signIn.key, Blueprint: signIn.blueprint, Hostname: "id.example.org"}}
 	if !all {
 		return a
 	}
@@ -62,7 +62,7 @@ func answersFor(sh Shape, all, gated bool) Answers {
 			continue
 		}
 		for _, s := range c.apps {
-			a.Apps = append(a.Apps, App{Key: s.key, Kind: s.kind, Hostname: s.sub + ".example.org", MembersOnly: gated && s.gateable})
+			a.Apps = append(a.Apps, App{Key: s.key, Blueprint: s.blueprint, Hostname: s.sub + ".example.org", MembersOnly: gated && s.gateable})
 		}
 	}
 	a.Monitor = &Site{Name: monitorSite, Roles: []config.Role{config.RoleMonitor}, PublicAddress: "203.0.113.50", SSHUser: "ubuntu"}

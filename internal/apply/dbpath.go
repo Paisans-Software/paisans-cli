@@ -6,13 +6,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // ClusterDatabaseApps returns, sorted, the apps that reach the cluster's
-// database through each apps site's HAProxy: cluster placement and a kind that
-// uses Postgres, the same test Databases makes. A pinned app has its own
+// database through each apps site's HAProxy: cluster placement and a blueprint
+// that uses Postgres, the same test Databases makes. A pinned app has its own
 // Postgres and is not among them.
 //
 // These are the apps a database path change breaks. A real `site add`
@@ -25,7 +25,7 @@ func ClusterDatabaseApps(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Placement.Mode == config.PlacementCluster && kinds.UsesPostgres(app.Kind) {
+		if app.Placement.Mode == config.PlacementCluster && blueprints.UsesPostgres(app.Blueprint) {
 			out = append(out, name)
 		}
 	}

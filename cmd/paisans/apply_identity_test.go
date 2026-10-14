@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/grant"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -60,7 +60,7 @@ func TestApplyNamesTheCoreRelease(t *testing.T) {
 	fakeGrants(t, grantedWith(t, f, nil))
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	release, _ := kinds.CoreRelease()
+	release, _ := blueprints.CoreRelease()
 	if release.Commit == "" || rec.Index("done", "core catalog") < 0 || !strings.Contains(rec.Lines(), release.Tag+", "+release.Commit[:12]) {
 		t.Errorf("the run does not name the core release %+v:\n%s", release, rec.Lines())
 	}

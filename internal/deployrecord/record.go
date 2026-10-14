@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/registry"
 )
 
@@ -61,8 +61,8 @@ func Path(d deployment.Deployment) string {
 func FromConfig(cfg *config.Config) Record {
 	r := Record{Sites: cfg.SiteNames(), Apps: cfg.AppNames()}
 	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Kind == config.KindPocketID {
-			r.PocketIDGroups = append(r.PocketIDGroups, kinds.PocketIDSignupGroups(cfg.Apps[name].Settings)...)
+		if cfg.Apps[name].Blueprint == config.BlueprintPocketID {
+			r.PocketIDGroups = append(r.PocketIDGroups, blueprints.PocketIDSignupGroups(cfg.Apps[name].Settings)...)
 		}
 	}
 	return normal(r)

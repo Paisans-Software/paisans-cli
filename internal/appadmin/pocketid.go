@@ -59,7 +59,7 @@ func (pocketID) client(t Transport, req Request) *pocketid.Client {
 
 // find is the user a request is about: the one with its username, or for a
 // Declared request whose username no account has, the one with its email.
-// The pocket-id kind renders ALLOW_OWN_ACCOUNT_EDIT=false, so a user can
+// The pocket-id blueprint renders ALLOW_OWN_ACCOUNT_EDIT=false, so a user can
 // change neither; only an administrator can, from Pocket ID's admin page, and
 // an account renamed there is still found by its address. The address is
 // compared whole, ignoring case, since Pocket ID's search is a substring

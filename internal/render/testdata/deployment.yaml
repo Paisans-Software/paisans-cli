@@ -147,7 +147,7 @@ apps:
     # signed in is signed into it too.
     auto_login: true
     # Pinned as an ordinary choice, not a forced one: the writefreely-wisp
-    # fork this kind means supports Postgres and S3, so it could join the
+    # fork this blueprint means supports Postgres and S3, so it could join the
     # cluster instead.
     placement: { pinned: home-a }
     # An ini key goes inside the section that is already there. max_blogs is

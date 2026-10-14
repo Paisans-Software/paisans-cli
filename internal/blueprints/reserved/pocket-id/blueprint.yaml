@@ -1,5 +1,5 @@
 # The pocket-id blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
-# internal/kinds reads it; Parse there documents every key.
+# internal/blueprints reads it; Parse there documents every key.
 apiVersion: paisans.blueprint/v1
 name: pocket-id
 services:
@@ -15,7 +15,7 @@ config:
   format: env
   file: ".env"
   # FILE_BACKEND is owned by file_backend. Every setting in
-  # kinds.PocketIDSettings owns its variable as well, and the toolkit adds
+  # blueprints.PocketIDSettings owns its variable as well, and the toolkit adds
   # those from that table rather than listing them again here, so a setting
   # added there is an owner without a second edit. signup_default_groups is
   # not among them: its variable carries recorded IDs, which the setting

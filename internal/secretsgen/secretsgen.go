@@ -31,8 +31,8 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // garageKeyIDPattern and garageSecretPattern are the only shapes Garage
@@ -218,7 +218,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 		if entries == nil {
 			entries = map[string]any{}
 		}
-		pairs := keypairs(app.Kind)
+		pairs := keypairs(app.Blueprint)
 		for _, key := range appSecretKeys(cfg, app) {
 			if pairs.has(key) {
 				continue // a pair, derived from its passphrase; see below
@@ -227,7 +227,7 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 				note(false, "apps."+name+"."+key)
 				continue
 			}
-			value, err := appSecret(app.Kind, key)
+			value, err := appSecret(app.Blueprint, key)
 			if err != nil {
 				return result, err
 			}
@@ -250,15 +250,16 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 }
 
 // appSecretKeys is what one app's stanza needs: a database role for a
-// Postgres backed kind, the kind's own secrets (kinds.Def.AppSecrets, which
-// says why each is there), and storage keys for an app in object storage.
+// Postgres backed blueprint, the blueprint's own secrets
+// (blueprints.Def.AppSecrets, which says why each is there), and storage keys
+// for an app in object storage.
 func appSecretKeys(cfg *config.Config, app config.App) []string {
 	var keys []string
-	if kinds.UsesPostgres(app.Kind) {
+	if blueprints.UsesPostgres(app.Blueprint) {
 		keys = append(keys, "database_password")
 	}
-	keys = append(keys, kinds.AppSecrets(app.Kind)...)
-	if kinds.InObjectStorage(cfg, app) {
+	keys = append(keys, blueprints.AppSecrets(app.Blueprint)...)
+	if blueprints.InObjectStorage(cfg, app) {
 		// Only for an app keeping its files in Garage: one keeping them on
 		// its own disk has no bucket for a key to open.
 		//
@@ -275,14 +276,14 @@ func appSecretKeys(cfg *config.Config, app config.App) []string {
 // blueprint declares, a password by default. A database password is always
 // a password, and Garage refuses a base64 key ID or secret outright, so the
 // two S3 credential keys get their own generators.
-func appSecret(kind config.Kind, key string) (string, error) {
+func appSecret(blueprint config.Blueprint, key string) (string, error) {
 	switch key {
 	case "s3_access_key_id":
 		return garageKeyID()
 	case "s3_secret_access_key":
 		return garageSecretKey()
 	}
-	if spec, ok := kinds.SecretOf(kind, key); ok {
+	if spec, ok := blueprints.SecretOf(blueprint, key); ok {
 		return generate(spec.Format)
 	}
 	return password()
@@ -320,13 +321,13 @@ func rsaPrivateKeyPEM() (string, error) {
 // formats are made with their passphrase, by keypairOf.
 func generate(format string) (string, error) {
 	switch format {
-	case kinds.FormatHex16:
+	case blueprints.FormatHex16:
 		return hexSecret(16)
-	case kinds.FormatHex32:
+	case blueprints.FormatHex32:
 		return hexSecret(32)
-	case kinds.FormatRSAPEM:
+	case blueprints.FormatRSAPEM:
 		return rsaPrivateKeyPEM()
-	case kinds.FormatPassword, "":
+	case blueprints.FormatPassword, "":
 		return password()
 	}
 	return "", fmt.Errorf("a %s secret is made with the secret it depends on", format)
@@ -347,19 +348,19 @@ func (l keypairList) has(key string) bool {
 	return false
 }
 
-// keypairs is the encrypted keypairs a kind's blueprint declares. Keeping
+// keypairs is the encrypted keypairs an app's blueprint declares. Keeping
 // one in the secrets file means every apps site under cluster placement
 // renders the same pair, so a token one site signs verifies on another.
-func keypairs(kind config.Kind) keypairList {
+func keypairs(blueprint config.Blueprint) keypairList {
 	var out keypairList
-	for _, s := range kinds.AppSecrets(kind) {
-		spec, _ := kinds.SecretOf(kind, s)
-		if spec.Format != kinds.FormatRSAKeypair {
+	for _, s := range blueprints.AppSecrets(blueprint) {
+		spec, _ := blueprints.SecretOf(blueprint, s)
+		if spec.Format != blueprints.FormatRSAKeypair {
 			continue
 		}
 		p := keypair{private: spec.Name, passphrase: spec.Passphrase}
-		for _, t := range kinds.AppSecrets(kind) {
-			if half, _ := kinds.SecretOf(kind, t); half.Format == kinds.FormatRSAPublic && half.Of == spec.Name {
+		for _, t := range blueprints.AppSecrets(blueprint) {
+			if half, _ := blueprints.SecretOf(blueprint, t); half.Format == blueprints.FormatRSAPublic && half.Of == spec.Name {
 				p.public = half.Name
 			}
 		}
@@ -542,10 +543,10 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 			continue
 		}
 		app := cfg.Apps[name]
-		// A kind with no client spec has no client: Pocket ID has none at
+		// A blueprint with no client spec has no client: Pocket ID has none at
 		// itself, and a Matrix client authenticates at the homeserver, whose
 		// authentication service is the relying party.
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -562,9 +563,9 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 			"` runs the same step alone. The client's redirect URI is " + spec.CallbackURL + ", with " + pkce
 		admin, member := spec.Groups(app)
 		switch {
-		case app.Kind == config.KindOAuth2Proxy:
+		case app.Blueprint == config.BlueprintOAuth2Proxy:
 			why += ". It is restricted to the groups " + member + " and " + admin + ", the ones the gate admits"
-		case app.Kind == config.KindUptime:
+		case app.Blueprint == config.BlueprintUptime:
 			why += ". The redirect URI is the fork's own (src/lib/oidc.js:26 in the uptime fork). It is restricted to the group named in apps." +
 				name + ".settings.admin_group, so the identity provider refuses everyone else before the monitor does"
 		case spec.ReadsGroups:
@@ -591,7 +592,7 @@ func owedSMTPPassword(cfg *config.Config, secrets *config.Secrets) (Owed, bool) 
 		return Owed{}, false
 	}
 	for _, name := range cfg.AppNames() {
-		if !kinds.SendsMail(cfg.Apps[name].Kind) {
+		if !blueprints.SendsMail(cfg.Apps[name].Blueprint) {
 			continue
 		}
 		host := cfg.SMTPFor(name).Host
@@ -722,7 +723,7 @@ func garageKeyIsMalformed(appName, key, value string) error {
 func CheckGarageKeys(cfg *config.Config, secrets *config.Secrets) error {
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.InObjectStorage(cfg, app) {
+		if !blueprints.InObjectStorage(cfg, app) {
 			continue
 		}
 		entries := secrets.Apps[name]

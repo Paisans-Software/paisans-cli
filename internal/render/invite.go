@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
-// inviteValues is what the invite kind's templates need beyond any app's.
+// inviteValues is what the invite blueprint's templates need beyond any app's.
 type inviteValues struct {
 	// IdentityURL is the public URL of the pocket-id app identity_app names,
 	// from its hostname in paisans-stack.yaml and nothing else. The service is
@@ -21,8 +21,8 @@ type inviteValues struct {
 	Accent string
 	// CoC is the code_of_conduct setting's text, rendered verbatim.
 	CoC string
-	// Settings is every setting in kinds.InviteSettingDefaults, declared or
-	// defaulted, as the service spells it.
+	// Settings is every setting in blueprints.InviteSettingDefaults, declared
+	// or defaulted, as the service spells it.
 	Settings map[string]string
 }
 
@@ -49,7 +49,7 @@ func (p *planner) inviteValuesFor(name string) (inviteValues, error) {
 		}
 		v.Accent = quoted
 	}
-	for key, def := range kinds.InviteSettingDefaults {
+	for key, def := range blueprints.InviteSettingDefaults {
 		v.Settings[key] = def
 		switch x := app.Settings[key].(type) {
 		case int:

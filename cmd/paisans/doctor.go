@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/ownership"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
@@ -253,15 +253,15 @@ func gatherDoctor(cfg *config.Config, sites []string, transports map[string]appl
 }
 
 // gatherSettings asks each running copy of every app using the gate for the
-// settings the gate leaves to it, with the read command its kind records, on
-// every site doctor reached that the app runs on.
+// settings the gate leaves to it, with the read command its blueprint records,
+// on every site doctor reached that the app runs on.
 func gatherSettings(cfg *config.Config, reached map[string]bool, transports map[string]apply.Transport) []doctor.SettingsProbe {
 	var out []doctor.SettingsProbe
 	placed := render.AppSites(cfg)
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		wanted := kinds.GateSettingsFor(app)
-		live, ok := kinds.LiveSettingsFor(app.Kind)
+		wanted := blueprints.GateSettingsFor(app)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		if len(wanted) == 0 || !ok {
 			continue
 		}
@@ -359,7 +359,7 @@ func firstOf(s string) string {
 
 // removeRedundantGateConfig is doctor --execute's one change: it takes out of
 // paisans-stack.yaml every config: key that only repeats a value gating makes the
-// template write (kinds.RedundantGateConfig), which validate refuses as
+// template write (blueprints.RedundantGateConfig), which validate refuses as
 // config-key-already-rendered. A key with any other value contradicts the
 // gate, and changing it would change policy, so it is left for the operator.
 // It runs before validate, which would otherwise refuse the file before
@@ -371,7 +371,7 @@ func removeRedundantGateConfig(r ui.Reporter, path string) error {
 		// A file that does not load is reported by loadChecked, next.
 		return nil
 	}
-	keys := kinds.RedundantGateConfig(cfg)
+	keys := blueprints.RedundantGateConfig(cfg)
 	if len(keys) == 0 {
 		return nil
 	}

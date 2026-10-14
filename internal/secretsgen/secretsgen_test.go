@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 )
@@ -132,11 +132,11 @@ func TestFillCoversWhatWasAddedLater(t *testing.T) {
 	}
 }
 
-// Secrets differ per app and per kind. The writefreely-wisp fork keeps its
+// Secrets differ per app and per blueprint. The writefreely-wisp fork keeps its
 // data in Postgres, and only Mbin runs a broker and a cache of its own, so
 // generating a password for a role nobody creates would be noise in a file an
 // operator has to trust.
-func TestFillMatchesEachKindsNeeds(t *testing.T) {
+func TestFillMatchesEachBlueprintsNeeds(t *testing.T) {
 	cfg := load(t)
 	secrets := &config.Secrets{}
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
@@ -216,9 +216,9 @@ func TestAPendingClientWritesNothing(t *testing.T) {
 }
 
 // A homeserver's client returns to its authentication service, at a redirect
-// URI no other kind uses, and an operator checking an existing client needs
-// it BEFORE anything is rendered: the only other place it appears is a 0600
-// file that exists after apply. Apply creates the client, with PKCE on.
+// URI no other blueprint uses, and an operator checking an existing client
+// needs it BEFORE anything is rendered: the only other place it appears is a
+// 0600 file that exists after apply. Apply creates the client, with PKCE on.
 func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	secrets := &config.Secrets{}
@@ -235,7 +235,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	if why == "" {
 		t.Fatal("the homeserver's client was not reported as pending at all")
 	}
-	want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + kinds.StableULID("chat")
+	want := "https://" + cfg.Apps["chat"].Hostname + "/upstream/callback/" + blueprints.StableULID("chat")
 	if !strings.Contains(why, want) {
 		t.Errorf("the pending client does not name the redirect URI to register (%s):\n%s", want, why)
 	}
@@ -249,41 +249,41 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	}
 }
 
-// Every kind with a client spec has a pending client whose reason says that
-// apply makes it and names its redirect URI, and a kind without one, the
-// identity provider itself and a Matrix client, has none.
+// Every blueprint with a client spec has a pending client whose reason says
+// that apply makes it and names its redirect URI, and a blueprint without one,
+// the identity provider itself and a Matrix client, has none.
 func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	cfg := load(t)
-	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("wikijs"), config.Kind("writefreely"), config.KindUptime, config.Kind("synapse"), config.KindOAuth2Proxy, config.Kind("element"), config.KindPocketID} {
-		cfg.Apps["k-"+string(kind)] = config.App{Kind: kind, Hostname: string(kind) + ".example.org", Settings: map[string]any{"admin_group": "admins"}}
+	for _, blueprint := range []config.Blueprint{config.Blueprint("mbin"), config.Blueprint("wikijs"), config.Blueprint("writefreely"), config.BlueprintUptime, config.Blueprint("synapse"), config.BlueprintOAuth2Proxy, config.Blueprint("element"), config.BlueprintPocketID} {
+		cfg.Apps["k-"+string(blueprint)] = config.App{Blueprint: blueprint, Hostname: string(blueprint) + ".example.org", Settings: map[string]any{"admin_group": "admins"}}
 	}
 	pending := pendingBy(t, cfg, &config.Secrets{})
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
 		why, isPending := pending["oidc_clients."+name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			if isPending {
-				t.Errorf("%s (%s) has no client, and one is pending: %q", name, app.Kind, why)
+				t.Errorf("%s (%s) has no client, and one is pending: %q", name, app.Blueprint, why)
 			}
 			continue
 		}
 		for _, want := range []string{"paisans apply", spec.CallbackURL, "PKCE"} {
 			if !strings.Contains(why, want) {
-				t.Errorf("%s (%s): the pending client does not say %q:\n%s", name, app.Kind, want, why)
+				t.Errorf("%s (%s): the pending client does not say %q:\n%s", name, app.Blueprint, want, why)
 			}
 		}
 	}
 }
 
-// The gate's client is created by apply like every other kind's, returns to
-// oauth2-proxy's own callback, and is restricted to the groups the gate admits,
-// members and admins.
+// The gate's client is created by apply like every other blueprint's, returns
+// to oauth2-proxy's own callback, and is restricted to the groups the gate
+// admits, members and admins.
 func TestTheGatesPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
-	cfg.Apps["gate"] = config.App{Kind: config.KindOAuth2Proxy, Hostname: "auth-gate.example.org"}
+	cfg.Apps["gate"] = config.App{Blueprint: config.BlueprintOAuth2Proxy, Hostname: "auth-gate.example.org"}
 	why := pendingBy(t, cfg, &config.Secrets{})["oidc_clients.gate"]
-	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + kinds.MembersGroup + " and " + kinds.AdminsGroup} {
+	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + blueprints.MembersGroup + " and " + blueprints.AdminsGroup} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not say %q:\n%s", want, why)
 		}
@@ -330,9 +330,9 @@ func TestGeneratedS3CredentialsMatchGaragesFormat(t *testing.T) {
 	secret := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if !kinds.UsesObjectStorage(app.Kind) {
+		if !blueprints.UsesObjectStorage(app.Blueprint) {
 			if _, ok := secrets.Apps[name]["s3_access_key_id"]; ok {
-				t.Errorf("%s is a %s and stores no objects, but was given an S3 key", name, app.Kind)
+				t.Errorf("%s is a %s and stores no objects, but was given an S3 key", name, app.Blueprint)
 			}
 			continue
 		}
@@ -548,7 +548,7 @@ func TestMbinOAuthKeypairIsGeneratedOnceAndOpens(t *testing.T) {
 func withUptime(t *testing.T, smtp *config.SMTP) *config.Config {
 	t.Helper()
 	cfg := load(t)
-	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org",
+	cfg.Apps["health"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	cfg.SMTP = config.SMTP{}
@@ -714,7 +714,7 @@ func TestWikiAndWriteFreelyPendingClientsNameTheirCallbackAndRestriction(t *test
 			}
 		}
 		if strings.Contains(why, "/oauth/callback\"") || strings.Contains(why, "/oauth/callback ") {
-			t.Errorf("%s offers the callback no kind uses:\n%s", name, why)
+			t.Errorf("%s offers the callback no blueprint uses:\n%s", name, why)
 		}
 	}
 }
@@ -767,9 +767,9 @@ func TestFillGeneratesAnAdminsHeartbeatTokenPerPocketID(t *testing.T) {
 	before := map[string]string{}
 	for _, name := range cfg.AppNames() {
 		token, _ := secrets.Apps[name]["admins_heartbeat_token"].(string)
-		if cfg.Apps[name].Kind != config.KindPocketID {
+		if cfg.Apps[name].Blueprint != config.BlueprintPocketID {
 			if token != "" {
-				t.Errorf("apps.%s, a %s, was given an admins heartbeat token", name, cfg.Apps[name].Kind)
+				t.Errorf("apps.%s, a %s, was given an admins heartbeat token", name, cfg.Apps[name].Blueprint)
 			}
 			continue
 		}
@@ -828,7 +828,7 @@ func TestALocalStorageAppNeedsNoGarageKey(t *testing.T) {
 func withInvite(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := load(t)
-	cfg.Apps["invite"] = config.App{Kind: config.KindInvite, Hostname: "invite.example.org",
+	cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Hostname: "invite.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"},
 		Settings:  map[string]any{"admin_group": "admins"}}
 	return cfg

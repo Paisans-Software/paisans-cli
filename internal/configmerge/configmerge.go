@@ -1,7 +1,7 @@
 // Package configmerge places an operator's passthrough `config` keys into a
 // file a template has already rendered, in that file's own syntax. It knows
-// nothing about kinds, apps or templates: one function per format, each taking
-// the rendered text and the keys, so the merge is testable on its own.
+// nothing about blueprints, apps or templates: one function per format, each
+// taking the rendered text and the keys, so the merge is testable on its own.
 //
 // Env and ini are line oriented rather than parsed and re-emitted. Both files
 // are read by people, a round trip through a general data structure would

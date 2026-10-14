@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // Probes are how a move reaches the world besides ssh and the DNS
@@ -65,7 +65,7 @@ type Check struct {
 }
 
 // checks are every hostname the gateway serves, through each of site's
-// public addresses: an app's own hostname at its kind's health route, and
+// public addresses: an app's own hostname at its blueprint's health route, and
 // every other hostname at /.
 func checks(cfg *config.Config, site string) []Check {
 	s := cfg.Sites[site]
@@ -77,7 +77,7 @@ func checks(cfg *config.Config, site string) []Check {
 	for _, h := range dns.GatewayHostnames(cfg) {
 		path := "/"
 		if h.Main {
-			if health, ok := kinds.HealthFor(cfg.Apps[h.App].Kind); ok && health.Path != "" {
+			if health, ok := blueprints.HealthFor(cfg.Apps[h.App].Blueprint); ok && health.Path != "" {
 				path = health.Path
 			}
 		}

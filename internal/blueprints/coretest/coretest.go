@@ -23,13 +23,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
-
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
-// completeMark is the mark internal/kinds reads as a commit fetched in full.
+// completeMark is the mark internal/blueprints reads as a commit fetched in
+// full.
 const completeMark = ".paisans-complete"
 
 // installed is the release's directory in a catalog cache, shared by every
@@ -161,7 +161,7 @@ func repository() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(tag + "\n" + blueprints.DigestFiles(files)))
+	sum := cacheKey(tag, files)
 	base := filepath.Join(os.TempDir(), "paisans-coretest")
 	repo := filepath.Join(base, hex.EncodeToString(sum[:])[:16])
 	if _, err := os.Stat(filepath.Join(repo, ".git", "refs", "tags", tag)); err == nil {
@@ -205,4 +205,26 @@ func repository() (string, error) {
 		return "", err
 	}
 	return repo, nil
+}
+
+// cacheKey names the repository an earlier run made from the same tag and
+// files, so that a change to either makes a new one. It is not a blueprint
+// digest and nothing compares it with one; it only has to change when the
+// test copy does. It cannot call into internal/blueprints, whose own tests
+// import this package.
+func cacheKey(tag string, files map[string][]byte) [sha256.Size]byte {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\n", tag)
+	for _, name := range names {
+		sum := sha256.Sum256(files[name])
+		fmt.Fprintf(h, "%s  %s\n", hex.EncodeToString(sum[:]), name)
+	}
+	var out [sha256.Size]byte
+	copy(out[:], h.Sum(nil))
+	return out
 }

@@ -78,7 +78,7 @@ func declaredWorld(t *testing.T) *mqWorld {
 	w.cfg.Catalogs = map[string]config.Catalog{"ex": {URL: repo, Commit: git("rev-parse", "HEAD")}}
 	for _, name := range []string{"forum", "plain"} {
 		app := w.cfg.Apps[name]
-		app.Kind = "ex/broker"
+		app.Blueprint = "ex/broker"
 		w.cfg.Apps[name] = app
 	}
 	if problems := config.ResolveBlueprints(w.cfg); len(problems) > 0 {

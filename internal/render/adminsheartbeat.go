@@ -49,7 +49,7 @@ func adminsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 	var out []heartbeatTarget
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Kind == config.KindUptime {
+		if app.Blueprint == config.BlueprintUptime {
 			out = append(out, heartbeatTarget{App: name, Hostname: app.Hostname})
 		}
 	}
@@ -87,7 +87,7 @@ func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 // monitor's URL reaches a host without touching Pocket ID.
 func (p *planner) adminsHeartbeatFiles(base string, app plannedApp) ([]File, error) {
 	targets := adminsHeartbeatTargets(p.cfg)
-	if app.Kind != config.KindPocketID || len(targets) == 0 {
+	if app.Blueprint != config.BlueprintPocketID || len(targets) == 0 {
 		return nil, nil
 	}
 	token, err := p.adminsHeartbeatToken(app.Name)

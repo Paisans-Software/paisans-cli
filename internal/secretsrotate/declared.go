@@ -11,28 +11,28 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
-// The rotations a blueprint declares (kinds.SecretSpec): the cost it names,
-// a group of secrets replaced as one unit, and a secret changed inside the
-// running app by an in-app action.
+// The rotations a blueprint declares (blueprints.SecretSpec): the cost it
+// names, a group of secrets replaced as one unit, and a secret changed inside
+// the running app by an in-app action.
 
 // CostOf is what rotating an app's secret costs, as its blueprint says:
 // nothing a member notices, for a secret it says nothing of.
 func CostOf(cfg *config.Config, app, key string) Cost {
-	spec, _ := kinds.SecretOf(cfg.Apps[app].Kind, key)
+	spec, _ := blueprints.SecretOf(cfg.Apps[app].Blueprint, key)
 	return declaredCost(app, spec.RotationCost)
 }
 
 func declaredCost(app, cost string) Cost {
 	switch cost {
-	case kinds.CostSignsOut:
+	case blueprints.CostSignsOut:
 		return Cost{SignsOut: true}
-	case kinds.CostRestart:
+	case blueprints.CostRestart:
 		return Cost{Downtime: "the " + app + " stack, for one restart on each site in turn"}
 	}
 	return Cost{}
@@ -59,8 +59,8 @@ func (r appGroup) Path() string { return "apps." + r.app + "." + r.group }
 
 func (r appGroup) key(k string) string { return "apps." + r.app + "." + k }
 
-func (r appGroup) members() []kinds.SecretSpec {
-	return kinds.SecretGroup(r.cfg.Apps[r.app].Kind, r.group)
+func (r appGroup) members() []blueprints.SecretSpec {
+	return blueprints.SecretGroup(r.cfg.Apps[r.app].Blueprint, r.group)
 }
 
 // Cost is the dearest of the members': signing out, then a restart.
@@ -94,7 +94,7 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 	members := r.members()
 	next := map[string]string{}
 	for _, m := range members {
-		if m.Format == kinds.FormatRSAKeypair || m.Format == kinds.FormatRSAPublic {
+		if m.Format == blueprints.FormatRSAKeypair || m.Format == blueprints.FormatRSAPublic {
 			continue
 		}
 		v, err := secretsgen.ReplacementIn(e.Cfg, r.key(m.Name), s)
@@ -105,7 +105,7 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 		next[m.Name] = v
 	}
 	for _, m := range members {
-		if m.Format != kinds.FormatRSAKeypair {
+		if m.Format != blueprints.FormatRSAKeypair {
 			continue
 		}
 		priv, pub, err := secretsgen.ReplacementKeypair(next[m.Passphrase])
@@ -116,7 +116,7 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 		ui.Secret(pub)
 		next[m.Name] = priv
 		for _, half := range members {
-			if half.Format == kinds.FormatRSAPublic && half.Of == m.Name {
+			if half.Format == blueprints.FormatRSAPublic && half.Of == m.Name {
 				next[half.Name] = pub
 			}
 		}
@@ -148,7 +148,7 @@ func (r appGroup) parse(next string) (map[string]string, error) {
 		return nil, fmt.Errorf("the next value holds secrets the %s unit does not", r.Path())
 	}
 	for _, m := range members {
-		if m.Format != kinds.FormatRSAKeypair {
+		if m.Format != blueprints.FormatRSAKeypair {
 			continue
 		}
 		key, err := secretsgen.OpenPrivateKey(values[m.Name], values[m.Passphrase])
@@ -156,7 +156,7 @@ func (r appGroup) parse(next string) (map[string]string, error) {
 			return nil, fmt.Errorf("the next %s does not open with the next %s, and the app could not sign with it", m.Name, m.Passphrase)
 		}
 		for _, half := range members {
-			if half.Format != kinds.FormatRSAPublic || half.Of != m.Name {
+			if half.Format != blueprints.FormatRSAPublic || half.Of != m.Name {
 				continue
 			}
 			block, _ := pem.Decode([]byte(values[half.Name]))
@@ -204,7 +204,7 @@ func (r appGroup) Promote(s *config.Secrets, next string) error {
 type inApp struct {
 	Generated
 	app, key string
-	rot      kinds.InAppRotation
+	rot      blueprints.InAppRotation
 	cost     Cost
 }
 
@@ -215,7 +215,7 @@ type inApp struct {
 // the same value. A value handed to a command never begins with a dash,
 // which a command would read as an option.
 func InApp(cfg *config.Config, app, key string) Rotator {
-	spec, _ := kinds.SecretOf(cfg.Apps[app].Kind, key)
+	spec, _ := blueprints.SecretOf(cfg.Apps[app].Blueprint, key)
 	r := inApp{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key, cost: declaredCost(app, spec.RotationCost)}
 	if spec.Rotate != nil {
 		r.rot = *spec.Rotate

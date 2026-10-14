@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
 // VolumeCheck is the guard against image declared volumes nothing mounts.
@@ -37,7 +37,7 @@ type VolumeCheck struct {
 	Uncovered []UncoveredVolume
 
 	// services is each acted on stack's services, for Execute's owed check.
-	services map[string]map[string]kinds.ServiceMounts
+	services map[string]map[string]blueprints.ServiceMounts
 }
 
 // UncoveredVolume is one declared VOLUME path that one service does not mount.
@@ -50,7 +50,7 @@ type UncoveredVolume struct {
 
 // Describe is the refusal's line for it, with the fix.
 func (u UncoveredVolume) Describe() string {
-	return fmt.Sprintf("%s/%s runs %s, which declares VOLUME %s, and the compose file mounts nothing at that path. Docker would give every new container an anonymous volume there and abandon it on the next recreate. Mount it in the kind's compose template: a bind under the stack's own directory for state, a tmpfs for throwaway",
+	return fmt.Sprintf("%s/%s runs %s, which declares VOLUME %s, and the compose file mounts nothing at that path. Docker would give every new container an anonymous volume there and abandon it on the next recreate. Mount it in the blueprint's compose template: a bind under the stack's own directory for state, a tmpfs for throwaway",
 		u.Stack, u.Service, u.Image, u.Path)
 }
 
@@ -107,7 +107,7 @@ func probeVolumes(refs []string, t Transport) (map[string][]string, error) {
 // uncoveredVolumes compares what each image declares with what each service
 // mounts, for the images in declared. A service whose image is not in it is
 // skipped, which is how Build leaves the owed images to Execute.
-func uncoveredVolumes(services map[string]map[string]kinds.ServiceMounts, declared map[string][]string) []UncoveredVolume {
+func uncoveredVolumes(services map[string]map[string]blueprints.ServiceMounts, declared map[string][]string) []UncoveredVolume {
 	var out []UncoveredVolume
 	for _, stack := range sortedStacks(services) {
 		names := make([]string, 0, len(services[stack]))
@@ -121,7 +121,7 @@ func uncoveredVolumes(services map[string]map[string]kinds.ServiceMounts, declar
 			if !ok {
 				continue
 			}
-			for _, p := range kinds.Uncovered(paths, s.Targets) {
+			for _, p := range blueprints.Uncovered(paths, s.Targets) {
 				out = append(out, UncoveredVolume{Stack: stack, Service: name, Image: s.Image, Path: p})
 			}
 		}
@@ -129,7 +129,7 @@ func uncoveredVolumes(services map[string]map[string]kinds.ServiceMounts, declar
 	return out
 }
 
-func sortedStacks(m map[string]map[string]kinds.ServiceMounts) []string {
+func sortedStacks(m map[string]map[string]blueprints.ServiceMounts) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -140,13 +140,13 @@ func sortedStacks(m map[string]map[string]kinds.ServiceMounts) []string {
 
 // stackServices reads the services of each named stack from its rendered
 // compose file.
-func stackServices(changes []Change, stacks map[string]bool) (map[string]map[string]kinds.ServiceMounts, error) {
-	out := map[string]map[string]kinds.ServiceMounts{}
+func stackServices(changes []Change, stacks map[string]bool) (map[string]map[string]blueprints.ServiceMounts, error) {
+	out := map[string]map[string]blueprints.ServiceMounts{}
 	for _, c := range changes {
 		if !stacks[c.Stack] || !isStackCompose(c) {
 			continue
 		}
-		services, err := kinds.ComposeMounts(c.content)
+		services, err := blueprints.ComposeMounts(c.content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the mounts %s renders: %w", c.Path, err)
 		}

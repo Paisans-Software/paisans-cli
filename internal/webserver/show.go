@@ -161,7 +161,7 @@ func directive(lines []string, level int) string {
 // "Reverse Proxy Request Headers", read 2026-10-08). nginx sets none of them
 // unasked.
 //
-// Each also refuses what the toolkit's own snippet for the uptime kind
+// Each also refuses what the toolkit's own snippet for the uptime blueprint
 // refuses (internal/blueprints/reserved/uptime/caddy.snippet.tmpl), because behind the
 // operator's web server that snippet is not in front of the app. Apache's
 // refusal is a 403 from Require rather than a 404.

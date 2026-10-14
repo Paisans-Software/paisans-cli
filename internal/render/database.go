@@ -3,8 +3,8 @@ package render
 import (
 	"fmt"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // clusteredDatabaseHost is what a clustered application instance connects to:
@@ -20,9 +20,9 @@ import (
 // loopback address is the container itself: a DSN naming 127.0.0.1 reaches
 // nothing, and the app fails at its first query. Two other ways round that
 // were rejected. Running the apps with host networking would put every
-// sidecar on the host's interfaces and make two kinds that listen on the same
-// port collide. Pointing at the Docker bridge gateway would need HAProxy to
-// bind an address that differs per compose network and does not exist until
+// sidecar on the host's interfaces and make two blueprints that listen on the
+// same port collide. Pointing at the Docker bridge gateway would need HAProxy
+// to bind an address that differs per compose network and does not exist until
 // Docker creates it. The mesh address exists from the moment the mesh interface is up, which
 // is before anything else starts, and it is already declared in the
 // configuration.
@@ -55,14 +55,14 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 		planned.Name)
 }
 
-// requireAppSecrets refuses an app whose kind needs a secret that is unset
-// (kinds.Def.RequiredSecrets). Most app secrets render as an empty value when
-// unset, because the kinds differ in what they need and an absent optional
-// one is not an error. These are not optional, and an empty one is a
+// requireAppSecrets refuses an app whose blueprint needs a secret that is unset
+// (blueprints.Def.RequiredSecrets). Most app secrets render as an empty value
+// when unset, because the blueprints differ in what they need and an absent
+// optional one is not an error. These are not optional, and an empty one is a
 // container that exits on a host after the apply has already moved, so
 // render refuses first and names the command that fixes it.
 func (p *planner) requireAppSecrets(planned plannedApp) error {
-	for _, need := range kinds.RequiredSecrets(planned.Kind) {
+	for _, need := range blueprints.RequiredSecrets(planned.Blueprint) {
 		if p.appSecret(planned.Name, need.Key) == "" {
 			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
 		}
@@ -73,7 +73,7 @@ func (p *planner) requireAppSecrets(planned plannedApp) error {
 	// template turns that on whenever the app has a client, and without one
 	// the password is the first anybody would guess. `paisans secrets set`
 	// or a hand edit can still write it, so render refuses it.
-	if planned.Kind == config.KindUptime && p.appSecret(planned.Name, "admin_password") == "admin" {
+	if planned.Blueprint == config.BlueprintUptime && p.appSecret(planned.Name, "admin_password") == "admin" {
 		return fmt.Errorf("secrets apps.%s.admin_password: is the literal `admin`, which the monitor treats as unset and refuses to start with when sign-in is SSO only. Set it to a generated value", planned.Name)
 	}
 	return nil

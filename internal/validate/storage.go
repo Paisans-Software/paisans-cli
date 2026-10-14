@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
-// storage checks each app's `storage` key against its kind and placement.
+// storage checks each app's `storage` key against its blueprint and placement.
 // README, Rule 5, "A pinned app may keep its files on its own disk", says why
 // each combination is refused rather than warned about: every one of them
 // either renders an app that cannot store a file, or silently means something
@@ -18,7 +18,7 @@ func (c *checker) storage() {
 		app := c.cfg.Apps[name]
 		key := fmt.Sprintf("apps.%s.storage", name)
 		switch {
-		case app.Kind == config.KindPocketID:
+		case app.Blueprint == config.BlueprintPocketID:
 			// Pocket ID has a storage setting of its own, which this key
 			// would shadow without replacing.
 			if app.Storage != "" {
@@ -27,19 +27,19 @@ func (c *checker) storage() {
 					"is %q, and pocket-id does not read it. Pocket ID chooses where it keeps its files with its own FILE_BACKEND, set here as apps.%s.settings.file_backend; database is the recommendation (README, Rule 3). Remove storage.",
 					app.Storage, name)
 			}
-		case kinds.KeepsFilesOnlyLocally(app.Kind):
+		case blueprints.KeepsFilesOnlyLocally(app.Blueprint):
 			if app.Storage == config.StorageS3 {
-				c.refuse("storage-s3-on-a-local-only-kind", key,
-					"this kind keeps its files only on its own disk",
+				c.refuse("storage-s3-on-a-local-only-blueprint", key,
+					"this blueprint keeps its files only on its own disk",
 					"is s3, but %s has no object storage form here: %s. Remove the key, or set storage: local, which is what it does anyway.",
-					app.Kind, localOnlyReason(app.Kind))
+					app.Blueprint, localOnlyReason(app.Blueprint))
 			}
-		case !kinds.UsesObjectStorage(app.Kind):
+		case !blueprints.UsesObjectStorage(app.Blueprint):
 			if app.Storage != "" {
-				c.refuse("storage-on-a-kind-without-files", key,
-					"storage is declared for a kind that stores no files",
+				c.refuse("storage-on-a-blueprint-without-files", key,
+					"storage is declared for a blueprint that stores no files",
 					"is %q, but %s stores no files, so this would be ignored without a word. Remove it.",
-					app.Storage, app.Kind)
+					app.Storage, app.Blueprint)
 			}
 		default:
 			c.objectStorageApp(name, app)
@@ -47,7 +47,7 @@ func (c *checker) storage() {
 	}
 }
 
-// objectStorageApp checks an app of a kind that can keep its files in S3 or
+// objectStorageApp checks an app whose blueprint can keep its files in S3 or
 // on its own disk.
 func (c *checker) objectStorageApp(name string, app config.App) {
 	key := fmt.Sprintf("apps.%s.storage", name)
@@ -59,7 +59,7 @@ func (c *checker) objectStorageApp(name string, app config.App) {
 			name)
 		return
 	}
-	if app.Placement.Mode == config.PlacementCluster && kinds.KeepsFilesLocally(c.cfg, app) {
+	if app.Placement.Mode == config.PlacementCluster && blueprints.KeepsFilesLocally(c.cfg, app) {
 		// A clustered app runs on every apps site, and each would keep its
 		// own copy of the files: an upload on one site is missing on the
 		// others, and a failover moves readers onto the copy without it.
@@ -75,18 +75,18 @@ func (c *checker) objectStorageApp(name string, app config.App) {
 				name)
 		}
 	}
-	if declared := strings.TrimSpace(app.Hostnames[kinds.MediaRole]); declared != "" && !kinds.InObjectStorage(c.cfg, app) {
-		c.refuse("media-hostname-without-object-storage", fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole),
+	if declared := strings.TrimSpace(app.Hostnames[blueprints.MediaRole]); declared != "" && !blueprints.InObjectStorage(c.cfg, app) {
+		c.refuse("media-hostname-without-object-storage", fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole),
 			"media hostname is declared for an app with no bucket",
 			"is %q, but %s keeps its files on its own disk and serves them on its own hostname, so nothing would answer this name. Remove it, or keep the files in Garage.",
 			declared, name)
 	}
 }
 
-// localOnlyReason is why a kind that keeps its files only on its own disk
-// has no S3 form, for the refusal of `storage: s3` on it.
-func localOnlyReason(kind config.Kind) string {
-	if why := kinds.LocalOnlyReason(kind); why != "" {
+// localOnlyReason is why a blueprint that keeps its files only on its own
+// disk has no S3 form, for the refusal of `storage: s3` on it.
+func localOnlyReason(blueprint config.Blueprint) string {
+	if why := blueprints.LocalOnlyReason(blueprint); why != "" {
 		return why
 	}
 	return "it keeps its files on local disk"

@@ -56,7 +56,7 @@ func heartbeatTargets(cfg *config.Config, site string) []heartbeatTarget {
 	var out []heartbeatTarget
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		if app.Kind != config.KindUptime || app.Placement.Site == site {
+		if app.Blueprint != config.BlueprintUptime || app.Placement.Site == site {
 			continue
 		}
 		out = append(out, heartbeatTarget{App: name, Hostname: app.Hostname})

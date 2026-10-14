@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
 // nullDSN is Symfony Mailer's discard transport (NullTransportFactory at
@@ -41,7 +41,7 @@ func (v appValues) SMTPSender() string {
 // LockedSettings is the settings the app's blueprint locks, those with a
 // condition only when it holds, joined by sep.
 func (v appValues) LockedSettings(sep string) string {
-	return strings.Join(kinds.LockedSettingsFor(v.decl, v.OIDC.Present), sep)
+	return strings.Join(blueprints.LockedSettingsFor(v.decl, v.OIDC.Present), sep)
 }
 
 func mailerDSN(s smtpValues) string {

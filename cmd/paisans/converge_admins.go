@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -55,8 +55,8 @@ type declaredAdmin struct {
 // every app's admin group, and every app's member group, since an app whose
 // member gate does not admit its administrator refuses their first login.
 // Founder decision. The username is fixed once the account exists:
-// nobody can edit their own account (kinds.PocketIDAccountEditSetting), and
-// apply never renames one. validate holds the name to a first and a last.
+// nobody can edit their own account (blueprints.PocketIDAccountEditSetting),
+// and apply never renames one. validate holds the name to a first and a last.
 func adminRequest(cfg *config.Config, app, id string) appadmin.Request {
 	a := cfg.Admins[id]
 	first, last, _ := strings.Cut(strings.TrimSpace(a.Name), " ")
@@ -71,7 +71,7 @@ func adminRequest(cfg *config.Config, app, id string) appadmin.Request {
 // adminEmailOn reports whether a Pocket ID app emails its admins their links:
 // it can send mail and does not set email_one_time_access_as_admin false.
 func adminEmailOn(cfg *config.Config, app string) bool {
-	return kinds.PocketIDAdminEmail(cfg.Apps[app].Settings, cfg.CanMail(app))
+	return blueprints.PocketIDAdminEmail(cfg.Apps[app].Settings, cfg.CanMail(app))
 }
 
 // convergeDeclaredAdmin plans, and with execute makes, one declared admin of
@@ -89,7 +89,7 @@ var convergeDeclaredAdmin = func(cfg *config.Config, app, id string, o convergeO
 	req := adminRequest(cfg, app, id)
 	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
-	plan, err := appadmin.Build(cfg.Apps[app].Kind, transport, req)
+	plan, err := appadmin.Build(cfg.Apps[app].Blueprint, transport, req)
 	if err != nil {
 		return out, err
 	}
@@ -159,7 +159,7 @@ func convergeAdmins(r ui.Reporter, cfg *config.Config, o convergeOptions, execut
 	var failures []error
 	section := false
 	for _, app := range cfg.AppNames() {
-		if cfg.Apps[app].Kind != config.KindPocketID || !up(app) {
+		if cfg.Apps[app].Blueprint != config.BlueprintPocketID || !up(app) {
 			continue
 		}
 		if !section {
@@ -222,7 +222,7 @@ func adminEmailOffWhy(cfg *config.Config, app string) string {
 	if !cfg.CanMail(app) {
 		return "Its smtp settings resolve no host or no from_address, so the links below are the only copies. Pass each one on yourself."
 	}
-	return "apps." + app + ".settings." + kinds.PocketIDAdminEmailSetting + " is false, so the links below are the only copies. Pass each one on yourself."
+	return "apps." + app + ".settings." + blueprints.PocketIDAdminEmailSetting + " is false, so the links below are the only copies. Pass each one on yourself."
 }
 
 // convergeEmailResults waits on Pocket ID's log and gives each emailed admin

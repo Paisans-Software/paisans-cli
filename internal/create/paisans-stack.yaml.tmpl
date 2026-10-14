@@ -108,7 +108,7 @@ storage:
 apps:
 {{- range .Apps}}
   {{.Key}}:
-    blueprint: {{.Kind}}
+    blueprint: {{.Blueprint}}
     hostname: {{q .Hostname}}
 {{- if and .DisplayName (ne .DisplayName .Key)}}
     # What a person signing in is shown, as the app's client name at Pocket ID.
@@ -118,13 +118,13 @@ apps:
 {{- if .MembersOnly}}
     # Behind the gate, which admits members and admins. The toolkit runs the
     # gate itself, at gate.{{$.Domain}} on the gateway.
-{{- if or (eq .Kind "mbin") (eq .Kind "writefreely")}}
+{{- if or (eq .Blueprint "mbin") (eq .Blueprint "writefreely")}}
     # Federation still works: ActivityPub goes to the app, which checks
     # every signature.
 {{- end}}
     gated: true
 {{- end}}
-{{- if eq .Kind "pocket-id"}}
+{{- if eq .Blueprint "pocket-id"}}
     # Sign in for every other app. Its settings are rendered into its
     # configuration, and its admin page for them is read only.
     settings:
@@ -134,7 +134,7 @@ apps:
       # Also the sender name on its mail.
       app_name: {{q $.Name}}
 {{- end}}
-{{- if eq .Kind "element"}}
+{{- if eq .Blueprint "element"}}
     settings:
 {{- range $setting, $host := .Links}}
       # The hostname of the app it is a client of.
@@ -142,7 +142,7 @@ apps:
 {{- end}}
       brand: {{q $.Name}}
 {{- end}}
-{{- if eq .Kind "uptime"}}
+{{- if eq .Blueprint "uptime"}}
 {{- if $.MonitorBesideGateway}}
     # The uptime monitor, beside the gateway: it checks every app and every
     # other machine, but cannot report this machine failing. A small machine

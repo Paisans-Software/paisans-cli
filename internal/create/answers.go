@@ -55,9 +55,9 @@ func (s Site) Has(role config.Role) bool {
 
 // App is one declared app. Sign in is among them, so Render reads one list.
 type App struct {
-	Key      string
-	Kind     config.Kind
-	Hostname string
+	Key       string
+	Blueprint config.Blueprint
+	Hostname  string
 	// DisplayName is what a person signing in is shown for the app. Render
 	// writes it only when it differs from Key, the name the client has
 	// without one.

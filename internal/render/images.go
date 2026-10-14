@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // ComposeImage is one image reference a site's compose file names, as the
@@ -28,7 +28,7 @@ type ComposeImage struct {
 	// Image is the reference as rendered.
 	Image string
 	// Services are the names the configuration knows the image by: the
-	// kind's services naming it, which are the keys of apps.<name>.images
+	// blueprint's services naming it, which are the keys of apps.<name>.images
 	// (Eg: app, for Mbin's application and its messenger consumers alike),
 	// or caddy for the gateway's.
 	Services []string
@@ -36,14 +36,14 @@ type ComposeImage struct {
 	// how many `image:` lines name it.
 	Lines int
 
-	// kind is the app's kind, for Setting.
-	kind config.Kind
+	// blueprint is the app's blueprint, for Setting.
+	blueprint config.Blueprint
 }
 
 // Setting is the configuration key that decides Image, for a message that
 // tells the operator where to pin it: acme.image for the gateway's Caddy,
-// apps.<name>.images.<service> for a service of an app's kind, and empty for
-// an image only the core catalog's foundation decides (the rest of the
+// apps.<name>.images.<service> for a service of an app's blueprint, and empty
+// for an image only the core catalog's foundation decides (the rest of the
 // infrastructure stack, and the admins heartbeat).
 func (c ComposeImage) Setting() string {
 	if c.App == "" {
@@ -52,7 +52,7 @@ func (c ComposeImage) Setting() string {
 		}
 		return ""
 	}
-	if len(c.Services) == 0 || !kinds.Has(c.kind, c.Services[0]) {
+	if len(c.Services) == 0 || !blueprints.Has(c.blueprint, c.Services[0]) {
 		return ""
 	}
 	return fmt.Sprintf("apps.%s.images.%s", c.App, c.Services[0])
@@ -74,7 +74,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		if !ok || rest != "compose.yaml" {
 			continue
 		}
-		services, err := kinds.ComposeMounts(file.Content)
+		services, err := blueprints.ComposeMounts(file.Content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the images %s names: %w", file.Path, err)
 		}
@@ -105,7 +105,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			}
 		}
 		for image, n := range lines {
-			// An image no service of the kind declares (the admins
+			// An image no service of the blueprint declares (the admins
 			// heartbeat in a Pocket ID stack), and every image of the
 			// infrastructure stack, is named by the compose services
 			// that run it.
@@ -114,7 +114,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, kind: p.cfg.Apps[app].Kind})
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {

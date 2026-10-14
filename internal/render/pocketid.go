@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/configmerge"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // pocketIDConfig is the pocket-id kind's application configuration, quoted
-// for its .env. See kinds.PocketIDSettings for why it is rendered at all.
+// for its .env. See blueprints.PocketIDSettings for why it is rendered at all.
 type pocketIDConfig struct {
 	// Env is every declared setting's variable, then the resolved signup
-	// groups, in kinds.PocketIDSettings order.
-	Env []kinds.PocketIDEnvVar
+	// groups, in blueprints.PocketIDSettings order.
+	Env []blueprints.PocketIDEnvVar
 	// Unresolved names the signup groups with no ID recorded under
 	// pocket_id_groups yet, which the .env says in a comment. apply resolves
 	// them on a site running Pocket ID and renders the .env again.
@@ -28,15 +28,15 @@ type pocketIDConfig struct {
 // database host.
 func (p *planner) pocketIDConfigFor(name string, app config.App) (pocketIDConfig, error) {
 	var out pocketIDConfig
-	settings := kinds.PocketIDSettingsFor(app.Settings, p.cfg.CanMail(name))
-	for _, v := range kinds.PocketIDEnv(settings) {
+	settings := blueprints.PocketIDSettingsFor(app.Settings, p.cfg.CanMail(name))
+	for _, v := range blueprints.PocketIDEnv(settings) {
 		quoted, err := configmerge.EnvValue(fmt.Sprintf("apps.%s.settings (%s)", name, v.Name), v.Value)
 		if err != nil {
 			return pocketIDConfig{}, err
 		}
-		out.Env = append(out.Env, kinds.PocketIDEnvVar{Name: v.Name, Value: quoted})
+		out.Env = append(out.Env, blueprints.PocketIDEnvVar{Name: v.Name, Value: quoted})
 	}
-	groups := kinds.PocketIDSignupGroups(app.Settings)
+	groups := blueprints.PocketIDSignupGroups(app.Settings)
 	if len(groups) == 0 {
 		return out, nil
 	}
@@ -60,7 +60,7 @@ func (p *planner) pocketIDConfigFor(name string, app config.App) (pocketIDConfig
 	if err != nil {
 		return pocketIDConfig{}, err
 	}
-	out.Env = append(out.Env, kinds.PocketIDEnvVar{Name: kinds.PocketIDSignupGroupsEnv, Value: quoted})
+	out.Env = append(out.Env, blueprints.PocketIDEnvVar{Name: blueprints.PocketIDSignupGroupsEnv, Value: quoted})
 	return out, nil
 }
 

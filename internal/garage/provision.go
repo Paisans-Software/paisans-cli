@@ -19,9 +19,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -158,11 +158,11 @@ func absent(out string, err error, marker string) (bool, error) {
 }
 
 // BucketName is the bucket an app's objects live in: a declared s3_bucket
-// setting, or <app>-uploads. It is kinds.BucketName, which internal/render
+// setting, or <app>-uploads. It is blueprints.BucketName, which internal/render
 // also reads, because the bucket this package creates has to be the same one
 // the rendered application is told to use. Exported for storage add.
 func BucketName(app config.App, name string) string {
-	return kinds.BucketName(name, app)
+	return blueprints.BucketName(name, app)
 }
 
 // Build checks what already exists on the target site's node and returns a
@@ -250,7 +250,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 		app := cfg.Apps[name]
 		// An app keeping its files on its own disk gets no key and no
 		// bucket: it has nothing to put in one.
-		if !kinds.InObjectStorage(cfg, app) {
+		if !blueprints.InObjectStorage(cfg, app) {
 			continue
 		}
 		keyID, _ := SecretString(secrets, name, "s3_access_key_id")
@@ -307,7 +307,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 			plan.Steps = append(plan.Steps, step)
 		}
 
-		if kinds.ServesObjectsPublicly(app.Kind) {
+		if blueprints.ServesObjectsPublicly(app.Blueprint) {
 			// Website access is what lets a request with no credential read
 			// this bucket. `garage bucket website --allow` is a set rather
 			// than a create: established by running it twice against a real
@@ -315,7 +315,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 			// "Website access allowed for <bucket>" and exited 0 both times.
 			//
 			// Nothing here ever revokes it. A bucket that stops being public
-			// is a change to a kind's record, which is a code change with
+			// is a change to a blueprint's record, which is a code change with
 			// a review, and a provisioner that guessed a human meant to
 			// withdraw public access would be guessing about the one thing in
 			// this package that cannot be undone quietly.

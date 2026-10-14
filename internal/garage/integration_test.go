@@ -197,8 +197,8 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 			},
 		},
 		Apps: map[string]config.App{
-			"talk": {Kind: config.Kind("mbin")},
-			"blog": {Kind: config.Kind("writefreely")},
+			"talk": {Blueprint: config.Blueprint("mbin")},
+			"blog": {Blueprint: config.Blueprint("writefreely")},
 		},
 	}
 	secrets := &config.Secrets{

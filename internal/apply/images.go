@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/deployment"
 	"github.com/paisans-software/paisans-stack/internal/hostarch"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -160,7 +160,7 @@ func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver)
 		}
 		seen[image.Image] = true
 		pin := ImagePin{Image: image.Image, Reference: image.Image}
-		if ref := kinds.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
+		if ref := blueprints.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
 			tagged, err := image.Image, error(nil)
 			if t, ok := r.(Tracker); ok && imagedigest.IsTrack(image.Image) {
 				tagged, err = t.Track(image.Image)
@@ -317,7 +317,7 @@ func buildLabel(ref, version string) string {
 }
 
 func digestOf(ref string) string {
-	return kinds.ParseReference(ref).Digest
+	return blueprints.ParseReference(ref).Digest
 }
 
 // buildKey is what identifies the build a reference runs: its digest, or the
@@ -369,15 +369,15 @@ func (p *Plan) FirstPins() []ImagePin {
 // current and found the host's copy. It returns the file to compare and
 // write, the pins for the plan and its manifest, and notes for the operator.
 func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
-	rendered, err := kinds.ComposeMounts(compose)
+	rendered, err := blueprints.ComposeMounts(compose)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("reading the images its compose file names: %w", err)
 	}
 	// A host file that does not parse is not this function's to report: the
 	// comparison that follows calls it a conflict.
-	var host map[string]kinds.ServiceMounts
+	var host map[string]blueprints.ServiceMounts
 	if found {
-		host, _ = kinds.ComposeMounts(current)
+		host, _ = blueprints.ComposeMounts(current)
 	}
 	pinned, lines := map[string]string{}, map[string]int{}
 	var pins []ImagePin
@@ -422,7 +422,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 // services that run it, host the host's compose file, nil when it has none.
 // The pin is nil when nothing was pinned: no resolver, and no build of the
 // tag on the host to keep.
-func pinImage(site string, image render.ComposeImage, services []string, host map[string]kinds.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
+func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
 	want := image.Image
 	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want}
 	deployed, _ := deployedRef(host, services)
@@ -431,7 +431,7 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		deployed = ""
 	}
 	pin.Deployed = deployed
-	ref := kinds.ParseReference(want)
+	ref := blueprints.ParseReference(want)
 	label := imageLabel(image)
 	if r == nil {
 		// No resolver is a command with a narrower purpose than moving
@@ -600,7 +600,7 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 		// The request is named by its tag, or its digest, alone: the
 		// repository is already in the hint.
 		asked := want
-		if ref := kinds.ParseReference(want); ref.Digest != "" {
+		if ref := blueprints.ParseReference(want); ref.Digest != "" {
 			asked = ref.Digest
 		} else if ref.Tag != "" {
 			asked = ref.Tag
@@ -623,12 +623,12 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 // that run the image here, since every site of an app renders the same
 // template. A build is compared by its digest, or by its reference when it
 // names none.
-func holdImage(site string, image render.ComposeImage, services []string, host map[string]kinds.ServiceMounts, peers []PeerCompose, r Resolver) (string, []Note, error) {
+func holdImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, peers []PeerCompose, r Resolver) (string, []Note, error) {
 	app := ui.Name(image.App)
 	builds := map[string]string{}
 	var unread, all []string
 	var notes []Note
-	consider := func(name string, mounts map[string]kinds.ServiceMounts) error {
+	consider := func(name string, mounts map[string]blueprints.ServiceMounts) error {
 		ref, mixed := deployedRef(mounts, services)
 		if len(mixed) > 1 {
 			return &ui.Problem{
@@ -657,7 +657,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		if !peer.Found {
 			continue
 		}
-		mounts, err := kinds.ComposeMounts(peer.Content)
+		mounts, err := blueprints.ComposeMounts(peer.Content)
 		if err != nil {
 			return "", nil, &ui.Problem{
 				Hint:    fmt.Sprintf("compose file of %s on %s is not readable", app, ui.Name(peer.Site)),
@@ -767,7 +767,7 @@ func heldBuild(site string, builds map[string]string) string {
 // nameOf is a reference without its digest: the repository and tag a build
 // was resolved from, or the reference itself when it names no digest.
 func nameOf(ref string) string {
-	if parsed := kinds.ParseReference(ref); parsed.Digest != "" {
+	if parsed := blueprints.ParseReference(ref); parsed.Digest != "" {
 		return parsed.Name
 	}
 	return strings.TrimSpace(ref)
@@ -776,7 +776,7 @@ func nameOf(ref string) string {
 // deployedRef is the reference the given services of a compose file run,
 // when they all run one; mixed lists each reference when they run more than
 // one. Both are empty when the file names none of them.
-func deployedRef(mounts map[string]kinds.ServiceMounts, services []string) (ref string, mixed []string) {
+func deployedRef(mounts map[string]blueprints.ServiceMounts, services []string) (ref string, mixed []string) {
 	seen := map[string]bool{}
 	for _, service := range services {
 		image := strings.TrimSpace(mounts[service].Image)
@@ -804,7 +804,7 @@ func fileImages(images []render.ComposeImage, path string) []render.ComposeImage
 }
 
 // servicesNaming is every compose service of a rendered file running image.
-func servicesNaming(mounts map[string]kinds.ServiceMounts, image string) []string {
+func servicesNaming(mounts map[string]blueprints.ServiceMounts, image string) []string {
 	var out []string
 	for name, m := range mounts {
 		if strings.TrimSpace(m.Image) == image {
@@ -863,7 +863,7 @@ type Lister interface {
 // It is read from the registry rather than written here so the example is
 // never a version the registry has moved past.
 func exampleTag(ref string, r Resolver) string {
-	name := kinds.ParseReference(ref).Name
+	name := blueprints.ParseReference(ref).Name
 	if l, ok := r.(Lister); ok {
 		if newest, err := l.NewestVersion(ref); err == nil && newest != "" {
 			return name + ":" + newest

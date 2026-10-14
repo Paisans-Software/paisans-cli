@@ -33,17 +33,17 @@
     },
     {
       "path": "srv/paisans/f2a9/gate/.env",
-      "sha256": "1179ba5a197aed13caf47fbe5c989bbdb4af968285baac59e03f530be6bc7b0c",
+      "sha256": "a28d85445353e03eb1b3fe4392de2ec6809da9726001750d497ccf2c8ad79285",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/gate/compose.yaml",
-      "sha256": "0baab12007faabee38f2a98b5bf64706d18cc789a2083e85798023acd02405d8",
+      "sha256": "03319a02811f78b7227bdc4986300a645dec97c5be92758c335a8a50c78e7ff2",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "258710c18897ad9e36f29788c601f108abc940ba33aa3feed939ddda364f58d8",
+      "sha256": "3b0732ef6b28993f18d8eed5bfef5f34257423322f6fb4ea96f37928b40e7781",
       "mode": "0644"
     },
     {

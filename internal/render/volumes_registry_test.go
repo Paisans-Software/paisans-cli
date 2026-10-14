@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
 // Every image the toolkit renders by default has its declared volumes mounted
 // at exactly those paths, for every Postgres major it knows and with every app
-// pinned as well as clustered, so each kind's own database is rendered too.
-// Each track is resolved to the build apply would run today, and what it
+// pinned as well as clustered, so each blueprint's own database is rendered
+// too. Each track is resolved to the build apply would run today, and what it
 // declares is read from the registry for every platform it is published for.
 // `paisans apply` makes the same check against the host's copy of every
 // image before it writes anything; this one says so before a release.
@@ -42,13 +42,13 @@ func TestEveryDeclaredImageVolumeIsMounted(t *testing.T) {
 				if !strings.HasSuffix(path, "/compose.yaml") {
 					continue
 				}
-				services, err := kinds.ComposeMounts(content)
+				services, err := blueprints.ComposeMounts(content)
 				if err != nil {
 					t.Fatalf("%s: %v", path, err)
 				}
 				for name, s := range services {
 					for _, declared := range declaredVolumes(t, registry, s.Image) {
-						if u := kinds.Uncovered(declared, s.Targets); len(u) > 0 {
+						if u := blueprints.Uncovered(declared, s.Targets); len(u) > 0 {
 							t.Errorf("postgres %s, pinned %v: %s service %s runs %s, which declares %v, and nothing is mounted at exactly that path, so every container would get an anonymous volume there", major, pinned, path, name, s.Image, u)
 						}
 					}

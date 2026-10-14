@@ -143,7 +143,7 @@ func ContainerRules(cfg *config.Config, name string) []Rule {
 func monitorRules(cfg *config.Config, name string, site config.Site) []Rule {
 	hosts := false
 	for _, app := range cfg.PinnedTo(name) {
-		if cfg.Apps[app].Kind == config.KindUptime {
+		if cfg.Apps[app].Blueprint == config.BlueprintUptime {
 			hosts = true
 		}
 	}
@@ -152,13 +152,13 @@ func monitorRules(cfg *config.Config, name string, site config.Site) []Rule {
 	}
 	ports := map[int]bool{}
 	for app, sites := range render.AppSites(cfg) {
-		kind := cfg.Apps[app].Kind
-		if kind == config.KindUptime {
+		blueprint := cfg.Apps[app].Blueprint
+		if blueprint == config.BlueprintUptime {
 			continue // a monitor does not check itself
 		}
 		for _, s := range sites {
 			if s == name {
-				ports[render.AppPort(kind)] = true
+				ports[render.AppPort(blueprint)] = true
 			}
 		}
 	}

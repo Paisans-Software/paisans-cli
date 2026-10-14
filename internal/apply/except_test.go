@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -198,7 +198,7 @@ func TestAHeldAppKeepsItsOwedRestartWhileHeld(t *testing.T) {
 func TestPruneKeepsTheImagesAHeldStackRenders(t *testing.T) {
 	host := supersededHost()
 	rendered := plan(t)
-	wikiImage, _ := kinds.DefaultImage(config.Kind("wikijs"), "app")
+	wikiImage, _ := blueprints.DefaultImage(config.Blueprint("wikijs"), "app")
 	for i, file := range rendered.Files {
 		if file.Path == "home-a/srv/paisans/f2a9/wiki/compose.yaml" {
 			rendered.Files[i].Content = strings.Replace(file.Content, wikiImage, "ghcr.io/example-org/mbin:v1.9.0", 1)

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
@@ -91,7 +91,7 @@ func TestEveryPocketIDSitePushesTheAdminsHeartbeat(t *testing.T) {
 		if !strings.Contains(compose, "\n  admins-heartbeat:\n") {
 			t.Errorf("%s: the Pocket ID stack has no admins-heartbeat service:\n%s", site, compose)
 		}
-		heartbeat, _ := kinds.FoundationImage(kinds.FoundationHeartbeat)
+		heartbeat, _ := blueprints.FoundationImage(blueprints.FoundationHeartbeat)
 		if !strings.Contains(compose, "image: "+heartbeat+"\n") {
 			t.Errorf("%s: the pusher does not run %s:\n%s", site, heartbeat, compose)
 		}

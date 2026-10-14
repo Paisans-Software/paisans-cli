@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // destinationName is a destination name usable as a secrets key segment,
@@ -216,16 +216,16 @@ func schedulePeriod(s config.Schedule) string {
 func (c *checker) pinnedPostgresWithoutWALG() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.BacksUp() || app.Placement.Mode != config.PlacementPinned || !kinds.Has(app.Kind, kinds.PostgresService) {
+		if !app.BacksUp() || app.Placement.Mode != config.PlacementPinned || !blueprints.Has(app.Blueprint, blueprints.PostgresService) {
 			continue
 		}
-		image := app.Images[kinds.PostgresService]
-		if image == "" || imageRepository(image) == kinds.WALGImage {
+		image := app.Images[blueprints.PostgresService]
+		if image == "" || imageRepository(image) == blueprints.WALGImage {
 			continue
 		}
 		c.refuse("pinned-postgres-without-walg", fmt.Sprintf("apps.%s.images.postgres", name),
 			"this Postgres would have no backup",
-			"is %s, which carries no WAL-G, so while backups are on this database would not be backed up. Use %s:<major>, or leave images.postgres unset, or opt the app out with apps.%s.backup: false.", image, kinds.WALGImage, name)
+			"is %s, which carries no WAL-G, so while backups are on this database would not be backed up. Use %s:<major>, or leave images.postgres unset, or opt the app out with apps.%s.backup: false.", image, blueprints.WALGImage, name)
 	}
 }
 
@@ -256,7 +256,7 @@ func imageRepository(ref string) string {
 // failure is silent.
 func (c *checker) backupMonitor() {
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindUptime {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintUptime {
 			return
 		}
 	}

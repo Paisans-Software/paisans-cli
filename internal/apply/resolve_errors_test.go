@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/imagedigest"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
@@ -25,12 +25,12 @@ func denied(ref string) error {
 	return fmt.Errorf("asking ghcr.io for %s: the token service answered 403 Forbidden: %w", ref, imagedigest.ErrDenied)
 }
 
-// mbinDefault is the fixture with talk on the mbin kind's default image.
+// mbinDefault is the fixture with talk on the mbin blueprint's default image.
 func mbinDefault(t *testing.T) (*render.Plan, string) {
 	t.Helper()
-	def, ok := kinds.DefaultImage(config.Kind("mbin"), "app")
-	if !ok || kinds.ParseReference(def).Tag == "" {
-		t.Fatalf("the mbin kind's default %q names no tag", def)
+	def, ok := blueprints.DefaultImage(config.Blueprint("mbin"), "app")
+	if !ok || blueprints.ParseReference(def).Tag == "" {
+		t.Fatalf("the mbin blueprint's default %q names no tag", def)
 	}
 	return planWith(t, func(cfg *config.Config) {
 		app := cfg.Apps["talk"]
@@ -95,7 +95,7 @@ func TestAnUnreachableRegistrySaysToRunAgain(t *testing.T) {
 	if want := "could not reach ghcr.io to resolve `talk` image `" + def + "`"; hint != want {
 		t.Errorf("hint\n%s\nwant\n%s", hint, want)
 	}
-	says(t, explain, "once this workstation reaches ghcr.io", "`apps.talk.images.app`", "a digest", "Apply does not keep the running `"+mbinTag+"`: it can't confirm that build is `"+kinds.ParseReference(def).Tag+"`.")
+	says(t, explain, "once this workstation reaches ghcr.io", "`apps.talk.images.app`", "a digest", "Apply does not keep the running `"+mbinTag+"`: it can't confirm that build is `"+blueprints.ParseReference(def).Tag+"`.")
 	saysNot(t, explain, "configuration's", "which this site runs", "is a build of")
 }
 

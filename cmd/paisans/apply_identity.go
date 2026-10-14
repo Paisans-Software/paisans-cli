@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/paisans-software/paisans-stack/internal/kinds"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -86,7 +86,7 @@ func (v *runIdentity) report(r ui.Reporter) {
 // and the foundation's tracks, and each newer release it skipped with why.
 // Nothing when the core catalog has not been read.
 func reportCore(r ui.Reporter) {
-	release, skipped := kinds.CoreRelease()
+	release, skipped := blueprints.CoreRelease()
 	if release.Commit == "" {
 		return
 	}

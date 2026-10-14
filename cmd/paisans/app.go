@@ -11,8 +11,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
@@ -36,7 +36,7 @@ func adminGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -61,7 +61,7 @@ func memberGroups(cfg *config.Config) []string {
 	var out []string
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -94,7 +94,7 @@ func pocketIDKey(cfg *config.Config, configPath, secretsPath, app string) (strin
 // pocketIDBase is where Pocket ID answers from the host it runs on: the port
 // it publishes on that site's mesh address, and nowhere else.
 func pocketIDBase(cfg *config.Config, site string) string {
-	return fmt.Sprintf("http://%s:%d", cfg.Sites[site].Address, render.AppPort(config.KindPocketID))
+	return fmt.Sprintf("http://%s:%d", cfg.Sites[site].Address, render.AppPort(config.BlueprintPocketID))
 }
 
 // adminSite picks the site to run an app's commands on. A pinned app has one.

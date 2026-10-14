@@ -21,8 +21,8 @@ import (
 
 	"github.com/paisans-software/paisans-stack/internal/acme"
 	"github.com/paisans-software/paisans-stack/internal/adminreconciler"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 	"github.com/paisans-software/paisans-stack/internal/render"
 	"github.com/paisans-software/paisans-stack/internal/secretsgen"
@@ -151,7 +151,7 @@ func Check(cfg *config.Config) Result {
 	c.latestACMEImage()
 	c.hostnameRoles()
 	c.duplicateHostname()
-	c.gatedOnUngateableKind()
+	c.gatedOnUngateableBlueprint()
 	c.gatedWithoutSignedFetch()
 	c.autoLoginWithoutARule()
 	c.usesGateOutsideTheDomain()
@@ -165,7 +165,7 @@ func Check(cfg *config.Config) Result {
 	c.displayNameWithoutAClient()
 	c.monitorRoles()
 	c.webServer()
-	c.smtpOnAKindWithoutMail()
+	c.smtpOnABlueprintWithoutMail()
 	c.pocketIDSettingInvalid()
 	c.pocketIDAccountEditOn()
 	c.pocketIDConfigKeyHasASetting()
@@ -844,12 +844,12 @@ func (c *checker) placementShape() {
 // any client is planned, rather than at the provider.
 func (c *checker) dashboardLinkIsAPath() {
 	for _, name := range c.cfg.AppNames() {
-		v, ok := c.cfg.Apps[name].Settings[kinds.DashboardLinkSetting]
+		v, ok := c.cfg.Apps[name].Settings[blueprints.DashboardLinkSetting]
 		if !ok {
 			continue
 		}
-		if err := kinds.CheckDashboardLink(v); err != nil {
-			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, kinds.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
+		if err := blueprints.CheckDashboardLink(v); err != nil {
+			c.refuse("sso-dashboard-link-not-a-path", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.DashboardLinkSetting), "dashboard link is not a valid path", "%s", err.Error())
 		}
 	}
 }
@@ -859,9 +859,9 @@ func (c *checker) dashboardLinkIsAPath() {
 // member would never see the screen the operator asked for.
 func (c *checker) consentIsABoolean() {
 	for _, name := range c.cfg.AppNames() {
-		v, ok := c.cfg.Apps[name].Settings[kinds.ConsentSetting]
+		v, ok := c.cfg.Apps[name].Settings[blueprints.ConsentSetting]
 		if _, isBool := v.(bool); ok && !isBool {
-			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, kinds.ConsentSetting),
+			c.refuse("sso-consent-not-a-boolean", fmt.Sprintf("apps.%s.settings.%s", name, blueprints.ConsentSetting),
 				"sso_consent is not true or false",
 				"is %v. Write true to show Pocket ID's consent screen on a member's first sign in, or leave it out.", v)
 		}
@@ -878,7 +878,7 @@ func (c *checker) consentIsABoolean() {
 // that diverge from the moment anybody writes to them, and a failover would
 // move readers between them.
 //
-// Three kinds are in this position: Element, which is a static client,
+// Three blueprints are in this position: Element, which is a static client,
 // oauth2-proxy, which keeps a session in a cookie, and uptime, which keeps
 // its database in SQLite under its own data directory. It is refused rather
 // than warned about because there is no reading of it that works, and pinning
@@ -887,13 +887,13 @@ func (c *checker) consentIsABoolean() {
 func (c *checker) clusterPlacementWithoutACluster() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Placement.Mode != config.PlacementCluster || kinds.UsesPostgres(app.Kind) {
+		if app.Placement.Mode != config.PlacementCluster || blueprints.UsesPostgres(app.Blueprint) {
 			continue
 		}
 		c.refuse("cluster-placement-without-a-cluster", fmt.Sprintf("apps.%s.placement", name),
 			"app has cluster placement but no shared database",
 			"is `cluster`, but %s keeps its data outside the Postgres cluster, so there is nothing for it to join. It would be rendered onto every apps site with its own separate storage, which is two deployments behind one hostname. Pin it to a site instead.",
-			app.Kind)
+			app.Blueprint)
 	}
 }
 
@@ -938,8 +938,8 @@ func (c *checker) acmeImageIsNotStockCaddy() {
 		c.cfg.ACME.Image, c.cfg.ACME.Provider)
 }
 
-// imageServices refuses an image declared for a service the kind does not
-// have.
+// imageServices refuses an image declared for a service the blueprint
+// does not have.
 //
 // The map is keyed on compose service names precisely so this check can exist.
 // An unknown key is a typo, and a typo that renders nothing is the worst
@@ -949,13 +949,13 @@ func (c *checker) imageServices() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			if kinds.Has(app.Kind, service) {
+			if blueprints.Has(app.Blueprint, service) {
 				continue
 			}
 			c.refuse("unknown-image-service", fmt.Sprintf("apps.%s.images.%s", name, service),
 				"image names a service the template does not define",
 				"names a service %q, which the %s template does not define. Its services are %s. A key that matches nothing renders nothing, so the deployment would keep running the default image while the file says otherwise.",
-				service, app.Kind, strings.Join(kinds.ServiceNames(app.Kind), ", "))
+				service, app.Blueprint, strings.Join(blueprints.ServiceNames(app.Blueprint), ", "))
 		}
 	}
 }
@@ -975,7 +975,7 @@ func (c *checker) floatingImages() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			ref := kinds.ParseReference(app.Images[service])
+			ref := blueprints.ParseReference(app.Images[service])
 			why := ref.Floating()
 			if why == "" {
 				continue
@@ -1001,10 +1001,10 @@ func (c *checker) imageForAbsentPostgres() {
 		if app.Placement.Mode != config.PlacementCluster {
 			continue
 		}
-		if _, ok := app.Images[kinds.PostgresService]; !ok {
+		if _, ok := app.Images[blueprints.PostgresService]; !ok {
 			continue
 		}
-		c.warn("image-for-absent-postgres", fmt.Sprintf("apps.%s.images.%s", name, kinds.PostgresService),
+		c.warn("image-for-absent-postgres", fmt.Sprintf("apps.%s.images.%s", name, blueprints.PostgresService),
 			"database image is declared but nothing uses it",
 			"declares a database image, but the app has cluster placement and runs no database of its own: it connects to the local HAProxy, and the cluster's version comes from cluster.postgres_version. Nothing renders this. Remove it, or pin the app if it was meant to have its own database.")
 	}
@@ -1040,7 +1040,7 @@ func (c *checker) pinnedOntoWitness() {
 		// The gate keeps nothing on disk, so it is the quiet neighbour etcd
 		// needs, and it is placed on the gateway by the toolkit, often the
 		// witness, where a warning would name a choice nobody made.
-		if app.Kind == config.KindOAuth2Proxy {
+		if app.Blueprint == config.BlueprintOAuth2Proxy {
 			continue
 		}
 		c.warn("pinned-app-on-witness", fmt.Sprintf("apps.%s.placement", name),
@@ -1129,7 +1129,7 @@ func collides(a, b render.Listener) bool {
 func (c *checker) pocketIDFileBackend() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Kind != config.KindPocketID {
+		if app.Blueprint != config.BlueprintPocketID {
 			continue
 		}
 		backend, _ := app.Settings["file_backend"].(string)
@@ -1145,7 +1145,7 @@ func (c *checker) pocketIDFileBackend() {
 
 // pocketIDStandbyMarkerUnknown warns when a Pocket ID on more than one apps
 // site runs an image whose refusal text the toolkit has not recorded. Every
-// site but one stands by on that text (kinds.PocketIDStandbyMarker); an
+// site but one stands by on that text (blueprints.PocketIDStandbyMarker); an
 // unknown image gets the default image's, which may not match. A warning,
 // not a refusal: a marker that does not match fails safe, the standby site's
 // container restarting under Docker's policy rather than running twice, and
@@ -1154,14 +1154,14 @@ func (c *checker) pocketIDStandbyMarkerUnknown() {
 	sites := len(c.cfg.AppsSites())
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Kind != config.KindPocketID || app.Placement.Mode == config.PlacementPinned || sites < 2 {
+		if app.Blueprint != config.BlueprintPocketID || app.Placement.Mode == config.PlacementPinned || sites < 2 {
 			continue
 		}
 		image := app.Images["app"]
 		if image == "" {
 			continue
 		}
-		if _, known := kinds.StandbyMarker(image); known {
+		if _, known := blueprints.StandbyMarker(image); known {
 			continue
 		}
 		c.warn("pocket-id-standby-marker-unknown", fmt.Sprintf("apps.%s.images.app", name),
@@ -1188,7 +1188,7 @@ func (c *checker) latestACMEImage() {
 	if c.cfg.ACME.Image == "" {
 		return
 	}
-	why := kinds.ParseReference(c.cfg.ACME.Image).Floating()
+	why := blueprints.ParseReference(c.cfg.ACME.Image).Floating()
 	if why == "" {
 		return
 	}
@@ -1198,7 +1198,7 @@ func (c *checker) latestACMEImage() {
 		c.cfg.ACME.Image, why)
 }
 
-// gatedOnUngateableKind refuses gated: true on a kind that cannot sit
+// gatedOnUngateableKind refuses gated: true on a blueprint that cannot sit
 // behind one.
 //
 // README: "A Matrix hostname must never be gated." The gate answers a request
@@ -1214,22 +1214,22 @@ func (c *checker) latestACMEImage() {
 // provider, where the group restriction decides who may be provisioned an
 // account at all. That is why this is a refusal and not a warning: there is no
 // reading of a gated one that works.
-func (c *checker) gatedOnUngateableKind() {
+func (c *checker) gatedOnUngateableBlueprint() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.Gated || kinds.GateFor(app.Kind).Gateable {
+		if !app.Gated || blueprints.GateFor(app.Blueprint).Gateable {
 			continue
 		}
-		c.refuse("gated-on-ungateable-kind", fmt.Sprintf("apps.%s.gated", name),
-			"gated is set on a kind that cannot sit behind the gate",
-			"is true on an app of kind %s, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt, and its blueprint says it cannot take one: its clients or federating servers would not follow the redirect, it is the sign-in flow itself, or it must stay readable while the gate is down. Remove gated.",
-			app.Kind)
+		c.refuse("gated-on-ungateable-blueprint", fmt.Sprintf("apps.%s.gated", name),
+			"gated is set on a blueprint that cannot sit behind the gate",
+			"is true on a %s app, which cannot sit behind the gate. The gate redirects a request with no session to a passkey prompt, and its blueprint says it cannot take one: its clients or federating servers would not follow the redirect, it is the sign-in flow itself, or it must stay readable while the gate is down. Remove gated.",
+			app.Blueprint)
 	}
 }
 
 // gatedWithoutSignedFetch refuses gated: true on a federating app that
-// does not refuse an unsigned ActivityPub read: one whose kind records no way
-// to, or whose settings.authorized_fetch is false.
+// does not refuse an unsigned ActivityPub read: one whose blueprint records no
+// way to, or whose settings.authorized_fetch is false.
 //
 // The gate sends every ActivityPub request to the app without asking for a
 // session, because a federating peer has none and proves who it is by
@@ -1241,30 +1241,31 @@ func (c *checker) gatedOnUngateableKind() {
 func (c *checker) gatedWithoutSignedFetch() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.Gated || !kinds.Federates(app) || kinds.SignedFetchFor(app) != nil {
+		if !app.Gated || !blueprints.Federates(app) || blueprints.SignedFetchFor(app) != nil {
 			continue
 		}
 		c.refuse("gated-without-signed-fetch", fmt.Sprintf("apps.%s.gated", name),
 			"gated federating app still answers unsigned reads",
-			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and any setting the kind's blueprint says turns its signed reads off), turn federation off for this app, or remove gated.",
-			app.Kind)
+			"is true, but this %s app federates and would not refuse an unsigned ActivityPub read. The gate leaves ActivityPub requests to the app, and anyone can send an ActivityPub Accept header, so every page would be readable as JSON by anyone. Remove settings.authorized_fetch: false (and any setting its blueprint says turns its signed reads off), turn federation off for this app, or remove gated.",
+			app.Blueprint)
 	}
 }
 
-// autoLoginWithoutARule refuses auto_login: true on a kind with no auto-login
-// rule. The key would do nothing, and an operator reading it would believe a
-// member is signed straight in. A kind whose sign-in screen redirects itself
-// needs none, and the kinds that cannot sit behind the gate have none to take.
+// autoLoginWithoutARule refuses auto_login: true on a blueprint with no
+// auto-login rule. The key would do nothing, and an operator reading it would
+// believe a member is signed straight in. A blueprint whose sign-in screen
+// redirects itself needs none, and the blueprints that cannot sit behind the
+// gate have none to take.
 func (c *checker) autoLoginWithoutARule() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if !app.AutoLogin || len(kinds.GateFor(app.Kind).AutoLogin) > 0 {
+		if !app.AutoLogin || len(blueprints.GateFor(app.Blueprint).AutoLogin) > 0 {
 			continue
 		}
 		c.refuse("auto-login-without-a-rule", fmt.Sprintf("apps.%s.auto_login", name),
-			"auto_login is set on a kind with no auto-login rule",
-			"is true on an app of kind %s, which has no auto-login rule, so it would do nothing: its blueprint declares none, because its sign-in screen already redirects itself or because it cannot sit behind the gate. Remove auto_login.",
-			app.Kind)
+			"auto_login is set on a blueprint with no auto-login rule",
+			"is true on a %s app, which has no auto-login rule, so it would do nothing: its blueprint declares none, because its sign-in screen already redirects itself or because it cannot sit behind the gate. Remove auto_login.",
+			app.Blueprint)
 	}
 }
 
@@ -1285,7 +1286,7 @@ func (c *checker) usesGateOutsideTheDomain() {
 		}
 		hostnames := map[string]string{"hostname": app.Hostname}
 		for role, h := range app.Hostnames {
-			if role != kinds.MediaRole {
+			if role != blueprints.MediaRole {
 				hostnames["hostnames."+role] = h
 			}
 		}
@@ -1321,12 +1322,12 @@ func (c *checker) mediaHostnameShape() {
 	domain := strings.ToLower(c.cfg.Community.Domain)
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := kinds.MediaHostname(c.cfg, app)
+		media := blueprints.MediaHostname(c.cfg, app)
 		if media == "" {
 			continue
 		}
-		key := fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole)
-		derived := kinds.MediaHostnameIsDerived(c.cfg, app)
+		key := fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole)
+		derived := blueprints.MediaHostnameIsDerived(c.cfg, app)
 		if problem := hostnameProblem(media); problem != "" {
 			if derived {
 				c.refuse("media-hostname-is-not-a-hostname", key,
@@ -1337,7 +1338,7 @@ func (c *checker) mediaHostnameShape() {
 				c.refuse("media-hostname-is-not-a-hostname", key,
 					"media hostname is not a valid hostname",
 					"is %q, which is not a hostname: %s. It becomes a site address on the gateway and a URL the app publishes to readers, so it has to be a name a browser can fetch, for example %s.",
-					media, problem, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+					media, problem, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 			}
 			continue
 		}
@@ -1348,7 +1349,7 @@ func (c *checker) mediaHostnameShape() {
 			c.refuse("media-hostname-outside-the-domain", key,
 				"media hostname is outside community.domain",
 				"is %q, which is not under community.domain (%s). Its certificate is issued over DNS-01 against the deployment's own zone, so the configured DNS provider cannot answer for a name outside it. Use a name under %s, for example %s.",
-				media, c.cfg.Community.Domain, c.cfg.Community.Domain, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+				media, c.cfg.Community.Domain, c.cfg.Community.Domain, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 		}
 	}
 }
@@ -1395,7 +1396,7 @@ func (c *checker) mailDomains() {
 // with the app but the community's own domain.
 //
 // That domain is the one exception, because it cannot be otherwise: every
-// hostname in a deployment sits under it, and a synapse kind commonly serves
+// hostname in a deployment sits under it, and a synapse app commonly serves
 // its delegation documents on it. A cookie scoped to the community's domain is
 // a deliberate choice, made by the gate, and it already reaches every app.
 func (c *checker) mediaHostnameUnderAnAppHostname() {
@@ -1406,7 +1407,7 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 		app := c.cfg.Apps[name]
 		appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostname", name), app.Hostname})
 		for _, role := range sortedKeys(app.Hostnames) {
-			if role == kinds.MediaRole {
+			if role == blueprints.MediaRole {
 				continue
 			}
 			appHosts = append(appHosts, claim{fmt.Sprintf("apps.%s.hostnames.%s", name, role), app.Hostnames[role]})
@@ -1414,7 +1415,7 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		media := strings.ToLower(kinds.MediaHostname(c.cfg, app))
+		media := strings.ToLower(blueprints.MediaHostname(c.cfg, app))
 		if media == "" {
 			continue
 		}
@@ -1426,10 +1427,10 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 			if !strings.HasSuffix(media, "."+parent) {
 				continue
 			}
-			c.refuse("media-hostname-under-an-app-hostname", fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole),
+			c.refuse("media-hostname-under-an-app-hostname", fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole),
 				"media hostname sits under an app hostname",
 				"is %q, a child of %q (%s). Cookies an app scopes to its own host reach every name under it, so a media hostname there shares the cookie scope it exists to be outside of. Use a sibling instead, for example %s.",
-				media, host.hostname, host.key, name+kinds.MediaSuffix+"."+c.cfg.Community.Domain)
+				media, host.hostname, host.key, name+blueprints.MediaSuffix+"."+c.cfg.Community.Domain)
 			break
 		}
 	}
@@ -1525,9 +1526,9 @@ func (c *checker) duplicateHostname() {
 		// been. It is the claim most likely to collide unseen: an app whose
 		// hostname is talk-media.example.org clashes with talk's media
 		// hostname, and neither line in the file says so.
-		if kinds.MediaHostnameIsDerived(c.cfg, app) {
-			if media := kinds.MediaHostname(c.cfg, app); media != "" {
-				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, kinds.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
+		if blueprints.MediaHostnameIsDerived(c.cfg, app) {
+			if media := blueprints.MediaHostname(c.cfg, app); media != "" {
+				claims = append(claims, claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole), hostname: media, derived: true, from: "the app's own hostname"})
 			}
 		}
 		for _, cl := range claims {
@@ -1550,7 +1551,7 @@ func (c *checker) duplicateHostname() {
 	}
 }
 
-// hostnameRoles refuses a hostname role the kind ships no snippet for.
+// hostnameRoles refuses a hostname role the blueprint ships no snippet for.
 //
 // A role selects a Caddy snippet. A role nobody ships renders a host block
 // importing a file that does not exist, so the gateway fails to load its whole
@@ -1560,19 +1561,19 @@ func (c *checker) hostnameRoles() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, role := range sortedKeys(app.Hostnames) {
-			if kinds.HasHostnameRole(app.Kind, role) {
+			if blueprints.HasHostnameRole(app.Blueprint, role) {
 				continue
 			}
 			c.refuse("unknown-hostname-role", fmt.Sprintf("apps.%s.hostnames.%s", name, role),
-				"hostname role is not known to this kind",
-				"names a hostname role %q, which the %s kind does not understand. A role selects the Caddy snippet that hostname gets, so an unknown one would import a file that does not exist and the gateway would fail to load at all. Roles for this kind: %s.",
-				role, app.Kind, strings.Join(kinds.HostnameRoles(app.Kind), ", "))
+				"hostname role is not known to this blueprint",
+				"names a hostname role %q, which the %s blueprint does not understand. A role selects the Caddy snippet that hostname gets, so an unknown one would import a file that does not exist and the gateway would fail to load at all. Roles for this blueprint: %s.",
+				role, app.Blueprint, strings.Join(blueprints.HostnameRoles(app.Blueprint), ", "))
 		}
 	}
 }
 
-// configKeyIsNestedInAnEnvFile refuses a dotted key on a kind configured by
-// environment.
+// configKeyIsNestedInAnEnvFile refuses a dotted key on a blueprint configured
+// by environment.
 //
 // Env has no nesting. In ini and yaml a dot is a path and means something, so
 // the same habit carried over here produces a variable called `a.b` that the
@@ -1582,7 +1583,7 @@ func (c *checker) hostnameRoles() {
 func (c *checker) configKeyIsNestedInAnEnvFile() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if kinds.ConfigFormat(app.Kind) != kinds.ConfigEnv {
+		if blueprints.ConfigFormat(app.Blueprint) != blueprints.ConfigEnv {
 			continue
 		}
 		for _, key := range sortedKeys(app.Config) {
@@ -1592,7 +1593,7 @@ func (c *checker) configKeyIsNestedInAnEnvFile() {
 			c.refuse("config-key-is-nested-in-an-env-file", fmt.Sprintf("apps.%s.config.%s", name, key),
 				"config key has a dot in an env file",
 				"is a dotted key, and %s is an env file. Env has no nesting, so a dot is a typo here rather than a path. Write the variable name the application reads, for example with underscores.",
-				kinds.ConfigFile(app.Kind))
+				blueprints.ConfigFile(app.Blueprint))
 		}
 	}
 }
@@ -1629,7 +1630,7 @@ func (c *checker) configKeyLooksLikeASecret() {
 }
 
 // composeSteeringPrefixes are the variable name prefixes refused on an env
-// kind by configKeySteersCompose.
+// blueprint by configKeySteersCompose.
 var composeSteeringPrefixes = []string{"COMPOSE_", "DOCKER_"}
 
 // configKeySteersCompose refuses an env key that would configure compose
@@ -1649,7 +1650,7 @@ var composeSteeringPrefixes = []string{"COMPOSE_", "DOCKER_"}
 func (c *checker) configKeySteersCompose() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if kinds.ConfigFormat(app.Kind) != kinds.ConfigEnv {
+		if blueprints.ConfigFormat(app.Blueprint) != blueprints.ConfigEnv {
 			continue
 		}
 		for _, key := range sortedKeys(app.Config) {
@@ -1660,7 +1661,7 @@ func (c *checker) configKeySteersCompose() {
 				c.refuse("config-key-steers-compose", fmt.Sprintf("apps.%s.config.%s", name, key),
 					"config key would steer compose itself",
 					"starts with %s. When apply runs compose for this stack, compose reads the stack's %s for its own settings as well as handing it to the application, and a variable there can rename the project or change which services are active. That is compose's configuration, not the application's: it belongs in the toolkit, not in config.",
-					prefix, kinds.ConfigFile(app.Kind))
+					prefix, blueprints.ConfigFile(app.Blueprint))
 				break
 			}
 		}
@@ -1696,13 +1697,13 @@ func (c *checker) configKeyAlreadyRendered() {
 		// this file's; render meets the same keys at apply.
 		return
 	}
-	redundant := map[kinds.RedundantKey]bool{}
-	for _, k := range kinds.RedundantGateConfig(c.cfg) {
+	redundant := map[blueprints.RedundantKey]bool{}
+	for _, k := range blueprints.RedundantGateConfig(c.cfg) {
 		redundant[k] = true
 	}
 	for _, col := range collisions {
 		detail := col.Detail
-		if redundant[kinds.RedundantKey{App: col.App, Key: col.Key}] {
+		if redundant[blueprints.RedundantKey{App: col.App, Key: col.Key}] {
 			detail += " It repeats the value gating requires, so `paisans doctor --execute` removes it, and changes nothing else."
 		}
 		c.refuse("config-key-already-rendered", col.ConfigKey(),
@@ -1758,7 +1759,7 @@ func (c *checker) watchdogOffOnDataSite() {
 func (c *checker) uptimeNeedsAnAdminGroup() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.Kind != config.KindUptime {
+		if app.Blueprint != config.BlueprintUptime {
 			continue
 		}
 		if group, _ := app.Settings["admin_group"].(string); strings.TrimSpace(group) != "" {
@@ -1779,7 +1780,7 @@ func (c *checker) uptimeNeedsAnAdminGroup() {
 func (c *checker) adminGroupNotAdmins() {
 	runsPocketID := false
 	for _, app := range c.cfg.Apps {
-		if app.Kind == config.KindPocketID {
+		if app.Blueprint == config.BlueprintPocketID {
 			runsPocketID = true
 		}
 	}
@@ -1788,7 +1789,7 @@ func (c *checker) adminGroupNotAdmins() {
 	}
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -1806,14 +1807,14 @@ func (c *checker) adminGroupNotAdmins() {
 // oidcMemberGroupNotAName refuses a member_group or admin_group setting that
 // is not a group name.
 //
-// A blank or non-string value is read as absent, and the kind's default
-// holds, so the client is still restricted. But the operator wrote something,
-// and what they wrote is not what the client admits; left alone, that reads
-// as a restriction to a group that does not exist.
+// A blank or non-string value is read as absent, and the blueprint's
+// default holds, so the client is still restricted. But the operator wrote
+// something, and what they wrote is not what the client admits; left alone,
+// that reads as a restriction to a group that does not exist.
 func (c *checker) oidcMemberGroupNotAName() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
@@ -1830,7 +1831,7 @@ func (c *checker) oidcMemberGroupNotAName() {
 			}
 			c.refuse("oidc-member-group-not-a-name", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"oidc member group is not a group name",
-				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the kind's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
+				"is %v, which is not a group name. Name the identity provider group, or remove the key to take the blueprint's default. The client at Pocket ID admits exactly the groups named here, so a value that is not a name is a restriction to nothing.", v)
 		}
 		// Extra groups are created at Pocket ID by apply, so a name it
 		// refuses would otherwise fail there, after validate passed.
@@ -1862,34 +1863,34 @@ func (c *checker) oidcMemberGroupDisagreesWithGate() {
 		if !app.UsesGate() {
 			continue
 		}
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
 		if !ok {
 			continue
 		}
 		_, member := spec.Groups(app)
-		if member == kinds.MembersGroup {
+		if member == blueprints.MembersGroup {
 			continue
 		}
 		c.refuse("oidc-member-group-disagrees-with-gate", fmt.Sprintf("apps.%s.settings.%s", name, spec.MemberGroupSetting),
 			"member group differs between gate and client",
 			"is %s, but the gate's member group is %s, and this app sets gated or auto_login. The gate admits one group and the app's client at Pocket ID admits the other, so the two disagree about who a member is. Remove the setting, so the app admits %s too.",
-			member, kinds.MembersGroup, kinds.MembersGroup)
+			member, blueprints.MembersGroup, blueprints.MembersGroup)
 	}
 }
 
 // oidcClientUnrestricted refuses a gateable app whose client would admit
 // every Pocket ID account.
 //
-// A kind that can sit behind the gate is member facing, and its client is the
-// control that stops a person outside the community before the app sees them.
-// Every such kind has a default member group today, so this is the floor
-// under that: a kind added without one, or a change that empties one, is
-// refused here rather than shipping an open client.
+// A blueprint that can sit behind the gate is member facing, and its client
+// is the control that stops a person outside the community before the app
+// sees them. Every such blueprint has a default member group today, so this is
+// the floor under that: a blueprint added without one, or a change that empties
+// one, is refused here rather than shipping an open client.
 func (c *checker) oidcClientUnrestricted() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		spec, ok := kinds.OIDCClient(app.Kind, app.Hostname, name)
-		if !ok || !kinds.GateFor(app.Kind).Gateable {
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, name)
+		if !ok || !blueprints.GateFor(app.Blueprint).Gateable {
 			continue
 		}
 		if _, member := spec.Groups(app); member != "" {
@@ -1902,23 +1903,23 @@ func (c *checker) oidcClientUnrestricted() {
 }
 
 // smtpOnAKindWithoutMail refuses an app level smtp block that nothing reads.
-func (c *checker) smtpOnAKindWithoutMail() {
+func (c *checker) smtpOnABlueprintWithoutMail() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		if app.SMTP == nil || kinds.SendsMail(app.Kind) {
+		if app.SMTP == nil || blueprints.SendsMail(app.Blueprint) {
 			continue
 		}
-		c.refuse("smtp-on-a-kind-without-mail", fmt.Sprintf("apps.%s.smtp", name),
-			"smtp is declared for a kind that sends no mail",
+		c.refuse("smtp-on-a-blueprint-without-mail", fmt.Sprintf("apps.%s.smtp", name),
+			"smtp is declared for a blueprint that sends no mail",
 			"is declared, but %s does not read the toolkit's smtp settings, so this override would be ignored without a word. Remove it, or configure that application's mail where it keeps it.",
-			app.Kind)
+			app.Blueprint)
 	}
 }
 
 // uptimeWithoutSMTP warns that a monitor with no mail server cannot email.
 func (c *checker) uptimeWithoutSMTP() {
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind != config.KindUptime || c.cfg.SMTPFor(name).Host != "" {
+		if c.cfg.Apps[name].Blueprint != config.BlueprintUptime || c.cfg.SMTPFor(name).Host != "" {
 			continue
 		}
 		c.warn("uptime-without-smtp", fmt.Sprintf("apps.%s.smtp", name),

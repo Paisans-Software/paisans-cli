@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 // The infrastructure's fixed ports. Each is what a rendered file says, and is
@@ -37,7 +37,7 @@ const (
 // Listener is one address and port something on a site binds.
 type Listener struct {
 	// Owner names what binds it, as an operator would recognise it: an
-	// infrastructure service, or an app by name and kind.
+	// infrastructure service, or an app by name and blueprint.
 	Owner string
 	// Key is the paisans-stack.yaml key that makes the site bind it, for a
 	// message that has to tell the operator what to change. A listener
@@ -134,19 +134,19 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 	}
 	sort.Strings(apps)
 	for _, name := range apps {
-		kind := cfg.Apps[name].Kind
-		owner := fmt.Sprintf("app %s (%s)", name, kind)
+		blueprint := cfg.Apps[name].Blueprint
+		owner := fmt.Sprintf("app %s (%s)", name, blueprint)
 		// With managed_by: external the app is published on listen alone, for
 		// the operator's own web server; nothing dials its mesh address.
 		if host, port, ok := ExternalListen(cfg, name); ok {
 			add(owner, fmt.Sprintf("sites.%s.web_server.listen", site), "tcp", host, port)
-		} else if port := kinds.Port(kind); port != 0 {
+		} else if port := blueprints.Port(blueprint); port != 0 {
 			add(owner, "apps."+name, "tcp", addr, port)
 		}
-		for _, svc := range kinds.ServicePorts(kind) {
+		for _, svc := range blueprints.ServicePorts(blueprint) {
 			add(owner+" "+svc.Name, "apps."+name, "tcp", addr, svc.Port)
 		}
-		if kind == config.KindPocketID {
+		if blueprint == config.BlueprintPocketID {
 			add(owner+" admin reconciler", "apps."+name, "tcp", addr, reconcilerPort)
 		}
 	}

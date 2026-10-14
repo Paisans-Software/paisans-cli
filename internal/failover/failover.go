@@ -81,8 +81,8 @@ func SwitchoverCommand(d deployment.Deployment, leader, candidate string) string
 // appPath is the path requested from each app: the root, and for Pocket ID
 // its OpenID discovery document, which is the first thing every client of it
 // fetches and so the answer that matters.
-func appPath(kind config.Kind) string {
-	if kind == config.KindPocketID {
+func appPath(blueprint config.Blueprint) string {
+	if blueprint == config.BlueprintPocketID {
 		return "/.well-known/openid-configuration"
 	}
 	return "/"
@@ -329,7 +329,7 @@ func summary(list []apply.Instance) string {
 // is; a 5xx, or no answer, means it did not.
 func (r *runner) answer(app string) (string, error) {
 	declared := r.cfg.Apps[app]
-	url := r.o.URL(declared.Hostname, appPath(declared.Kind))
+	url := r.o.URL(declared.Hostname, appPath(declared.Blueprint))
 	resp, err := r.o.Client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("%s: %v", url, err)

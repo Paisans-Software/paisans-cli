@@ -1801,7 +1801,7 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 func convergeAnyAdmin(r ui.Reporter, cfg *config.Config, o convergeOptions, up func(app string) bool) {
 	section := false
 	for _, app := range cfg.AppNames() {
-		if cfg.Apps[app].Kind != config.KindPocketID || !up(app) {
+		if cfg.Apps[app].Blueprint != config.BlueprintPocketID || !up(app) {
 			continue
 		}
 		if !section {

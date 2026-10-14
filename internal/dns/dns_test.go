@@ -198,8 +198,8 @@ func declared() *config.Config {
 			},
 		},
 		Apps: map[string]config.App{
-			"talk": {Kind: config.Kind("mbin"), Hostname: "talk.example.org"},
-			"blog": {Kind: config.Kind("writefreely"), Hostname: "Blog.Example.org."},
+			"talk": {Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.org"},
+			"blog": {Blueprint: config.Blueprint("writefreely"), Hostname: "Blog.Example.org."},
 		},
 		Community: config.Community{Domain: "example.org"},
 		// Garage, so talk and blog keep their files in it and each has a
@@ -538,7 +538,7 @@ func TestDesiredDerivesAndDedupes(t *testing.T) {
 	// An endpoint given as an address needs no record.
 	cfg.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "198.51.100.20:51820"}
 	// A role hostname is a public name too, and the same name twice is one record.
-	cfg.Apps["chat"] = config.App{Kind: config.Kind("synapse"), Hostname: "matrix.example.org", Hostnames: map[string]string{"wellknown": "example.org"}}
+	cfg.Apps["chat"] = config.App{Blueprint: config.Blueprint("synapse"), Hostname: "matrix.example.org", Hostnames: map[string]string{"wellknown": "example.org"}}
 	vm := cfg.Sites["vm"]
 	vm.PublicAddress6 = "2001:db8::10"
 	vm.Endpoint = "talk.example.org:51820"
@@ -603,7 +603,7 @@ func TestALocalStorageAppGetsNoMediaRecord(t *testing.T) {
 func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
 	cfg := declared()
 	cfg.Sites["watch"] = config.Site{Roles: []config.Role{config.RoleMonitor}, Address: "10.44.0.4", PublicAddress: "203.0.113.20", PublicAddress6: "2001:db8::20"}
-	cfg.Apps["health"] = config.App{Kind: config.KindUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	cfg.Apps["health"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
 	wants, err := Desired(cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/doctor"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
 	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 	"github.com/paisans-software/paisans-stack/internal/mesh"
 	"github.com/paisans-software/paisans-stack/internal/patroni"
 	"github.com/paisans-software/paisans-stack/internal/registry"
@@ -85,13 +85,13 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 	}
 	exact = append(exact, hostcheck.ReadCommands()...)
 	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path, "read "+hostprep.AllowPath("ubuntu"))
-	// Each gated app's settings read, which kinds.LiveSettings promises
+	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
-		live, ok := kinds.LiveSettingsFor(app.Kind)
+		live, ok := blueprints.LiveSettingsFor(app.Blueprint)
 		var names []string
-		for _, s := range kinds.GateSettingsFor(app) {
+		for _, s := range blueprints.GateSettingsFor(app) {
 			names = append(names, s.Name)
 		}
 		if ok && len(names) > 0 {

@@ -5,14 +5,14 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
 func (c *checker) inviteApps() []string {
 	var out []string
 	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Kind == config.KindInvite {
+		if c.cfg.Apps[name].Blueprint == config.BlueprintInvite {
 			out = append(out, name)
 		}
 	}
@@ -35,7 +35,7 @@ func (c *checker) inviteIdentityApp() {
 	for _, name := range c.inviteApps() {
 		idp, _ := c.cfg.Apps[name].Settings["identity_app"].(string)
 		app, ok := c.cfg.Apps[idp]
-		if !ok || app.Kind != config.KindPocketID {
+		if !ok || app.Blueprint != config.BlueprintPocketID {
 			c.refuse("invite-identity-app", fmt.Sprintf("apps.%s.settings.identity_app", name),
 				"identity_app must name a pocket-id app",
 				"is %q, which is not a pocket-id app in this configuration. The invite service creates each approved member's account at the pocket-id app named here, and signs members in through it.", idp)
@@ -92,12 +92,12 @@ func (c *checker) inviteCodeOfConduct() {
 func (c *checker) inviteSettingInvalid() {
 	for _, name := range c.inviteApps() {
 		s := c.cfg.Apps[name].Settings
-		for _, key := range sortedKeys(kinds.InviteSettingRanges) {
+		for _, key := range sortedKeys(blueprints.InviteSettingRanges) {
 			v, set := s[key]
 			if !set {
 				continue
 			}
-			rng := kinds.InviteSettingRanges[key]
+			rng := blueprints.InviteSettingRanges[key]
 			if n, ok := v.(int); !ok || n < rng[0] || n > rng[1] {
 				c.refuse("invite-setting-invalid", fmt.Sprintf("apps.%s.settings.%s", name, key),
 					"invite setting out of range",
@@ -113,17 +113,17 @@ func (c *checker) inviteSettingInvalid() {
 	}
 }
 
-// inviteSettingUnknown warns about an invite setting the kind does not read,
-// which renders nothing and is most likely a misspelling.
+// inviteSettingUnknown warns about an invite setting the blueprint does not
+// read, which renders nothing and is most likely a misspelling.
 func (c *checker) inviteSettingUnknown() {
 	for _, name := range c.inviteApps() {
 		for _, key := range sortedKeys(c.cfg.Apps[name].Settings) {
-			if _, ranged := kinds.InviteSettingRanges[key]; ranged || slices.Contains(kinds.InviteOtherSettings, key) {
+			if _, ranged := blueprints.InviteSettingRanges[key]; ranged || slices.Contains(blueprints.InviteOtherSettings, key) {
 				continue
 			}
 			c.warn("invite-setting-unknown", fmt.Sprintf("apps.%s.settings.%s", name, key),
 				"invite setting is not read by the toolkit",
-				"is not a setting the invite kind reads, so it renders nothing. The settings are listed in README.md, \"Invites\".")
+				"is not a setting the invite blueprint reads, so it renders nothing. The settings are listed in README.md, \"Invites\".")
 		}
 	}
 }
