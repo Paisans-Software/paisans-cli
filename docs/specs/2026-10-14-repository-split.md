@@ -1,0 +1,227 @@
+# Repository split: the CLI, the Pocket ID client and the admin reconciler
+
+Status: approved in session by the founder, 2026-10-14. Not implemented.
+
+This repository holds two programs. `cmd/paisans` is the toolkit an operator
+runs on a workstation. `cmd/admin-reconciler` is a service every deployment runs
+beside Pocket ID, published as `ghcr.io/paisans-software/admin-reconciler`. They
+share one Go module, one tag namespace and one set of workflows, and the
+reconciler's image is cut by tags in the toolkit's repository although it is
+not a toolkit release.
+
+The split gives each program its own repository, and gives the code both of
+them need, the Pocket ID API client, a repository of its own:
+
+| Repository | Holds | Published as |
+|------------|-------|--------------|
+| `Paisans-Software/paisans-cli` | `cmd/paisans` and everything only it uses. This repository, renamed. | the `paisans` binary |
+| `Paisans-Software/pocketid-go` | the Pocket ID API client and its types | Go module `github.com/paisans-software/pocketid-go` |
+| `Paisans-Software/paisans-admin-reconciler-service` | the reconciler and its DNS continuity check | `ghcr.io/paisans-software/admin-reconciler` |
+
+`paisans-account-service` moves onto `pocketid-go` as well, so the toolkit, the
+reconciler and the invite service speak to Pocket ID through one client.
+
+## Settled
+
+Founder decisions, 2026-10-14, in session:
+
+* **The admin reconciler gets its own repository.** It is a service with its
+  own image, its own release cadence and its own approval as a service the
+  deployment runs, so it ships like the other services
+  (`paisans-account-service`, `wikijs-bootstrap`).
+* **A service's repository is named `paisans-<what it does>-service`.** A
+  service is a container a deployment runs, beside an app or as an app. A
+  library, a catalog, a tap and the CLI are not services and keep names of
+  their own. The reconciler's repository is
+  `paisans-admin-reconciler-service`.
+* **The Pocket ID client is shared through a module of its own,** not copied
+  into each program. Its types mirror Pocket ID's API, so a change on Pocket
+  ID's side is fixed once, and one contract test covers every program that
+  calls it.
+* **The shared module holds the Pocket ID client and nothing else.** It is
+  named for that one job. Code two programs happen to share does not go into
+  it on that ground alone; it earns a module of its own the same way this one
+  did.
+* **This repository is renamed `paisans-cli`,** with its Go module path. The
+  product is the paisans CLI, `paisans` on the command line, and the
+  documentation calls it that.
+* **The deployment's file stays `paisans-stack.yaml`.** It describes the
+  stack being deployed, not the tool deploying it.
+
+## `pocketid-go`
+
+The module is `internal/pocketid` as it stands, made public: `Client`, its
+`Transport` and `HTTP` paths, `Group`, `User`, `NewUser`, `OIDCClient`,
+`NewOIDCClient`, `ClientSecret`, `APIError`, `Redact`, `ValidGroupName` and the
+methods on `Client`. One package, `pocketid`, at the module root.
+
+`emaillog.go` stays in the CLI. It reads a deployed Pocket ID's container log
+through `docker compose logs`, which is how the toolkit operates a host, not
+part of Pocket ID's API. It moves to `internal/pocketidlog`.
+
+The module imports nothing from the CLI today and must not start: `Transport`
+is declared in the client so that it depends on a shape, and the CLI's
+`apply.SSHTransport` satisfies it from outside.
+
+**Every method takes a `context.Context` first.** Founder decision. A caller
+can then cancel a call or bound it: invite passes the request it is serving,
+so a Pocket ID call ends when the visitor leaves or the server shuts down, and
+the reconciler passes its pass's deadline. The `HTTP` path hands the context
+to `http.NewRequestWithContext`. The `Transport` path checks it before each
+call; `Transport.RunInput` takes no context, so a curl already running on a
+host runs to its end. The context goes in at extraction, in `v0.1.0`, so each
+caller is edited once.
+
+**The CLI makes every Pocket ID API call through `pocketid-go`.** No command
+builds its own request to Pocket ID's API. *CLI calls to Pocket ID* below
+lists what the CLI reaches Pocket ID with today and what each becomes.
+
+What the module carries:
+
+* **Pocket ID's major version.** The module is written against Pocket ID v2,
+  and its README says so. A Pocket ID major release is a `pocketid-go` major
+  release.
+* **The integration test,** behind the `pocketid_integration` build tag,
+  against the Pocket ID image the `pocket-id` blueprint's track resolves to
+  today. It moves from `internal/adminreconciler/integration_test.go`, keeping
+  only what exercises the client; the reconciler keeps its own.
+* **Its own CI:** `go vet` and `go test` on every pull request, and the
+  integration test on `develop`.
+
+Releases are tags `vX.Y.Z`, `0.x` while the API settles. Each program depends
+on a tagged release, never a pseudo version, so `go.mod` records what was
+tested together.
+
+## CLI calls to Pocket ID
+
+Every authenticated call the CLI makes to Pocket ID's API already goes through
+`pocketid.Client`, over the `Transport` path: ssh to the site whose instance is
+active (or the one `--site` names), and `curl` there against
+`http://<mesh address>:1411`, with the key from the workstation's decrypted
+`secrets.enc.yaml`. Four places build a client: `clientAPI` in
+`cmd/paisans/clients.go` (apply's identity step, `oidc client create`,
+`app remove`, `secrets rotate`), `cmd/paisans/converge.go` (apply's admin
+check), `internal/appadmin` (declared admins, `admin magic-link`), and the
+reconciler (the `HTTP` path, on the compose network).
+
+Three things reach Pocket ID without the client:
+
+| Where | What | In `pocketid-go` |
+|-------|------|------------------|
+| `internal/apply/standby.go`, `instanceCommand` | One shell command per site: is the stack there, is its container a standby (a marker file read with `docker exec`), does `/healthz` answer on the mesh port | No. The standby marker is container state, not API, and reading it in the same command as the health check keeps the probe to one ssh round trip. |
+| `internal/pocketid/emaillog.go` | Reads Pocket ID's container log for a failed login link email | No. Pocket ID reports the failure only in its log. It moves to `internal/pocketidlog` (*`pocketid-go`*). |
+| `internal/failover/failover.go` | Anonymous HTTPS from the workstation to `/.well-known/openid-configuration` at the public hostname | Yes, as `Discovery(ctx)` on the `HTTP` path. |
+
+`internal/gatewaymove/verify.go` also requests Pocket ID's `/healthz` at its
+public hostname, pinned to a new gateway's address. That is a probe of the
+gateway, and it stays there.
+
+### Which calls could go over HTTPS
+
+Pocket ID's whole API is reachable from the workstation at
+`https://<hostname>/api/...`: its Caddy snippet is a plain `reverse_proxy`,
+the gate never covers it, and the gateway's failover sends a request to the
+active instance. The invite service already calls the API that way with the
+same key. A command that only needs the active instance could therefore use
+the `HTTP` path from the workstation and skip ssh for its Pocket ID calls.
+
+| Command | Pocket ID calls could use HTTPS | Why |
+|---------|-------------------------------|-----|
+| `app remove` | Yes | It deletes clients on the active instance; nothing needs a particular site. |
+| `secrets rotate` (retiring secrets) | Yes | Same: plain API work on the active instance, after apply. |
+| apply's admin check and declared admins | Yes, after the converge | They run after DNS and the gateway are in place. A dry run before the first converge has no public hostname to call. |
+| `oidc client create` | Only without `--site` or `--ssh` | Those flags name one instance, which the public hostname cannot. Its `--execute` claims the host registry over ssh either way. |
+| apply's identity step (clients, signup groups) | No | It runs as soon as Pocket ID starts, before the first converge has given it DNS or a certificate. |
+| `admin magic-link` | No | It is the way back in when something is broken, the gateway included, and it reads the email failure from the log over ssh. |
+
+Moving any command to HTTPS is a separate decision and not part of this split.
+`pocketid-go` keeps both paths, so either is available to every command.
+
+## `paisans-admin-reconciler-service`
+
+The repository receives `cmd/admin-reconciler` as the module root's
+`main.go`, `internal/adminreconciler` and `internal/dnscontinuity`, the
+Dockerfile, and the image workflow, with its history (`git filter-repo` over
+those paths), so `git log` on the reconciler still explains it.
+
+It depends on `pocketid-go` for the client. Its write surface is unchanged:
+the tests that fail on any writing request other than `SetUserGroups` move
+with it, and they are what keeps the approval in *Services the deployment runs*
+true, as they are today.
+
+Releases are tags `vX.Y.Z` on its own repository. The workflow publishes
+`X.Y.Z` from a tag and `develop` and `sha-<short>` from a push to `develop`,
+as it does now. **The first release is `v0.2.1`:** the same behaviour, built
+from the new repository, so the core catalog's track
+`ghcr.io/paisans-software/admin-reconciler:0.2.*` picks it up and no catalog
+release is needed.
+
+The GHCR package `admin-reconciler` belongs to the organisation and is linked
+to this repository. Before the first release, an organisation owner grants the
+new repository write access to it (package settings, *Manage Actions access*),
+or the workflow's `GITHUB_TOKEN` cannot push.
+
+## `paisans-cli`
+
+After the two moves, this repository is the CLI:
+
+* `cmd/admin-reconciler`, `internal/adminreconciler`, `internal/dnscontinuity`
+  and `.github/workflows/admin-reconciler-image.yml` are removed.
+* `internal/pocketid` is removed, and every import of it names
+  `github.com/paisans-software/pocketid-go`.
+* `internal/validate` uses `blueprints.AdminsGroup`, which already names the
+  same group, in place of `adminreconciler.Group`. The group name is a
+  contract between the `pocket-id` blueprint, its apps and the reconciler, and
+  the reconciler spec states it; neither program imports it from the other.
+* The `pocket-id` blueprint and its compose template are unchanged. They name
+  the reconciler through the foundation track, not through the code.
+
+The rename:
+
+1. GitHub repository `Paisans-Software/paisans-stack` becomes
+   `Paisans-Software/paisans-cli`. GitHub redirects the old path for clones and
+   the web; it does not redirect Go module resolution, which fetches the path
+   in `go.mod`.
+2. `go.mod` becomes `module github.com/paisans-software/paisans-cli`, and every
+   import follows, in one commit.
+3. The documentation calls the product the paisans CLI, or `paisans` where it
+   means the command. `paisans-stack.yaml` keeps its name everywhere.
+4. References in the sibling repositories follow: the core catalog's README
+   and comments, `paisans-account-service`'s, and the Homebrew tap's (step 4 of
+   *Order*).
+
+The `admin-reconciler-v0.1.0` and `admin-reconciler-v0.2.0` tags are deleted
+from this repository. Nothing consumes them: a deployment reaches the image
+through its track, and the published `0.1.0` and `0.2.0` images stay in GHCR,
+where deleting a git tag does not reach. Founder decision.
+
+## Order
+
+Each step leaves every repository building and every deployment running the
+same images.
+
+1. **`pocketid-go`.** Create the repository from `internal/pocketid` with its
+   history. Tag `v0.1.0`. Switch this repository's imports to it, reconciler
+   included, and remove `internal/pocketid`.
+2. **`paisans-admin-reconciler-service`.** Create the repository with its
+   history. Grant it the GHCR package. Tag `v0.2.1` and confirm the image
+   resolves on the `0.2.*` track. Remove the reconciler from this repository and delete its
+   two `admin-reconciler-v*` tags here.
+3. **The rename.** Rename the repository, change the module path, update the
+   documentation, the core catalog's references and `paisans-account-service`'s.
+4. **The Homebrew tap.** In `Paisans-Software/homebrew-paisans`, point
+   `Formula/paisans-cli.rb`'s `homepage` and `head` at
+   `Paisans-Software/paisans-cli`, and update the README: its links, the
+   `head` example, and the release `url` template the stable block will use
+   (`.../paisans-cli/releases/download/...`). `brew install --HEAD
+   paisans-cli` must build from the renamed repository before this step is
+   done. The formula's build names `./cmd/paisans`, not the module path, so
+   the install line is unchanged.
+5. **`paisans-account-service` onto `pocketid-go`.** Replace
+   `internal/idp/pocketid` with the shared client behind invite's `idp`
+   interface, keeping invite's contract and write surface tests.
+
+## Open
+
+* **Who creates the repositories and the rename.** Each is a publishing
+  action, so a human performs or approves it at its step.
