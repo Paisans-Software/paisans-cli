@@ -159,6 +159,10 @@ type appValues struct {
 	// deployment (uptime.go). Populated only for that blueprint.
 	UptimeSeed string
 
+	// IdentityClients names, sorted, every app whose settings.identity_app
+	// names this one: the apps that use it as their identity provider.
+	IdentityClients []string
+
 	// Invite is the invite blueprint's identity provider, settings and code of
 	// conduct (invite.go). Populated only for that blueprint.
 	Invite inviteValues
@@ -441,6 +445,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.S3 = p.s3For(planned, app, v)
 	}
 	v.OIDC = p.oidcFor(planned)
+	v.IdentityClients = p.identityClients(planned.Name)
 	v.Upstreams = p.upstreams(planned.Name)
 	if blueprints.SendsMail(planned.Blueprint) {
 		v.SMTP = p.smtpFor(planned.Name)

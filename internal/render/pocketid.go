@@ -19,6 +19,11 @@ type pocketIDConfig struct {
 	// pocket_id_groups yet, which the .env says in a comment. apply resolves
 	// them on a site running Pocket ID and renders the .env again.
 	Unresolved []string
+	// Settings is the settings the .env is rendered from, by setting key
+	// (blueprints.PocketIDSettingsFor), holding only keys in
+	// blueprints.PocketIDSettings. A key absent here renders nothing, so
+	// Pocket ID's own default holds.
+	Settings map[string]any
 }
 
 // pocketIDConfigFor renders an app's settings and its recorded signup group
@@ -29,6 +34,12 @@ type pocketIDConfig struct {
 func (p *planner) pocketIDConfigFor(name string, app config.App) (pocketIDConfig, error) {
 	var out pocketIDConfig
 	settings := blueprints.PocketIDSettingsFor(app.Settings, p.cfg.CanMail(name))
+	out.Settings = map[string]any{}
+	for _, s := range blueprints.PocketIDSettings {
+		if v, ok := settings[s.Key]; ok && v != nil {
+			out.Settings[s.Key] = v
+		}
+	}
 	for _, v := range blueprints.PocketIDEnv(settings) {
 		quoted, err := configmerge.EnvValue(fmt.Sprintf("apps.%s.settings (%s)", name, v.Name), v.Value)
 		if err != nil {

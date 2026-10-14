@@ -6878,19 +6878,11 @@ admin a fresh sign-in link* gives, and
 in every app's admin group, and in every app's
 member group as well. Declaring the admin is the approval for all of it.
 
-**The gateway refuses Pocket ID's own first-admin setup, always.** `POST
-/api/signup/setup` takes no authentication and makes its caller an
-administrator (`usersignup/module.go:86-87` at v2.14.0), and it is open while
-Pocket ID holds no user besides its static API key's
-(`usersignup/service.go:220-229`). That is the state of every new deployment
-until apply makes the declared admins, and of a restore that holds no users,
-so on a public hostname whoever reaches it first would own the identity
-provider. Nothing in Pocket ID turns it off. The pocket-id kind's Caddy
-snippet answers 404 to every method on `/api/signup/setup`, `/setup` and
-`/signup/setup` and everything below each; Caddy's path matcher compares the
-decoded, cleaned path case insensitively, so no spelling of them gets through.
-`/api/signup` and `/signup` stay open, since signup links use them. Apply makes
-admins through the static API key and never needs the setup route.
+**The gateway refuses Pocket ID's own first-admin setup, always**, so the
+window between Pocket ID starting and apply making the admins is not a race
+with the internet. *The gateway exposes only the Pocket ID routes its
+configuration turns on* gives the rule. Apply makes admins through the static
+API key and never needs the setup route.
 
 **A declared admin is a member of every app too**, because an app that gates
 on its member group would otherwise refuse its own administrator. Mbin reads
@@ -7154,6 +7146,55 @@ recorded and present, a re-run plans nothing.
 A Pocket ID that cannot be asked holds nothing back and fails nothing: a
 recorded ID is rendered as it is, and a name with none is left out of the
 `.env`, which says so in a comment, until a re-run resolves it.
+
+### The gateway exposes only the Pocket ID routes its configuration turns on
+
+Pocket ID serves some routes to anyone, with no sign in, for features its
+configuration can turn off. **A route that serves only a feature the rendered
+configuration turns off is closed at the gateway**, which answers 404 to every
+method on it, because a feature that is off has no visitor to serve and an
+open route is one more way in. The pocket-id blueprint's Caddy snippet holds
+the rule, each route beside its condition and the Pocket ID source it rests
+on. It reads two things: the settings as the `.env` renders them, where a
+setting left out takes Pocket ID's default (`appconfig/model.go:120-175` at
+v2.14.0), and whether an app names this Pocket ID as its `identity_app`.
+
+| Paths, and everything below each | Closed when | Pocket ID v2.14.0 |
+|---|---|---|
+| `/api/signup/setup`, `/signup/setup`, `/setup` | always | `POST /api/signup/setup` takes no authentication and makes its caller an administrator (`usersignup/module.go:86-87`) while no user exists besides the static API key's (`usersignup/service.go:220-229`). Nothing turns it off |
+| `/api/signup`, `/signup`, `/st/` | `allow_user_signups` is `disabled` or unset (the default, `appconfig/model.go:130`), or an app names this one as its `identity_app` | the signup page refuses when disabled (`frontend/src/routes/signup/+page.svelte:38-41`), but `POST /api/signup` takes an administrator's signup token whatever the setting (`usersignup/service.go:51-52`). `/st/<token>` redirects to `/signup` |
+| `/api/one-time-access-email`, `/login/alternative/email` | `email_one_time_access_as_unauthenticated` is not `true` (the default is false, `appconfig/model.go:144`) | Pocket ID refuses the request (`onetimeaccess/service.go:66-67`) and does not offer the page (`frontend/src/routes/login/alternative/+page.svelte:30-36`) |
+
+**The setup routes are closed on every deployment.** That route is open on
+every new deployment from Pocket ID's start until apply makes the declared
+admins, and again after a restore that holds no users. On a public hostname
+whoever reaches it first in that window owns the identity provider.
+
+**An invite deployment closes signup and keeps the email code.** Accounts
+there come only from the invite app, after the code of conduct, which is why
+`validate` refuses any `allow_user_signups` but `disabled`; the gateway closes
+signup for any Pocket ID an app names as its `identity_app`, whatever the
+setting says, including the signup tokens an administrator could otherwise
+hand out. A member whose sign-in link expired recovers through the email
+code, which `validate` requires on (*What `validate` refuses on the Pocket ID
+app*), so those routes stay open. A Pocket ID with no invite app and
+`allow_user_signups: open` is a public self-service identity provider, and
+its signup pages stay open.
+
+**Nothing the toolkit or the invite app calls is closed.** Apply, `admin
+magic-link` and `oidc client create` reach Pocket ID at a site's own address,
+from that host, and never pass the gateway; the admin reconciler reaches it on
+its stack's own network. The invite app does pass the gateway, with the static
+API key, and calls only `/api/users`, `/api/user-groups` and
+`/api/users/<id>/one-time-access-email`, with sign in through OIDC. Sign in,
+`/lc/` login links, `/login/alternative/code` and `/api/signup-tokens`, an
+administrator's route, stay open on every deployment.
+
+Each path is matched with everything below it, and Caddy's path matcher
+compares the decoded, cleaned path case insensitively (`MatchPath` in
+`modules/caddyhttp/matchers.go` at v2.11.7), so a trailing slash, a change of
+case, a doubled slash, a dot segment or an escaped letter reaches the same
+refusal.
 
 ### The toolkit administers Pocket ID through its static API key
 

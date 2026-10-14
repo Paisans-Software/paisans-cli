@@ -12,8 +12,7 @@
 # owns the identity provider. Nothing in Pocket ID turns it off, and the
 # toolkit makes its admins through the static API key, so the gateway refuses
 # the route for every method, always, along with /setup and /signup/setup,
-# the pages that offer the form. /api/signup and /signup stay open: signup
-# links use them.
+# the pages that offer the form.
 #
 # Each pattern ends in *, so a trailing slash or anything below is refused
 # too. Caddy's path matcher compares the decoded, cleaned path case
@@ -22,6 +21,28 @@
 # refused as well.
 @setup path /api/signup/setup* /signup/setup* /setup*
 respond @setup 404
+#
+# Every other refusal below follows the rendered configuration: a route that
+# serves only a feature the configuration turns off is closed. The values are
+# those the .env renders, and a setting left out takes Pocket ID's default
+# (appconfig/model.go:120-175 at v2.14.0).
+#
+# Self signup is closed while allow_user_signups is disabled, or unset, since
+# Pocket ID's default is disabled (appconfig/model.go:130), and whenever an
+# app names this one as its identity_app, since accounts then come only from
+# that app's invites. Here allow_user_signups is disabled, and this app is
+# the identity_app of invite.
+#
+# With allow_user_signups disabled, Pocket ID's signup page refuses
+# (frontend/src/routes/signup/+page.svelte:38-41) and its admin page offers no
+# signup links (frontend/src/routes/settings/admin/users/+page.svelte:65), but
+# POST /api/signup still takes a signup token an administrator made
+# (usersignup/service.go:51-52, route at usersignup/module.go:85). The gateway
+# closes the API route, the signup pages, and /st/, which redirects a signup
+# link to /signup (frontend/src/routes/st/[token]/+page.ts). /api/signup-tokens
+# stays open: it is an administrator's route.
+@signup path /api/signup /api/signup/* /signup /signup/* /st/*
+respond @signup 404
 reverse_proxy 10.44.0.1:1411 10.44.0.2:1411 {
 	# Failover across apps sites; see upstream_failover in the Caddyfile.
 	import upstream_failover
