@@ -614,10 +614,22 @@ recovered, so that none of it needs a Pocket ID administrator.
   who has lost both passkey and address is recovered at `/admin/recovery`,
   opened by one community admin and approved by a different one. Operators
   are refused both, and recover with `paisans operator magic-link`.
+* **A member's groups.** A group is what grants privilege: `admins` makes a
+  community admin of every app that reads it, and an app's member group
+  admits a member to that app. So promoting and demoting are one act, at
+  `/admin/members/<id>/groups`: any community admin adds any user to any
+  group or takes them out of one, themselves and other admins included,
+  because there is one tier of community admin. The exception is
+  `operators`, shown but never changed there, since `paisans-stack.yaml`
+  alone says who is an operator; an operator's other groups can be changed,
+  and the next `apply` puts them back in the groups it gives every operator.
+  A change takes effect at the user's next sign in: a session an app already
+  holds keeps the groups it was given until it expires.
 
 The design is in `docs/specs/2026-10-12-invite-service.md`,
-`docs/specs/2026-10-14-account-service.md` and
-`docs/specs/2026-10-14-account-signup-bans-recovery.md`.
+`docs/specs/2026-10-14-account-service.md`,
+`docs/specs/2026-10-14-account-signup-bans-recovery.md` and
+`docs/specs/2026-10-14-account-promotion.md`.
 
 The app exists because it is declared, and `management: paisans` requires it:
 the toolkit never adds it or drops it on its own, so the declaration is the
@@ -701,7 +713,7 @@ account service's `.env`, and the next `apply` recreates the account stack.
 
 ### What it writes at Pocket ID
 
-Three calls, and nothing else:
+Four calls, and nothing else:
 
 * **Create the user**: `POST /api/users` with the username, email address and
   display name. No group and no admin flag, so the new account takes the
@@ -712,8 +724,14 @@ Three calls, and nothing else:
   itself.
 * **Update the user**: `PUT /api/users/<id>`, with every other field sent back
   as read, to disable or re-enable a banned member, to set a verified address
-  after an address change or a recovery, and to set a member's name. Groups
-  are never touched, so a lifted ban returns everything the member had.
+  after an address change or a recovery, and to set a member's name. A ban
+  never touches groups, so a lifted ban returns everything the member had.
+* **Replace the user's groups**: `PUT /api/users/<id>/user-groups`, which sets
+  the user's whole list of groups at once. The service reads the user's
+  groups immediately before, sends that list with the admin's additions and
+  removals applied, and refuses a list that would change who is in
+  `operators`, so two admins at once never undo each other's unrelated
+  changes.
 
 It authenticates with the Pocket ID app's `static_api_key`, the same key the
 toolkit uses, and a Pocket ID API key carries no scopes: the key is all of

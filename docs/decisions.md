@@ -2639,3 +2639,40 @@ other app that reads it for operator access would keep granting it. The
 reconciler already read every user with their groups, so the reverse check
 costs no request and keeps the reconciler read-only.
 
+## 2026-10-14: One tier of community admin, and the account service changes groups
+
+Founder decision. The design is
+`docs/specs/2026-10-14-account-promotion.md`.
+
+### What was decided
+
+* Any community admin changes any group of any user, themselves and other
+  admins included, at `/admin/members/<id>/groups` on `account.`. There is
+  one tier of community admin.
+* `operators` is never changed there: `paisans-stack.yaml` decides who is in
+  it. An operator's other groups can be changed, and the next `apply` puts
+  the operator back in every group it gives operators.
+* The account service's writes at Pocket ID, all with the static API key, are
+  creating a user at signup (Pocket ID puts them in the member group as its
+  signup default), disabling and re-enabling a user, setting a user's email
+  address (marked verified) and names, sending a one-time access email, and
+  replacing a user's groups with `PUT /api/users/:id/user-groups`. The last
+  sends the list it has just read with the admin's additions and removals
+  applied, and is refused if it would change membership of `operators`.
+* A change takes effect at the user's next sign in, and every change is an
+  audit entry: who, whose groups, each group added and each removed, and
+  when.
+* `docs/deployment-agent-rules.md` approves the account service under
+  *Services the deployment runs*, with these writes, and lets `apply` create
+  a missing group only where the configuration names it: `operators`, the
+  member group, and each app's admin and member groups.
+
+### Why
+
+Under `management: paisans` nobody is a Pocket ID administrator, so the
+account service is the only place a member's groups change, and a group is
+what grants privilege. Adding a member to a group and taking them out of one
+are the same act, so one page does both. Sending the freshly read list with
+only the requested changes keeps two admins working at once from undoing each
+other. An operator is declared in a file and holds the deployment's keys, so
+the group that says who is one follows that file and nothing else.
