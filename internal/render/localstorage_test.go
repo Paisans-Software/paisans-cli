@@ -12,9 +12,9 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/validate"
 )
 
-// localStorageApps are the fixture's three apps of kinds that can use S3,
+// localStorageApps are the fixture's two apps of kinds that can use S3,
 // each pinned and given `storage: local` by localStorageFixture.
-var localStorageApps = []string{"talk", "docs", "blog"}
+var localStorageApps = []string{"talk", "blog"}
 
 // localStorageFixture is the golden tree's deployment with every app that can
 // use S3 pinned and keeping its files on its own disk instead, while the
@@ -23,7 +23,7 @@ var localStorageApps = []string{"talk", "docs", "blog"}
 func localStorageFixture(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := fixture(t)
-	pins := map[string]string{"talk": "home-a", "docs": "home-b", "blog": "home-a"}
+	pins := map[string]string{"talk": "home-a", "blog": "home-a"}
 	for _, name := range localStorageApps {
 		app := cfg.Apps[name]
 		app.Placement = config.Placement{Mode: config.PlacementPinned, Site: pins[name], Literal: "pinned"}
@@ -59,7 +59,7 @@ func localStorageFiles(t *testing.T, cfg *config.Config) map[string]string {
 	return out
 }
 
-// The golden tree for apps keeping their files locally: Mbin, Outline and the
+// The golden tree for apps keeping their files locally: Mbin and the
 // writefreely-wisp fork each render their own local storage settings and no
 // S3 ones, and the gateway routes no media hostname for any of them.
 // Regenerated with -update, like the main golden tree.
@@ -112,15 +112,11 @@ func TestLocalStorageRendersNoObjectStorage(t *testing.T) {
 	if !strings.Contains(talk, "KBIN_STORAGE_URL=https://talk.example.org/media\n") {
 		t.Error("talk's media URL is not its own hostname under /media")
 	}
-	docs := file("home-b/srv/paisans/f2a9/docs/.env")
-	if !strings.Contains(docs, "FILE_STORAGE=local\n") || !strings.Contains(docs, "FILE_STORAGE_LOCAL_ROOT_DIR=/var/lib/outline/data\n") {
-		t.Error("docs does not render Outline's local file storage")
-	}
 	blog := file("home-a/srv/paisans/f2a9/blog/config.ini")
 	if !strings.Contains(blog, "type = local\n") || !strings.Contains(blog, "dir = /data/uploads\n") {
 		t.Error("blog does not render the fork's local image store")
 	}
-	for name, content := range map[string]string{"talk": talk, "docs": docs, "blog": blog} {
+	for name, content := range map[string]string{"talk": talk, "blog": blog} {
 		for _, s3 := range []string{"S3_KEY=", "AWS_ACCESS_KEY_ID=", "s3_access_key_id =", "s3_endpoint =", "AWS_S3_UPLOAD_BUCKET_URL=", "-media.example.org"} {
 			if strings.Contains(content, s3) {
 				t.Errorf("%s keeps its files locally and still renders %s", name, s3)

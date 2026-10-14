@@ -63,12 +63,10 @@ storage:
     consistency: eventual
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
-    settings:
-      s3_bucket: docs-uploads
   auth:
     blueprint: pocket-id
     hostname: id.example.org

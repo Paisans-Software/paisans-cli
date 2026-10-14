@@ -89,7 +89,7 @@ func newPGWorld(t *testing.T) *pgWorld {
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}, Synchronous: true},
 		Apps: map[string]config.App{
 			"forum": {Kind: config.Kind("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
-			"notes": {Kind: config.Kind("outline"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
+			"notes": {Kind: config.Kind("wikijs"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
 			"proxy": {Kind: config.KindOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
 		},
 	}

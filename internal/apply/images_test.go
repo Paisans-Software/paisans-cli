@@ -445,9 +445,9 @@ func TestASiteApplyHoldsAMultiSiteAppOnItsDeployedBuild(t *testing.T) {
 				t.Errorf("no warning says the app stays and a newer build exists: %+v", p.Notes)
 			}
 			// An app with no other site in the plan's word moves as usual.
-			outline, _ := kinds.DefaultImage(config.Kind("outline"), "app")
-			if docs := pinOf(p, "docs", outline); docs == nil || !strings.HasSuffix(docs.Reference, buildB) {
-				t.Errorf("docs planned %+v", docs)
+			wikiImage, _ := kinds.DefaultImage(config.Kind("wikijs"), "app")
+			if wiki := pinOf(p, "wiki", wikiImage); wiki == nil || !strings.HasSuffix(wiki.Reference, buildB) {
+				t.Errorf("wiki planned %+v", wiki)
 			}
 		})
 	}
@@ -570,7 +570,7 @@ func bareAt(t *testing.T, site string) *fakeHost {
 func TestOnlyAndExceptPinOnlyTheStacksTheyMove(t *testing.T) {
 	host := siteAt(t, "home-a", &registry{digest: buildA})
 	moving := &registry{digest: buildA, digests: map[string]string{mbinTag: buildB}}
-	for name, opt := range map[string]apply.Option{"only": apply.Only("docs"), "except": apply.Except("talk")} {
+	for name, opt := range map[string]apply.Option{"only": apply.Only("wiki"), "except": apply.Except("talk")} {
 		t.Run(name, func(t *testing.T) {
 			p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(moving))
 			if err != nil {

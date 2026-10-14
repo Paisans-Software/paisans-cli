@@ -175,26 +175,6 @@ chat.example.org {
 }
 
 
-docs-media.example.org {
-	import upstream_unavailable
-	# Stripped here as on a gated hostname: nothing that reaches an app may
-	# name a user unless the gate put the name there, and an ungated app that
-	# trusted the header would otherwise trust whoever sent the request.
-	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/docs-media.caddy
-}
-
-
-docs.example.org {
-	import upstream_unavailable
-	# Stripped here as on a gated hostname: nothing that reaches an app may
-	# name a user unless the gate put the name there, and an ungated app that
-	# trusted the header would otherwise trust whoever sent the request.
-	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/docs.caddy
-}
-
-
 example.org {
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
@@ -365,6 +345,16 @@ web.example.org {
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
 	import /etc/caddy/snippets/web.caddy
+}
+
+
+wiki.example.org {
+	import upstream_unavailable
+	# Stripped here as on a gated hostname: nothing that reaches an app may
+	# name a user unless the gate put the name there, and an ungated app that
+	# trusted the header would otherwise trust whoever sent the request.
+	request_header -X-Auth-Request-*
+	import /etc/caddy/snippets/wiki.caddy
 }
 
 # Site blocks the host's owner adds for things paisans does not run, Eg: a blog

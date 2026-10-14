@@ -14,7 +14,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
-// idpFake is a Pocket ID with the fixture's recorded clients (docs, blog, invite)
+// idpFake is a Pocket ID with the fixture's recorded clients (wiki, blog, invite)
 // already in place with live secrets, the groups members and admins, and no
 // talk client until one is created.
 type idpFake struct {
@@ -45,8 +45,8 @@ func newIDPFake() *idpFake {
 	groups := []pocketid.Group{{ID: "fixture-group-members-id", Name: "members"}, {ID: "g-admins", Name: "admins"}, {ID: "fixture-group-newcomers-id", Name: "newcomers"}}
 	launch := func(s string) *string { return &s }
 	return &idpFake{groups: groups, others: map[string]*pocketid.OIDCClient{
-		"docs": {ID: "fixture-not-a-secret-docs-id", Name: "docs", CallbackURLs: []string{"https://docs.example.org/auth/oidc.callback"},
-			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://docs.example.org"), SkipConsent: true},
+		"wiki": {ID: "fixture-not-a-secret-wiki-id", Name: "wiki", CallbackURLs: []string{"https://wiki.example.org/login/pocketid/callback"},
+			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://wiki.example.org"), SkipConsent: true},
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org"), SkipConsent: true},
 		"invite": {ID: "fixture-not-a-secret-invite-id", Name: "invite", CallbackURLs: []string{"https://invite.example.org/auth/callback"},
@@ -261,7 +261,7 @@ func TestOIDCClientCreateRefusesAKindItDoesNotKnow(t *testing.T) {
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
 	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", tempSecrets(t), "--app", "web"})
-	if err == nil || !strings.Contains(err.Error(), "Kinds with one: invite, mbin, oauth2-proxy, outline, synapse, uptime, writefreely") {
+	if err == nil || !strings.Contains(err.Error(), "Kinds with one: invite, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fake.commands) != 0 {

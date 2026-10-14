@@ -353,9 +353,7 @@ func (p *planner) s3For(planned plannedApp, app config.App, v appValues) s3Value
 	}
 	s3 := s3Values{
 		// Mbin and the blog write to this address themselves, server side,
-		// over the mesh. Outline never uses it: its uploads are a presigned
-		// POST the browser submits directly, so for Outline every upload and
-		// every read goes through PublicBase, not here.
+		// over the mesh.
 		Endpoint:        s3Endpoint,
 		GarageAddresses: garageAddresses(p),
 		AccessKeyID:     v.Secret("s3_access_key_id"),

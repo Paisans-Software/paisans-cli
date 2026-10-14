@@ -126,9 +126,9 @@ apps:
     # Federation still works: ActivityPub goes to the app, which checks
     # every signature.
     gated: true
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
     # Behind the gate, which admits members and admins. The toolkit runs the
     # gate itself, at gate.example.org on the gateway.

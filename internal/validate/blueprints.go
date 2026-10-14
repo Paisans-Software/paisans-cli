@@ -68,7 +68,8 @@ func (c *checker) blueprintRules() {
 		}
 
 		// Settings the blueprint declares, checked by type; an unknown one
-		// is most likely a typo nothing reads.
+		// is most likely a typo nothing reads. One the toolkit reads for
+		// every app is neither, and its own rules check it.
 		if specs := kinds.SettingsOf(kind); specs != nil {
 			keys := make([]string, 0, len(app.Settings))
 			for k := range app.Settings {
@@ -77,6 +78,9 @@ func (c *checker) blueprintRules() {
 			sort.Strings(keys)
 			for _, k := range keys {
 				spec, ok := specs[k]
+				if !ok && kinds.IsGenericSetting(k) {
+					continue
+				}
 				if !ok {
 					c.warn("blueprint-setting-unknown", fmt.Sprintf("%s.settings.%s", prefix, k),
 						"the blueprint reads no such setting",

@@ -1105,7 +1105,7 @@ func TestARestartedMeshIsReadBack(t *testing.T) {
 }
 
 // The infrastructure stack is acted on before any app stack. Sorted order
-// alone put "blog" and "docs" ahead of "infra", starting applications before
+// alone put "auth" and "blog" ahead of "infra", starting applications before
 // the proxy and database they connect to.
 func TestInfrastructureMovesBeforeApps(t *testing.T) {
 	host := newHost()
@@ -1120,7 +1120,7 @@ func TestInfrastructureMovesBeforeApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	infra := host.indexOf("/srv/paisans/f2a9/infra/compose.yaml up -d")
-	for _, app := range []string{"blog", "docs", "talk"} {
+	for _, app := range []string{"blog", "wiki", "talk"} {
 		if i := host.indexOf("/srv/paisans/f2a9/" + app + "/compose.yaml up -d"); i < infra {
 			t.Errorf("%s was started before the infrastructure stack", app)
 		}
@@ -1229,7 +1229,7 @@ func noWait(t *testing.T) {
 	t.Cleanup(apply.SetPrimaryWait(9*time.Second, 3*time.Second, func(time.Duration) {}))
 }
 
-// The fixture's clustered apps are talk, docs, auth and invite; the pinned ones keep
+// The fixture's clustered apps are talk, wiki, auth and invite; the pinned ones keep
 // their own Postgres and are none of the cluster's business.
 func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	cfg, secrets := fixture(t)
@@ -1241,7 +1241,7 @@ func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	for _, db := range b.Databases {
 		got = append(got, db.App+"="+db.Role+"/"+db.Name)
 	}
-	if want := "auth=auth/auth docs=docs/docs invite=invite/invite talk=talk/talk"; strings.Join(got, " ") != want {
+	if want := "auth=auth/auth invite=invite/invite talk=talk/talk wiki=wiki/wiki"; strings.Join(got, " ") != want {
 		t.Errorf("bootstrapped %v, want %s", got, want)
 	}
 	if b.Patroni != "10.44.0.1:8008" {
@@ -1278,7 +1278,7 @@ func TestDatabasesExistBeforeAnyAppStarts(t *testing.T) {
 	if !(infra < wait && wait < psql) {
 		t.Errorf("out of order: infra %d, wait %d, psql %d", infra, wait, psql)
 	}
-	for _, app := range []string{"auth", "blog", "docs", "talk"} {
+	for _, app := range []string{"auth", "blog", "wiki", "talk"} {
 		if i := host.indexOf("/srv/paisans/f2a9/" + app + "/compose.yaml up -d"); i < psql {
 			t.Errorf("%s was started before its database existed", app)
 		}
@@ -1448,7 +1448,7 @@ func TestAReplicaLeavesTheDatabasesToTheLeader(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leader = "home-b"
-	host.replicaHas = []string{"auth", "docs", "invite", "talk"}
+	host.replicaHas = []string{"auth", "invite", "talk", "wiki"}
 	p := bootstrapPlan(t, host)
 	said := &ui.Recorder{}
 	p.Report = said
@@ -1483,14 +1483,14 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
 	}
 	var wait *apply.DatabasesWaitError
-	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"docs", "invite", "talk"}) {
+	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"invite", "talk", "wiki"}) {
 		t.Errorf("the replica's stop does not name the leader: %#v", wait)
 	}
 	if errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
 	}
 	q := problemOf(t, err)
-	if q.Hint != "home-a is waiting on home-b to create databases docs, invite, talk" {
+	if q.Hint != "home-a is waiting on home-b to create databases invite, talk, wiki" {
 		t.Errorf("hint: %q", q.Hint)
 	}
 	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
@@ -1515,7 +1515,7 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		}
 	}
 
-	host.replicaHas = []string{"auth", "docs", "invite", "talk"}
+	host.replicaHas = []string{"auth", "invite", "talk", "wiki"}
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}
@@ -1860,7 +1860,7 @@ func TestRecreateForcesANamedStack(t *testing.T) {
 	if infra < 0 || psql < 0 || talk < 0 || !(infra < psql && psql < talk) {
 		t.Errorf("want infra, then the databases, then talk: %v", host.commands)
 	}
-	if host.ran("/srv/paisans/f2a9/docs/compose.yaml") {
+	if host.ran("/srv/paisans/f2a9/wiki/compose.yaml") {
 		t.Error("a stack nobody named was acted on")
 	}
 }
@@ -1899,7 +1899,7 @@ func TestAHealthyStackPasses(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	for _, stack := range []string{"infra", "talk", "docs"} {
+	for _, stack := range []string{"infra", "talk", "wiki"} {
 		if !host.ran("/srv/paisans/f2a9/" + stack + "/compose.yaml ps --all --format json") {
 			t.Errorf("%s was never checked", stack)
 		}
@@ -1986,7 +1986,7 @@ func TestAnUnhealthyStackStopsTheApply(t *testing.T) {
 			if tc.name != "timeout" && *slept != 0 {
 				t.Errorf("a failed container was waited on (%d sleeps)", *slept)
 			}
-			for _, stack := range []string{"blog", "docs", "talk"} {
+			for _, stack := range []string{"blog", "wiki", "talk"} {
 				if host.ran("/srv/paisans/f2a9/" + stack + "/compose.yaml up -d") {
 					t.Errorf("%s was started after the infrastructure stack failed its check", stack)
 				}

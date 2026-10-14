@@ -8,7 +8,7 @@ import (
 )
 
 // Each case sets display names on the valid fixture and expects one rule at
-// one key. The valid fixture's docs is Outline, which has a client; auth is
+// one key. The valid fixture's wiki is Wiki.js, which has a client; auth is
 // Pocket ID itself, which does not.
 func TestDisplayNameRules(t *testing.T) {
 	cases := []struct {
@@ -18,12 +18,12 @@ func TestDisplayNameRules(t *testing.T) {
 		key   string
 		level validate.Level
 	}{
-		{"too long", map[string]string{"docs": strings.Repeat("w", 51)}, "display-name-invalid", "apps.docs.display_name", validate.Refuse},
-		{"surrounding space", map[string]string{"docs": "Wiki "}, "display-name-invalid", "apps.docs.display_name", validate.Refuse},
+		{"too long", map[string]string{"wiki": strings.Repeat("w", 51)}, "display-name-invalid", "apps.wiki.display_name", validate.Refuse},
+		{"surrounding space", map[string]string{"wiki": "Wiki "}, "display-name-invalid", "apps.wiki.display_name", validate.Refuse},
 		// "e" followed by a combining acute accent, which NFC composes.
-		{"not NFC", map[string]string{"docs": "Café"}, "display-name-invalid", "apps.docs.display_name", validate.Refuse},
-		{"another app's name", map[string]string{"docs": "health"}, "duplicate-client-name", "apps.docs.display_name", validate.Refuse},
-		{"two display names alike", map[string]string{"docs": "Ours", "health": "Ours"}, "duplicate-client-name", "apps.health.display_name", validate.Refuse},
+		{"not NFC", map[string]string{"wiki": "Café"}, "display-name-invalid", "apps.wiki.display_name", validate.Refuse},
+		{"another app's name", map[string]string{"wiki": "health"}, "duplicate-client-name", "apps.wiki.display_name", validate.Refuse},
+		{"two display names alike", map[string]string{"wiki": "Ours", "health": "Ours"}, "duplicate-client-name", "apps.wiki.display_name", validate.Refuse},
 		{"no client", map[string]string{"auth": "Sign in"}, "display-name-without-a-client", "apps.auth.display_name", validate.Warn},
 	}
 	for _, tc := range cases {
@@ -48,9 +48,9 @@ func TestDisplayNameRules(t *testing.T) {
 func TestDisplayNameQuiet(t *testing.T) {
 	for _, name := range []string{"Wiki", "Café", strings.Repeat("é", 50)} {
 		cfg := load(t, "valid")
-		a := cfg.Apps["docs"]
+		a := cfg.Apps["wiki"]
 		a.DisplayName = name
-		cfg.Apps["docs"] = a
+		cfg.Apps["wiki"] = a
 		if result := validate.Check(cfg); len(result.Findings) != 0 {
 			t.Errorf("display name %q: %v", name, result.Findings)
 		}

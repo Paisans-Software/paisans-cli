@@ -1,7 +1,7 @@
-# valid.yaml with one thing broken: docs declares a media hostname that is
+# valid.yaml with one thing broken: blog declares a media hostname that is
 # not a hostname, because an underscore is not allowed in a DNS label. It
 # would be a site address the gateway cannot get a certificate for, and a URL
-# Outline hands every browser.
+# WriteFreely hands every browser.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -64,14 +64,16 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
     placement: cluster
     hostnames:
-      media: docs_media.example.org
-    settings:
-      s3_bucket: docs-uploads
+      media: blog_media.example.org
   auth:
     blueprint: pocket-id
     hostname: id.example.org

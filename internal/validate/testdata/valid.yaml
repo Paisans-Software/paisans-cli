@@ -71,12 +71,16 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
-    settings:
-      s3_bucket: docs-uploads
+  # WriteFreely keeps its images in Garage, so the deployment's object
+  # storage has an app to serve.
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
   auth:
     blueprint: pocket-id
     hostname: id.example.org

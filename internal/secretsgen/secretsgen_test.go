@@ -151,8 +151,8 @@ func TestFillMatchesEachKindsNeeds(t *testing.T) {
 			t.Errorf("mbin is missing %s", key)
 		}
 	}
-	if _, ok := secrets.Apps["docs"]["rabbitmq_password"]; ok {
-		t.Error("outline was given a broker password for a broker it does not run")
+	if _, ok := secrets.Apps["wiki"]["rabbitmq_password"]; ok {
+		t.Error("wikijs was given a broker password for a broker it does not run")
 	}
 	for _, name := range []string{"encryption_key", "static_api_key"} {
 		if key, _ := secrets.Apps["auth"][name].(string); len(key) < 16 {
@@ -254,7 +254,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 // identity provider itself and a Matrix client, has none.
 func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 	cfg := load(t)
-	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("outline"), config.Kind("writefreely"), config.KindUptime, config.Kind("synapse"), config.KindOAuth2Proxy, config.Kind("element"), config.KindPocketID} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("wikijs"), config.Kind("writefreely"), config.KindUptime, config.Kind("synapse"), config.KindOAuth2Proxy, config.Kind("element"), config.KindPocketID} {
 		cfg.Apps["k-"+string(kind)] = config.App{Kind: kind, Hostname: string(kind) + ".example.org", Settings: map[string]any{"admin_group": "admins"}}
 	}
 	pending := pendingBy(t, cfg, &config.Secrets{})
@@ -411,7 +411,7 @@ func TestGarageKeyIsMalformed(t *testing.T) {
 				"s3_access_key_id":     "not-a-valid-garage-key-id",
 				"s3_secret_access_key": validSecret,
 			},
-			want: "docs.s3_access_key_id",
+			want: "blog.s3_access_key_id",
 		},
 		{
 			name: "uppercase hex in the key ID",
@@ -419,7 +419,7 @@ func TestGarageKeyIsMalformed(t *testing.T) {
 				"s3_access_key_id":     "GK" + strings.Repeat("AB", 12),
 				"s3_secret_access_key": validSecret,
 			},
-			want: "docs.s3_access_key_id",
+			want: "blog.s3_access_key_id",
 		},
 		{
 			name: "short secret key",
@@ -427,7 +427,7 @@ func TestGarageKeyIsMalformed(t *testing.T) {
 				"s3_access_key_id":     "GK" + strings.Repeat("ab", 12),
 				"s3_secret_access_key": "tooshort",
 			},
-			want: "docs.s3_secret_access_key",
+			want: "blog.s3_secret_access_key",
 		},
 		{
 			// A rotation keeps the retired pair beside the new one, and
@@ -439,13 +439,13 @@ func TestGarageKeyIsMalformed(t *testing.T) {
 				"s3_secret_access_key":      validSecret,
 				"s3_previous_access_key_id": "talk",
 			},
-			want: "docs.s3_previous_access_key_id",
+			want: "blog.s3_previous_access_key_id",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			secrets := &config.Secrets{Apps: map[string]map[string]any{
-				"docs": tc.entry,
+				"blog": tc.entry,
 			}}
 			_, err := secretsgen.Fill(cfg, secrets)
 			if err == nil {
@@ -661,7 +661,7 @@ func TestGarageKeyPairIsWellFormedAndFresh(t *testing.T) {
 		t.Fatal("two generated key pairs are the same")
 	}
 	cfg := load(t)
-	secrets := &config.Secrets{Apps: map[string]map[string]any{"docs": {
+	secrets := &config.Secrets{Apps: map[string]map[string]any{"blog": {
 		"s3_access_key_id": id1, "s3_secret_access_key": secret1,
 		secretsgen.PreviousKeyID: id2, secretsgen.PreviousSecretKey: secret2,
 	}}}
@@ -691,14 +691,15 @@ func TestTheDNSTokenIsOwedForAMonitorsOwnCaddy(t *testing.T) {
 	t.Fatal("a monitor with managed_by: paisans needs the token, and it was not owed")
 }
 
-// Outline's and WriteFreely's clients are created by apply like Mbin's, and
+// Wiki.js's and WriteFreely's clients are created by apply like Mbin's, and
 // their pending reason names the callback each app really serves, that PKCE is
-// off, and that the group restriction at Pocket ID is the whole control,
-// since neither app reads a groups claim.
-func TestOutlineAndWriteFreelyPendingClientsNameTheirCallbackAndRestriction(t *testing.T) {
+// off, and the group restriction at Pocket ID: the whole control for
+// WriteFreely, which reads no groups claim, and the groups Wiki.js reads from
+// the claim.
+func TestWikiAndWriteFreelyPendingClientsNameTheirCallbackAndRestriction(t *testing.T) {
 	pending := pendingBy(t, load(t), &config.Secrets{})
 	cases := map[string][]string{
-		"oidc_clients.docs": {"https://docs.example.org/auth/oidc.callback", "PKCE off", "paisans apply", "restricted", "reads no groups claim"},
+		"oidc_clients.wiki": {"https://wiki.example.org/login/pocketid/callback", "PKCE off", "paisans apply", "restricted", "reads from the groups claim"},
 		"oidc_clients.blog": {"https://blog.example.org/oauth/callback/generic", "PKCE off", "paisans apply", "restricted", "reads no groups claim"},
 	}
 	for name, wants := range cases {

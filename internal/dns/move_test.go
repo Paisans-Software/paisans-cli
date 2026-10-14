@@ -35,7 +35,7 @@ func TestDesiredMarksTheGatewaysHostnames(t *testing.T) {
 		if w.Type != "A" {
 			continue
 		}
-		gateway := w.Name == "talk.example.org" || w.Name == "docs.example.org" || strings.HasSuffix(w.Name, "-media.example.org")
+		gateway := w.Name == "talk.example.org" || w.Name == "blog.example.org" || strings.HasSuffix(w.Name, "-media.example.org")
 		if w.ViaGateway != gateway {
 			t.Errorf("%s: ViaGateway %t", w.Name, w.ViaGateway)
 		}
@@ -54,7 +54,7 @@ func TestInitLeavesAMovingNameToTheMove(t *testing.T) {
 	fake.records["zone-1"] = []cfRecord{
 		{ID: "old-talk", Type: "A", Name: "talk.example.org", Content: oldGW, Comment: recordComment},
 		{ID: "old-talk6", Type: "AAAA", Name: "talk.example.org", Content: oldGW6, Comment: recordComment},
-		{ID: "hand-docs", Type: "A", Name: "docs.example.org", Content: oldGW},
+		{ID: "hand-blog", Type: "A", Name: "blog.example.org", Content: oldGW},
 	}
 	c := fake.serve(t)
 	p := plan(t, c, moved())
@@ -65,8 +65,8 @@ func TestInitLeavesAMovingNameToTheMove(t *testing.T) {
 	if actions["A talk.example.org"] != Moving {
 		t.Errorf("talk: %s, want moving", actions["A talk.example.org"])
 	}
-	if actions["A docs.example.org"] != Conflict {
-		t.Errorf("a record dns init did not make is still a conflict: %s", actions["A docs.example.org"])
+	if actions["A blog.example.org"] != Conflict {
+		t.Errorf("a record dns init did not make is still a conflict: %s", actions["A blog.example.org"])
 	}
 	rec := &ui.Recorder{}
 	p.Show(rec)
@@ -89,14 +89,14 @@ func TestTheMoveDeletesOnlyTheOldGatewaysOwnRecordsAtGatewayHostnames(t *testing
 		// would go on reaching a gateway about to stop.
 		{ID: "old-talk6", Type: "AAAA", Name: "talk.example.org", Content: oldGW6, Comment: recordComment, TTL: 600},
 		{ID: "new-talk", Type: "A", Name: "talk.example.org", Content: "203.0.113.10", Comment: recordComment},
-		{ID: "old-docs", Type: "A", Name: "docs.example.org", Content: oldGW, Comment: recordComment, TTL: 1},
+		{ID: "old-blog", Type: "A", Name: "blog.example.org", Content: oldGW, Comment: recordComment, TTL: 1},
 		// Not a gateway hostname: a site endpoint, and a name the
 		// configuration no longer has.
 		{ID: "endpoint", Type: "A", Name: "vm.example.org", Content: oldGW, Comment: recordComment},
 		{ID: "gone", Type: "A", Name: "gone.example.org", Content: oldGW, Comment: recordComment},
 		// Not this deployment's, or not as dns init makes them.
-		{ID: "proxied", Type: "A", Name: "docs.example.org", Content: oldGW, Comment: recordComment, Proxied: true},
-		{ID: "other", Type: "A", Name: "docs.example.org", Content: oldGW, Comment: "paisans-0c1d: created by paisans dns init"},
+		{ID: "proxied", Type: "A", Name: "blog.example.org", Content: oldGW, Comment: recordComment, Proxied: true},
+		{ID: "other", Type: "A", Name: "blog.example.org", Content: oldGW, Comment: "paisans-0c1d: created by paisans dns init"},
 	}
 	c := fake.serve(t)
 	ctx := context.Background()
@@ -112,7 +112,7 @@ func TestTheMoveDeletesOnlyTheOldGatewaysOwnRecordsAtGatewayHostnames(t *testing
 		sort.Strings(out)
 		return out
 	}
-	if got := ids(p.Deletes); !slices.Equal(got, []string{"old-docs", "old-talk", "old-talk6"}) {
+	if got := ids(p.Deletes); !slices.Equal(got, []string{"old-blog", "old-talk", "old-talk6"}) {
 		t.Errorf("deletes %v", got)
 	}
 	if got := ids(p.Kept); !slices.Equal(got, []string{"other", "proxied"}) {
@@ -122,7 +122,7 @@ func TestTheMoveDeletesOnlyTheOldGatewaysOwnRecordsAtGatewayHostnames(t *testing
 		t.Errorf("TTL %d, want the longest, 600", p.TTL())
 	}
 	if p.Ready() {
-		t.Errorf("docs.example.org has no record of vm's, so the plan is not ready")
+		t.Errorf("blog.example.org has no record of vm's, so the plan is not ready")
 	}
 
 	// Nothing is deleted while vm's records are missing or a protected
@@ -147,7 +147,7 @@ func TestTheMoveDeletesOnlyTheOldGatewaysOwnRecordsAtGatewayHostnames(t *testing
 		t.Fatal(err)
 	}
 	sort.Strings(fake.deletes)
-	if !slices.Equal(fake.deletes, []string{"old-docs", "old-talk", "old-talk6"}) {
+	if !slices.Equal(fake.deletes, []string{"old-blog", "old-talk", "old-talk6"}) {
 		t.Errorf("deleted %v", fake.deletes)
 	}
 	if p, err = BuildMove(ctx, c, moved(), "home-a"); err != nil || !p.Clear() {

@@ -22,7 +22,7 @@ func TestInObjectStorageDefaultsToGarageWhereThereIsOne(t *testing.T) {
 	}{
 		{"default with garage", withGarage, config.App{Kind: config.Kind("mbin")}, true},
 		{"default without garage", without, config.App{Kind: config.Kind("mbin")}, false},
-		{"local with garage", withGarage, config.App{Kind: config.Kind("outline"), Storage: config.StorageLocal}, false},
+		{"local with garage", withGarage, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageLocal}, false},
 		{"s3 says so", withGarage, config.App{Kind: config.Kind("writefreely"), Storage: config.StorageS3}, true},
 		// No S3 form at all, whatever the key says; validate refuses the s3.
 		{"synapse", withGarage, config.App{Kind: config.Kind("synapse"), Storage: config.StorageS3}, false},
@@ -49,7 +49,11 @@ func TestLocalMediaPaths(t *testing.T) {
 	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("mbin")}); got != nil {
 		t.Errorf("mbin in garage: %v", got)
 	}
-	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("outline"), Storage: config.StorageLocal}); got != nil {
-		t.Errorf("outline local is private: %v", got)
+	// The paths are only what a blueprint declares under local_media_paths,
+	// so a kind declaring none opens none. Wiki.js declares none because it
+	// keeps no files at all; this case proves a kind without declared paths
+	// gets an empty list, not anything about privacy.
+	if got := kinds.LocalMediaPaths(cfg, config.App{Kind: config.Kind("wikijs"), Storage: config.StorageLocal}); len(got) != 0 {
+		t.Errorf("wikijs keeps no files: %v", got)
 	}
 }

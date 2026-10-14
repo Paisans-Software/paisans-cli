@@ -377,14 +377,14 @@ func TestHAProxyRestartsWithItsDatabaseAppsStopped(t *testing.T) {
 	rec := &ui.Recorder{Verbose_: true}
 	p.Show(rec)
 	for _, want := range []struct{ kind, text string }{
-		{"pending", "stop auth, docs, invite, talk on home-a"},
-		{"detail", "home-a: auth, docs, invite, talk: they reach the database through this HAProxy"},
+		{"pending", "stop auth, invite, talk, wiki on home-a"},
+		{"detail", "home-a: auth, invite, talk, wiki: they reach the database through this HAProxy"},
 		{"pending", "restart HAProxy on home-a"},
 		{"detail", "home-a: HAProxy alone"},
-		{"pending", "start auth, docs, invite, talk on home-a"},
-		{"detail", "home-a: auth, docs, invite, talk (docker compose -f /srv/paisans/f2a9/auth/compose.yaml up -d;"},
-		{"pending", "check auth, docs, invite, talk on home-a"},
-		{"detail", "home-a: auth, docs, invite, talk: every container running"},
+		{"pending", "start auth, invite, talk, wiki on home-a"},
+		{"detail", "home-a: auth, invite, talk, wiki (docker compose -f /srv/paisans/f2a9/auth/compose.yaml up -d;"},
+		{"pending", "check auth, invite, talk, wiki on home-a"},
+		{"detail", "home-a: auth, invite, talk, wiki: every container running"},
 	} {
 		if !rec.Has(want.kind, want.text) {
 			t.Errorf("the plan has no %s %q:\n%s", want.kind, want.text, rec.Lines())
@@ -407,7 +407,7 @@ func TestHAProxyRestartsWithItsDatabaseAppsStopped(t *testing.T) {
 	if restart < 0 {
 		t.Fatal("HAProxy was not restarted")
 	}
-	for _, app := range []string{"auth", "docs", "talk"} {
+	for _, app := range []string{"auth", "talk", "wiki"} {
 		compose := "/srv/paisans/f2a9/" + app + "/compose.yaml"
 		stop, start, check := index(compose+" stop"), index(compose+" up -d"), index(compose+" ps --all")
 		if stop < 0 || stop > restart {

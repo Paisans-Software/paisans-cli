@@ -1,5 +1,5 @@
-# valid.yaml with one thing broken: a config key Outline's template already
-# writes, which would be a second place to set the app's public URL.
+# valid.yaml with one thing broken: a config key Wiki.js's template already
+# writes, which would be a second place to say where its database is.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -71,14 +71,12 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
     config:
-      URL: https://elsewhere.example.org
-    settings:
-      s3_bucket: docs-uploads
+      DB_HOST: 10.44.0.9
   auth:
     blueprint: pocket-id
     hostname: id.example.org

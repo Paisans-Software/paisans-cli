@@ -160,33 +160,33 @@ func TestAGatedAppIsCheckedThroughTheGate(t *testing.T) {
 	if headers, _ := signed["request_headers"].(map[string]any); headers["Accept"] != "application/activity+json" {
 		t.Errorf("signed fetch check does not ask for ActivityPub: %v", signed["request_headers"])
 	}
-	if got := monitors["docs — public"]["expected_status"]; got != "200" {
-		t.Errorf("ungated outline public expects %v", got)
+	if got := monitors["wiki — public"]["expected_status"]; got != "200" {
+		t.Errorf("ungated wikijs public expects %v", got)
 	}
-	if _, ok := monitors["docs — gate"]; ok {
-		t.Error("ungated outline has a gate check")
+	if _, ok := monitors["wiki — gate"]; ok {
+		t.Error("ungated wikijs has a gate check")
 	}
 
-	docs := cfg.Apps["docs"]
-	docs.Gated = false
-	cfg.Apps["docs"] = docs
-	if _, ok := byName(renderSeed(t, cfg, secrets))["docs — gate"]; ok {
-		t.Error("gated: false is no gate, yet outline has a gate check")
+	wiki := cfg.Apps["wiki"]
+	wiki.Gated = false
+	cfg.Apps["wiki"] = wiki
+	if _, ok := byName(renderSeed(t, cfg, secrets))["wiki — gate"]; ok {
+		t.Error("gated: false is no gate, yet wikijs has a gate check")
 	}
-	docs.Gated = true
-	cfg.Apps["docs"] = docs
+	wiki.Gated = true
+	cfg.Apps["wiki"] = wiki
 	gated := byName(renderSeed(t, cfg, secrets))
-	if got := gated["docs — public"]["expected_status"]; got != "200" {
-		t.Errorf("gated outline's dedicated health route is open, yet its public check expects %v", got)
+	if got := gated["wiki — public"]["expected_status"]; got != "200" {
+		t.Errorf("gated wikijs's dedicated health route is open, yet its public check expects %v", got)
 	}
-	if got := gated["docs — gate"]["expected_string"]; got != render.GateMarker {
-		t.Errorf("gated outline gate check expects %v", got)
+	if got := gated["wiki — gate"]["expected_string"]; got != render.GateMarker {
+		t.Errorf("gated wikijs gate check expects %v", got)
 	}
-	if _, ok := gated["docs — signed fetch"]; ok {
-		t.Error("outline does not federate, yet has a signed fetch check")
+	if _, ok := gated["wiki — signed fetch"]; ok {
+		t.Error("wikijs does not federate, yet has a signed fetch check")
 	}
-	if got := monitors["docs — direct (home-a)"]["url"]; got != "http://"+cfg.Sites["home-a"].Address+":3000/_health" {
-		t.Errorf("outline direct url %v", got)
+	if got := monitors["wiki — direct (home-a)"]["url"]; got != "http://"+cfg.Sites["home-a"].Address+":3000/healthz" {
+		t.Errorf("wikijs direct url %v", got)
 	}
 }
 

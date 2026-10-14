@@ -13,7 +13,7 @@ services:
   # core catalog's foundation.yaml's.
   - {name: "app", foundation: "uptime", purpose: "the monitor"}
 database: {engine: sqlite}
-# Not the fork's default 3000: Outline publishes 3000, and two apps on
+# Not the fork's default 3000: Wiki.js publishes 3000, and two apps on
 # one site publish on the same mesh address.
 port: 3001
 config:

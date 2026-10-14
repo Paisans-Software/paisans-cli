@@ -168,7 +168,7 @@ func TestUnreachableSiteSaysWhatIsLost(t *testing.T) {
 		t.Fatalf("level %v", b.Level)
 	}
 	text := strings.Join(b.More, "\n")
-	for _, want := range []string{"roles: data, apps", "one of 3 etcd votes (quorum needs 2)", "a Patroni member", "a Garage node", "its copy of auth, docs, invite, talk", "web, pinned here and running nowhere else"} {
+	for _, want := range []string{"roles: data, apps", "one of 3 etcd votes (quorum needs 2)", "a Patroni member", "a Garage node", "its copy of auth, invite, talk, wiki", "web, pinned here and running nowhere else"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("home-b's loss lacks %q:\n%s", want, text)
 		}
@@ -402,14 +402,14 @@ func TestContainerThatStartedBeforeWg0(t *testing.T) {
 func TestRestartingContainerThatCannotReachItsDatabase(t *testing.T) {
 	sites := []SiteContainers{{
 		Site: "home-a",
-		PS:   `{"Names":"paisans-f2a9-docs-app-1","State":"restarting","Status":"Restarting (1) 5 seconds ago","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		PS:   `{"Names":"paisans-f2a9-wiki-app-1","State":"restarting","Status":"Restarting (1) 5 seconds ago","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
 		Down: []ContainerProbe{{
-			Entry:   PSEntry{Names: "paisans-f2a9-docs-app-1", State: "restarting", Labels: "community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},
+			Entry:   PSEntry{Names: "paisans-f2a9-wiki-app-1", State: "restarting", Labels: "community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},
 			Inspect: `{"State":{"Status":"restarting","Restarting":true,"ExitCode":1,"Error":""},"RestartCount":14}`,
 			Logs:    "starting\nError: connect ECONNREFUSED 127.0.0.1:5000\nSequelizeConnectionRefusedError: connection refused\n",
 		}},
 	}}
-	f := find(t, Containers(fixture(t).Deployment(), sites, ""), SectionContainers, "paisans-f2a9-docs-app-1 restarting (exit 1, restarted 14 time(s))")
+	f := find(t, Containers(fixture(t).Deployment(), sites, ""), SectionContainers, "paisans-f2a9-wiki-app-1 restarting (exit 1, restarted 14 time(s))")
 	if !strings.Contains(strings.Join(f.More, "\n"), "cannot reach its database") {
 		t.Fatalf("%v", f.More)
 	}
@@ -507,10 +507,10 @@ func TestContainersAreThisDeploymentsByLabel(t *testing.T) {
 		Site: "home-a",
 		PS: `{"Names":"paisans-f2a9-talk-app-1","State":"running","Status":"Up","Labels":"community.paisans.deployment=` + d.ID + `"}
 {"Names":"paisans-0c1d-talk-app-1","State":"exited","Status":"Exited (1)","Labels":"` + other + `"}
-{"Names":"paisans-f2a9-docs-app-1","State":"exited","Status":"Exited (1)","Labels":"com.docker.compose.project=paisans-f2a9-docs"}`,
+{"Names":"paisans-f2a9-wiki-app-1","State":"exited","Status":"Exited (1)","Labels":"com.docker.compose.project=paisans-f2a9-wiki"}`,
 		Down: []ContainerProbe{
 			{Entry: PSEntry{Names: "paisans-0c1d-talk-app-1", State: "exited", Labels: other}},
-			{Entry: PSEntry{Names: "paisans-f2a9-docs-app-1", State: "exited", Labels: "com.docker.compose.project=paisans-f2a9-docs"}},
+			{Entry: PSEntry{Names: "paisans-f2a9-wiki-app-1", State: "exited", Labels: "com.docker.compose.project=paisans-f2a9-wiki"}},
 		},
 	}}
 	got := Containers(d, sites, "")

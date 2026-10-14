@@ -320,7 +320,7 @@ func TestDeletionTouchesOnlyTheOldGatewaysRecordsAtGatewayHostnames(t *testing.T
 
 func TestNothingIsDeletedOrStoppedWhileTheNewGatewayDoesNotAnswer(t *testing.T) {
 	w := newWorld(t)
-	w.down["docs.example.org"] = true
+	w.down["wiki.example.org"] = true
 	err := w.run()
 	if err == nil || !strings.Contains(err.Error(), "stage 2 (serve)") {
 		t.Fatalf("want a stop at stage 2: %v", err)
@@ -329,7 +329,7 @@ func TestNothingIsDeletedOrStoppedWhileTheNewGatewayDoesNotAnswer(t *testing.T) 
 		t.Errorf("a failed check went on: deleted %v, Caddy %v, talk %v", w.zone.Deletes, w.hosts["home-a"].caddy, w.at("talk.example.org"))
 	}
 	// Fixed, the same command resumes and finishes.
-	delete(w.down, "docs.example.org")
+	delete(w.down, "wiki.example.org")
 	if err := w.run(); err != nil {
 		t.Fatal(err)
 	}

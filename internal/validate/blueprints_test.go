@@ -137,3 +137,23 @@ func TestABlueprintsOwnRulesRun(t *testing.T) {
 		t.Error("a bare address failed the blueprint's check")
 	}
 }
+
+// A setting the toolkit reads for every app, whatever its blueprint, is not
+// unknown to a blueprint that declares settings of its own: the blueprint
+// cannot be expected to list what it never reads, and a warning on a setting
+// that works would teach an operator to read past the warning.
+func TestGenericSettingsAreNotUnknown(t *testing.T) {
+	cfg := load(t, "valid")
+	wiki := cfg.Apps["wiki"]
+	wiki.Settings = map[string]any{"sso_consent": true, "sso_dashboard_link": "/login", "colour": "red"}
+	cfg.Apps["wiki"] = wiki
+	var unknown []string
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "blueprint-setting-unknown" {
+			unknown = append(unknown, f.Key)
+		}
+	}
+	if len(unknown) != 1 || unknown[0] != "apps.wiki.settings.colour" {
+		t.Errorf("unknown settings %v, want only apps.wiki.settings.colour", unknown)
+	}
+}

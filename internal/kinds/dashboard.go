@@ -2,6 +2,7 @@ package kinds
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -27,6 +28,17 @@ func DashboardPath(kind config.Kind) string {
 // false, the client skips it: the toolkit made the client for the community's
 // own app, so the screen asks a member to approve something already theirs.
 const ConsentSetting = "sso_consent"
+
+// genericSettings are the app settings the toolkit itself reads for every
+// app with a client at the identity provider, whatever its blueprint. A
+// blueprint declares only what its own templates read, so it never lists
+// these, and an app setting one is not a typo.
+var genericSettings = []string{DashboardLinkSetting, ConsentSetting}
+
+// IsGenericSetting reports whether key is one of the settings the toolkit
+// reads for every app, so validate does not call it unknown to a blueprint
+// that declares settings of its own.
+func IsGenericSetting(key string) bool { return slices.Contains(genericSettings, key) }
 
 // LaunchURL is the address the identity provider's dashboard opens for an
 // app: https://<hostname> plus link, or the kind's DashboardPath when link is

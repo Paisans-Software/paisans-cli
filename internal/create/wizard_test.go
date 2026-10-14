@@ -412,7 +412,7 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if want := "Name shown at sign in for the wiki [docs]: "; !strings.Contains(out, want) {
+	if want := "Name shown at sign in for the wiki [wiki]: "; !strings.Contains(out, want) {
 		t.Errorf("missing %q:\n%s", want, out)
 	}
 	if strings.Contains(out, "Name shown at sign in for the sign in") {
@@ -434,7 +434,7 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 	if err := w.Ask(SectionApps); err != nil {
 		t.Fatalf("%v\n%s", err, again.String())
 	}
-	if app, _ := w.Answers.App("docs"); app.DisplayName != "Wiki" {
+	if app, _ := w.Answers.App("wiki"); app.DisplayName != "Wiki" {
 		t.Errorf("answering the apps again changed docs's display name to %q", app.DisplayName)
 	}
 }

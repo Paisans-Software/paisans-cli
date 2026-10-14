@@ -176,7 +176,7 @@ func TestEveryPassReportsItsNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"plan hold=blog,docs,invite,talk client=false", "note run infra down", "execute", "plan hold= client=true", "note run infra down", "execute"}
+	want := []string{"plan hold=blog,invite,talk,wiki client=false", "note run infra down", "execute", "plan hold= client=true", "note run infra down", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s\nwant:\n%s", strings.Join(log.events, "\n"), strings.Join(want, "\n"))
 	}
@@ -197,7 +197,7 @@ func TestApplyCreatesAndRecordsTheClientBeforeTheAppRenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s%s", err, stdout, stderr)
 	}
-	want := []string{"plan hold=blog,docs,invite,talk client=false", "execute", "plan hold= client=true", "execute"}
+	want := []string{"plan hold=blog,invite,talk,wiki client=false", "execute", "plan hold= client=true", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s\nwant:\n%s", strings.Join(log.events, "\n"), strings.Join(want, "\n"))
 	}
@@ -403,7 +403,7 @@ func TestApplyHoldsBackWhenItsOwnPocketIDNeverAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"plan hold=blog,docs,invite,talk client=false", "execute", "plan hold=talk client=false", "execute"}
+	want := []string{"plan hold=blog,invite,talk,wiki client=false", "execute", "plan hold=talk client=false", "execute"}
 	if strings.Join(log.events, "\n") != strings.Join(want, "\n") {
 		t.Errorf("passes:\n%s", strings.Join(log.events, "\n"))
 	}
@@ -700,19 +700,19 @@ func TestApplyReportsAnOverwriteItHeldBack(t *testing.T) {
 // as steps, and a plan warning shows once although both calls plan.
 func TestApplyExecuteListsNoClientPlanAndWarnsOnce(t *testing.T) {
 	fake := withIDPFake(t)
-	custom := "https://docs.example.org/custom"
-	fake.others["docs"].LaunchURL = &custom
+	custom := "https://wiki.example.org/custom"
+	fake.others["wiki"].LaunchURL = &custom
 	c := stepFor(t, "home-a", secretsWithout(t, "talk"))
 	// A chosen launch URL beside a client's own, which the toolkit did not
 	// set, is the warning that both plans carry.
-	docs := c.cfg.Apps["docs"]
+	wiki := c.cfg.Apps["wiki"]
 	settings := map[string]any{}
-	for k, v := range docs.Settings {
+	for k, v := range wiki.Settings {
 		settings[k] = v
 	}
 	settings["sso_dashboard_link"] = "/home"
-	docs.Settings = settings
-	c.cfg.Apps["docs"] = docs
+	wiki.Settings = settings
+	c.cfg.Apps["wiki"] = wiki
 	rec := &ui.Recorder{}
 	c.report = rec
 	planFor := func([]string) (*apply.Plan, error) { return &apply.Plan{Site: "home-a"}, nil }

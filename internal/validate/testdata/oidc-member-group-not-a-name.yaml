@@ -1,4 +1,4 @@
-# valid.yaml with an Outline whose member_group is not a group name.
+# valid.yaml with a Wiki.js whose member_group is not a group name.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -62,12 +62,11 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
     placement: cluster
     settings:
-      s3_bucket: docs-uploads
       member_group: false
   auth:
     blueprint: pocket-id

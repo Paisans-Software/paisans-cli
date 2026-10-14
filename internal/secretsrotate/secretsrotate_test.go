@@ -546,7 +546,7 @@ func TestPrecheckRefusesAtPlan(t *testing.T) {
 // A rotation with its own staging is handed the whole of it, and leaves the
 // --all bookkeeping when it succeeds.
 func TestWholeRunsItsOwnStaging(t *testing.T) {
-	const cs = "oidc_clients.outline.client_secret"
+	const cs = "oidc_clients.wiki.client_secret"
 	w := newWorld(t, map[string]string{pw: "old", cs: "c"})
 	h := whole{newRot(w, cs, "a")}
 	run, err := secretsrotate.PlanAll(w.env(pw), []secretsrotate.Rotator{h, newRot(w, pw, "a")})
@@ -750,7 +750,7 @@ func (h *pendingAtWhole) RunWhole(e secretsrotate.Env) error {
 // renders does; they run inside secrets rotate because every rotation before
 // them in the run is promoted first, so none is pending when they start.
 func TestWholeRunsWithNothingPending(t *testing.T) {
-	const cs = "oidc_clients.outline.client_secret"
+	const cs = "oidc_clients.wiki.client_secret"
 	w := newWorld(t, map[string]string{pw: "old", cs: "c"})
 	w.secrets.Rotations = map[string]string{pw: "pw-next"}
 	h := &pendingAtWhole{rot: newRot(w, cs, "a")}

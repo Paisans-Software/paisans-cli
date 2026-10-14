@@ -16,10 +16,10 @@ wizard:
     default: true
     apps:
       - {key: talk, blueprint: mbin, subdomain: talk, what: "forums and social"}
-  - question: "A wiki (Outline)?"
+  - question: "A wiki (Wiki.js)?"
     default: true
     apps:
-      - {key: docs, blueprint: outline, subdomain: docs, what: "wiki"}
+      - {key: wiki, blueprint: wikijs, subdomain: wiki, what: "wiki"}
   - question: "Blogs (WriteFreely)?"
     default: true
     apps:

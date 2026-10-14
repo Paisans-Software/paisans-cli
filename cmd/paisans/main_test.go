@@ -33,7 +33,7 @@ func TestRunRenderRefusesAMalformedGarageKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "garage-key-is-malformed") {
 		t.Fatalf("the error should name the rule garage-key-is-malformed, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "docs.s3_access_key_id") {
+	if !strings.Contains(err.Error(), "blog.s3_access_key_id") {
 		t.Fatalf("the error should name the offending field, got: %v", err)
 	}
 	entries, err := os.ReadDir(out)

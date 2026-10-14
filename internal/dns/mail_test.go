@@ -44,8 +44,8 @@ func TestNoMailLocksDownTheDomainAndEveryHostname(t *testing.T) {
 		"TXT _dmarc.example.org":       dmarcLockdown,
 		"TXT talk.example.org":         spfLockdown,
 		"TXT talk-media.example.org":   spfLockdown,
-		"TXT docs.example.org":         spfLockdown,
-		"TXT docs-media.example.org":   spfLockdown,
+		"TXT blog.example.org":         spfLockdown,
+		"TXT blog-media.example.org":   spfLockdown,
 		"TXT vm.example.org":           spfLockdown,
 	}
 	if len(got) != len(want) {
@@ -93,7 +93,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	cfg.Apps["auth"] = config.App{Kind: config.KindPocketID, Hostname: "id.example.org", SMTP: &config.SMTP{FromAddress: "noreply@Talk.Example.org"}}
 	// An app that sends no mail has no say, even with a block (validate
 	// refuses one, but this must not depend on it).
-	cfg.Apps["docs"] = config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org", SMTP: &config.SMTP{FromAddress: "x@docs.example.org"}}
+	cfg.Apps["blog"] = config.App{Kind: config.Kind("writefreely"), Hostname: "blog.example.org", SMTP: &config.SMTP{FromAddress: "x@blog.example.org"}}
 
 	names := MailNames(cfg)
 	if s := names["example.org"]; len(s) != 1 || s[0] != "smtp.from_address" {
@@ -102,7 +102,7 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	if s := names["talk.example.org"]; len(s) != 1 || s[0] != "apps.auth.smtp.from_address" {
 		t.Errorf("an app's sender: %v", names)
 	}
-	if _, ok := names["docs.example.org"]; ok {
+	if _, ok := names["blog.example.org"]; ok {
 		t.Errorf("a kind that sends no mail made its sender a mail domain: %v", names)
 	}
 
@@ -116,8 +116,8 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	if !got["TXT _dmarc.example.org"].Advisory {
 		t.Errorf("the sending domain's DMARC is advisory")
 	}
-	if _, ok := got["TXT docs.example.org"]; !ok {
-		t.Errorf("docs sends no mail, so it says so")
+	if _, ok := got["TXT blog.example.org"]; !ok {
+		t.Errorf("blog sends no mail, so it says so")
 	}
 }
 

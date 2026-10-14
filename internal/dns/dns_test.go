@@ -199,10 +199,10 @@ func declared() *config.Config {
 		},
 		Apps: map[string]config.App{
 			"talk": {Kind: config.Kind("mbin"), Hostname: "talk.example.org"},
-			"docs": {Kind: config.Kind("outline"), Hostname: "Docs.Example.org."},
+			"blog": {Kind: config.Kind("writefreely"), Hostname: "Blog.Example.org."},
 		},
 		Community: config.Community{Domain: "example.org"},
-		// Garage, so talk and docs keep their files in it and each has a
+		// Garage, so talk and blog keep their files in it and each has a
 		// media hostname, as they would by default in a real deployment.
 		Storage: config.Storage{Garage: config.Garage{Sites: []string{"home-a"}}},
 	}
@@ -279,9 +279,9 @@ func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
 			}
 		}
 	}
-	// docs was declared with capitals and a trailing dot, which its derived
+	// blog was declared with capitals and a trailing dot, which its derived
 	// media hostname inherits, and both sort first.
-	if len(addresses) != 5 || addresses[0].Name != "docs-media.example.org" || addresses[1].Name != "docs.example.org" {
+	if len(addresses) != 5 || addresses[0].Name != "blog-media.example.org" || addresses[1].Name != "blog.example.org" {
 		t.Errorf("names should be normalised and sorted, got %+v", addresses)
 	}
 
@@ -559,8 +559,8 @@ func TestDesiredDerivesAndDedupes(t *testing.T) {
 		}
 	}
 	want := []string{
-		"A docs-media.example.org", "AAAA docs-media.example.org",
-		"A docs.example.org", "AAAA docs.example.org",
+		"A blog-media.example.org", "AAAA blog-media.example.org",
+		"A blog.example.org", "AAAA blog.example.org",
 		"A example.org", "AAAA example.org",
 		"A matrix.example.org", "AAAA matrix.example.org",
 		"A talk-media.example.org", "AAAA talk-media.example.org",
@@ -584,17 +584,17 @@ func TestALocalStorageAppGetsNoMediaRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawDocsMedia bool
+	var sawBlogMedia bool
 	for _, w := range wants {
 		if w.Name == "talk-media.example.org" {
 			t.Errorf("talk keeps its files locally and still gets %s %s", w.Type, w.Name)
 		}
-		if w.Name == "docs-media.example.org" {
-			sawDocsMedia = true
+		if w.Name == "blog-media.example.org" {
+			sawBlogMedia = true
 		}
 	}
-	if !sawDocsMedia {
-		t.Error("docs is still in Garage and lost its media record")
+	if !sawBlogMedia {
+		t.Error("blog is still in Garage and lost its media record")
 	}
 }
 
@@ -625,7 +625,7 @@ func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
 	// The monitor's hostnames need no gateway, and its own address is
 	// required.
 	delete(cfg.Apps, "talk")
-	delete(cfg.Apps, "docs")
+	delete(cfg.Apps, "blog")
 	vm := cfg.Sites["vm"]
 	vm.Roles = []config.Role{config.RoleWitness}
 	cfg.Sites["vm"] = vm

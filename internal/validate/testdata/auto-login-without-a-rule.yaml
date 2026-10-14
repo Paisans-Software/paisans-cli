@@ -1,5 +1,5 @@
-# valid.yaml with one thing broken: auto_login on Outline, which has no
-# auto-login rule because its sign-in screen redirects itself.
+# valid.yaml with one thing broken: auto_login on Element, a static client
+# whose blueprint has no auto-login rule.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -71,13 +71,11 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.org
-    placement: cluster
+  web:
+    blueprint: element
+    hostname: web.example.org
+    placement: { pinned: home-a }
     auto_login: true
-    settings:
-      s3_bucket: docs-uploads
   auth:
     blueprint: pocket-id
     hostname: id.example.org

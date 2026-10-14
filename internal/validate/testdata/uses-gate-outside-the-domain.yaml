@@ -71,13 +71,11 @@ storage:
     replication: 1
 
 apps:
-  docs:
-    blueprint: outline
-    hostname: docs.example.net
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.net
     placement: cluster
     gated: true
-    settings:
-      s3_bucket: docs-uploads
   auth:
     blueprint: pocket-id
     hostname: id.example.org

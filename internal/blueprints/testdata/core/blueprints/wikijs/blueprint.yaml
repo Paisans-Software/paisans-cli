@@ -1,0 +1,148 @@
+# The wikijs blueprint, in the core catalog.
+# paisans-stack reads it; internal/kinds.Parse there documents every key.
+# Spec: paisans-stack docs/specs/2026-10-13-wikijs-blueprint.md.
+apiVersion: paisans.blueprint/v1
+name: wikijs
+services:
+  # Wiki.js 2.x, the line in maintenance; 3 is a beta. A track on 2.5,
+  # the line every 2.x release since 2020 has been on: 2.5.316, the
+  # newest on 2026-10-13, is what every citation here was read at.
+  - {name: "app", image: "ghcr.io/requarks/wiki:2.5.*", purpose: "the application"}
+  # Paisans-Software/wikijs-bootstrap, published for amd64 and arm64.
+  # NOTE THE MISSING `v`: docker/metadata-action's semver pattern strips
+  # it from the git tag. 0.1 is the first release, and a 0.x minor may
+  # change the environment bootstrap.env renders, so a new minor is
+  # taken by a catalog release.
+  - {name: "bootstrap", image: "ghcr.io/paisans-software/wikijs-bootstrap:0.1.*", purpose: "finishes setup and keeps sign-in, site settings and groups as configured"}
+  - {name: "postgres", purpose: "its own database, when the app is pinned"}
+database: {engine: postgres}
+# Fixed by the image's own config.yml (dev/build/config.yml:1), which
+# reads no variable for it.
+port: 3000
+config:
+  # Wiki.js 2.5 reads only its database from the environment; everything
+  # else is the bootstrap's, through Wiki.js's GraphQL API.
+  format: env
+  file: ".env"
+# Cited at Wiki.js v2.5.316.
+# Answers 200 while its database pool has a connection, 503 when it has
+# none (server/controllers/common.js:29-35). It answers 200 in setup
+# mode too, so it says the process is up, not that setup is done; the
+# bootstrap's healthcheck says that.
+health: {path: "/healthz", status: [200]}
+gate:
+  gateable: true
+  # The OAuth2 start and its callback, the app's own sign-in routes
+  # (server/controllers/auth.js:53,66; the callback is built at
+  # server/core/auth.js:85 from the strategy key, pocketid, which the
+  # bootstrap sets).
+  open_paths:
+    - "/login/pocketid"
+    - "/login/pocketid/callback"
+  auto_login:
+    # Wiki.js's session is its jwt cookie (server/controllers/auth.js:73).
+    # Only / and /login: any other page answers a guest 403 with a Login
+    # button and keeps the page in the loginRedirect cookie, so one
+    # click lands a member where the link pointed.
+    - {paths: ["/", "/login"], target: "/login/pocketid", absent_cookies: ["jwt"]}
+  sign_in_path: "/login"
+# Wiki.js's generic OAuth2 module, not its OpenID Connect one, which
+# fixes its scopes without groups (server/modules/authentication/oidc/
+# definition.yml:10-13). The callback is ${host}/login/${key}/callback
+# (server/core/auth.js:85) with the key pocketid. passport-oauth2 is
+# given no PKCE option, so it sends no code_challenge
+# (server/modules/authentication/oauth2/authentication.js:13-23). Wiki.js
+# puts each person in the groups the claim names and takes them out of
+# every other on each sign-in (oauth2/authentication.js:36-48).
+oidc:
+  callback: "/login/pocketid/callback"
+  pkce: false
+  reads_groups: true
+  admin_group_setting: "admin_group"
+  member_group_setting: "member_group"
+  default_admin_group: "admins"
+  default_member_group: "members"
+  extra_groups_setting: "synced_groups"
+settings:
+  admin_group: {type: string, default: "admins"}
+  member_group: {type: string, default: "members"}
+  # The Pocket ID groups that become Wiki.js groups, by name. The
+  # bootstrap creates each one missing in Wiki.js, and apply each one
+  # missing at Pocket ID.
+  synced_groups: {type: list, default: ["admins", "members"]}
+  # The blueprint's because changing them in Wiki.js needs manage:system,
+  # which no member has.
+  site_title: {type: string, default: "Wiki"}
+  site_description: {type: string, default: ""}
+  # An absolute URL reachable without signing in, since the login page
+  # shows it; empty for Wiki.js's own.
+  logo_url: {type: string, default: ""}
+  # Per file, in MiB as Wiki.js counts it (server/app/data.yml:97,
+  # 5242880). The gateway's request body limit follows it.
+  upload_max_mb: {type: int, default: 5}
+secrets:
+  generate:
+    # The break glass admin's, which the bootstrap signs in with.
+    - name: local_admin_password
+      never_rotate: "Wiki.js keeps the break glass admin's password hashed in its own database once setup has run, and nothing changes it there, so a rotated secret would no longer sign in and the bootstrap could not configure the wiki"
+# The rules validate holds a Wiki.js app to.
+checks:
+  # Without the admin group in synced_groups nobody but the break glass
+  # admin can administer the wiki, and the bootstrap refuses to run.
+  # Provisional: inferred, not decided.
+  - id: wikijs-synced-groups-lack-admin-group
+    level: refuse
+    hint: synced_groups does not include the admin group
+    key: settings.synced_groups
+    rule: |-
+      type(app.settings.synced_groups) != list || (has(app.settings.admin_group) ? app.settings.admin_group : 'admins') in app.settings.synced_groups
+    message: "does not include the admin group. Add it, or nobody but the break glass admin can administer the wiki."
+  # The bootstrap reads SYNCED_GROUPS split on commas and trims each name,
+  # and bootstrap.env carries the list bare, where Compose would end a
+  # value at " #", expand a $ and strip quotes, and cannot carry a control
+  # character at all. A name with any of those would reach Wiki.js as a
+  # different group from Pocket ID's, or as two.
+  - id: wikijs-synced-group-name
+    level: refuse
+    hint: a synced_groups name cannot be passed to the bootstrap
+    key: settings.synced_groups
+    rule: |-
+      type(app.settings.synced_groups) != list || app.settings.synced_groups.all(g, type(g) != string || (g.trim() == g && !g.matches('[,$#"\'\\\\\\x00-\\x1f\\x7f]')))
+    message: "holds a name with a comma, a $, a #, a quote, a backslash, a control character, or a space at either end. The bootstrap reads the list comma separated through an env file, so such a name would reach Wiki.js as a different group. Rename the group at Pocket ID."
+  # The bootstrap refuses to start without SITE_TITLE, and an env file
+  # trims a value of spaces, so a blank title would stop it.
+  - id: wikijs-site-title-empty
+    level: refuse
+    hint: site_title is empty
+    key: settings.site_title
+    rule: |-
+      type(app.settings.site_title) != string || app.settings.site_title.trim() != ''
+    message: "is empty. The wiki needs a title; leave the key out for the default, Wiki."
+  # Administrators (ID 1) and Guests (ID 2) are Wiki.js's built-in groups.
+  # The bootstrap rewrites the admin group's permissions and creates the
+  # synced ones, so naming either would strip Administrators of
+  # manage:system or put members' rights on Guests.
+  - id: wikijs-builtin-group
+    level: refuse
+    hint: a Wiki.js built-in group is named
+    key: settings.admin_group
+    rule: |-
+      !has(app.settings.admin_group) || !(app.settings.admin_group in ['Administrators', 'Guests'])
+    message: "is one of Wiki.js's built-in groups, Administrators or Guests. Use a group of your own."
+  - id: wikijs-builtin-group
+    level: refuse
+    hint: a Wiki.js built-in group is named
+    key: settings.synced_groups
+    rule: |-
+      type(app.settings.synced_groups) != list || !app.settings.synced_groups.exists(g, g in ['Administrators', 'Guests'])
+    message: "names one of Wiki.js's built-in groups, Administrators or Guests. Use groups of your own."
+  # The bootstrap refuses anything under 1. The upper bound is ours: a
+  # gigabyte per file is past anything a wiki stores, and the gateway
+  # accepts a request this size plus framing.
+  - id: wikijs-upload-limit
+    level: refuse
+    hint: upload_max_mb is not between 1 and 1024
+    key: settings.upload_max_mb
+    rule: |-
+      type(app.settings.upload_max_mb) != int || (app.settings.upload_max_mb >= 1 && app.settings.upload_max_mb <= 1024)
+    message: "must be a whole number of megabytes from 1 to 1024."

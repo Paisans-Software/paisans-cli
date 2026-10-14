@@ -68,8 +68,8 @@ func TestExecuteRefusesWhenTheResultIsNotAnAdmin(t *testing.T) {
 }
 
 func TestUnsupportedKind(t *testing.T) {
-	_, err := Build(config.Kind("outline"), nullTransport{}, Request{Username: "founder"})
-	if err == nil || err.Error() != "outline admin creation is not implemented yet. Implemented kinds: pocket-id" {
+	_, err := Build(config.Kind("wikijs"), nullTransport{}, Request{Username: "founder"})
+	if err == nil || err.Error() != "wikijs admin creation is not implemented yet. Implemented kinds: pocket-id" {
 		t.Errorf("got %v", err)
 	}
 }

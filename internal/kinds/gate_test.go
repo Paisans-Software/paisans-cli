@@ -59,10 +59,7 @@ func TestNoGateRecordOpensTheFrontPage(t *testing.T) {
 // A dedicated health route is open past the gate, so a gated app can be
 // checked through the edge; `/` is the front page and never is.
 func TestADedicatedHealthRouteIsOpen(t *testing.T) {
-	if !slices.Contains(kinds.OpenPathsFor(config.Kind("outline")), "/_health") {
-		t.Error("outline's /_health is not open past the gate")
-	}
-	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("writefreely")} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("wikijs"), config.Kind("writefreely")} {
 		if !slices.Contains(kinds.OpenPathsFor(kind), "/healthz") {
 			t.Errorf("%s's /healthz is not open past the gate", kind)
 		}

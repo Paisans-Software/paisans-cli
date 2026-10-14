@@ -218,11 +218,11 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"external.smtp_password",
 		"oidc_clients.blog.client_secret",
 		"oidc_clients.chat.client_secret",
-		"oidc_clients.docs.client_secret",
 		"oidc_clients.gate.client_secret",
 		"oidc_clients.health.client_secret",
 		"oidc_clients.invite.client_secret",
 		"oidc_clients.talk.client_secret",
+		"oidc_clients.wiki.client_secret",
 		"apps.talk.oauth",
 		"apps.chat.mas_signing_key",
 		"apps.chat.mas_matrix_secret",
@@ -231,7 +231,6 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.invite.session_key",
 		"apps.talk.app_secret",
 		"apps.blog.s3_secret_access_key",
-		"apps.docs.s3_secret_access_key",
 		"apps.talk.s3_secret_access_key",
 		"apps.auth.static_api_key",
 		"apps.health.admin_password",
@@ -241,13 +240,11 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.database_password",
 		"apps.blog.database_password",
 		"apps.chat.database_password",
-		"apps.docs.database_password",
 		"apps.invite.database_password",
 		"apps.talk.database_password",
+		"apps.wiki.database_password",
 		"apps.talk.rabbitmq_password",
 		"apps.auth.dns_email_hash_key",
-		"apps.docs.redis_password",
-		"apps.docs.utils_secret",
 		"apps.talk.mercure_jwt_secret",
 		"apps.talk.valkey_password",
 		"storage.garage.admin_token",
@@ -273,8 +270,8 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 	for _, p := range []string{
 		"apps.auth.encryption_key",
 		"apps.chat.mas_encryption_secret",
-		"apps.docs.outline_secret_key",
 		"apps.invite.email_hash_key",
+		"apps.wiki.local_admin_password",
 		"sites.*.wireguard_private_key",
 	} {
 		if !slices.Contains(keptPaths, p) {
@@ -533,8 +530,8 @@ func TestSecretsRotateNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]string{
-		"oidc_clients.docs.client_secret": "deleted at Pocket ID",
-		"apps.docs.s3_secret_access_key":  "deleted from Garage",
+		"oidc_clients.wiki.client_secret": "deleted at Pocket ID",
+		"apps.blog.s3_secret_access_key":  "deleted from Garage",
 		"storage.garage.rpc_secret":       "home-a, home-b",
 		"external.acme_dns_token":         "paisans secrets set external.acme_dns_token",
 		"external.smtp_password":          "paisans secrets set external.smtp_password",
