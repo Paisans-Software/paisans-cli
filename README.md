@@ -7543,6 +7543,28 @@ compares the decoded, cleaned path case insensitively (`MatchPath` in
 case, a doubled slash, a dot segment or an escaped letter reaches the same
 refusal.
 
+**The gateway refuses every request that carries an API key.** Before any
+other rule, the snippet answers 403 to a request with an `X-API-Key` header,
+on every path and for every method, whatever its value, an empty one
+included, and whatever else the request carries, a valid session cookie
+included:
+
+```caddy
+@api_key header X-API-Key *
+respond @api_key 403
+```
+
+Pocket ID reads an API key from that header alone
+(`middleware/api_key_auth.go:38` at v2.14.0), and Caddy's header matcher
+compares the name case insensitively, so `x-api-key` and `X-API-KEY` are
+refused too. The web interface signs in with the `access_token` session
+cookie and never sends the header, so sign in, passkeys, the logo, OIDC
+discovery and every admin page are untouched. The static API key therefore
+works only on the mesh, where the toolkit and the account service send it.
+Members' own API keys, which Pocket ID lets a user create, are refused the
+same way: a member who scripts against Pocket ID does it from a machine on
+the mesh.
+
 ### The toolkit administers Pocket ID through its static API key
 
 Pocket ID is the one application whose first users, the operators, and whose
@@ -7571,8 +7593,11 @@ plus `su-exec`), and the host has it from `host prepare`.
 The key is a standing admin credential on every apps site that runs Pocket ID,
 which is worth stating plainly. It adds nothing to what root on that host
 already holds: the same `.env` carries the database connection string and the
-encryption key, and either is all of Pocket ID. It is reachable only over the
-mesh, because the port is bound to the mesh address and nowhere else.
+encryption key, and either is all of Pocket ID. It works only over the mesh:
+the port is bound to the mesh address and nowhere else, and the gateway, the
+one way to Pocket ID from the internet, refuses any request that carries an
+`X-API-Key` header (see *The gateway exposes only the Pocket ID routes its
+configuration turns on*).
 
 ### `oidc client create` makes an app's client at Pocket ID
 

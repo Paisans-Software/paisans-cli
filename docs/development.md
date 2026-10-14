@@ -1780,7 +1780,9 @@ against fakes.
 HAProxy's `listen pocket-id`, which the account service reaches Pocket ID's
 API through, has not run against a real Pocket ID: that its `/healthz` check
 marks a standby down and the route follows a takeover is reasoned from the
-standby's closed port.
+standby's closed port. The gateway's refusal of `X-API-Key` has run in the
+gateway's Caddy image in front of a stub, not on a deployed gateway with the
+account service calling Pocket ID over the mesh.
 
 `secrets rotate` has never been run against a real host either. Its `ALTER
 ROLE` on the leader and the Patroni restarts and switchover around a cluster
