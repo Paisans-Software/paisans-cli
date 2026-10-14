@@ -19,58 +19,37 @@ func (c *checker) accountApps() []string {
 	return out
 }
 
-// inviteApps are the account apps with invites on. Every rule an invite
-// community needs reads these; an app whose invites setting is missing or
-// not a boolean is refused by accountInvites and held to none of them.
-func (c *checker) inviteApps() []string {
-	var out []string
-	for _, name := range c.accountApps() {
-		if blueprints.AccountInvites(c.cfg.Apps[name]) {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-// accountInvites refuses an account app whose invites setting is missing or
-// not a boolean, and with invites off refuses what belongs to them: their
-// settings and the invite hostname. invites is access policy, like gated, so
-// it is declared and never defaulted; it decides whether invite.<domain>
-// exists at all.
-func (c *checker) accountInvites() {
+// accountSignup refuses an account app whose signup setting is missing or
+// is neither invite nor open, and under open signup refuses the settings
+// that belong to invite links. signup is access policy, like gated, so it is
+// declared and never defaulted: it decides whether a stranger can apply.
+func (c *checker) accountSignup() {
 	for _, name := range c.accountApps() {
 		app := c.cfg.Apps[name]
-		key := fmt.Sprintf("apps.%s.settings.%s", name, blueprints.AccountInvitesSetting)
-		raw, set := app.Settings[blueprints.AccountInvitesSetting]
+		key := fmt.Sprintf("apps.%s.settings.%s", name, blueprints.AccountSignupSetting)
+		raw, set := app.Settings[blueprints.AccountSignupSetting]
 		if !set {
-			c.refuse("account-invites-unset", key,
-				"invites must be declared",
-				"is missing. Set invites: true for a community that admits new members by invite, which serves the invite pages on invite.%s, or invites: false for one without invites. It is never defaulted, because it decides whether a hostname exists.", c.cfg.Community.Domain)
+			c.refuse("account-signup-unset", key,
+				"signup must be declared",
+				"is missing. Set signup: invite for a community that admits new members by a member's invite link, or signup: open for one where anyone may apply on join.%s. It is never defaulted, because it decides whether a stranger can apply at all.", c.cfg.Community.Domain)
 			continue
 		}
-		if _, ok := raw.(bool); !ok {
+		mode := blueprints.AccountSignup(app)
+		if mode == "" {
 			c.refuse("account-setting-invalid", key,
-				"account setting out of range", "is %v. It must be true or false, unquoted.", raw)
+				"account setting out of range", "is %v. It must be invite or open.", raw)
 			continue
 		}
-		if blueprints.AccountInvites(app) {
+		if mode != blueprints.SignupOpen {
 			continue
 		}
 		for _, k := range blueprints.AccountInviteSettings {
 			if _, ok := app.Settings[k]; ok {
-				c.refuse("account-invite-settings-without-invites", fmt.Sprintf("apps.%s.settings.%s", name, k),
-					"an invite setting with invites off",
-					"is set, and invites is false. It belongs to invites and the service is never told it, so it would read as configured and do nothing. Remove it, or set invites: true.")
+				c.refuse("account-invite-settings-under-open-signup", fmt.Sprintf("apps.%s.settings.%s", name, k),
+					"an invite setting under open signup",
+					"is set, and signup is open. It belongs to invite links, which open signup does not have, and the service is never told it, so it would read as configured and do nothing. Remove it, or set signup: invite.")
 			}
 		}
-		if _, ok := app.Hostnames[blueprints.InviteRole]; ok {
-			c.refuse("account-invite-hostname-without-invites", fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.InviteRole),
-				"an invite hostname with invites off",
-				"is set, and invites is false. The invite hostname exists only with invites on, so nothing would serve it, no DNS record or certificate would be made for it, and the line would read as though one were. Remove it, or set invites: true.")
-		}
-		c.warn("account-serves-nothing", key,
-			"the account app has nothing to serve",
-			"is false. Invites are the account service's one feature so far, so with them off it shows a signed in member their name and nothing else. Leave the app out, or set invites: true.")
 	}
 }
 
@@ -79,7 +58,7 @@ func (c *checker) accountMustBeClustered() {
 		if c.cfg.Apps[name].Placement.Mode != config.PlacementCluster {
 			c.refuse("account-must-be-clustered", fmt.Sprintf("apps.%s.placement", name),
 				"account must have cluster placement",
-				"is not cluster. Invites and applications must survive the loss of a site, so the account service keeps its state in the cluster's Postgres and runs on every apps site. Set placement: cluster.")
+				"is not cluster. Invites, applications and bans must survive the loss of a site, so the account service keeps its state in the cluster's Postgres and runs on every apps site. Set placement: cluster.")
 		}
 	}
 }
@@ -88,9 +67,8 @@ func (c *checker) accountMustBeClustered() {
 // in through and creates accounts at. It is the deployment's one pocket-id
 // app, found rather than named: with none there is nothing to sign in to, and
 // with more than one the account service's client, issuer and API key could
-// come from different identity providers. With invites on it also checks the
-// one setting of that app the invite flow depends on that the toolkit does
-// not render itself.
+// come from different identity providers. It also checks the one setting of
+// that app every signup depends on that the toolkit does not render itself.
 func (c *checker) accountIdentityProvider() {
 	for _, name := range c.accountApps() {
 		n := len(c.pocketIDApps())
@@ -106,9 +84,6 @@ func (c *checker) accountIdentityProvider() {
 				"is an account app, and this configuration has %d pocket-id apps. The account service's OIDC client, its issuer and its API key all come from the deployment's pocket-id app; with more than one, they could be different identity providers. Declare one pocket-id app.", n)
 			continue
 		}
-		if !blueprints.AccountInvites(c.cfg.Apps[name]) {
-			continue
-		}
 		idp, _ := c.cfg.PocketIDApp()
 		if v, set := c.cfg.Apps[idp].Settings["email_one_time_access_as_admin"]; set && v == false {
 			c.refuse("account-login-link-disabled", fmt.Sprintf("apps.%s.settings.email_one_time_access_as_admin", idp),
@@ -118,34 +93,35 @@ func (c *checker) accountIdentityProvider() {
 	}
 }
 
-// accountWithoutSMTP refuses an account app with no mail server, invites on
-// or off: the service reads ACCOUNT_SMTP_HOST and ACCOUNT_SMTP_FROM as
+// accountWithoutSMTP refuses an account app with no mail server: the service
+// reads ACCOUNT_SMTP_HOST and ACCOUNT_SMTP_FROM as
 // required and refuses to start without them.
 func (c *checker) accountWithoutSMTP() {
 	for _, name := range c.accountApps() {
 		if !c.cfg.CanMail(name) {
 			c.refuse("account-without-smtp", fmt.Sprintf("apps.%s", name),
 				"account needs mail",
-				"resolves no SMTP host and from_address. The account service refuses to start without one, and with invites on it emails admins when an application is waiting and tells invitees the outcome. Declare an smtp: block with a host and from_address.")
+				"resolves no SMTP host and from_address. The account service refuses to start without one; it emails admins when an application is waiting and tells applicants the outcome. Declare an smtp: block with a host and from_address.")
 		}
 	}
 }
 
 // accountCodeOfConduct refuses a missing, non-string or blank code of
-// conduct. The setting is the Markdown text itself, so nothing reads a file.
+// conduct, in either signup mode. The setting is the Markdown text itself, so
+// nothing reads a file.
 func (c *checker) accountCodeOfConduct() {
-	for _, name := range c.inviteApps() {
+	for _, name := range c.accountApps() {
 		text, ok := c.cfg.Apps[name].Settings["code_of_conduct"].(string)
 		if !ok || strings.TrimSpace(text) == "" {
 			c.refuse("account-code-of-conduct-missing", fmt.Sprintf("apps.%s.settings.code_of_conduct", name),
 				"the code of conduct text is missing",
-				"is missing, empty or not text. Every invitee agrees to the code of conduct before an account exists. Put the community's code of conduct in code_of_conduct as a block of text (code_of_conduct: |).")
+				"is missing, empty or not text. Everyone who signs up, by invite or by registering, agrees to the code of conduct before an account exists. Put the community's code of conduct in code_of_conduct as a block of text (code_of_conduct: |).")
 		}
 	}
 }
 
 func (c *checker) accountSettingInvalid() {
-	for _, name := range c.inviteApps() {
+	for _, name := range c.accountApps() {
 		s := c.cfg.Apps[name].Settings
 		for _, key := range sortedKeys(blueprints.AccountSettingRanges) {
 			v, set := s[key]

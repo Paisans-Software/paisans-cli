@@ -563,7 +563,7 @@ to make by omission.
 | An `account` app | required (`pocket-id-without-account`) | refused (`account-under-pocket-id-management`) |
 | `allow_user_signups` | refused if set (`pocket-id-setting-managed`); rendered `disabled` | the operator's choice |
 | `email_one_time_access_as_unauthenticated` | refused if set (`pocket-id-setting-managed`); rendered `true` | the operator's choice |
-| `email_one_time_access_as_admin` | refused if `false` with invites on (`account-login-link-disabled`) | the operator's choice |
+| `email_one_time_access_as_admin` | refused if `false` (`account-login-link-disabled`) | the operator's choice |
 | SMTP host and sender | required (`pocket-id-paisans-without-smtp`) | optional |
 | Operators' `isAdmin` at Pocket ID | never set by `apply` | set by `apply` |
 | Signup, bans, recovery | the account service | Pocket ID's admin pages |
@@ -589,16 +589,35 @@ Each row has its reason:
 ### The account service
 
 The `account` blueprint runs [`Paisans-Software/paisans-account-service`](https://github.com/Paisans-Software/paisans-account-service),
-the community's account management under `management: paisans`. It carries
-invites and their approval, so that admitting someone needs no Pocket ID
-administrator. With invites on, a signed in member makes an invite link.
-Whoever opens it reads the community's code of conduct, agrees to it, and
-chooses a username, a display name and an email address. With
-`require_approval` on, a community admin then approves or declines the
-application; only after approval does an account exist at Pocket ID, and
-Pocket ID emails the new member a one-time sign-in link. The design is in
-`docs/specs/2026-10-12-invite-service.md` and
-`docs/specs/2026-10-14-account-service.md`.
+the community's account management under `management: paisans`. It is where
+people join, where community admins ban them, and where an account is
+recovered, so that none of it needs a Pocket ID administrator.
+
+* **Signup.** With `signup: invite`, a signed in member makes an invite link;
+  with `signup: open`, anyone opens the registration page. Either way the
+  person reads the community's code of conduct, agrees to it, and chooses a
+  username, a display name and an email address, and an address under a
+  current ban is refused. With `require_approval` on, a community admin then
+  approves or declines the application; only after approval does an account
+  exist at Pocket ID, and Pocket ID emails the new member a one-time sign-in
+  link.
+* **Bans.** A community admin finds a member at `/admin/members` and bans them
+  with a reason: the service disables the user at Pocket ID and keeps a keyed
+  hash of their address, so they cannot sign up again. `/admin/bans` lists
+  every ban and lifts one. An operator cannot be banned there, because an
+  operator is removed by editing `paisans-stack.yaml`: the toolkit renders
+  their usernames as `ACCOUNT_OPERATORS`, and the service refuses them. A ban
+  does not end a session an app keeps for itself.
+* **A member's own account and recovery.** A member changes their own address
+  (confirmed by a code sent to the new one) and name at `/account/email` and
+  `/account/name`, since nobody edits their own Pocket ID account. A member
+  who has lost both passkey and address is recovered at `/admin/recovery`,
+  opened by one community admin and approved by a different one. Operators
+  are refused both, and recover with `paisans operator magic-link`.
+
+The design is in `docs/specs/2026-10-12-invite-service.md`,
+`docs/specs/2026-10-14-account-service.md` and
+`docs/specs/2026-10-14-account-signup-bans-recovery.md`.
 
 The app exists because it is declared, and `management: paisans` requires it:
 the toolkit never adds it or drops it on its own, so the declaration is the
@@ -611,7 +630,7 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      invites: true
+      signup: invite
       invite_quota: 3
       require_approval: true
       code_of_conduct: |
@@ -619,57 +638,58 @@ apps:
 
         Be kind. Keep what is shared here inside the community.
     hostnames:
-      invite: invite.example.org   # optional; invite.<domain> when unset
+      join: join.example.org   # optional; join.<domain> when unset
 ```
 
 | Setting | Takes | Default |
 |---------|-------|---------|
-| `invites` | `true` or `false` | required |
-| `invite_quota` | 1 to 100: live invites a member may hold at once; community admins have no quota | `3` |
+| `signup` | `invite` or `open` | required |
+| `invite_quota` | `signup: invite` only. 1 to 100: live invites a member may hold at once; community admins have no quota | `3` |
 | `require_approval` | `true` or `false` | `true` |
-| `invite_lifetime_days` | 1 to 365: how long an unused invite lasts | `14` |
+| `invite_lifetime_days` | `signup: invite` only. 1 to 365: how long an unused invite lasts | `14` |
 | `application_wait_days` | 1 to 365: how long an application waits for a community admin before it is dropped | `14` |
 | `decline_retention_days` | 1 to 3650: how long a declined address is remembered | `183` |
-| `login_link_days` | 1 to 31: how long the sign-in link Pocket ID emails lasts, and the number of days the invitee's page says | `7` |
-| `code_of_conduct` | the Markdown text itself, a YAML block scalar | required with invites on |
+| `login_link_days` | 1 to 31: how long the sign-in link Pocket ID emails lasts, and the number of days the applicant's page says | `7` |
+| `code_of_conduct` | the Markdown text itself, a YAML block scalar | required |
 | `member_group`, `admin_group` | the Pocket ID groups its OIDC client admits | `members`, `admins` |
 
-**`invites` is declared, never defaulted.** It is access policy, like
-`gated`, and it decides whether a hostname exists. The `invite_*` settings,
-`require_approval`, `application_wait_days`, `decline_retention_days`,
-`login_link_days` and `code_of_conduct` belong to invites and are refused with
-`invites: false`.
+**`signup` is declared, never defaulted.** It is access policy, like `gated`:
+it decides whether a stranger can apply at all. `invite_quota` and
+`invite_lifetime_days` belong to invite links and are refused with
+`signup: open`, since the service is never told them there; every other
+setting applies in both modes.
 
 ### Two hostnames
 
 | Hostname | Serves |
 |---|---|
-| the app's `hostname`, `account.<domain>` in the example | everything a signed in member or community admin uses: sign in, the home page, making and revoking invites, `/admin` and the application queue |
-| `invite.<domain>`, or `hostnames.invite` | only the pages an invitee opens before they have an account, `/i/<token>`, and their static files |
+| the app's `hostname`, `account.<domain>` in the example | everything a signed in member or community admin uses: sign in, the home page at `/`, a member's own address and name, making and revoking invites, `/admin`, the application queue, bans and recovery |
+| `join.<domain>`, or `hostnames.join` | only the pages for someone with no account yet, and their static files: `/i/<token>` with `signup: invite`, the registration page at `/` with `signup: open` |
 
-The invite hostname exists only with `invites: true`. With invites off there
-is no DNS record, no Caddy block, no certificate and no route in the app for
-it. With them on, its name is `invite.` under `community.domain` unless
-`hostnames.invite` names another. Every consumer of an app's hostnames (the
+Every account app has the join hostname, because every one takes signups in
+one mode or the other. Its name is `join.` under `community.domain` unless
+`hostnames.join` names another. Every consumer of an app's hostnames (the
 gateway, `dns init`, `validate`'s collision checks) reads them through one
-resolver, `blueprints.RoleHostnames`, so a stale `hostnames.invite` with
-invites off reaches none of them even if `validate` were bypassed.
+resolver, `blueprints.RoleHostnames`, so the gateway, DNS and the collision
+checks always agree on it.
 
 **Each hostname serves only its own routes**, enforced twice. The service
 registers each route with the host of its public URL, so a request for a
 route on the other hostname gets a 404, and that holds for a request that
-reaches it directly on the mesh. The gateway's invite snippet passes `/i/*`
-and `/static/*` and answers 404 to everything else, and the primary snippet
-answers 404 to `/i/*`. The session cookie carries no `Domain` attribute, so
-the origin an invitee opens never holds a session.
+reaches it directly on the mesh. The gateway's join snippet passes `/i/*` and
+`/static/*` with `signup: invite`, and exactly `/` (`GET` and `POST`) and
+`/static/*` with `signup: open`, and answers 404 to everything else. The
+primary snippet answers 404 to `/i/*` in both modes and proxies its own `/`,
+which is the member's home page. The session cookie carries no `Domain`
+attribute, so the origin someone signing up opens never holds a session.
 
 **It is cluster only** (`account-must-be-clustered`). Its state is in the
 cluster's Postgres, under a role and database of its own, and it runs on every
-apps site, so an invite survives the loss of a site. It listens on
-container port `8082`, because `8080` belongs to a clustered Mbin on the same
-site, and answers `GET /healthz` with `200` when its database does. Neither
-hostname is put behind the gate: an invitee has no account when they open
-`/i/<token>`, and the service checks every sign in itself.
+apps site, so an invite, an application or a ban survives the loss of a site.
+It listens on container port `8082`, because `8080` belongs to a clustered
+Mbin on the same site, and answers `GET /healthz` with `200` when its database does. Neither
+hostname is put behind the gate: someone signing up has no account yet, and
+the service checks every sign in itself.
 
 **The identity app** is the deployment's one `pocket-id` app. The account app
 names none, and `identity_app` among its settings is refused
@@ -681,7 +701,7 @@ account service's `.env`, and the next `apply` recreates the account stack.
 
 ### What it writes at Pocket ID
 
-Two calls, and nothing else:
+Three calls, and nothing else:
 
 * **Create the user**: `POST /api/users` with the username, email address and
   display name. No group and no admin flag, so the new account takes the
@@ -690,6 +710,10 @@ Two calls, and nothing else:
 * **Send the sign-in email**: `POST /api/users/<id>/one-time-access-email`
   with a `ttl` of `login_link_days × 24` hours. Pocket ID sends the mail
   itself.
+* **Update the user**: `PUT /api/users/<id>`, with every other field sent back
+  as read, to disable or re-enable a banned member, to set a verified address
+  after an address change or a recovery, and to set a member's name. Groups
+  are never touched, so a lifted ban returns everything the member had.
 
 It authenticates with the Pocket ID app's `static_api_key`, the same key the
 toolkit uses, and a Pocket ID API key carries no scopes: the key is all of
@@ -702,13 +726,11 @@ Then check Pocket ID for administrators, clients and API keys nobody made.
 
 | Rule | Refused or warned |
 |---|---|
-| `account-invites-unset` | `settings.invites` missing. Refused |
-| `account-invite-settings-without-invites` | an invite setting (see above) with `invites: false`. Refused: the service is never told it, so it would read as configured and do nothing |
-| `account-invite-hostname-without-invites` | `hostnames.invite` with `invites: false`. Refused: nothing would serve it |
-| `account-serves-nothing` | `invites: false`. A warning: invites are the service's one feature so far |
+| `account-signup-unset` | `settings.signup` missing. Refused |
+| `account-invite-settings-under-open-signup` | `invite_quota` or `invite_lifetime_days` with `signup: open`. Refused: the service is never told it, so it would read as configured and do nothing |
 
-With invites on, the identity app is held to the one setting the invite flow
-depends on that the toolkit does not render itself:
+The identity app is held to the one setting every signup depends on that the
+toolkit does not render itself:
 
 | The identity app | Refused | Rule |
 |---|---|---|
@@ -718,11 +740,11 @@ Its signup and its email code are not checked here, because the account app
 exists only under `management: paisans`, where the toolkit renders both itself
 and refuses either one declared (*Who manages accounts: `management`*).
 
-Also refused with invites on: a `code_of_conduct` that is missing, empty or
-not text (`account-code-of-conduct-missing`), and a setting out of range
-(`account-setting-invalid`, which also refuses an `invites` that is not a
-boolean). Refused either way, because every account app signs members in
-through Pocket ID and the service will not start without a mail server: a
+Also refused: a `code_of_conduct` that is missing, empty or not text
+(`account-code-of-conduct-missing`), and a setting out of range
+(`account-setting-invalid`, which also refuses a `signup` that is neither
+`invite` nor `open`). Refused as well, because every account app signs
+members in through Pocket ID and the service will not start without a mail server: a
 deployment with no `pocket-id` app (`account-without-pocket-id`), one with
 more than one (`account-one-identity-app`, since the account app's OIDC
 client, issuer and API key all come from the deployment's Pocket ID, and with
@@ -732,15 +754,16 @@ setting (`account-setting-unknown`, refused for that key), and no SMTP host
 and sender for the app (`account-without-smtp`). Any other setting the
 blueprint does not read is a warning under the same rule, since it renders
 nothing. The service sends its own notices (an application waiting, an
-invitee's outcome) through the deployment's `smtp:` block, which the app's
-own `smtp:` fields may override; the sign-in link is Pocket ID's mail.
+applicant's outcome, an address change) through the deployment's `smtp:`
+block, which the app's own `smtp:` fields may override; the sign-in link is
+Pocket ID's mail.
 
 ### The code of conduct
 
 `code_of_conduct` is the text, not a path, so it is versioned and synced with
 the rest of `paisans-stack.yaml` through every site's configuration store. `render`
 writes it to `code-of-conduct.md` in the app's data directory and the container
-mounts it read-only; with invites off the file is empty. Its SHA-256 is the
+mounts it read-only, in either signup mode. Its SHA-256 is the
 version recorded with each person's agreement, so editing the text is a new
 version without anyone numbering it.
 
@@ -1569,7 +1592,7 @@ named in every site's `ssh.keys`. It then asks who manages accounts and writes
 the answer as the `pocket-id` app's `management` (see *Who manages accounts:
 `management`*), since that is never defaulted. With the account service it
 adds an `account` app, asking its hostname (`account.<domain>` by default),
-whether members invite new people, and with invites the Markdown file that
+how people join (`signup: invite` or `open`), and the Markdown file that
 holds the code of conduct, whose text it writes into `code_of_conduct`. With
 Pocket ID it asks `allow_user_signups` and the two email settings,
 `email_one_time_access_as_unauthenticated` and
@@ -2777,7 +2800,7 @@ password is a secret: `apps.<app>.smtp_password` when present, otherwise
 mail host.
 
 Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
-`ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and invitees; the
+`ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and applicants; the
 uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
 `SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
@@ -6727,7 +6750,7 @@ reconciler reports when it disagrees with the yaml rather than changing
 either one. Its only requests are `GET`s, and its tests fail on any other
 method. Every two hours, and once when it starts, it reads Pocket ID's users
 and the groups it checks (after one minute instead when it could not read
-Pocket ID, which starts alongside it), and holds them to two checks:
+Pocket ID, which starts alongside it), and holds them to three checks:
 
 1. **Every operator in the yaml is a member.** For each operator, a Pocket ID
    user with that username exists, is not disabled, and is in the community's
@@ -6743,6 +6766,13 @@ Pocket ID, which starts alongside it), and holds them to two checks:
    *Who manages accounts: `management`*). An administrator nobody declared
    holds all of Pocket ID outside the yaml, the review and the signed
    history.
+3. **Every member of `operators` is an operator.** Every enabled user in the
+   group `operators`, the static API key's user left out as above, is an
+   operator in the yaml. A failure names them, Eg: `carol is in operators and
+   not an operator`. An operator taken out of the yaml keeps the group until
+   someone removes it at Pocket ID, and every app that reads `operators` for
+   operator access goes on granting it, so the pass says so rather than
+   letting the yaml and the group drift apart.
 
 **An operator banned or removed at Pocket ID fails check 1 until they are
 taken out of the yaml.** That is a manual step by design: removing an operator
@@ -6752,7 +6782,7 @@ off it, which the reconciler cannot do and must not guess at. `apply` never dele
 person stays a member until the community removes them.
 
 `/healthz`, published on the site's mesh address at port 1412, serves the
-last pass: 200 when both checks pass, and 503 when either fails, when Pocket
+last pass: 200 when every check passes, and 503 when any fails, when Pocket
 ID does not answer, before the first pass, and once the last pass is more
 than two and a half hours old. The body is one line naming each failure by
 username, never by email, and a standby's is `standby`, with a 200. The

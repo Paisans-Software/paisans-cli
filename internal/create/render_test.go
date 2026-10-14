@@ -35,7 +35,7 @@ func answersFor(sh Shape, all, gated bool) Answers {
 		},
 		Shape:      sh,
 		Management: "paisans",
-		Account:    Account{Hostname: "account.example.org", Invites: true, CodeOfConductPath: "testdata/code-of-conduct.md", CodeOfConduct: "# Be kind\n\nTreat each other well."},
+		Account:    Account{Hostname: "account.example.org", Signup: "invite", CodeOfConductPath: "testdata/code-of-conduct.md", CodeOfConduct: "# Be kind\n\nTreat each other well."},
 		SMTP: SMTP{Host: "smtp.example.org", Port: 587, Security: "starttls", Username: "community@example.org",
 			FromAddress: "community@example.org", FromName: "Example Community"},
 	}

@@ -9,6 +9,7 @@
 # goes in this directory.
 !internal/render/testdata/golden/**/.env
 !internal/render/testdata/golden-local-storage/**/.env
+!internal/render/testdata/golden-open-signup/**/.env
 
 # A blueprint's templates are source, and the templates that render an .env are
 # named for what they produce. The rule above matches them by accident, and the

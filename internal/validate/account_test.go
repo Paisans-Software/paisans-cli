@@ -99,13 +99,13 @@ func TestAnAccountAppWithTwoPocketIDAppsIsRefused(t *testing.T) {
 	}
 }
 
-// withInvitesOff is valid.yaml with the account app's invites false and every
-// setting that belongs to invites removed.
-func withInvitesOff(t *testing.T) *config.Config {
+// withOpenSignup is valid.yaml with the account app's signup open and the
+// settings that belong to invite links removed.
+func withOpenSignup(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := load(t, "valid")
 	app := cfg.Apps["account"]
-	app.Settings["invites"] = false
+	app.Settings["signup"] = "open"
 	for _, k := range blueprints.AccountInviteSettings {
 		delete(app.Settings, k)
 	}
@@ -113,90 +113,97 @@ func withInvitesOff(t *testing.T) *config.Config {
 	return cfg
 }
 
-// With invites off, none of the rules an invite community needs fires.
-func TestInvitesOffFiresNoInviteRule(t *testing.T) {
-	r := validate.Check(withInvitesOff(t))
-	for _, rule := range []string{"account-code-of-conduct-missing", "account-setting-unknown"} {
-		if f := findings(r, rule); len(f) != 0 {
-			t.Errorf("%s fired with invites off: %v", rule, f)
-		}
+// Open signup with the settings that apply in both modes is a valid
+// configuration, and the code of conduct is still required.
+func TestOpenSignupIsValid(t *testing.T) {
+	cfg := withOpenSignup(t)
+	for k, v := range map[string]any{"require_approval": false, "application_wait_days": 7, "decline_retention_days": 30, "login_link_days": 3} {
+		cfg.Apps["account"].Settings[k] = v
 	}
-	if f := findings(r, "account-serves-nothing"); len(f) != 1 || f[0] != "WARN apps.account.settings.invites" {
-		t.Errorf("account-serves-nothing: %v", f)
-	}
-	if r.Refused() {
+	if r := validate.Check(cfg); r.Refused() {
 		t.Errorf("refused: %v", r.Refusals())
 	}
-}
-
-// invites is a YAML boolean; a quoted one is a typo for something else.
-func TestInvitesMustBeABoolean(t *testing.T) {
-	r := withAccountSetting(t, "invites", "yes")
-	if f := findings(r, "account-setting-invalid"); len(f) != 1 || f[0] != "REFUSE apps.account.settings.invites" {
-		t.Errorf("account-setting-invalid: %v", f)
+	cfg = withOpenSignup(t)
+	delete(cfg.Apps["account"].Settings, "code_of_conduct")
+	if f := findings(validate.Check(cfg), "account-code-of-conduct-missing"); len(f) != 1 {
+		t.Errorf("open signup without a code of conduct: %v", f)
 	}
 }
 
-// Every setting that belongs to invites is refused with invites off, each by
-// its own key.
-func TestEveryInviteSettingIsRefusedWithInvitesOff(t *testing.T) {
+// signup is one of two lowercase strings; anything else is a typo, never
+// read as either mode.
+func TestSignupMustBeInviteOrOpen(t *testing.T) {
+	for _, bad := range []any{"Invite", "closed", true, 1} {
+		r := withAccountSetting(t, "signup", bad)
+		if f := findings(r, "account-setting-invalid"); len(f) != 1 || f[0] != "REFUSE apps.account.settings.signup" {
+			t.Errorf("signup %v: %v", bad, f)
+		}
+	}
+}
+
+// Every invite link setting is refused under open signup, each by its own
+// key.
+func TestEveryInviteSettingIsRefusedUnderOpenSignup(t *testing.T) {
 	for _, k := range blueprints.AccountInviteSettings {
-		cfg := withInvitesOff(t)
+		cfg := withOpenSignup(t)
 		cfg.Apps["account"].Settings[k] = 3
-		if f := findings(validate.Check(cfg), "account-invite-settings-without-invites"); len(f) != 1 || f[0] != "REFUSE apps.account.settings."+k {
+		if f := findings(validate.Check(cfg), "account-invite-settings-under-open-signup"); len(f) != 1 || f[0] != "REFUSE apps.account.settings."+k {
 			t.Errorf("%s: %v", k, f)
 		}
 	}
 }
 
-// The invite hostname is claimed like any other, so one that repeats the
-// account app's own hostname, or a derived invite.<domain> that another app
-// already uses, is refused rather than rendered as two site blocks for one
-// name, by the key the operator has to change.
-func TestTheInviteHostnameIsClaimed(t *testing.T) {
+// The join hostname is claimed like any other in both modes, so one that
+// repeats the account app's own hostname, or a derived join.<domain> that
+// another app already uses, is refused rather than rendered as two site
+// blocks for one name, by the key the operator has to change.
+func TestTheJoinHostnameIsClaimed(t *testing.T) {
 	cfg := load(t, "valid")
 	app := cfg.Apps["account"]
-	app.Hostnames = map[string]string{"invite": "account.example.org"}
+	app.Hostnames = map[string]string{"join": "account.example.org"}
 	cfg.Apps["account"] = app
-	if f := findings(validate.Check(cfg), "duplicate-hostname"); len(f) != 1 || f[0] != "REFUSE apps.account.hostnames.invite" {
-		t.Errorf("hostnames.invite equal to the primary: %v", f)
+	if f := findings(validate.Check(cfg), "duplicate-hostname"); len(f) != 1 || f[0] != "REFUSE apps.account.hostnames.join" {
+		t.Errorf("hostnames.join equal to the primary: %v", f)
 	}
 
-	cfg = load(t, "valid")
-	wiki := cfg.Apps["wiki"]
-	wiki.Hostname = "invite.example.org"
-	cfg.Apps["wiki"] = wiki
-	r := validate.Check(cfg)
-	var said string
-	for _, f := range r.Findings {
-		if f.Rule == "duplicate-hostname" {
-			said = f.Key + ": " + f.Message
+	for mode, cfg := range map[string]*config.Config{"invite": load(t, "valid"), "open": withOpenSignup(t)} {
+		wiki := cfg.Apps["wiki"]
+		wiki.Hostname = "join.example.org"
+		cfg.Apps["wiki"] = wiki
+		var said string
+		for _, f := range validate.Check(cfg).Findings {
+			if f.Rule == "duplicate-hostname" {
+				said = f.Key + ": " + f.Message
+			}
 		}
-	}
-	if !strings.Contains(said, "apps.wiki.hostname") || !strings.Contains(said, "apps.account.hostnames.invite, derived from the community's domain") {
-		t.Errorf("an app on the derived invite hostname: %q", said)
-	}
-
-	// With invites off the name is free.
-	cfg = withInvitesOff(t)
-	wiki = cfg.Apps["wiki"]
-	wiki.Hostname = "invite.example.org"
-	cfg.Apps["wiki"] = wiki
-	if f := findings(validate.Check(cfg), "duplicate-hostname"); len(f) != 0 {
-		t.Errorf("invites off: %v", f)
+		if !strings.Contains(said, "apps.wiki.hostname") || !strings.Contains(said, "apps.account.hostnames.join, derived from the community's domain") {
+			t.Errorf("%s: an app on the derived join hostname: %q", mode, said)
+		}
 	}
 }
 
-// The service needs a mail server to start, so it is refused without one
-// whether invites are on or off.
-func TestAccountWithoutSMTPIsRefusedWithInvitesOff(t *testing.T) {
-	cfg := withInvitesOff(t)
+// The invite role is gone: a hostnames.invite left in a file is refused,
+// never silently dropped.
+func TestTheInviteRoleIsRefused(t *testing.T) {
+	cfg := load(t, "valid")
+	app := cfg.Apps["account"]
+	app.Hostnames = map[string]string{"invite": "invite.example.org"}
+	cfg.Apps["account"] = app
+	if f := findings(validate.Check(cfg), "unknown-hostname-role"); len(f) != 1 {
+		t.Errorf("hostnames.invite: %v", f)
+	}
+}
+
+// The service needs a mail server to start, so it is refused without one in
+// either signup mode.
+func TestAccountWithoutSMTPIsRefusedUnderOpenSignup(t *testing.T) {
+	cfg := withOpenSignup(t)
 	cfg.SMTP = config.SMTP{}
 	for name, app := range cfg.Apps {
 		app.SMTP = nil
 		cfg.Apps[name] = app
 	}
 	if f := findings(validate.Check(cfg), "account-without-smtp"); len(f) != 1 {
-		t.Errorf("account-without-smtp with invites off: %v", f)
+		t.Errorf("account-without-smtp under open signup: %v", f)
 	}
 }

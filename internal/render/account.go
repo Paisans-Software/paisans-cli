@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
@@ -19,12 +20,16 @@ type accountValues struct {
 	// Accent is that app's accent_color, quoted for a .env, and empty when
 	// it is unset or `default`, so the service keeps its own.
 	Accent string
-	// Invites is settings.invites. With it off the service is told nothing
-	// that belongs to invites, and the code of conduct renders empty.
-	Invites bool
-	// InviteHostname is where invitees are served, from
-	// blueprints.InviteHostname, and empty with invites off.
-	InviteHostname string
+	// Signup is settings.signup, blueprints.SignupInvite or SignupOpen. Under
+	// open signup the service is told nothing that belongs to invite links.
+	Signup string
+	// JoinHostname is where people with no account yet are served, from
+	// blueprints.JoinHostname.
+	JoinHostname string
+	// Operators is the operators' usernames, the keys of the operators
+	// section, sorted and comma separated. The service refuses to ban them
+	// or to change their address or name.
+	Operators string
 	// CoC is the code_of_conduct setting's text, rendered verbatim.
 	CoC string
 	// Settings is every setting in blueprints.AccountSettingDefaults, declared
@@ -44,12 +49,13 @@ func (p *planner) accountValuesFor(name string) (accountValues, error) {
 	idApp := p.cfg.Apps[idp]
 	coc, _ := app.Settings["code_of_conduct"].(string)
 	v := accountValues{
-		Invites:        blueprints.AccountInvites(app),
-		InviteHostname: blueprints.InviteHostname(p.cfg, app),
-		IdentityURL:    "https://" + idApp.Hostname,
-		APIKey:         p.appSecret(idp, "static_api_key"),
-		CoC:            coc,
-		Settings:       map[string]string{},
+		Signup:       blueprints.AccountSignup(app),
+		JoinHostname: blueprints.JoinHostname(p.cfg, app),
+		Operators:    strings.Join(sortedKeys(p.cfg.Operators), ","),
+		IdentityURL:  "https://" + idApp.Hostname,
+		APIKey:       p.appSecret(idp, "static_api_key"),
+		CoC:          coc,
+		Settings:     map[string]string{},
 	}
 	if accent, ok := idApp.Settings["accent_color"].(string); ok && accent != "default" {
 		quoted, err := envquote(accent)

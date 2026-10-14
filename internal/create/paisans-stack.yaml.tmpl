@@ -152,16 +152,17 @@ apps:
 {{- if eq .Blueprint "account"}}
     # The community's account service, signing in through the pocket-id app.
     settings:
-{{- if $.Account.Invites}}
-      # Members invite new people, who agree to the code of conduct below
-      # before an account exists. Its SHA-256 is the version each person
-      # agrees to, so an edit is a new version.
-      invites: true
+{{- if eq $.Account.Signup "open"}}
+      # Anyone may apply on the registration page at join.{{$.Domain}}.
+{{- else}}
+      # Members invite new people, who open their link on join.{{$.Domain}}.
+{{- end}}
+      signup: {{$.Account.Signup}}
+      # Everyone who signs up agrees to the code of conduct below before an
+      # account exists. Its SHA-256 is the version each person agrees to, so
+      # an edit is a new version.
       code_of_conduct: |
 {{$.CodeOfConduct}}
-{{- else}}
-      invites: false
-{{- end}}
 {{- end}}
 {{- if eq .Blueprint "element"}}
     settings:

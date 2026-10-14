@@ -1,8 +1,10 @@
 # Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
 #
-# Invitees of account on invite.example.org: the invite pages and their
-# static files, and nothing else. Never gated, because an invitee has no
-# account yet. Sign in, the home page and /admin answer on the app's primary
+# People with no account yet, on join.example.org, for account:
+# signup is invite, so the invite pages, /i/<token>, and the static files,
+# and nothing else.
+# Never gated, because nobody here has an account yet. Sign in, the home
+# page, a member's own account and /admin answer on the app's primary
 # hostname only, and the service registers them there only, so a session
 # cookie is never set on this origin.
 @invitee path /i/* /static/*

@@ -14,10 +14,10 @@ import (
 func TestRoleHostnames(t *testing.T) {
 	cfg := &config.Config{Community: config.Community{Domain: "example.org"}}
 	cfg.Storage.Garage.Sites = []string{"home-a"}
-	account := func(invites any, hostnames map[string]string) config.App {
+	account := func(signup any, hostnames map[string]string) config.App {
 		settings := map[string]any{}
-		if invites != nil {
-			settings["invites"] = invites
+		if signup != nil {
+			settings["signup"] = signup
 		}
 		return config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org", Hostnames: hostnames, Settings: settings}
 	}
@@ -26,13 +26,16 @@ func TestRoleHostnames(t *testing.T) {
 		app  config.App
 		want []blueprints.RoleHostname
 	}{
-		{"invites on, derived", account(true, nil),
-			[]blueprints.RoleHostname{{Role: "invite", Hostname: "invite.example.org", Derived: true}}},
-		{"invites on, declared", account(true, map[string]string{"invite": "join.example.org"}),
-			[]blueprints.RoleHostname{{Role: "invite", Hostname: "join.example.org"}}},
-		{"invites off, stale declared", account(false, map[string]string{"invite": "invite.example.org"}), nil},
-		{"invites unset", account(nil, nil), nil},
-		{"invites a string", account("true", nil), nil},
+		// Every account app takes signups, so every one has join., whatever
+		// signup says: validate refuses a bad value by its own rule.
+		{"invite signup, derived", account("invite", nil),
+			[]blueprints.RoleHostname{{Role: "join", Hostname: "join.example.org", Derived: true}}},
+		{"open signup, derived", account("open", nil),
+			[]blueprints.RoleHostname{{Role: "join", Hostname: "join.example.org", Derived: true}}},
+		{"open signup, declared", account("open", map[string]string{"join": "welcome.example.org"}),
+			[]blueprints.RoleHostname{{Role: "join", Hostname: "welcome.example.org"}}},
+		{"signup unset", account(nil, nil),
+			[]blueprints.RoleHostname{{Role: "join", Hostname: "join.example.org", Derived: true}}},
 		{"derived media", config.App{Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.org"},
 			[]blueprints.RoleHostname{{Role: "media", Hostname: "talk-media.example.org", Derived: true}}},
 		{"local files, declared media", config.App{Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.org", Storage: config.StorageLocal, Hostnames: map[string]string{"media": "m.example.org"}}, nil},
@@ -43,7 +46,19 @@ func TestRoleHostnames(t *testing.T) {
 			t.Errorf("%s: RoleHostnames = %+v, want %+v", tc.name, got, tc.want)
 		}
 	}
-	if got := blueprints.InviteHostname(cfg, account(false, map[string]string{"invite": "invite.example.org"})); got != "" {
-		t.Errorf("InviteHostname with invites off = %q, want empty", got)
+	if got := blueprints.JoinHostname(cfg, config.App{Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.org"}); got != "" {
+		t.Errorf("JoinHostname of a forum = %q, want empty", got)
+	}
+}
+
+func TestAccountSignup(t *testing.T) {
+	for value, want := range map[any]string{"invite": "invite", "open": "open", "Invite": "", "closed": "", true: "", nil: ""} {
+		app := config.App{Blueprint: config.BlueprintAccount, Settings: map[string]any{}}
+		if value != nil {
+			app.Settings["signup"] = value
+		}
+		if got := blueprints.AccountSignup(app); got != want {
+			t.Errorf("AccountSignup(signup: %v) = %q, want %q", value, got, want)
+		}
 	}
 }

@@ -454,13 +454,13 @@ func (w *Wizard) apps() error {
 }
 
 // management asks who manages accounts, and what that choice needs: the
-// account app's hostname, invites and code of conduct under paisans, or
+// account app's hostname, how people join and the code of conduct under paisans, or
 // Pocket ID's own signup and email settings under pocket-id. It returns the
 // account app to declare, nil under pocket-id.
 func (w *Wizard) management() (*App, error) {
 	a := &w.Answers
 	w.p.Say("\nWho manages the community's accounts: who may sign up, bans, and a member's way back in.")
-	w.p.Say("  - the account service: members invite new people, who agree to the code of conduct first. Nobody is a Pocket ID administrator.")
+	w.p.Say("  - the account service: people join by a member's invite or on a registration page, and agree to the code of conduct first. Nobody is a Pocket ID administrator.")
 	w.p.Say("  - Pocket ID: its own admin pages, and its signup settings. Every operator is its administrator, and mail is optional.")
 	def := 0
 	if a.Management == blueprints.ManagementPocketID {
@@ -478,29 +478,31 @@ func (w *Wizard) management() (*App, error) {
 	d := a.Account
 	if d.Hostname == "" {
 		d.Hostname = "account." + a.Domain
-		d.Invites = true
+	}
+	if d.Signup == "" {
+		d.Signup = blueprints.SignupInvite
 	}
 	host, err := w.p.Text("Hostname for the account service", d.Hostname, checkHostname)
 	if err != nil {
 		return nil, err
 	}
-	invites, err := w.p.YesNo("Do members invite new people?", d.Invites)
+	modes := []string{blueprints.SignupInvite, blueprints.SignupOpen}
+	w.p.Say("People sign up on join.%s: by opening an invite link a member made (invite), or on a registration page anyone can use (open).", a.Domain)
+	i, err = w.p.Choose("How do people join?", []string{"a member's invite link", "a registration page anyone can use"}, max(slices.Index(modes, d.Signup), 0))
 	if err != nil {
 		return nil, err
 	}
-	acc := Account{Hostname: host, Invites: invites}
-	if invites {
-		w.p.Say("Every invitee agrees to the code of conduct before an account exists. Give the Markdown file that holds it; its text is written into the configuration.")
-		path, err := w.p.Text("Code of conduct file", d.CodeOfConductPath, func(s string) error {
-			text, err := readCodeOfConduct(s)
-			acc.CodeOfConduct = text
-			return err
-		})
-		if err != nil {
-			return nil, err
-		}
-		acc.CodeOfConductPath = path
+	acc := Account{Hostname: host, Signup: modes[i]}
+	w.p.Say("Everyone who signs up agrees to the code of conduct before an account exists. Give the Markdown file that holds it; its text is written into the configuration.")
+	path, err := w.p.Text("Code of conduct file", d.CodeOfConductPath, func(s string) error {
+		text, err := readCodeOfConduct(s)
+		acc.CodeOfConduct = text
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
+	acc.CodeOfConductPath = path
 	a.Account = acc
 	return &App{Key: accountApp, Blueprint: config.BlueprintAccount, Hostname: host}, nil
 }

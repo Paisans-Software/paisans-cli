@@ -43,7 +43,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "54f01f65665e733daab0c80a42e1ad0ef283ed31123880132f0435f92747cef3",
+      "sha256": "4167ab878b1efa927f850a28979c75dd969e30051b9214d9c8f0f1531e641b6b",
       "mode": "0644"
     },
     {
@@ -52,18 +52,18 @@
       "mode": "0600"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/account-invite.caddy",
-      "sha256": "157675ed8abf851d64ffd9083742118439f3fe41f3ef7b97140fbf0b051a1823",
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/account-join.caddy",
+      "sha256": "a5d3490da47b132f9d375c67acdc533845169d9fbf9c47629c8a4da726ae9be2",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/account.caddy",
-      "sha256": "8d864e4eace37c02371f356dd846f69e16f26def93eb658d17fc231ed11d5e3b",
+      "sha256": "7442eebe99ac3309d0a592a48e1ffdbcfc3eee6f9473565b9e8748057db3bd0a",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/auth.caddy",
-      "sha256": "47f1d637145b82fbdbd48d5d5d6d18df490c2d08a99ebda68e4f5bcf2dfd2091",
+      "sha256": "20ef19aebb630f37f5bb4a664de8a1dd04548170082726a432d7119995af6768",
       "mode": "0644"
     },
     {

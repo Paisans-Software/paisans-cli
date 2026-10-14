@@ -98,8 +98,12 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      invites: false
+      signup: open
       invite_quota: 3
+      code_of_conduct: |
+        # Be kind
+
+        Treat each other well.
   health:
     blueprint: uptime
     hostname: health.example.org

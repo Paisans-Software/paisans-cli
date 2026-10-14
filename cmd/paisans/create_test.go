@@ -49,8 +49,9 @@ var (
 	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "",
 		"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"}
 	// sign in; the account service manages accounts, on its default
-	// hostname, without invites; then no forums, wiki, blog or health page.
-	createNoApps = []string{"", "", "", "n", "n", "n", "n", "n"}
+	// hostname, with open signup and the code of conduct the wizard's own
+	// tests read; then no forums, wiki, blog or health page.
+	createNoApps = []string{"", "", "", "2", "../../internal/create/testdata/code-of-conduct.md", "n", "n", "n", "n"}
 	createMail   = []string{"smtp.example.org", "", "", "community@example.org", "", ""}
 )
 

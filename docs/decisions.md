@@ -2598,3 +2598,44 @@ they are taken out of the yaml, which is a manual step by design.
   `invites`.
 * **Letting the account app keep naming its identity app.** Not chosen: a
   deployment has one, and a setting naming it could only agree or be wrong.
+
+## 2026-10-14: Signup is invite or open, every account app has join., and operators holds only operators
+
+Founder decision. The design is
+`docs/specs/2026-10-14-account-signup-bans-recovery.md`, and the service side
+is paisans-account-service v0.2.0.
+
+### What was decided
+
+* `settings.signup`, `invite` or `open`, replaces `settings.invites`,
+  required and never defaulted. `invite_quota` and `invite_lifetime_days` are
+  refused under `open`; every other setting, the code of conduct among them,
+  applies in both modes.
+* The hostname role `invite` is `join`, derived `join.<domain>` unless
+  `hostnames.join` is declared, and every account app has it. Under `invite`
+  the gateway passes `/i/*` and `/static/*` there; under `open`, exactly `/`
+  for `GET` and `POST` and `/static/*`. Everything else is a 404, and the
+  primary refuses `/i/*` in both modes.
+* `account-serves-nothing` and `account-invite-hostname-without-invites` are
+  removed.
+* The toolkit renders the operators' usernames as `ACCOUNT_OPERATORS`, which
+  the service refuses to ban, recover or rename.
+* The operator reconciler also checks the reverse of its first check: every
+  enabled member of `operators` is an operator in the yaml, and `/healthz`
+  names each one who is not. It reads only.
+
+### Why
+
+Every account app now takes signups in one mode or the other, so there is no
+account app without people who have no account yet, and no reason for their
+hostname to be conditional. Naming it for what it does (joining) rather than
+for one way of joining keeps the name true in both modes. Open registration
+lives at `/` on `join.`, so the gateway passes exactly that path and nothing
+under it: the member's home page at `/` on `account.` is a different origin.
+
+An operator is removed by editing the yaml, but the group `operators` at
+Pocket ID stays until someone takes it away, and the uptime monitor and any
+other app that reads it for operator access would keep granting it. The
+reconciler already read every user with their groups, so the reverse check
+costs no request and keeps the reconciler read-only.
+

@@ -4,8 +4,8 @@ apiVersion: paisans.blueprint/v1
 name: account
 services:
   # paisans-account-service: the community's account management, which
-  # carries member invites with the code of conduct before the account
-  # (docs/specs/2026-10-14-account-service.md). Cluster placement only,
+  # carries signup with the code of conduct before the account, bans and
+  # recovery (docs/specs/2026-10-14-account-signup-bans-recovery.md). Cluster placement only,
   # so the PostgresService row is the cluster's role and database, never
   # a container of its own. Its image is the core catalog's
   # foundation.yaml's.
@@ -22,14 +22,15 @@ config:
   file: ".env"
 # paisans-account-service's /healthz answers 200 when its database does.
 health: {path: "/healthz", status: [200]}
-# Invitees reach /i/* on the invite hostname before they have an
-# account; a member gate would lock them out.
+# People with no account yet reach the join hostname, and a member
+# gate would lock them out.
 gate: {gateable: false}
-# invite.<domain>, or hostnames.invite, serves the pages an invitee opens
-# before they have an account, and exists only with settings.invites true
-# (blueprints.InviteHostname). Everything a signed in member or admin uses
-# stays on the primary hostname.
-hostname_roles: ["invite"]
+# join.<domain>, or hostnames.join, serves the pages for people who have
+# no account yet: the invite pages with signup: invite, the registration
+# page with signup: open (blueprints.JoinHostname). Every account app has
+# it. Everything a signed in member or admin uses stays on the primary
+# hostname.
+hostname_roles: ["join"]
 mail: reads
 # paisans-account-service's callback is GET /auth/callback with PKCE S256
 # (internal/web/auth.go); it reads the groups claim to tell members

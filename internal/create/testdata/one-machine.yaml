@@ -103,10 +103,11 @@ apps:
     placement: cluster
     # The community's account service, signing in through the pocket-id app.
     settings:
-      # Members invite new people, who agree to the code of conduct below
-      # before an account exists. Its SHA-256 is the version each person
-      # agrees to, so an edit is a new version.
-      invites: true
+      # Members invite new people, who open their link on join.example.org.
+      signup: invite
+      # Everyone who signs up agrees to the code of conduct below before an
+      # account exists. Its SHA-256 is the version each person agrees to, so
+      # an edit is a new version.
       code_of_conduct: |
         # Be kind
 

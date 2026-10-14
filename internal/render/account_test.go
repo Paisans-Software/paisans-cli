@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,12 +16,13 @@ const (
 )
 
 // accountServiceEnv is every variable paisans-account-service's config.Load
-// reads, as docs/specs/2026-10-14-account-service.md names them for its
-// v0.2.0. It is the service's environment contract: a name the service reads and this
-// toolkit does not render is a setting nobody can change, and a required one
-// is a container that refuses to start.
+// reads at v0.2.0, from its internal/config/config.go and README. It is the
+// service's environment contract: a name the service reads and this toolkit
+// does not render is a setting nobody can change, and a required one is a
+// container that refuses to start.
 var accountServiceEnv = []string{
-	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_INVITES", "ACCOUNT_INVITE_PUBLIC_URL", "ACCOUNT_DATABASE_URL",
+	"ACCOUNT_LISTEN_ADDR", "ACCOUNT_PUBLIC_URL", "ACCOUNT_SIGNUP", "ACCOUNT_JOIN_PUBLIC_URL", "ACCOUNT_OPERATORS",
+	"ACCOUNT_DATABASE_URL",
 	"ACCOUNT_SESSION_KEY", "ACCOUNT_EMAIL_HASH_KEY",
 	"ACCOUNT_OIDC_ISSUER", "ACCOUNT_OIDC_CLIENT_ID", "ACCOUNT_OIDC_CLIENT_SECRET",
 	"ACCOUNT_MEMBER_GROUP", "ACCOUNT_ADMIN_GROUP",
@@ -63,27 +65,33 @@ func withAccountSettings(set map[string]any) func(*config.Config, *config.Secret
 	}
 }
 
+// accountInviteEnv are the variables the service reads only with
+// ACCOUNT_SIGNUP=invite, so they are rendered only then.
+var accountInviteEnv = []string{"ACCOUNT_INVITE_QUOTA", "ACCOUNT_INVITE_LIFETIME_DAYS"}
+
+// Under invite signup every name the service reads is rendered; under open
+// every one but the invite link settings. Nothing else with the service's
+// prefix is rendered in either.
 func TestAccountRendersEveryVariableTheServiceReads(t *testing.T) {
-	env := buildAccount(t, nil)[accountEnvA]
-	if env == "" {
-		t.Fatal("the account app rendered no .env on home-a")
-	}
-	for _, name := range accountServiceEnv {
-		if !assignsEnvVar(env, name) {
-			t.Errorf("%s is read by paisans-account-service and not rendered", name)
+	for mode, change := range map[string]func(*config.Config, *config.Secrets){"invite": nil, "open": openSignup} {
+		env := buildAccount(t, change)[accountEnvA]
+		if env == "" {
+			t.Fatalf("%s: the account app rendered no .env on home-a", mode)
 		}
-	}
-	for _, line := range strings.Split(env, "\n") {
-		name, _, ok := strings.Cut(line, "=")
-		if !ok || strings.HasPrefix(line, "#") || !strings.HasPrefix(name, "ACCOUNT_") {
-			continue
+		for _, name := range accountServiceEnv {
+			want := mode == "invite" || !slices.Contains(accountInviteEnv, name)
+			if got := assignsEnvVar(env, name); got != want {
+				t.Errorf("%s: %s rendered is %v, want %v", mode, name, got, want)
+			}
 		}
-		known := false
-		for _, want := range accountServiceEnv {
-			known = known || want == name
-		}
-		if !known {
-			t.Errorf("%s is rendered but paisans-account-service does not read it", name)
+		for _, line := range strings.Split(env, "\n") {
+			name, _, ok := strings.Cut(line, "=")
+			if !ok || strings.HasPrefix(line, "#") || !strings.HasPrefix(name, "ACCOUNT_") {
+				continue
+			}
+			if !slices.Contains(accountServiceEnv, name) {
+				t.Errorf("%s: %s is rendered but paisans-account-service does not read it", mode, name)
+			}
 		}
 	}
 }
@@ -93,6 +101,9 @@ func TestAccountEnvFromTheFixture(t *testing.T) {
 	for key, want := range map[string]string{
 		"ACCOUNT_LISTEN_ADDR":            ":8082",
 		"ACCOUNT_PUBLIC_URL":             "https://account.example.org",
+		"ACCOUNT_SIGNUP":                 "invite",
+		"ACCOUNT_JOIN_PUBLIC_URL":        "https://join.example.org",
+		"ACCOUNT_OPERATORS":              "alice,bob",
 		"ACCOUNT_DATABASE_URL":           "postgresql://account:fixture-not-a-secret-account-db@10.44.0.1:5000/account",
 		"ACCOUNT_SESSION_KEY":            "Zml4dHVyZS1ub3QtYS1zZWNyZXQtaW52aXRlLXNlc3M",
 		"ACCOUNT_EMAIL_HASH_KEY":         "Zml4dHVyZS1ub3QtYS1zZWNyZXQtaW52aXRlLWhhc2g",
@@ -260,7 +271,7 @@ func TestAccountWithoutItsKeysIsRefused(t *testing.T) {
 }
 
 // The service is reachable through the gateway on every apps site, with
-// nothing in front of it: invitees arrive before they have an account.
+// nothing in front of it: people signing up arrive before they have an account.
 func TestAccountIsRoutedToEveryAppsSiteUngated(t *testing.T) {
 	var snippet, caddyfile string
 	for path, content := range buildAccount(t, nil) {
@@ -296,15 +307,15 @@ func TestAccountIsRoutedToEveryAppsSiteUngated(t *testing.T) {
 	}
 }
 
-// invitesOff turns the account app's invites off and removes every setting
-// that belongs to them, as validate requires.
-func invitesOff(cfg *config.Config, _ *config.Secrets) {
+// openSignup sets the account app's signup to open and removes the settings
+// that belong to invite links, as validate requires.
+func openSignup(cfg *config.Config, _ *config.Secrets) {
 	app := cfg.Apps["account"]
 	settings := map[string]any{}
 	for k, v := range app.Settings {
 		settings[k] = v
 	}
-	settings["invites"] = false
+	settings["signup"] = "open"
 	for _, k := range blueprints.AccountInviteSettings {
 		delete(settings, k)
 	}
@@ -312,93 +323,112 @@ func invitesOff(cfg *config.Config, _ *config.Secrets) {
 	cfg.Apps["account"] = app
 }
 
-// The service is told whether invites are on, and with them off it is told
-// nothing that belongs to them.
-func TestAccountInvitesReachTheService(t *testing.T) {
-	if got := envValue(buildAccount(t, nil)[accountEnvA], "ACCOUNT_INVITES"); got != "true" {
-		t.Errorf("ACCOUNT_INVITES=%q with invites on", got)
-	}
-	files := buildAccount(t, invitesOff)
+// The service is told the signup mode, and under open signup nothing that
+// belongs to invite links; the code of conduct and the settings that apply
+// to every signup reach it in both.
+func TestAccountSignupReachesTheService(t *testing.T) {
+	files := buildAccount(t, openSignup)
 	env := files[accountEnvA]
-	if got := envValue(env, "ACCOUNT_INVITES"); got != "false" {
-		t.Errorf("ACCOUNT_INVITES=%q with invites off", got)
+	if got := envValue(env, "ACCOUNT_SIGNUP"); got != "open" {
+		t.Errorf("ACCOUNT_SIGNUP=%q under open signup", got)
 	}
-	for _, name := range []string{
-		"ACCOUNT_INVITE_QUOTA", "ACCOUNT_REQUIRE_APPROVAL", "ACCOUNT_INVITE_LIFETIME_DAYS",
-		"ACCOUNT_APPLICATION_WAIT_DAYS", "ACCOUNT_DECLINE_RETENTION_DAYS", "ACCOUNT_LOGIN_LINK_DAYS",
-		"ACCOUNT_COC_PATH", "ACCOUNT_INVITE_PUBLIC_URL",
+	for key, want := range map[string]string{
+		"ACCOUNT_JOIN_PUBLIC_URL": "https://join.example.org", "ACCOUNT_OPERATORS": "alice,bob",
+		"ACCOUNT_REQUIRE_APPROVAL": "true", "ACCOUNT_APPLICATION_WAIT_DAYS": "14", "ACCOUNT_DECLINE_RETENTION_DAYS": "183",
+		"ACCOUNT_LOGIN_LINK_DAYS": "7", "ACCOUNT_COC_PATH": "/etc/paisans-account-service/code-of-conduct.md",
 	} {
-		if assignsEnvVar(env, name) {
-			t.Errorf("%s is rendered with invites off", name)
+		if got := envValue(env, key); got != want {
+			t.Errorf("%s=%q under open signup, want %q", key, got, want)
 		}
 	}
-	if got := files[accountCoCA]; got != "" {
-		t.Errorf("code-of-conduct.md is %q with invites off, want empty", got)
+	if got, want := files[accountCoCA], "# Be kind\n\nTo each other.\n"; got != want {
+		t.Errorf("code-of-conduct.md is %q under open signup, want %q", got, want)
 	}
 }
 
-// With invites on, invitees are served on their own hostname, never gated,
-// and its snippet passes only the invite pages and their static files; the
-// primary refuses the invite pages.
-func TestAccountInviteHostnameWithInvitesOn(t *testing.T) {
-	files := buildAccount(t, nil)
-	const snippetPath = "vm/srv/paisans/f2a9/infra/caddy/snippets/account-invite.caddy"
-	snippet, ok := files[snippetPath]
-	if !ok {
-		t.Fatalf("%s was not rendered", snippetPath)
+// ACCOUNT_OPERATORS is the operators section's keys, sorted, whatever order
+// the file lists them in.
+func TestAccountOperatorsAreSorted(t *testing.T) {
+	env := buildAccount(t, func(cfg *config.Config, _ *config.Secrets) {
+		cfg.Operators["aaron"] = cfg.Operators["alice"]
+	})[accountEnvA]
+	if got := envValue(env, "ACCOUNT_OPERATORS"); got != "aaron,alice,bob" {
+		t.Errorf("ACCOUNT_OPERATORS=%q", got)
 	}
-	for _, want := range []string{"@invitee path /i/* /static/*", "respond 404", "10.44.0.1:8082", "import upstream_failover"} {
-		if !strings.Contains(snippet, want) {
-			t.Errorf("the invite snippet lacks %q:\n%s", want, snippet)
+}
+
+// joinSnippet and the rest are the gateway's files for the account app.
+const (
+	joinSnippet    = "vm/srv/paisans/f2a9/infra/caddy/snippets/account-join.caddy"
+	primarySnippet = "vm/srv/paisans/f2a9/infra/caddy/snippets/account.caddy"
+	gatewayCaddy   = "vm/srv/paisans/f2a9/infra/caddy/Caddyfile"
+)
+
+// In both modes join.<domain> exists, ungated, with its own snippet, and the
+// primary refuses the invite pages while still proxying its own / (the
+// member's home page).
+func TestAccountJoinHostnameInBothModes(t *testing.T) {
+	for mode, change := range map[string]func(*config.Config, *config.Secrets){"invite": nil, "open": openSignup} {
+		files := buildAccount(t, change)
+		if _, ok := files[joinSnippet]; !ok {
+			t.Fatalf("%s: %s was not rendered", mode, joinSnippet)
+		}
+		block := hostBlock(t, files[gatewayCaddy], "join.example.org")
+		if !strings.Contains(block, "import /etc/caddy/snippets/account-join.caddy") {
+			t.Errorf("%s: the join host block does not import its snippet:\n%s", mode, block)
+		}
+		for _, line := range strings.Split(block, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "import gate") || strings.HasPrefix(line, "forward_auth") {
+				t.Errorf("%s: the join host block is gated: %q", mode, line)
+			}
+		}
+		primary := files[primarySnippet]
+		if !strings.Contains(primary, "@invitepages path /i/*") || !strings.Contains(primary, "respond @invitepages 404") {
+			t.Errorf("%s: the primary snippet does not refuse /i/*:\n%s", mode, primary)
+		}
+		if strings.Contains(primary, "path /\n") || strings.Contains(primary, "path / ") {
+			t.Errorf("%s: the primary snippet has a rule for bare /, the member's home page:\n%s", mode, primary)
 		}
 	}
-	block := hostBlock(t, files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "invite.example.org")
-	if !strings.Contains(block, "import /etc/caddy/snippets/account-invite.caddy") {
-		t.Errorf("the invite host block does not import its snippet:\n%s", block)
-	}
-	for _, line := range strings.Split(block, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "import gate") || strings.HasPrefix(line, "forward_auth") {
-			t.Errorf("the invite host block is gated: %q", line)
+}
+
+// Under invite signup join. passes the invite pages and the static files;
+// under open, exactly / for GET and POST and the static files. Everything
+// else is a 404 at the gateway.
+func TestAccountJoinSnippetPerMode(t *testing.T) {
+	invite := buildAccount(t, nil)[joinSnippet]
+	for _, want := range []string{"@invitee path /i/* /static/*", "handle @invitee {", "respond 404", "10.44.0.1:8082", "import upstream_failover"} {
+		if !strings.Contains(invite, want) {
+			t.Errorf("invite: the join snippet lacks %q:\n%s", want, invite)
 		}
 	}
-	if primary := files["vm/srv/paisans/f2a9/infra/caddy/snippets/account.caddy"]; !strings.Contains(primary, "@invitepages path /i/*") || !strings.Contains(primary, "respond @invitepages 404") {
-		t.Errorf("the primary snippet does not refuse /i/*:\n%s", primary)
+	if strings.Contains(invite, "@register") {
+		t.Errorf("invite: the join snippet passes the registration page:\n%s", invite)
 	}
-	if got := envValue(files[accountEnvA], "ACCOUNT_INVITE_PUBLIC_URL"); got != "https://invite.example.org" {
-		t.Errorf("ACCOUNT_INVITE_PUBLIC_URL=%q", got)
+	open := buildAccount(t, openSignup)[joinSnippet]
+	for _, want := range []string{"@register {\n\tpath /\n\tmethod GET POST\n}", "handle @register {", "@static path /static/*", "handle @static {", "respond 404", "10.44.0.1:8082", "import upstream_failover"} {
+		if !strings.Contains(open, want) {
+			t.Errorf("open: the join snippet lacks %q:\n%s", want, open)
+		}
 	}
+	if strings.Contains(open, "/i/") {
+		t.Errorf("open: the join snippet passes the invite pages:\n%s", open)
+	}
+}
+
+// hostnames.join replaces the derived name everywhere it is used.
+func TestAccountDeclaredJoinHostname(t *testing.T) {
 	declared := buildAccount(t, func(cfg *config.Config, _ *config.Secrets) {
 		app := cfg.Apps["account"]
-		app.Hostnames = map[string]string{"invite": "join.example.org"}
+		app.Hostnames = map[string]string{"join": "welcome.example.org"}
 		cfg.Apps["account"] = app
 	})
-	if got := envValue(declared[accountEnvA], "ACCOUNT_INVITE_PUBLIC_URL"); got != "https://join.example.org" {
-		t.Errorf("ACCOUNT_INVITE_PUBLIC_URL=%q with hostnames.invite declared", got)
+	if got := envValue(declared[accountEnvA], "ACCOUNT_JOIN_PUBLIC_URL"); got != "https://welcome.example.org" {
+		t.Errorf("ACCOUNT_JOIN_PUBLIC_URL=%q with hostnames.join declared", got)
 	}
-	hostBlock(t, declared["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "join.example.org")
-}
-
-// With invites off the invite hostname exists nowhere: no host block, no
-// snippet, no URL, even with a stale hostnames.invite that validate would
-// refuse.
-func TestAccountInviteHostnameWithInvitesOff(t *testing.T) {
-	for name, change := range map[string]func(*config.Config, *config.Secrets){
-		"derived": invitesOff,
-		"stale declared": func(cfg *config.Config, s *config.Secrets) {
-			invitesOff(cfg, s)
-			app := cfg.Apps["account"]
-			app.Hostnames = map[string]string{"invite": "invite.example.org"}
-			cfg.Apps["account"] = app
-		},
-	} {
-		for path, content := range buildAccount(t, change) {
-			if strings.HasSuffix(path, "/account-invite.caddy") {
-				t.Errorf("%s: %s rendered with invites off", name, path)
-			}
-			if strings.Contains(content, "invite.example.org") {
-				t.Errorf("%s: %s names invite.example.org with invites off", name, path)
-			}
-		}
+	hostBlock(t, declared[gatewayCaddy], "welcome.example.org")
+	if strings.Contains(declared[gatewayCaddy], "join.example.org") {
+		t.Error("the gateway still routes the derived join.example.org")
 	}
 }

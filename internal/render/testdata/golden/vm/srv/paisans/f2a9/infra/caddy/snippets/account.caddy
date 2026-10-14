@@ -3,10 +3,12 @@
 # Routing for account, imported by the gateway's block for
 # account.example.org. Never gated: the service checks every sign-in itself.
 #
-# The invite pages answer on the invite hostname only, and the service
-# registers them there only, so /i/* is refused here as well: an invite link
-# opened on this hostname would otherwise reach the origin that holds a
-# member's session.
+# The invite pages answer on the join hostname only, and the service
+# registers them there only, so /i/* is refused here as well, in either
+# signup mode: an invite link opened on this hostname would otherwise reach
+# the origin that holds a member's session. The bare / here is the member's
+# home page, and is proxied; the registration page of open signup is / on the
+# join hostname.
 @invitepages path /i/*
 respond @invitepages 404
 reverse_proxy 10.44.0.1:8082 10.44.0.2:8082 {

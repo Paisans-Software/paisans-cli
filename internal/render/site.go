@@ -898,14 +898,15 @@ func (p *planner) routesFor(site *siteView) []route {
 			Bypass:    bypass,
 		})
 		// Every hostname beyond the primary that exists: a derived media
-		// hostname as well as a declared one, the invite hostname only with
-		// invites on, and nothing for a role whose condition does not hold.
+		// hostname as well as a declared one, an account app's join hostname,
+		// and nothing for a role whose condition does not hold.
 		for _, rh := range blueprints.RoleHostnames(p.cfg, app) {
 			routeGated, routeAutoLogin, routeBypass := app.Gated, app.AutoLogin, bypass
-			if rh.Role == blueprints.MediaRole || rh.Role == blueprints.InviteRole {
+			if rh.Role == blueprints.MediaRole || rh.Role == blueprints.JoinRole {
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
-				// redirect to a passkey prompt; an invitee has no account yet.
+				// redirect to a passkey prompt; someone signing up has no
+				// account yet.
 				routeGated, routeAutoLogin, routeBypass = false, false, gateBypass{}
 			}
 			out = append(out, route{

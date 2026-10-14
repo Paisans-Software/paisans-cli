@@ -1,0 +1,62 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# People with no account yet, on {{ .Hostname }}, for {{ .App.Name }}:
+{{- if eq .Account.Signup "open" }}
+# signup is open, so the registration page, GET and POST on / exactly, and
+# the static files, and nothing else.
+{{- else }}
+# signup is invite, so the invite pages, /i/<token>, and the static files,
+# and nothing else.
+{{- end }}
+# Never gated, because nobody here has an account yet. Sign in, the home
+# page, a member's own account and /admin answer on the app's primary
+# hostname only, and the service registers them there only, so a session
+# cookie is never set on this origin.
+{{- if eq .Account.Signup "open" }}
+@register {
+	path /
+	method GET POST
+}
+handle @register {
+	reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if gt (len .Upstreams) 1 }}
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+{{- else if .UpstreamElsewhere }}
+		# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+		import upstream_single
+{{- end }}
+		header_up X-Forwarded-Proto https
+	}
+}
+@static path /static/*
+handle @static {
+	reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if gt (len .Upstreams) 1 }}
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+{{- else if .UpstreamElsewhere }}
+		# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+		import upstream_single
+{{- end }}
+		header_up X-Forwarded-Proto https
+	}
+}
+{{- else }}
+@invitee path /i/* /static/*
+handle @invitee {
+	reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if gt (len .Upstreams) 1 }}
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+{{- else if .UpstreamElsewhere }}
+		# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+		import upstream_single
+{{- end }}
+		header_up X-Forwarded-Proto https
+	}
+}
+{{- end }}
+handle {
+	respond 404
+}

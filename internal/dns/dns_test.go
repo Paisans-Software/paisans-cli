@@ -678,10 +678,11 @@ func hasWant(wants []Want, typ, name, content string) bool {
 	return false
 }
 
-// An account app's invite hostname is a record only with invites on: derived
-// as invite.<domain> and named by the key to change, and absent with invites
-// off even when a stale hostnames.invite declares it.
-func TestAccountInviteHostnameOnlyWithInvitesOn(t *testing.T) {
+// Every account app's join hostname is a record, in either signup mode:
+// derived as join.<domain> and named by the key to change, or the declared
+// hostnames.join. A stale hostnames.invite names no role and publishes
+// nothing.
+func TestAccountJoinHostnameInEitherMode(t *testing.T) {
 	keyOf := func(cfg *config.Config, name string) (string, bool) {
 		for _, h := range hostnames(cfg) {
 			if h.Name == name {
@@ -690,25 +691,34 @@ func TestAccountInviteHostnameOnlyWithInvitesOn(t *testing.T) {
 		}
 		return "", false
 	}
+	for _, mode := range []string{"invite", "open"} {
+		cfg := declared()
+		cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+			Settings: map[string]any{"signup": mode}}
+		if key, ok := keyOf(cfg, "join.example.org"); !ok || key != "apps.account.hostnames.join (derived)" {
+			t.Errorf("signup %s: join.example.org is %q, %v", mode, key, ok)
+		}
+		cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+			Hostnames: map[string]string{"join": "welcome.example.org"},
+			Settings:  map[string]any{"signup": mode}}
+		if key, ok := keyOf(cfg, "welcome.example.org"); !ok || key != "apps.account.hostnames.join" {
+			t.Errorf("signup %s: welcome.example.org is %q, %v", mode, key, ok)
+		}
+		if _, ok := keyOf(cfg, "join.example.org"); ok {
+			t.Errorf("signup %s: the derived join.example.org is published beside the declared one", mode)
+		}
+	}
 	cfg := declared()
 	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
-		Settings: map[string]any{"invites": true}}
-	if key, ok := keyOf(cfg, "invite.example.org"); !ok || key != "apps.account.hostnames.invite (derived)" {
-		t.Errorf("invites on: invite.example.org is %q, %v", key, ok)
-	}
-	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
 		Hostnames: map[string]string{"invite": "invite.example.org"},
-		Settings:  map[string]any{"invites": false}}
-	if key, ok := keyOf(cfg, "invite.example.org"); ok {
-		t.Errorf("invites off with a stale hostnames.invite: published as %s", key)
-	}
+		Settings:  map[string]any{"signup": "invite"}}
 	wants, err := Desired(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, w := range wants {
 		if w.Name == "invite.example.org" {
-			t.Errorf("invites off: %s %s is wanted", w.Type, w.Name)
+			t.Errorf("a stale hostnames.invite: %s %s is wanted", w.Type, w.Name)
 		}
 	}
 }

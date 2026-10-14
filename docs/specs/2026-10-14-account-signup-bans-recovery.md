@@ -1,6 +1,6 @@
 # The account service: signup, bans and recovery
 
-Status: approved by the founder on 2026-10-14, not implemented. Builds on
+Status: approved by the founder on 2026-10-14; implemented in paisans-stack and paisans-account-service v0.2.0, not yet run end to end. Builds on
 `docs/specs/2026-10-14-account-service.md` and
 `docs/specs/2026-10-14-operators-and-management.md`, which lands first.
 
