@@ -53,8 +53,10 @@ respond @signup 404
 # ID refuses POST /api/one-time-access-email then (onetimeaccess/service.go:66-67,
 # route at onetimeaccess/module.go:71) and its sign-in page does not offer the
 # page that asks for it (frontend/src/routes/login/alternative/+page.svelte:30-36).
-# The administrator's route, /api/users/<id>/one-time-access-email, which
-# apply and the invite app call, is a different path and stays open.
+# The administrator's route, /api/users/<id>/one-time-access-email, is a
+# different path and stays open. The invite app calls it here, at the public
+# hostname, with the static API key. apply calls it on the mesh port over
+# ssh and never reaches the gateway.
 @email_code path /api/one-time-access-email /api/one-time-access-email/* /login/alternative/email /login/alternative/email/*
 respond @email_code 404
 {{- end }}
