@@ -898,8 +898,7 @@ func (p *planner) routesFor(site *siteView) []route {
 				hostname = kinds.MediaHostname(p.cfg, app)
 				// Never gated, whatever the app's gate is. A federating server
 				// fetching an image is a machine, and it will not follow a
-				// redirect to a passkey prompt; Outline's private objects are
-				// protected by the signature on every URL, not by a cookie.
+				// redirect to a passkey prompt.
 				routeGated, routeAutoLogin, routeBypass = false, false, gateBypass{}
 			}
 			out = append(out, route{

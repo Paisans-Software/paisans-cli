@@ -1253,9 +1253,8 @@ func (c *checker) gatedWithoutSignedFetch() {
 
 // autoLoginWithoutARule refuses auto_login: true on a kind with no auto-login
 // rule. The key would do nothing, and an operator reading it would believe a
-// member is signed straight in. Outline needs none, because its sign-in
-// screen redirects itself when OIDC is its only provider; the kinds that
-// cannot sit behind the gate have none to take.
+// member is signed straight in. A kind whose sign-in screen redirects itself
+// needs none, and the kinds that cannot sit behind the gate have none to take.
 func (c *checker) autoLoginWithoutARule() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
