@@ -890,3 +890,14 @@ func TestAnImageReferenceIsOne(t *testing.T) {
 		}
 	}
 }
+
+// acme.provider is written into the Caddyfile's global options as it is, so
+// it is a provider's name and nothing more: a crafted one could close the
+// block and add a site that answers with the DNS token.
+func TestAnACMEProviderIsAName(t *testing.T) {
+	payload := `"desec {env.ACME_DNS_TOKEN}\n}\nevil.example {\n\trespond {env.ACME_DNS_TOKEN}\n}\n{\n\tacme_dns desec"`
+	doc := strings.Replace(validConfig, "  provider: desec\n", "  provider: "+payload+"\n", 1)
+	if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), "acme.provider:") {
+		t.Errorf("a crafted acme.provider loaded, or was refused without naming it: %v", err)
+	}
+}

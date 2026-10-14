@@ -539,6 +539,10 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// acmeProvider is a DNS provider's name as caddy-dns modules take it
+// (dns.providers.<name>).
+var acmeProvider = regexp.MustCompile(`^[a-z0-9_]+$`)
+
 // imageRef is the characters an image reference is written with: a
 // registry, a repository, a tag (a track's `*` included) and a digest. A
 // reference is written into a compose file as it is, so anything else (a
@@ -1178,6 +1182,9 @@ func (c *Config) structural(noSubnet bool) error {
 		add("acme.image %s", controlProblem(r))
 	} else if c.ACME.Image != "" && !imageRef.MatchString(c.ACME.Image) {
 		add("acme.image: %s", imageRefProblem(c.ACME.Image))
+	}
+	if c.ACME.Provider != "" && !acmeProvider.MatchString(c.ACME.Provider) {
+		add("acme.provider: %q is not a provider's name: lowercase letters, digits and underscores, as caddy-dns names its modules (Eg: desec, cloudflare). It is written into the gateway's Caddyfile as it is, so anything else could add to it.", c.ACME.Provider)
 	}
 	if c.ACME.Provider == "" && len(c.CaddySites()) > 0 {
 		// The providers are deliberately not listed here. This package does not
