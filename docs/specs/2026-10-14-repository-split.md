@@ -76,6 +76,12 @@ caller is edited once.
 builds its own request to Pocket ID's API. *CLI calls to Pocket ID* below
 lists what the CLI reaches Pocket ID with today and what each becomes.
 
+**The client sends the key only to a private address,** from `v0.1.0`.
+Founder decision. `docs/specs/2026-10-14-pocket-id-api-private.md` has the
+rule: a `BaseURL` whose host is not private is refused before anything is
+sent. Every caller in this repository already uses a mesh address, and the
+reconciler a compose hostname, so step 1 changes no behaviour.
+
 What the module carries:
 
 * **Pocket ID's major version.** The module is written against Pocket ID v2,
@@ -219,7 +225,10 @@ same images.
    the install line is unchanged.
 5. **`paisans-account-service` onto `pocketid-go`.** Replace
    `internal/idp/pocketid` with the shared client behind invite's `idp`
-   interface, keeping invite's contract and write surface tests.
+   interface, keeping invite's contract and write surface tests. The
+   account service must already reach Pocket ID over the mesh
+   (`docs/specs/2026-10-14-pocket-id-api-private.md`), since the shared
+   client refuses its public hostname.
 
 ## Open
 
