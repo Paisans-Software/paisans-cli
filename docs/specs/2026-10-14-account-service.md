@@ -130,6 +130,32 @@ The session cookie carries no `Domain` attribute, so the browser sends it to
 `account.` only. The pages an invitee opens are on an origin that never holds a
 session.
 
+### Reaching Pocket ID
+
+The service has two Pocket ID addresses, and they differ:
+
+| Variable | Value |
+|---|---|
+| `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>`, the issuer Pocket ID names itself by |
+| `ACCOUNT_IDP_URL` | the API, called with the static API key |
+
+`docs/specs/2026-10-14-pocket-id-api-private.md` makes the mesh the only
+place the key works: the gateway refuses `X-API-Key`, each site's HAProxy
+gains `listen pocket-id` on port 1413, and `ACCOUNT_IDP_URL` is
+`http://<site mesh address>:1413`. Until that spec is implemented,
+`ACCOUNT_IDP_URL` is the public hostname, as `INVITE_IDP_URL` is today. This
+spec renames the variable and the files that spec names
+(`internal/render/invite.go` becomes `internal/render/account.go`), and
+updates that spec's text to the new names in the same change, so whichever
+is implemented second reads current names. Step 5 of
+`docs/specs/2026-10-14-repository-split.md`, moving the service onto
+`pocketid-go`, needs the mesh route first, because that client refuses to
+send the key to an address that is not private.
+
+The `pocket-id` blueprint's Caddy snippet says which caller reaches
+`/api/users/<id>/one-time-access-email` through the gateway. That caller is
+the account service, and the comment names it so.
+
 ## The `account` blueprint
 
 The reserved `invite` blueprint's directory becomes `account`. Its
