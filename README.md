@@ -6249,12 +6249,12 @@ is in setup mode owns the wiki. The blueprint's route refuses it on the wiki's
 hostname for every method, always, and only the bootstrap, on the stack's own
 network, can reach it.
 
-**Pocket ID is the only way in for members, through Wiki.js's OAuth2 module
-rather than its OpenID Connect one.** The OpenID Connect module fixes its
-scopes at `openid profile email`
-(`server/modules/authentication/oidc/definition.yml:10-13`), and Pocket ID
-sends the `groups` claim only to a client that asks for the `groups` scope
-(`oidc/claims_service.go:157`). The client's callback, PKCE and groups are in
+**Pocket ID is the only way in for members, through Wiki.js's generic OAuth2
+module asking for the `groups` scope.** Pocket ID sends the `groups` claim only
+to a client that asks for that scope (`oidc/claims_service.go:157`), and the
+OAuth2 module passes on whatever scope it is configured with
+(`server/modules/authentication/oauth2/authentication.js:21`), so the
+bootstrap configures `openid profile email groups`. The client's callback, PKCE and groups are in
 the table under *`oidc client create` makes an app's client at Pocket ID*. The
 Pocket ID client stays restricted to the member and admin groups, as every
 app's is: that restriction is who may sign in at all, and the groups claim
@@ -6272,9 +6272,11 @@ it (observed). Founder decision: the one click stays (see *The visibility gate
 is a per-app property*).
 
 **Membership is Pocket ID's; what a group may do is Wiki.js's.** On every sign
-in Wiki.js adds the person to each existing group their claim names and
-removes them from every group it does not (`oauth2/authentication.js:41-46`),
-matching names exactly and case sensitively (`:40`). A person added to a group
+in Wiki.js adds the person to each existing group their claim names and,
+when the claim is present, removes them from every group it does not
+(`oauth2/authentication.js:36-48`: group mapping, which the bootstrap turns on,
+acts only on a groups claim that is a list), matching names exactly and case
+sensitively (`:40`). A person added to a group
 by hand in Wiki.js loses it at their next sign in, so every group a member
 should be in is a Pocket ID group and is listed in `synced_groups`, which
 defaults to the admin group and the member group. The bootstrap creates each
@@ -6360,47 +6362,42 @@ and the one account with `manage:system`, and Wiki.js will not remove it from
 rather than rotated (see *`secrets rotate` replaces a secret where it is
 checked and where it is used*).
 
-Nobody reaches it in a browser by accident, and that is deliberate.
-`/login?all=1` skips auto-login (`server/controllers/auth.js:37`), but the
-hidden local form stays hidden (`:46`), so signing in by hand means first
-turning that off in the database, where the bootstrap would turn it back on at
-its next run. This is a recovery procedure, for when an admin needs
-`manage:system` (a setting the bootstrap does not own, or a wiki whose admin
-group was lost), not a workflow. **Reasoned from Wiki.js's source at
-`v2.5.316`; nobody has run it yet.**
+**Hiding the local form hides it from the page, not the account.** The
+bootstrap sets `authHideLocal`, so Wiki.js's sign-in page never shows the
+local form to a member, but Wiki.js still keeps a legacy sign-in page for old
+browsers that ignores it. A request for `/login` with `legacy` in its query
+string, or from a user agent containing `Trident`, gets that page, skipping
+auto-login and `authHideLocal` (`server/controllers/auth.js:28-34` at
+`v2.5.316`); it lists every form strategy, `local` among them
+(`server/models/authentication.js:46-57`); and a `POST /login` under the same
+condition signs in with no `authHideLocal` check (`server/controllers/auth.js:101-113`).
+What protects the account is therefore the gate on a gated wiki, the generated
+password, and Wiki.js's sign-in rate limit on that route (`bruteforce.prevent`,
+`:101`), not the hidden form. The same legacy page is the recovery: when an
+admin needs `manage:system` (a setting the bootstrap does not own, or a wiki
+whose admin group was lost), it needs no change to the wiki at all.
+**Reasoned from Wiki.js's source at `v2.5.316`; nobody has run it yet.**
 
-1. On every site running the wiki, stop its bootstrap, so that nothing puts
-   the setting back while you work:
+1. In a browser, set the user agent to one containing `Trident` (a browser's
+   developer tools can override it). The legacy form posts to `/login` with no
+   query string (`server/views/legacy/login.pug:10`), so `?legacy=1` alone
+   shows the form and the sign in is then redirected back to the modern page;
+   the user agent carries both requests.
 
-   ```sh
-   cd /srv/paisans/<token>/<app> && docker compose stop bootstrap
-   ```
+2. Open `https://<hostname>/login`. On a gated wiki this needs a Pocket ID
+   session the gate admits. The gate's auto-login rule matches `/login`
+   whatever its query string, because Caddy's `path` matcher reads the path
+   alone, so a browser holding the gate's session and no wiki session is sent
+   to Pocket ID once; the rule then stands aside for two minutes (its loop
+   breaker cookie). Open `/login` again.
 
-   `stop` rather than `kill`: its restart policy is `unless-stopped`, so a
-   container stopped this way stays down even when the app restarts.
+3. Choose the local strategy and sign in as `wikijs-admin@<community domain>`
+   with the wiki's `local_admin_password`.
 
-2. In the wiki's database (a pinned wiki's own `postgres` service, or the
-   cluster's leader), show the local form again. Wiki.js keeps its sign-in
-   options as one JSON row of its `settings` table, key `auth`
-   (`server/graph/resolvers/site.js:83-90,128`):
-
-   ```sql
-   UPDATE settings SET value = jsonb_set(value::jsonb, '{hideLocal}', 'false')::json WHERE key = 'auth';
-   ```
-
-3. Restart the app on every site running it, `docker compose restart app`.
-   Wiki.js reads its settings from the database at boot
-   (`server/core/config.js`, `loadFromDb`), and a change made in SQL tells no
-   running instance.
-
-4. Open `https://<hostname>/login?all=1` and sign in with the local form as
-   `wikijs-admin@<community domain>` and the wiki's `local_admin_password`. On
-   a gated wiki the gate still stands in front of `/login`, so this needs a
-   Pocket ID session the gate admits.
-
-5. When done, start the bootstrap again on every site,
-   `docker compose start bootstrap`, or run `paisans apply`. Its run hides the
-   local form again and puts back anything else it owns.
+4. Make the change, sign out, and drop the user agent override. Anything
+   changed that the bootstrap sets (*Wiki.js is configured by its
+   bootstrap*) is put back at its next run, which every restart of the app and
+   every `apply` that recreates the stack starts.
 
 ### Pocket ID runs on every apps site, and one of them is active
 

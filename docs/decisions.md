@@ -2390,6 +2390,13 @@ entitlement. Keeping it meant a SCIM bridge from Pocket ID, a second client
 to carry it, and an API key only a signed in admin can make. Wiki.js 3 is a
 beta its own README calls not for production use.
 
+Within Wiki.js 2.5, its OpenID Connect module fixes its scopes at `openid
+profile email` (`server/modules/authentication/oidc/definition.yml:10-13` at
+`v2.5.316`, applied at `server/models/users.js:313`), and Pocket ID sends the
+`groups` claim only to a client that asks for the `groups` scope
+(`oidc/claims_service.go:157` at `v2.14.0`). So members sign in through the
+generic OAuth2 module, which takes its scope as configuration.
+
 ### What the spike changed
 
 A spike against Wiki.js 2.5.316 and Pocket ID 2.14.0
