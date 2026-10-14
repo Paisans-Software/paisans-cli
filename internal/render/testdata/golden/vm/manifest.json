@@ -38,7 +38,7 @@
     },
     {
       "path": "srv/paisans/f2a9/gate/compose.yaml",
-      "sha256": "03319a02811f78b7227bdc4986300a645dec97c5be92758c335a8a50c78e7ff2",
+      "sha256": "fa3f2fd668784837168a83c4713e2177e703c9a87ed4fc61fe86448734b7ca58",
       "mode": "0644"
     },
     {
@@ -113,7 +113,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "abec7333c3ecad32b0cd3c290cf7f41dfb228051b4f41181a0f55436b11f139a",
+      "sha256": "7fa114d1954a365ba5c2c420a891ee3e383e0da69929db1964dbb38d13319d75",
       "mode": "0644"
     },
     {

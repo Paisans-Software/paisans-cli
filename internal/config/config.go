@@ -539,6 +539,17 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// imageRef is the characters an image reference is written with: a
+// registry, a repository, a tag (a track's `*` included) and a digest. A
+// reference is written into a compose file as it is, so anything else (a
+// space, a `#`, a quote, a line break in any encoding) could end the value
+// and add a key.
+var imageRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@+*-]*$`)
+
+func imageRefProblem(ref string) string {
+	return fmt.Sprintf("%q is not an image reference: letters, digits and . _ / : @ + * -, as in ghcr.io/example/app:1.2 or a track like ghcr.io/example/app:1.*. It is written into a compose file as it is, so any other character could add a key to the service.", ref)
+}
+
 // nameCharsRE is what nameChars accepts.
 var nameCharsRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -1122,6 +1133,8 @@ func (c *Config) structural(noSubnet bool) error {
 				add("apps.%s.images.%s %s", name, service, controlProblem(r))
 			} else if strings.TrimSpace(app.Images[service]) == "" {
 				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, service)
+			} else if !imageRef.MatchString(app.Images[service]) {
+				add("apps.%s.images.%s: %s", name, service, imageRefProblem(app.Images[service]))
 			}
 		}
 		for _, role := range sortedKeys(app.Hostnames) {
@@ -1163,6 +1176,8 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if r, ok := ControlRune(c.ACME.Image); ok {
 		add("acme.image %s", controlProblem(r))
+	} else if c.ACME.Image != "" && !imageRef.MatchString(c.ACME.Image) {
+		add("acme.image: %s", imageRefProblem(c.ACME.Image))
 	}
 	if c.ACME.Provider == "" && len(c.CaddySites()) > 0 {
 		// The providers are deliberately not listed here. This package does not

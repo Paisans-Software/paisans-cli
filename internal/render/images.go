@@ -236,12 +236,32 @@ func (p *planner) injectedImages(app config.App) (map[string]string, error) {
 	return map[string]string{adminsHeartbeatService: heartbeat}, nil
 }
 
+// ImageLine is the reference an `image:` line of a compose file names,
+// trimmed of its indentation, and whether it is written quoted, as the
+// toolkit's own templates write it (yamlquote), or bare, as a catalog's may.
+// A quoted reference holding an escape is not read: no reference has one.
+func ImageLine(trimmed string) (ref string, quoted, ok bool) {
+	ref, ok = strings.CutPrefix(trimmed, "image: ")
+	if !ok {
+		return "", false, false
+	}
+	if inner, isQuoted := strings.CutPrefix(ref, `"`); isQuoted {
+		inner, closed := strings.CutSuffix(inner, `"`)
+		if !closed || strings.ContainsAny(inner, `"\$`) {
+			return "", false, false
+		}
+		return inner, true, true
+	}
+	return ref, false, true
+}
+
 // PinImages returns a compose file with each image line naming a key of
 // pinned naming its value instead, which is how apply puts the build it
 // resolved into the file.
 //
 // The lines are this package's: every template writes an image as
-// `image: <reference>` on a line of its own, one per service. Each reference
+// `image: <reference>` on a line of its own, one per service, quoted in the
+// toolkit's own templates (ImageLine). Each reference
 // must be named on exactly as many lines as lines gives it, the count
 // render reported in Plan.Images. A different count means the template
 // changed under this function, and pinning some of the services and not the
@@ -256,7 +276,7 @@ func PinImages(compose string, pinned map[string]string, lines map[string]int) (
 	for i, line := range out {
 		body := strings.TrimRight(line, "\n")
 		trimmed := strings.TrimLeft(body, " ")
-		ref, ok := strings.CutPrefix(trimmed, "image: ")
+		ref, quoted, ok := ImageLine(trimmed)
 		if !ok {
 			continue
 		}
@@ -265,6 +285,9 @@ func PinImages(compose string, pinned map[string]string, lines map[string]int) (
 			continue
 		}
 		found[ref]++
+		if quoted {
+			to = `"` + to + `"`
+		}
 		out[i] = body[:len(body)-len(trimmed)] + "image: " + to + line[len(body):]
 	}
 	refs := make([]string, 0, len(pinned))

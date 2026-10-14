@@ -856,3 +856,37 @@ func TestValuesTheTemplatesWriteAsTheyAreAreChecked(t *testing.T) {
 		}
 	}
 }
+
+// A YAML parser built on libyaml reads U+2028 and U+2029 as line breaks, so
+// an image reference carrying them adds keys to the compose file it is
+// written into: privileged, on the gateway's Caddy with the host's network.
+// An image reference is refused unless it is one.
+func TestAnImageReferenceIsOne(t *testing.T) {
+	const payload = "ghcr.io/pocket-id/pocket-id:v1.0.0     privileged: true     x-pad: a:v1.0.0"
+	cases := []struct{ from, to, want string }{
+		{"    placement: cluster\n", "    placement: cluster\n    images:\n      app: \"" + payload + "\"\n", "apps.talk.images.app"},
+		{"acme:\n  provider: desec\n", "acme:\n  provider: desec\n  image: \"" + payload + "\"\n", "acme.image"},
+		{"acme:\n  provider: desec\n", "acme:\n  provider: desec\n  image: \"ghcr.io/x/caddy:2 #\"\n", "acme.image"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, c.from, c.to, 1)
+		if doc == validConfig {
+			t.Fatalf("%q not in the fixture", c.from)
+		}
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+	for _, r := range []rune{' ', ' '} {
+		if _, ok := config.ControlRune("a" + string(r) + "b"); !ok {
+			t.Errorf("U+%04X is not a control character to ControlRune", r)
+		}
+	}
+	// A track, which apply resolves, and a reference to one build pass.
+	for _, ref := range []string{"ghcr.io/example-org/mbin:v1.*.*-fork", "docker.io/library/postgres:18.*-trixie", "ghcr.io/x/y:1.2@sha256:" + strings.Repeat("a", 64), "caddy:2.10.0"} {
+		doc := strings.Replace(validConfig, "    placement: cluster\n", "    placement: cluster\n    images:\n      app: \""+ref+"\"\n", 1)
+		if _, err := config.Load(write(t, doc)); err != nil {
+			t.Errorf("%s: %v", ref, err)
+		}
+	}
+}

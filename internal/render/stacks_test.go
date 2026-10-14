@@ -140,3 +140,34 @@ func TestSettingsInEnvFilesAreQuoted(t *testing.T) {
 		}
 	}
 }
+
+// The toolkit's own compose templates quote every image reference, so even a
+// reference that slipped past configuration cannot add a key, and pinning
+// keeps the quotes.
+func TestTheToolkitsImageLinesAreQuoted(t *testing.T) {
+	plan, err := render.Build(fixture(t), fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checked int
+	for _, f := range plan.Files {
+		if !strings.HasSuffix(f.Path, "/infra/compose.yaml") && !strings.HasSuffix(f.Path, "/auth/compose.yaml") {
+			continue
+		}
+		for _, line := range strings.Split(f.Content, "\n") {
+			if ref, ok := strings.CutPrefix(strings.TrimSpace(line), "image: "); ok {
+				checked++
+				if !strings.HasPrefix(ref, `"`) {
+					t.Errorf("%s: %s is not quoted", f.Path, line)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no image line checked")
+	}
+	got, err := render.PinImages("    image: \"a:1\"\n", map[string]string{"a:1": "a:1@sha256:00"}, map[string]int{"a:1": 1})
+	if err != nil || got != "    image: \"a:1@sha256:00\"\n" {
+		t.Errorf("pinned %q, %v", got, err)
+	}
+}

@@ -8,7 +8,7 @@ services:
   etcd:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: gcr.io/etcd-development/etcd:v3.5.*
+    image: "gcr.io/etcd-development/etcd:v3.5.*"
     restart: unless-stopped
     network_mode: host
     command:
@@ -35,7 +35,7 @@ services:
   caddy:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/paisans-software/caddy:2.*.*
+    image: "ghcr.io/paisans-software/caddy:2.*.*"
     restart: unless-stopped
     network_mode: host
     # Relative to this file, so the path names the caddy/ directory the token
@@ -61,7 +61,7 @@ services:
   heartbeat:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: docker.io/curlimages/curl:8.*.*
+    image: "docker.io/curlimages/curl:8.*.*"
     restart: unless-stopped
     env_file:
       - heartbeat/heartbeat.env

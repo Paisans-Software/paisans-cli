@@ -13,7 +13,7 @@ services:
   app:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "app" }}
+    image: {{ yamlquote (.Image "app") }}
     restart: unless-stopped
     # The standby wrapper, paisans-standby.sh beside this file, runs the
     # image's own entrypoint and command, which are spelled out here because
@@ -67,7 +67,7 @@ services:
   reconciler:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "reconciler" }}
+    image: {{ yamlquote (.Image "reconciler") }}
     restart: unless-stopped
     env_file:
       - .env
@@ -89,7 +89,7 @@ services:
   admins-heartbeat:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .HeartbeatImage }}
+    image: {{ yamlquote .HeartbeatImage }}
     restart: unless-stopped
     env_file:
       - admins-heartbeat/heartbeat.env
@@ -104,7 +104,7 @@ services:
   postgres:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "postgres" }}
+    image: {{ yamlquote (.Image "postgres") }}
     restart: unless-stopped
     environment:
       POSTGRES_DB: {{ .DBName }}

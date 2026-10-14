@@ -1078,8 +1078,10 @@ func (p *planner) electionTimeoutMS() int {
 // command that reads a peer's key back from `wg show`.
 func PublicKey(private string) (string, error) { return publicKey(private) }
 
-// yamlquote is the template function of that name.
+// yamlquote is the template function of that name. A `$` is doubled as
+// well, since docker compose interpolates `$` in every value of a compose
+// file, quoted or not, and `$$` is its escape for a literal one.
 func yamlquote(v string) (string, error) {
 	raw, err := json.Marshal(v)
-	return string(raw), err
+	return strings.ReplaceAll(string(raw), "$", "$$"), err
 }

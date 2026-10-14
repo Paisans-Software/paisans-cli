@@ -92,7 +92,7 @@ func TestEveryPocketIDSitePushesTheAdminsHeartbeat(t *testing.T) {
 			t.Errorf("%s: the Pocket ID stack has no admins-heartbeat service:\n%s", site, compose)
 		}
 		heartbeat, _ := blueprints.FoundationImage(blueprints.FoundationHeartbeat)
-		if !strings.Contains(compose, "image: "+heartbeat+"\n") {
+		if !strings.Contains(compose, "image: \""+heartbeat+"\"\n") {
 			t.Errorf("%s: the pusher does not run %s:\n%s", site, heartbeat, compose)
 		}
 		if strings.Contains(compose, token) {
