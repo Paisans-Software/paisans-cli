@@ -35,18 +35,19 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
-	// Foundation is an image the render took from the official core
-	// catalog's foundation.yaml for a service of the toolkit's own, for every
-	// service of the file that runs it: one of the infrastructure stack's, a
-	// service a reserved or core blueprint names with foundation:, a pinned
-	// app's database, or the admins heartbeat. Only that file is reviewed by
-	// the team, in the official repository's pull requests, so a core read
-	// from anywhere else (blueprints.CoreIsOfficial) marks nothing, and a
-	// service a third party catalog's blueprint names with foundation: is not
-	// one. It is decided where the render chose the image, never by its name,
-	// so a catalog blueprint or a declaration naming the same reference is
-	// not one either.
-	Foundation bool
+	// FoundationServices are the compose services of the file, among those
+	// running Image, whose image the render itself took from the official
+	// core catalog's foundation.yaml for a service of the toolkit's own: one
+	// of the infrastructure stack's, a service a reserved or core blueprint
+	// names with foundation:, a pinned app's defaulted database, or the
+	// admins heartbeat. Only that file is reviewed by the team, in the
+	// official repository's pull requests, so a core read from anywhere else
+	// (blueprints.CoreIsOfficial) marks nothing, and a service a third party
+	// catalog's blueprint names with foundation: is not one. The mark is the
+	// service's, never the reference's: another service of the same file that
+	// a template points at the same reference was chosen by the template, not
+	// by the render, and is reviewed.
+	FoundationServices []string
 
 	// blueprint is the app's blueprint, for Setting.
 	blueprint config.Blueprint
@@ -100,15 +101,25 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		app := ""
 		named := map[string][]string{}
-		// fromFoundation and fromElsewhere are each reference the render
-		// chose for this stack, by where it chose it. A reference chosen
-		// both ways is not the foundation's, so a declaration that happens
-		// to name a foundation image is still reviewed.
-		var fromFoundation, fromElsewhere map[string]bool
+		// chosen is each compose service whose image the render took from
+		// the foundation, with that image. fromElsewhere is each reference
+		// the render chose for this stack otherwise: a reference chosen both
+		// ways is not the foundation's, so a declaration that happens to name
+		// a foundation image is still reviewed.
+		chosen, fromElsewhere := map[string]string{}, map[string]bool{}
 		if stack == "infra" {
-			fromFoundation, fromElsewhere, err = p.infraImageOrigins()
+			// The infrastructure template is the toolkit's own, so every
+			// service of it running a foundation image was chosen by the
+			// render.
+			fromFoundation, declared, err := p.infraImageOrigins()
 			if err != nil {
 				return nil, err
+			}
+			fromElsewhere = declared
+			for name, service := range services {
+				if image := strings.TrimSpace(service.Image); fromFoundation[image] {
+					chosen[name] = image
+				}
 			}
 		} else {
 			declared, isApp := p.cfg.Apps[stack]
@@ -120,13 +131,12 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			if err != nil {
 				return nil, err
 			}
-			fromFoundation, fromElsewhere = map[string]bool{}, map[string]bool{}
 			for service, image := range images {
 				if lines[image] > 0 {
 					named[image] = append(named[image], service)
 				}
 				if foundation[service] {
-					fromFoundation[image] = true
+					chosen[service] = image
 				} else {
 					fromElsewhere[image] = true
 				}
@@ -135,13 +145,20 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, image := range injected {
-				fromFoundation[image] = true
+			for service, image := range injected {
+				chosen[service] = image
 			}
 		}
 		// Asked once the origins are known, since choosing them is what
 		// reads the core catalog.
 		official := blueprints.CoreIsOfficial()
+		marked := map[string][]string{}
+		for name, service := range services {
+			image := strings.TrimSpace(service.Image)
+			if official && image != "" && chosen[name] == image && !fromElsewhere[image] {
+				marked[image] = append(marked[image], name)
+			}
+		}
 		for image, n := range lines {
 			// An image no service of the blueprint declares (the admins
 			// heartbeat in a Pocket ID stack), and every image of the
@@ -152,9 +169,8 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
-			// A literal reference equal to one the foundation chose in this
-			// stack shares its mark, harmlessly: it is the same reviewed reference.
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: official && fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
+			sort.Strings(marked[image])
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, FoundationServices: marked[image], blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {
@@ -194,11 +210,11 @@ func (p *planner) infraImageOrigins() (foundation, declared map[string]bool, err
 	return foundation, declared, nil
 }
 
-// injectedImages are the images an app's stack runs that no service of its
-// blueprint names: services the toolkit adds to a blueprint built into it,
-// each the foundation's. The pocket-id blueprint's admins heartbeat is the
-// one, appValues.HeartbeatImage.
-func (p *planner) injectedImages(app config.App) ([]string, error) {
+// injectedImages are the services an app's stack runs that no service of
+// its blueprint names, with their images: services the toolkit adds to a
+// blueprint built into it, each the foundation's. The pocket-id blueprint's
+// admins heartbeat is the one, appValues.HeartbeatImage.
+func (p *planner) injectedImages(app config.App) (map[string]string, error) {
 	if app.Blueprint != config.BlueprintPocketID {
 		return nil, nil
 	}
@@ -206,7 +222,7 @@ func (p *planner) injectedImages(app config.App) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{heartbeat}, nil
+	return map[string]string{adminsHeartbeatService: heartbeat}, nil
 }
 
 // PinImages returns a compose file with each image line naming a key of

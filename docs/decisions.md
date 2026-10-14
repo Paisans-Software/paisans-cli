@@ -2418,14 +2418,19 @@ Founder decision, 2026-10-13. It amends the grant review of
 An image needs no `approve` in `apply`'s grant review, when it is added or
 changed, only when all of these hold:
 
-1. The render took it from `foundation.yaml`, decided where the render chose
-   it, never by matching its repository.
-2. That `foundation.yaml` came from the official core catalog: the core
-   catalog was read from exactly
-   `https://github.com/Paisans-Software/paisans-blueprints`, not from
-   `PAISANS_CORE_CATALOG`, not from a `catalogs.core.url`, not from any
-   mirror. The URL may differ only by a trailing slash, a `.git` suffix and
-   the case of its host; any other URL is not official.
+1. The render itself took it from `foundation.yaml` for that service,
+   decided where the render chose it, never by matching its repository, so
+   another service of the same compose file a template points at the same
+   reference is approved.
+2. That `foundation.yaml` came from the official core catalog: the core was
+   fetched from exactly
+   `https://github.com/Paisans-Software/paisans-blueprints` at the pinned or
+   resolved commit, which the toolkit checks on the directory it read: a git
+   checkout whose origin is that URL and whose `HEAD` is that commit. The URL
+   may differ only by a trailing slash, a `.git` suffix and the case of its
+   host. A core from `PAISANS_CORE_CATALOG`, a `catalogs.core.url`, any
+   mirror, a cached commit another URL fetched, or an installed configuration
+   store snapshot is not official.
 3. The service is the toolkit's own: the infrastructure stack's, the gateway's
    Caddy unless `acme.image` declares one, a pinned app's own database unless
    the configuration declares one, a service the toolkit adds to a stack (the
@@ -2459,7 +2464,9 @@ check already made. A third party catalog or a mirror of the core catalog is
 not reviewed by that team: a mirror's `foundation.yaml` can say anything, and a
 third party blueprint's choice to run a foundation image in its own stack, with
 its own configuration around it, is that catalog's choice, which nobody on the
-team reviewed.
+team reviewed. A snapshot is checked only against the sums its own publisher
+wrote, and the catalog cache is keyed by commit alone, so neither says where
+its bytes came from; only a checkout's origin and `HEAD` do.
 
 ### What was weighed
 

@@ -37,7 +37,7 @@ type Service struct {
 	// service runs (FoundationPocketID and the rest), in any blueprint that
 	// writes foundation: for it. Services and DefaultImage fill Image from
 	// it. Only in a reserved or core blueprint (ToolkitBlueprint), with the
-	// core read from CoreURL (CoreIsOfficial), does it spare the image
+	// core fetched from CoreURL (CoreIsOfficial), does it spare the image
 	// apply's approval: the team reviews foundation.yaml in that repository,
 	// not a third party catalog's choice to run one of its images.
 	Foundation string

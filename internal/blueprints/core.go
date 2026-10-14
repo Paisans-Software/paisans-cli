@@ -33,24 +33,38 @@ func coreURL() string {
 	return CoreURL
 }
 
-// CoreIsOfficial reports whether the core catalog this process read came
-// from CoreURL itself. Only then is its foundation.yaml the one the team
+// CoreIsOfficial reports whether the core catalog this process read is the
+// official one: a git checkout made from CoreURL at the commit read
+// (officialCheckout). Only then is its foundation.yaml the one the team
 // reviews in that repository's pull requests, and only then may apply skip
 // approving the images it names (README.md, "Apply asks before it grants").
-// A core read from PAISANS_CORE_CATALOG, from a catalogs.core url, or from
-// any mirror is not reviewed by that team, however faithful the copy. A core
-// not read, or read with an error, is not official.
+// A core read from PAISANS_CORE_CATALOG, from a catalogs.core url, from any
+// mirror, from a cached commit another URL fetched, or from an installed
+// snapshot, which is bytes another admin published, is not reviewed by that
+// team, however faithful the copy. A core not read, or read with an error,
+// is not official.
 func CoreIsOfficial() bool {
 	core.Lock()
 	defer core.Unlock()
-	if !core.done || core.err != nil {
+	return core.done && core.err == nil && core.official
+}
+
+// officialCheckout reports whether dir, a core catalog read at commit, came
+// from the official repository. It is decided from the directory itself,
+// never from what the configuration says the URL is, since the cache is
+// keyed by commit alone and a snapshot carries no origin at all: dir must
+// be a checkout Fetch made, its origin the official URL, and its HEAD the
+// commit.
+func officialCheckout(dir, commit string) bool {
+	if !fetched(dir) || commit == "" {
 		return false
 	}
-	url := core.release.URL
-	if url == "" {
-		url = coreURL()
+	origin, err := git(dir, "remote", "get-url", "origin")
+	if err != nil || !(officialCoreURL(origin) || testOfficialCore(origin)) {
+		return false
 	}
-	return officialCoreURL(url) || testOfficialCore(url)
+	head, err := git(dir, "rev-parse", "--verify", "HEAD^{commit}")
+	return err == nil && head == commit
 }
 
 // officialCoreURL reports whether url names CoreURL's repository: the same
@@ -81,12 +95,12 @@ func splitHTTPS(url string) (host, path string, ok bool) {
 	return host, "/" + path, ok && host != ""
 }
 
-// testOfficialCore lets a test count its local copy of the core catalog
-// (internal/blueprints/coretest) as official, since a test never reaches
-// the real repository. It reads PAISANS_TEST_OFFICIAL_CORE only inside a
-// binary `go test` built: testing.Testing is false in every other binary,
-// so no configuration or environment can make a production run count
-// another core as official.
+// testOfficialCore lets a test count a checkout of its local copy of the
+// core catalog (internal/blueprints/coretest) as fetched from the official
+// URL, since a test never reaches the real repository. It reads
+// PAISANS_TEST_OFFICIAL_CORE only inside a binary `go test` built:
+// testing.Testing is false in every other binary, so no configuration or
+// environment can make a production run count another core as official.
 func testOfficialCore(url string) bool {
 	if !testing.Testing() {
 		return false
@@ -122,6 +136,9 @@ var core struct {
 	release config.Catalog
 	skipped []string
 	wizard  []WizardEntry
+	// official is whether the core was read from a checkout of the official
+	// repository at its commit (officialCheckout).
+	official bool
 }
 
 // LoadCore reads the core catalog from url, coreURL() when empty, unless it
@@ -205,6 +222,7 @@ func coreDir(cat config.Catalog) (string, bool) {
 // at dir, and records them only when every one reads: a release with one
 // wrong is skipped whole, not half known.
 func readCoreAt(dir string, cat config.Catalog) error {
+	core.official = false
 	// An installed snapshot holds only the blueprints and the foundation a
 	// configuration used, not the catalog's own file, and so no wizard,
 	// which only a new deployment's `paisans create` asks.
@@ -251,6 +269,7 @@ func readCoreAt(dir string, cat config.Catalog) error {
 	}
 	setFoundation(f)
 	core.wizard = wizard
+	core.official = officialCheckout(dir, cat.Commit)
 	return nil
 }
 

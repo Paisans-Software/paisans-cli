@@ -408,13 +408,32 @@ func resolve(cfg *config.Config) []string {
 			return dir, dir != ""
 		}
 		cat := CorePin(cfg, name)
-		if dir, ok := snapshotDir(cat.Commit); ok {
-			fetched[name] = dir
-			return dir, true
+		read := func() (string, error) {
+			dir, err := Fetch(cat)
+			if err == nil {
+				_, err = ReadCatalog(dir)
+			}
+			return dir, err
 		}
-		dir, err := Fetch(cat)
-		if err == nil {
-			_, err = ReadCatalog(dir)
+		var dir string
+		var err error
+		if name == config.CoreCatalog {
+			// A pinned core is fetched before a snapshot is used, since
+			// only a checkout of the official repository is the official
+			// core (CoreIsOfficial), and a snapshot never is. Its url
+			// defaults to the core's own.
+			if cat.URL == "" {
+				cat.URL = coreURL()
+			}
+			if dir, err = read(); err != nil {
+				if snap, ok := snapshotDir(cat.Commit); ok {
+					dir, err = snap, nil
+				}
+			}
+		} else if snap, ok := snapshotDir(cat.Commit); ok {
+			dir = snap
+		} else {
+			dir, err = read()
 		}
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("catalogs.%s: %v.", name, err))

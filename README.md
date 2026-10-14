@@ -5110,12 +5110,19 @@ image the render takes from `foundation.yaml` for one of the toolkit's own
 services, and only when that file came from the official core catalog. All of
 these must hold:
 
-1. The render took the image from `foundation.yaml`, never matched it by name.
-2. The core catalog was read from exactly
-   `https://github.com/Paisans-Software/paisans-blueprints`, not from
-   `PAISANS_CORE_CATALOG`, not from a `catalogs.core.url`, not from any mirror.
-   The URL may differ only by a trailing slash, a `.git` suffix and the case of
-   its host; any other URL is not the official one.
+1. The render itself took the image from `foundation.yaml` for that service,
+   never matched it by name: another service of the same compose file that a
+   template points at the same reference is reviewed.
+2. The core catalog was fetched from exactly
+   `https://github.com/Paisans-Software/paisans-blueprints` at the commit read:
+   the toolkit reads it from a git checkout whose origin is that URL and whose
+   `HEAD` is that commit. The URL may differ only by a trailing slash, a `.git`
+   suffix and the case of its host. A core from `PAISANS_CORE_CATALOG`, from a
+   `catalogs.core.url`, from any mirror, from a cached commit another URL
+   fetched, or from an installed configuration store snapshot (bytes another
+   admin published) is not official. A configuration that pins core to a
+   commit is fetched from the official URL before any snapshot is used, so an
+   honest pin keeps the exemption.
 3. The service is the toolkit's own: one of the infrastructure stack's, the
    gateway's Caddy unless `acme.image` declares one, a pinned app's own database
    unless `apps.<name>.images` declares one, a service the toolkit adds to a
