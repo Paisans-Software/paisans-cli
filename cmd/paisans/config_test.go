@@ -377,6 +377,9 @@ func TestSigningKeyFor(t *testing.T) {
 	cfg := fixture(t)
 	alice := cfg.Operators["alice"].KeyLines()[0]
 	other := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"
+	// The fixture declares bob under other; the first cases are about a
+	// key no operator lists.
+	delete(cfg.Operators, "bob")
 	saved := agentKeys
 	t.Cleanup(func() { agentKeys = saved })
 	l := configstore.Local{Dir: t.TempDir()}
@@ -393,7 +396,7 @@ func TestSigningKeyFor(t *testing.T) {
 	cfg.Operators["bob"] = config.Operator{Name: "Bob Example", Email: "bob@example.org", Keys: other}
 	agentKeys = func() []string { return []string{alice, other} }
 	if _, err := signingKeyFor(l, cfg); err == nil || !strings.Contains(problemText(err), "more than one") {
-		t.Fatalf("two admin keys: %v", err)
+		t.Fatalf("two operator keys: %v", err)
 	}
 	if err := l.SetSigningKey(other); err != nil {
 		t.Fatal(err)

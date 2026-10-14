@@ -29,11 +29,13 @@ func answersFor(sh Shape, all, gated bool) Answers {
 		Name:     "Example Community",
 		Domain:   "example.org",
 		Provider: "cloudflare",
-		Admins: []Admin{
+		Operators: []Operator{
 			{ID: "alice", Name: "Alice Example", Email: "alice@example.org", Keys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"}},
 			{ID: "bob", Name: "Bob Example", Email: "bob@example.org", Keys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"}},
 		},
-		Shape: sh,
+		Shape:      sh,
+		Management: "paisans",
+		Account:    Account{Hostname: "account.example.org", Invites: true, CodeOfConductPath: "testdata/code-of-conduct.md", CodeOfConduct: "# Be kind\n\nTreat each other well."},
 		SMTP: SMTP{Host: "smtp.example.org", Port: 587, Security: "starttls", Username: "community@example.org",
 			FromAddress: "community@example.org", FromName: "Example Community"},
 	}
@@ -49,7 +51,8 @@ func answersFor(sh Shape, all, gated bool) Answers {
 		}
 		a.Sites = append(a.Sites, site)
 	}
-	a.Apps = []App{{Key: signIn.key, Blueprint: signIn.blueprint, Hostname: "id.example.org"}}
+	a.Apps = []App{{Key: signIn.key, Blueprint: signIn.blueprint, Hostname: "id.example.org"},
+		{Key: accountApp, Blueprint: config.BlueprintAccount, Hostname: "account.example.org"}}
 	if !all {
 		return a
 	}
@@ -165,7 +168,7 @@ func renders(t *testing.T, data []byte) {
 func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	a := answersFor(ShapeOneMachine, false, false)
 	a.Name = `- "Paisans": a #community`
-	a.Admins[0].Name = `Zoë "Z" O'Brien: #1`
+	a.Operators[0].Name = `Zoë "Z" O'Brien: #1`
 	a.SMTP.FromName = "yes"
 	data, err := Render(a, testID, testOrigin)
 	if err != nil {
@@ -175,7 +178,7 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("does not load: %v\n%s", err, data)
 	}
-	if cfg.Community.Name != a.Name || cfg.Operators["alice"].Name != a.Admins[0].Name || cfg.SMTP.FromName != "yes" {
+	if cfg.Community.Name != a.Name || cfg.Operators["alice"].Name != a.Operators[0].Name || cfg.SMTP.FromName != "yes" {
 		t.Errorf("read back %q, %q, %q", cfg.Community.Name, cfg.Operators["alice"].Name, cfg.SMTP.FromName)
 	}
 	if !strings.Contains(string(data), "id: "+testID) {
@@ -210,5 +213,31 @@ func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) 
 	}
 	if strings.Contains(string(data), "on a machine of its own") || !strings.Contains(string(data), "beside the gateway") {
 		t.Errorf("the health page's comment does not say where it runs:\n%s", data)
+	}
+}
+
+// Under management pocket-id there is no account app, Pocket ID's own
+// settings are written, and a community that sends no mail writes no smtp
+// block; the file validates.
+func TestPocketIDManagementWithoutMailValidates(t *testing.T) {
+	a := answersFor(ShapeHomeAndVPS, false, false)
+	a.Management = "pocket-id"
+	a.Apps = a.Apps[:1]
+	a.PocketID = PocketIDAccounts{Signups: "open"}
+	a.SMTP = SMTP{}
+	data, err := Render(a, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"management: pocket-id\n", "allow_user_signups: open\n", "email_one_time_access_as_admin: false\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("missing %q:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), "smtp:") || strings.Contains(string(data), "blueprint: account") {
+		t.Errorf("an smtp block or an account app was written:\n%s", data)
+	}
+	for _, f := range check(t, data).Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
 	}
 }

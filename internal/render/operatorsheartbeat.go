@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 )
 
-// The admins heartbeat: the health of a Pocket ID app's admins group, pushed
-// to every monitor by whichever of its instances is active. The admin
-// reconciler beside each instance answers /healthz with the group's health on
-// the active instance and with `standby` on every other
-// (docs/specs/2026-10-08-admin-reconciler.md). A small service beside it, in
+// The operators heartbeat: the operator reconciler's answer for a Pocket ID
+// app, pushed to every monitor by whichever of its instances is active. The
+// operator reconciler beside each instance answers /healthz with whether the
+// operators check out on the active instance and with `standby` on every
+// other (docs/specs/2026-10-14-operators-and-management.md). A small service beside it, in
 // the app's own stack on every site the app runs on, asks that once a minute
 // and pushes what it hears to one heartbeat monitor per app, under one token
 // every instance shares. So the monitor follows the active instance across a
@@ -31,21 +32,21 @@ import (
 // last_heartbeat_body (src/monitor.js:517-548), and shown, first line, in the
 // recent pings of the monitor's own page (views/site-detail.ejs:298-299). It
 // is not the incident's message, which is the fixed "heartbeat reported
-// failure (exit 1)" (src/monitor.js:552-554), so an alert says that the group
-// is short and the monitor's page says why.
+// failure (exit 1)" (src/monitor.js:552-554), so an alert says that a check
+// failed and the monitor's page says which.
 
-// adminsHeartbeatService is the pusher's compose service, and the directory
+// operatorsHeartbeatService is the pusher's compose service, and the directory
 // of the app's stack its two files sit in.
-const adminsHeartbeatService = "admins-heartbeat"
+const operatorsHeartbeatService = "operators-heartbeat"
 
-// adminsHeartbeatTargets is every monitor a Pocket ID app's instances push
+// operatorsHeartbeatTargets is every monitor a Pocket ID app's instances push
 // to: each uptime app, in app order, the site heartbeat's targets
 // (heartbeatTargets) without its rule leaving out a monitor on the pushing
 // site. That rule is about the push proving the site reachable, which a push
 // from the monitor's own host cannot; this push carries the group's health,
 // which is the same news from any host, and the instance that is active may
 // be the one beside a monitor. Empty with no monitor, so nothing is rendered.
-func adminsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
+func operatorsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 	var out []heartbeatTarget
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
@@ -56,16 +57,16 @@ func adminsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 	return out
 }
 
-// adminsHeartbeatToken is a Pocket ID app's token from the secrets, refused
+// operatorsHeartbeatToken is a Pocket ID app's token from the secrets, refused
 // by name when it is missing or not what the fork accepts, as a site's
 // heartbeat token is (heartbeatToken).
-func (p *planner) adminsHeartbeatToken(app string) (string, error) {
-	return p.dnsHeartbeatToken(app, "admins_heartbeat_token")
+func (p *planner) operatorsHeartbeatToken(app string) (string, error) {
+	return p.dnsHeartbeatToken(app, "operators_heartbeat_token")
 }
 
 // dnsHeartbeatToken is one of a Pocket ID app's continuity tokens from the
-// secrets, the admins heartbeat's or one of the DNS check's, refused by name
-// as adminsHeartbeatToken is.
+// secrets, the operators heartbeat's or one of the DNS check's, refused by
+// name as operatorsHeartbeatToken is.
 func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 	token := p.appSecret(app, key)
 	if token == "" {
@@ -77,7 +78,7 @@ func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 	return token, nil
 }
 
-// adminsHeartbeatFiles is the pusher's two files in a Pocket ID app's stack
+// operatorsHeartbeatFiles is the pusher's two files in a Pocket ID app's stack
 // on one site, nil when there is no monitor to push to. The URLs carry the
 // token, so they go in a 0600 env file only the pusher reads, never the
 // app's own .env, which holds the static API key the pusher has no use
@@ -85,12 +86,12 @@ func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 // env file recreates the pusher alone (apply, isEnvironment, and `up -d`
 // replacing only the service whose configuration changed), which is how a new
 // monitor's URL reaches a host without touching Pocket ID.
-func (p *planner) adminsHeartbeatFiles(base string, app plannedApp) ([]File, error) {
-	targets := adminsHeartbeatTargets(p.cfg)
+func (p *planner) operatorsHeartbeatFiles(base string, app plannedApp) ([]File, error) {
+	targets := operatorsHeartbeatTargets(p.cfg)
 	if app.Blueprint != config.BlueprintPocketID || len(targets) == 0 {
 		return nil, nil
 	}
-	token, err := p.adminsHeartbeatToken(app.Name)
+	token, err := p.operatorsHeartbeatToken(app.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -115,16 +116,38 @@ func (p *planner) adminsHeartbeatFiles(base string, app plannedApp) ([]File, err
 		}
 	}
 	data := map[string]any{"App": app, "URLs": strings.Join(urls, " "), "ReconcilerPort": reconcilerPort, "DNS": dns}
-	env, err := p.renderTemplate("admins-heartbeat.env.tmpl", data)
+	env, err := p.renderTemplate("operators-heartbeat.env.tmpl", data)
 	if err != nil {
 		return nil, err
 	}
-	push, err := p.renderTemplate("admins-heartbeat-push.sh.tmpl", data)
+	push, err := p.renderTemplate("operators-heartbeat-push.sh.tmpl", data)
 	if err != nil {
 		return nil, err
 	}
 	return []File{
-		{Path: base + p.dep().RelPath(app.Name, adminsHeartbeatService, "heartbeat.env"), Content: env, Mode: 0o600},
-		{Path: base + p.dep().RelPath(app.Name, adminsHeartbeatService, "push.sh"), Content: push, Mode: 0o644},
+		{Path: base + p.dep().RelPath(app.Name, operatorsHeartbeatService, "heartbeat.env"), Content: env, Mode: 0o600},
+		{Path: base + p.dep().RelPath(app.Name, operatorsHeartbeatService, "push.sh"), Content: push, Mode: 0o644},
 	}, nil
+}
+
+// reconcilerValues is what a Pocket ID app's .env tells its operator
+// reconciler to check.
+type reconcilerValues struct {
+	// Operators is the operators' usernames, comma separated and sorted.
+	Operators string
+	// MemberGroup is the community's member group.
+	MemberGroup string
+	// Management is the app's management, paisans or pocket-id.
+	Management string
+}
+
+// reconcilerValuesFor is a Pocket ID app's reconciler values: every operator
+// the configuration declares, the member group every operator is put in
+// (blueprints.MembersGroup), and the app's management.
+func (p *planner) reconcilerValuesFor(app config.App) reconcilerValues {
+	return reconcilerValues{
+		Operators:   strings.Join(sortedKeys(p.cfg.Operators), ","),
+		MemberGroup: blueprints.MembersGroup,
+		Management:  blueprints.PocketIDManagement(app.Settings),
+	}
 }

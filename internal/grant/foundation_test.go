@@ -128,12 +128,12 @@ func TestARenderedGrantMarksTheFoundationsImages(t *testing.T) {
 		if strings.HasPrefix(name, "auth/") && strings.Contains(name, "heartbeat") {
 			heartbeat = true
 			if !foundation {
-				t.Errorf("%s, the admins heartbeat, is not marked", name)
+				t.Errorf("%s, the operators heartbeat, is not marked", name)
 			}
 		}
 	}
 	if !heartbeat {
-		t.Errorf("no admins heartbeat in the auth stack: %v", marked)
+		t.Errorf("no operators heartbeat in the auth stack: %v", marked)
 	}
 
 	// A Caddy image acme.image declares is the operator's choice.

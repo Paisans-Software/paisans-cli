@@ -16,7 +16,7 @@ type Section int
 const (
 	SectionAll Section = iota
 	SectionCommunity
-	SectionAdmins
+	SectionOperators
 	SectionSites
 	SectionApps
 	SectionMail
@@ -25,7 +25,7 @@ const (
 var sectionNames = map[Section]string{
 	SectionAll:       "every question",
 	SectionCommunity: "the community",
-	SectionAdmins:    "the admins",
+	SectionOperators: "the operators",
 	SectionSites:     "the machines",
 	SectionApps:      "the apps",
 	SectionMail:      "mail",
@@ -40,8 +40,8 @@ func SectionFor(key string) Section {
 	switch top {
 	case "community", "acme":
 		return SectionCommunity
-	case "admins":
-		return SectionAdmins
+	case "operators":
+		return SectionOperators
 	case "sites", "mesh", "cluster", "etcd":
 		return SectionSites
 	case "apps", "storage":
@@ -62,6 +62,9 @@ type Wizard struct {
 	// asked is set once the apps have been asked, after which an app's
 	// default is whether it was chosen rather than the capability's own.
 	asked bool
+	// mailAsked is set once mail has been asked, after which sending none
+	// is the default when none was chosen.
+	mailAsked bool
 }
 
 // NewWizard asks its questions through p.
@@ -74,7 +77,7 @@ func (w *Wizard) Ask(section Section) error {
 		ask func() error
 	}{
 		{SectionCommunity, w.community},
-		{SectionAdmins, w.admins},
+		{SectionOperators, w.operators},
 		{SectionSites, w.sites},
 		{SectionApps, w.apps},
 		{SectionMail, w.mail},
@@ -127,21 +130,24 @@ func (w *Wizard) community() error {
 	return nil
 }
 
-func (w *Wizard) admins() error {
+func (w *Wizard) operators() error {
 	a := &w.Answers
-	w.p.Say("\nAdmins: the people who log in to the machines and administer the apps. Each becomes a sign in administrator on the first apply.")
-	prev := a.Admins
-	var admins []Admin
+	w.p.Say("\nOperators: the people who run the machines. They log in to every site, hold the secrets and run apply, and each becomes a Pocket ID user and a community admin on the first apply. A deployment has at least two, so that one lost workstation does not leave nobody able to run it.")
+	prev := a.Operators
+	var operators []Operator
 	for i := 0; ; i++ {
-		var d Admin
+		var d Operator
 		if i < len(prev) {
 			d = prev[i]
 		}
 		var taken []string
-		for _, ad := range admins {
-			taken = append(taken, ad.ID)
+		for _, op := range operators {
+			taken = append(taken, op.ID)
 		}
-		id, err := w.p.Text("Username", d.ID, notIn(taken, "admin", checkAdminID))
+		if i > 0 {
+			w.p.Say("\nOperator %d", i+1)
+		}
+		id, err := w.p.Text("Username", d.ID, notIn(taken, "operator", checkOperatorID))
 		if err != nil {
 			return err
 		}
@@ -157,8 +163,11 @@ func (w *Wizard) admins() error {
 		if err != nil {
 			return err
 		}
-		admins = append(admins, Admin{ID: id, Name: name, Email: email, Keys: keys})
-		more, err := w.p.YesNo("Add another admin?", i+1 < len(prev))
+		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: keys})
+		if len(operators) < 2 {
+			continue
+		}
+		more, err := w.p.YesNo("Add another operator?", i+1 < len(prev))
 		if err != nil {
 			return err
 		}
@@ -166,7 +175,7 @@ func (w *Wizard) admins() error {
 			break
 		}
 	}
-	a.Admins = admins
+	a.Operators = operators
 	return nil
 }
 
@@ -373,6 +382,13 @@ func (w *Wizard) apps() error {
 		return err
 	}
 	apps := []App{{Key: signIn.key, Blueprint: signIn.blueprint, Hostname: host}}
+	account, err := w.management()
+	if err != nil {
+		return err
+	}
+	if account != nil {
+		apps = append(apps, *account)
+	}
 
 	offered, err := capabilities()
 	if err != nil {
@@ -434,6 +450,84 @@ func (w *Wizard) apps() error {
 		a.Monitor, a.MonitorOnGateway = nil, false
 	}
 	a.Apps = apps
+	return nil
+}
+
+// management asks who manages accounts, and what that choice needs: the
+// account app's hostname, invites and code of conduct under paisans, or
+// Pocket ID's own signup and email settings under pocket-id. It returns the
+// account app to declare, nil under pocket-id.
+func (w *Wizard) management() (*App, error) {
+	a := &w.Answers
+	w.p.Say("\nWho manages the community's accounts: who may sign up, bans, and a member's way back in.")
+	w.p.Say("  - the account service: members invite new people, who agree to the code of conduct first. Nobody is a Pocket ID administrator.")
+	w.p.Say("  - Pocket ID: its own admin pages, and its signup settings. Every operator is its administrator, and mail is optional.")
+	def := 0
+	if a.Management == blueprints.ManagementPocketID {
+		def = 1
+	}
+	i, err := w.p.Choose("Who manages accounts?", []string{"the account service", "Pocket ID"}, def)
+	if err != nil {
+		return nil, err
+	}
+	if i == 1 {
+		a.Management = blueprints.ManagementPocketID
+		return nil, w.pocketIDAccounts()
+	}
+	a.Management = blueprints.ManagementPaisans
+	d := a.Account
+	if d.Hostname == "" {
+		d.Hostname = "account." + a.Domain
+		d.Invites = true
+	}
+	host, err := w.p.Text("Hostname for the account service", d.Hostname, checkHostname)
+	if err != nil {
+		return nil, err
+	}
+	invites, err := w.p.YesNo("Do members invite new people?", d.Invites)
+	if err != nil {
+		return nil, err
+	}
+	acc := Account{Hostname: host, Invites: invites}
+	if invites {
+		w.p.Say("Every invitee agrees to the code of conduct before an account exists. Give the Markdown file that holds it; its text is written into the configuration.")
+		path, err := w.p.Text("Code of conduct file", d.CodeOfConductPath, func(s string) error {
+			text, err := readCodeOfConduct(s)
+			acc.CodeOfConduct = text
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		acc.CodeOfConductPath = path
+	}
+	a.Account = acc
+	return &App{Key: accountApp, Blueprint: config.BlueprintAccount, Hostname: host}, nil
+}
+
+// pocketIDAccounts asks Pocket ID's own account settings.
+func (w *Wizard) pocketIDAccounts() error {
+	a := &w.Answers
+	d := a.PocketID
+	if d.Signups == "" {
+		d = PocketIDAccounts{Signups: "disabled", EmailLinks: true}
+	}
+	choices := []string{"disabled", "withToken", "open"}
+	def := max(slices.Index(choices, d.Signups), 0)
+	w.p.Say("Who may sign up at Pocket ID: nobody but those an operator adds (disabled), those given a signup link (withToken), or anyone (open).")
+	i, err := w.p.Choose("Pocket ID signup", choices, def)
+	if err != nil {
+		return err
+	}
+	code, err := w.p.YesNo("May a member whose sign-in link expired ask for an email code? (needs mail)", d.EmailCode)
+	if err != nil {
+		return err
+	}
+	links, err := w.p.YesNo("Does Pocket ID email operators their login links? (needs mail)", d.EmailLinks)
+	if err != nil {
+		return err
+	}
+	a.PocketID = PocketIDAccounts{Signups: choices[i], EmailCode: code, EmailLinks: links}
 	return nil
 }
 
@@ -505,7 +599,20 @@ func (w *Wizard) publicGateway() string {
 func (w *Wizard) mail() error {
 	a := &w.Answers
 	d := a.SMTP
-	w.p.Say("\nMail. The apps send sign in links and codes, alerts, notifications and account mail, so a server to send through is required. Its password is set afterwards, with secrets set, so it is never written here.")
+	if a.Management == blueprints.ManagementPocketID {
+		w.p.Say("\nMail. The apps send sign in links and codes, alerts and notifications. With Pocket ID managing accounts it is optional, but nothing that needs it is sent without it. Its password is set afterwards, with secrets set, so it is never written here.")
+		send, err := w.p.YesNo("Send mail?", d.Host != "" || !w.mailAsked)
+		if err != nil {
+			return err
+		}
+		w.mailAsked = true
+		if !send {
+			a.SMTP = SMTP{}
+			return nil
+		}
+	} else {
+		w.p.Say("\nMail. The apps send sign in links and codes, alerts, notifications and account mail, so a server to send through is required. Its password is set afterwards, with secrets set, so it is never written here.")
+	}
 	host, err := w.p.Text("SMTP host", d.Host, checkHostname)
 	if err != nil {
 		return err

@@ -104,15 +104,15 @@ func TestTheDNSCheckIsRenderedIntoTheReconcilersEnv(t *testing.T) {
 	}
 }
 
-// The seed holds the admins heartbeat and the check's two, each under its own
+// The seed holds the operators heartbeat and the check's two, each under its own
 // token, named for the community.
 func TestTheSeedExpectsTheDNSHeartbeats(t *testing.T) {
 	cfg, secrets := withDNS(t, false)
 	monitors := byName(renderSeed(t, cfg, secrets))
 	for name, token := range map[string]string{
-		"admin continuity":                   adminsToken(t, secrets),
-		"admin continuity: dns super admins": superToken,
-		"admin continuity: dns 2fa":          twoFAToken,
+		"operator continuity":                   operatorsToken(t, secrets),
+		"operator continuity: dns super admins": superToken,
+		"operator continuity: dns 2fa":          twoFAToken,
 	} {
 		m := monitors[name]
 		if m == nil {
@@ -128,7 +128,7 @@ func TestTheSeedExpectsTheDNSHeartbeats(t *testing.T) {
 // The pusher's env holds each monitor's URLs under its own token.
 func TestThePusherCarriesTheDNSURLs(t *testing.T) {
 	cfg, secrets := withDNS(t, false)
-	env := buildFiles(t, cfg, secrets)["home-a/srv/paisans/f2a9/auth/admins-heartbeat/heartbeat.env"]
+	env := buildFiles(t, cfg, secrets)["home-a/srv/paisans/f2a9/auth/operators-heartbeat/heartbeat.env"]
 	for _, want := range []string{
 		"\nDNS_SUPER_ADMINS_HEARTBEAT_URLS=https://health.example.org/ping/" + superToken + "\n",
 		"\nDNS_2FA_HEARTBEAT_URLS=https://health.example.org/ping/" + twoFAToken + "\n",
@@ -144,7 +144,7 @@ func TestThePusherCarriesTheDNSURLs(t *testing.T) {
 func TestThePusherRelaysTheDNSAnswers(t *testing.T) {
 	cfg, secrets := withDNS(t, true)
 	pushes := runPusher(t, cfg, secrets, []string{
-		"ADMINS_HEARTBEAT_URLS=https://one.example.org/ping/t1",
+		"OPERATORS_HEARTBEAT_URLS=https://one.example.org/ping/t1",
 		"DNS_SUPER_ADMINS_HEARTBEAT_URLS=https://one.example.org/ping/t2",
 		"DNS_2FA_HEARTBEAT_URLS=https://one.example.org/ping/t3",
 	}, "503", "1 of 2 admins have 2fa off")
@@ -165,7 +165,7 @@ func TestABadMappingIsRefused(t *testing.T) {
 		admins map[string]config.OperatorSecrets
 		want   string
 	}{
-		"unknown admin":         {map[string]config.OperatorSecrets{"carol": {DNSProviderEmail: "carol@example.org"}}, "admins.carol"},
+		"unknown admin":         {map[string]config.OperatorSecrets{"carol": {DNSProviderEmail: "carol@example.org"}}, "operators.carol"},
 		"two at one address":    {map[string]config.OperatorSecrets{"alice": {DNSProviderEmail: bobAtWork}, "bob": {DNSProviderEmail: bobAtWork}}, "alice and bob"},
 		"another admin's email": {map[string]config.OperatorSecrets{"bob": {DNSProviderEmail: " Alice@example.org"}}, "alice and bob"},
 	} {
@@ -196,19 +196,19 @@ func TestTwoPocketIDAppsPrefixTheirContinuityMonitors(t *testing.T) {
 	for k, v := range secrets.Apps["auth"] {
 		copied[k] = v
 	}
-	copied["admins_heartbeat_token"] = "7777777777777777777777777777aaaa"
+	copied["operators_heartbeat_token"] = "7777777777777777777777777777aaaa"
 	copied["dns_super_admins_heartbeat_token"] = "8888888888888888888888888888bbbb"
 	copied["dns_2fa_heartbeat_token"] = "9999999999999999999999999999cccc"
 	secrets.Apps["auth2"] = copied
 	monitors := byName(renderSeed(t, cfg, secrets))
 	for _, app := range []string{"auth", "auth2"} {
-		for _, name := range []string{app + ": admin continuity", app + ": admin continuity: dns super admins", app + ": admin continuity: dns 2fa"} {
+		for _, name := range []string{app + ": operator continuity", app + ": operator continuity: dns super admins", app + ": operator continuity: dns 2fa"} {
 			if monitors[name] == nil {
 				t.Errorf("no monitor %q", name)
 			}
 		}
 	}
-	if monitors["admin continuity"] != nil {
+	if monitors["operator continuity"] != nil {
 		t.Error("an unprefixed continuity monitor with two Pocket ID apps")
 	}
 }

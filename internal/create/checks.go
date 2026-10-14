@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/mail"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,12 +36,12 @@ var unixUser = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 var hostLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-func checkAdminID(s string) error {
+func checkOperatorID(s string) error {
 	if !adminID.MatchString(s) {
 		return errors.New("a lowercase letter or digit, then lowercase letters, digits, dots, underscores or hyphens, at most 32 characters")
 	}
 	// Pocket ID refuses a username ending in one of these, and apply makes
-	// every admin a Pocket ID user under this name.
+	// every operator a Pocket ID user under this name.
 	if strings.ContainsAny(s[len(s)-1:], "._-") {
 		return errors.New("Pocket ID refuses a username ending in a dot, an underscore or a hyphen")
 	}
@@ -232,4 +233,23 @@ func checkDisplayName(s string) error {
 		return fmt.Errorf("Pocket ID stores this as %q; type that instead", norm.NFC.String(s))
 	}
 	return nil
+}
+
+// readCodeOfConduct is the Markdown file at path, refused when it cannot be
+// read or holds nothing: every invitee agrees to it before an account exists.
+func readCodeOfConduct(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", errors.New("cannot be read: " + err.Error())
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if strings.TrimSpace(text) == "" {
+		return "", errors.New("is empty; the code of conduct is the text every invitee agrees to")
+	}
+	for _, r := range text {
+		if r != '\n' && r != '\t' && (r < 0x20 || r == 0x7f) {
+			return "", errors.New("holds a control character, which the configuration cannot carry")
+		}
+	}
+	return text, nil
 }

@@ -66,7 +66,7 @@ func linkArgs(extra ...string) []string {
 
 // A dry run finds the declared operator's account and says what it would issue,
 // and reaches nothing that changes: no link, no registry claim.
-func TestAdminMagicLinkDryRunChangesNothing(t *testing.T) {
+func TestOperatorMagicLinkDryRunChangesNothing(t *testing.T) {
 	fake := withLinkFake(t)
 	rec := withRecorder(t, true)
 	var err error
@@ -87,7 +87,7 @@ func TestAdminMagicLinkDryRunChangesNothing(t *testing.T) {
 
 // An execute issues the link, prints it once on stdout and nowhere else, and
 // changes nothing about the account: no create, no group, no operator flag.
-func TestAdminMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
+func TestOperatorMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 	fake := withLinkFake(t)
 	key := fixtureAPIKey(t)
 	rec := withRecorder(t, true)
@@ -117,7 +117,7 @@ func TestAdminMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 // Only a declared operator with an account is given a link: a name not under
 // operators is refused before any host is reached, and a declared operator apply has
 // not made yet, or whose account is disabled, is refused with why.
-func TestAdminMagicLinkRefusals(t *testing.T) {
+func TestOperatorMagicLinkRefusals(t *testing.T) {
 	fake := withLinkFake(t)
 	withRecorder(t, true)
 	err := runOperatorMagicLink([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "mallory", "--execute"})

@@ -28,11 +28,11 @@ func registerWorkstation(t *testing.T, answer string, f configstore.Files, runs 
 	return l
 }
 
-// withAdminBob is the fixture's paisans-stack.yaml with alice's key replaced by alice
-// and a second operator, bob, holding bob.
-func withAdminBob(t *testing.T, alice, bob string) string {
+// withOperatorBob is the fixture's paisans-stack.yaml with alice's key
+// replaced by alice and its second operator bob's by bob.
+func withOperatorBob(t *testing.T, alice, bob string) string {
 	t.Helper()
-	return strings.Replace(fixtureAs(t, alice), "sites:\n", "  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      "+bob+"\nsites:\n", 1)
+	return strings.Replace(fixtureAs(t, alice), bobKey, bob, 1)
 }
 
 func pushed(runs []string) bool {
@@ -46,7 +46,7 @@ func pushed(runs []string) bool {
 
 // With no agent key any operator lists, register refuses, prints the agent's
 // keys, and says where to add one.
-func TestAdminRegisterWithoutAnAdminKeyPrintsTheAgentsKeys(t *testing.T) {
+func TestOperatorRegisterWithoutAnAdminKeyPrintsTheAgentsKeys(t *testing.T) {
 	shas, answer, files := storedHistory(t, 1, 0)
 	_, other := testKey(t)
 	l := registerWorkstation(t, answer, files[0], nil, other)
@@ -61,10 +61,10 @@ func TestAdminRegisterWithoutAnAdminKeyPrintsTheAgentsKeys(t *testing.T) {
 }
 
 // Keys of two operators in the agent refuse, naming both and asking for --key.
-func TestAdminRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
+func TestOperatorRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
 	_, alice := testKey(t)
 	_, bob := testKey(t)
-	yaml := withAdminBob(t, alice, bob)
+	yaml := withOperatorBob(t, alice, bob)
 	f := snapshotted(configstore.Files{Paisans: []byte(yaml), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	var runs []string
 	l := registerWorkstation(t, "", f, &runs, alice, bob)
@@ -81,7 +81,7 @@ func TestAdminRegisterWithTwoAdminsKeysAsksForKey(t *testing.T) {
 
 // Local files that differ from the head refuse, with the difference shown
 // and nothing recorded.
-func TestAdminRegisterRefusesFilesThatDifferFromTheHead(t *testing.T) {
+func TestOperatorRegisterRefusesFilesThatDifferFromTheHead(t *testing.T) {
 	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
 	var runs []string
 	l := registerWorkstation(t, answer, files[0], &runs, pub)
@@ -101,11 +101,11 @@ func TestAdminRegisterRefusesFilesThatDifferFromTheHead(t *testing.T) {
 // A dry run shows what it would sign and writes no state and nothing to any
 // site; --execute signs the attestation on the head, pushes it, and records
 // the key, the head and the root.
-func TestAdminRegisterDryRunThenExecute(t *testing.T) {
+func TestOperatorRegisterDryRunThenExecute(t *testing.T) {
 	akey, apub := testKey(t)
 	bkey, bpub := testKey(t)
 	s := newStore(t)
-	yaml := withAdminBob(t, apub, bpub)
+	yaml := withOperatorBob(t, apub, bpub)
 	v1, f1 := s.commit(t, yaml, "", nil, 1, akey)
 	v2, f2 := s.commit(t, yaml, "# edited\n", []string{v1}, 2, akey)
 	shas, files := []string{v1, v2}, []configstore.Files{f1, f2}
@@ -156,7 +156,7 @@ func TestAdminRegisterDryRunThenExecute(t *testing.T) {
 // With fewer than a majority of sites reached directly, register --execute
 // asks for partial even when it writes no files, and without a terminal
 // refuses with nothing signed, pushed or recorded.
-func TestAdminRegisterWithoutAMajorityAsksPartial(t *testing.T) {
+func TestOperatorRegisterWithoutAMajorityAsksPartial(t *testing.T) {
 	shas, answer, files, key, pub := storedHistoryKey(t, 1, 0)
 	var runs []string
 	l := registerWorkstation(t, answer, files[0], &runs, pub)

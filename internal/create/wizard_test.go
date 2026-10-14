@@ -14,25 +14,31 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files under testdata/")
 
-const aliceKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
+const (
+	aliceKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
+	bobKey   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"
+)
 
 // script joins answers one per line; "" is Enter.
 func script(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
 var (
 	communityAnswers = []string{"Example Community", "example.org", ""}
-	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "n"}
-	mailAnswers      = []string{"smtp.example.org", "", "", "community@example.org", "", ""}
+	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
+	// management: the account service, its hostname, invites, and the code
+	// of conduct's file.
+	managementAnswers = []string{"", "", "", "testdata/code-of-conduct.md"}
+	mailAnswers       = []string{"smtp.example.org", "", "", "community@example.org", "", ""}
 )
 
 // every capability, its default hostnames, and members only where offered.
 func appAnswers(chat bool) []string {
-	out := []string{
-		"",             // sign in hostname
+	out := append([]string{""}, managementAnswers...) // sign in hostname, then who manages accounts
+	out = append(out,
 		"", "", "", "", // forums: yes, hostname, display name, members only
 		"", "", "", "", // wiki
 		"", "", "", "", // blog
-	}
+	)
 	if chat {
 		out = append(out, "y", "", "", "", "") // chat: yes, server, its display name, web client, members only
 	}
@@ -186,7 +192,9 @@ func TestDecliningTheHealthPageDropsIt(t *testing.T) {
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
-	lines = append(lines, "", "n", "n", "n", "n")
+	lines = append(lines, "")
+	lines = append(lines, managementAnswers...)
+	lines = append(lines, "n", "n", "n", "n")
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))
 	if err != nil {
@@ -205,8 +213,9 @@ func TestTheHealthPageOnTheGateway(t *testing.T) {
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines, "") // sign in hostname
+	lines = append(lines, managementAnswers...)
 	lines = append(lines,
-		"",            // sign in hostname
 		"n", "n", "n", // no forums, wiki or blog
 		"n",        // no chat
 		"", "", "", // health page: yes, hostname, display name
@@ -255,7 +264,7 @@ func TestAnsweringAgainKeepsEveryAnswerAsTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []Section{SectionCommunity, SectionAdmins, SectionSites, SectionApps, SectionMail} {
+	for _, s := range []Section{SectionCommunity, SectionOperators, SectionSites, SectionApps, SectionMail} {
 		// Enter at every question: far more than any section asks.
 		var out strings.Builder
 		w.p = NewPrompter(strings.NewReader(strings.Repeat("\n", 40)), &out)
@@ -282,7 +291,7 @@ func TestSectionFor(t *testing.T) {
 	for key, want := range map[string]Section{
 		"community.domain":        SectionCommunity,
 		"acme.provider":           SectionCommunity,
-		"admins.alice.email":      SectionAdmins,
+		"operators.alice.email":   SectionOperators,
 		"sites.home-a.roles":      SectionSites,
 		"etcd.members":            SectionSites,
 		"apps.talk.placement":     SectionApps,
@@ -374,7 +383,9 @@ func TestAnsweringAgainKeepsTheHealthPageOnTheGateway(t *testing.T) {
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
-	lines = append(lines, "", "n", "n", "n", "n", "", "", "", "2")
+	lines = append(lines, "")
+	lines = append(lines, managementAnswers...)
+	lines = append(lines, "n", "n", "n", "n", "", "", "", "2")
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))
 	if err != nil {
@@ -400,8 +411,9 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 	lines = append(lines, communityAnswers...)
 	lines = append(lines, adminAnswers...)
 	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
+	lines = append(lines, "") // sign in hostname
+	lines = append(lines, managementAnswers...)
 	lines = append(lines,
-		"",                 // sign in hostname
 		"n",                // no forums
 		"", "", "Wiki", "", // wiki: yes, hostname, display name, members only
 		"n", "n", // no blog or chat

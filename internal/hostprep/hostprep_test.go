@@ -231,11 +231,18 @@ func owned(specs ...string) string {
 	return out
 }
 
+// fixture is the render fixture with every site logging in with alice's key
+// alone: the fixture declares a second operator, bob, whom validate requires,
+// and these tests add bob's key themselves where they are about one.
 func fixture(t *testing.T) *config.Config {
 	t.Helper()
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
 	if err != nil {
 		t.Fatalf("loading the fixture configuration: %v", err)
+	}
+	for name, s := range cfg.Sites {
+		s.SSH.Keys = []config.NamedKey{{Name: "alice", Line: keyAlice}}
+		cfg.Sites[name] = s
 	}
 	return cfg
 }

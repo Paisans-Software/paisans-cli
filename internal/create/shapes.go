@@ -158,6 +158,8 @@ func specFor(key string) (appSpec, bool) {
 var signIn = appSpec{key: "auth", blueprint: config.BlueprintPocketID, sub: "id", what: "sign in"}
 
 const (
+	// accountApp is the account app, declared under management paisans.
+	accountApp  = "account"
 	healthApp   = "health"
 	monitorSite = "health"
 )

@@ -58,12 +58,13 @@ services:
       - postgres
 {{- end }}
 
-  # The admin reconciler (docs/specs/2026-10-08-admin-reconciler.md): keeps Pocket ID's
-  # administrators in the admins group, and fails /healthz while that group
-  # has fewer than two members. It reaches Pocket ID as `app` on this stack's
-  # own network with the STATIC_API_KEY above, so the key goes nowhere it was
-  # not already. Beside a standby it reads the marker and does nothing, and
-  # its /healthz says standby.
+  # The operator reconciler (docs/specs/2026-10-14-operators-and-management.md):
+  # reads Pocket ID and writes nothing, and fails /healthz while an operator is
+  # not an enabled member in the member group and in operators, or a Pocket ID
+  # administrator is not an operator. It reaches Pocket ID as `app` on this
+  # stack's own network with the STATIC_API_KEY above, so the key goes nowhere
+  # it was not already. Beside a standby it reads the marker and does nothing,
+  # and its /healthz says standby.
   reconciler:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
@@ -78,24 +79,24 @@ services:
       - {{ .DataPath }}/run:/paisans/run:ro
     depends_on:
       - app
-{{- if .AdminsHeartbeat }}
+{{- if .OperatorsHeartbeat }}
 
-  # The admins heartbeat (internal/render/adminsheartbeat.go): once a minute it
-  # asks the reconciler's /healthz over this stack's network and pushes the
-  # admins group's health to every monitor's public hostname, from the active
+  # The operators heartbeat (internal/render/operatorsheartbeat.go): once a
+  # minute it asks the reconciler's /healthz over this stack's network and
+  # pushes its answer to every monitor's public hostname, from the active
   # instance only. The URLs carry a token and stay in
-  # admins-heartbeat/heartbeat.env, which is 0600; it never reads .env, which
-  # holds the static API key. It dials out and listens for nothing.
-  admins-heartbeat:
+  # operators-heartbeat/heartbeat.env, which is 0600; it never reads .env,
+  # which holds the static API key. It dials out and listens for nothing.
+  operators-heartbeat:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
     image: {{ yamlquote .HeartbeatImage }}
     restart: unless-stopped
     env_file:
-      - admins-heartbeat/heartbeat.env
+      - operators-heartbeat/heartbeat.env
     entrypoint: ["/bin/sh", "/push.sh"]
     volumes:
-      - {{ .DataPath }}/admins-heartbeat/push.sh:/push.sh:ro
+      - {{ .DataPath }}/operators-heartbeat/push.sh:/push.sh:ro
     depends_on:
       - reconciler
 {{- end }}

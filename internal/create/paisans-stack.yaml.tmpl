@@ -26,11 +26,13 @@ mesh:
 acme:
   provider: {{.Provider}}
 
-# The people who may log in to the sites. Each becomes a Pocket ID
-# administrator on the first apply, and each key below an authorized key on
-# every site that names them.
+# The people who run the machines: they log in to every site, hold the
+# secrets and run apply. Each becomes a Pocket ID user and a community admin
+# on the first apply, and each key below an authorized key on every site that
+# names them. At least two, so that one lost workstation does not leave
+# nobody able to run the deployment.
 operators:
-{{- range .Admins}}
+{{- range .Operators}}
   {{.ID}}:
     name: {{q .Name}}
     email: {{q .Email}}
@@ -42,7 +44,7 @@ operators:
 
 # Every machine. Each address is the site's WireGuard address inside
 # mesh.subnet, stable forever, and each ssh section is how the toolkit reaches
-# the site: a public key per admin, never a private one.
+# the site: a public key per operator, never a private one.
 sites:
 {{- range .Sites}}
   {{.Name}}:
@@ -62,7 +64,7 @@ sites:
       host: {{q .SSHHost}}
 {{- end}}
       user: {{q .SSHUser}}
-      keys: [{{$.AdminIDs}}]
+      keys: [{{$.OperatorIDs}}]
 {{- end}}
 {{- if .Synchronous}}
 
@@ -128,11 +130,38 @@ apps:
     # Sign in for every other app. Its settings are rendered into its
     # configuration, and its admin page for them is read only.
     settings:
+{{- if eq $.Management "paisans"}}
+      # The account service manages signup, bans and recovery, and nobody
+      # is a Pocket ID administrator. The toolkit renders Pocket ID's signup
+      # and email-code settings for it.
+      management: paisans
+{{- else}}
+      # Pocket ID's own admin pages manage accounts, and every operator is
+      # its administrator.
+      management: pocket-id
+      allow_user_signups: {{$.PocketID.Signups}}
+      email_one_time_access_as_unauthenticated: {{$.PocketID.EmailCode}}
+      email_one_time_access_as_admin: {{$.PocketID.EmailLinks}}
+{{- end}}
       # Avatars and branding, about a megabyte: in Postgres they ride
       # replication, and sign in gains no dependency on object storage.
       file_backend: database
       # Also the sender name on its mail.
       app_name: {{q $.Name}}
+{{- end}}
+{{- if eq .Blueprint "account"}}
+    # The community's account service, signing in through the pocket-id app.
+    settings:
+{{- if $.Account.Invites}}
+      # Members invite new people, who agree to the code of conduct below
+      # before an account exists. Its SHA-256 is the version each person
+      # agrees to, so an edit is a new version.
+      invites: true
+      code_of_conduct: |
+{{$.CodeOfConduct}}
+{{- else}}
+      invites: false
+{{- end}}
 {{- end}}
 {{- if eq .Blueprint "element"}}
     settings:
@@ -153,10 +182,13 @@ apps:
     # the gateway it reports on. Its checks are generated from this file.
 {{- end}}
     settings:
-      # Only members of this group may sign in.
-      admin_group: admins
+      # Only members of this group may sign in: the operators, who run the
+      # machines it watches.
+      admin_group: operators
 {{- end}}
 {{- end}}
+
+{{- if .SMTP.Host}}
 
 # How the apps send mail: sign in links and codes, alerts, notifications and
 # account mail. The password is a secret, set with
@@ -168,3 +200,4 @@ smtp:
   username: {{q .SMTP.Username}}
   from_address: {{q .SMTP.FromAddress}}
   from_name: {{q .SMTP.FromName}}
+{{- end}}

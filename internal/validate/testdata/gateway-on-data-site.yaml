@@ -23,7 +23,7 @@ operators:
     name: Bob Example
     email: bob@example.org
     keys: |
-      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO04gQe+cdriVt0QrP7GCmv4mU7M1DrHDEV0olLvv8v9 bob@example.org
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
 sites:
   home-a:
     roles: [data, apps, gateway]

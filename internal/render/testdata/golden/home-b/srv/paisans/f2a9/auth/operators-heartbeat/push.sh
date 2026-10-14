@@ -1,15 +1,16 @@
 #!/bin/sh
 # Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
 #
-# The admins heartbeat of auth, from its instance on home-b.
-# Once a minute it asks the admin reconciler beside this instance for the
-# admins group's health and passes it on to each URL in ADMINS_HEARTBEAT_URLS,
-# which heartbeat.env beside this file sets. Every instance pushes to the same
-# token, so the monitor hears whichever one is active:
+# The operators heartbeat of auth, from its instance on home-b.
+# Once a minute it asks the operator reconciler beside this instance whether
+# the operators check out and passes the answer on to each URL in
+# OPERATORS_HEARTBEAT_URLS, which heartbeat.env beside this file sets. Every
+# instance pushes to the same token, so the monitor hears whichever one is
+# active:
 #
 #   200 standby   this instance is a standby: push nothing, the active one
-#                 speaks for the group.
-#   200           the group is healthy: push success.
+#                 speaks for the deployment.
+#   200           every check holds: push success.
 #   503           it is not: push to /fail, with the reconciler's one line as
 #                 the body, which the monitor keeps with the ping.
 #   anything else no answer from the reconciler: push nothing. Silence past
@@ -26,7 +27,7 @@
 # URL, so the token stays out of the log.
 set -u
 reconciler=http://reconciler:1412
-agent="paisans-admins-heartbeat (auth@home-b)"
+agent="paisans-operators-heartbeat (auth@home-b)"
 
 # push sends one push to every monitor in $1: $2 is the status segment, empty
 # for success, and $3 the body of a failure.
@@ -34,14 +35,14 @@ push() {
 	for url in $1; do
 		if [ -z "$2" ]; then
 			curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" "$url" \
-				|| echo "admins-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
+				|| echo "operators-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
 		else
 			# Plain text, so the monitor's form and JSON parsers leave the
 			# body alone and it is kept as sent; from stdin, so a reason
 			# starting with @ is never read as a file name.
 			printf '%s' "$3" | curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" \
 				-H 'Content-Type: text/plain' --data-binary @- "$url/$2" \
-				|| echo "admins-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
+				|| echo "operators-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
 		fi
 	done
 }
@@ -64,13 +65,13 @@ relay() {
 		push "$2" fail "$body"
 		;;
 	*)
-		echo "admins-heartbeat: the reconciler did not answer $1 (status $code) at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+		echo "operators-heartbeat: the reconciler did not answer $1 (status $code) at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 		;;
 	esac
 }
 
 while true; do
 	sleep 60 &
-	relay /healthz "$ADMINS_HEARTBEAT_URLS"
+	relay /healthz "$OPERATORS_HEARTBEAT_URLS"
 	wait
 done

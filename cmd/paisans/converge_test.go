@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/dns"
@@ -262,10 +261,8 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// one yet. fakeGatewayReads says otherwise.
 	savedRegistry := registryHost
 	registryHost = func(string, config.Site, string, bool) registry.Runner { return noRecord{} }
-	// Asking Pocket ID for an admin reaches a host too; here it has none,
-	// and every declared admin has registered. fakeAdminCheck and
-	// fakeDeclaredOperators say otherwise.
-	fakeAdminCheck(t, false, nil)
+	// Making each declared operator reaches a host too; here every one has
+	// registered. fakeDeclaredOperators says otherwise.
 	fakeDeclaredOperators(t, registered)
 	fakeEmailFailures(t, nil, nil)
 	// An app's web server is checked from this machine; here every check
@@ -1844,33 +1841,6 @@ func TestSSHFlagProblemSaysItOnce(t *testing.T) {
 	}
 }
 
-// fakeAdminCheck replaces asking a Pocket ID app whether it has an admin: it
-// answers has, or err. It returns the apps asked, in order.
-func fakeAdminCheck(t *testing.T, has bool, err error) *[]string {
-	t.Helper()
-	var asked []string
-	saved := convergeAdminCheck
-	convergeAdminCheck = func(_ *config.Config, app string, o convergeOptions) (bool, error) {
-		asked = append(asked, app)
-		return has, err
-	}
-	t.Cleanup(func() { convergeAdminCheck = saved })
-	return &asked
-}
-
-// adminNotes is every note about a Pocket ID app's admin, as "hint | detail".
-func adminNotes(rec *ui.Recorder) []string {
-	var out []string
-	for _, e := range rec.Events {
-		if e.Kind == "note" && strings.HasPrefix(e.Text, "Pocket ID") {
-			out = append(out, e.Text+" | "+e.Extra)
-		}
-	}
-	return out
-}
-
-const authAdminCommand = "Declare at least two under operators in paisans-stack.yaml and run apply, which makes their accounts at auth and gives each a sign-in link."
-
 // fakeDeclaredOperators replaces making a declared admin: answer gives the
 // outcome for each app and admin. It returns the calls, as "app/id", with
 // "!" after one that executes.
@@ -1978,10 +1948,10 @@ func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, []string{"auth/alice"}) {
+	if !slices.Equal(*asked, []string{"auth/alice", "auth/bob"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	if !rec.Has("pending", "alice on auth") {
+	if !rec.Has("pending", "alice on auth") || !rec.Has("pending", "bob on auth") {
 		t.Errorf("no pending line for alice:\n%s", rec.Lines())
 	}
 	if links.Len() != 0 {
@@ -2014,13 +1984,13 @@ func TestConvergeRunPrintsEachLinkAfterTheResult(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, []string{"auth/alice!"}) {
+	if !slices.Equal(*asked, []string{"auth/alice!", "auth/bob!"}) {
 		t.Errorf("asked %v", *asked)
 	}
 	if !rec.Has("done", "alice on auth") || !rec.Has("result", "Deployment complete.") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
-	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n\n"
+	want := "\nLogin links, each valid for 24 hours and for one sign in. Treat each as a password:\n  alice  https://id.example.org/lc/tok-not-real-alice\n  bob    https://id.example.org/lc/tok-not-real-bob\n\n"
 	if links.String() != want {
 		t.Errorf("links %q\nwant %q", links.String(), want)
 	}
@@ -2061,7 +2031,7 @@ func TestConvergeRunReportsEachEmail(t *testing.T) {
 		if err := converge(t, "--execute"); err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(*asked, []string{"alice@example.org"}) {
+		if !slices.Equal(*asked, []string{"alice@example.org", "bob@example.org"}) {
 			t.Errorf("asked about %v", *asked)
 		}
 		found := false
@@ -2080,13 +2050,6 @@ func TestConvergeRunReportsEachEmail(t *testing.T) {
 // still printed.
 func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
 	fakeConverge(t, nil)
-	saved := convergeRead
-	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
-		cfg, st, err := readConvergeState(c, s)
-		cfg.Operators["bob"] = config.Operator{Email: "bob@example.org"}
-		return cfg, st, err
-	}
-	t.Cleanup(func() { convergeRead = saved })
 	fakeDeclaredOperators(t, func(app, id string, execute bool) (declaredOperator, error) {
 		if id == "bob" {
 			return declaredOperator{}, errors.New("POST /api/users: 400 email already in use")
@@ -2105,28 +2068,6 @@ func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
 	if !strings.Contains(links.String(), "alice") {
 		t.Errorf("links %q", links.String())
 	}
-}
-
-// A deployment that declares no admins is checked for any admin, and one
-// with none is named with the command that makes one.
-func TestConvergeWithoutDeclaredAdminsNamesAMissingAdmin(t *testing.T) {
-	fakeConverge(t, nil)
-	saved := convergeRead
-	convergeRead = func(c, s string) (*config.Config, convergeState, error) {
-		cfg, st, err := readConvergeState(c, s)
-		cfg.Operators = nil
-		return cfg, st, err
-	}
-	t.Cleanup(func() { convergeRead = saved })
-	asked := fakeAdminCheck(t, false, nil)
-	rec := recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(*asked, []string{"auth"}) {
-		t.Errorf("asked %v", *asked)
-	}
-	sameLines(t, adminNotes(rec), []string{"Pocket ID auth has no admin yet | " + authAdminCommand})
 }
 
 // A run that stopped asks about no admin.
@@ -2199,95 +2140,6 @@ func TestOperatorRequestJoinsTheMemberGroups(t *testing.T) {
 	}
 	if !slices.Contains(req.MemberGroups, "members") {
 		t.Errorf("member groups %v lack members", req.MemberGroups)
-	}
-}
-
-// The check asks the Pocket ID a declared admin is made at, with its key, read
-// only, through the run's sudo, and answers whether a user is an admin.
-func TestConvergeAdminCheckAsksPocketIDReadOnly(t *testing.T) {
-	fake := withPIDFake(t)
-	key := fixtureAPIKey(t)
-	cfg := fixture(t)
-	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath(), Sudo: true}
-	has, err := convergeAdminCheck(cfg, "auth", o)
-	if err != nil || has {
-		t.Fatalf("has %t, err %v", has, err)
-	}
-	fake.created = true
-	if has, err = convergeAdminCheck(cfg, "auth", o); err != nil || !has {
-		t.Fatalf("has %t, err %v", has, err)
-	}
-	if fake.mutated || !fake.sudo {
-		t.Errorf("mutated %t, sudo %t", fake.mutated, fake.sudo)
-	}
-	for i, c := range fake.commands {
-		if strings.Contains(c, key) {
-			t.Errorf("a command line carries the API key: %s", c)
-		}
-		if !strings.Contains(fake.stdins[i], `request = "GET"`) || !strings.Contains(fake.stdins[i], "http://10.44.0.1:1411/api/users?") {
-			t.Errorf("request %d was not a GET of the users on home-a's mesh port:\n%s", i, strings.ReplaceAll(fake.stdins[i], key, "<key>"))
-		}
-	}
-}
-
-// A missing key is an error, not an answer, and names no secret's value.
-func TestConvergeAdminCheckFailsWithoutAKey(t *testing.T) {
-	fake := withPIDFake(t)
-	o := convergeOptions{Config: fixtureConfig(), Secrets: filepath.Join(t.TempDir(), "absent.enc.yaml")}
-	if has, err := convergeAdminCheck(fixture(t), "auth", o); err == nil || has {
-		t.Fatalf("has %t, err %v", has, err)
-	}
-	if len(fake.commands) != 0 {
-		t.Error("Pocket ID was asked without a key")
-	}
-}
-
-// In a run, each step points the prompt holds at its own reporter; the
-// check after the run holds the run's, which draws its spinner.
-func TestConvergeRunAdminCheckHoldsTheRunsReporter(t *testing.T) {
-	fakeConverge(t, nil)
-	saved := convergeRun
-	convergeRun = func(args []string) error {
-		routeHolds(&ui.Recorder{})
-		return saved(args)
-	}
-	run := recordHolds(t)
-	t.Cleanup(func() { convergeRun = saved; routeHolds(ui.Discard) })
-	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
-		holdOutput()()
-		return declaredOperator{}, nil
-	})
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if !run.Has("hold", "") {
-		t.Errorf("the check did not hold the run's reporter:\n%s", run.Lines())
-	}
-}
-
-// failingTransport is a host whose curl does not connect, failing as an ssh
-// transport does: the command on the first line, curl's own message after.
-type failingTransport struct{}
-
-func (failingTransport) Describe() string           { return "deploy@home-a" }
-func (failingTransport) Run(string) (string, error) { return "", errors.New("unexpected Run") }
-func (failingTransport) RunInput(string, string) (string, error) {
-	return "curl: (7) Failed to connect to 10.44.0.1 port 1411", errors.New("deploy@home-a: sudo -k -S -p '' sh -c 'curl --config -': exit status 7\ncurl: (7) Failed to connect to 10.44.0.1 port 1411")
-}
-
-// A check that fails says why on one line: curl's own message, not the
-// command that ran it.
-func TestConvergeAdminCheckSaysWhyItFailedOnOneLine(t *testing.T) {
-	saved := adminTransport
-	adminTransport = func(apply.SSHTransport) appadmin.Transport { return failingTransport{} }
-	t.Cleanup(func() { adminTransport = saved })
-	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
-	_, err := convergeAdminCheck(fixture(t), "auth", o)
-	if err == nil {
-		t.Fatal("no error")
-	}
-	if msg := err.Error(); strings.Contains(msg, "\n") || strings.Contains(msg, "sudo") || !strings.Contains(msg, "curl: (7) Failed to connect") {
-		t.Errorf("reason %q", msg)
 	}
 }
 

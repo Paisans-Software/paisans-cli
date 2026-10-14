@@ -89,8 +89,9 @@ func operatorEmailOn(cfg *config.Config, app string) bool {
 	return blueprints.PocketIDAdminEmail(cfg.Apps[app].Settings, cfg.CanMail(app))
 }
 
-// convergeDeclaredOperator plans, and with execute makes, one declared operator of
-// a Pocket ID app, reaching it as convergeAdminCheck does. Tests replace it.
+// convergeDeclaredOperator plans, and with execute makes, one declared
+// operator of a Pocket ID app, reaching the site Pocket ID answers on with the
+// run's sudo. Tests replace it.
 var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredOperator, error) {
 	out := declaredOperator{App: app, ID: id, Email: cfg.Operators[id].Email}
 	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")
@@ -152,17 +153,16 @@ var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptio
 }
 
 // convergeOperators makes every operator the configuration declares a user of
-// each Pocket ID app up says is running, and returns the
-// login links issued. A dry run only plans, reading Pocket ID and changing
-// nothing. A deployment that declares no operators is checked for any operator
-// instead, as before operators were declared.
+// each Pocket ID app up says is running, and returns the login links issued.
+// A dry run only plans, reading Pocket ID and changing nothing. A deployment
+// with a Pocket ID app declares at least two operators, which validate holds
+// it to, so one that declares none has nothing to make.
 //
 // An operator who could not be made fails the run, since the deployment cannot
 // be signed in to, but only after every other operator has been tried and the
 // links already issued are returned to be printed.
 func convergeOperators(r ui.Reporter, cfg *config.Config, o convergeOptions, execute bool, up func(app string) bool) ([]declaredOperator, error) {
 	if len(cfg.Operators) == 0 {
-		convergeAnyOperator(r, cfg, o, up)
 		return nil, nil
 	}
 	ids := make([]string, 0, len(cfg.Operators))

@@ -519,7 +519,7 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.AppDatabase(app), nil
 		case "admin_password":
 			return secretsrotate.UptimeAdmin(app), nil
-		case "admins_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
+		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
 			return secretsrotate.ContinuityHeartbeat(app, last), nil
 		}
 		if _, ok := secretsrotate.AppSelfBlueprint(last); ok {

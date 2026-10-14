@@ -253,7 +253,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"sites.home-b.heartbeat_token",
 		"sites.vm.heartbeat_token",
 		"sites.watch.heartbeat_token",
-		"apps.auth.admins_heartbeat_token",
+		"apps.auth.operators_heartbeat_token",
 		"apps.auth.dns_super_admins_heartbeat_token",
 		"apps.auth.dns_2fa_heartbeat_token",
 	}
@@ -1008,18 +1008,18 @@ func TestSecretsRotateAllKeepsNoOrphanedDestination(t *testing.T) {
 	}
 }
 
-// A Pocket ID app's admins heartbeat token is rotated by name, at the cost of
-// the admins heartbeat's pushes refused while the monitors and pushers take
+// A Pocket ID app's operators heartbeat token is rotated by name, at the cost of
+// the operators heartbeat's pushes refused while the monitors and pushers take
 // it, and signs nobody out.
-func TestSecretsRotateNamesTheAdminsHeartbeatToken(t *testing.T) {
-	r, err := rotatorFor("apps.auth.admins_heartbeat_token", rotateWiring{})
+func TestSecretsRotateNamesTheOperatorsHeartbeatToken(t *testing.T) {
+	r, err := rotatorFor("apps.auth.operators_heartbeat_token", rotateWiring{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Path() != "apps.auth.admins_heartbeat_token" {
+	if r.Path() != "apps.auth.operators_heartbeat_token" {
 		t.Errorf("path %q", r.Path())
 	}
-	if c := r.Cost(); c.SignsOut || !strings.Contains(c.Downtime, "admins heartbeat") {
+	if c := r.Cost(); c.SignsOut || !strings.Contains(c.Downtime, "operators heartbeat") {
 		t.Errorf("cost %+v", c)
 	}
 }

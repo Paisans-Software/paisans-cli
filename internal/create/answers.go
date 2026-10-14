@@ -9,10 +9,10 @@ type Answers struct {
 	Name   string
 	Domain string
 	// Provider is the DNS provider certificates are issued through.
-	Provider string
-	Admins   []Admin
-	Shape    Shape
-	Sites    []Site
+	Provider  string
+	Operators []Operator
+	Shape     Shape
+	Sites     []Site
 	// Monitor is the health page's own machine, added when the health page
 	// was chosen and no site holds the monitor role. It is kept apart from
 	// Sites so that answering the sites again does not lose it.
@@ -22,11 +22,45 @@ type Answers struct {
 	// the gateway role, so answering the sites again keeps it.
 	MonitorOnGateway bool
 	Apps             []App
-	SMTP             SMTP
+	// Management is who manages accounts: blueprints.ManagementPaisans, the
+	// account service, or blueprints.ManagementPocketID.
+	Management string
+	// Account is the account service's answers, under management paisans.
+	Account Account
+	// PocketID is Pocket ID's own account settings, under management
+	// pocket-id.
+	PocketID PocketIDAccounts
+	// SMTP is the mail every app sends through. Its Host is empty when the
+	// community sends no mail, which only management pocket-id allows.
+	SMTP SMTP
 }
 
-// Admin is one person who may log in to the sites and administer the apps.
-type Admin struct {
+// Account is what the account app's settings need: whether it admits new
+// members by invite, and with invites on the code of conduct, read from the
+// Markdown file named.
+type Account struct {
+	Hostname          string
+	Invites           bool
+	CodeOfConductPath string
+	CodeOfConduct     string
+}
+
+// PocketIDAccounts is how Pocket ID manages accounts itself.
+type PocketIDAccounts struct {
+	// Signups is allow_user_signups: disabled, withToken or open.
+	Signups string
+	// EmailCode is email_one_time_access_as_unauthenticated: a member whose
+	// link expired asks for an email code at the sign-in page.
+	EmailCode bool
+	// EmailLinks is email_one_time_access_as_admin: Pocket ID emails a
+	// login link an administrator issues, apply's to each operator among
+	// them.
+	EmailLinks bool
+}
+
+// Operator is one person who runs the machines: they log in to the sites,
+// hold the secrets, and run apply.
+type Operator struct {
 	ID    string
 	Name  string
 	Email string

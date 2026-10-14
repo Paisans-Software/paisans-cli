@@ -54,7 +54,7 @@ func replacement(text string) string {
     ssh:
       host: home-d.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]`, 1)
 	text = strings.Replace(text, "    endpoint: vm.example.org:51820\n", "    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)

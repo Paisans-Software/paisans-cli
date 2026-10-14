@@ -1325,7 +1325,7 @@ func worldConfig(t *testing.T, edits ...func(string) string) (*config.Config, *c
     ssh:
       host: home-c.local
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
     roles: [gateway, witness]`, 1)
 	text = strings.Replace(text, "    address: 10.44.0.2\n", "    address: 10.44.0.2\n    public_address: 203.0.113.20\n", 1)

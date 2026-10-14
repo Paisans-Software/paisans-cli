@@ -28,22 +28,22 @@ const FoundationAPIVersion = "paisans.foundation/v1"
 
 // The foundation's images, by the name foundation.yaml gives them.
 const (
-	FoundationEtcd            = "etcd"
-	FoundationHAProxy         = "haproxy"
-	FoundationGarage          = "garage"
-	FoundationCaddy           = "caddy"
-	FoundationHeartbeat       = "heartbeat"
-	FoundationPocketID        = "pocket-id"
-	FoundationAdminReconciler = "admin-reconciler"
-	FoundationOAuth2Proxy     = "oauth2-proxy"
-	FoundationUptime          = "uptime"
-	FoundationAccount         = "account"
+	FoundationEtcd               = "etcd"
+	FoundationHAProxy            = "haproxy"
+	FoundationGarage             = "garage"
+	FoundationCaddy              = "caddy"
+	FoundationHeartbeat          = "heartbeat"
+	FoundationPocketID           = "pocket-id"
+	FoundationOperatorReconciler = "operator-reconciler"
+	FoundationOAuth2Proxy        = "oauth2-proxy"
+	FoundationUptime             = "uptime"
+	FoundationAccount            = "account"
 )
 
 // foundationNames are the images every foundation names.
 var foundationNames = map[string]bool{
 	FoundationEtcd: true, FoundationHAProxy: true, FoundationGarage: true, FoundationCaddy: true,
-	FoundationHeartbeat: true, FoundationPocketID: true, FoundationAdminReconciler: true,
+	FoundationHeartbeat: true, FoundationPocketID: true, FoundationOperatorReconciler: true,
 	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationAccount: true,
 }
 

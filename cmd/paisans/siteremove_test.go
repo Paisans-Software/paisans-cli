@@ -388,7 +388,7 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
     ssh:
       host: home-d.example.org
       user: ubuntu
-      keys: [alice]
+      keys: [alice, bob]
   vm:
 `, 1)
 	text = strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-d }")
