@@ -174,7 +174,7 @@ apps:
     hostname: account.example.org
     placement: cluster
     settings:
-      invites: true
+      signup: invite
       # One setting declared, so the golden .env shows it beside the defaults.
       invite_quota: 5
       # The text itself, not a path: rendered byte for byte into
