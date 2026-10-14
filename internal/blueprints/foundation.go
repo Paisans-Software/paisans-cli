@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/paisans-software/paisans-stack/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
 )
 
 // The foundation. The core catalog's foundation.yaml names the image of

@@ -3,7 +3,7 @@ package ui_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // A name in a message is set off in backticks, so `app` reads as the name of

@@ -9,8 +9,8 @@ import (
 
 	"cel.dev/cel-go/cel"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/version"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // BackupSpec is how to dump and restore a database the backups do not reach
@@ -271,7 +271,7 @@ func meets(req, have string) error {
 		return fmt.Errorf("the toolkit's own version: %w", err)
 	}
 	if less(is, need) {
-		return fmt.Errorf("requires_toolkit: needs paisans-stack %s, and this is %s", strings.TrimSpace(want), have)
+		return fmt.Errorf("requires_toolkit: needs Paisans %s, and this is %s", strings.TrimSpace(want), have)
 	}
 	return nil
 }

@@ -10,7 +10,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/ext"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A blueprint's conditions and checks are CEL expressions (docs/specs/

@@ -2,7 +2,7 @@
 // imported only from test files, once per test package that reads a core
 // blueprint or the foundation, in a core_test.go:
 //
-//	import _ "github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
+//	import _ "github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 //
 // At init it makes the test copy, internal/blueprints/testdata/core, into a
 // git repository with one commit, tagged with the release

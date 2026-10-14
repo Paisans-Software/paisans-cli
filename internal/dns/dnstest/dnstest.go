@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/paisans-software/paisans-stack/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 )
 
 // Provider is a zone store behind dns.Provider.

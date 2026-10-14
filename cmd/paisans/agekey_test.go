@@ -9,9 +9,9 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/keystore"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 func withKeystore(t *testing.T, s keystore.Store) {

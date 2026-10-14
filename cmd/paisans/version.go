@@ -6,7 +6,7 @@ import (
 	"io"
 	"runtime/debug"
 
-	"github.com/paisans-software/paisans-stack/internal/version"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // runVersion prints the binary's version and the commit it was built from.

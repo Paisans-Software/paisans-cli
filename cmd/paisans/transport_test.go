@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // A site's section becomes the transport's user, host, port and keys; --ssh

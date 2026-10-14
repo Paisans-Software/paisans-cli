@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Obviously fake: an ed25519 key whose 32 bytes are all zero, and all one.

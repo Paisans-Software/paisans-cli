@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
 
 // Where Docker came from does not matter, except a snap; how old it is

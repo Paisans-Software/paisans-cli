@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // operatorsFewerThanTwo refuses a deployment whose Pocket ID sites admit

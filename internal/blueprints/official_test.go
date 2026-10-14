@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The official core catalog is one repository, written the ways git accepts

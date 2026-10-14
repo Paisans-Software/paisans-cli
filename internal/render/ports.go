@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // The infrastructure's fixed ports. Each is what a rendered file says, and is

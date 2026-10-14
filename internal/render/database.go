@@ -3,8 +3,8 @@ package render
 import (
 	"fmt"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // clusteredDatabaseHost is what a clustered application instance connects to:

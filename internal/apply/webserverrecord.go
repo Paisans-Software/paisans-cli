@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // ReadWebServerRecord is what the site's manifest records of the files apply

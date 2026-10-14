@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/dns"
-	"github.com/paisans-software/paisans-stack/internal/dns/dnstest"
-	"github.com/paisans-software/paisans-stack/internal/siteremove"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
+	"github.com/paisans-software/paisans-cli/internal/siteremove"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const comment = "paisans-f2a9: created by paisans dns init"

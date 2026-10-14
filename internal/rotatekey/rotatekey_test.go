@@ -3,17 +3,17 @@ package rotatekey_test
 import (
 	"errors"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/rotatekey"
-	"github.com/paisans-software/paisans-stack/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/rotatekey"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 )
 
 // The fixture's talk key, and the pair every test rotates to.

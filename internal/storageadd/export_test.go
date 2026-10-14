@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // TestMain makes every wait a few polls with no sleep, so a gate that fails

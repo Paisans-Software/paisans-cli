@@ -3,8 +3,8 @@ package validate_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 // pinBlog pins the valid fixture's WriteFreely app to home-a, with the given

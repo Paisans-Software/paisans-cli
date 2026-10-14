@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // localPlan is a plan over the render fixture with the named apps pinned to

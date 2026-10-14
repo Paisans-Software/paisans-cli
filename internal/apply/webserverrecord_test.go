@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // The files written for the operator's web server are recorded in the

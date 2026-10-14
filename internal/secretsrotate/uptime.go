@@ -3,8 +3,8 @@ package secretsrotate
 import (
 	"fmt"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // What the uptime fork does with the two secrets at boot, read in its source

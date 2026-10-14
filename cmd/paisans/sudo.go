@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // sudoAuths holds one SudoAuth per destination for the whole run, so a site

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
 // psHost answers `ps` with fixed output.

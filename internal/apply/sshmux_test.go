@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
 // TestMain closes whatever socket directory the package's tests made, without

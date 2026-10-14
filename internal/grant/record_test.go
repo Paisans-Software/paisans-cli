@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 )
 
 // A record written before the configuration part existed is read as it is,

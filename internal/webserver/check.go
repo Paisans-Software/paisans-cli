@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // The checks, by name, in the order they run.

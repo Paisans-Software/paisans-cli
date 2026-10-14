@@ -3,7 +3,7 @@ package validate
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // One owner binding the same port twice for two different keys still cannot

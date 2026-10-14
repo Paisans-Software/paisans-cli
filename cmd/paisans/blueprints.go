@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
-	"github.com/paisans-software/paisans-stack/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 )
 
 // Every version the workstation publishes carries the catalog blueprints its

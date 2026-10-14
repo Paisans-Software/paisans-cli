@@ -1,4 +1,4 @@
-module github.com/paisans-software/paisans-stack
+module github.com/paisans-software/paisans-cli
 
 go 1.25.8
 

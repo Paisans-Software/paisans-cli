@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 )
 
 // An entry approved on a host and not applied yet is not asked about again:

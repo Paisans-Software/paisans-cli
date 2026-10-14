@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 const minimal = `apiVersion: paisans.blueprint/v1
@@ -73,7 +73,7 @@ func TestABlueprintMistakeIsRefused(t *testing.T) {
 		{"an unknown setting type", minimal + "settings:\n  mode: {type: colour}\n", "settings.mode.type"},
 		{"leaves open something else", minimal + "gate: {leaves_open: [ssh]}\n", "gate.leaves_open"},
 		{"a requirement in another form", minimal + "requires_toolkit: \"^1.0\"\n", "requires_toolkit"},
-		{"a requirement this toolkit does not meet", minimal + "requires_toolkit: \">= 999.0\"\n", "needs paisans-stack 999.0"},
+		{"a requirement this toolkit does not meet", minimal + "requires_toolkit: \">= 999.0\"\n", "needs Paisans 999.0"},
 	}
 	for _, c := range cases {
 		_, err := Parse("example", []byte(c.change), always)

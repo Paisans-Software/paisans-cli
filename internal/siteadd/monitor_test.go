@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/siteadd"
 )
 
 const seed = "/srv/paisans/f2a9/health/monitors.json"

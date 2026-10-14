@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // ServedBy is the monitor site that serves an app, when the app is pinned to

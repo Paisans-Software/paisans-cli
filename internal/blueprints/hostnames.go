@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // PrimaryRole is the hostname every app has, held in App.Hostname rather than

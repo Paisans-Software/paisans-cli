@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
 )
 
 // TestMain keeps every test away from the workstation's real keystore, and

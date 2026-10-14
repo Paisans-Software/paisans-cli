@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/render"
-	"github.com/paisans-software/paisans-stack/internal/siteremove"
-	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/siteremove"
+	"github.com/paisans-software/paisans-cli/internal/webserver/webservertest"
 )
 
 const siteFile = webDir + "paisans.d/paisans-f2a9-health.caddy"

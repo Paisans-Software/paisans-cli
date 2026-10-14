@@ -1,6 +1,6 @@
 package render
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // The values below are what the rendered files say, for a command that reads
 // a host and must compare against the same numbers. They go through the

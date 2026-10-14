@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/paisans-software/paisans-stack/internal/configmerge"
+	"github.com/paisans-software/paisans-cli/internal/configmerge"
 )
 
 // The real rendered files the format specific tests are asserted against. A

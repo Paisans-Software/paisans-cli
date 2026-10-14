@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 func TestParseDestination(t *testing.T) {

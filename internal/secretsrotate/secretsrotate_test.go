@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/secretsrotate"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/secretsrotate"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // world is the fake deployment: the secrets file, the value each checking

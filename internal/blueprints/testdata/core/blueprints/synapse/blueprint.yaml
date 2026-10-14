@@ -1,5 +1,5 @@
 # The synapse blueprint, in the core catalog.
-# paisans-stack reads it; internal/blueprints.Parse there documents every key.
+# Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
 apiVersion: paisans.blueprint/v1
 name: synapse
 services:

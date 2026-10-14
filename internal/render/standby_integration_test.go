@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 )
 
 // fakePocketID stands in for /app/pocket-id. Each server start counts itself

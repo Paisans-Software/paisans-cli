@@ -88,7 +88,7 @@ jobs:
           TAG: ${{ steps.decide.outputs.tag }}
           VERSION: ${{ steps.decide.outputs.version }}
         run: |
-          git tag -a "$TAG" -m "paisans-stack ${VERSION}"
+          git tag -a "$TAG" -m "Paisans ${VERSION}"
           git push origin "$TAG"
 
       # The operator-facing half of the notes: what someone upgrading has to

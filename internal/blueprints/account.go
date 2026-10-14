@@ -1,6 +1,6 @@
 package blueprints
 
-import "github.com/paisans-software/paisans-stack/internal/config"
+import "github.com/paisans-software/paisans-cli/internal/config"
 
 // AccountSettingRanges are the integer settings of the account blueprint and
 // their inclusive ranges, from docs/specs/2026-10-12-invite-service.md.

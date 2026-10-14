@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // Transport is the subset of apply.Transport this package uses. It is

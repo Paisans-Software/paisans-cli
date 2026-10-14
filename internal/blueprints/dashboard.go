@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // DashboardLinkSetting is the app setting that replaces the blueprint's

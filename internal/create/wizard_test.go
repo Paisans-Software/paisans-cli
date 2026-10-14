@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files under testdata/")

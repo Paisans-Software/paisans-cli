@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/webserver"
-	"github.com/paisans-software/paisans-stack/internal/webserver/webservertest"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
+	"github.com/paisans-software/paisans-cli/internal/webserver/webservertest"
 )
 
 // composeCaddy is a Caddy in a container compose started, mounting its

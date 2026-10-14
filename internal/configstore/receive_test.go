@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 // childOf writes a commit on parent with the three files and names it

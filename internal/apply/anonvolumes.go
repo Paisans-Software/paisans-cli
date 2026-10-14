@@ -3,7 +3,7 @@ package apply
 import (
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // stackVolumes lists the volumes a stack's current containers mount, run

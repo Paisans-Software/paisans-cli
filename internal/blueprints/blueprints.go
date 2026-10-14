@@ -18,7 +18,7 @@ package blueprints
 import (
 	"sort"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // Service is one container in a blueprint's compose template.

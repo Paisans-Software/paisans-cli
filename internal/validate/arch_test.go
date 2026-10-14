@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
 func TestDataSitesMustShareAnArchitecture(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
 // What follows is how the Ubuntu profile reads and writes ufw rules. Every

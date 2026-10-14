@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Each change gets one bullet, a single sentence of at most 35 words; related
 changes share a bullet. Detailed notes are on the corresponding
-[GitHub release](https://github.com/Paisans-Software/paisans-stack/releases).
+[GitHub release](https://github.com/Paisans-Software/paisans-cli/releases).
 
 ## [Unreleased]
 
@@ -28,4 +28,4 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime blueprint's admin group defaults to `operators`.
 - `paisans create` asks who manages accounts, adds the account app under `paisans`, and asks for at least two operators.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-stack/commits/develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/commits/develop

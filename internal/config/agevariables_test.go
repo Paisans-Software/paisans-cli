@@ -9,7 +9,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/plugin"
 
-	"github.com/paisans-software/paisans-stack/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/keystore"
 )
 
 func TestReadVariableKey(t *testing.T) {

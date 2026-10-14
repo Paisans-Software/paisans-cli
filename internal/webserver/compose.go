@@ -3,7 +3,7 @@ package webserver
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"path"
 	"slices"
 	"strings"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paisans-software/paisans-stack/internal/blueprints/coretest"
+	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 )
 
 // The core catalog is read at its newest release, from the repository

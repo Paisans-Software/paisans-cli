@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/hostprep"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // AllowlistProbe is one site's key allowlist, as its host holds it: the

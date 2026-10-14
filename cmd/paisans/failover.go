@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/config"
 
-	"github.com/paisans-software/paisans-stack/internal/failover"
+	"github.com/paisans-software/paisans-cli/internal/failover"
 )
 
 func runFailover(args []string) error {

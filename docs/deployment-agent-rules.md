@@ -4,7 +4,7 @@
 > community.
 >
 > It governs agents operating a *deployed* paisans stack. It does not govern
-> agents working on the paisans-stack toolkit itself, which has its own
+> agents working on the Paisans toolkit itself, which has its own
 > `AGENTS.md` at the root of that repository.
 >
 > **Copy it into your deployment's own configuration repository as `AGENTS.md`**
