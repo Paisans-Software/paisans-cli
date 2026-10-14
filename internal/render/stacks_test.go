@@ -117,3 +117,26 @@ func TestAComposeFileOutsideAStackIsAnError(t *testing.T) {
 		t.Error("an app named a/b rendered")
 	}
 }
+
+// A setting the toolkit's own templates write into an env file is quoted
+// there, so a newline in it cannot add a variable.
+func TestSettingsInEnvFilesAreQuoted(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Apps["auth"].Settings["file_backend"] = "database\nSTATIC_API_KEY=injected"
+	cfg.Apps["health"].Settings["admin_group"] = "admins\nOIDC_ISSUER=https://evil.example"
+	cfg.Apps["invite"].Settings["member_group"] = "members\nINVITE_IDP_URL=https://evil.example"
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if !strings.HasSuffix(f.Path, "/.env") {
+			continue
+		}
+		for _, line := range strings.Split(f.Content, "\n") {
+			if strings.HasPrefix(line, "STATIC_API_KEY=injected") || strings.HasPrefix(line, "OIDC_ISSUER=https://evil.example") || strings.HasPrefix(line, "INVITE_IDP_URL=https://evil.example") {
+				t.Errorf("%s: a setting added the line %q", f.Path, line)
+			}
+		}
+	}
+}

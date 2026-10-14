@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -56,6 +57,10 @@ var templateFuncs = template.FuncMap{
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,
+	// yamlquote writes a string as a double quoted YAML scalar, for a value
+	// an operator supplied: a JSON string is one, with every quote, backslash
+	// and line break escaped, so the value cannot end the scalar early.
+	"yamlquote": yamlquote,
 	// stableULID is a ULID derived from an app's name (blueprints.StableULID),
 	// for software that must be told one and given the same one every run.
 	"stableULID": blueprints.StableULID,
@@ -1072,3 +1077,9 @@ func (p *planner) electionTimeoutMS() int {
 // PublicKey derives a site's WireGuard public key from its private key, for a
 // command that reads a peer's key back from `wg show`.
 func PublicKey(private string) (string, error) { return publicKey(private) }
+
+// yamlquote is the template function of that name.
+func yamlquote(v string) (string, error) {
+	raw, err := json.Marshal(v)
+	return string(raw), err
+}

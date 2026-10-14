@@ -539,6 +539,16 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// nameCharsRE is what nameChars accepts.
+var nameCharsRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// nameChars reports whether s holds only characters a DNS name can, and an
+// underscore, which validate refuses with its own reason. It is not a full
+// check of a name's shape; it is what keeps a value the toolkit's templates
+// write as it is (a Caddyfile, an env file, a WireGuard file) from adding a
+// line, a brace or a shell expansion to them.
+func nameChars(s string) bool { return len(s) <= 253 && nameCharsRE.MatchString(s) }
+
 // InfraStack is the toolkit's infrastructure stack: the directory and the
 // compose project every site's infrastructure services render into, beside
 // one per app. An app takes its stack's name from its own, so an app of this
@@ -1014,6 +1024,8 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if c.Community.Domain == "" {
 		add("community.domain: required. It is the community's federation identity and cannot be changed later.")
+	} else if !nameChars(c.Community.Domain) {
+		add("community.domain: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the apps' env files as it is, so anything else could add to them.", c.Community.Domain)
 	}
 	switch {
 	case c.Mesh.Subnet == "" && noSubnet:
@@ -1068,6 +1080,15 @@ func (c *Config) structural(noSubnet bool) error {
 				add("sites.%s.endpoint: %q %v. Write it as a host and a port, for example vm.example.org:51820, or as a port alone, for example \":51820\", beside a public_address: the port is also the one this site's WireGuard listens on.", name, site.Endpoint, err)
 			} else if host, _, _ := net.SplitHostPort(site.Endpoint); host == "" && site.PublicAddress == "" {
 				add("sites.%s.endpoint: %q is a port alone, which means public_address on that port, and the site declares no public_address. Declare it, for example public_address: 203.0.113.10, or write the endpoint as a host and a port.", name, site.Endpoint)
+			} else if host != "" && net.ParseIP(host) == nil && !nameChars(host) {
+				add("sites.%s.endpoint: %q names a host with characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into every other site's WireGuard file as it is, and a line added there runs as root when the interface comes up.", name, site.Endpoint)
+			}
+		}
+		// Each is written into WireGuard files as it is, for the same reason
+		// as the endpoint; validate says which kind of address each must be.
+		for _, a := range []struct{ key, value string }{{"public_address", site.PublicAddress}, {"public_address6", site.PublicAddress6}} {
+			if a.value != "" && net.ParseIP(a.value) == nil {
+				add("sites.%s.%s: %q is not an IP address. It is written into every other site's WireGuard file as it is, and a line added there runs as root when the interface comes up.", name, a.key, a.value)
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
@@ -1093,6 +1114,8 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
+		} else if !nameChars(app.Hostname) {
+			add("apps.%s.hostname: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname)
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
@@ -1107,6 +1130,8 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
 				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, role)
+			} else if !nameChars(app.Hostnames[role]) {
+				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, role, app.Hostnames[role])
 			}
 		}
 		if app.SMTP != nil {

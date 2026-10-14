@@ -830,3 +830,29 @@ func TestASiteNameIsOneWord(t *testing.T) {
 		}
 	}
 }
+
+// The values the toolkit's own templates write as they are, into WireGuard,
+// Caddy and env files, are refused at load unless they are what they claim
+// to be: a WireGuard file with a line added runs it as root (PostUp), and a
+// Caddyfile or env file with one added routes or configures what nobody
+// reviewed.
+func TestValuesTheTemplatesWriteAsTheyAreAreChecked(t *testing.T) {
+	cases := []struct{ from, to, want string }{
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \"evil\\nPostUp = touch /pwned:51820\"\n", "sites.home-a.endpoint"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \"$(id).example.org:51820\"\n", "sites.home-a.endpoint"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    public_address: \"203.0.113.1\\nPostUp = touch /pwned\"\n", "sites.home-a.public_address"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    public_address6: \"2001:db8::1\\nPostUp = x\"\n", "sites.home-a.public_address6"},
+		{"  domain: example.org\n", "  domain: \"example.org\\n}\\nevil.example {\"\n", "community.domain"},
+		{"    hostname: talk.example.org\n", "    hostname: \"talk.example.org {\\n\"\n", "apps.talk.hostname"},
+		{"    hostname: talk.example.org\n", "    hostname: talk.example.org\n    hostnames:\n      media: \"m.example.org\\nX\"\n", "apps.talk.hostnames.media"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, c.from, c.to, 1)
+		if doc == validConfig {
+			t.Fatalf("%q not in the fixture", c.from)
+		}
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want+":") {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+}

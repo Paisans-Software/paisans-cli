@@ -77,11 +77,10 @@ func officialCheckout(dir string, cat config.Catalog) bool {
 // a mirror.
 const officialTagsDir = "official-tags"
 
-// officialRelease reports whether cat.Tag is a release tag (vMAJOR.MINOR.PATCH)
-// that the official
-// repository itself names cat.Commit by. The answer is recorded in the
-// checkout once the official repository has given it, so a run that cannot
-// reach the forge keeps it.
+// officialRelease reports whether cat.Tag is a release tag
+// (vMAJOR.MINOR.PATCH) that the official repository itself names cat.Commit
+// by. The answer is recorded in the checkout once the official repository has
+// given it, so a run that cannot reach the forge keeps it.
 func officialRelease(dir string, cat config.Catalog) bool {
 	// The official repository's releases are tagged vMAJOR.MINOR.PATCH,
 	// the tags its ruleset protects; any other tag is not one.
