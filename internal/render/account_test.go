@@ -16,8 +16,9 @@ const (
 )
 
 // accountServiceEnv is every variable paisans-account-service's config.Load
-// reads at v0.2.0, from its internal/config/config.go and README. It is the
-// service's environment contract: a name the service reads and this toolkit
+// reads at v0.2.0, from its internal/config/config.go and README, and
+// ACCOUNT_IDP_PRIVATE_NETWORKS, which it reads from the release after v0.3.0
+// and earlier releases ignore. It is the service's environment contract: a name the service reads and this toolkit
 // does not render is a setting nobody can change, and a required one is a
 // container that refuses to start.
 var accountServiceEnv = []string{
@@ -26,7 +27,7 @@ var accountServiceEnv = []string{
 	"ACCOUNT_SESSION_KEY", "ACCOUNT_EMAIL_HASH_KEY",
 	"ACCOUNT_OIDC_ISSUER", "ACCOUNT_OIDC_CLIENT_ID", "ACCOUNT_OIDC_CLIENT_SECRET",
 	"ACCOUNT_MEMBER_GROUP", "ACCOUNT_ADMIN_GROUP",
-	"ACCOUNT_IDP_URL", "ACCOUNT_IDP_API_KEY",
+	"ACCOUNT_IDP_URL", "ACCOUNT_IDP_PRIVATE_NETWORKS", "ACCOUNT_IDP_API_KEY",
 	"ACCOUNT_SMTP_HOST", "ACCOUNT_SMTP_PORT", "ACCOUNT_SMTP_USER", "ACCOUNT_SMTP_PASSWORD",
 	"ACCOUNT_SMTP_FROM", "ACCOUNT_SMTP_TLS",
 	"ACCOUNT_ACCENT_COLOR", "ACCOUNT_INVITE_QUOTA", "ACCOUNT_REQUIRE_APPROVAL",
@@ -264,6 +265,9 @@ func TestAccountCallsPocketIDOnItsOwnSitesMeshListener(t *testing.T) {
 	} {
 		if got := envValue(files[path], "ACCOUNT_IDP_URL"); got != want {
 			t.Errorf("%s: ACCOUNT_IDP_URL=%q, want %q", path, got, want)
+		}
+		if got := envValue(files[path], "ACCOUNT_IDP_PRIVATE_NETWORKS"); got != "10.44.0.0/24" {
+			t.Errorf("%s: ACCOUNT_IDP_PRIVATE_NETWORKS=%q, want the mesh subnet 10.44.0.0/24", path, got)
 		}
 		if got := envValue(files[path], "ACCOUNT_OIDC_ISSUER"); got != "https://id.example.org" {
 			t.Errorf("%s: ACCOUNT_OIDC_ISSUER=%q, want the public https://id.example.org", path, got)

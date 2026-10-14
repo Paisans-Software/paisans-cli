@@ -714,6 +714,7 @@ app, and its two Pocket ID addresses differ:
 |----------|-------|-----|
 | `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
 | `ACCOUNT_IDP_URL` | `http://<site mesh address>:1413` | The API, with the static API key, through the site's own HAProxy to the active Pocket ID, so the key travels only over the mesh, which WireGuard encrypts between sites. |
+| `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, so the key still goes only to the mesh when `mesh.subnet` lies outside them. |
 
 Renaming the identity hostname re-renders the account service's `.env`, and
 the next `apply` recreates the account stack. The account app is cluster

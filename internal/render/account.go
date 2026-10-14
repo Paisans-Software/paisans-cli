@@ -19,6 +19,10 @@ type accountValues struct {
 	// routes to the active instance. The key never reaches the public
 	// hostname.
 	APIURL string
+	// PrivateNetworks is the deployment's mesh.subnet, which the service
+	// accepts APIURL in alongside the private ranges, so a mesh declared
+	// outside them still reaches Pocket ID.
+	PrivateNetworks string
 	// APIKey is that app's static API key.
 	APIKey string
 	// Accent is that app's accent_color, quoted for a .env, and empty when
@@ -53,14 +57,15 @@ func (p *planner) accountValuesFor(name, site string) (accountValues, error) {
 	idApp := p.cfg.Apps[idp]
 	coc, _ := app.Settings["code_of_conduct"].(string)
 	v := accountValues{
-		Signup:       blueprints.AccountSignup(app),
-		JoinHostname: blueprints.JoinHostname(p.cfg, app),
-		Operators:    strings.Join(sortedKeys(p.cfg.Operators), ","),
-		IssuerURL:    "https://" + idApp.Hostname,
-		APIURL:       fmt.Sprintf("http://%s:%d", p.meshAddress(site), pocketIDAPIPort),
-		APIKey:       p.appSecret(idp, "static_api_key"),
-		CoC:          coc,
-		Settings:     map[string]string{},
+		Signup:          blueprints.AccountSignup(app),
+		JoinHostname:    blueprints.JoinHostname(p.cfg, app),
+		Operators:       strings.Join(sortedKeys(p.cfg.Operators), ","),
+		IssuerURL:       "https://" + idApp.Hostname,
+		APIURL:          fmt.Sprintf("http://%s:%d", p.meshAddress(site), pocketIDAPIPort),
+		PrivateNetworks: p.mesh,
+		APIKey:          p.appSecret(idp, "static_api_key"),
+		CoC:             coc,
+		Settings:        map[string]string{},
 	}
 	if accent, ok := idApp.Settings["accent_color"].(string); ok && accent != "default" {
 		quoted, err := envquote(accent)
