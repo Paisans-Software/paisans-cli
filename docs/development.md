@@ -1,8 +1,9 @@
 # Development
 
-The toolkit is a single Go binary, `cmd/paisans`. A second, `cmd/operator-reconciler`,
-is built into the image that runs beside Pocket ID, so no operator builds it.
-Contributors need a Go toolchain; operators need nothing.
+The toolkit is a single Go binary, `cmd/paisans`. The operator reconciler
+that runs beside Pocket ID is its own repository,
+`Paisans-Software/paisans-operator-reconciler-service`, and its tests are
+there. Contributors need a Go toolchain; operators need nothing.
 
 ## Build
 
@@ -1391,27 +1392,6 @@ whatever build it already holds under a tag, so a workstation that once
 pulled the image with `--platform linux/amd64` keeps running that one under
 emulation: `docker pull` the tag first to get the native build.
 
-The operator reconciler has a Docker test of its own, behind its own tag:
-
-```
-PAISANS_POCKET_ID_IMAGE=ghcr.io/pocket-id/pocket-id:v2.14.0 \
-  go test -tags pocketid_integration ./internal/operatorreconciler/
-```
-
-`PAISANS_POCKET_ID_IMAGE` must name a concrete tag, because the foundation
-names a track, which Docker cannot run. The test imports
-`internal/blueprints/coretest` (its `core_test.go`), since without the
-variable it reads the pocket-id image from the core catalog's foundation. It starts that image with a static API key,
-makes `members` and `operators` and two operators in both, one of them a Pocket
-ID administrator, and runs a pass under each management: under `pocket-id` the
-administrator who is an operator passes, and under `paisans` the same one
-fails. It then reads the second operator back, unchanged, and takes them out
-of `operators` to see check 1 fail, and puts a third user who is not an
-operator in `operators` to see check 3 fail. Rerun it whenever the Pocket ID image is
-bumped: it proves what the reconciler assumes about the API (the user list
-carries each user's groups and flags, and the static key's user is an
-administrator with a fixed ID) against the real thing.
-
 The passthrough ini merge and the locked settings have a Docker test of
 their own, behind their own tag:
 
@@ -1429,11 +1409,7 @@ hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
 another build, such as a local one of a release newer than the one the kind
 names.
 
-`.github/workflows/operator-reconciler-image.yml` builds the operator reconciler's image,
-and runs only the tests of the packages that image is built from. It runs on
-an `operator-reconciler-v*` tag alone, so a push to `develop` runs nothing; the
-reconciler is released from its own repository once the repository split
-moves it there (`docs/specs/2026-10-14-repository-split.md`). Nothing runs
+Nothing runs
 `go test ./...` or any tagged test for you, so run them before a pull request.
 
 ## Fixtures and secrets
@@ -1457,8 +1433,6 @@ installed, on a workstation or anywhere else.
 | Path | Holds |
 |------|-------|
 | `cmd/paisans` | the command, flag parsing, and how findings are printed |
-| `cmd/operator-reconciler` | the operator reconciler's binary and its image's Dockerfile: the pass loop, `/healthz` and the DNS check's two paths, and `healthcheck` |
-| `internal/operatorreconciler` | one operator reconciler pass, which only reads: every operator an enabled member in the member group and in `operators`, every enabled member of `operators` an operator, every Pocket ID administrator an operator (none under `management: paisans`), and what `/healthz` says |
 | `internal/config` | loading `paisans-stack.yaml`, and decrypting `secrets.enc.yaml` |
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
@@ -1471,7 +1445,6 @@ installed, on a workstation or anywhere else.
 | `internal/kinds` | what an application kind is: its compose services, and the image each runs by default |
 | `internal/acme` | what each ACME DNS provider needs: its Caddy module, the image that carries it, and its Caddyfile directive |
 | `internal/render` | placement, templates, and the writer |
-| `internal/dnscontinuity` | the reconciler's DNS check: reading the Cloudflare account's members (two GETs, nothing else), the keyed hash every address is compared under, and the counts the two DNS continuity monitors carry |
 | `internal/dns` | which public records a deployment needs, creating the missing ones at the DNS provider, and pruning the ones it created that nothing wants |
 | `internal/apply` | what to push to a host, what to restart, and the gates before either |
 | `internal/siteadd` | joining a new data site: eight staged, gated, resumable stages |

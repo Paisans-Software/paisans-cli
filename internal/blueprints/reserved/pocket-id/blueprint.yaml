@@ -4,9 +4,9 @@ apiVersion: paisans.blueprint/v1
 name: pocket-id
 services:
   - {name: "app", foundation: "pocket-id", purpose: "the application"}
-  # Built from cmd/operator-reconciler by
-  # .github/workflows/operator-reconciler-image.yml. The checks this toolkit
-  # renders for need 0.3.0 or later, which the foundation's track names.
+  # Released from Paisans-Software/paisans-operator-reconciler-service. The
+  # checks this toolkit renders for need 0.3.0 or later, which the
+  # foundation's track names.
   - {name: "reconciler", foundation: "operator-reconciler", purpose: "the operator reconciler"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}

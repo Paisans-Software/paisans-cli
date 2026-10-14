@@ -9,10 +9,6 @@ name: release
 # That pull request is merged with a merge commit, never squashed or rebased.
 # A merge commit keeps main an ancestor of develop, so the next release pull
 # request merges without a conflict and develop needs nothing from main.
-#
-# Tags matching operator-reconciler-v* belong to the operator reconciler's image
-# (operator-reconciler-image.yml) and are not toolkit releases; the tags here
-# are vX.Y.Z alone.
 on:
   push:
     branches: [main]

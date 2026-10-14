@@ -78,3 +78,17 @@ func TestPocketIDSettingsForManagement(t *testing.T) {
 		t.Errorf("PocketIDManagement of a number = %q, want empty", got)
 	}
 }
+
+// The group and management values are a contract with the operator
+// reconciler (Paisans-Software/paisans-operator-reconciler-service), whose
+// environment the pocket-id blueprint renders and which states the same
+// three. Each side pins them, so either side changing one fails its own
+// tests until the other follows.
+func TestTheReconcilerContractValues(t *testing.T) {
+	if blueprints.OperatorsGroup != "operators" {
+		t.Errorf("OperatorsGroup is %q", blueprints.OperatorsGroup)
+	}
+	if blueprints.ManagementPaisans != "paisans" || blueprints.ManagementPocketID != "pocket-id" {
+		t.Errorf("management values are %q and %q", blueprints.ManagementPaisans, blueprints.ManagementPocketID)
+	}
+}

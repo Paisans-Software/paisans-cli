@@ -6755,8 +6755,8 @@ section is the record of who runs the machines. Nothing else holds the two to
 each other, and an operator whose account was banned, disabled or taken out
 of a group would keep their SSH keys and secrets while losing the sign-in a
 recovery needs. So the `pocket-id` blueprint runs a second service beside
-Pocket ID on every site it runs on, `reconciler`, built from
-`cmd/operator-reconciler` and published as
+Pocket ID on every site it runs on, `reconciler`, released from
+`Paisans-Software/paisans-operator-reconciler-service` and published as
 `ghcr.io/paisans-software/operator-reconciler`, the core catalog
 `foundation.yaml`'s `operator-reconciler` on the track `0.3.*`.
 `docs/specs/2026-10-14-operators-and-management.md` is the approved design,
@@ -6830,12 +6830,10 @@ standby wrapper writes its marker to `/srv/paisans/<token>/<app>/run/standby` as
 `/tmp`, the reconciler mounts that directory read only, and a reconciler that finds the
 marker reports `standby` with a 200.
 
-**Its image is released from its own repository** once the repository split
-moves it there (`docs/specs/2026-10-14-repository-split.md`). In this
-repository the image workflow, `.github/workflows/operator-reconciler-image.yml`,
-publishes only from an `operator-reconciler-v*` tag, and a push to `develop`
-publishes nothing, so no change here reaches a deployment's reconciler by
-itself.
+**Its image is released from its own repository**,
+`Paisans-Software/paisans-operator-reconciler-service`, where only a `vX.Y.Z`
+tag publishes. A change in this repository reaches a deployment's
+reconciler only through the environment the blueprint renders for it.
 
 **The groups it reads are `operators` and the member group.** `validate`
 warns (`admin-group-not-admins`) about an app, in a deployment running Pocket
