@@ -3,9 +3,9 @@
 Status: approved in session by the founder, 2026-10-14. Steps 1 and 2 are
 implemented: `pocketid-go` v0.1.0 and the operator reconciler's v0.3.0 are
 released from their own repositories, and this repository uses the first and
-does not hold the second. Step 3 is implemented: the repository is
-`Paisans-Software/paisans-cli` and its module path matches. Steps 4 and 5
-are not implemented.
+does not hold the second. Steps 3 and 4 are implemented: the repository is
+`Paisans-Software/paisans-cli`, its module path matches, and the Homebrew
+tap's formula builds from it. Step 5 is not implemented.
 
 This repository holds two programs. `cmd/paisans` is the toolkit an operator
 runs on a workstation. `cmd/operator-reconciler` is a service every deployment
