@@ -63,21 +63,22 @@ func TestMbinsClientIsRestrictedToMembersAndAdminsByDefault(t *testing.T) {
 	}
 }
 
-// Outline and WriteFreely read no groups claim, so their clients are
-// restricted at Pocket ID to the member group and admins, and nothing else:
-// the restriction is the whole control. Neither sends a code challenge in the
-// configuration the toolkit renders, and a Pocket ID client with PKCE on
-// refuses a request without one, so PKCE is off.
-func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.T) {
+// Wiki.js's and WriteFreely's clients are restricted at Pocket ID to the
+// member group and admins. WriteFreely reads no groups claim, so for it the
+// restriction is the whole control; Wiki.js reads the claim as well. Neither
+// sends a code challenge in the configuration the toolkit renders, and a
+// Pocket ID client with PKCE on refuses a request without one, so PKCE is off.
+func TestWikiAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.T) {
 	cases := []struct {
-		kind     config.Kind
-		callback string
+		kind        config.Kind
+		callback    string
+		readsGroups bool
 	}{
-		{config.Kind("outline"), "https://docs.example.org/auth/oidc.callback"},
-		{config.Kind("writefreely"), "https://docs.example.org/oauth/callback/generic"},
+		{config.Kind("wikijs"), "https://app.example.org/login/pocketid/callback", true},
+		{config.Kind("writefreely"), "https://app.example.org/oauth/callback/generic", false},
 	}
 	for _, tc := range cases {
-		spec, ok := kinds.OIDCClient(tc.kind, "docs.example.org", "docs")
+		spec, ok := kinds.OIDCClient(tc.kind, "app.example.org", "app")
 		if !ok {
 			t.Errorf("the toolkit does not know a %s client", tc.kind)
 			continue
@@ -88,10 +89,10 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 		if spec.PKCE {
 			t.Errorf("%s: PKCE on, but the app sends no code challenge", tc.kind)
 		}
-		if spec.ReadsGroups {
-			t.Errorf("%s: says it reads the groups claim, and it does not", tc.kind)
+		if spec.ReadsGroups != tc.readsGroups {
+			t.Errorf("%s: reads the groups claim %v, want %v", tc.kind, spec.ReadsGroups, tc.readsGroups)
 		}
-		if spec.LaunchURL != "https://docs.example.org" {
+		if spec.LaunchURL != "https://app.example.org" {
 			t.Errorf("%s launch URL %s", tc.kind, spec.LaunchURL)
 		}
 		admin, member := spec.Groups(config.App{Kind: tc.kind})
@@ -109,7 +110,7 @@ func TestOutlineAndWriteFreelyClientsAreRestrictedAndSendNoChallenge(t *testing.
 // one from an empty declaration. An unrestricted client on a member facing
 // app would admit anyone with a Pocket ID account.
 func TestEveryGateableClientIsRestrictedByDefault(t *testing.T) {
-	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("outline"), config.Kind("writefreely"), config.Kind("element"), config.KindUptime} {
+	for _, kind := range []config.Kind{config.Kind("mbin"), config.Kind("wikijs"), config.Kind("writefreely"), config.Kind("element"), config.KindUptime} {
 		spec, ok := kinds.OIDCClient(kind, "app.example.org", "app")
 		if !ok || !kinds.GateFor(kind).Gateable {
 			continue

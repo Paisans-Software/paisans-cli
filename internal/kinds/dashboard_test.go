@@ -31,7 +31,7 @@ func TestADashboardLinkReplacesTheKindsPath(t *testing.T) {
 	}{
 		{config.Kind("mbin"), "/magazines", "https://app.example.org/magazines"},
 		{config.Kind("mbin"), "/", "https://app.example.org"},
-		{config.Kind("outline"), "/home", "https://app.example.org/home"},
+		{config.Kind("wikijs"), "/home", "https://app.example.org/home"},
 	}
 	for _, tc := range cases {
 		if got := kinds.LaunchURL(tc.kind, "app.example.org", tc.link); got != tc.want {
@@ -47,9 +47,9 @@ func TestToolkitLaunchURLs(t *testing.T) {
 	if got != "[https://app.example.org https://app.example.org/oauth/oidc/connect]" {
 		t.Errorf("mbin: %s", got)
 	}
-	got = fmt.Sprint(kinds.ToolkitLaunchURLs(config.Kind("outline"), "app.example.org"))
+	got = fmt.Sprint(kinds.ToolkitLaunchURLs(config.Kind("wikijs"), "app.example.org"))
 	if got != "[https://app.example.org]" {
-		t.Errorf("outline: %s", got)
+		t.Errorf("wikijs: %s", got)
 	}
 }
 

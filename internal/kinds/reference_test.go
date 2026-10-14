@@ -15,7 +15,7 @@ func TestPinning(t *testing.T) {
 		pinned bool
 	}{
 		{"ghcr.io/mbinorg/mbin:v1.10.1", true},
-		{"outlinewiki/outline:1.10.0", true},
+		{"ghcr.io/requarks/wiki:2.5.316", true},
 		{"ghcr.io/mbinorg/mbin@sha256:" + hex64, true},
 		{"registry.example.org:5000/org/app:v1.2.3", true},
 		{"ghcr.io/mbinorg/mbin:latest", false},

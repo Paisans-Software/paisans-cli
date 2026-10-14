@@ -9,13 +9,14 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/kinds"
 )
 
-// Mbin, Outline and the writefreely-wisp fork keep uploads in S3; Synapse is
+// Mbin and the writefreely-wisp fork keep uploads in S3; Synapse is
 // deliberately excluded because its media store is a directory the homeserver
-// owns, not a bucket. The other kinds have no uploads at all.
+// owns, not a bucket, and Wiki.js keeps its uploads in Postgres. The other
+// kinds have no uploads at all.
 func TestUsesObjectStorage(t *testing.T) {
 	cases := map[config.Kind]bool{
 		config.Kind("mbin"):        true,
-		config.Kind("outline"):     true,
+		config.Kind("wikijs"):      false,
 		config.Kind("synapse"):     false,
 		config.Kind("element"):     false,
 		config.KindOAuth2Proxy:     false,
@@ -31,17 +32,13 @@ func TestUsesObjectStorage(t *testing.T) {
 
 // Mbin's media must be fetchable by a federating server with no credential,
 // and so must the blog's images now that the wisp fork serves them only from
-// image_url_base. Outline's bucket holds document attachments and must never
-// be.
-func TestMbinAndTheBlogServeObjectsPubliclyAndOutlineDoesNot(t *testing.T) {
+// image_url_base. No other kind's objects are.
+func TestMbinAndTheBlogServeObjectsPublicly(t *testing.T) {
 	for _, kind := range kinds.Builtin() {
 		want := kind == config.Kind("mbin") || kind == config.Kind("writefreely")
 		if got := kinds.ServesObjectsPublicly(kind); got != want {
 			t.Errorf("%s: ServesObjectsPublicly is %v, want %v", kind, got, want)
 		}
-	}
-	if kinds.ServesObjectsPublicly(config.Kind("outline")) {
-		t.Fatal("outline's bucket holds document attachments and must never be world readable")
 	}
 }
 
@@ -94,12 +91,11 @@ func TestMediaHostnameIsDerivedAsASiblingAndCanBeOverridden(t *testing.T) {
 		want string
 	}{
 		{"mbin", config.App{Kind: config.Kind("mbin"), Hostname: "talk.example.org"}, "talk-media.example.org"},
-		{"outline", config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org"}, "docs-media.example.org"},
 		{"writefreely", config.App{Kind: config.Kind("writefreely"), Hostname: "blog.example.org"}, "blog-media.example.org"},
 		// The label is the first one, and the result is under the domain
 		// rather than under whatever the rest of the app's hostname was.
 		{"deeper hostname", config.App{Kind: config.Kind("mbin"), Hostname: "talk.eu.example.org"}, "talk-media.example.org"},
-		{"declared", config.App{Kind: config.Kind("outline"), Hostname: "docs.example.org", Hostnames: map[string]string{"media": "attachments.example.org"}}, "attachments.example.org"},
+		{"declared", config.App{Kind: config.Kind("writefreely"), Hostname: "blog.example.org", Hostnames: map[string]string{"media": "attachments.example.org"}}, "attachments.example.org"},
 		{"stores nothing", config.App{Kind: config.KindPocketID, Hostname: "id.example.org"}, ""},
 		{"synapse keeps media on disk", config.App{Kind: config.Kind("synapse"), Hostname: "chat.example.org"}, ""},
 		// An app keeping its files on its own disk serves them on its own

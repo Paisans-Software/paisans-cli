@@ -9,7 +9,7 @@ import (
 )
 
 // A gateable kind that federates leaves ActivityPub to the app, so it has
-// gate settings and a way to read them; Outline and Element leave nothing to
+// gate settings and a way to read them; Wiki.js and Element leave nothing to
 // a setting.
 func TestEveryFederatingGateableKindRecordsItsGateSettings(t *testing.T) {
 	for _, kind := range kinds.Builtin() {

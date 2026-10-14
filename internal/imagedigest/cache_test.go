@@ -95,7 +95,7 @@ func TestAnUnreachableRegistryFailsFast(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
 		t.Errorf("a second image on the same registry got %v, want the first failure", err)
 	}
-	if got, err := c.Digest("outlinewiki/outline:1.10.0"); err != nil || got != "sha256:1" {
+	if got, err := c.Digest("docker.io/dxflrs/garage:v1.0.1"); err != nil || got != "sha256:1" {
 		t.Errorf("another registry got %q, %v", got, err)
 	}
 	if len(u.asked) != 2 {
