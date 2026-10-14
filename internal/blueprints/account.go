@@ -14,7 +14,7 @@ var AccountSettingRanges = map[string][2]int{
 
 // AccountOtherSettings are the account settings that are not whole numbers.
 var AccountOtherSettings = []string{
-	"invites", "require_approval", "code_of_conduct", "member_group", "admin_group",
+	"signup", "require_approval", "code_of_conduct", "member_group", "admin_group",
 }
 
 // AccountSettingDefaults are what the service is told when a setting is unset.
@@ -23,22 +23,33 @@ var AccountSettingDefaults = map[string]string{
 	"application_wait_days": "14", "decline_retention_days": "183", "login_link_days": "7",
 }
 
-// AccountInvitesSetting switches an account app's invites on or off. It is
+// AccountSignupSetting is how people join an account app's community. It is
 // access policy, like gated, so it is declared and never defaulted: it
-// decides whether invite.<domain> exists at all.
-const AccountInvitesSetting = "invites"
+// decides whether a stranger can apply at all.
+const AccountSignupSetting = "signup"
 
-// AccountInviteSettings are the settings that belong to invites, valid only
-// with invites on.
-var AccountInviteSettings = []string{
-	"invite_quota", "require_approval", "invite_lifetime_days", "application_wait_days",
-	"decline_retention_days", "login_link_days", "code_of_conduct",
-}
+// The values of settings.signup, which the service reads as ACCOUNT_SIGNUP.
+const (
+	// SignupInvite admits someone holding a member's invite link.
+	SignupInvite = "invite"
+	// SignupOpen admits anyone, through the registration page on join.
+	SignupOpen = "open"
+)
 
-// AccountInvites reports whether an account app's invites are on: true only
-// when settings.invites is the YAML boolean true. validate refuses it unset
-// or of another type, so anything else reads as off.
-func AccountInvites(app config.App) bool {
-	on, _ := app.Settings[AccountInvitesSetting].(bool)
-	return app.Blueprint == config.BlueprintAccount && on
+// AccountInviteSettings are the settings that belong to invite links, valid
+// only with signup: invite. Every other setting applies in both modes.
+var AccountInviteSettings = []string{"invite_quota", "invite_lifetime_days"}
+
+// AccountSignup is an account app's settings.signup when it is SignupInvite
+// or SignupOpen, and empty otherwise. validate refuses anything else, so an
+// empty answer is never rendered.
+func AccountSignup(app config.App) string {
+	if app.Blueprint != config.BlueprintAccount {
+		return ""
+	}
+	switch v, _ := app.Settings[AccountSignupSetting].(string); v {
+	case SignupInvite, SignupOpen:
+		return v
+	}
+	return ""
 }

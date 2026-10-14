@@ -22,7 +22,7 @@ services:
     ports:
       - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
     # The code of conduct, rendered from apps.{{ .App.Name }}.settings.code_of_conduct,
-    # and empty with invites off, when the service reads none.
+    # which the service reads in either signup mode.
     # A root owned 0644 file: the image runs as distroless nonroot (uid
     # 65532), which reads it as other. It carries nothing secret.
     volumes:

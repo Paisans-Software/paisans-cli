@@ -147,7 +147,7 @@ var engines = map[string]bool{"postgres": true, "mysql": true, "sqlite": true, "
 // knownRoles are the hostname roles beyond the primary that the gateway can
 // route: each selects a snippet, caddy.snippet.<role>.tmpl, from the
 // blueprint's templates.
-var knownRoles = map[string]bool{MediaRole: true, WellknownRole: true, InviteRole: true}
+var knownRoles = map[string]bool{MediaRole: true, WellknownRole: true, JoinRole: true}
 
 // callbackHelpers are the functions an OIDC callback template may call.
 var callbackHelpers = template.FuncMap{"stableULID": StableULID}
