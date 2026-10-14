@@ -6246,8 +6246,12 @@ makes is named.
 **`/finalize` is closed at the gateway.** It takes no authentication and no
 CSRF token (`server/setup.js:76`), so whoever reaches it first while the wiki
 is in setup mode owns the wiki. The blueprint's route refuses it on the wiki's
-hostname for every method, always, and only the bootstrap, on the stack's own
-network, can reach it.
+hostname in every form, for every method, always. The app port on the mesh
+address is not gated, like every app's, so a mesh peer reaches `/finalize`
+there whenever an instance is in setup mode: the first deploy's setup window,
+or up to about two minutes on a stale clustered instance before its bootstrap
+stops it. Outside those windows Wiki.js does not serve it at all, since a set
+up instance never mounts the setup routes.
 
 **Pocket ID is the only way in for members, through Wiki.js's generic OAuth2
 module asking for the `groups` scope.** Pocket ID sends the `groups` claim only
