@@ -18,6 +18,7 @@
 package oidcclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +26,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -93,25 +95,25 @@ type State struct {
 // client ID the secrets file records: a client this toolkit made under a name
 // the configuration has since changed, such as the gate's after the community
 // is renamed. Build plans the rename.
-func Probe(c *pocketid.Client, d Desired, recordedID string) (State, error) {
+func Probe(ctx context.Context, c *pocketid.Client, d Desired, recordedID string) (State, error) {
 	var s State
 	var err error
-	if s.Client, err = c.FindOIDCClient(d.Name); err != nil {
+	if s.Client, err = c.FindOIDCClient(ctx, d.Name); err != nil {
 		return s, fmt.Errorf("looking up client %s: %w", d.Name, err)
 	}
 	if s.Client == nil && recordedID != "" {
-		if s.Client, err = c.OIDCClientByID(recordedID); err != nil {
+		if s.Client, err = c.OIDCClientByID(ctx, recordedID); err != nil {
 			return s, fmt.Errorf("looking up client %s by its recorded ID: %w", d.App, err)
 		}
 	}
 	if s.Client != nil {
-		if s.Secrets, err = c.ClientSecrets(s.Client.ID); err != nil {
+		if s.Secrets, err = c.ClientSecrets(ctx, s.Client.ID); err != nil {
 			return s, fmt.Errorf("listing client %s's secrets: %w", d.App, err)
 		}
 	}
 	s.Groups = map[string]*pocketid.Group{}
 	for _, name := range append(d.groups(), d.ExtraGroups...) {
-		if s.Groups[name], err = c.FindGroup(name); err != nil {
+		if s.Groups[name], err = c.FindGroup(ctx, name); err != nil {
 			return s, fmt.Errorf("looking up group %s: %w", name, err)
 		}
 	}
@@ -419,7 +421,7 @@ func allows(c *pocketid.OIDCClient, group string) bool {
 // newSecret makes a fresh client secret. After the steps it probes again and
 // refuses to report success unless a fresh plan would do nothing, because a
 // call that answers 2xx without doing its job is the failure nobody notices.
-func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string, error)) error {
+func Execute(ctx context.Context, p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string, error)) error {
 	d := p.Desired
 	groups := map[string]*pocketid.Group{}
 	for name, g := range p.State.Groups {
@@ -441,22 +443,22 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 		switch step.Kind {
 		case CreateGroup:
 			var g pocketid.Group
-			if g, err = c.CreateGroup(step.Group); err == nil {
+			if g, err = c.CreateGroup(ctx, step.Group); err == nil {
 				groups[step.Group] = &g
 				result = "created"
 			}
 		case CreateClient:
 			var created pocketid.OIDCClient
-			if created, err = c.CreateOIDCClient(d.newClient()); err == nil {
+			if created, err = c.CreateOIDCClient(ctx, d.newClient()); err == nil {
 				client = &created
 				result = "created"
 			}
 		case SetLaunchURL:
-			err = c.SetLaunchURL(client.ID, d.LaunchURL)
+			err = c.SetLaunchURL(ctx, client.ID, d.LaunchURL)
 		case SetSkipConsent:
-			err = c.SetSkipConsent(client.ID, d.SkipConsent)
+			err = c.SetSkipConsent(ctx, client.ID, d.SkipConsent)
 		case SetName:
-			err = c.SetClientName(client.ID, d.Name)
+			err = c.SetClientName(ctx, client.ID, d.Name)
 		case AllowGroups:
 			// Exactly the app's groups. checkExisting has refused a client
 			// allowing any other, so nothing is dropped here that was not
@@ -470,7 +472,7 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 				ids[groups[name].ID] = true
 			}
 			if err == nil {
-				err = c.SetAllowedGroups(client.ID, sortedKeys(ids))
+				err = c.SetAllowedGroups(ctx, client.ID, sortedKeys(ids))
 			}
 		case AddSecret:
 			var secret string
@@ -484,7 +486,7 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 			}
 			recorded = Recorded{ClientID: client.ID, ClientSecret: secret}
 			s.Detail("recorded oidc_clients.%s.client_id and oidc_clients.%s.client_secret", d.App, d.App)
-			if err = c.AddClientSecret(client.ID, secret); err != nil {
+			if err = c.AddClientSecret(ctx, client.ID, secret); err != nil {
 				err = fmt.Errorf("%w. oidc_clients.%s holds the new secret and Pocket ID does not: re-run to send it, and do not apply %s until it has", err, d.App, d.App)
 			}
 		case SendRecordedSecret:
@@ -495,7 +497,7 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 				}
 				s.Detail("recorded oidc_clients.%s.client_id and oidc_clients.%s.client_secret", d.App, d.App)
 			}
-			err = c.AddClientSecret(client.ID, recorded.ClientSecret)
+			err = c.AddClientSecret(ctx, client.ID, recorded.ClientSecret)
 		case RecordClientID:
 			secretsToHide = append(secretsToHide, recorded.ClientSecret)
 			if err = rec.Record(client.ID, recorded.ClientSecret); err == nil {
@@ -516,7 +518,7 @@ func Execute(p *Plan, c *pocketid.Client, rec Recorder, newSecret func() (string
 	// A rotation is done once its secret is sent; asking the fresh plan for
 	// another would make the check below fail on its own success.
 	d.RotateSecret = false
-	after, err := Probe(c, d, recorded.ClientID)
+	after, err := Probe(ctx, c, d, recorded.ClientID)
 	if err != nil {
 		return pocketid.Redact(err, secretsToHide...)
 	}
@@ -568,14 +570,14 @@ func sortedKeys(m map[string]bool) []string {
 // deleted, and the error names them: a rotation run again records a secret
 // with another prefix and retires them all. Running Retire again deletes
 // nothing more. No secret's value is sent or printed.
-func Retire(c *pocketid.Client, app string, rec Recorded, report ui.Reporter) error {
+func Retire(ctx context.Context, c *pocketid.Client, app string, rec Recorded, report ui.Reporter) error {
 	if report == nil {
 		report = ui.Discard
 	}
 	if rec.ClientID == "" || rec.ClientSecret == "" {
 		return fmt.Errorf("oidc_clients.%s records no client and secret to keep, so no other secret of it can be told to be old. Nothing was deleted", app)
 	}
-	held, err := c.ClientSecrets(rec.ClientID)
+	held, err := c.ClientSecrets(ctx, rec.ClientID)
 	if err != nil {
 		return pocketid.Redact(fmt.Errorf("listing client %s's secrets: %w", app, err), rec.ClientSecret)
 	}
@@ -593,7 +595,7 @@ func Retire(c *pocketid.Client, app string, rec Recorded, report ui.Reporter) er
 	for _, s := range old {
 		step := report.Step(fmt.Sprintf("delete old client secret %s of %s", s.ID, app))
 		step.Detail("DELETE /api/oidc/clients/%s/secrets/%s", rec.ClientID, s.ID)
-		if err := c.DeleteClientSecret(rec.ClientID, s.ID); err != nil {
+		if err := c.DeleteClientSecret(ctx, rec.ClientID, s.ID); err != nil {
 			err = pocketid.Redact(fmt.Errorf("deleting client %s's secret %s: %w", app, s.ID, err), rec.ClientSecret)
 			step.Fail(err)
 			return err
@@ -601,7 +603,7 @@ func Retire(c *pocketid.Client, app string, rec Recorded, report ui.Reporter) er
 		step.Done("deleted")
 	}
 	// The gate: a fresh read holds only the secrets kept.
-	after, err := c.ClientSecrets(rec.ClientID)
+	after, err := c.ClientSecrets(ctx, rec.ClientID)
 	if err != nil {
 		return pocketid.Redact(fmt.Errorf("listing client %s's secrets after the deletes: %w", app, err), rec.ClientSecret)
 	}

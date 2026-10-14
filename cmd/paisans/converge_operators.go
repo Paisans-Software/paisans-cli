@@ -13,7 +13,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/paisans-stack/internal/pocketidlog"
 	"github.com/paisans-software/paisans-stack/internal/ui"
 )
 
@@ -103,7 +103,7 @@ var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o conver
 		return out, err
 	}
 	req := operatorRequest(cfg, app, id)
-	req.APIKey, req.APIBase = key, pocketIDBase(cfg, where)
+	req.APIKey, req.APIBase, req.APINetworks = key, pocketIDBase(cfg, where), meshNetworks(cfg)
 	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
 	plan, err := appadmin.Build(cfg.Apps[app].Blueprint, transport, req)
 	if err != nil {
@@ -136,12 +136,12 @@ var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptio
 	failed := map[string]string{}
 	for {
 		// The window reaches back past the calls that asked for the emails.
-		logs, err := transport.Run(pocketid.LogCommand(project, time.Since(start)+time.Minute))
+		logs, err := transport.Run(pocketidlog.LogCommand(project, time.Since(start)+time.Minute))
 		if err != nil {
 			return nil, err
 		}
 		for _, address := range addresses {
-			if why, ok := pocketid.EmailFailure(logs, address); ok {
+			if why, ok := pocketidlog.EmailFailure(logs, address); ok {
 				failed[address] = why
 			}
 		}

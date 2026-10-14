@@ -88,7 +88,9 @@ lists what the CLI reaches Pocket ID with today and what each becomes.
 Founder decision. `docs/specs/2026-10-14-pocket-id-api-private.md` has the
 rule: a `BaseURL` whose host is not private is refused before anything is
 sent. Every caller in this repository already uses a mesh address, and the
-reconciler a compose hostname, so step 1 changes no behaviour.
+reconciler a compose hostname, so step 1 changes no behaviour. The CLI gives
+each client the deployment's `mesh.subnet` as a private network, so a mesh
+outside the private ranges still reaches Pocket ID.
 
 What the module carries:
 
@@ -124,7 +126,7 @@ Three things reach Pocket ID without the client:
 |-------|------|------------------|
 | `internal/apply/standby.go`, `instanceCommand` | One shell command per site: is the stack there, is its container a standby (a marker file read with `docker exec`), does `/healthz` answer on the mesh port | No. The standby marker is container state, not API, and reading it in the same command as the health check keeps the probe to one ssh round trip. |
 | `internal/pocketid/emaillog.go` | Reads Pocket ID's container log for a failed login link email | No. Pocket ID reports the failure only in its log. It moves to `internal/pocketidlog` (*`pocketid-go`*). |
-| `internal/failover/failover.go` | Anonymous HTTPS from the workstation to `/.well-known/openid-configuration` at the public hostname | Yes, as `Discovery(ctx)` on the `HTTP` path. |
+| `internal/failover/failover.go` | Anonymous HTTPS from the workstation to `/.well-known/openid-configuration` at the public hostname | No. It is failover's gateway probe, which asks every app's hostname the same question and only picks Pocket ID's path; it carries no key. |
 
 `internal/gatewaymove/verify.go` also requests Pocket ID's `/healthz` at its
 public hostname, pinned to a new gateway's address. That is a probe of the

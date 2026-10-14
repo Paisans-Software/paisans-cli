@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-stack/internal/ui"
 
 	"github.com/paisans-software/paisans-stack/internal/appadmin"
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -95,6 +97,18 @@ func pocketIDKey(cfg *config.Config, configPath, secretsPath, app string) (strin
 // it publishes on that site's mesh address, and nowhere else.
 func pocketIDBase(cfg *config.Config, site string) string {
 	return fmt.Sprintf("http://%s:%d", cfg.Sites[site].Address, render.AppPort(config.BlueprintPocketID))
+}
+
+// meshNetworks is the deployment's mesh, which the Pocket ID client accepts
+// as private wherever its addresses are, so pocketIDBase is reachable however
+// mesh.subnet is chosen. A subnet that does not parse adds nothing, and the
+// client's own private ranges still apply.
+func meshNetworks(cfg *config.Config) []netip.Prefix {
+	p, err := netip.ParsePrefix(cfg.Mesh.Subnet)
+	if err != nil {
+		return nil
+	}
+	return []netip.Prefix{p.Masked()}
 }
 
 // adminSite picks the site to run an app's commands on. A pinned app has one.

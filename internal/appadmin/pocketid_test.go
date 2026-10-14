@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
 const pidKey = "not-a-real-api-key-0002"
@@ -44,7 +45,7 @@ func (f *fakePocketID) RunInput(command, stdin string) (string, error) {
 	method, target, body := readCurlConfig(stdin)
 	u, _ := url.Parse(target)
 	status, out := f.serve(method, u, body, stdin)
-	return fmt.Sprintf("%s\npaisans-http-status:%d", out, status), nil
+	return fmt.Sprintf("%s\npocketid-http-status:%d", out, status), nil
 }
 
 func (f *fakePocketID) serve(method string, u *url.URL, body, stdin string) (int, string) {

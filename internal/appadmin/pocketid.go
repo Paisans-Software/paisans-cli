@@ -1,13 +1,14 @@
 package appadmin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
+	"github.com/paisans-software/pocketid-go"
 )
 
 // pocketID creates an administrator through Pocket ID's REST API, with the
@@ -54,7 +55,7 @@ type pocketID struct{}
 const loginTTL = 20 * time.Minute
 
 func (pocketID) client(t Transport, req Request) *pocketid.Client {
-	return &pocketid.Client{Transport: t, BaseURL: req.APIBase, APIKey: req.APIKey}
+	return &pocketid.Client{Transport: t, BaseURL: req.APIBase, APIKey: req.APIKey, Networks: req.APINetworks}
 }
 
 // find is the user a request is about: the one with its username, or for a
@@ -65,11 +66,12 @@ func (pocketID) client(t Transport, req Request) *pocketid.Client {
 // compared whole, ignoring case, since Pocket ID's search is a substring
 // match.
 func (p pocketID) find(c *pocketid.Client, req Request) (*pocketid.User, error) {
-	u, err := c.FindUser(req.Username)
+	ctx := context.Background()
+	u, err := c.FindUser(ctx, req.Username)
 	if err != nil || u != nil || !req.Declared || req.Email == "" {
 		return u, err
 	}
-	users, err := c.SearchUsers(req.Email)
+	users, err := c.SearchUsers(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +92,7 @@ func linkTTL(req Request) time.Duration {
 }
 
 func (p pocketID) Probe(t Transport, req Request) (State, error) {
+	ctx := context.Background()
 	c := p.client(t, req)
 	u, err := p.find(c, req)
 	if err != nil {
@@ -105,14 +108,14 @@ func (p pocketID) Probe(t Transport, req Request) (State, error) {
 	// app could match against one of its own.
 	state := State{Exists: true, Verified: u.Email == nil || u.EmailVerified, Admin: u.IsAdmin}
 	if req.Declared {
-		has, err := c.HasPasskey(u.ID)
+		has, err := c.HasPasskey(ctx, u.ID)
 		if err != nil {
 			return State{}, fmt.Errorf("reading whether %s in %s has a passkey: %w", req.Username, req.App, err)
 		}
 		state.Passkey = has
 	}
 	for _, name := range req.Groups() {
-		g, err := p.client(t, req).FindGroup(name)
+		g, err := p.client(t, req).FindGroup(ctx, name)
 		if err != nil {
 			return State{}, fmt.Errorf("looking up group %s in %s: %w", name, req.App, err)
 		}
@@ -209,6 +212,7 @@ func (p pocketID) Describe(a Action, req Request) string {
 }
 
 func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, error) {
+	ctx := context.Background()
 	c := p.client(t, req)
 	var user *pocketid.User
 	load := func() error {
@@ -229,7 +233,7 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 	for _, a := range actions {
 		switch a {
 		case ActionCreate:
-			created, err := c.CreateUser(p.newUser(req))
+			created, err := c.CreateUser(ctx, p.newUser(req))
 			if err != nil {
 				return Outcome{}, fmt.Errorf("creating %s: %w", req.Username, err)
 			}
@@ -240,7 +244,7 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 			if err := load(); err != nil {
 				return Outcome{}, err
 			}
-			if err := c.VerifyEmail(*user); err != nil {
+			if err := c.VerifyEmail(ctx, *user); err != nil {
 				return Outcome{}, fmt.Errorf("marking %s's email verified: %w", req.Username, err)
 			}
 			user.EmailVerified = true
@@ -248,7 +252,7 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 			if err := load(); err != nil {
 				return Outcome{}, err
 			}
-			if err := c.SetAdmin(*user); err != nil {
+			if err := c.SetAdmin(ctx, *user); err != nil {
 				return Outcome{}, fmt.Errorf("making %s an administrator: %w", req.Username, err)
 			}
 			user.IsAdmin = true
@@ -261,12 +265,12 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 				ids[g.ID] = true
 			}
 			for _, name := range req.Groups() {
-				g, err := c.FindGroup(name)
+				g, err := c.FindGroup(ctx, name)
 				if err != nil {
 					return Outcome{}, fmt.Errorf("looking up group %s: %w", name, err)
 				}
 				if g == nil {
-					created, err := c.CreateGroup(name)
+					created, err := c.CreateGroup(ctx, name)
 					if err != nil {
 						return Outcome{}, fmt.Errorf("creating group %s: %w", name, err)
 					}
@@ -279,14 +283,14 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 				all = append(all, id)
 			}
 			sort.Strings(all)
-			if err := c.SetUserGroups(user.ID, all); err != nil {
+			if err := c.SetUserGroups(ctx, user.ID, all); err != nil {
 				return Outcome{}, fmt.Errorf("adding %s to %s: %w", req.Username, strings.Join(req.Groups(), ", "), err)
 			}
 		case ActionLoginLink:
 			if err := load(); err != nil {
 				return Outcome{}, err
 			}
-			token, err := c.LoginToken(user.ID, linkTTL(req))
+			token, err := c.LoginToken(ctx, user.ID, linkTTL(req))
 			if err != nil {
 				return Outcome{}, fmt.Errorf("issuing a login link for %s: %w", req.Username, err)
 			}
@@ -296,7 +300,7 @@ func (p pocketID) Execute(t Transport, req Request, actions []Action) (Outcome, 
 			if err := load(); err != nil {
 				return Outcome{}, err
 			}
-			if err := c.EmailLoginLink(user.ID, linkTTL(req)); err != nil {
+			if err := c.EmailLoginLink(ctx, user.ID, linkTTL(req)); err != nil {
 				return Outcome{}, fmt.Errorf("asking Pocket ID to email %s a login link: %w", req.Username, err)
 			}
 			out.Emailed = true

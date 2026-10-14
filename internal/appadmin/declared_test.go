@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/pocketid-go"
+
 	"github.com/paisans-software/paisans-stack/internal/config"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
 // declaredRequest is a request as apply makes one for an admin the

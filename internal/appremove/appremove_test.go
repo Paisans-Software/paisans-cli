@@ -1,14 +1,17 @@
 package appremove
 
 import (
-	"github.com/paisans-software/paisans-stack/internal/ui"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/paisans-stack/internal/ui"
+
+	"github.com/paisans-software/pocketid-go"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/garage"
 	"github.com/paisans-software/paisans-stack/internal/hostcheck"
-	"github.com/paisans-software/paisans-stack/internal/pocketid"
 )
 
 const (
@@ -321,9 +324,13 @@ func TestTheClientIsDeletedOnlyByItsRecordedID(t *testing.T) {
 
 type fakeClients struct{ deleted []string }
 
-func (f *fakeClients) OIDCClientByID(string) (*pocketid.OIDCClient, error) { return nil, nil }
-func (f *fakeClients) FindOIDCClient(string) (*pocketid.OIDCClient, error) { return nil, nil }
-func (f *fakeClients) DeleteOIDCClient(id string) error {
+func (f *fakeClients) OIDCClientByID(context.Context, string) (*pocketid.OIDCClient, error) {
+	return nil, nil
+}
+func (f *fakeClients) FindOIDCClient(context.Context, string) (*pocketid.OIDCClient, error) {
+	return nil, nil
+}
+func (f *fakeClients) DeleteOIDCClient(_ context.Context, id string) error {
 	f.deleted = append(f.deleted, id)
 	return nil
 }

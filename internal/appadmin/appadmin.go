@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"sort"
 	"strings"
@@ -82,10 +83,13 @@ type Request struct {
 	// APIBase, APIKey and PublicURL are for a blueprint administered through
 	// its own HTTP API rather than through commands in its container. APIBase
 	// is where the API answers from the site's host, APIKey is never printed,
-	// and PublicURL is what a login link is built on.
-	APIBase   string
-	APIKey    string
-	PublicURL string
+	// and PublicURL is what a login link is built on. APINetworks are the
+	// private networks APIBase may be on besides the ranges any client
+	// accepts: the deployment's mesh.
+	APIBase     string
+	APIKey      string
+	APINetworks []netip.Prefix
+	PublicURL   string
 }
 
 // Groups is every group the user is put in: the admin groups and the member
