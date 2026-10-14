@@ -324,6 +324,35 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestRealGarageGivesAPrivateBucketNoWebsiteAccess provisions a live node for
+// a public bucket and a private one, the latter from a catalog blueprint that
+// stores objects and does not declare public reads, and reads each bucket's
+// website access back from Garage. A private bucket with website access on
+// would serve every object in it to anyone who asks for its key.
+func TestRealGarageGivesAPrivateBucketNoWebsiteAccess(t *testing.T) {
+	transport := startGarage(t)
+	const site = "home-a"
+	cfg := loadWithPrivateFiles(t)
+	cfg.Storage.Garage = config.Garage{Sites: []string{site}, Replication: 1, Capacity: "100G"}
+	secrets := &config.Secrets{Apps: map[string]map[string]any{}}
+	for _, app := range []string{"talk", "blog", "files"} {
+		secrets.Apps[app] = map[string]any{"s3_access_key_id": garageKeyID(t), "s3_secret_access_key": hexString(t, 64)}
+	}
+	plan, err := Build(site, cfg, secrets, transport)
+	if err != nil {
+		t.Fatalf("building the plan: %v", err)
+	}
+	if err := Execute(plan, transport); err != nil {
+		t.Fatalf("executing the plan: %v", err)
+	}
+	if got := bucketWebsiteAccess(t, transport, "blog-uploads"); got != "true" {
+		t.Errorf("blog-uploads serves objects publicly, so its website access must be true, got %q", got)
+	}
+	if got := bucketWebsiteAccess(t, transport, "files-uploads"); got != "false" {
+		t.Errorf("files-uploads must never be readable without a credential, so its website access must be false, got %q", got)
+	}
+}
+
 // TestRenderedGarageTOMLStartsGarage boots dxflrs/garage:v1.0.1 against the
 // garage.toml this toolkit actually renders, byte for byte, rather than
 // against one a test wrote for itself.

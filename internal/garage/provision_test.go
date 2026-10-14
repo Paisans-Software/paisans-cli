@@ -255,7 +255,9 @@ func TestASiteWithNoGarageRoleIsRefused(t *testing.T) {
 
 // Website access is what makes an object readable with no credential, and it
 // is per bucket. Mbin's bucket needs it, and so does the blog's now that the
-// wisp fork serves images only from image_url_base.
+// wisp fork serves images only from image_url_base. A bucket whose blueprint
+// does not say its objects are public must never have it: it would make
+// every object in it readable by anyone who guesses a key.
 func TestOnlyAPublicBucketIsAllowedWebsiteAccess(t *testing.T) {
 	transport := &fakeTransport{responses: map[string]response{
 		"layout show": {out: "Connection established to 51494feb5444d466\n==== CURRENT CLUSTER LAYOUT ====\nID  Tags  Zone  Capacity\n51494feb5444d466  []  home-a  100.0 GB\n\nCurrent cluster layout version: 1\n"},
@@ -264,9 +266,23 @@ func TestOnlyAPublicBucketIsAllowedWebsiteAccess(t *testing.T) {
 		"bucket info": {out: "Bucket: cfc236316d4a81858f84f84c287f5a0d\nSize: 0 B\nObjects: 0\n"},
 	}}
 
-	plan, err := garage.Build("home-a", fixtureConfig(t), fixtureSecrets(t), transport)
+	cfg, secrets := garage.LoadWithPrivateFiles(t), fixtureSecrets(t)
+	secrets.Apps["files"] = map[string]any{
+		"s3_access_key_id":     "GKccddeeffccddeeffccddeeff",
+		"s3_secret_access_key": "ccddeeff0011ccddeeff0011ccddeeff0011ccddeeff0011ccddeeff0011ccdd",
+	}
+	plan, err := garage.Build("home-a", cfg, secrets, transport)
 	if err != nil {
 		t.Fatalf("building the plan: %v", err)
+	}
+	// The private bucket is provisioned, so its missing website step is a
+	// decision rather than an app the plan never reached.
+	var granted bool
+	for _, s := range plan.Steps {
+		granted = granted || strings.Contains(s.Command, "bucket allow --read --write --owner files-uploads ")
+	}
+	if !granted {
+		t.Fatal("the private app's bucket is not provisioned, so this test proves nothing about its website access")
 	}
 
 	var website []string
@@ -278,6 +294,9 @@ func TestOnlyAPublicBucketIsAllowedWebsiteAccess(t *testing.T) {
 	joined := strings.Join(website, "\n")
 	if !strings.Contains(joined, "bucket website --allow talk-uploads") {
 		t.Errorf("mbin's bucket needs website access or its media stays unreadable, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "files-uploads") {
+		t.Errorf("a bucket whose blueprint does not declare public reads must never be world readable, got:\n%s", joined)
 	}
 	// The blog's bucket (blog-uploads) needs it too: the wisp fork writes
 	// images there and never reads them back, so a reader's browser fetches
