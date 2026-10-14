@@ -1091,12 +1091,13 @@ func (w *world) stats(site string) (string, error) {
 	var b strings.Builder
 	b.WriteString("# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,\n")
 	b.WriteString("postgres,FRONTEND,,,0,0,500,0,0,0,0,0,0,,,,,OPEN,\n")
-	for _, m := range serverRe.FindAllStringSubmatch(cfg, -1) {
+	for _, sv := range listenServers(cfg) {
+		proxy, name := sv[0], sv[1]
 		status := "DOWN"
-		if m[1] == w.leader() {
+		if proxy != "postgres" || name == w.leader() {
 			status = "UP"
 		}
-		fmt.Fprintf(&b, "postgres,%s,0,0,0,0,100,0,0,0,,0,,0,0,0,0,%s,\n", m[1], status)
+		fmt.Fprintf(&b, "%s,%s,0,0,0,0,100,0,0,0,,0,,0,0,0,0,%s,\n", proxy, name, status)
 	}
 	b.WriteString("postgres,BACKEND,0,0,0,0,50,0,0,0,0,0,,0,0,0,0,UP,\n")
 	return b.String(), nil
@@ -1505,4 +1506,23 @@ func shortAndVerbose(t *testing.T, err error, want ...string) {
 			t.Errorf("verbose output lacks the raw log (%q):\n%s", raw, verbose.String())
 		}
 	}
+}
+
+// listenServers is every `server` line in a rendered haproxy.cfg with the
+// `listen` section it is in, so the fake statistics name each server under
+// its own proxy, as HAProxy's do: the postgres servers and the pocket-id
+// ones are separate rows.
+func listenServers(cfg string) [][2]string {
+	var out [][2]string
+	proxy := ""
+	for _, line := range strings.Split(cfg, "\n") {
+		if strings.HasPrefix(line, "listen ") {
+			proxy = strings.TrimSpace(strings.TrimPrefix(line, "listen "))
+			continue
+		}
+		if m := serverRe.FindStringSubmatch(line); m != nil {
+			out = append(out, [2]string{proxy, m[1]})
+		}
+	}
+	return out
 }
