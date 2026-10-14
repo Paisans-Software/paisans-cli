@@ -30,3 +30,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `paisans create` asks who manages accounts, adds the account app under `paisans`, and asks for at least two operators.
 
 [Unreleased]: https://github.com/Paisans-Software/paisans-cli/commits/develop
+
+### Security
+
+- The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.

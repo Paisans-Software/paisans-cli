@@ -442,6 +442,7 @@
     "smtp_host": "smtp.example.org",
     "smtp_pass": "fixture-not-a-secret-smtp",
     "smtp_port": 587,
+    "smtp_require_tls": true,
     "smtp_secure": false,
     "smtp_user": "robot@example.org",
     "status_page_enabled": false
