@@ -8923,3 +8923,8 @@ network — a hosted installer, say: those users must be offered its source.
 Running the unmodified toolkit to deploy a community does not trigger it, and
 the applications a deployment runs keep their own licenses; the toolkit
 configures them and does not link them.
+
+A binary built from this repository links the Go standard library and
+third-party modules under their own licenses. `scripts/third-party-notices.sh`
+prints those licenses and notices for the packages a binary is built from, and
+the admin reconciler's image carries its output as `/THIRD_PARTY_NOTICES`.

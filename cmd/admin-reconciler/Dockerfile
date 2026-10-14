@@ -7,10 +7,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /admin-reconciler ./cmd/admin-reconciler
+RUN scripts/third-party-notices.sh ./cmd/admin-reconciler > /THIRD_PARTY_NOTICES
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /admin-reconciler /admin-reconciler
 COPY --from=build /src/LICENSE /LICENSE
+COPY --from=build /THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 USER nonroot
 EXPOSE 1412
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD ["/admin-reconciler", "healthcheck"]
