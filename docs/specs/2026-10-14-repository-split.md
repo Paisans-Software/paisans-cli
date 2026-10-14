@@ -1,6 +1,9 @@
 # Repository split: the CLI, the Pocket ID client and the operator reconciler
 
-Status: approved in session by the founder, 2026-10-14. Not implemented.
+Status: approved in session by the founder, 2026-10-14. Steps 1 and 2 are
+implemented: `pocketid-go` v0.1.0 and the operator reconciler's v0.3.0 are
+released from their own repositories, and this repository uses the first and
+does not hold the second. Steps 3 to 5 are not implemented.
 
 This repository holds two programs. `cmd/paisans` is the toolkit an operator
 runs on a workstation. `cmd/operator-reconciler` is a service every deployment
@@ -46,8 +49,9 @@ Founder decisions, 2026-10-14, in session:
   did.
 * **The operator reconciler's first release comes from its own
   repository.** It is a plain `v0.3.0` there, after steps 1 and 2 of *Order*;
-  no `operator-reconciler-v*` tag is made in this repository. The core catalog
-  and toolkit releases that carry the operators change wait for it. Outside
+  no `operator-reconciler-v*` tag is made in this repository. The core
+  catalog's v0.1.0, released first by founder decision, names the track
+  `0.3.*`, which this release fills. Outside
   this repository a release needs no prefix, since nothing else shares its
   tags.
 * **This repository is renamed `paisans-cli`,** with its Go module path. The
