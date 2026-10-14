@@ -76,10 +76,14 @@ belong to invites and are valid only with `invites: true`.
 | `account-serves-nothing` | `invites: false`. Warning: the app has no feature without invites |
 
 Every rule `validate` holds an `invite` app to today keeps its meaning under an
-`account-` id and applies only with `invites: true`: the identity app's
+`account-` id. These apply only with `invites: true`: the identity app's
 `allow_user_signups` disabled or unset, `email_one_time_access_as_admin` not
-`false`, `email_one_time_access_as_unauthenticated` `true`, one `pocket-id`
-app, SMTP resolved, the code of conduct present, and the settings' ranges.
+`false`, `email_one_time_access_as_unauthenticated` `true`, the code of
+conduct present, and the settings' ranges. These apply either way, because
+the service signs members in through Pocket ID, keeps its state in the
+cluster's Postgres and does not start without a mail server: `identity_app`
+names a `pocket-id` app, one `pocket-id` app, cluster placement, and SMTP
+resolved.
 
 ## The service
 

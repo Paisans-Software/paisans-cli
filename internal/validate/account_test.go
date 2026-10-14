@@ -201,3 +201,17 @@ func TestTheInviteHostnameIsClaimed(t *testing.T) {
 		t.Errorf("invites off: %v", f)
 	}
 }
+
+// The service needs a mail server to start, so it is refused without one
+// whether invites are on or off.
+func TestAccountWithoutSMTPIsRefusedWithInvitesOff(t *testing.T) {
+	cfg := withInvitesOff(t)
+	cfg.SMTP = config.SMTP{}
+	for name, app := range cfg.Apps {
+		app.SMTP = nil
+		cfg.Apps[name] = app
+	}
+	if f := findings(validate.Check(cfg), "account-without-smtp"); len(f) != 1 {
+		t.Errorf("account-without-smtp with invites off: %v", f)
+	}
+}

@@ -125,12 +125,15 @@ func (c *checker) accountIdentityApp() {
 	}
 }
 
+// accountWithoutSMTP refuses an account app with no mail server, invites on
+// or off: the service reads ACCOUNT_SMTP_HOST and ACCOUNT_SMTP_FROM as
+// required and refuses to start without them.
 func (c *checker) accountWithoutSMTP() {
-	for _, name := range c.inviteApps() {
+	for _, name := range c.accountApps() {
 		if !c.cfg.CanMail(name) {
 			c.refuse("account-without-smtp", fmt.Sprintf("apps.%s", name),
 				"account needs mail",
-				"resolves no SMTP host and from_address. The account service emails admins when an application is waiting and tells invitees the outcome. Declare an smtp: block with a host and from_address.")
+				"resolves no SMTP host and from_address. The account service refuses to start without one, and with invites on it emails admins when an application is waiting and tells invitees the outcome. Declare an smtp: block with a host and from_address.")
 		}
 	}
 }

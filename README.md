@@ -638,15 +638,16 @@ With invites on, the identity app is held to what an invite community needs:
 | `email_one_time_access_as_admin` | `false`. Pocket ID refuses to send the sign-in link while it is off | `account-login-link-disabled` |
 | `email_one_time_access_as_unauthenticated` | anything but `true`, unset included. A member whose link expired recovers through Pocket ID's email-code sign-in, which works only in the browser that asked for the code | `account-recovery-disabled` |
 
-Also refused with invites on: no SMTP host and sender for the app
-(`account-without-smtp`), a `code_of_conduct` that is missing, empty or not
-text (`account-code-of-conduct-missing`), and a setting out of range
+Also refused with invites on: a `code_of_conduct` that is missing, empty or
+not text (`account-code-of-conduct-missing`), and a setting out of range
 (`account-setting-invalid`, which also refuses an `invites` that is not a
 boolean). Refused either way, because every account app signs members in
-through Pocket ID: an `identity_app` that is missing or not a `pocket-id` app
-(`account-identity-app`), and a deployment with more than one `pocket-id` app
+through Pocket ID and the service will not start without a mail server: an
+`identity_app` that is missing or not a `pocket-id` app
+(`account-identity-app`), a deployment with more than one `pocket-id` app
 (`account-one-identity-app`: the account app's OIDC client is created at the
-one Pocket ID, its issuer and key come from `identity_app`). A setting the
+one Pocket ID, its issuer and key come from `identity_app`), and no SMTP host
+and sender for the app (`account-without-smtp`). A setting the
 blueprint does not read is a warning (`account-setting-unknown`), since it
 renders nothing. The service sends its own notices (an application waiting,
 an invitee's outcome) through the deployment's `smtp:` block, which the app's
