@@ -18,11 +18,11 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- The `invite` blueprint is the `account` blueprint, running paisans-account-service: `settings.invites` is required, and `invite.<domain>` exists only with invites on, beside `account.<domain>`.
+- The `invite` blueprint is the `account` blueprint, running paisans-account-service: `settings.signup` (`invite` or `open`) is required, and every account app serves signups on `join.<domain>` beside `account.<domain>`.
 - The Pocket ID gateway closes its signup routes on `allow_user_signups` alone.
 - The `admins:` section of `paisans-stack.yaml` and the secrets file is `operators:`, and `paisans admin` is `paisans operator`.
 - apply makes each operator a member of `operators`, `members` and every app's groups, and a Pocket ID administrator only under `management: pocket-id`.
-- The admin reconciler is the operator reconciler: it reads Pocket ID, writes nothing, and reports an operator missing from Pocket ID or an administrator who is not an operator.
+- The admin reconciler is the operator reconciler: it reads Pocket ID, writes nothing, and reports operators missing from Pocket ID, non-operators in `operators`, and administrators who are not operators.
 - The admins heartbeat is the operators heartbeat, its token `operators_heartbeat_token`, its monitors `operator continuity`.
 - The account app uses the deployment's one `pocket-id` app, and `identity_app` is refused.
 - The uptime blueprint's admin group defaults to `operators`.

@@ -1,6 +1,6 @@
 # Operators, and who manages accounts
 
-Status: approved by the founder on 2026-10-14, not implemented.
+Status: approved by the founder on 2026-10-14; implemented in paisans-stack, not yet run end to end.
 
 A deployment has two kinds of people with power over it, and this spec names
 them apart. **Operators** run the machines: they are declared in

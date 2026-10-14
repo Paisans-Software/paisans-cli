@@ -1330,7 +1330,11 @@ failure rather than a puzzle.
 **Golden tree tests** live in `internal/render`. The tree under
 `internal/render/testdata/golden` is checked in, because it is the
 specification of what an operator receives: a diff there is a change in what
-lands on a host. Regenerate it deliberately, and read the diff:
+lands on a host. Two smaller trees beside it each show one variation of the
+same deployment: `golden-local-storage`, apps keeping their files on their own
+disk, and `golden-open-signup`, the account app with `signup: open` where the
+main tree has `signup: invite`. Regenerate them deliberately, and read the
+diff:
 
 ```
 go test ./internal/render -update
@@ -1402,7 +1406,8 @@ makes `members` and `operators` and two operators in both, one of them a Pocket
 ID administrator, and runs a pass under each management: under `pocket-id` the
 administrator who is an operator passes, and under `paisans` the same one
 fails. It then reads the second operator back, unchanged, and takes them out
-of `operators` to see check 1 fail. Rerun it whenever the Pocket ID image is
+of `operators` to see check 1 fail, and puts a third user who is not an
+operator in `operators` to see check 3 fail. Rerun it whenever the Pocket ID image is
 bumped: it proves what the reconciler assumes about the API (the user list
 carries each user's groups and flags, and the static key's user is an
 administrator with a fixed ID) against the real thing.
@@ -1453,7 +1458,7 @@ installed, on a workstation or anywhere else.
 |------|-------|
 | `cmd/paisans` | the command, flag parsing, and how findings are printed |
 | `cmd/operator-reconciler` | the operator reconciler's binary and its image's Dockerfile: the pass loop, `/healthz` and the DNS check's two paths, and `healthcheck` |
-| `internal/operatorreconciler` | one operator reconciler pass, which only reads: every operator an enabled member in the member group and in `operators`, every Pocket ID administrator an operator (none under `management: paisans`), and what `/healthz` says |
+| `internal/operatorreconciler` | one operator reconciler pass, which only reads: every operator an enabled member in the member group and in `operators`, every enabled member of `operators` an operator, every Pocket ID administrator an operator (none under `management: paisans`), and what `/healthz` says |
 | `internal/config` | loading `paisans-stack.yaml`, and decrypting `secrets.enc.yaml` |
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
