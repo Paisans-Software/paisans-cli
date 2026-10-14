@@ -1,6 +1,9 @@
 # Wiki.js is the default wiki
 
-Status: design approved in session on 2026-10-13, not yet implemented. Founder
+Status: implemented. What shipped: paisans-stack #270 (the `list` setting
+type, `extra_groups_setting` and consent off by default), `wikijs-bootstrap`
+v0.1.0, core catalog v0.0.1 (`wikijs` added, `outline` removed), and the
+toolkit's tests and docs on the branch `feat/wikijs-default-wiki`. Founder
 decisions throughout; the provisional points are marked as such, and *To verify
 before building* lists what the design rests on but nobody has observed.
 
@@ -18,7 +21,7 @@ Four repositories change:
 |---|---|
 | `Paisans-Software/wikijs-bootstrap` | new: the bootstrap, a one shot program that finishes Wiki.js's setup and keeps its sign-in, site settings and groups as the configuration says |
 | `Paisans-Software/paisans-blueprints` | `blueprints/wikijs/` added, `blueprints/outline/` removed |
-| `Paisans-Software/paisans-stack` | a `list` setting type, an OIDC key naming further groups to create at Pocket ID, consent off by default for every client, the `create` wizard, help and error text, the volume registry, the core pin, the test fixtures and the README |
+| `Paisans-Software/paisans-stack` | a `list` setting type, an OIDC key naming further groups to create at Pocket ID, consent off by default for every client, help and error text, the core catalog test copy, the test fixtures and the README |
 | none | the deployment agent rules, if the founder widens the exception in *Groups at Pocket ID* |
 
 Every citation of Wiki.js below is at `v2.5.316`, the newest 2.x release, which
@@ -29,10 +32,11 @@ is tagged in `requarks/wiki-v2` (2026-10-01). Pocket ID citations are at
 
 2.x. Version 3 is a beta whose own README says "NOT FOR PRODUCTION USE", whose
 schema took 18 migrations in the two months to 2026-10-13, and which has no
-documented upgrade from 2.x. The blueprint pins
-`ghcr.io/requarks/wiki:2.5.316` by digest, which on 2026-10-13 was
-`sha256:fffff288a52f76e5b8c19a4fbcd0f3e538e96edea642c4f2d813d54d59a876de`;
-the implementation re-resolves it rather than trusting this line.
+documented upgrade from 2.x. The blueprint names the image track
+`ghcr.io/requarks/wiki:2.5.*`, as every image in the core catalog names a
+track rather than a digest, so a 2.5 patch release is taken without a catalog
+release. 2.5.316 was the newest on 2026-10-13 and is what every citation here
+was read at.
 
 2.x is in maintenance. Its advisories so far (15, nine of them stored XSS) were
 published within a day of their fixed release, and the access control ones
@@ -53,7 +57,8 @@ Nothing else needs to persist. `/wiki/data/cache` is emptied at every boot
 (`server/core/system.js:28`). The image declares `/wiki/data/content` as a
 volume (`dev/build/Dockerfile:47-51`), so the compose file binds it under the
 stack's data path, as every declared volume is, rather than leaving Docker an
-anonymous one; `internal/kinds/volumes.go` registers it.
+anonymous one. No toolkit change carries it: `apply` reads the volumes an
+image declares and refuses a compose file that leaves one unmounted.
 
 Uploads are capped by Wiki.js at 5 MB per file and 10 files per request by
 default (`server/app/data.yml:96-98`). `upload_max_mb` sets the first; the
@@ -246,13 +251,15 @@ admin, sign-in providers, site URL and groups live in its database and change
 through its GraphQL API. The bootstrap is what sets them. It is a Go program
 in its own repository, `Paisans-Software/wikijs-bootstrap`, published as
 `ghcr.io/paisans-software/wikijs-bootstrap` by that repository's release
-workflow, and the blueprint pins it by digest as a second service (the
-version and digests below stand for the ones its release produces):
+workflow, and the blueprint names it as a second service by image track, as
+the catalog names every image. The bootstrap's track is a minor, `0.1.*`,
+because a new 0.x minor may change the environment `bootstrap.env` renders, so
+it is taken by a catalog release:
 
 ```yaml
 services:
-  - {name: "app", image: "ghcr.io/requarks/wiki:2.5.316@sha256:...", purpose: "the application"}
-  - {name: "bootstrap", image: "ghcr.io/paisans-software/wikijs-bootstrap:X.Y.Z@sha256:...", purpose: "finishes setup and keeps sign-in, site settings and groups as configured"}
+  - {name: "app", image: "ghcr.io/requarks/wiki:2.5.*", purpose: "the application"}
+  - {name: "bootstrap", image: "ghcr.io/paisans-software/wikijs-bootstrap:0.1.*", purpose: "finishes setup and keeps sign-in, site settings and groups as configured"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 ```
 
@@ -275,6 +282,15 @@ configuration change reaches Wiki.js. It reaches Wiki.js by service name on the 
 through the gateway, and the database through the same host and port Wiki.js
 uses, with the same credentials.
 
+Its healthcheck's start period is five minutes, set in the compose file over
+the image's thirty seconds. A first deploy migrates an empty database, runs
+`/finalize`, restarts Wiki.js and converges before the bootstrap reports
+healthy, and with the image's own start period three failed checks would mark
+it unhealthy within about a minute, which `apply` counts as failed. Five
+minutes is `apply`'s own health wait (`healthWait`,
+`internal/apply/health.go`), so the start period never ends before `apply`
+stops waiting.
+
 It shares the app's process namespace (`pid: "service:app"`, which the compose
 policy allows because it reaches no further than the stack) and runs as the
 app's user, uid 1000, so that it can stop a stale instance (step 3 below).
@@ -284,8 +300,10 @@ finds an instance that has left setup mode.
 
 ### What one run does
 
-1. **Wait** for `GET /healthz` on the app to answer 200, and for the database
-   to accept a connection.
+1. **Wait** for `GET /healthz` on the app to answer 200. The database is
+   reached through the connection that takes the lock in step 2; a database
+   that does not answer fails the run, which is retried with it a minute
+   later.
 2. **Lock.** Take a session level Postgres advisory lock with a fixed key, so
    that of every instance's bootstrap against one database exactly one runs
    steps 3 to 5 at a time.
@@ -300,7 +318,11 @@ finds an instance that has left setup mode.
      another finished setup and will serve the setup page until it restarts.
      Send it `SIGTERM`, which it handles by shutting down
      (`server/index.js:46`); its `restart: unless-stopped` brings it back, now
-     reading a set up database. Wait for it, then go on.
+     reading a set up database. A setup another instance has just finished
+     is given the same budget to leave setup mode first, about two minutes.
+     Stopping the app ends the namespace the bootstrap shares, so this run
+     ends there; the bootstrap's next start finds an instance out of setup
+     mode and goes on.
    * Rows present, instance not in setup mode: nothing to do here.
    * Empty table, instance not in setup mode: refuse and exit non zero. It
      cannot happen unless the database was emptied under a running wiki, and
@@ -377,9 +399,13 @@ Pocket ID not at all.
 
 `/finalize` takes no authentication and no CSRF token
 (`server/setup.js:76`): whoever reaches it first owns the wiki. The blueprint's
-Caddy snippet refuses `/finalize` on the wiki's hostname for every method,
-always, so only the bootstrap, on the stack network, can ever reach it. The
-same snippet sets the request body limit from `upload_max_mb`.
+Caddy snippet refuses `/finalize` on the wiki's hostname in every form (any
+case, with or without a trailing slash), for every method, always. The app
+port on the mesh address is not gated, as no app's is, so a mesh peer reaches
+`/finalize` there whenever an instance is in setup mode: the first deploy's
+setup window, or up to about two minutes on a stale clustered instance before
+its bootstrap stops it. The same snippet sets the request body limit from
+`upload_max_mb`.
 
 ## Settings
 
@@ -442,14 +468,15 @@ README, not as a workflow.
 The `outline` blueprint is deleted from the core catalog, and the toolkit stops
 naming it:
 
-* `internal/create/shapes.go`: the wiki question becomes "A wiki (Wiki.js)?",
-  making the `wiki` app with the `wikijs` blueprint, whose default hostname is
-  therefore `wiki.<domain>`.
+* The `create` wizard's wiki question: the menu lives in the core catalog's
+  `catalog.yaml` (paisans-stack #268), so the catalog release that carries
+  `wikijs` offers "A wiki (Wiki.js)?", making the `wiki` app with the
+  `wikijs` blueprint, whose default hostname is therefore `wiki.<domain>`.
 * `cmd/paisans/help.go`, `cmd/paisans/oidc.go`, `internal/config/config.go`:
   help and error text that lists kinds.
-* `internal/kinds/volumes.go`: Outline's entry replaced by Wiki.js's.
-* `internal/blueprints/core/pin.yaml`: the pin follows the catalog release
-  that carries `wikijs`.
+* `internal/blueprints/testdata/core.release` and the test copy beside it,
+  refreshed by `scripts/fetch-core-testdata.sh` from the catalog release that
+  carries `wikijs`. The toolkit pins no core release: it follows the newest.
 * Tests. The validate fixtures' `docs` app becomes a `wikijs` app, and so does
   every test that used Outline as an ordinary Postgres app with OIDC. Tests of
   S3, media hostnames and Garage move to WriteFreely, the core blueprint that
@@ -468,9 +495,10 @@ A deployment already running Outline is not converted. It is redeployed.
 1. `wikijs-bootstrap`: the repository (its creation is the founder's, being
    a new public repository), the program, its tests, and a release whose image
    is published.
-2. `paisans-blueprints`: `blueprints/wikijs/` pinning both images by digest,
+2. `paisans-blueprints`: `blueprints/wikijs/` naming both images by track,
    and `blueprints/outline/` removed, in one release of the catalog.
-3. `paisans-stack`: the toolkit changes above, pinning that catalog release.
+3. `paisans-stack`: the toolkit changes above, its tests reading that catalog
+   release.
 
 Each through a pull request; `main` and `develop` take nothing else.
 
