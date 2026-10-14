@@ -24,7 +24,7 @@ func manifestOf(t *testing.T, host *fakeHost) map[string]render.ManifestFile {
 	return out
 }
 
-func withoutDocs(c *config.Config) { delete(c.Apps, "docs") }
+func withoutWiki(c *config.Config) { delete(c.Apps, "wiki") }
 
 func applyWhole(t *testing.T, host *fakeHost, rendered *render.Plan, opts ...apply.Option) *apply.Plan {
 	t.Helper()
@@ -48,29 +48,29 @@ func TestAWholeApplyKeepsLeftoverFilesRecorded(t *testing.T) {
 
 	host := newHost()
 	applyWhole(t, host, plan(t))
-	const docsEnv = "srv/paisans/f2a9/docs/.env"
-	if _, ok := manifestOf(t, host)[docsEnv]; !ok {
-		t.Fatalf("the fixture's docs app wrote no %s", docsEnv)
+	const wikiEnv = "srv/paisans/f2a9/wiki/.env"
+	if _, ok := manifestOf(t, host)[wikiEnv]; !ok {
+		t.Fatalf("the fixture's wiki app wrote no %s", wikiEnv)
 	}
 
-	p := applyWhole(t, host, planWith(t, withoutDocs))
+	p := applyWhole(t, host, planWith(t, withoutWiki))
 	var listed bool
 	for _, l := range p.Leftovers {
-		if l.Path == docsEnv {
+		if l.Path == wikiEnv {
 			listed = true
 		}
-		if !strings.HasPrefix(l.Path, "srv/paisans/f2a9/docs/") {
-			t.Errorf("%s is listed left over, and the docs app is the only one removed", l.Path)
+		if !strings.HasPrefix(l.Path, "srv/paisans/f2a9/wiki/") {
+			t.Errorf("%s is listed left over, and the wiki app is the only one removed", l.Path)
 		}
 	}
 	if !listed {
-		t.Errorf("the plan lists no left over %s: %+v", docsEnv, p.Leftovers)
+		t.Errorf("the plan lists no left over %s: %+v", wikiEnv, p.Leftovers)
 	}
-	entry := manifestOf(t, host)[docsEnv]
+	entry := manifestOf(t, host)[wikiEnv]
 	if !entry.Leftover || entry.LeftoverSince != "2026-10-01T12:00:00Z" || entry.SHA256 == "" {
-		t.Errorf("the docs app's entry after a whole apply = %+v, want it kept and marked left over", entry)
+		t.Errorf("the wiki app's entry after a whole apply = %+v, want it kept and marked left over", entry)
 	}
-	if _, ok := host.files["/"+docsEnv]; !ok {
+	if _, ok := host.files["/"+wikiEnv]; !ok {
 		t.Error("apply deleted a left over file")
 	}
 	if manifestOf(t, host)["srv/paisans/f2a9/talk/.env"].Leftover {
@@ -78,8 +78,8 @@ func TestAWholeApplyKeepsLeftoverFilesRecorded(t *testing.T) {
 	}
 
 	defer apply.SetNow(func() time.Time { return first.Add(48 * time.Hour) })()
-	applyWhole(t, host, planWith(t, withoutDocs))
-	if got := manifestOf(t, host)[docsEnv].LeftoverSince; got != "2026-10-01T12:00:00Z" {
+	applyWhole(t, host, planWith(t, withoutWiki))
+	if got := manifestOf(t, host)[wikiEnv].LeftoverSince; got != "2026-10-01T12:00:00Z" {
 		t.Errorf("a second whole apply moved the time it was first left over to %s", got)
 	}
 
@@ -107,7 +107,7 @@ func TestAPartialApplyMarksNothingLeftOver(t *testing.T) {
 	applyWhole(t, host, plan(t))
 	before := manifestOf(t, host)
 
-	p := applyWhole(t, host, planWith(t, withoutDocs), apply.Only("talk"), apply.Recreate("talk"))
+	p := applyWhole(t, host, planWith(t, withoutWiki), apply.Only("talk"), apply.Recreate("talk"))
 	if len(p.Leftovers) != 0 {
 		t.Errorf("an --only plan lists left overs: %v", p.Leftovers)
 	}
@@ -118,7 +118,7 @@ func TestAPartialApplyMarksNothingLeftOver(t *testing.T) {
 		}
 	}
 
-	scoped, err := apply.Build("home-a", planWith(t, withoutDocs), acmeModule(t), host, apply.Scope("/srv/paisans/f2a9/talk/.env"))
+	scoped, err := apply.Build("home-a", planWith(t, withoutWiki), acmeModule(t), host, apply.Scope("/srv/paisans/f2a9/talk/.env"))
 	if err != nil {
 		t.Fatal(err)
 	}

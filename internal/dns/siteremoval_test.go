@@ -28,9 +28,9 @@ func zoneWithLeaving() *fakeCloudflare {
 	fake.records["zone-1"] = []cfRecord{
 		{ID: "rec-endpoint", Type: "A", Name: "home-b.example.org", Content: "203.0.113.7", Comment: recordComment},
 		{ID: "rec-endpoint6", Type: "AAAA", Name: "home-b.example.org", Content: "2001:db8::7", Comment: recordComment},
-		{ID: "rec-stale", Type: "A", Name: "blog.example.org", Content: "203.0.113.7", Comment: recordComment},
+		{ID: "rec-stale", Type: "A", Name: "archive.example.org", Content: "203.0.113.7", Comment: recordComment},
 		{ID: "rec-talk", Type: "A", Name: "talk.example.org", Content: "203.0.113.10", Comment: recordComment},
-		{ID: "rec-wanted", Type: "A", Name: "docs.example.org", Content: "203.0.113.7", Comment: recordComment},
+		{ID: "rec-wanted", Type: "A", Name: "blog.example.org", Content: "203.0.113.7", Comment: recordComment},
 		{ID: "rec-theirs", Type: "A", Name: "old.example.org", Content: "203.0.113.7", Comment: "paisans-0c1d: created by paisans dns init"},
 		{ID: "rec-hand", Type: "A", Name: "hand.example.org", Content: "203.0.113.7"},
 		{ID: "rec-txt", Type: "TXT", Name: "home-b.example.org", Content: "v=placeholder", Comment: recordComment},
@@ -70,7 +70,7 @@ func TestSiteRemovalDeletesOnlyTheSitesRecords(t *testing.T) {
 		"rec-talk": "203.0.113.10 is not home-b's public_address or public_address6",
 		// The site's address, at a name the configuration without it still
 		// wants.
-		"rec-wanted": "the configuration without home-b still wants a record of type A at this name (apps.docs.hostname)",
+		"rec-wanted": "the configuration without home-b still wants a record of type A at this name (apps.blog.hostname)",
 		"rec-txt":    "it is a TXT record",
 	} {
 		e, ok := entry(p, id)
@@ -177,7 +177,7 @@ func TestSiteRemovalStoppedPartwaySaysWhatWasDeleted(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error")
 	}
-	for _, want := range []string{"deleted: A blog.example.org (record rec-stale)", "not deleted: A home-b.example.org (record rec-endpoint), AAAA home-b.example.org (record rec-endpoint6)"} {
+	for _, want := range []string{"deleted: A archive.example.org (record rec-stale)", "not deleted: A home-b.example.org (record rec-endpoint), AAAA home-b.example.org (record rec-endpoint6)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should say %q: %v", want, err)
 		}

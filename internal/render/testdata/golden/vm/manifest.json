@@ -43,7 +43,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "9c8a0b0985cdeeed76be4963018e3dbec7f445e02189e3c9fea6a7a3e875ebb9",
+      "sha256": "258710c18897ad9e36f29788c601f108abc940ba33aa3feed939ddda364f58d8",
       "mode": "0644"
     },
     {
@@ -77,16 +77,6 @@
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/docs-media.caddy",
-      "sha256": "8e7c36bc41157d707340acd0c984a277b36925168eca49a83ee0025a5a3fee90",
-      "mode": "0644"
-    },
-    {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/docs.caddy",
-      "sha256": "4c49411067ecfb863e2b45b1182fb75576a26ff305e4437431c7260ebae0dc1c",
-      "mode": "0644"
-    },
-    {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy",
       "sha256": "836f6de3dfa8bf32660a9b53e579dd09e77660b2a892da796e79dfc2842b34a8",
       "mode": "0644"
@@ -114,6 +104,11 @@
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/web.caddy",
       "sha256": "4be04cb8ce4acf3e0945ac16eeed26dc2791d19eb9f220bb10c29667a75a56f6",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/wiki.caddy",
+      "sha256": "2d6ca0fc88459922f5b0e5ffc30d97b3fe3012afc7f971c46854338bc8a910d3",
       "mode": "0644"
     },
     {

@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/health/.env",
-      "sha256": "8f166c396cdfcd0f84b6aa5d8388f52a806f1a147acceb1c7113a4aeb2ea1c69",
+      "sha256": "447fa38aeb83dea5df1a69d6956fa849abab925436d7c66da17a48ba7420bc0b",
       "mode": "0600"
     },
     {
@@ -18,7 +18,7 @@
     },
     {
       "path": "srv/paisans/f2a9/health/monitors.json",
-      "sha256": "753dd93fdd1c422859ef9ca03633fd548b07f56bdb525d3888f79d53f4008a84",
+      "sha256": "c6139861729a39e277841abb33b8a0e1c1db6f0bd0d8f666c16c4dfc01a3c5fe",
       "mode": "0600"
     },
     {

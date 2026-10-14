@@ -2,7 +2,6 @@ package storageadd
 
 import (
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/paisans-software/paisans-stack/internal/config"
@@ -27,12 +26,11 @@ func TestALocalStorageAppHasNoBucketToCountOrProbe(t *testing.T) {
 	}
 	p := &Plan{cfg: cfg, secrets: secrets}
 
-	if got := p.buckets(); !slices.Equal(got, []string{"docs-uploads"}) {
-		t.Errorf("buckets = %v, want only docs-uploads", got)
+	if got := p.buckets(); len(got) != 0 {
+		t.Errorf("buckets = %v, want none: talk and blog keep their files locally, and the wiki stores no objects", got)
 	}
 	// talk and blog are the two apps whose objects are public; with both
-	// local there is nothing public to probe through, and Outline's private
-	// bucket is never used for it.
+	// local there is nothing public to probe through.
 	if pr := p.publicProbe(); pr != nil {
 		t.Errorf("probed %s's bucket %s, which keeps its files locally or is private", pr.app, pr.bucket)
 	}

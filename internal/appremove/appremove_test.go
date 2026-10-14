@@ -12,46 +12,46 @@ import (
 )
 
 const (
-	docsEnv     = "/srv/paisans/f2a9/docs/.env"
-	docsCompose = "/srv/paisans/f2a9/docs/compose.yaml"
-	docsUpload  = "/srv/paisans/f2a9/docs/data/upload-1"
+	blogEnv     = "/srv/paisans/f2a9/blog/.env"
+	blogCompose = "/srv/paisans/f2a9/blog/compose.yaml"
+	blogUpload  = "/srv/paisans/f2a9/blog/data/upload-1"
 	talkEnv     = "/srv/paisans/f2a9/talk/.env"
-	docsRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/docs.caddy"
-	docsMedia   = "/srv/paisans/f2a9/infra/caddy/snippets/docs-media.caddy"
+	blogRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/blog.caddy"
+	blogMedia   = "/srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy"
 	talkRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"
 )
 
-// world is docs taken out of the fixture's configuration and applied
+// world is blog taken out of the fixture's configuration and applied
 // everywhere since: its stack on home-a with an upload it wrote, its routes
 // on the gateway, vm, and talk, still declared, beside both.
 func world(t *testing.T) (*config.Config, map[string]*host) {
 	t.Helper()
 	cfg := fixture(t)
-	delete(cfg.Apps, "docs")
+	delete(cfg.Apps, "blog")
 	a, vm := newHost("home-a"), newHost("vm")
-	a.files[docsEnv] = "SECRET_KEY=x\n"
-	a.files[docsCompose] = "services: {}\n"
-	a.files[docsUpload] = "an upload"
+	a.files[blogEnv] = "SECRET_KEY=x\n"
+	a.files[blogCompose] = "services: {}\n"
+	a.files[blogUpload] = "an upload"
 	a.files[talkEnv] = "talk\n"
 	a.containers = []hostcheck.Container{
-		{Name: "paisans-f2a9-docs-app-1", Deployment: ours, Project: "paisans-f2a9-docs", PID: 10},
-		{Name: "paisans-f2a9-docs-redis-1", Deployment: ours, Project: "paisans-f2a9-docs"},
+		{Name: "paisans-f2a9-blog-app-1", Deployment: ours, Project: "paisans-f2a9-blog", PID: 10},
+		{Name: "paisans-f2a9-blog-redis-1", Deployment: ours, Project: "paisans-f2a9-blog"},
 		{Name: "paisans-f2a9-talk-app-1", Deployment: ours, Project: "paisans-f2a9-talk", PID: 11},
 		// Somebody else's container that happens to carry the project's
-		// name, and another deployment's: neither is docs'.
-		{Name: "docs-by-hand", Project: "paisans-f2a9-docs", PID: 12},
-		{Name: "paisans-0c1d-docs-app-1", Deployment: theirs, Project: "paisans-f2a9-docs", PID: 13},
+		// name, and another deployment's: neither is blog'.
+		{Name: "blog-by-hand", Project: "paisans-f2a9-blog", PID: 12},
+		{Name: "paisans-0c1d-blog-app-1", Deployment: theirs, Project: "paisans-f2a9-blog", PID: 13},
 	}
 	a.networks = []hostcheck.Network{
-		{Name: "paisans-f2a9-docs_default", Deployment: ours, Project: "paisans-f2a9-docs"},
-		{Name: "docs_default", Project: "paisans-f2a9-docs"},
+		{Name: "paisans-f2a9-blog_default", Deployment: ours, Project: "paisans-f2a9-blog"},
+		{Name: "blog_default", Project: "paisans-f2a9-blog"},
 	}
-	a.volumes = []hostcheck.Volume{{Name: "paisans-f2a9-docs_cache", Deployment: ours, Project: "paisans-f2a9-docs"}}
-	a.manifest(t, a.entry(docsEnv, true), a.entry(docsCompose, true), a.entry(talkEnv, false))
-	vm.files[docsRoute] = "docs route\n"
-	vm.files[docsMedia] = "docs media route\n"
+	a.volumes = []hostcheck.Volume{{Name: "paisans-f2a9-blog_cache", Deployment: ours, Project: "paisans-f2a9-blog"}}
+	a.manifest(t, a.entry(blogEnv, true), a.entry(blogCompose, true), a.entry(talkEnv, false))
+	vm.files[blogRoute] = "blog route\n"
+	vm.files[blogMedia] = "blog media route\n"
 	vm.files[talkRoute] = "talk route\n"
-	vm.manifest(t, vm.entry(docsRoute, true), vm.entry(docsMedia, true), vm.entry(talkRoute, false))
+	vm.manifest(t, vm.entry(blogRoute, true), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
 	return cfg, map[string]*host{"home-a": a, "home-b": newHost("home-b"), "vm": vm, "watch": newHost("watch")}
 }
 
@@ -79,39 +79,39 @@ func TestRefusedBeforeAnyHost(t *testing.T) {
 		"infra":  "infrastructure stack",
 		"../etc": "not an app's name",
 		"":       "not an app's name",
-		"Docs":   "not an app's name",
+		"Blog":   "not an app's name",
 	} {
 		err := Refusal(cfg, app)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Refusal(%q) = %v, want %q", app, err, want)
 		}
 	}
-	delete(cfg.Apps, "docs")
-	if err := Refusal(cfg, "docs"); err != nil {
+	delete(cfg.Apps, "blog")
+	if err := Refusal(cfg, "blog"); err != nil {
 		t.Errorf("an app out of the configuration is refused: %v", err)
 	}
 }
 
 // A route on the gateway still unmarked means no whole apply has run there
-// since docs left, so the gateway may still route to it.
+// since blog left, so the gateway may still route to it.
 func TestAnUnmarkedEntryRefuses(t *testing.T) {
 	cfg, hosts := world(t)
 	vm := hosts["vm"]
-	vm.manifest(t, vm.entry(docsRoute, false), vm.entry(docsMedia, true), vm.entry(talkRoute, false))
-	_, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
-	if err == nil || !strings.Contains(err.Error(), "vm: "+docsRoute) || !strings.Contains(err.Error(), "paisans apply") {
+	vm.manifest(t, vm.entry(blogRoute, false), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
+	_, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans apply") {
 		t.Fatalf("Build = %v", err)
 	}
 	if strings.Contains(err.Error(), "talk") {
-		t.Errorf("a declared app's file was read as docs': %v", err)
+		t.Errorf("a declared app's file was read as blog': %v", err)
 	}
 }
 
 func TestNothingFoundAnywhere(t *testing.T) {
 	cfg := fixture(t)
-	delete(cfg.Apps, "docs")
+	delete(cfg.Apps, "blog")
 	hosts := map[string]*host{"home-a": newHost("home-a"), "home-b": newHost("home-b"), "vm": newHost("vm"), "watch": newHost("watch")}
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestNothingFoundAnywhere(t *testing.T) {
 
 func TestThePlanTakesOnlyWhatIsProvablyTheApps(t *testing.T) {
 	cfg, hosts := world(t)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,22 +131,22 @@ func TestThePlanTakesOnlyWhatIsProvablyTheApps(t *testing.T) {
 	printed := rec.Lines()
 	for _, want := range []string{
 		"pending: remove containers and networks",
-		"detail: stop paisans-f2a9-docs: 2 container(s), 1 running: paisans-f2a9-docs-app-1, paisans-f2a9-docs-redis-1",
-		"detail: remove network paisans-f2a9-docs_default",
+		"detail: stop paisans-f2a9-blog: 2 container(s), 1 running: paisans-f2a9-blog-app-1, paisans-f2a9-blog-redis-1",
+		"detail: remove network paisans-f2a9-blog_default",
 		"pending: remove files",
-		"detail: " + docsEnv,
-		"detail: " + docsRoute,
-		"detail: " + docsMedia,
-		"done: keep /srv/paisans/f2a9/docs",
-		"detail: /srv/paisans/f2a9/docs: data, written by the app",
+		"detail: " + blogEnv,
+		"detail: " + blogRoute,
+		"detail: " + blogMedia,
+		"done: keep /srv/paisans/f2a9/blog",
+		"detail: /srv/paisans/f2a9/blog: data, written by the app",
 		"done: keep volumes",
-		"detail: volume paisans-f2a9-docs_cache. --delete-data deletes it",
+		"detail: volume paisans-f2a9-blog_cache. --delete-data deletes it",
 	} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("plan lacks %q:\n%s", want, printed)
 		}
 	}
-	for _, never := range []string{"docs-by-hand", "paisans-0c1d", "network docs_default", "talk"} {
+	for _, never := range []string{"blog-by-hand", "paisans-0c1d", "network blog_default", "talk"} {
 		if strings.Contains(printed, never) {
 			t.Errorf("plan names %q:\n%s", never, printed)
 		}
@@ -157,7 +157,7 @@ func TestThePlanTakesOnlyWhatIsProvablyTheApps(t *testing.T) {
 // nothing and finds only the data it kept.
 func TestRemovalResumesAndRepeats(t *testing.T) {
 	cfg, hosts := world(t)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,15 +165,15 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, vm := hosts["home-a"], hosts["vm"]
-	for _, gone := range []string{docsEnv, docsCompose} {
+	for _, gone := range []string{blogEnv, blogCompose} {
 		if _, ok := a.files[gone]; ok {
 			t.Errorf("%s is still there", gone)
 		}
 	}
-	if _, ok := a.files[docsUpload]; !ok {
+	if _, ok := a.files[blogUpload]; !ok {
 		t.Error("the app's upload was deleted without --delete-data")
 	}
-	if _, ok := vm.files[docsRoute]; ok {
+	if _, ok := vm.files[blogRoute]; ok {
 		t.Error("the route is still there")
 	}
 	if got := a.manifestFiles(t); len(got) != 1 || got[0].Path != strings.TrimPrefix(talkEnv, "/") {
@@ -186,7 +186,7 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 	for _, c := range a.containers {
 		names[c.Name] = true
 	}
-	if names["paisans-f2a9-docs-app-1"] || !names["docs-by-hand"] || !names["paisans-0c1d-docs-app-1"] || !names["paisans-f2a9-talk-app-1"] {
+	if names["paisans-f2a9-blog-app-1"] || !names["blog-by-hand"] || !names["paisans-0c1d-blog-app-1"] || !names["paisans-f2a9-talk-app-1"] {
 		t.Errorf("containers left: %v", names)
 	}
 	if len(a.volumes) != 1 {
@@ -195,7 +195,7 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 
 	// Stopped after the containers and before the files: the same command
 	// picks up there.
-	again, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	again, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +220,8 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 // recorded. The next run drops those entries as gone.
 func TestAnEntryWhoseFileIsGoneIsDropped(t *testing.T) {
 	cfg, hosts := world(t)
-	delete(hosts["vm"].files, docsRoute)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	delete(hosts["vm"].files, blogRoute)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,36 +236,36 @@ func TestAnEntryWhoseFileIsGoneIsDropped(t *testing.T) {
 func TestAFileEditedOnTheHostIsKept(t *testing.T) {
 	cfg, hosts := world(t)
 	a := hosts["home-a"]
-	a.files[docsEnv] = "SECRET_KEY=edited\n"
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, true))
+	a.files[blogEnv] = "SECRET_KEY=edited\n"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec := &ui.Recorder{Verbose_: true}
 	p.Show(rec)
-	if !rec.Has("warn", docsEnv+" and its manifest entry: edited on the host") ||
-		!rec.Has("warn", "/srv/paisans/f2a9/docs and everything in it, because a file in it was edited") {
+	if !rec.Has("warn", blogEnv+" and its manifest entry: edited on the host") ||
+		!rec.Has("warn", "/srv/paisans/f2a9/blog and everything in it, because a file in it was edited") {
 		t.Errorf("plan:\n%s", rec.Lines())
 	}
 	ex := executor(hosts)
 	if err := ex.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	if a.files[docsEnv] != "SECRET_KEY=edited\n" || a.files[docsUpload] == "" {
+	if a.files[blogEnv] != "SECRET_KEY=edited\n" || a.files[blogUpload] == "" {
 		t.Error("the edited file, or the directory holding it, was deleted")
 	}
 	entries := a.manifestFiles(t)
-	if len(entries) != 2 || entries[0].Path != strings.TrimPrefix(docsEnv, "/") {
+	if len(entries) != 2 || entries[0].Path != strings.TrimPrefix(blogEnv, "/") {
 		t.Errorf("manifest = %+v, want the edited file's entry kept", entries)
 	}
-	if !strings.Contains(strings.Join(ex.Kept, "\n"), docsEnv+", edited on the host") {
+	if !strings.Contains(strings.Join(ex.Kept, "\n"), blogEnv+", edited on the host") {
 		t.Errorf("kept = %v", ex.Kept)
 	}
 }
 
 func TestDeleteDataTakesTheDirectoryAndVolumes(t *testing.T) {
 	cfg, hosts := world(t)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, true))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,14 +273,14 @@ func TestDeleteDataTakesTheDirectoryAndVolumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := hosts["home-a"]
-	if _, ok := a.files[docsUpload]; ok {
+	if _, ok := a.files[blogUpload]; ok {
 		t.Error("the upload survived --delete-data")
 	}
 	if len(a.volumes) != 0 {
 		t.Errorf("volumes left: %+v", a.volumes)
 	}
 	if _, ok := a.files[talkEnv]; !ok {
-		t.Error("talk's file went with docs")
+		t.Error("talk's file went with blog")
 	}
 	if !strings.Contains(strings.Join(a.sent, "\n"), "docker rm -v") {
 		t.Error("anonymous volumes were not removed with the containers")
@@ -288,22 +288,22 @@ func TestDeleteDataTakesTheDirectoryAndVolumes(t *testing.T) {
 }
 
 func TestTheClientIsDeletedOnlyByItsRecordedID(t *testing.T) {
-	docs := &pocketid.OIDCClient{ID: "c-1", Name: "docs"}
-	other := &pocketid.OIDCClient{ID: "c-2", Name: "docs"}
+	blog := &pocketid.OIDCClient{ID: "c-1", Name: "blog"}
+	other := &pocketid.OIDCClient{ID: "c-2", Name: "blog"}
 	renamed := &pocketid.OIDCClient{ID: "c-1", Name: "wiki"}
 	for name, tc := range map[string]struct {
 		st     ClientState
 		delete string
 		kept   int
 	}{
-		"recorded and named":   {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByID: docs, ByName: docs}, "c-1", 0},
-		"named, not recorded":  {ClientState{Name: "docs", Provider: "auth", ByName: other}, "", 1},
-		"recorded, other name": {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByID: renamed}, "", 1},
-		"recorded, gone":       {ClientState{Name: "docs", Provider: "auth", RecordedID: "c-1", ByName: other}, "", 1},
-		"no pocket-id":         {ClientState{Name: "docs", RecordedID: "c-1"}, "", 0},
+		"recorded and named":   {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByID: blog, ByName: blog}, "c-1", 0},
+		"named, not recorded":  {ClientState{Name: "blog", Provider: "auth", ByName: other}, "", 1},
+		"recorded, other name": {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByID: renamed}, "", 1},
+		"recorded, gone":       {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByName: other}, "", 1},
+		"no pocket-id":         {ClientState{Name: "blog", RecordedID: "c-1"}, "", 0},
 		"recorded, own name":   {ClientState{Name: "wiki", Provider: "auth", RecordedID: "c-1", ByID: renamed, ByName: renamed}, "c-1", 0},
 	} {
-		cp := planClient("docs", tc.st)
+		cp := planClient("blog", tc.st)
 		got := ""
 		if cp.Delete != nil {
 			got = cp.Delete.ID
@@ -312,7 +312,7 @@ func TestTheClientIsDeletedOnlyByItsRecordedID(t *testing.T) {
 			t.Errorf("%s: delete %q kept %v", name, got, cp.Kept)
 		}
 		for _, k := range cp.Kept {
-			if !strings.Contains(k, "delete it in Pocket ID if it served only docs") {
+			if !strings.Contains(k, "delete it in Pocket ID if it served only blog") {
 				t.Errorf("%s: kept without saying how to delete it: %s", name, k)
 			}
 		}
@@ -333,36 +333,36 @@ func (f *fakeClients) DeleteOIDCClient(id string) error {
 func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
 	cfg, hosts := world(t)
 	a := hosts["home-a"]
-	a.db = &database{leader: "home-a", dbs: map[string]string{"docs": "docs", "talk": "talk"}, roles: map[string]bool{"docs": true, "talk": true}}
+	a.db = &database{leader: "home-a", dbs: map[string]string{"blog": "blog", "talk": "talk"}, roles: map[string]bool{"blog": true, "talk": true}}
 	a.garage = &garageNode{
 		keys: map[string]bool{"GK000000000000000000000001": true, "GK000000000000000000000002": true},
 		buckets: map[string]*bucket{
-			"docs-uploads": {id: "aaaaaaaaaaaaaaaa1111", keys: []string{"GK000000000000000000000001"}, objects: []string{"a", "b/c", "d", "e"}},
+			"blog-uploads": {id: "aaaaaaaaaaaaaaaa1111", keys: []string{"GK000000000000000000000001"}, objects: []string{"a", "b/c", "d", "e"}},
 			"shared":       {id: "bbbbbbbbbbbbbbbb2222", keys: []string{"GK000000000000000000000001", "GK000000000000000000000002"}},
 		},
 	}
 	secrets := &config.Secrets{Apps: map[string]map[string]any{
-		"docs": {"s3_access_key_id": "GK000000000000000000000001", "s3_secret_access_key": "SECRET-docs"},
+		"blog": {"s3_access_key_id": "GK000000000000000000000001", "s3_secret_access_key": "SECRET-blog"},
 		"talk": {"s3_access_key_id": "GK000000000000000000000002", "s3_secret_access_key": "SECRET-talk"},
 	}}
 	hm := map[string]Host{}
 	for k, v := range hosts {
 		hm[k] = v
 	}
-	in := probe(t, cfg, "docs", hosts, true)
+	in := probe(t, cfg, "blog", hosts, true)
 	var err error
-	if in.Database, err = ProbeDatabase(cfg, "docs", hm); err != nil {
+	if in.Database, err = ProbeDatabase(cfg, "blog", hm); err != nil {
 		t.Fatal(err)
 	}
-	if in.Storage, err = ProbeStorage(cfg, secrets, "docs", a); err != nil {
+	if in.Storage, err = ProbeStorage(cfg, secrets, "blog", a); err != nil {
 		t.Fatal(err)
 	}
-	in.Client = ClientState{Provider: "auth", Site: "home-a", Name: "docs", RecordedID: "c-1", ByID: &pocketid.OIDCClient{ID: "c-1", Name: "docs"}}
-	p, err := Build(cfg, "docs", in)
+	in.Client = ClientState{Provider: "auth", Site: "home-a", Name: "blog", RecordedID: "c-1", ByID: &pocketid.OIDCClient{ID: "c-1", Name: "blog"}}
+	p, err := Build(cfg, "blog", in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Database.DropDatabase || !p.Database.DropRole || len(p.Storage.Buckets) != 1 || p.Storage.Buckets[0].Name != "docs-uploads" {
+	if !p.Database.DropDatabase || !p.Database.DropRole || len(p.Storage.Buckets) != 1 || p.Storage.Buckets[0].Name != "blog-uploads" {
 		t.Fatalf("plan: db %+v storage %+v", p.Database, p.Storage)
 	}
 	if !strings.Contains(strings.Join(p.Storage.Kept, "\n"), "The bucket is shared, and the keys are GK000000000000000000000002") {
@@ -374,10 +374,10 @@ func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
 	if err := ex.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := a.db.dbs["docs"]; ok || a.db.roles["docs"] || a.db.dbs["talk"] == "" {
+	if _, ok := a.db.dbs["blog"]; ok || a.db.roles["blog"] || a.db.dbs["talk"] == "" {
 		t.Errorf("databases %v roles %v", a.db.dbs, a.db.roles)
 	}
-	if _, ok := a.garage.buckets["docs-uploads"]; ok || a.garage.keys["GK000000000000000000000001"] || a.garage.buckets["shared"] == nil || !a.garage.keys["GK000000000000000000000002"] {
+	if _, ok := a.garage.buckets["blog-uploads"]; ok || a.garage.keys["GK000000000000000000000001"] || a.garage.buckets["shared"] == nil || !a.garage.keys["GK000000000000000000000002"] {
 		t.Errorf("garage: buckets %v keys %v", a.garage.buckets, a.garage.keys)
 	}
 	if len(clients.deleted) != 1 || clients.deleted[0] != "c-1" {
@@ -390,10 +390,10 @@ func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
 	}
 
 	// The same again: everything is gone, so nothing is planned.
-	in = probe(t, cfg, "docs", hosts, true)
-	in.Database, _ = ProbeDatabase(cfg, "docs", hm)
-	in.Storage, _ = ProbeStorage(cfg, secrets, "docs", a)
-	again, err := Build(cfg, "docs", in)
+	in = probe(t, cfg, "blog", hosts, true)
+	in.Database, _ = ProbeDatabase(cfg, "blog", hm)
+	in.Storage, _ = ProbeStorage(cfg, secrets, "blog", a)
+	again, err := Build(cfg, "blog", in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,20 +406,20 @@ func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
 // app also uses, is not provably the removed app's.
 func TestADatabaseIsDroppedOnlyWithItsOwnRole(t *testing.T) {
 	cfg := fixture(t)
-	delete(cfg.Apps, "docs")
-	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "docs", Database: true, Owner: "postgres", Role: true}); dp.DropDatabase || dp.DropRole || len(dp.Kept) != 2 {
+	delete(cfg.Apps, "blog")
+	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "blog", Database: true, Owner: "postgres", Role: true}); dp.DropDatabase || dp.DropRole || len(dp.Kept) != 2 {
 		t.Errorf("foreign owner: %+v", dp)
 	}
 	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "talk", Database: true, Owner: "talk", Role: true}); dp.DropDatabase || len(dp.Kept) != 1 {
 		t.Errorf("a declared app's database: %+v", dp)
 	}
-	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "docs", Role: true}); !dp.DropRole || dp.DropDatabase {
+	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "blog", Role: true}); !dp.DropRole || dp.DropDatabase {
 		t.Errorf("a role left alone by a stopped run: %+v", dp)
 	}
 }
 
 func TestKeyInfoIsReadWithoutItsSecret(t *testing.T) {
-	out := "Key name: docs\nKey ID: GK1\nSecret key: abc\nCan create buckets: false\n\nKey-specific bucket aliases:\n\nAuthorized buckets:\n  RWO  docs-uploads    aaaaaaaaaaaaaaaa\n  R                    bbbbbbbbbbbbbbbb\n"
+	out := "Key name: blog\nKey ID: GK1\nSecret key: abc\nCan create buckets: false\n\nKey-specific bucket aliases:\n\nAuthorized buckets:\n  RWO  blog-uploads    aaaaaaaaaaaaaaaa\n  R                    bbbbbbbbbbbbbbbb\n"
 	h := &scripted{out: out}
 	kb, err := garage.ReadKeyBuckets(h, fixture(t).Deployment(), "GK1")
 	if err != nil || len(kb.Buckets) != 2 || kb.Buckets[1] != "bbbbbbbbbbbbbbbb" {
@@ -454,7 +454,7 @@ func (*exitError) Error() string { return "exit status 1" }
 // and a failure marks the step that failed.
 func TestTheExecutorReportsEachStep(t *testing.T) {
 	cfg, hosts := world(t)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,16 +484,16 @@ func TestTheExecutorReportsEachStep(t *testing.T) {
 // --verbose, so every such sentence stays within 100 characters.
 func TestTheLeftForYouHintsStayShort(t *testing.T) {
 	cfg, hosts := world(t)
-	hosts["home-a"].files[docsEnv] = "SECRET_KEY=edited\n"
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, true))
+	hosts["home-a"].files[blogEnv] = "SECRET_KEY=edited\n"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	keep, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	keep, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secrets := &config.Secrets{Apps: map[string]map[string]any{"docs": {
+	secrets := &config.Secrets{Apps: map[string]map[string]any{"blog": {
 		"s3_access_key_id": "GKx", "s3_secret_access_key": "y", "previous_s3_access_key_id": "GKz", "previous_s3_secret_access_key": "w", "secret_key": "k",
 	}}}
 	ex := executor(hosts)

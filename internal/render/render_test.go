@@ -235,13 +235,13 @@ func TestDeclaredImagesWinAndDefaultsFillIn(t *testing.T) {
 		t.Errorf("the declared image did not reach the compose file:\n%s", talk)
 	}
 
-	docs := files["home-a/srv/paisans/f2a9/docs/compose.yaml"]
-	fallback, ok := kinds.DefaultImage(config.Kind("outline"), "app")
+	wiki := files["home-a/srv/paisans/f2a9/wiki/compose.yaml"]
+	fallback, ok := kinds.DefaultImage(config.Kind("wikijs"), "app")
 	if !ok {
-		t.Fatal("outline ships no default image")
+		t.Fatal("wikijs ships no default image")
 	}
-	if !strings.Contains(docs, "image: "+fallback) {
-		t.Errorf("an app that declared no image did not take its kind default %q:\n%s", fallback, docs)
+	if !strings.Contains(wiki, "image: "+fallback) {
+		t.Errorf("an app that declared no image did not take its kind default %q:\n%s", fallback, wiki)
 	}
 
 	// A pinned app may choose its own database image; a clustered one has no
@@ -440,7 +440,7 @@ func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 	if !ok {
 		t.Fatal("the gateway rendered no Caddyfile")
 	}
-	for _, app := range []string{"talk", "docs", "auth", "blog", "chat"} {
+	for _, app := range []string{"talk", "wiki", "auth", "blog", "chat"} {
 		snippet := "vm/srv/paisans/f2a9/infra/caddy/snippets/" + app + ".caddy"
 		if _, ok := files[snippet]; !ok {
 			t.Errorf("%s was not rendered onto the gateway", snippet)
@@ -865,7 +865,7 @@ func walk(t *testing.T, root string) map[string]string {
 // filesystem catches it, because embed sees exactly what git checked out.
 func TestEveryKindShipsACommittedTemplateSet(t *testing.T) {
 	for _, kind := range []config.Kind{
-		config.Kind("mbin"), config.Kind("outline"), config.KindPocketID,
+		config.Kind("mbin"), config.Kind("wikijs"), config.KindPocketID,
 		config.Kind("synapse"), config.Kind("writefreely"), config.KindInvite,
 	} {
 		files, err := render.TemplateSet(kind)
@@ -1377,10 +1377,8 @@ func hostBlock(t *testing.T, caddyfile, hostname string) string {
 // strings for a reason, though what crosses the gateway differs by app. Mbin
 // and the blog write to their endpoint themselves, server side, over the mesh,
 // so their uploads never cross the gateway; only the URL they publish does.
-// Outline's server never writes bytes to S3 at all: it issues a presigned POST
-// the browser submits directly against its media hostname, so Outline's
-// uploads cross the gateway too. Either way the published URL must resolve for
-// a browser and for a federating server that will never join this mesh.
+// The published URL must resolve for a browser and for a federating server
+// that will never join this mesh.
 //
 // Each app's media hostname is its own, <label>-media.<domain>, with no bucket
 // in the published URL: the hostname already says whose objects they are.
@@ -1414,18 +1412,6 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 		t.Errorf("Mbin writes to Garage itself, server side, over the mesh, so its endpoint must still be the internal one, want %q in:\n%s", endpointLine, env)
 	}
 
-	outline := files["home-a/srv/paisans/f2a9/docs/.env"]
-	if !strings.Contains(outline, "\nAWS_S3_UPLOAD_BUCKET_URL=https://docs-media.example.org\n") {
-		t.Errorf("Outline signs and publishes attachment URLs on its bucket URL, which must be its own media hostname, got:\n%s", outline)
-	}
-	// Path style is required, not a preference: the media hostname is not
-	// under Garage's S3 root domain, so Garage reads the bucket from the path,
-	// and virtual host style would sign for docs-uploads.docs-media.example.org,
-	// which nothing serves.
-	if !strings.Contains(outline, "\nAWS_S3_FORCE_PATH_STYLE=true\n") {
-		t.Errorf("Outline must address its media hostname path style, got:\n%s", outline)
-	}
-
 	blog := files["home-a/srv/paisans/f2a9/blog/config.ini"]
 	if !strings.Contains(blog, "\nimage_url_base = https://blog-media.example.org\n") {
 		t.Errorf("the fork serves every image from image_url_base, which must be the blog's own media hostname, got:\n%s", blog)
@@ -1434,14 +1420,13 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
 	for app, host := range map[string]string{
 		"talk": "talk-media.example.org",
-		"docs": "docs-media.example.org",
 		"blog": "blog-media.example.org",
 	} {
 		block := hostBlock(t, caddyfile, host)
 		// talk is gated members in the fixture, which is what makes this
 		// assertion able to fail: its media hostname must not inherit it.
 		if strings.Contains(block, "import gate") {
-			t.Errorf("%s must never be gated: a federating server fetching an image is a machine, and Outline's URLs carry their own signature:\n%s", host, block)
+			t.Errorf("%s must never be gated: a federating server fetching an image is a machine:\n%s", host, block)
 		}
 		if !strings.Contains(block, "import /etc/caddy/snippets/"+app+"-media.caddy") {
 			t.Errorf("%s should import %s's own media snippet:\n%s", host, app, block)
@@ -1473,9 +1458,9 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 // the site address, the snippet that serves it and the URL the app publishes.
 func TestADeclaredMediaHostnameReplacesTheDerivedOne(t *testing.T) {
 	cfg := fixture(t)
-	docs := cfg.Apps["docs"]
-	docs.Hostnames = map[string]string{"media": "attachments.example.org"}
-	cfg.Apps["docs"] = docs
+	blog := cfg.Apps["blog"]
+	blog.Hostnames = map[string]string{"media": "attachments.example.org"}
+	cfg.Apps["blog"] = blog
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("the override should be accepted, got %v", refusals)
 	}
@@ -1487,14 +1472,14 @@ func TestADeclaredMediaHostnameReplacesTheDerivedOne(t *testing.T) {
 
 	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
 	block := hostBlock(t, caddyfile, "attachments.example.org")
-	if !strings.Contains(block, "import /etc/caddy/snippets/docs-media.caddy") {
-		t.Errorf("the declared name should import docs's media snippet:\n%s", block)
+	if !strings.Contains(block, "import /etc/caddy/snippets/blog-media.caddy") {
+		t.Errorf("the declared name should import blog's media snippet:\n%s", block)
 	}
-	if strings.Contains(caddyfile, "docs-media.example.org {") {
+	if strings.Contains(caddyfile, "blog-media.example.org {") {
 		t.Errorf("the derived name must not be served beside a declared one:\n%s", caddyfile)
 	}
-	if env := files["home-a/srv/paisans/f2a9/docs/.env"]; !strings.Contains(env, "\nAWS_S3_UPLOAD_BUCKET_URL=https://attachments.example.org\n") {
-		t.Errorf("Outline must sign for the declared name, got:\n%s", env)
+	if ini := files["home-a/srv/paisans/f2a9/blog/config.ini"]; !strings.Contains(ini, "\nimage_url_base = https://attachments.example.org\n") {
+		t.Errorf("the blog must publish its images on the declared name, got:\n%s", ini)
 	}
 }
 
@@ -1533,30 +1518,6 @@ func TestAPublicMediaHostnameGoesToTheWebEndpoint(t *testing.T) {
 				t.Errorf("%s's media snippet should not contain %q: one hostname is one bucket, with no per path routing:\n%s", app, unwanted, snippet)
 			}
 		}
-	}
-}
-
-// Outline's media hostname goes to the S3 API and never to the anonymous web
-// endpoint, with Host forwarded unchanged so that every presigned URL
-// verifies. It carries nosniff but not the sandboxing policy, which would stop
-// a browser running its PDF viewer on the attachments Outline embeds.
-func TestOutlinesMediaHostnameGoesToTheS3APIWithHostUnchanged(t *testing.T) {
-	snippet := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/snippets/docs-media.caddy"]
-	if !strings.Contains(snippet, "reverse_proxy 10.44.0.1:3900 10.44.0.2:3900 {\n") || !strings.Contains(snippet, "lb_policy first") {
-		t.Errorf("Outline's media hostname must reach the S3 API on 3900, on every Garage node in order:\n%s", snippet)
-	}
-	if strings.Contains(snippet, ":3902") {
-		t.Errorf("Outline's media hostname must never reach the anonymous web endpoint:\n%s", snippet)
-	}
-	// Any header_up Host at all is the bug, whatever value it carries.
-	if strings.Contains(snippet, "header_up Host") {
-		t.Errorf("Host must be forwarded unchanged or Outline's presigned URLs stop verifying:\n%s", snippet)
-	}
-	if !strings.Contains(snippet, "X-Content-Type-Options nosniff") {
-		t.Errorf("nosniff costs Outline nothing and should be set:\n%s", snippet)
-	}
-	if strings.Contains(snippet, "Content-Security-Policy") {
-		t.Errorf("a sandboxing policy on Outline's attachments breaks its embedded PDF previews:\n%s", snippet)
 	}
 }
 
@@ -2227,7 +2188,7 @@ func TestMultiSiteAppsShareOneFailoverSetting(t *testing.T) {
 			t.Errorf("the gateway Caddyfile's upstream_failover does not carry %q:\n%s", want, caddyfile)
 		}
 	}
-	for _, app := range []string{"talk", "docs", "auth"} {
+	for _, app := range []string{"talk", "wiki", "auth"} {
 		snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+".caddy"]
 		if !strings.Contains(snippet, "10.44.0.1:") || !strings.Contains(snippet, "10.44.0.2:") {
 			t.Fatalf("%s is not on both apps sites in the fixture, so it proves nothing:\n%s", app, snippet)
@@ -2587,7 +2548,6 @@ func TestEtcdCompactsAndStatesItsQuota(t *testing.T) {
 func TestAMediaURLCannotBeOverriddenThroughConfig(t *testing.T) {
 	for _, tc := range []struct{ app, key string }{
 		{"talk", "KBIN_STORAGE_URL"},
-		{"docs", "AWS_S3_UPLOAD_BUCKET_URL"},
 		{"blog", "storage.image_url_base"},
 	} {
 		cfg := withConfig(t, tc.app, map[string]any{tc.key: "https://elsewhere.example.org"})
@@ -2764,7 +2724,7 @@ func TestRoutesBoundTheWaitOnAnotherMachine(t *testing.T) {
 // host block without auto-login carries none of it.
 func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	cfg := fixture(t)
-	for _, name := range []string{"docs", "blog"} {
+	for _, name := range []string{"wiki", "blog"} {
 		app := cfg.Apps[name]
 		app.Gated = true
 		cfg.Apps[name] = app
@@ -2798,15 +2758,15 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 		at += i + len(want)
 	}
 
-	docs := hostBlock(t, caddyfile, "docs.example.org")
-	for _, want := range []string{"path /api/* /mcp", `header Authorization "Bearer *"`, "/_health", "/auth/oidc.callback", "import gate\n"} {
-		if !strings.Contains(docs, want) {
-			t.Errorf("docs' gated host block lacks %q:\n%s", want, docs)
+	wiki := hostBlock(t, caddyfile, "wiki.example.org")
+	for _, want := range []string{"/healthz", "/login/pocketid", "/login/pocketid/callback", "import gate\n"} {
+		if !strings.Contains(wiki, want) {
+			t.Errorf("wiki's gated host block lacks %q:\n%s", want, wiki)
 		}
 	}
-	for _, refused := range []string{"@activitypub", "@autologin", "/auth/*"} {
-		if strings.Contains(docs, refused) {
-			t.Errorf("outline neither federates nor auto-logs in, yet docs carries %s:\n%s", refused, docs)
+	for _, refused := range []string{"@activitypub", "@autologin", "Bearer"} {
+		if strings.Contains(wiki, refused) {
+			t.Errorf("wikijs neither federates, auto-logs in here, nor takes a token, yet wiki carries %s:\n%s", refused, wiki)
 		}
 	}
 

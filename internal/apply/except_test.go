@@ -60,7 +60,7 @@ func TestExceptHoldsAStackBackAndAppliesTheRest(t *testing.T) {
 // releases it force-recreates it.
 func TestExceptKeepsAHeldStackOwed(t *testing.T) {
 	host := applied(t, "home-a")
-	host.files["/srv/paisans/f2a9/.paisans-pending.json"] = `{"version":1,"actions":[{"stack":"docs","recreate":true},{"stack":"talk","recreate":true}]}`
+	host.files["/srv/paisans/f2a9/.paisans-pending.json"] = `{"version":1,"actions":[{"stack":"wiki","recreate":true},{"stack":"talk","recreate":true}]}`
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Except("talk"))
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestExceptKeepsAHeldStackOwed(t *testing.T) {
 		t.Fatal(err)
 	}
 	record, ok := host.files["/srv/paisans/f2a9/.paisans-pending.json"]
-	if !ok || !strings.Contains(record, `"talk"`) || strings.Contains(record, `"docs"`) {
+	if !ok || !strings.Contains(record, `"talk"`) || strings.Contains(record, `"wiki"`) {
 		t.Fatalf("after holding talk back the record of owed actions is %q, want talk alone", record)
 	}
 	next, err := apply.Build("home-a", plan(t), acmeModule(t), host)
@@ -198,19 +198,19 @@ func TestAHeldAppKeepsItsOwedRestartWhileHeld(t *testing.T) {
 func TestPruneKeepsTheImagesAHeldStackRenders(t *testing.T) {
 	host := supersededHost()
 	rendered := plan(t)
-	outline, _ := kinds.DefaultImage(config.Kind("outline"), "app")
+	wikiImage, _ := kinds.DefaultImage(config.Kind("wikijs"), "app")
 	for i, file := range rendered.Files {
-		if file.Path == "home-a/srv/paisans/f2a9/docs/compose.yaml" {
-			rendered.Files[i].Content = strings.Replace(file.Content, outline, "ghcr.io/example-org/mbin:v1.9.0", 1)
+		if file.Path == "home-a/srv/paisans/f2a9/wiki/compose.yaml" {
+			rendered.Files[i].Content = strings.Replace(file.Content, wikiImage, "ghcr.io/example-org/mbin:v1.9.0", 1)
 		}
 	}
-	p, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.Except("docs"))
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.Except("wiki"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, prune := range p.Prunes {
 		if prune.Ref == "ghcr.io/example-org/mbin:v1.9.0" {
-			t.Error("an image the held docs stack renders is planned for pruning")
+			t.Error("an image the held wiki stack renders is planned for pruning")
 		}
 	}
 }
@@ -251,7 +251,7 @@ func TestRefusalNamesAConflictBeforeAnythingIsWritten(t *testing.T) {
 func TestAHeldStackKeepsTheOperatorsRecreateAndReportsItsOverwrite(t *testing.T) {
 	host := applied(t, "home-a")
 	host.files["/srv/paisans/f2a9/talk/.env"] += "# edited on the host\n"
-	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Overwrite("/srv/paisans/f2a9/talk/.env"), apply.Recreate("talk", "docs"), apply.Except("talk"))
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Overwrite("/srv/paisans/f2a9/talk/.env"), apply.Recreate("talk", "wiki"), apply.Except("talk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestAHeldStackKeepsTheOperatorsRecreateAndReportsItsOverwrite(t *testing.T)
 // database path restarts included.
 func TestOnlyKeepsWhatIsOwedOutsideIt(t *testing.T) {
 	host := applied(t, "home-a")
-	host.files["/srv/paisans/f2a9/.paisans-pending.json"] = `{"version":1,"actions":[{"stack":"docs","recreate":true},{"stack":"talk","database_path":true}]}`
+	host.files["/srv/paisans/f2a9/.paisans-pending.json"] = `{"version":1,"actions":[{"stack":"wiki","recreate":true},{"stack":"talk","database_path":true}]}`
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Only("auth"), apply.Recreate("auth"))
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +286,7 @@ func TestOnlyKeepsWhatIsOwedOutsideIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := host.files["/srv/paisans/f2a9/.paisans-pending.json"]
-	if !strings.Contains(record, `"docs"`) || !strings.Contains(record, `"database_path": true`) {
+	if !strings.Contains(record, `"wiki"`) || !strings.Contains(record, `"database_path": true`) {
 		t.Errorf("an --only run dropped what is owed outside it: %q", record)
 	}
 }

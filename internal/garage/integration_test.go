@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,8 +185,8 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	const site = "home-a"
 	talkKeyID := garageKeyID(t)
 	talkSecret := hexString(t, 64)
-	docsKeyID := garageKeyID(t)
-	docsSecret := hexString(t, 64)
+	blogKeyID := garageKeyID(t)
+	blogSecret := hexString(t, 64)
 
 	cfg := &config.Config{
 		ID: fixtureID,
@@ -199,7 +198,7 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 		},
 		Apps: map[string]config.App{
 			"talk": {Kind: config.Kind("mbin")},
-			"docs": {Kind: config.Kind("outline")},
+			"blog": {Kind: config.Kind("writefreely")},
 		},
 	}
 	secrets := &config.Secrets{
@@ -208,9 +207,9 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 				"s3_access_key_id":     talkKeyID,
 				"s3_secret_access_key": talkSecret,
 			},
-			"docs": {
-				"s3_access_key_id":     docsKeyID,
-				"s3_secret_access_key": docsSecret,
+			"blog": {
+				"s3_access_key_id":     blogKeyID,
+				"s3_secret_access_key": blogSecret,
 			},
 		},
 	}
@@ -240,7 +239,7 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	// The property that matters: the key ID the toolkit generated is the key
 	// ID Garage actually holds, read back from Garage rather than compared
 	// against the toolkit's own record of what it sent.
-	for name, keyID := range map[string]string{"talk": talkKeyID, "docs": docsKeyID} {
+	for name, keyID := range map[string]string{"talk": talkKeyID, "blog": blogKeyID} {
 		out, err := transport.Run(garageCommand + " key info " + keyID)
 		if err != nil {
 			t.Fatalf("reading back %s's key %s from Garage: %v\n%s", name, keyID, err, out)
@@ -254,7 +253,7 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	}
 
 	// Both buckets exist.
-	for _, bucket := range []string{"talk-uploads", "docs-uploads"} {
+	for _, bucket := range []string{"talk-uploads", "blog-uploads"} {
 		out, err := transport.Run(garageCommand + " bucket info " + bucket)
 		if err != nil {
 			t.Fatalf("reading back bucket %s from Garage: %v\n%s", bucket, err, out)
@@ -273,19 +272,19 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(talkBucket, talkKeyID) {
 		t.Errorf("talk's key %s must be allowed on talk-uploads, got:\n%s", talkKeyID, talkBucket)
 	}
-	if strings.Contains(talkBucket, docsKeyID) {
-		t.Errorf("docs's key %s must not be allowed on talk-uploads, got:\n%s", docsKeyID, talkBucket)
+	if strings.Contains(talkBucket, blogKeyID) {
+		t.Errorf("blog's key %s must not be allowed on talk-uploads, got:\n%s", blogKeyID, talkBucket)
 	}
 
-	docsBucket, err := transport.Run(garageCommand + " bucket info docs-uploads")
+	blogBucket, err := transport.Run(garageCommand + " bucket info blog-uploads")
 	if err != nil {
-		t.Fatalf("reading docs-uploads: %v", err)
+		t.Fatalf("reading blog-uploads: %v", err)
 	}
-	if !strings.Contains(docsBucket, docsKeyID) {
-		t.Errorf("docs's key %s must be allowed on docs-uploads, got:\n%s", docsKeyID, docsBucket)
+	if !strings.Contains(blogBucket, blogKeyID) {
+		t.Errorf("blog's key %s must be allowed on blog-uploads, got:\n%s", blogKeyID, blogBucket)
 	}
-	if strings.Contains(docsBucket, talkKeyID) {
-		t.Errorf("talk's key %s must not be allowed on docs-uploads, got:\n%s", talkKeyID, docsBucket)
+	if strings.Contains(blogBucket, talkKeyID) {
+		t.Errorf("talk's key %s must not be allowed on blog-uploads, got:\n%s", talkKeyID, blogBucket)
 	}
 
 	// The same cross check from the key's own point of view: `key info`
@@ -298,8 +297,8 @@ func TestRealGarageIsProvisionedAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(talkKeyInfo, "talk-uploads") {
 		t.Errorf("talk's key should be authorized on talk-uploads, got:\n%s", talkKeyInfo)
 	}
-	if strings.Contains(talkKeyInfo, "docs-uploads") {
-		t.Errorf("talk's key must not be authorized on docs-uploads, got:\n%s", talkKeyInfo)
+	if strings.Contains(talkKeyInfo, "blog-uploads") {
+		t.Errorf("talk's key must not be authorized on blog-uploads, got:\n%s", talkKeyInfo)
 	}
 
 	// Idempotency, proven against the real thing: a second Build finds
@@ -463,7 +462,6 @@ func renderedGarageTOML(t *testing.T) string {
 var mediaHosts = map[string]string{
 	"talk": "talk-media.example.org",
 	"blog": "blog-media.example.org",
-	"docs": "docs-media.example.org",
 }
 
 const (
@@ -684,7 +682,7 @@ func startMediaCluster(t *testing.T) *mediaCluster {
 		t.Fatalf("creating the snippet directory: %v", err)
 	}
 	caddyfile := "{\n\tadmin off\n\tauto_https off\n}\n"
-	for _, app := range []string{"blog", "docs", "talk"} {
+	for _, app := range []string{"blog", "talk"} {
 		file := app + "-media.caddy"
 		snippet := renderedFile(t, "vm/srv/paisans/f2a9/infra/caddy/snippets/"+file)
 		if err := os.WriteFile(filepath.Join(snippets, file), []byte(snippet), 0o644); err != nil {
@@ -771,10 +769,10 @@ func (c *mediaCluster) provision(t *testing.T, cfg *config.Config, secrets *conf
 	}
 }
 
-// hmacSHA256 and the three helpers below are a complete SigV4 implementation
-// in about fifty lines of standard library. The AWS SDK is in go.mod as an
-// indirect dependency of sops and making it a direct one to sign two requests
-// would change what this repository depends on in order to test it.
+// hmacSHA256 and the helpers below are the SigV4 signing an upload needs, in
+// standard library alone. The AWS SDK is in go.mod as an indirect dependency
+// of sops, and making it a direct one to sign a request would change what
+// this repository depends on in order to test it.
 func hmacSHA256(key []byte, data string) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(data))
@@ -795,9 +793,7 @@ func sigv4Key(secret, dateStamp string) []byte {
 }
 
 // signSigV4 signs a request in the header form, in place. The signature
-// covers the Host header, which is the reason the gateway forwards Host
-// unchanged on its fallback route and the reason a presigned Outline URL
-// would stop working if it did not.
+// covers the Host header.
 func signSigV4(req *http.Request, keyID, secret, body string) {
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
@@ -830,38 +826,6 @@ func signSigV4(req *http.Request, keyID, secret, body string) {
 
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+keyID+"/"+scope+
 		", SignedHeaders="+signedHeaders+", Signature="+signature)
-}
-
-// presignGet returns the query a presigned GET carries, signed for the given
-// host. This is the form Outline issues to a browser: the credential is in
-// the URL, so the only header the signature covers is Host, and the host it
-// is signed with is the media hostname rather than anything inside the mesh.
-func presignGet(keyID, secret, host, path string) string {
-	now := time.Now().UTC()
-	amzDate := now.Format("20060102T150405Z")
-	dateStamp := now.Format("20060102")
-	scope := dateStamp + "/" + s3Region + "/s3/aws4_request"
-
-	query := url.Values{}
-	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
-	query.Set("X-Amz-Credential", keyID+"/"+scope)
-	query.Set("X-Amz-Date", amzDate)
-	query.Set("X-Amz-Expires", "300")
-	query.Set("X-Amz-SignedHeaders", "host")
-
-	canonicalRequest := strings.Join([]string{
-		"GET",
-		path,
-		query.Encode(),
-		"host:" + host + "\n",
-		"host",
-		"UNSIGNED-PAYLOAD",
-	}, "\n")
-	stringToSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest),
-	}, "\n")
-	query.Set("X-Amz-Signature", hex.EncodeToString(hmacSHA256(sigv4Key(secret, dateStamp), stringToSign)))
-	return query.Encode()
 }
 
 // appCredential reads one app's rendered S3 credential and bucket out of the
@@ -974,16 +938,12 @@ const publicMediaPolicy = "default-src 'none'; style-src 'unsafe-inline'; sandbo
 //     key with no bucket in it, because the hostname is the bucket.
 //  2. The blog's object on blog-media, the same way. The wisp fork never reads
 //     its bucket back under S3, so a reader's browser has to be able to.
-//  3. Outline's object on docs-media, no credential. Refused. The absence of
-//     the object's bytes is asserted alongside the status, because a 200
-//     carrying an error document would satisfy a status check alone.
-//  4. Outline's object on docs-media, presigned for that hostname. 200 and the
-//     bytes. The signature covers Host, so this is what proves the gateway
-//     forwards it unchanged to the S3 API rather than to the web endpoint.
-//  5. Outline's key asked for on talk-media. Not Outline's object: talk-media
-//     resolves to talk's bucket whatever the path says, so one app's media
-//     hostname cannot be used to reach another app's bucket.
-//  6. talk's object again with the first listed Garage node stopped. 200
+//  3. The blog's key asked for on talk-media. Not the blog's object:
+//     talk-media resolves to talk's bucket whatever the path says, so one
+//     app's media hostname cannot be used to reach another app's bucket. The
+//     absence of the object's bytes is asserted alongside the status, because
+//     a 200 carrying an error document would satisfy a status check alone.
+//  4. talk's object again with the first listed Garage node stopped. 200
 //     and the bytes, from the second node.
 func TestEachAppsMediaHostnameServesOnlyItsOwnBucket(t *testing.T) {
 	cfg, secrets := fixtureDeployment(t)
@@ -992,28 +952,20 @@ func TestEachAppsMediaHostnameServesOnlyItsOwnBucket(t *testing.T) {
 
 	talkBucket, talkKeyID, talkSecret := appCredential(t, cfg, secrets, "talk")
 	blogBucket, blogKeyID, blogSecret := appCredential(t, cfg, secrets, "blog")
-	docsBucket, docsKeyID, docsSecret := appCredential(t, cfg, secrets, "docs")
 
 	// Website access, stated rather than implied. A public bucket must have it
-	// or no anonymous read is possible; the private bucket must not, or the
-	// refusal below would be an accident of routing rather than a property of
-	// the bucket.
+	// or no anonymous read is possible.
 	for _, bucket := range []string{talkBucket, blogBucket} {
 		if got := bucketWebsiteAccess(t, cluster.Nodes["home-a"], bucket); got != "true" {
 			t.Errorf("%s serves objects publicly, so its website access must be true, got %q", bucket, got)
 		}
 	}
-	if got := bucketWebsiteAccess(t, cluster.Nodes["home-a"], docsBucket); got != "false" {
-		t.Errorf("%s must never be readable without a credential, so its website access must be false, got %q", docsBucket, got)
-	}
 
 	const key = "media/permedia-read.svg"
 	talkBody := "mbin media bytes " + hexString(t, 16)
 	blogBody := "blog image bytes " + hexString(t, 16)
-	docsBody := "outline private bytes " + hexString(t, 16)
 	putObject(t, cluster.S3, talkBucket, key, talkKeyID, talkSecret, talkBody)
 	putObject(t, cluster.S3, blogBucket, key, blogKeyID, blogSecret, blogBody)
-	putObject(t, cluster.S3, docsBucket, key, docsKeyID, docsSecret, docsBody)
 
 	// 1 and 2. Anonymous, public buckets, each on its own hostname.
 	for _, tc := range []struct{ app, body string }{{"talk", talkBody}, {"blog", blogBody}} {
@@ -1034,43 +986,15 @@ func TestEachAppsMediaHostnameServesOnlyItsOwnBucket(t *testing.T) {
 		}
 	}
 
-	// 3. Anonymous, private bucket, on Outline's hostname.
-	docsHost := mediaHosts["docs"]
-	docsPath := "/" + docsBucket + "/" + key
-	status, _, body := throughGateway(t, cluster, docsHost, docsPath, "")
-	t.Logf("anonymous GET %s%s: HTTP %d", docsHost, docsPath, status)
-	if status != http.StatusForbidden {
-		t.Errorf("an anonymous fetch on %s should be refused with 403 by Garage's S3 API, got %d:\n%s", docsHost, status, body)
-	}
-	if strings.Contains(body, docsBody) {
-		t.Errorf("an anonymous fetch on %s returned the object's bytes in a %d response, which is the failure a status check alone would miss:\n%s", docsHost, status, body)
+	// 3. Another app's key on talk's hostname.
+	blogPath := "/" + blogBucket + "/" + key
+	status, _, body := throughGateway(t, cluster, mediaHosts["talk"], blogPath, "")
+	t.Logf("anonymous GET %s%s: HTTP %d", mediaHosts["talk"], blogPath, status)
+	if status == http.StatusOK || strings.Contains(body, blogBody) {
+		t.Errorf("talk's media hostname must not reach the blog's bucket, got %d:\n%s", status, body)
 	}
 
-	// 4. Presigned for Outline's hostname, path style, the form Outline issues.
-	query := presignGet(docsKeyID, docsSecret, docsHost, docsPath)
-	status, header, body := throughGateway(t, cluster, docsHost, docsPath, query)
-	t.Logf("presigned GET %s%s: HTTP %d", docsHost, docsPath, status)
-	if status != http.StatusOK {
-		t.Errorf("a presigned fetch on %s must return 200, got %d:\n%s", docsHost, status, body)
-	}
-	if body != docsBody {
-		t.Errorf("a presigned fetch on %s must return the object's bytes, got %q", docsHost, body)
-	}
-	if got := header.Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Errorf("%s should send X-Content-Type-Options: nosniff, got %q", docsHost, got)
-	}
-	if got := header.Get("Content-Security-Policy"); got != "" {
-		t.Errorf("%s should carry no sandboxing policy, which would break Outline's embedded PDF previews, got %q", docsHost, got)
-	}
-
-	// 5. Another app's key on talk's hostname.
-	status, _, body = throughGateway(t, cluster, mediaHosts["talk"], docsPath, "")
-	t.Logf("anonymous GET %s%s: HTTP %d", mediaHosts["talk"], docsPath, status)
-	if status == http.StatusOK || strings.Contains(body, docsBody) {
-		t.Errorf("talk's media hostname must not reach Outline's bucket, got %d:\n%s", status, body)
-	}
-
-	// 6. The first listed node gone. Every media hostname names the Garage
+	// 4. The first listed node gone. Every media hostname names the Garage
 	// nodes in storage.garage.sites order, so the gateway must find talk's
 	// object on the second: the request that meets the dead node is retried
 	// there (lb_try_duration), and both nodes hold a copy at replication 2.

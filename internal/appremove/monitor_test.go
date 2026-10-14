@@ -16,8 +16,8 @@ import (
 
 const seed = "/srv/paisans/f2a9/health/monitors.json"
 
-// watched is world with the monitor site applied while docs was still
-// declared, so its seed carries docs' checks.
+// watched is world with the monitor site applied while blog was still
+// declared, so its seed carries blog' checks.
 func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 	t.Helper()
 	cfg, hosts := world(t)
@@ -40,8 +40,8 @@ func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 		entries = append(entries, watch.entry("/"+rel, false))
 	}
 	watch.manifest(t, entries...)
-	if !strings.Contains(watch.files[seed], "docs") {
-		t.Fatal("the seed rendered with docs does not check it")
+	if !strings.Contains(watch.files[seed], "blog") {
+		t.Fatal("the seed rendered with blog does not check it")
 	}
 	return cfg, secrets, hosts
 }
@@ -61,12 +61,12 @@ func monitors(t *testing.T, cfg *config.Config, secrets *config.Secrets, hosts m
 	}
 }
 
-// The monitor is reseeded last: once docs is off every site, watch's seed no
+// The monitor is reseeded last: once blog is off every site, watch's seed no
 // longer checks it, and the monitor restarts on the new file. A second run
 // finds the seed current and plans nothing for the monitor.
 func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +80,8 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	watch := hosts["watch"]
-	if strings.Contains(watch.files[seed], "docs") {
-		t.Errorf("the monitor still checks docs:\n%s", watch.files[seed])
+	if strings.Contains(watch.files[seed], "blog") {
+		t.Errorf("the monitor still checks blog:\n%s", watch.files[seed])
 	}
 	restarted := 0
 	for _, c := range watch.sent {
@@ -98,7 +98,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 		}
 	}
 
-	again, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	again, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 func TestAFailedReseedNamesTheApply(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
 	hosts["watch"].fail = "/health/compose.yaml restart"
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	if !errors.As(err, &me) || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
 		t.Fatalf("want the monitor's failure naming the apply, got %v", err)
 	}
-	if _, ok := hosts["home-a"].files[docsEnv]; ok {
+	if _, ok := hosts["home-a"].files[blogEnv]; ok {
 		t.Error("the app's files were not removed before the monitor")
 	}
 }
@@ -147,7 +147,7 @@ func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 	delete(cfg.Sites, "watch")
 	delete(cfg.Apps, "health")
 	delete(hosts, "watch")
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
 	hosts["watch"].unhealthy = "health"
-	p, err := Build(cfg, "docs", probe(t, cfg, "docs", hosts, false))
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
 	if err != nil {
 		t.Fatal(err)
 	}

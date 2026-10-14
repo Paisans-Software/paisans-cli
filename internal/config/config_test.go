@@ -683,7 +683,7 @@ func TestTheGateIsNeverDeclared(t *testing.T) {
 	}
 	named := validConfig + `    gated: true
   gate:
-    blueprint: outline
+    blueprint: wikijs
     hostname: wiki.example.org
     placement: cluster
 `

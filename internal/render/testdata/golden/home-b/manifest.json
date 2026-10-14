@@ -32,16 +32,6 @@
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/docs/.env",
-      "sha256": "eaa753940e43381c036bf00d99ef31c083acc21f4017392e39b9d28ab1203a1a",
-      "mode": "0600"
-    },
-    {
-      "path": "srv/paisans/f2a9/docs/compose.yaml",
-      "sha256": "0f78d53950f0d121b572e8f5624ded94fcda476f042bd0a06e58412bb49ba25b",
-      "mode": "0644"
-    },
-    {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
       "sha256": "0c3be05a214081b2144e2718c96ec9401d2fabc6ab5a5c228a24fa71a5d7d712",
       "mode": "0644"
@@ -124,6 +114,21 @@
     {
       "path": "srv/paisans/f2a9/web/config.json",
       "sha256": "94f6dc0349cd44b21a57afa907ed2d8f31fbb2af13a0dbee5c17001d595611c2",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/wiki/.env",
+      "sha256": "2caacac4cb49078ccf9ad65221bc281870586beb22bbecb6e978569c4d641bcd",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/wiki/bootstrap.env",
+      "sha256": "0760881d1e4304a000e0b92480406d04c49d8d7547083a004e6d15d688c90975",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/wiki/compose.yaml",
+      "sha256": "07e6b7a577d2639141974b86c9835142c56c72f4ad62515f36a036925d69526b",
       "mode": "0644"
     }
   ]

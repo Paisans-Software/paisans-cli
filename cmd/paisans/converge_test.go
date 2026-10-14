@@ -1509,7 +1509,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			// its own disk, which only a pinned app may do.
 			edit: func(cfg *config.Config) {
 				cfg.Storage.Garage.Sites = nil
-				for _, name := range []string{"talk", "docs"} {
+				for _, name := range []string{"talk", "wiki"} {
 					app := cfg.Apps[name]
 					app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
 					cfg.Apps[name] = app
