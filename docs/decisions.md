@@ -2359,3 +2359,44 @@ tagging `admin-reconciler-v0.2.0`, resolved to its digest with an anonymous
 pull token, pulled by that digest and run: it refused a members token set
 without its domain and key, which only this release checks. The pocket-id
 blueprint names it by that digest.
+
+## 2026-10-13: Wiki.js is the core catalog's wiki, and Outline is removed
+
+Founder decision, 2026-10-13. Spec: `docs/specs/2026-10-13-wikijs-blueprint.md`.
+
+### What was decided
+
+The core catalog's wiki is Wiki.js 2.5, as the `wikijs` blueprint, and the
+`outline` blueprint is removed. Release `v0.0.1` of
+`Paisans-Software/paisans-blueprints` carries the change, and the toolkit
+reads that release. The blueprint's bootstrap, which finishes Wiki.js's setup
+and keeps its sign-in, site settings and groups as the configuration says, is
+a repository and image of its own, `Paisans-Software/wikijs-bootstrap`, first
+released as 0.1.0, because no core blueprint is named in the toolkit's Go. A
+deployment running Outline is redeployed, not converted.
+
+### Why
+
+A community's wiki has to follow the groups its members are in at Pocket ID.
+Wiki.js's OAuth2 sign-in maps the groups claim onto wiki groups at every
+login, and its page rules gate content by path per group. Uploads live in
+Postgres, so the database's backup is the wiki's.
+
+### What was weighed
+
+Outline reads no groups claim. Its group sync exists in source but no
+plugin registers it in 1.10.0, and 1.11.0 gates it behind a paid
+entitlement. Keeping it meant a SCIM bridge from Pocket ID, a second client
+to carry it, and an API key only a signed in admin can make. Wiki.js 3 is a
+beta its own README calls not for production use.
+
+### What the spike changed
+
+A spike against Wiki.js 2.5.316 and Pocket ID 2.14.0
+(`docs/specs/2026-10-13-wikijs-blueprint-findings.md`) contradicted the spec in
+three places, and the build follows what was observed. A clustered wiki's DSN
+carries `ssl=no-verify`, since the image's connection string parser ignores
+`sslmode` and connected without TLS. Pocket ID's consent screen is off by
+default for every client the toolkit makes, with `sso_consent: true` to keep
+it. A deep link takes one click on Wiki.js's refusal page, which the founder
+chose to keep.
