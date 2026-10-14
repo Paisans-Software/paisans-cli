@@ -96,14 +96,18 @@ a client's secret, deleting a client, and every change to groups or users stay
 in the tier above, and `apply` never replaces a client it has already recorded.
 
 The same holds for the deployment's own operators. **`paisans apply`
-making each operator `paisans-stack.yaml` declares an administrator of the identity
-provider**, and handing each one who has not yet signed in a one-time login
+making each operator `paisans-stack.yaml` declares an account at the identity
+provider**, and handing each one who has no passkey yet a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
 sign into is not set up, and declaring the operator is approval for the account.
 The exception covers creating that account, marking its declared email
-verified, making it an administrator, adding it to the apps' admin and
-member groups, issuing the link and having the identity provider email it. Doing any of
-these by hand, and every other change to a user, stays in the tier above.
+verified, adding it to the group `operators`, the member group `members` and
+every app's admin and member groups, issuing the link and having the identity
+provider email it. It covers making the account an administrator of the
+identity provider only where the identity provider's app declares
+`management: pocket-id`; under `management: paisans` `apply` makes nobody one.
+Doing any of these by hand, and every other change to a user, stays in the
+tier above.
 
 **Never without the human present**
 
