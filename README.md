@@ -2623,7 +2623,7 @@ Finishing either command first costs nothing but its resume.
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
 | `external.acme_dns_token` | the provider | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that sends mail with it | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
@@ -2814,8 +2814,11 @@ app may declare its own `smtp:` with any of those fields, and each one it names
 replaces the deployment's while the rest are inherited, so a different sender
 or a different account is one line rather than a copy of the whole block. The
 password is a secret: `apps.<app>.smtp_password` when present, otherwise
-`external.smtp_password`, which `init` lists as owed once something resolves a
-mail host.
+`external.smtp_password`, which `init` lists as owed, and `secrets set` asks
+for, only once an app resolves both a mail host and a `username`. A relay with
+no `username`, such as a test deployment's Mailpit under `security: none`, is
+sent to without logging in, so it takes no password: none is asked for, and
+`secrets rotate --all` leaves out one that is set.
 
 Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
 `ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and applicants; the
