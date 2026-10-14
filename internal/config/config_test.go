@@ -906,7 +906,7 @@ func TestAnACMEProviderIsAName(t *testing.T) {
 // application reads (JSON, INI, env, YAML), so a control character in one,
 // a line break above all, could add a line to it. Each string setting, and
 // each string in a list or a mapping, is refused if it holds one; the
-// invite's code of conduct, written as a Markdown file of its own, may hold
+// account's code of conduct, written as a Markdown file of its own, may hold
 // line breaks and tabs.
 func TestASettingHoldsNoControlCharacter(t *testing.T) {
 	cases := []struct{ settings, want string }{

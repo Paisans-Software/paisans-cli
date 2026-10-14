@@ -88,6 +88,16 @@
 import /etc/caddy/snippets/gate-gates.caddy
 
 
+account.example.org {
+	import upstream_unavailable
+	# Stripped here as on a gated hostname: nothing that reaches an app may
+	# name a user unless the gate put the name there, and an ungated app that
+	# trusted the header would otherwise trust whoever sent the request.
+	request_header -X-Auth-Request-*
+	import /etc/caddy/snippets/account.caddy
+}
+
+
 # Public, with auto-login: a member the gate has signed in goes straight into
 # the app's own sign-in, and a visitor on its sign-in page with no gate session
 # signs in at the gate first. Everything else is the public app. See
@@ -192,16 +202,6 @@ id.example.org {
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
 	import /etc/caddy/snippets/auth.caddy
-}
-
-
-invite.example.org {
-	import upstream_unavailable
-	# Stripped here as on a gated hostname: nothing that reaches an app may
-	# name a user unless the gate put the name there, and an ungated app that
-	# trusted the header would otherwise trust whoever sent the request.
-	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/invite.caddy
 }
 
 

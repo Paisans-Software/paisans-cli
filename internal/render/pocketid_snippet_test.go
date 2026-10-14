@@ -110,9 +110,9 @@ func renderAuthSnippet(t *testing.T, c exposureCase) string {
 	app.Settings = settings
 	cfg.Apps["auth"] = app
 	if !c.invite {
-		delete(cfg.Apps, "invite")
-		delete(secrets.Apps, "invite")
-		delete(secrets.OIDCClients, "invite")
+		delete(cfg.Apps, "account")
+		delete(secrets.Apps, "account")
+		delete(secrets.OIDCClients, "account")
 	}
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
@@ -186,7 +186,7 @@ func TestPocketIDSnippetNamedDeployments(t *testing.T) {
 // app that closed signup.
 func TestPocketIDSnippetNamesTheInviteApp(t *testing.T) {
 	snippet := renderAuthSnippet(t, exposureCase{invite: true, signups: "disabled", emailCode: true})
-	if !strings.Contains(snippet, "the identity_app of invite.") {
+	if !strings.Contains(snippet, "the identity_app of account.") {
 		t.Errorf("the snippet does not name the invite app:\n%s", snippet)
 	}
 }

@@ -82,12 +82,13 @@ apps:
     settings:
       file_backend: database
       email_one_time_access_as_unauthenticated: true
-  invite:
-    blueprint: invite
-    hostname: invite.example.org
+  account:
+    blueprint: account
+    hostname: account.example.org
     placement: cluster
     settings:
-      identity_app: nope
+      identity_app: auth
+      invite_qouta: 3
       code_of_conduct: |
         # Be kind
 

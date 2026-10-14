@@ -31,7 +31,7 @@ respond @setup 404
 # Pocket ID's default is disabled (appconfig/model.go:130), and whenever an
 # app names this one as its identity_app, since accounts then come only from
 # that app's invites. Here allow_user_signups is disabled, and this app is
-# the identity_app of invite.
+# the identity_app of account.
 #
 # With allow_user_signups disabled, Pocket ID's signup page refuses
 # (frontend/src/routes/signup/+page.svelte:38-41) and its admin page offers no

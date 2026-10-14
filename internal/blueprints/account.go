@@ -1,8 +1,8 @@
 package blueprints
 
-// InviteSettingRanges are the integer settings of the invite blueprint and
+// AccountSettingRanges are the integer settings of the account blueprint and
 // their inclusive ranges, from docs/specs/2026-10-12-invite-service.md.
-var InviteSettingRanges = map[string][2]int{
+var AccountSettingRanges = map[string][2]int{
 	"invite_quota":           {1, 100},
 	"invite_lifetime_days":   {1, 365},
 	"application_wait_days":  {1, 365},
@@ -10,13 +10,13 @@ var InviteSettingRanges = map[string][2]int{
 	"login_link_days":        {1, 31},
 }
 
-// InviteOtherSettings are the invite settings that are not whole numbers.
-var InviteOtherSettings = []string{
+// AccountOtherSettings are the account settings that are not whole numbers.
+var AccountOtherSettings = []string{
 	"identity_app", "require_approval", "code_of_conduct", "member_group", "admin_group",
 }
 
-// InviteSettingDefaults are what the service is told when a setting is unset.
-var InviteSettingDefaults = map[string]string{
+// AccountSettingDefaults are what the service is told when a setting is unset.
+var AccountSettingDefaults = map[string]string{
 	"invite_quota": "3", "require_approval": "true", "invite_lifetime_days": "14",
 	"application_wait_days": "14", "decline_retention_days": "183", "login_link_days": "7",
 }

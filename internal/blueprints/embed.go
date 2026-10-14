@@ -1,7 +1,7 @@
 // The reserved blueprints, built into the binary: a blueprint.yaml and the
 // templates it renders, one directory per blueprint under reserved/. They are
 // the blueprints no catalog may provide: the identity provider, the gate, the
-// invite service and the monitor. The first party blueprints every deployment
+// account service and the monitor. The first party blueprints every deployment
 // can use are the core catalog's, which the binary does not carry
 // (docs/specs/2026-10-13-images-follow-tracks.md).
 

@@ -330,7 +330,7 @@ apps:
       # configuration is rendered from paisans-stack.yaml".
       app_name: Example ID       # also the sender name on its mail
       session_duration: 10080    # minutes
-      # New accounts come only from invites (the invite app below), so
+      # New accounts come only from invites (the account app below), so
       # Pocket ID's own signup links stay off.
       allow_user_signups: disabled
       # By name. apply finds or creates each group at the running Pocket ID
@@ -441,15 +441,20 @@ apps:
     # smtp:
     #   from_name: Example Health
 
-  # Members bring new people in. The invitee agrees to the code of conduct
-  # below and chooses their details before any account exists; with
-  # require_approval an admin approves first. See "Invites" in the README.
-  invite:
-    blueprint: invite
-    hostname: invite.example.org
+  # The community's account service, on account.example.org. With invites
+  # on, members bring new people in: the invitee opens their link on
+  # invite.example.org, agrees to the code of conduct below and chooses
+  # their details before any account exists; with require_approval an admin
+  # approves first. See "Accounts" in the README.
+  account:
+    blueprint: account
+    hostname: account.example.org
     placement: cluster
     settings:
       identity_app: auth
+      # Required. true serves invite.example.org as well, unless
+      # hostnames.invite names another hostname for it.
+      invites: true
       invite_quota: 3
       require_approval: true
       # Replace this with the community's own code of conduct. Its SHA-256 is
@@ -460,7 +465,7 @@ apps:
         This is an example. Replace it with the community's own code of
         conduct before inviting anyone.
 
-# How apps that send mail send it: the uptime monitor's alerts, the invite
+# How apps that send mail send it: the uptime monitor's alerts, the account
 # service's notices to admins and invitees, Pocket ID's
 # login codes and notices, which go out under its app_name rather than
 # from_name, and Mbin's contact form and account mails, which go out under its

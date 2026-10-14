@@ -8,8 +8,8 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 )
 
-// inviteValues is what the invite blueprint's templates need beyond any app's.
-type inviteValues struct {
+// accountValues is what the account blueprint's templates need beyond any app's.
+type accountValues struct {
 	// IdentityURL is the public URL of the pocket-id app identity_app names,
 	// from its hostname in paisans-stack.yaml and nothing else. The service is
 	// given it twice, as its OIDC issuer and as the API it creates accounts
@@ -22,22 +22,22 @@ type inviteValues struct {
 	Accent string
 	// CoC is the code_of_conduct setting's text, rendered verbatim.
 	CoC string
-	// Settings is every setting in blueprints.InviteSettingDefaults, declared
+	// Settings is every setting in blueprints.AccountSettingDefaults, declared
 	// or defaulted, as the service spells it.
 	Settings map[string]string
 }
 
-// inviteValuesFor reads the identity app the invite app names, never one
+// accountValuesFor reads the identity app the account app names, never one
 // found by search, and the code of conduct from the app's own settings.
-func (p *planner) inviteValuesFor(name string) (inviteValues, error) {
+func (p *planner) accountValuesFor(name string) (accountValues, error) {
 	app := p.cfg.Apps[name]
 	idp, _ := app.Settings["identity_app"].(string)
 	idApp, ok := p.cfg.Apps[idp]
 	if !ok {
-		return inviteValues{}, fmt.Errorf("apps.%s.settings.identity_app: %q is not an app in this configuration", name, idp)
+		return accountValues{}, fmt.Errorf("apps.%s.settings.identity_app: %q is not an app in this configuration", name, idp)
 	}
 	coc, _ := app.Settings["code_of_conduct"].(string)
-	v := inviteValues{
+	v := accountValues{
 		IdentityURL: "https://" + idApp.Hostname,
 		APIKey:      p.appSecret(idp, "static_api_key"),
 		CoC:         coc,
@@ -46,11 +46,11 @@ func (p *planner) inviteValuesFor(name string) (inviteValues, error) {
 	if accent, ok := idApp.Settings["accent_color"].(string); ok && accent != "default" {
 		quoted, err := envquote(accent)
 		if err != nil {
-			return inviteValues{}, fmt.Errorf("apps.%s.settings.accent_color: %w", idp, err)
+			return accountValues{}, fmt.Errorf("apps.%s.settings.accent_color: %w", idp, err)
 		}
 		v.Accent = quoted
 	}
-	for key, def := range blueprints.InviteSettingDefaults {
+	for key, def := range blueprints.AccountSettingDefaults {
 		v.Settings[key] = def
 		switch x := app.Settings[key].(type) {
 		case int:

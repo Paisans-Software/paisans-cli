@@ -1581,7 +1581,7 @@ func TestContainerRulesLetTheMonitorReachLocalApps(t *testing.T) {
 		}
 	}
 	// home-a runs the clustered mbin (8080), wikijs (3000), pocket-id
-	// (1411) and invite (8082), and the pinned writefreely (8081). 3001 is
+	// (1411) and account (8082), and the pinned writefreely (8081). 3001 is
 	// absent: the monitor does not check itself.
 	if want := "1411,3000,8080,8081,8082"; strings.Join(got, ",") != want {
 		t.Fatalf("got %v, want %s", got, want)

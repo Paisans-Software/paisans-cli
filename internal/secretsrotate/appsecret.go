@@ -71,13 +71,13 @@ func (r appSelf) Checked(e Env, next string) error { return nil }
 func (r appSelf) Accepts(e Env, next string) (bool, error) { return true, nil }
 
 // Users is every site running the app, its own stack on each. Pocket ID's
-// static_api_key is also presented by every invite app whose identity_app
+// static_api_key is also presented by every account app whose identity_app
 // names it, from that app's .env, so each of those stacks is handed the next
 // key too: on a site running both, in the same step with no order between the
-// two stacks guaranteed; on a site running only the invite app, in a step of
-// its own. The invite service calls Pocket ID only when it serves a request,
+// two stacks guaranteed; on a site running only the account app, in a step of
+// its own. The account service calls Pocket ID only when it serves a request,
 // so the window in which it holds a key Pocket ID does not yet accept is
-// seconds. Without them the invite service would keep calling with a key
+// seconds. Without them the account service would keep calling with a key
 // Pocket ID no longer accepts.
 func (r appSelf) Users(e Env) []Use {
 	uses := appUses(e, r.app)
@@ -91,7 +91,7 @@ func (r appSelf) Users(e Env) []Use {
 	}
 	for _, name := range e.Cfg.AppNames() {
 		app := e.Cfg.Apps[name]
-		if app.Blueprint != config.BlueprintInvite {
+		if app.Blueprint != config.BlueprintAccount {
 			continue
 		}
 		if idp, _ := app.Settings["identity_app"].(string); idp != r.app {

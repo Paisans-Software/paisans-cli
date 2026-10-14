@@ -168,7 +168,7 @@ func TestUnreachableSiteSaysWhatIsLost(t *testing.T) {
 		t.Fatalf("level %v", b.Level)
 	}
 	text := strings.Join(b.More, "\n")
-	for _, want := range []string{"roles: data, apps", "one of 3 etcd votes (quorum needs 2)", "a Patroni member", "a Garage node", "its copy of auth, invite, talk, wiki", "web, pinned here and running nowhere else"} {
+	for _, want := range []string{"roles: data, apps", "one of 3 etcd votes (quorum needs 2)", "a Patroni member", "a Garage node", "its copy of account, auth, talk, wiki", "web, pinned here and running nowhere else"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("home-b's loss lacks %q:\n%s", want, text)
 		}

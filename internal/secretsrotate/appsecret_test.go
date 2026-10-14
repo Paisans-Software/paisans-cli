@@ -202,14 +202,14 @@ func TestAppSelfStopsAtAnUnhealthySite(t *testing.T) {
 // Each secret's cost is the one its blueprint declares.
 func TestAppSelfCosts(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
+	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster}}
 	for _, c := range []struct {
 		app, key string
 		signsOut bool
 		restart  bool
 	}{
 		{"forum", "app_secret", true, false}, {"gate", "cookie_secret", true, false},
-		{"health", "session_secret", true, false}, {"invite", "session_key", true, false},
+		{"health", "session_secret", true, false}, {"account", "session_key", true, false},
 		{"chat", "mas_signing_key", true, false}, {"chat", "mas_matrix_secret", true, false},
 		{"forum", "mercure_jwt_secret", false, true}, {"forum", "valkey_password", false, true},
 		{"id", "static_api_key", false, false},
@@ -270,45 +270,45 @@ func TestAppSelfEachBlueprintOnItsOwnSite(t *testing.T) {
 	}
 }
 
-// Pocket ID's static_api_key is in every invite .env whose identity_app
-// names it, so rotating it hands the next key to those invite stacks too:
+// Pocket ID's static_api_key is in every account .env whose identity_app
+// names it, so rotating it hands the next key to those account stacks too:
 // beside Pocket ID on a site running both, after it, and in a step of its
-// own on a site running only the invite app. An invite app naming another
+// own on a site running only the account app. An account app naming another
 // identity app is left alone.
-func TestStaticAPIKeyReachesTheInviteAppsThatNameIt(t *testing.T) {
+func TestStaticAPIKeyReachesTheAccountAppsThatNameIt(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster},
 		Settings: map[string]any{"identity_app": "id"}}
-	w.cfg.Apps["elsewhere"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster},
+	w.cfg.Apps["elsewhere"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster},
 		Settings: map[string]any{"identity_app": "other-id"}}
 	e := w.env()
 	got := usesOf(e, AppSelf("id", "static_api_key", CostOf(w.cfg, "id", "static_api_key")))
-	if want := []string{"home-a:id,invite", "home-b:invite"}; !slices.Equal(got, want) {
+	if want := []string{"home-a:id,account", "home-b:account"}; !slices.Equal(got, want) {
 		t.Fatalf("users %v, want %v", got, want)
 	}
-	// Another app's key is its own stack's alone, invite apps or none.
+	// Another app's key is its own stack's alone, account apps or none.
 	if got := usesOf(e, AppSelf("forum", "app_secret", Cost{})); !slices.Equal(got, []string{"home-a:forum", "home-b:forum"}) {
 		t.Fatalf("app_secret users %v", got)
 	}
 }
 
-// The invite service's session_key is checked by the service itself, and
+// The account service's session_key is checked by the service itself, and
 // rotating it signs members out of it.
-func TestInviteSessionKeyIsAnAppSelfSecret(t *testing.T) {
+func TestAccountSessionKeyIsAnAppSelfSecret(t *testing.T) {
 	w := newSelfWorld(t)
-	w.cfg.Apps["invite"] = config.App{Blueprint: config.BlueprintInvite, Placement: config.Placement{Mode: config.PlacementCluster}}
-	if blueprint, ok := AppSelfBlueprint("session_key"); !ok || blueprint != config.BlueprintInvite {
-		t.Fatalf("session_key is %v %v, want the invite blueprint's", blueprint, ok)
+	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster}}
+	if blueprint, ok := AppSelfBlueprint("session_key"); !ok || blueprint != config.BlueprintAccount {
+		t.Fatalf("session_key is %v %v, want the account blueprint's", blueprint, ok)
 	}
-	r := AppSelf("invite", "session_key", CostOf(w.cfg, "invite", "session_key"))
+	r := AppSelf("account", "session_key", CostOf(w.cfg, "account", "session_key"))
 	e := w.env()
 	if err := r.(Prechecker).Precheck(e); err != nil {
 		t.Fatal(err)
 	}
 	if !r.Cost().SignsOut {
-		t.Error("rotating the invite session key does not sign anyone out")
+		t.Error("rotating the account session key does not sign anyone out")
 	}
-	if got := usesOf(e, r); !slices.Equal(got, []string{"home-a:invite", "home-b:invite"}) {
+	if got := usesOf(e, r); !slices.Equal(got, []string{"home-a:account", "home-b:account"}) {
 		t.Fatalf("users %v", got)
 	}
 }

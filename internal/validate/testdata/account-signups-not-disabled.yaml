@@ -82,10 +82,10 @@ apps:
     settings:
       file_backend: database
       email_one_time_access_as_unauthenticated: true
-      email_one_time_access_as_admin: false
-  invite:
-    blueprint: invite
-    hostname: invite.example.org
+      allow_user_signups: withToken
+  account:
+    blueprint: account
+    hostname: account.example.org
     placement: cluster
     settings:
       identity_app: auth

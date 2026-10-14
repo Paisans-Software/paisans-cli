@@ -131,7 +131,7 @@ func TestEachBlueprintsConfigFileAndFormat(t *testing.T) {
 		config.Blueprint("synapse"):     {blueprints.ConfigYAML, "homeserver.yaml"},
 		config.Blueprint("element"):     {blueprints.ConfigJSON, "config.json"},
 		config.BlueprintUptime:          {blueprints.ConfigEnv, ".env"},
-		config.BlueprintInvite:          {blueprints.ConfigEnv, ".env"},
+		config.BlueprintAccount:         {blueprints.ConfigEnv, ".env"},
 	}
 	for _, blueprint := range blueprints.Builtin() {
 		want, known := cases[blueprint]
@@ -163,21 +163,21 @@ func TestTheForksDefaultToATrackOnTheirReleases(t *testing.T) {
 	}
 }
 
-func TestInviteBlueprint(t *testing.T) {
-	if !blueprints.UsesPostgres(config.BlueprintInvite) {
-		t.Fatal("invite keeps its state in Postgres")
+func TestAccountBlueprint(t *testing.T) {
+	if !blueprints.UsesPostgres(config.BlueprintAccount) {
+		t.Fatal("account keeps its state in Postgres")
 	}
-	if !blueprints.SendsMail(config.BlueprintInvite) {
-		t.Fatal("invite sends mail")
+	if !blueprints.SendsMail(config.BlueprintAccount) {
+		t.Fatal("account sends mail")
 	}
-	spec, ok := blueprints.OIDCClient(config.BlueprintInvite, "invite.example.org", "invite")
-	if !ok || spec.CallbackURL != "https://invite.example.org/auth/callback" || !spec.PKCE || !spec.ReadsGroups {
+	spec, ok := blueprints.OIDCClient(config.BlueprintAccount, "account.example.org", "account")
+	if !ok || spec.CallbackURL != "https://account.example.org/auth/callback" || !spec.PKCE || !spec.ReadsGroups {
 		t.Fatalf("%+v", spec)
 	}
 	if spec.DefaultMemberGroup != blueprints.MembersGroup || spec.DefaultAdminGroup != blueprints.AdminsGroup {
 		t.Fatalf("%+v", spec)
 	}
-	if blueprints.GateFor(config.BlueprintInvite).Gateable {
-		t.Fatal("invitees are not members; the gate must never sit in front of invite")
+	if blueprints.GateFor(config.BlueprintAccount).Gateable {
+		t.Fatal("invitees are not members; the gate must never sit in front of account")
 	}
 }

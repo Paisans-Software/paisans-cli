@@ -69,7 +69,7 @@ const (
 	BlueprintOAuth2Proxy Blueprint = "oauth2-proxy"
 	BlueprintPocketID    Blueprint = "pocket-id"
 	BlueprintUptime      Blueprint = "uptime"
-	BlueprintInvite      Blueprint = "invite"
+	BlueprintAccount     Blueprint = "account"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
@@ -1195,7 +1195,7 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 		}
 		for _, key := range sortedKeys(app.Settings) {
-			multiline := app.Blueprint == BlueprintInvite && key == "code_of_conduct"
+			multiline := app.Blueprint == BlueprintAccount && key == "code_of_conduct"
 			if r, ok := settingControlRune(app.Settings[key], multiline); ok {
 				add("apps.%s.settings.%s %s A setting is written into the application's own configuration (JSON, INI, env or YAML), where a line break or another control character could add to it.", name, keyPath(key), controlProblem(r))
 			}
