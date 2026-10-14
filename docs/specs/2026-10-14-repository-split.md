@@ -211,8 +211,8 @@ same images.
    included, and remove `internal/pocketid`.
 2. **`paisans-admin-reconciler-service`.** Create the repository with its
    history. Grant it the GHCR package. Tag `v0.2.1` and confirm the image
-   resolves on the `0.2.*` track. Remove the reconciler from this repository and delete its
-   two `admin-reconciler-v*` tags here.
+   resolves on the `0.2.*` track. Remove the reconciler from this
+   repository and delete its two `admin-reconciler-v*` tags here.
 3. **The rename.** Rename the repository, change the module path, update the
    documentation, the core catalog's references and `paisans-account-service`'s.
 4. **The Homebrew tap.** In `Paisans-Software/homebrew-paisans`, point
