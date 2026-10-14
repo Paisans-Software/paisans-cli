@@ -1,11 +1,13 @@
 package blueprints
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 
 	"gopkg.in/yaml.v3"
 
@@ -32,6 +34,141 @@ func coreURL() string {
 	return CoreURL
 }
 
+// CoreIsOfficial reports whether the core catalog this process read is the
+// official one: a release of CoreURL, read from a git checkout made from
+// CoreURL at the commit that release names (officialCheckout). Only then is
+// its foundation.yaml one the team reviewed in that repository's pull
+// requests and released, and only then may apply skip approving the images
+// it names (README.md, "Apply asks before it grants"). A commit the team did
+// not release, a core read from PAISANS_CORE_CATALOG, from a catalogs.core
+// url, from any mirror, from a cached commit another URL fetched, or from an
+// installed snapshot, which is bytes another admin published, is not, however
+// faithful the copy. A core not read, or read with an error, is not official.
+func CoreIsOfficial() bool {
+	core.Lock()
+	defer core.Unlock()
+	return core.done && core.err == nil && core.official
+}
+
+// officialCheckout reports whether dir, a core catalog read at cat, is a
+// release of the official repository. It is decided from the directory and
+// the official repository, never from what the configuration says the URL
+// is, since the cache is keyed by commit alone and a snapshot carries no
+// origin at all: dir must be a checkout Fetch made, its origin the official
+// URL, its HEAD the commit, and the commit the one a release tag of the
+// official repository names (officialRelease). The official repository
+// serves any commit it holds, a pull request's head included, and only a
+// release is one the team reviewed and released.
+func officialCheckout(dir string, cat config.Catalog) bool {
+	if !fetched(dir) || cat.Commit == "" {
+		return false
+	}
+	origin, err := git(dir, "remote", "get-url", "origin")
+	if err != nil || !(officialCoreURL(origin) || testOfficialCore(origin)) {
+		return false
+	}
+	head, err := git(dir, "rev-parse", "--verify", "HEAD^{commit}")
+	return err == nil && head == cat.Commit && officialRelease(dir, cat)
+}
+
+// officialTagsDir is, inside a checkout's .git, a mark per tag the official
+// repository was asked about and named the checkout's commit. It is apart
+// from checkTag's marks, which record what cat.URL said, and cat.URL may be
+// a mirror.
+const officialTagsDir = "official-tags"
+
+// officialRelease reports whether cat.Tag is a release tag
+// (vMAJOR.MINOR.PATCH) that the official repository itself names cat.Commit
+// by. The answer is recorded in the checkout once the official repository has
+// given it, so a run that cannot reach the forge keeps it.
+func officialRelease(dir string, cat config.Catalog) bool {
+	// The official repository's releases are tagged vMAJOR.MINOR.PATCH,
+	// the tags its ruleset protects; any other tag is not one.
+	if _, ok := releaseVersion(cat.Tag); !ok || !strings.HasPrefix(cat.Tag, "v") {
+		return false
+	}
+	mark := filepath.Join(dir, ".git", stateDir, officialTagsDir, hex.EncodeToString([]byte(cat.Tag)))
+	if _, err := os.Stat(mark); err == nil {
+		return true
+	}
+	got, err := TagCommit(officialURL(), cat.Tag)
+	if err != nil || got != cat.Commit {
+		return false
+	}
+	// Best effort: a mark that is not written costs only asking again.
+	if os.MkdirAll(filepath.Dir(mark), 0o755) == nil {
+		_ = os.WriteFile(mark, []byte(cat.Tag+"\n"), 0o644)
+	}
+	return true
+}
+
+// officialURL is the repository release tags are checked against: CoreURL,
+// or in a test binary the copy coretest's hook names (testOfficialCore).
+func officialURL() string {
+	if testing.Testing() {
+		if url := os.Getenv("PAISANS_TEST_OFFICIAL_CORE"); url != "" {
+			return url
+		}
+	}
+	return CoreURL
+}
+
+// officialCoreURL reports whether url names CoreURL's repository: the same
+// scheme, host and path, with the host in any case and the path allowed one
+// trailing slash and a .git suffix, the spellings git and GitHub treat as
+// the same repository. Nothing else is accepted, since a looser comparison
+// would let a lookalike URL count as the reviewed repository.
+func officialCoreURL(url string) bool {
+	host, path, ok := splitHTTPS(url)
+	if !ok {
+		return false
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	officialHost, officialPath, _ := splitHTTPS(CoreURL)
+	return strings.EqualFold(host, officialHost) && path == officialPath
+}
+
+// splitHTTPS is the host and path of an https URL, ok false for any other
+// URL or one carrying characters an ordinary forge URL has no use for
+// (credentials, a port, a query, an escape, whitespace), which are refused
+// rather than interpreted.
+func splitHTTPS(url string) (host, path string, ok bool) {
+	rest, ok := strings.CutPrefix(url, "https://")
+	if !ok || strings.ContainsAny(rest, "@:?#%\\ \t\r\n") {
+		return "", "", false
+	}
+	host, path, ok = strings.Cut(rest, "/")
+	return host, "/" + path, ok && host != ""
+}
+
+// testOfficialCore lets a test count a checkout of its local copy of the
+// core catalog (internal/blueprints/coretest) as fetched from the official
+// URL, and officialURL check its release tags there, since a test never
+// reaches the real repository. It reads
+// PAISANS_TEST_OFFICIAL_CORE only inside a binary `go test` built:
+// testing.Testing is false in every other binary, so no configuration or
+// environment can make a production run count another core as official.
+func testOfficialCore(url string) bool {
+	if !testing.Testing() {
+		return false
+	}
+	want := os.Getenv("PAISANS_TEST_OFFICIAL_CORE")
+	return want != "" && url == want
+}
+
+// ToolkitBlueprint reports whether a blueprint is the toolkit's own: a
+// reserved one, built into the binary, or one of the core catalog's, both
+// written unqualified. A service such a blueprint writes with foundation: is
+// the toolkit's, reviewed with it; one in a blueprint from any other catalog
+// is that catalog's choice, which the team did not review.
+func ToolkitBlueprint(blueprint config.Blueprint) bool {
+	if catalog, _ := config.SplitBlueprint(blueprint); catalog != "" {
+		return false
+	}
+	_, ok := For(blueprint)
+	return ok
+}
+
 // coreTries is how many releases, newest first, are tried before giving up
 // on finding one this binary reads.
 const coreTries = 5
@@ -46,6 +183,9 @@ var core struct {
 	release config.Catalog
 	skipped []string
 	wizard  []WizardEntry
+	// official is whether the core was read from a checkout of the official
+	// repository at a commit one of its releases names (officialCheckout).
+	official bool
 }
 
 // LoadCore reads the core catalog from url, coreURL() when empty, unless it
@@ -129,6 +269,7 @@ func coreDir(cat config.Catalog) (string, bool) {
 // at dir, and records them only when every one reads: a release with one
 // wrong is skipped whole, not half known.
 func readCoreAt(dir string, cat config.Catalog) error {
+	core.official = false
 	// An installed snapshot holds only the blueprints and the foundation a
 	// configuration used, not the catalog's own file, and so no wizard,
 	// which only a new deployment's `paisans create` asks.
@@ -175,6 +316,7 @@ func readCoreAt(dir string, cat config.Catalog) error {
 	}
 	setFoundation(f)
 	core.wizard = wizard
+	core.official = officialCheckout(dir, cat)
 	return nil
 }
 

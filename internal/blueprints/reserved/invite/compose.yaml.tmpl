@@ -9,7 +9,7 @@ services:
   app:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "app" }}
+    image: {{ yamlquote (.Image "app") }}
     restart: unless-stopped
     # The image declares its own healthcheck, the binary probing /healthz on
     # INVITE_LISTEN_ADDR's port, which apply's health gate reads.

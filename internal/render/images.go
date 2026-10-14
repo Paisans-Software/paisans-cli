@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -35,13 +36,19 @@ type ComposeImage struct {
 	// Lines is how many services of the compose file run the image, and so
 	// how many `image:` lines name it.
 	Lines int
-	// Foundation is an image the render took from the core catalog's
-	// foundation.yaml for every service of the file that runs it: one of the
-	// infrastructure stack's, a service a blueprint names with foundation:,
-	// a pinned app's database, or the admins heartbeat. It is decided where
-	// the render chose the image, never by its name, so a catalog blueprint
-	// or a declaration naming the same reference is not one.
-	Foundation bool
+	// FoundationServices are the compose services of the file, among those
+	// running Image, whose image the render itself took from the official
+	// core catalog's foundation.yaml for a service of the toolkit's own: one
+	// of the infrastructure stack's, a service a reserved or core blueprint
+	// names with foundation:, a pinned app's defaulted database, or the
+	// admins heartbeat. Only that file is reviewed by the team, in the
+	// official repository's pull requests, so a core read from anywhere else
+	// (blueprints.CoreIsOfficial) marks nothing, and a service a third party
+	// catalog's blueprint names with foundation: is not one. The mark is the
+	// service's, never the reference's: another service of the same file that
+	// a template points at the same reference was chosen by the template, not
+	// by the render, and is reviewed.
+	FoundationServices []string
 
 	// blueprint is the app's blueprint, for Setting.
 	blueprint config.Blueprint
@@ -79,6 +86,11 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		site, rel := splitSite(file.Path)
 		_, stack, rest, ok := deployment.SplitRel(rel)
 		if !ok || rest != "compose.yaml" {
+			// A compose file anywhere but a stack's own directory would run
+			// images this list never names, and so never reviewed.
+			if path.Base(rel) == "compose.yaml" {
+				return nil, fmt.Errorf("%s is a compose file outside any stack's own directory", file.Path)
+			}
 			continue
 		}
 		services, err := blueprints.ComposeMounts(file.Content)
@@ -95,15 +107,26 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		}
 		app := ""
 		named := map[string][]string{}
-		// fromFoundation and fromElsewhere are each reference the render
-		// chose for this stack, by where it chose it. A reference chosen
-		// both ways is not the foundation's, so a declaration that happens
-		// to name a foundation image is still reviewed.
-		var fromFoundation, fromElsewhere map[string]bool
-		if stack == "infra" {
-			fromFoundation, fromElsewhere, err = p.infraImageOrigins()
+		// chosen is each compose service whose image the render took from
+		// the foundation, with that image. fromElsewhere is each reference
+		// the render chose for this stack otherwise: a reference chosen both
+		// ways is not the foundation's, so a declaration that happens to name
+		// a foundation image is still reviewed.
+		chosen, fromElsewhere := map[string]string{}, map[string]bool{}
+		if stack == config.InfraStack {
+			// The infrastructure template is the toolkit's own, so each of
+			// its services running a foundation image was chosen by the
+			// render. Only its own services count, so nothing else that
+			// reaches this file is marked.
+			fromFoundation, declared, err := p.infraImageOrigins()
 			if err != nil {
 				return nil, err
+			}
+			fromElsewhere = declared
+			for name, service := range services {
+				if image := strings.TrimSpace(service.Image); fromFoundation[image] && infraServices[name] {
+					chosen[name] = image
+				}
 			}
 		} else {
 			declared, isApp := p.cfg.Apps[stack]
@@ -115,13 +138,12 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			if err != nil {
 				return nil, err
 			}
-			fromFoundation, fromElsewhere = map[string]bool{}, map[string]bool{}
 			for service, image := range images {
 				if lines[image] > 0 {
 					named[image] = append(named[image], service)
 				}
 				if foundation[service] {
-					fromFoundation[image] = true
+					chosen[service] = image
 				} else {
 					fromElsewhere[image] = true
 				}
@@ -130,8 +152,18 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, image := range injected {
-				fromFoundation[image] = true
+			for service, image := range injected {
+				chosen[service] = image
+			}
+		}
+		// Asked once the origins are known, since choosing them is what
+		// reads the core catalog.
+		official := blueprints.CoreIsOfficial()
+		marked := map[string][]string{}
+		for name, service := range services {
+			image := strings.TrimSpace(service.Image)
+			if official && image != "" && chosen[name] == image && !fromElsewhere[image] {
+				marked[image] = append(marked[image], name)
 			}
 		}
 		for image, n := range lines {
@@ -144,9 +176,8 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				names = running[image]
 			}
 			sort.Strings(names)
-			// A literal reference equal to one the foundation chose in this
-			// stack shares its mark, harmlessly: it is the same reviewed reference.
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, Foundation: fromFoundation[image] && !fromElsewhere[image], blueprint: p.cfg.Apps[app].Blueprint})
+			sort.Strings(marked[image])
+			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, FoundationServices: marked[image], blueprint: p.cfg.Apps[app].Blueprint})
 		}
 	}
 	for site := range out {
@@ -160,6 +191,10 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 	}
 	return out, nil
 }
+
+// infraServices are the services the infrastructure template,
+// templates/infra-compose.yaml.tmpl, writes.
+var infraServices = map[string]bool{"etcd": true, "patroni": true, "haproxy": true, "garage": true, "caddy": true, "heartbeat": true}
 
 // infraImageOrigins is each reference the infrastructure stack runs, split
 // by where the render took it: from the core catalog's foundation, which is
@@ -186,11 +221,11 @@ func (p *planner) infraImageOrigins() (foundation, declared map[string]bool, err
 	return foundation, declared, nil
 }
 
-// injectedImages are the images an app's stack runs that no service of its
-// blueprint names: services the toolkit adds to a blueprint built into it,
-// each the foundation's. The pocket-id blueprint's admins heartbeat is the
-// one, appValues.HeartbeatImage.
-func (p *planner) injectedImages(app config.App) ([]string, error) {
+// injectedImages are the services an app's stack runs that no service of
+// its blueprint names, with their images: services the toolkit adds to a
+// blueprint built into it, each the foundation's. The pocket-id blueprint's
+// admins heartbeat is the one, appValues.HeartbeatImage.
+func (p *planner) injectedImages(app config.App) (map[string]string, error) {
 	if app.Blueprint != config.BlueprintPocketID {
 		return nil, nil
 	}
@@ -198,7 +233,26 @@ func (p *planner) injectedImages(app config.App) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{heartbeat}, nil
+	return map[string]string{adminsHeartbeatService: heartbeat}, nil
+}
+
+// ImageLine is the reference an `image:` line of a compose file names,
+// trimmed of its indentation, and whether it is written quoted, as the
+// toolkit's own templates write it (yamlquote), or bare, as a catalog's may.
+// A quoted reference holding an escape is not read: no reference has one.
+func ImageLine(trimmed string) (ref string, quoted, ok bool) {
+	ref, ok = strings.CutPrefix(trimmed, "image: ")
+	if !ok {
+		return "", false, false
+	}
+	if inner, isQuoted := strings.CutPrefix(ref, `"`); isQuoted {
+		inner, closed := strings.CutSuffix(inner, `"`)
+		if !closed || strings.ContainsAny(inner, `"\$`) {
+			return "", false, false
+		}
+		return inner, true, true
+	}
+	return ref, false, true
 }
 
 // PinImages returns a compose file with each image line naming a key of
@@ -206,7 +260,8 @@ func (p *planner) injectedImages(app config.App) ([]string, error) {
 // resolved into the file.
 //
 // The lines are this package's: every template writes an image as
-// `image: <reference>` on a line of its own, one per service. Each reference
+// `image: <reference>` on a line of its own, one per service, quoted in the
+// toolkit's own templates (ImageLine). Each reference
 // must be named on exactly as many lines as lines gives it, the count
 // render reported in Plan.Images. A different count means the template
 // changed under this function, and pinning some of the services and not the
@@ -221,7 +276,7 @@ func PinImages(compose string, pinned map[string]string, lines map[string]int) (
 	for i, line := range out {
 		body := strings.TrimRight(line, "\n")
 		trimmed := strings.TrimLeft(body, " ")
-		ref, ok := strings.CutPrefix(trimmed, "image: ")
+		ref, quoted, ok := ImageLine(trimmed)
 		if !ok {
 			continue
 		}
@@ -230,6 +285,9 @@ func PinImages(compose string, pinned map[string]string, lines map[string]int) (
 			continue
 		}
 		found[ref]++
+		if quoted {
+			to = `"` + to + `"`
+		}
 		out[i] = body[:len(body)-len(trimmed)] + "image: " + to + line[len(body):]
 	}
 	refs := make([]string, 0, len(pinned))

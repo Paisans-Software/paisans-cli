@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-stack/internal/blueprints"
 	"github.com/paisans-software/paisans-stack/internal/config"
 	"github.com/paisans-software/paisans-stack/internal/grant"
+	"github.com/paisans-software/paisans-stack/internal/render"
 )
 
 // A foundation image is reviewed where foundation.yaml is, in the core
@@ -193,15 +194,22 @@ health: {path: /status, status: [200]}
 // blueprint is example/journal from a catalog made here.
 func withCatalogApp(t *testing.T, blueprint string) *config.Config {
 	t.Helper()
-	repo := filepath.Join(t.TempDir(), "paisans-example")
-	files := map[string]string{
-		"catalog.yaml":                      "apiVersion: paisans.catalog/v1\nname: example\n",
-		"blueprints/journal/blueprint.yaml": blueprint,
-		"blueprints/journal/compose.yaml.tmpl": `name: {{ .Project }}
+	return withCatalogTemplate(t, blueprint, `name: {{ .Project }}
 services:
   app:
     image: {{ .Image "app" }}
-`,
+`)
+}
+
+// withCatalogTemplate is withCatalogApp with the blueprint's compose
+// template given.
+func withCatalogTemplate(t *testing.T, blueprint, compose string) *config.Config {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "paisans-example")
+	files := map[string]string{
+		"catalog.yaml":                          "apiVersion: paisans.catalog/v1\nname: example\n",
+		"blueprints/journal/blueprint.yaml":     blueprint,
+		"blueprints/journal/compose.yaml.tmpl":  compose,
 		"blueprints/journal/.env.secret.tmpl":   "JOURNAL_URL=https://{{ .Hostname }}\n",
 		"blueprints/journal/caddy.snippet.tmpl": "reverse_proxy {{ range .Upstreams }}{{ . }} {{ end }}\n",
 	}
@@ -275,5 +283,163 @@ func TestOnlyTheMarkIsNoChange(t *testing.T) {
 	next := grant.Update(older, g, grant.ApplyScope(), time.Unix(100, 0), "")
 	if grant.Encode(next) != grant.Encode(older) {
 		t.Errorf("rewrote an unchanged part:\n%s", grant.Encode(next))
+	}
+}
+
+// Only the toolkit's own services skip approval: a third party catalog's
+// blueprint that writes foundation: for a service runs the reviewed
+// reference, but nobody on the team reviewed that blueprint's choice to run
+// it, so it is approved like any other image the blueprint names.
+func TestAThirdPartyFoundationServiceNeedsApproval(t *testing.T) {
+	cfg := withCatalogApp(t, `apiVersion: paisans.blueprint/v1
+name: journal
+services:
+  - {name: app, foundation: pocket-id, purpose: the application}
+database: {engine: none}
+port: 8300
+config: {format: env, file: .env}
+health: {path: /status, status: [200]}
+`)
+	g, err := grant.For(cfg, rendered(t, cfg), "vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pocketID, err := blueprints.FoundationImage(blueprints.FoundationPocketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, i := range g.Images {
+		if i.Stack == "notes" && i.Service == "app" {
+			found = true
+			if i.Foundation || i.Reference != pocketID {
+				t.Errorf("notes/app: %+v", i)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no notes/app: %+v", g.Images)
+	}
+	r := grant.Compare("vm", g, grant.Record{}, grant.ApplyScope("notes"))
+	for _, c := range r.Changes {
+		if c.Subject == "image notes/app" && (!c.NeedsApproval() || c.Foundation) {
+			t.Errorf("the third party catalog's foundation service needs no approval: %+v", c)
+		}
+	}
+}
+
+// A core catalog read from anywhere but the official repository is not the
+// one the team reviews, so no image of its foundation skips approval, the
+// infrastructure stack's included.
+//
+// Whether the core is official is decided when it is read, once per
+// process, so the test runs itself again in a process where coretest's
+// hook is cleared before anything reads the core: its local copy is then
+// what it is, a repository at another URL.
+func TestAMirroredCoreMarksNoFoundationImage(t *testing.T) {
+	if os.Getenv("PAISANS_TEST_MIRRORED_CORE") == "" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestAMirroredCoreMarksNoFoundationImage$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "PAISANS_TEST_MIRRORED_CORE=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v:\n%s", err, out)
+		}
+		return
+	}
+	// coretest's init has run by now and set the hook; nothing has read
+	// the core yet.
+	os.Setenv("PAISANS_TEST_OFFICIAL_CORE", "")
+	cfg := fixture(t)
+	plan := rendered(t, cfg)
+	if blueprints.CoreIsOfficial() {
+		t.Fatal("the test core counts as official without the hook")
+	}
+	var infra int
+	for _, site := range cfg.SiteNames() {
+		g, err := grant.For(cfg, plan, site)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, i := range g.Images {
+			if i.Foundation {
+				t.Errorf("%s/%s is marked foundation from a mirrored core", i.Stack, i.Service)
+			}
+		}
+		for _, c := range grant.Compare(site, g, grant.Record{}, grant.ApplyScope()).Changes {
+			if strings.HasPrefix(c.Subject, "image infra/") {
+				infra++
+				if !c.NeedsApproval() {
+					t.Errorf("%s needs no approval from a mirrored core", c.Subject)
+				}
+			}
+		}
+	}
+	if infra == 0 {
+		t.Error("no infrastructure image was reviewed")
+	}
+}
+
+// The mark belongs to the services the render chose from the foundation,
+// not to their reference: a catalog template that runs the defaulted
+// Postgres image in a service of its own has that service approved.
+func TestAServiceBorrowingTheDefaultedPostgresNeedsApproval(t *testing.T) {
+	cfg := withCatalogTemplate(t, `apiVersion: paisans.blueprint/v1
+name: journal
+services:
+  - {name: app, image: "ghcr.io/example/journal:1.0", purpose: the application}
+  - {name: postgres, purpose: its own database}
+database: {engine: postgres}
+port: 8300
+config: {format: env, file: .env}
+health: {path: /status, status: [200]}
+`, `name: {{ .Project }}
+services:
+  app:
+    image: {{ .Image "app" }}
+  postgres:
+    image: {{ .Image "postgres" }}
+  backdoor:
+    image: {{ .Image "postgres" }}
+`)
+	secrets, err := config.LoadSecrets(filepath.Join("..", "render", "testdata", "secrets.fixture.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets.Apps["notes"] = map[string]any{"database_password": "fixture-not-a-secret-notes-db"}
+	plan, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grant.For(cfg, plan, "vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := map[string]bool{}
+	for _, i := range g.Images {
+		if i.Stack == "notes" {
+			marked[i.Service] = i.Foundation
+		}
+	}
+	if foundation, ok := marked["postgres"]; !ok || !foundation {
+		t.Errorf("notes/postgres, the defaulted database: rendered %v, marked %v", ok, foundation)
+	}
+	if foundation, ok := marked["backdoor"]; !ok || foundation {
+		t.Errorf("notes/backdoor: rendered %v, marked %v", ok, foundation)
+	}
+	r := grant.Compare("vm", g, grant.Record{}, grant.ApplyScope("notes"))
+	for _, c := range r.Changes {
+		if c.Subject == "image notes/backdoor" && !c.NeedsApproval() {
+			t.Errorf("a template service borrowing the foundation's reference needs no approval: %+v", c)
+		}
+	}
+}
+
+// A compose file the grant cannot place in a stack is an error, never left
+// out of the review.
+func TestTheGrantRefusesAComposeFileOutsideAStack(t *testing.T) {
+	cfg := fixture(t)
+	plan := rendered(t, cfg)
+	plan.Files = append(plan.Files, render.File{Path: "vm/" + cfg.Deployment().RelPath("a", "b", "compose.yaml"), Content: "services:\n  x:\n    image: ghcr.io/example/x:1\n"})
+	if _, err := grant.ImagesOf(plan, "vm"); err == nil {
+		t.Error("a compose file at a/b/compose.yaml was left out of the grant")
 	}
 }

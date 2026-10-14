@@ -10,6 +10,7 @@
 package applytest
 
 import (
+	"github.com/paisans-software/paisans-stack/internal/render"
 	"strings"
 
 	"github.com/paisans-software/paisans-stack/internal/apply"
@@ -39,12 +40,16 @@ func Pinned(content string) string {
 	for i, line := range lines {
 		body := strings.TrimRight(line, "\n")
 		trimmed := strings.TrimLeft(body, " ")
-		ref, ok := strings.CutPrefix(trimmed, "image: ")
+		ref, quoted, ok := render.ImageLine(trimmed)
 		if !ok || !strings.Contains(ref, "*") {
 			continue
 		}
 		tagged, _ := Registry{}.Track(ref)
-		lines[i] = body[:len(body)-len(trimmed)] + "image: " + tagged + "@" + Digest + line[len(body):]
+		to := tagged + "@" + Digest
+		if quoted {
+			to = `"` + to + `"`
+		}
+		lines[i] = body[:len(body)-len(trimmed)] + "image: " + to + line[len(body):]
 	}
 	return strings.Join(lines, "")
 }

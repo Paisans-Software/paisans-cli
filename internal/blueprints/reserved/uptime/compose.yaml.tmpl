@@ -15,7 +15,7 @@ services:
   app:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "app" }}
+    image: {{ yamlquote (.Image "app") }}
     restart: unless-stopped
     user: "0:0"
     # The image declares its own healthcheck on /healthz (Dockerfile at

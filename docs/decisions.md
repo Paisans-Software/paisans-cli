@@ -2415,29 +2415,65 @@ Founder decision, 2026-10-13. It amends the grant review of
 
 ### What was decided
 
-Any image the render takes from the core catalog's `foundation.yaml` needs no
-`approve` in `apply`'s grant review when it is added
-or changed. The review lists it apart, under `foundation images, reviewed in
-the core catalog:`, and the host's record holds it like every other image. That is the
-infrastructure stack's images, the gateway's Caddy unless `acme.image` declares
-one, a pinned app's own database unless the configuration declares one, the
-services the toolkit adds to a stack (the admins heartbeat), and a service
-written with `foundation:` in any blueprint, a third party catalog's included,
-since its image is then the reviewed `foundation.yaml` reference.
+An image needs no `approve` in `apply`'s grant review, when it is added or
+changed, only when all of these hold:
 
-Everything else is approved as it was: an image a blueprint names itself with
-`image:` (Wiki.js, Mbin, WriteFreely, any third party catalog's), an image the
-configuration declares, keys, the web server's directory and catalog
-blueprints. Whether an image is the foundation's is decided by where the render
-took it, never by matching its repository, so a catalog blueprint writing the
-foundation's own reference under `image:` is still approved.
+1. The render itself took it from `foundation.yaml` for that service,
+   decided where the render chose it, never by matching its repository, so
+   another service of the same compose file a template points at the same
+   reference is approved.
+2. That `foundation.yaml` came from a release of the official core catalog: a
+   release tag (`vMAJOR.MINOR.PATCH`) of
+   `https://github.com/Paisans-Software/paisans-blueprints` names the commit
+   read, as that repository itself says (checked against it, never against the
+   configured URL, and recorded in the checkout so an offline run keeps it),
+   and the toolkit read the commit from a git checkout whose origin is that URL
+   and whose `HEAD` is that commit. The URL may differ only by a trailing
+   slash, a `.git` suffix and the case of its host. A commit no release tag
+   names (an unmerged branch, a pull request's head), a core pin with no tag, a
+   core from `PAISANS_CORE_CATALOG`, a `catalogs.core.url`, any mirror, a
+   cached commit another URL fetched, or an installed configuration store
+   snapshot is not official.
+3. The service is the toolkit's own: the infrastructure stack's, the gateway's
+   Caddy unless `acme.image` declares one, a pinned app's own database unless
+   the configuration declares one, a service the toolkit adds to a stack (the
+   admins heartbeat), or a service written with `foundation:` in a reserved
+   blueprint or a core catalog one.
+
+The review lists such an image apart, under `foundation images, reviewed in the
+core catalog:`, and the host's record holds it like every other image.
+
+Everything else is approved as it was: a service a third party catalog's
+blueprint writes with `foundation:`, every image when the core catalog was read
+from any other URL, an image a blueprint names itself with `image:` (Wiki.js,
+Mbin, WriteFreely, any third party catalog's), an image the configuration
+declares, keys, the web server's directory and catalog blueprints. Whether an
+image is the foundation's is decided by where the render took it, never by
+matching its repository, so a catalog blueprint writing the foundation's own
+reference under `image:` is still approved.
+
+The founder narrowed the first version of this decision, which exempted a
+`foundation:` service in any blueprint and did not ask where the core catalog
+came from: "Approvals are only skipped if they are
+https://github.com/Paisans-Software/paisans-blueprints/foundation.yaml. DO NOT
+ALLOW 3p FOUNDATION BLUEPRINTS TO BYPASS APPROVALS."
 
 ### Why
 
-The team reviews `foundation.yaml` in paisans-blueprints pull requests, so its
-images are checked once, before any deployment reads them. Asking every
-operator to approve the same tracks again at every apply repeats a check
-already made.
+The team reviews `foundation.yaml` in the official repository's pull
+requests and releases it with a release tag there, so the images of a release
+fetched from that URL at that commit are checked once, before any deployment
+reads them. The repository also serves commits the team never merged or
+released (GitHub serves any pull request's head), so the URL alone does not
+say a commit was reviewed; a release tag the repository itself names does.
+Asking every operator to approve the same tracks again at every apply repeats a
+check already made. A third party catalog or a mirror of the core catalog is
+not reviewed by that team: a mirror's `foundation.yaml` can say anything, and a
+third party blueprint's choice to run a foundation image in its own stack, with
+its own configuration around it, is that catalog's choice, which nobody on the
+team reviewed. A snapshot is checked only against the sums its own publisher
+wrote, and the catalog cache is keyed by commit alone, so neither says where
+its bytes came from; only a checkout's origin and `HEAD` do.
 
 ### What was weighed
 
@@ -2448,3 +2484,6 @@ already made.
   capability.** Not chosen, for the same boundary.
 * **Requiring pull request approvals on the core catalog** before relying on
   its review: declined for now.
+* **Exempting a `foundation:` service in any blueprint**, a third party
+  catalog's included, since its image is then the reviewed reference. This was
+  the first version; the founder narrowed it to the toolkit's own services.

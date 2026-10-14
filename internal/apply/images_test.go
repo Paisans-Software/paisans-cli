@@ -178,7 +178,7 @@ func TestTheCaddyTagIsPinnedToTheBuildItNames(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(host.files[infraCompose], "    image: "+want+"\n") {
+	if !strings.Contains(host.files[infraCompose], "    image: \""+want+"\"\n") {
 		t.Errorf("the compose file does not name the build:\n%s", host.files[infraCompose])
 	}
 	got := manifestCaddy(t, host)

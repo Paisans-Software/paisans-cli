@@ -936,7 +936,7 @@ func TestTheGatewayRunsAnImageWithTheModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(infra, "image: "+want) {
+	if !strings.Contains(infra, "image: \""+want+"\"") {
 		t.Errorf("the gateway does not run the image carrying its provider:\n%s", infra)
 	}
 	if strings.Contains(infra, "image: caddy:") {
@@ -970,7 +970,7 @@ func TestADeclaredImageReachesTheGateway(t *testing.T) {
 	}
 
 	infra := files["vm/srv/paisans/f2a9/infra/compose.yaml"]
-	if !strings.Contains(infra, "image: "+cfg.ACME.Image) {
+	if !strings.Contains(infra, "image: \""+cfg.ACME.Image+"\"") {
 		t.Errorf("the gateway does not run the declared image:\n%s", infra)
 	}
 	published, _ := blueprints.FoundationImage(blueprints.FoundationCaddy)

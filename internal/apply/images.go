@@ -66,7 +66,7 @@ var FreshImages func() Resolver
 // empty when there is none.
 func unresolvedTrack(compose string) string {
 	for _, line := range strings.Split(compose, "\n") {
-		if ref, ok := strings.CutPrefix(strings.TrimSpace(line), "image: "); ok && imagedigest.IsTrack(ref) {
+		if ref, _, ok := render.ImageLine(strings.TrimSpace(line)); ok && imagedigest.IsTrack(ref) {
 			return ref
 		}
 	}

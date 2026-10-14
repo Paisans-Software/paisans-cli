@@ -1247,6 +1247,12 @@ func execute(plan *Plan, t Transport) error {
 				"%s: the gateway's Caddy image could not be pulled, so nothing was changed. If the registry answered unauthorized or denied, the image is private: make it public, or log the host in to that registry:\n%s",
 				plan.Site, out)
 		}
+		// grep -F takes each line of its pattern as a pattern of its own, so
+		// the module is checked to be one name before it is handed over: any
+		// module the image has would otherwise pass.
+		if !moduleName.MatchString(plan.ACMEModule) {
+			return fmt.Errorf("%s: %q is not a module name, so the gateway's Caddy was not checked for it and not reloaded", plan.Site, plan.ACMEModule)
+		}
 		command := fmt.Sprintf(
 			"%s run --rm --no-deps --entrypoint caddy caddy list-modules | grep -qxF %s",
 			infra, shellQuote(plan.ACMEModule))
@@ -1725,3 +1731,7 @@ func garageReplicationGuard(site, deployed, rendered string) error {
 	}
 	return fmt.Errorf("%s: Garage there runs at replication %d and the configuration says %d. Garage refuses to start when its stored layout disagrees with its configuration, so apply will not write this file. Change the factor with `paisans storage add --change-replication`, which stops every Garage node and rebuilds the layout, then run apply again. Nothing was changed", site, have, want)
 }
+
+// moduleName is a Caddy module identifier as `caddy list-modules` prints one
+// (Eg: dns.providers.desec).
+var moduleName = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)

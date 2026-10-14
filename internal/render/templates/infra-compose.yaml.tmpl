@@ -9,7 +9,7 @@ services:
   etcd:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .EtcdImage }}
+    image: {{ yamlquote .EtcdImage }}
     restart: unless-stopped
     network_mode: host
     command:
@@ -48,7 +48,7 @@ services:
   patroni:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .SpiloImage }}
+    image: {{ yamlquote .SpiloImage }}
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -74,7 +74,7 @@ services:
   haproxy:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .HAProxyImage }}
+    image: {{ yamlquote .HAProxyImage }}
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -84,7 +84,7 @@ services:
   garage:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .GarageImage }}
+    image: {{ yamlquote .GarageImage }}
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -96,7 +96,7 @@ services:
   caddy:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .CaddyImage }}
+    image: {{ yamlquote .CaddyImage }}
     restart: unless-stopped
     network_mode: host
     # Relative to this file, so the path names the caddy/ directory the token
@@ -126,7 +126,7 @@ services:
   heartbeat:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .HeartbeatImage }}
+    image: {{ yamlquote .HeartbeatImage }}
     restart: unless-stopped
     env_file:
       - heartbeat/heartbeat.env

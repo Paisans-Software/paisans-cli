@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -55,6 +57,14 @@ var templateFuncs = template.FuncMap{
 	// envquote quotes a value for a .env exactly as a passthrough key is
 	// quoted, for a value an operator supplied rather than one generated.
 	"envquote": envquote,
+	// yamlquote writes a string as a double quoted YAML scalar, for a value
+	// an operator supplied: a JSON string is one, with every quote, backslash
+	// and line break escaped, so the value cannot end the scalar early.
+	"yamlquote": yamlquote,
+	// jsonquote writes a string as a JSON string, quotes included, for a
+	// template that writes an operator's setting into JSON: a quote or a
+	// backslash in it cannot end the string early.
+	"jsonquote": jsonquote,
 	// stableULID is a ULID derived from an app's name (blueprints.StableULID),
 	// for software that must be told one and given the same one every run.
 	"stableULID": blueprints.StableULID,
@@ -658,6 +668,13 @@ func TemplateSet(blueprint config.Blueprint) ([]string, error) {
 // lands at /srv/paisans/<token>/<stack>/config/packages/x.yaml, so nothing holds a separate
 // mapping of template to location and a new file in a set needs no code.
 func (p *planner) renderTemplateSet(base string, app plannedApp) ([]File, error) {
+	// The stack's directory is one directory under the deployment's root,
+	// named for the app. A name that is not one segment would put the
+	// stack's files elsewhere, out of the root or out of the review that
+	// reads every stack (config refuses it; this is the render's own check).
+	if stack := p.dep().RelPath(app.Name); path.Dir(stack) != p.dep().RelPath() || path.Base(stack) != app.Name {
+		return nil, fmt.Errorf("apps.%s: the name puts the stack's files outside the deployment's own directory for it, %s", app.Name, p.dep().RelPath(app.Name))
+	}
 	dir := string(app.Blueprint)
 	entries, err := fs.ReadDir(blueprints.Templates, dir)
 	if err != nil {
@@ -1064,3 +1081,17 @@ func (p *planner) electionTimeoutMS() int {
 // PublicKey derives a site's WireGuard public key from its private key, for a
 // command that reads a peer's key back from `wg show`.
 func PublicKey(private string) (string, error) { return publicKey(private) }
+
+// yamlquote is the template function of that name. A `$` is doubled as
+// well, since docker compose interpolates `$` in every value of a compose
+// file, quoted or not, and `$$` is its escape for a literal one.
+func yamlquote(v string) (string, error) {
+	raw, err := json.Marshal(v)
+	return strings.ReplaceAll(string(raw), "$", "$$"), err
+}
+
+// jsonquote is the template function of that name.
+func jsonquote(v string) (string, error) {
+	raw, err := json.Marshal(v)
+	return string(raw), err
+}

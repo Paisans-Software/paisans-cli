@@ -47,6 +47,9 @@ var (
 // from.
 const CatalogRepoPrefix = "paisans-"
 
+// FullCommit reports whether s is a full 40 character lowercase commit id.
+func FullCommit(s string) bool { return fullCommit.MatchString(s) }
+
 // ValidCatalogName reports whether name is one a catalog may be declared
 // under.
 func ValidCatalogName(name string) bool { return catalogName.MatchString(name) }

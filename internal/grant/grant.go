@@ -13,6 +13,7 @@ package grant
 import (
 	"fmt"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -67,10 +68,11 @@ type Image struct {
 	Stack     string `json:"stack"`
 	Service   string `json:"service"`
 	Reference string `json:"reference"`
-	// Foundation is an image the render took from the core catalog's
-	// foundation.yaml, which the team reviews in the core catalog's pull
-	// requests. It is decided by where the render took the image
-	// (render.ComposeImage.Foundation), never by its name.
+	// Foundation is an image the render took from the official core
+	// catalog's foundation.yaml for one of the toolkit's own services, which
+	// the team reviews in that repository's pull requests. It is decided by
+	// where the render took the image for this service
+	// (render.ComposeImage.FoundationServices), never by its name.
 	Foundation bool `json:"foundation,omitempty"`
 }
 
@@ -148,13 +150,16 @@ func KeysOf(s config.SSH) []Key {
 // ImagesOf is every service of every compose file plan writes for site, with
 // the image it names. A service naming no image is left out, since it runs
 // nothing a reference chose. An image is marked Foundation when the render
-// says it took it from the foundation for that file (render.ComposeImage).
+// says it took it from the foundation for that service of that file
+// (render.ComposeImage.FoundationServices).
 func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 	var out []Image
+	// Keyed by the compose service, never by the reference, so a service a
+	// template points at a foundation image's reference is not marked.
 	foundation := map[[2]string]bool{}
 	for _, image := range plan.Images[site] {
-		if image.Foundation {
-			foundation[[2]string{image.Path, image.Image}] = true
+		for _, service := range image.FoundationServices {
+			foundation[[2]string{image.Path, service}] = true
 		}
 	}
 	for _, file := range plan.Files {
@@ -164,6 +169,11 @@ func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 		}
 		_, stack, rest, ok := deployment.SplitRel(rel)
 		if !ok || rest != "compose.yaml" {
+			// A compose file anywhere but a stack's own directory would run
+			// images the review never shows.
+			if path.Base(rel) == "compose.yaml" {
+				return nil, fmt.Errorf("%s is a compose file outside any stack's own directory", file.Path)
+			}
 			continue
 		}
 		services, err := blueprints.ComposeMounts(file.Content)
@@ -172,7 +182,7 @@ func ImagesOf(plan *render.Plan, site string) ([]Image, error) {
 		}
 		for name, service := range services {
 			if ref := strings.TrimSpace(service.Image); ref != "" {
-				out = append(out, Image{Stack: stack, Service: name, Reference: ref, Foundation: foundation[[2]string{file.Path, ref}]})
+				out = append(out, Image{Stack: stack, Service: name, Reference: ref, Foundation: foundation[[2]string{file.Path, name}]})
 			}
 		}
 	}

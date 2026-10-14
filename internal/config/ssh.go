@@ -433,13 +433,14 @@ func hasAdmin(admins map[string]Admin, id string) bool {
 }
 
 // ControlRune is the first control character in s, if it holds one: a C0
-// control (below U+0020, tab and line breaks included), DEL, or a C1 control
-// (U+0080 to U+009F). A terminal reads these as commands rather than text,
+// control (below U+0020, tab and line breaks included), DEL, a C1 control
+// (U+0080 to U+009F), or the line and paragraph separators U+2028 and
+// U+2029, which YAML parsers built on libyaml read as line breaks. A terminal reads these as commands rather than text,
 // and ESC or CSI followed by a few printable characters moves the cursor,
 // clears a line or rewrites one already printed.
 func ControlRune(s string) (rune, bool) {
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == 0x2028 || r == 0x2029 {
 			return r, true
 		}
 	}

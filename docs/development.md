@@ -1502,7 +1502,15 @@ Tests never fetch. A test package that reads a core blueprint or the
 foundation carries a `core_test.go` importing `internal/blueprints/coretest`
 blank, which makes the test copy a local repository tagged with the release
 `core.release` names, points `PAISANS_CORE_CATALOG` at it, installs its commit
-in a catalog cache, and allows git only local repositories. A test that needs a cache of its own calls
+in a catalog cache as a git checkout whose origin is the copy, and allows git
+only local repositories. It also sets `PAISANS_TEST_OFFICIAL_CORE` to the
+copy's URL, so `blueprints.CoreIsOfficial` counts that checkout as the official
+core catalog and its foundation's images skip approval as
+the real one's do; `internal/blueprints` reads that variable only in a binary
+`go test` built (`testing.Testing`), so no production run can count another core
+as official. The answer is fixed when the core is read, so a test that wants a
+mirror clears the variable before anything reads the core, in a process of its
+own. A test that needs a cache of its own calls
 `coretest.Cache(t)`, which holds the same core copy. The reserved blueprints in `internal/blueprints/reserved/` are this
 repository's own and are edited in place.
 

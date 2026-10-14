@@ -126,7 +126,9 @@ func TagCommit(url, tag string) (string, error) {
 	commit := ""
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 2 {
+		// ls-remote matches a pattern against the end of a ref, so
+		// refs/tags/x/refs/tags/<tag> answers too; only the tag itself is it.
+		if len(f) != 2 || (f[1] != "refs/tags/"+tag && f[1] != "refs/tags/"+tag+"^{}") {
 			continue
 		}
 		if strings.HasSuffix(f[1], "^{}") || commit == "" {

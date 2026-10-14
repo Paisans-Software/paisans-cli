@@ -539,6 +539,80 @@ func (a App) UsesGate() bool { return a.Gated || a.AutoLogin }
 // file declaring an app of that name while the gate is needed is refused.
 const GateApp = "gate"
 
+// keyPath is a mapping key as an error message prints it in a key's path:
+// as written when it is a plain word, and quoted otherwise, so a key holding
+// a line break or a terminal control cannot change what the message shows.
+func keyPath(k string) string {
+	if plainKey.MatchString(k) {
+		return k
+	}
+	return fmt.Sprintf("%q", k)
+}
+
+var plainKey = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// settingControlRune is the first control character (ControlRune) in a
+// setting's value: a string, or any string in a list or a mapping. A
+// multi-line text setting, written into a file of its own, may hold line
+// breaks and tabs.
+func settingControlRune(v any, multiline bool) (rune, bool) {
+	switch x := v.(type) {
+	case string:
+		for _, r := range x {
+			if multiline && (r == '\n' || r == '\t') {
+				continue
+			}
+			if c, ok := ControlRune(string(r)); ok {
+				return c, true
+			}
+		}
+	case []any:
+		for _, item := range x {
+			if r, ok := settingControlRune(item, multiline); ok {
+				return r, true
+			}
+		}
+	case map[string]any:
+		for _, item := range x {
+			if r, ok := settingControlRune(item, multiline); ok {
+				return r, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// acmeProvider is a DNS provider's name as caddy-dns modules take it
+// (dns.providers.<name>).
+var acmeProvider = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// imageRef is the characters an image reference is written with: a
+// registry, a repository, a tag (a track's `*` included) and a digest. A
+// reference is written into a compose file as it is, so anything else (a
+// space, a `#`, a quote, a line break in any encoding) could end the value
+// and add a key.
+var imageRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@+*-]*$`)
+
+func imageRefProblem(ref string) string {
+	return fmt.Sprintf("%q is not an image reference: letters, digits and . _ / : @ + * -, as in ghcr.io/example/app:1.2 or a track like ghcr.io/example/app:1.*. It is written into a compose file as it is, so any other character could add a key to the service.", ref)
+}
+
+// nameCharsRE is what nameChars accepts.
+var nameCharsRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// nameChars reports whether s holds only characters a DNS name can, and an
+// underscore, which validate refuses with its own reason. It is not a full
+// check of a name's shape; it is what keeps a value the toolkit's templates
+// write as it is (a Caddyfile, an env file, a WireGuard file) from adding a
+// line, a brace or a shell expansion to them.
+func nameChars(s string) bool { return len(s) <= 253 && nameCharsRE.MatchString(s) }
+
+// InfraStack is the toolkit's infrastructure stack: the directory and the
+// compose project every site's infrastructure services render into, beside
+// one per app. An app takes its stack's name from its own, so an app of this
+// name is refused: its files would land on the infrastructure stack's.
+const InfraStack = "infra"
+
 // GateHostname is the gate's hostname: the one name the identity provider's
 // callback is registered against, under the community's domain so the
 // session cookie the gate writes covers every app.
@@ -1008,6 +1082,8 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if c.Community.Domain == "" {
 		add("community.domain: required. It is the community's federation identity and cannot be changed later.")
+	} else if !nameChars(c.Community.Domain) {
+		add("community.domain: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the apps' env files as it is, so anything else could add to them.", c.Community.Domain)
 	}
 	switch {
 	case c.Mesh.Subnet == "" && noSubnet:
@@ -1030,6 +1106,10 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	for _, name := range c.SiteNames() {
 		site := c.Sites[name]
+		if !blueprintName.MatchString(name) {
+			add("sites.%q: %q is not a site name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63. The name is written into compose files, shell scripts and HAProxy and Patroni configuration, and names a directory of the render, so anything else could add to those files, run as a command, or write outside the directory.", name, name)
+			continue
+		}
 		if len(site.Roles) == 0 && len(c.PinnedTo(name)) == 0 {
 			add("sites.%s.roles: required. Give the site at least one of data, apps, gateway, witness, storage, monitor. A site may have none only when an app is pinned to it, because then it exists to host that app.", name)
 		}
@@ -1058,6 +1138,15 @@ func (c *Config) structural(noSubnet bool) error {
 				add("sites.%s.endpoint: %q %v. Write it as a host and a port, for example vm.example.org:51820, or as a port alone, for example \":51820\", beside a public_address: the port is also the one this site's WireGuard listens on.", name, site.Endpoint, err)
 			} else if host, _, _ := net.SplitHostPort(site.Endpoint); host == "" && site.PublicAddress == "" {
 				add("sites.%s.endpoint: %q is a port alone, which means public_address on that port, and the site declares no public_address. Declare it, for example public_address: 203.0.113.10, or write the endpoint as a host and a port.", name, site.Endpoint)
+			} else if host != "" && net.ParseIP(host) == nil && !nameChars(host) {
+				add("sites.%s.endpoint: %q names a host with characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into every other site's WireGuard file as it is, and a line added there runs as root when the interface comes up.", name, site.Endpoint)
+			}
+		}
+		// Each is written into WireGuard files as it is, for the same reason
+		// as the endpoint; validate says which kind of address each must be.
+		for _, a := range []struct{ key, value string }{{"public_address", site.PublicAddress}, {"public_address6", site.PublicAddress6}} {
+			if a.value != "" && net.ParseIP(a.value) == nil {
+				add("sites.%s.%s: %q is not an IP address. It is written into every other site's WireGuard file as it is, and a line added there runs as root when the interface comes up.", name, a.key, a.value)
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
@@ -1071,17 +1160,28 @@ func (c *Config) structural(noSubnet bool) error {
 	problems = append(problems, c.adminProblems()...)
 	for _, name := range c.AppNames() {
 		app := c.Apps[name]
+		if !blueprintName.MatchString(name) {
+			add("apps.%q: %q is not an app name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63. The name is the app's stack directory and compose project, so a slash, a dot or a capital would put its files somewhere else, outside the deployment or out of the review that reads every stack.", name, name)
+			continue
+		}
+		if name == InfraStack {
+			add("apps.%s: the name is the toolkit's infrastructure stack's. An app renders into a stack directory and a compose project named for it, beside the infrastructure stack, so this app's files would land on that stack's. Rename this app.", name)
+		}
 		if app.Blueprint == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
+		} else if !nameChars(app.Hostname) {
+			add("apps.%s.hostname: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname)
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
-				add("apps.%s.images.%s %s", name, service, controlProblem(r))
+				add("apps.%s.images.%s %s", name, keyPath(service), controlProblem(r))
 			} else if strings.TrimSpace(app.Images[service]) == "" {
-				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, service)
+				add("apps.%s.images.%s: empty. Give a full image reference, or remove the key to take the default this blueprint ships.", name, keyPath(service))
+			} else if !imageRef.MatchString(app.Images[service]) {
+				add("apps.%s.images.%s: %s", name, keyPath(service), imageRefProblem(app.Images[service]))
 			}
 		}
 		for _, role := range sortedKeys(app.Hostnames) {
@@ -1089,7 +1189,15 @@ func (c *Config) structural(noSubnet bool) error {
 				add("apps.%s.hostnames.primary: use the `hostname` key for the primary name. A role here names an additional hostname, and two places to write the same name is one place to get it wrong.", name)
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
-				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, role)
+				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, keyPath(role))
+			} else if !nameChars(app.Hostnames[role]) {
+				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role])
+			}
+		}
+		for _, key := range sortedKeys(app.Settings) {
+			multiline := app.Blueprint == BlueprintInvite && key == "code_of_conduct"
+			if r, ok := settingControlRune(app.Settings[key], multiline); ok {
+				add("apps.%s.settings.%s %s A setting is written into the application's own configuration (JSON, INI, env or YAML), where a line break or another control character could add to it.", name, keyPath(key), controlProblem(r))
 			}
 		}
 		if app.SMTP != nil {
@@ -1121,6 +1229,11 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	if r, ok := ControlRune(c.ACME.Image); ok {
 		add("acme.image %s", controlProblem(r))
+	} else if c.ACME.Image != "" && !imageRef.MatchString(c.ACME.Image) {
+		add("acme.image: %s", imageRefProblem(c.ACME.Image))
+	}
+	if c.ACME.Provider != "" && !acmeProvider.MatchString(c.ACME.Provider) {
+		add("acme.provider: %q is not a provider's name: lowercase letters, digits and underscores, as caddy-dns names its modules (Eg: desec, cloudflare). It is written into the gateway's Caddyfile as it is, so anything else could add to it.", c.ACME.Provider)
 	}
 	if c.ACME.Provider == "" && len(c.CaddySites()) > 0 {
 		// The providers are deliberately not listed here. This package does not

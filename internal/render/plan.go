@@ -5,6 +5,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -165,6 +166,24 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	// Two files at one path would leave one of them unwritten and the other
+	// reviewed and applied as if it were both (Eg: an app named for the
+	// infrastructure stack), so the render stops rather than choose.
+	// Nothing leaves the deployment's own directory but the WireGuard file
+	// wg-quick reads from /etc/wireguard: apply writes each file as root at
+	// its path, so a path that walks out would be written anywhere.
+	root, wg := cfg.Deployment().RelPath()+"/", cfg.Deployment().WireGuardConf()
+	for _, f := range files {
+		_, rel := splitSite(f.Path)
+		if rel != path.Clean(rel) || path.IsAbs(rel) || (!strings.HasPrefix(rel, root) && rel != wg) {
+			return nil, fmt.Errorf("the configuration renders %s, outside the deployment's own directory", f.Path)
+		}
+	}
+	for i := 1; i < len(files); i++ {
+		if files[i].Path == files[i-1].Path {
+			return nil, fmt.Errorf("the configuration renders two files at %s. Each stack is a directory of its own; rename whatever shares a name with another stack", files[i].Path)
+		}
+	}
 	images, err := p.listImages(files)
 	if err != nil {
 		return nil, err
@@ -306,10 +325,15 @@ func (p *planner) appImages(app config.App) (map[string]string, error) {
 }
 
 // appImageOrigins is appImages, and the services whose image it took from
-// the core catalog's foundation: one the blueprint names with foundation:,
-// and the database's, when the configuration declares neither.
+// the core catalog's foundation for the toolkit: one a reserved or core
+// blueprint names with foundation:, and the database's, which the toolkit
+// chooses for every blueprint, when the configuration declares neither. A
+// foundation: in a blueprint from any other catalog is that catalog's
+// choice, which the team that reviews foundation.yaml did not review, so it
+// is not counted.
 func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string]bool, error) {
 	out, foundation := map[string]string{}, map[string]bool{}
+	toolkits := blueprints.ToolkitBlueprint(app.Blueprint)
 	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
 		switch {
@@ -319,7 +343,7 @@ func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string
 			return nil, nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
 		case image != "":
 			out[service.Name] = image
-			foundation[service.Name] = service.Foundation != ""
+			foundation[service.Name] = service.Foundation != "" && toolkits
 		case service.Name == blueprints.PostgresService:
 			pg, err := blueprints.PostgresImage(p.postgresVersion())
 			if err != nil {

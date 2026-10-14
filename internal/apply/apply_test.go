@@ -2352,3 +2352,20 @@ func TestASharedHostApplyRemovesNoImageAndNoForeignVolume(t *testing.T) {
 		t.Errorf("removed %v, want only %s, which the replaced paisans container mounted", host.removedVolumes, ours)
 	}
 }
+
+// The module the gateway must carry is checked as one exact line: a module
+// name with a line break in it would hand grep -F several patterns, and any
+// one module the image has would pass.
+func TestTheModuleCheckIsOneExactLine(t *testing.T) {
+	host := newHost()
+	p, err := apply.Build("vm", plan(t), "dns.providers.nonesuch\nhttp.handlers.file_server", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err == nil || !strings.Contains(err.Error(), "is not a module name") {
+		t.Errorf("a module name holding a line break was checked: %v", err)
+	}
+	if host.ran("caddy reload") {
+		t.Error("the gateway was reloaded")
+	}
+}

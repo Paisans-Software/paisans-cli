@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/health/compose.yaml",
-      "sha256": "bf2912b4fdc6e703fb022e911cffdc68bf7938a42bad3fae4286e510dfaabe53",
+      "sha256": "0883c50e0bbe6281ece9753fe3b30fca2a1daad65d85bfa8d5c61f5525a492ad",
       "mode": "0644"
     },
     {
@@ -38,7 +38,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "1ebdea49b9e62aeb360b8376a4a038a78c44f862dccb28876626e7117ec6b7fa",
+      "sha256": "08d813aab28144ae3b167a2d91759fd37a5a4d55d55822edadd51d6931d47d5d",
       "mode": "0644"
     }
   ]

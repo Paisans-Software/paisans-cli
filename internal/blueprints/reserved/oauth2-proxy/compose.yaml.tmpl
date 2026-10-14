@@ -14,7 +14,7 @@ services:
   app:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
-    image: {{ .Image "app" }}
+    image: {{ yamlquote (.Image "app") }}
     restart: unless-stopped
     env_file:
       - .env
@@ -34,7 +34,7 @@ services:
       # through viper, which splits a string on commas into a list
       # (pkg/apis/options/load.go:27-55 at v7.15.4; viper v1.21.0,
       # viper.go:977-1022).
-      OAUTH2_PROXY_ALLOWED_GROUPS: "{{ .OIDCMemberGroup }},{{ .OIDCAdminGroup }}"
+      OAUTH2_PROXY_ALLOWED_GROUPS: {{ yamlquote (print .OIDCMemberGroup "," .OIDCAdminGroup) }}
       # /oauth2/auth answers for Caddy; nothing is proxied through this
       # container. A static upstream keeps that honest.
       OAUTH2_PROXY_UPSTREAMS: "static://202"

@@ -7,7 +7,9 @@
 // At init it makes the test copy, internal/blueprints/testdata/core, into a
 // git repository with one commit, tagged with the release
 // internal/blueprints/testdata/core.release names, points
-// PAISANS_CORE_CATALOG at it, and allows git only local repositories. A test
+// PAISANS_CORE_CATALOG at it, counts it as the official core catalog
+// (PAISANS_TEST_OFFICIAL_CORE, which only a test binary reads), and allows
+// git only local repositories. A test
 // then takes the same path a workstation does, listing the releases,
 // fetching the newest into a catalog cache and reading it, and can never
 // reach a forge. See docs/specs/2026-10-13-images-follow-tracks.md, "The core
@@ -29,8 +31,15 @@ import (
 )
 
 // completeMark is the mark internal/blueprints reads as a commit fetched in
-// full.
-const completeMark = ".paisans-complete"
+// full, and stateDir where, inside .git, it records a checkout's blueprints
+// and checked tags.
+const (
+	completeMark = ".paisans-complete"
+	stateDir     = "paisans"
+)
+
+// releaseTag is the test copy's release, which repository tags.
+var releaseTag string
 
 // installed is the release's directory in a catalog cache, shared by every
 // test in every package: it is keyed by the test copy's content, so a run
@@ -48,6 +57,13 @@ func init() {
 	}
 	installed = dir
 	if err := os.Setenv("PAISANS_CORE_CATALOG", "file://"+repo); err != nil {
+		panic(err)
+	}
+	// The test copy stands in for the official core catalog, so its
+	// foundation's images are exempt from approval as the real one's are.
+	// internal/blueprints reads this only in a test binary; a test that
+	// wants a mirror clears it.
+	if err := os.Setenv("PAISANS_TEST_OFFICIAL_CORE", "file://"+repo); err != nil {
 		panic(err)
 	}
 	if err := os.Setenv("PAISANS_CATALOG_CACHE", filepath.Dir(dir)); err != nil {
@@ -73,6 +89,11 @@ func Cache(t testing.TB) string {
 // temporary directory, and installs its commit in a catalog cache beside it,
 // unless an earlier run made the same ones. It returns the repository and
 // the commit's directory in the cache.
+//
+// The installed commit is a git checkout whose origin is the repository, as
+// internal/blueprints' Fetch makes one, since only such a checkout can be
+// the official core (blueprints.CoreIsOfficial). Every blueprint is checked
+// out and marked, and the tag marked as checked, so no test ever changes it.
 func install() (repo, dir string, err error) {
 	repo, err = repository()
 	if err != nil {
@@ -85,7 +106,7 @@ func install() (repo, dir string, err error) {
 		return "", "", fmt.Errorf("reading the test copy's commit: %w", err)
 	}
 	commit := strings.TrimSpace(string(out))
-	dir = filepath.Join(repo+"-cache", commit)
+	dir = filepath.Join(repo+"-checkout", commit)
 	if _, err := os.Stat(filepath.Join(dir, completeMark)); err == nil {
 		return repo, dir, nil
 	}
@@ -97,25 +118,37 @@ func install() (repo, dir string, err error) {
 		return "", "", err
 	}
 	defer os.RemoveAll(work)
-	err = filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", "file://" + repo},
+		{"fetch", "--quiet", "--depth", "1", "origin", commit},
+		{"-c", "advice.detachedHead=false", "checkout", "--quiet", commit},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = work
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", "", fmt.Errorf("git %s: %s", strings.Join(args, " "), out)
 		}
-		rel, _ := filepath.Rel(repo, p)
-		if rel == ".git" {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return os.MkdirAll(filepath.Join(work, rel), 0o755)
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(filepath.Join(work, rel), data, 0o644)
-	})
+	}
+	entries, err := os.ReadDir(filepath.Join(work, "blueprints"))
 	if err != nil {
 		return "", "", err
+	}
+	marks := []string{filepath.Join(stateDir, "tags", hex.EncodeToString([]byte(releaseTag)))}
+	for _, e := range entries {
+		if e.IsDir() {
+			marks = append(marks, filepath.Join(stateDir, "complete", e.Name()))
+		}
+	}
+	for _, mark := range marks {
+		p := filepath.Join(work, ".git", mark)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return "", "", err
+		}
+		if err := os.WriteFile(p, []byte(releaseTag+"\n"), 0o644); err != nil {
+			return "", "", err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(work, completeMark), nil, 0o644); err != nil {
 		return "", "", err
@@ -141,6 +174,7 @@ func repository() (string, error) {
 		return "", err
 	}
 	tag := strings.TrimSpace(string(raw))
+	releaseTag = tag
 	src := filepath.Join(testdata, "core")
 	files := map[string][]byte{}
 	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {

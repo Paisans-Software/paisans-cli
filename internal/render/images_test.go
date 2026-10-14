@@ -41,7 +41,7 @@ func TestTheCaddyImageIsListedAsConfigured(t *testing.T) {
 		if img.Path != site+"/srv/paisans/f2a9/infra/compose.yaml" {
 			t.Errorf("%s lists Caddy in %s", site, img.Path)
 		}
-		if !strings.Contains(files[img.Path], "    image: "+published+"\n") {
+		if !strings.Contains(files[img.Path], "    image: \""+published+"\"\n") {
 			t.Errorf("%s's compose file does not name %s", site, published)
 		}
 	}
