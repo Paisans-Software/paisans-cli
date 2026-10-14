@@ -91,7 +91,8 @@ toolkit should not overstate it:
 | Stack | S3 support | Notes |
 |-------|-----------|-------|
 | Mbin | full | `S3_KEY`/`S3_SECRET`/`S3_BUCKET`/`S3_REGION`/`S3_ENDPOINT`. The Docker image's entrypoint then switches `public_uploads_filesystem` to the S3 adapter itself; only a bare metal or VM install edits `config/packages/oneup_flysystem.yaml` by hand. Upstream strongly advises a media reverse proxy so URLs stay stable across provider changes |
-| Outline | full | `FILE_STORAGE=s3` with the `AWS_*` variables; non-AWS endpoints need `AWS_S3_FORCE_PATH_STYLE=true`. Known upstream bug: the bucket must not be named `outline` |
+| Wiki.js | none needed | Wiki.js 2.x writes every upload to its `assetData` table in Postgres and serves it from there (`server/models/assets.js:128-139,226-228` at `v2.5.316`); its S3 storage modules only push copies outward (`supportedModes: [push]`). So the `wikijs` blueprint has no bucket and no media hostname, and the database's backup is the wiki's |
+| Outline, no longer a core blueprint | full | `FILE_STORAGE=s3` with the `AWS_*` variables; non-AWS endpoints need `AWS_S3_FORCE_PATH_STYLE=true`. Known upstream bug: the bucket must not be named `outline` |
 | Synapse | partial | `synapse-s3-storage-provider` is a *storage provider* that supplements the media store. **A local media directory is still required.** `store_synchronous: True` writes to S3 immediately; the bucket prefix cannot be changed once media exists |
 | Pocket ID | full, plus better | `FILE_BACKEND` takes `filesystem` (default), `s3`, or **`database`**. See the note below — `database` is the recommendation |
 | WriteFreely | full, and public | the kind means the [writefreely-wisp](https://github.com/josephquigley/writefreely-wisp) fork, which adds `[storage] type = s3`. With S3 the fork is direct only: it writes images and never serves them, requires `[storage] image_url_base`, and redirects its own `/uploads/` route there, so the blog's bucket is served on the blog's media hostname like Mbin's. That needs a fork build containing writefreely-wisp#171; an older one ignores the key and streams images itself |
@@ -178,19 +179,19 @@ The gateway is what joins the two, one site block per media hostname:
 |------|---------|----------------------------|--------------|
 | Mbin | public | Garage's web endpoint on 3902, `Host` rewritten to `<bucket>.web.garage.internal` | `KBIN_STORAGE_URL=https://<media host>` |
 | WriteFreely (the fork) | public | the same | `[storage] image_url_base = https://<media host>` |
-| Outline | private | Garage's S3 API on 3900, `Host` forwarded unchanged | `AWS_S3_UPLOAD_BUCKET_URL=https://<media host>`, path style |
+| Outline, while the core catalog carried it | private | Garage's S3 API on 3900, `Host` forwarded unchanged | `AWS_S3_UPLOAD_BUCKET_URL=https://<media host>`, path style |
 
 The rewritten `Host` is an internal suffix that resolves nowhere on purpose, so
 there is no DNS record or certificate for it. Because a hostname is one bucket,
 the path is the object key and nothing is stripped from it. Outline's
-forwarding is load bearing rather than tidy: Outline presigns its object URLs
+forwarding was load bearing rather than tidy: Outline presigns its object URLs
 and the upload a browser submits, a SigV4 signature covers the host it was
 signed with, and rewriting that header would invalidate every URL Outline
-issues. Its URLs are path style, `https://<media host>/<bucket>/<key>`, because
+issues. Its URLs were path style, `https://<media host>/<bucket>/<key>`, because
 the media hostname is not under Garage's S3 root domain and Garage then reads
 the bucket from the path. Outline also decides path style by looking for the
-bucket name anywhere in that URL, so a bucket whose name appears in it is
-refused as `outline-bucket-in-media-url`.
+bucket name anywhere in that URL, so its blueprint refused a bucket whose name
+appears in it as `outline-bucket-in-media-url`.
 
 **Every public media hostname sends `Content-Security-Policy: default-src
 'none'; style-src 'unsafe-inline'; sandbox` and `X-Content-Type-Options:
@@ -198,7 +199,7 @@ nosniff`.** Mbin and the blog store what they are given byte for byte, an SVG
 that carries script among it, and no S3 provider can store a response header on
 an object, so the gateway is the only place one can be set. The sandbox keeps
 such a file inert when it is opened directly rather than through an `<img>`.
-Outline's media hostname sends nosniff and not the policy, because Outline
+Outline's media hostname sent nosniff and not the policy, because Outline
 embeds PDF attachments in the page and a browser will not run its PDF viewer in
 a sandboxed document. What the policy would protect against there is already
 handled upstream: Outline stores every type outside a short list of images,
@@ -206,8 +207,9 @@ PDF, audio and video as `Content-Disposition: attachment`, and leaves SVG off
 that list deliberately.
 
 Which kinds are public is a property of the kind, in `internal/kinds`, not a
-setting. Outline's attachments are read by people who are signed in, and its
-bucket is never routed to the web endpoint at all. There is no configuration
+setting. A kind whose objects only signed in people read has its bucket
+never routed to the web endpoint at all; the core catalog has none today, since
+Wiki.js keeps its uploads in Postgres and has no bucket. There is no configuration
 key that can get this wrong in either direction.
 
 `TestEachAppsMediaHostnameServesOnlyItsOwnBucket` in `internal/garage` is what
@@ -339,13 +341,13 @@ The app has no bucket, no key and no media hostname: `storage init` and
 `storage add` provision nothing for it, `dns init` publishes no
 `<label>-media` record, the gateway routes no media hostname, and `init`
 generates no S3 key. It serves its files on its own hostname, where upstream
-serves them: Mbin under `/media`, the writefreely-wisp fork under
-`/uploads/`, and Outline through its own API. A gated app opens Mbin's and the
+serves them: Mbin under `/media` and the writefreely-wisp fork under
+`/uploads/`. A gated app opens Mbin's and the
 blog's file paths past the gate, exactly as a media hostname is never gated,
-because a federating server fetching an image has no gate session. Mbin and
-Outline run as an unprivileged user and their images do not take ownership of
-a bind mounted upload directory, so in local mode their stacks hand that one
-directory to the application's user when the container starts.
+because a federating server fetching an image has no gate session. Mbin runs
+as an unprivileged user and its image does not take ownership of a bind
+mounted upload directory, so in local mode its stack hands that one directory
+to the application's user when the container starts.
 
 **`local` is valid only with `placement: pinned`, and `cluster` with `local`
 is refused.** A clustered app runs on every apps site, and each would keep its
@@ -363,10 +365,11 @@ do:
 
 | Kind | `storage` |
 |------|-----------|
-| `mbin`, `outline`, `writefreely` | `s3` or `local` |
+| `mbin`, `writefreely` | `s3` or `local` |
 | `synapse`, `uptime` | `local` only. They have no S3 form here (Synapse's provider supplements its media store, the monitor keeps SQLite under `/data`), so `s3` is refused; `local` is accepted, since it says what they do anyway |
 | `pocket-id` | refused. Pocket ID chooses with its own `settings.file_backend` (Rule 3) |
 | `element`, `oauth2-proxy` | refused. They store no files |
+| `wikijs` | refused. Wiki.js keeps every upload in Postgres (Rule 3), so there are no files for the key to place |
 
 Changing the key on an app that already holds files moves none of them. The
 toolkit does not copy files between a bucket and a disk, and a bucket left
@@ -1969,7 +1972,7 @@ An app takes two maps that look alike and are not.
 
 **`settings` is input the toolkit reasons about.** A template asks for each key
 by name, and some are validated or acted on: `s3_bucket` is a setting because
-`validate` refuses one named `outline` and `storage init` creates it, and
+`storage init` creates it, and
 `sso_dashboard_link` is one because `apply` and `oidc client create` send it
 to the identity provider (see *`oidc client create` makes an app's client at Pocket
 ID*). An Mbin app's `queue` is one because it decides which services the stack
@@ -1990,7 +1993,7 @@ The kinds do not share a format, so a key means something different per kind:
 
 | Format | Kinds | File | A key means |
 |---|---|---|---|
-| env | mbin, outline, pocket-id, oauth2-proxy, uptime, invite | `.env` | the variable name |
+| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, invite | `.env` | the variable name |
 | ini | writefreely | `config.ini` | `section.key`, exactly one dot |
 | yaml | synapse | `homeserver.yaml` | a nested path, any depth |
 | json | element | `config.json` | a nested path, any depth |
@@ -2437,7 +2440,7 @@ Finishing either command first costs nothing but its resume.
 | `cluster.superuser_password`, `cluster.admin_password`, `cluster.standby_password` | Postgres | Patroni on every data site | reconnects; each replica's Patroni restarts in turn and the leader last, after a switchover |
 | `apps.<app>.database_password` | Postgres | the app | reconnects |
 | Mbin `rabbitmq_password`, `valkey_password`, `mercure_jwt_secret` | the broker, the cache, the hub | Mbin | a restart of the Mbin stack on each site in turn |
-| Outline `redis_password`, `utils_secret` | Valkey, Outline | Outline | a restart of the Outline stack on each site in turn |
+| Outline `redis_password`, `utils_secret`, while the core catalog carried it | Valkey, Outline | Outline | a restart of the Outline stack on each site in turn |
 | `storage.garage.admin_token` | each Garage node | nothing: the toolkit drives Garage through its command line | none |
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
@@ -2530,11 +2533,18 @@ includes it (Founder decision).
 
 **Some secrets are kept, and the plan lists each with why:**
 
-* **Pocket ID's `encryption_key`, Matrix Authentication Service's
-  `mas_encryption_secret` and Outline's `outline_secret_key`** encrypt data
-  already stored. Changing any of them makes that data unreadable, and none of
-  those projects offers a re-encryption the toolkit could drive. An admin who held one also holds a copy of the data it
+* **Pocket ID's `encryption_key` and Matrix Authentication Service's
+  `mas_encryption_secret`** encrypt data already stored, as Outline's
+  `outline_secret_key` did while the core catalog carried it. Changing any of
+  them makes that data unreadable, and none of those projects offers a
+  re-encryption the toolkit could drive. An admin who held one also holds a copy of the data it
   protects, so rotating it would take nothing back.
+* **Wiki.js's `local_admin_password`.** Wiki.js keeps the break glass
+  admin's password hashed in its own database once setup has run, and nothing
+  changes it there, so a rotated secret would no longer sign in and the
+  bootstrap could not configure the wiki (see *Wiki.js is configured by its
+  bootstrap*). Its blueprint says so with `never_rotate`, and `secrets rotate`
+  refuses it with that reason.
 * **`cluster.admin_password`, where the admin role cannot log in.** Spilo
   creates it `NOLOGIN` at the Spilo 4 tags `render` pins, which run Patroni 4,
   so no login checks its password and a new one would change nothing. Where
@@ -2750,7 +2760,7 @@ each app the leftovers belong to, which is the command that takes them off
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved four (`pocket-id`, the
-gate, `invite`, `uptime`). The first party ones, `mbin`, `outline` and the
+gate, `invite`, `uptime`). The first party ones, `mbin`, `wikijs` and the
 rest, are the **core catalog**'s, which the toolkit fetches at its newest
 release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
@@ -3103,8 +3113,13 @@ per browser, so a member the app's own client refuses is not redirected
 forever. It never fires on a deep link: neither Mbin's nor WriteFreely's
 sign-in route takes a destination, and a deep link sent through one would land
 on the front page. `auto_login: true` on a kind with no such route is refused
-(`auto-login-without-a-rule`), because it would do nothing; Outline needs none,
-since its sign-in screen redirects itself when OIDC is its only provider.
+(`auto-login-without-a-rule`), because it would do nothing. Wiki.js's rule
+covers `/` and `/login` and nothing else, because Wiki.js does the rest
+itself: any other page answers a guest with its refusal page and a Login
+button, and keeps the page asked for in its `loginRedirect` cookie, so a
+member following a deep link clicks once and lands where the link pointed
+(observed, `docs/specs/2026-10-13-wikijs-blueprint-findings.md`). Founder
+decision: the one click stays.
 
 **On a public app, the sign-in page signs in at the gate.** Nobody passes the
 gate on a public app, so a visitor there would only hold the gate's session if
@@ -6160,6 +6175,233 @@ is not a fix: the fork refuses to start when the marker is present and its
 database holds no settings, which is every new blog's first start. The warning
 changes nothing.
 
+### Wiki.js is configured by its bootstrap
+
+A community's wiki is where its admins keep what only admins should read and
+its members keep what everyone should, so who may read what has to follow the
+groups people are in at Pocket ID, without anyone copying memberships by hand.
+The core catalog's `wikijs` blueprint runs Wiki.js 2.5, which does that
+itself: its OAuth2 sign-in puts each person in the wiki groups their groups
+claim names, on every sign in, and its page rules gate content by path per
+group. Every Wiki.js fact below is cited at `v2.5.316`, the release the
+blueprint's track was read at, and every Pocket ID fact at `v2.14.0`. The
+design is `docs/specs/2026-10-13-wikijs-blueprint.md`, and what was observed
+rather than read is in its findings file beside it.
+
+```yaml
+apps:
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    settings:
+      member_group: members            # who may sign in at all
+      admin_group: admins
+      synced_groups: [admins, members] # the default: the two groups above
+      site_title: "Example Wiki"
+      site_description: ""
+      logo_url: ""                     # an absolute URL, or empty for Wiki.js's own
+      upload_max_mb: 5
+```
+
+**Wiki.js reads only its database from the environment.** Its first admin,
+sign-in providers, site URL and groups live in its database and change through
+its GraphQL API. So the blueprint runs a second service beside it, the
+bootstrap (`Paisans-Software/wikijs-bootstrap`, published as
+`ghcr.io/paisans-software/wikijs-bootstrap`), which sets them. It runs once per
+start of its container, then stays up and reports healthy once that run has
+converged, so `apply`'s health gate waits until Wiki.js is configured (an
+exited container counts as failed, whatever its status). A configuration
+change therefore reaches Wiki.js when `apply` recreates the stack. It reaches
+Wiki.js by service name on the stack's own network, never through the gateway,
+and holds no Pocket ID API key.
+
+One run waits for Wiki.js and its database, takes a Postgres advisory lock so
+that one instance's bootstrap at a time does the rest, finishes setup if the
+database is empty, signs in as the break glass admin, and sets:
+
+* the sign-in strategies: `pocketid`, Wiki.js's OAuth2 module pointed at
+  Pocket ID, first, and the local strategy after it;
+* the site: its public URL, the title, description and logo from the settings,
+  auto-login on, the local sign-in form hidden, the proxy trusted, and the
+  upload limit;
+* the built in `Guests` group with no permissions and no page rules, so the
+  wiki is sign in only;
+* the admin group's permissions;
+* every `synced_groups` group missing from Wiki.js, created with Wiki.js's
+  defaults.
+
+Setup is finished only on an empty `settings` table and under the lock,
+because Wiki.js's `/finalize` deletes every user and every group before it
+seeds (`server/setup.js:204-223`): a second call against a wiki in use would
+empty it. An instance that started before another finished setup keeps
+serving the setup page until it restarts, so the bootstrap shares the app's
+process namespace and runs as its user, uid 1000, to send it `SIGTERM`; its
+restart policy brings it back reading a set up database. Those are the
+bootstrap's only writes, each logged on a line of its own. It never deletes a
+group or a user, never changes a group's members, never edits a group other
+than `Guests` and the admin group, and never edits a page, because a service
+the deployment runs is approved as a whole only while every kind of write it
+makes is named.
+
+**`/finalize` is closed at the gateway.** It takes no authentication and no
+CSRF token (`server/setup.js:76`), so whoever reaches it first while the wiki
+is in setup mode owns the wiki. The blueprint's route refuses it on the wiki's
+hostname for every method, always, and only the bootstrap, on the stack's own
+network, can reach it.
+
+**Pocket ID is the only way in for members, through Wiki.js's OAuth2 module
+rather than its OpenID Connect one.** The OpenID Connect module fixes its
+scopes at `openid profile email`
+(`server/modules/authentication/oidc/definition.yml:10-13`), and Pocket ID
+sends the `groups` claim only to a client that asks for the `groups` scope
+(`oidc/claims_service.go:157`). The client's callback, PKCE and groups are in
+the table under *`oidc client create` makes an app's client at Pocket ID*. The
+Pocket ID client stays restricted to the member and admin groups, as every
+app's is: that restriction is who may sign in at all, and the groups claim
+decides only what a signed in person may do. Pocket ID asks nobody to consent,
+since its consent screen is off for every client the toolkit makes, and
+`sso_consent: true` turns it on (same section).
+
+**Auto-login is on at both layers.** Wiki.js sends `/login` to its first
+strategy, `pocketid`, and the gate's rule sends `/` and `/login` there for a
+member it already let through, so a member with a Pocket ID session comes back
+signed in with no prompt. A deep link takes one click: Wiki.js answers a guest
+asking for any page but `/` with its refusal page and a Login button, keeping
+the page in its `loginRedirect` cookie, and after the click the member lands on
+it (observed). Founder decision: the one click stays (see *The visibility gate
+is a per-app property*).
+
+**Membership is Pocket ID's; what a group may do is Wiki.js's.** On every sign
+in Wiki.js adds the person to each existing group their claim names and
+removes them from every group it does not (`oauth2/authentication.js:41-46`),
+matching names exactly and case sensitively (`:40`). A person added to a group
+by hand in Wiki.js loses it at their next sign in, so every group a member
+should be in is a Pocket ID group and is listed in `synced_groups`, which
+defaults to the admin group and the member group. The bootstrap creates each
+one missing in Wiki.js, so a new wiki has its groups before anyone signs in,
+and `apply` creates each one missing at Pocket ID, empty, through the
+blueprint's `oidc.extra_groups_setting`. Creating an identity provider group
+beyond an app's own takes explicit approval under
+`docs/deployment-agent-rules.md`, so `apply` lists those groups and asks for
+the word `create` at a terminal; without one it holds the app back and sends
+Pocket ID nothing. They are never added to the client's allowed groups, so who
+may sign in is unchanged. Permissions and page rules are set by the
+community's admins in Wiki.js: gating a set of pages by path, Eg: `/admin/` for
+the admin group only, is a page rule an admin writes.
+
+**The admin group gets every permission except `manage:system` and
+`manage:api`.** Founder decision. Each setting the bootstrap owns is a
+`manage:system` mutation (`site.graphql:69`, `authentication.graphql:70-91`),
+and someone holding `manage:groups` without `manage:system` cannot grant it,
+change a group that has it, or put anyone in one
+(`server/graph/resolvers/group.js:50-64,181-195`). `manage:api` goes with it
+because an API key made with full access acts as `Administrators`
+(`server/models/apiKeys.js`), which makes `manage:api` `manage:system` by
+another route. So only the built in `Administrators` group has it, and only
+the break glass admin is in it. A change in Wiki.js to anything the bootstrap
+sets is possible only for that admin and is undone at the bootstrap's next run.
+`site_title`, `site_description` and `logo_url` are settings for the same
+reason: changing them in Wiki.js needs `manage:system`, which no member has.
+`logo_url` must be reachable without signing in, because the sign-in page shows
+it to someone who has not; a logo uploaded into the wiki is not, since
+`Guests` cannot read assets.
+
+`validate` refuses a `synced_groups` that leaves out the admin group, because
+nobody but the break glass admin could then administer the wiki; that refusal
+is provisional, inferred rather than decided. It also refuses a name the
+bootstrap's environment file could not carry unchanged, a built in group
+(`Administrators`, `Guests`) as either group, an empty `site_title`, and an
+`upload_max_mb` outside 1 to 1024.
+
+**Uploads live in Postgres, so a wiki has no bucket** (Rule 3). Wiki.js caps an
+upload at `upload_max_mb` MiB per file, 5 by default
+(`server/app/data.yml:96-98`), and the gateway's request body limit for the
+hostname follows it with room for the request's framing, because a limit lower
+at the edge than in the app fails an upload with no message a member can read.
+The one path the image declares as a volume, `/wiki/data/content`, is bound
+under the stack's directory like every other (*Every volume an image declares
+is mounted, and `apply` checks it*).
+
+**Cluster placement works from the first version.** Founder decision. Under
+`cluster` Wiki.js runs on every apps site against one database, with
+`HA_ACTIVE=true`: each instance listens on Postgres `LISTEN/NOTIFY` and reloads
+configuration, sign-in and pages when another changes them
+(`server/core/db.js:229-264`). Each instance also has its own bootstrap, which
+converges the instance it sits beside. A clustered wiki connects with
+`DATABASE_URL` ending `?ssl=no-verify`, which is encrypted without checking the
+cluster's certificate, what `sslmode=require` means to the other apps. The
+parameter differs because the connection string parser in Wiki.js's image
+ignores `sslmode` and reads `ssl`: with `sslmode` it connected without TLS, and
+the cluster's `pg_hba.conf` refuses every connection without it (observed). A
+pinned wiki talks to the Postgres in its own project, which serves no TLS, and
+its DSN has neither. Still reasoned, not observed: that the `LISTEN` reconnects
+after a Patroni failover moves the primary (it did across a restart of one
+Postgres), and a sign in completed through a second instance.
+
+The blueprint is gateable. Founder decision. Once `Guests` has no permissions
+Wiki.js refuses guests every page, upload and GraphQL query, but before sign in
+it still writes an upload to disk before checking permission
+(`server/controllers/upload.js:13-22`) and answers differently for a page that
+exists and one that does not (`server/controllers/common.js:144-170,260-271`).
+The gate closes both, and puts everything Wiki.js exposes before sign in
+behind Pocket ID; the OAuth2 start and callback paths stay open, as an app's
+own sign-in routes are for every gateable blueprint.
+
+A deployment that ran Outline as its wiki is redeployed with Wiki.js, not
+converted.
+
+#### Recovering the break glass admin
+
+The break glass admin is Wiki.js's user 1: a local account, `wikijs-admin@`
+the community's domain, in `Administrators`, made by setup with the wiki's
+`local_admin_password` from the secrets file. It is how the bootstrap signs in
+and the one account with `manage:system`, and Wiki.js will not remove it from
+`Administrators` (`server/graph/resolvers/group.js:137`). Its password is kept
+rather than rotated (see *`secrets rotate` replaces a secret where it is
+checked and where it is used*).
+
+Nobody reaches it in a browser by accident, and that is deliberate.
+`/login?all=1` skips auto-login (`server/controllers/auth.js:37`), but the
+hidden local form stays hidden (`:46`), so signing in by hand means first
+turning that off in the database, where the bootstrap would turn it back on at
+its next run. This is a recovery procedure, for when an admin needs
+`manage:system` (a setting the bootstrap does not own, or a wiki whose admin
+group was lost), not a workflow. **Reasoned from Wiki.js's source at
+`v2.5.316`; nobody has run it yet.**
+
+1. On every site running the wiki, stop its bootstrap, so that nothing puts
+   the setting back while you work:
+
+   ```sh
+   cd /srv/paisans/<token>/<app> && docker compose stop bootstrap
+   ```
+
+   `stop` rather than `kill`: its restart policy is `unless-stopped`, so a
+   container stopped this way stays down even when the app restarts.
+
+2. In the wiki's database (a pinned wiki's own `postgres` service, or the
+   cluster's leader), show the local form again. Wiki.js keeps its sign-in
+   options as one JSON row of its `settings` table, key `auth`
+   (`server/graph/resolvers/site.js:83-90,128`):
+
+   ```sql
+   UPDATE settings SET value = jsonb_set(value::jsonb, '{hideLocal}', 'false')::json WHERE key = 'auth';
+   ```
+
+3. Restart the app on every site running it, `docker compose restart app`.
+   Wiki.js reads its settings from the database at boot
+   (`server/core/config.js`, `loadFromDb`), and a change made in SQL tells no
+   running instance.
+
+4. Open `https://<hostname>/login?all=1` and sign in with the local form as
+   `wikijs-admin@<community domain>` and the wiki's `local_admin_password`. On
+   a gated wiki the gate still stands in front of `/login`, so this needs a
+   Pocket ID session the gate admits.
+
+5. When done, start the bootstrap again on every site,
+   `docker compose start bootstrap`, or run `paisans apply`. Its run hides the
+   local form again and puts back anything else it owns.
+
 ### Pocket ID runs on every apps site, and one of them is active
 
 Pocket ID v2.14.0 admits one instance per database. Its actor runtime,
@@ -6525,12 +6767,12 @@ for linux/amd64 alone:
 |-------|----------|------------|
 | mbin 1.15.1-paisans (app, messenger), inspected 2026-10-13 | `/app/var/` | tmpfs, 256m. Symfony's compiled cache, rebuilt by the entrypoint's `cache:clear` on every start; the app cache is in Valkey. The log bind mounts stay inside it |
 | rabbitmq 3.13.7-management-alpine | `/var/lib/rabbitmq` | bind, `rabbitmq_data` (already) |
-| outline 1.10.0 | `/var/lib/outline/data` | bind, `/srv/paisans/<token>/<app>/data`, which was mounted at `/data`, a path nothing reads |
+| wiki 2.5.316, read from its `dev/build/Dockerfile:49` | `/wiki/data/content` | bind, `/srv/paisans/<token>/<app>/content`. Uploads live in Postgres and no storage module the bootstrap turns on writes here, so it holds nothing a member wrote; the bind keeps Docker from making an anonymous volume at each recreate |
 | postgres 16-trixie, 17-trixie (inspected 2026-10-11), 16-alpine, 17-alpine | `/var/lib/postgresql/data` | bind, `/srv/paisans/<token>/<app>/postgres` (already) |
 | postgres 18-trixie (inspected 2026-10-11), 18-alpine | `/var/lib/postgresql` | bind, `/srv/paisans/<token>/<app>/postgres`, moved from `/var/lib/postgresql/data` |
 | invite (`paisans-invite`, distroless) | nothing | its state is in Postgres; the code of conduct is bind mounted read-only from `/srv/paisans/<token>/<app>/code-of-conduct.md` at `/etc/paisans-invite/code-of-conduct.md` |
 | uptime 1.1.0-oidc.4 | `/data` | bind, `/srv/paisans/<token>/<app>/data`. Inspected at 1.1.0-oidc.3, built from the same Dockerfile |
-| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, curl (the heartbeat and the admins heartbeat) | nothing | |
+| amqproxy, valkey, pocket-id, synapse, MAS, element-web, writefreely-wisp 0.21.2-wisp (inspected 2026-10-13, both platforms), oauth2-proxy, spilo 16 to 18, etcd, haproxy, garage, caddy, admin-reconciler, wikijs-bootstrap 0.1 (read from its Dockerfile), curl (the heartbeat and the admins heartbeat) | nothing | |
 
 Postgres 18 was worse than a leak. Its image sets `PGDATA` to
 `/var/lib/postgresql/18/docker` and its entrypoint refuses to start when
@@ -6905,7 +7147,7 @@ records both in the secrets file, where `render` already reads them
 (`oidc_clients.<app>.client_id` and `.client_secret`).
 
 **`apply` does this itself, for every app it starts whose kind has a client
-shape** (`kinds.OIDCClient`, today `mbin`, `outline`, `writefreely`,
+shape** (`kinds.OIDCClient`, today `mbin`, `wikijs`, `writefreely`,
 `uptime`, `synapse` and `oauth2-proxy`). Creating an app's
 client at the deployment's own Pocket ID is part of setting the app up, and
 declaring the app in `paisans-stack.yaml` is the approval for that client. Founder
@@ -7015,7 +7257,7 @@ app, except the gate's, which carries the community's name.** Pocket ID heads
 its sign in page "Sign in to" the client's name
 (`frontend/src/routes/interaction/+page.svelte:111,117` at v2.14.0), so the
 name is what a person signing in reads, and an app's key is often not what
-they should: `apps.docs.display_name: Wiki` puts "Wiki" there. The gate's
+they should: `apps.wiki.display_name: Wiki` puts "Wiki" there. The gate's
 sign in is the community's front door rather than an app a member picked, so
 `community.name` is what they should read there. When the configuration gives
 no `community.name`, the gate's client is named `gate` like any other app's.
@@ -7046,12 +7288,12 @@ group and its admin group**, so a person outside both is refused there before
 the app sees them. The two groups are `apps.<app>.settings.member_group` and
 `settings.admin_group`, defaulting to `members` and `admins`
 (`kinds.MembersGroup`, `kinds.AdminsGroup`), and the command creates
-whichever is missing. Outline and WriteFreely read no admin group, so theirs
-is always `admins` and only `member_group` is a setting; the uptime monitor
+whichever is missing. WriteFreely reads no admin group, so its client's is
+always `admins` and only `member_group` is a setting; the uptime monitor
 has one group, `settings.admin_group`, with no default, because `validate`
 requires it (`uptime-needs-an-admin-group`). Synapse's client is its
-authentication service's, which reads no admin group, so like Outline's it is
-`admins` plus `member_group`. The gate's is `members` and `admins`, with no
+authentication service's, which reads no admin group, so like WriteFreely's
+it is `admins` plus `member_group`. The gate's is `members` and `admins`, with no
 setting, the same two groups its compose file admits: an admin can see
 everything a member can (Founder decision). The defaults exist because an
 empty pair would leave an open client: anyone who could make a Pocket ID account could sign in to the
@@ -7062,7 +7304,7 @@ control and the operator should know that nothing else stands behind it:
 | Kind | Callback | PKCE | Groups claim |
 |---|---|---|---|
 | `mbin` | `/oauth/oidc/verify`, the paisans fork's verify route | on: the fork always sends a code challenge | read. `OAUTH_OIDC_MEMBER_GROUP` and `OAUTH_OIDC_ADMIN_GROUP` are rendered from the two settings (`.env.example_docker:243-273` at `v1.13.3+paisans`): a sign in outside the member group is refused by the fork as well, and the admin group's members become administrators. The fork asks for the `groups` scope only when one of the two is set (`src/Provider/Oidc.php:45-46`), which the defaults guarantee |
-| `outline` | `/auth/oidc.callback` (`plugins/oidc/server/auth/oidcRouter.ts:63` at `v1.10.0`) | off: the rendered `.env` sets the four explicit `OIDC_*_URI` values, and that branch of the plugin never passes `pkce` (`plugins/oidc/server/auth/oidc.ts:27-35`; only the `OIDC_ISSUER_URL` branch does) | not read. The restriction at Pocket ID is the whole control |
+| `wikijs` | `/login/pocketid/callback`, built from the key of the sign-in strategy the bootstrap names `pocketid` (`server/core/auth.js:85` at `v2.5.316`) | off: Wiki.js's OAuth2 module gives `passport-oauth2` no PKCE option, so it sends no code challenge (`server/modules/authentication/oauth2/authentication.js:13-23`) | read. The bootstrap asks for the `groups` scope, without which Pocket ID sends no groups claim (`oidc/claims_service.go:157` at `v2.14.0`), and on every sign in Wiki.js puts the person in each Wiki.js group the claim names and takes them out of every other (`oauth2/authentication.js:36-48`). Both group settings are read: `admin_group` gets every Wiki.js permission but `manage:system` and `manage:api` (see *Wiki.js is configured by its bootstrap*) |
 | `writefreely` | `/oauth/callback/generic`, built by `configureGenericOauth` and not configurable (`oauth.go:249` at writefreely-wisp `ff9dceb`) | off: nothing in the fork sends a code challenge | not read. The restriction at Pocket ID is the whole control |
 | `invite` | `/auth/callback` (`internal/web/auth.go`) | on: every sign in sends an S256 challenge | read. It tells members from admins by the groups claim, and the client admits `member_group` and `admin_group` (defaults `members`, `admins`) |
 | `uptime` | `/login/oidc/callback` (`src/lib/oidc.js:26`) | on: every sign in sends an S256 challenge (`src/lib/oidc.js:96-103`) | read. `settings.admin_group` is both groups: its members administer the monitor and nobody else may sign in |
@@ -7072,7 +7314,7 @@ control and the operator should know that nothing else stands behind it:
 PKCE is set per client the way the app behaves, not on as a matter of course:
 a Pocket ID client with PKCE on refuses every request that carries no code
 challenge (`oidc/authorization_service.go:750-755` at `v2.14.0`), so turning
-it on for Outline or WriteFreely would refuse every sign in, while a client
+it on for Wiki.js or WriteFreely would refuse every sign in, while a client
 with it off accepts a challenge when one is sent. Pocket ID fills the
 `groups` claim with group names (`oidc/claims_service.go:157-162`), so the
 names rendered into Mbin's `.env` are the names the client admits, read from

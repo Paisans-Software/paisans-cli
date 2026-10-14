@@ -174,7 +174,7 @@ actually do it, not assert it:
   do not eyeball it.
 * Claims about upstream software (S3 support, environment variable names,
   known bugs) are cited or verified. `README.md` makes specific factual claims
-  about Mbin, Outline, Synapse, Pocket ID and WriteFreely. Do not add one from
+  about Mbin, Wiki.js, Synapse, Pocket ID and WriteFreely. Do not add one from
   memory.
 
 For a code change, add: it builds; `go vet ./...` and `go test ./...` pass; the
