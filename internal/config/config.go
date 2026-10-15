@@ -1201,6 +1201,10 @@ func (c *Config) structural(noSubnet bool) error {
 			add("mesh.subnet: %q is IPv6. The mesh is IPv4 only for now.", c.Mesh.Subnet)
 		case !ip.Equal(network.IP):
 			add("mesh.subnet: %q is a host address inside a network, not the network itself. Write %s.", c.Mesh.Subnet, network.String())
+		default:
+			if ones, _ := network.Mask.Size(); ones < 24 {
+				add("mesh.subnet: %q is larger than a /24. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet)
+			}
 		}
 	}
 

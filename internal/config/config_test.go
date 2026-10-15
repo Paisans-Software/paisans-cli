@@ -1082,5 +1082,11 @@ func TestSpiloImageIsTheRunningMajors(t *testing.T) {
 	cfg.Cluster.PostgresVersion = "16"
 	if got := cfg.SpiloImage(); got != "" {
 		t.Errorf("SpiloImage is %q for a major with no entry", got)
+// A mesh larger than a /24 would let the rules that treat the mesh as
+// trusted cover an owner's LAN, so it is refused where it is declared.
+func TestMeshLargerThanA24IsRefused(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 10.44.0.0/16", 1))
+	if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "larger than a /24") {
+		t.Errorf("got %q", got)
 	}
 }
