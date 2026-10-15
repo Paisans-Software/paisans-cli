@@ -49,6 +49,9 @@ type SSH struct {
 	// records on every site so that a site can name its login without the
 	// configuration it came from.
 	defaultUser string
+	// file is the declaration Load read the site from, "" for one loaded
+	// from bytes, for SSHUserFile.
+	file string
 }
 
 // DefaultSSHPort is the port used when a site's ssh section names none.
@@ -108,6 +111,18 @@ func (s Site) SSHUser() string {
 		return s.SSH.User
 	}
 	return s.SSH.defaultUser
+}
+
+// SSHUserFile is the file a command records the site's login user in, with
+// SetSSHUser, once it has logged in as that user: the declaration the site
+// was loaded from, when the site leaves ssh.user out. It is "" for a site
+// that names its user, which is recorded already, and for a site not loaded
+// from a file, which has nowhere to record it.
+func (s Site) SSHUserFile() string {
+	if s.SSH.User != "" || s.SSH.defaultUser == "" {
+		return ""
+	}
+	return s.SSH.file
 }
 
 // SSHHost is the address the toolkit connects to: ssh.host, or failing that
@@ -321,11 +336,13 @@ func (c *Config) resolveKeys() {
 }
 
 // resolveUsers records the deployment's own user on every site's ssh section,
-// for SSHUser.
+// for SSHUser, and the file the configuration was read from, for
+// SSHUserFile.
 func (c *Config) resolveUsers() {
 	user := c.Deployment().Prefix()
 	for name, site := range c.Sites {
 		site.SSH.defaultUser = user
+		site.SSH.file = c.Path
 		c.Sites[name] = site
 	}
 }

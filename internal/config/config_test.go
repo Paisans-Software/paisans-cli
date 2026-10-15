@@ -384,6 +384,42 @@ func TestSSHUserIsTheDeclaredName(t *testing.T) {
 	}
 }
 
+// A site that leaves ssh.user out names the file it was loaded from, where a
+// command records the user it logged in as. A site naming its user names
+// none, and so does one loaded from bytes or built by hand, which have no
+// file to record it in.
+func TestSSHUserFileIsWhereTheDefaultUserIsRecorded(t *testing.T) {
+	path := write(t, withSSH("    ssh:\n      host: home-a.local\n      keys: [alice]\n"))
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSHUserFile(); got != path {
+		t.Errorf("SSHUserFile() = %q, want %q", got, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromBytes, err := config.LoadBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fromBytes.Sites["home-a"].SSHUserFile(); got != "" {
+		t.Errorf("loaded from bytes: SSHUserFile() = %q, want none", got)
+	}
+	declared, err := config.Load(write(t, minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := declared.Sites["home-a"].SSHUserFile(); got != "" {
+		t.Errorf("a declared user: SSHUserFile() = %q, want none", got)
+	}
+	if got := (config.Site{}).SSHUserFile(); got != "" {
+		t.Errorf("a site built by hand: SSHUserFile() = %q, want none", got)
+	}
+}
+
 // Each site gets only the keys of the admins it names.
 func TestSSHKeysAreOnlyTheListedAdmins(t *testing.T) {
 	admins := "operators:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"

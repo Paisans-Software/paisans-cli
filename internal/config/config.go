@@ -847,6 +847,7 @@ func LoadBytes(data []byte) (*Config, error) {
 		return nil, err
 	}
 	cfg.Path = ""
+	cfg.resolveUsers()
 	return cfg, nil
 }
 
