@@ -176,7 +176,8 @@ func (a *SudoAuth) resolve(t SSHTransport) (string, error) {
 		return "", nil
 	}
 	if errors.Is(err, ErrUnreachable) {
-		return "", fmt.Errorf("%s: asking whether sudo needs a password: %w\n%s", t.Describe(), err, out)
+		// The error already names the host and carries ssh's own words.
+		return "", fmt.Errorf("asking whether sudo needs a password: %w", err)
 	}
 	var exit interface{ ExitCode() int }
 	var sshProblem *ui.Problem
@@ -222,7 +223,7 @@ func (a *SudoAuth) resolve(t SSHTransport) (string, error) {
 	}
 	out, err = t.run(check, in)
 	if errors.Is(err, ErrUnreachable) {
-		return "", fmt.Errorf("%s: checking the sudo password: %w\n%s", t.Describe(), err, out)
+		return "", fmt.Errorf("checking the sudo password: %w", err)
 	}
 	if err != nil {
 		return "", a.refuse(&ui.Problem{

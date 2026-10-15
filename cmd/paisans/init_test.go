@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
@@ -48,7 +50,7 @@ func (f *initFake) Run(command string) (string, error) {
 
 func (f *initFake) ReadFile(path string) (string, bool, error) {
 	if f.down {
-		return "", false, errors.New("ssh: connect to host " + f.name + " port 22: Operation timed out")
+		return "", false, f.unreachable()
 	}
 	if c, ok := f.files[path]; ok && c != "" {
 		return c, true, nil
@@ -60,6 +62,16 @@ func (f *initFake) ReadFile(path string) (string, bool, error) {
 }
 
 func (f *initFake) Describe() string { return "ubuntu@" + f.name }
+
+// unreachable is the error a real transport gives for a host ssh cannot
+// connect to, by way of the sudo probe that runs first.
+func (f *initFake) unreachable() error {
+	return fmt.Errorf("asking whether sudo needs a password: %w", &ui.Problem{
+		Hint:    f.Describe() + " cannot be reached over ssh",
+		Explain: "ssh could not connect in 3 attempts: ssh: connect to host " + f.name + " port 22: Operation timed out. Check that the host is up, and that ssh " + f.Describe() + " from this machine reaches it.",
+		Cause:   fmt.Errorf("%w after 3 attempts: exit status 255", apply.ErrUnreachable),
+	})
+}
 
 const (
 	exampleID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -220,8 +232,23 @@ func TestInitRefusesWhenASiteIsUnreachable(t *testing.T) {
 	path, _ := initWorld(t, nil, sites, []byte{212, 37})
 	before, _ := os.ReadFile(path)
 	err := runInitQuietly(t, path)
-	if err == nil || !strings.Contains(err.Error(), "init reaches every site") || !strings.Contains(err.Error(), "home-b") || !strings.Contains(err.Error(), "Nothing was written") {
-		t.Fatalf("init = %v, want a refusal naming home-b", err)
+	if err == nil {
+		t.Fatal("init did not refuse although home-b is unreachable")
+	}
+	hint, explain := ui.Describe(err)
+	shown := hint + "\n" + explain
+	if !strings.Contains(hint, "every site") || !strings.Contains(explain, "- home-b: ubuntu@home-b.local cannot be reached over ssh") || !strings.Contains(explain, "Nothing was written") {
+		t.Fatalf("init refused with:\n%s\nwant a refusal naming home-b", shown)
+	}
+	for _, once := range []string{"Operation timed out", "ubuntu@home-b.local cannot", "Check that the host is up"} {
+		if n := strings.Count(shown, once); n != 1 {
+			t.Errorf("%q appears %d times, want once:\n%s", once, n, shown)
+		}
+	}
+	for _, noise := range []string{"sudo", "registry.json", "exit status 255"} {
+		if strings.Contains(shown, noise) {
+			t.Errorf("the refusal shows %q, which only --verbose should:\n%s", noise, shown)
+		}
 	}
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(before, after) {
