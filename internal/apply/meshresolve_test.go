@@ -70,7 +70,7 @@ func TestHostnameEndpointsAreFlushedAndResolvedBeforeTheMesh(t *testing.T) {
 	if strings.Index(poll, "flush-caches") > strings.Index(poll, "getent") {
 		t.Errorf("the names are asked for before the cache is flushed:\n%s", poll)
 	}
-	start := host.indexOf("systemctl enable --now wg-quick@psns-f2a9")
+	start := host.indexOf(wgHelper + "up")
 	if start < 0 || host.indexOf("getent ahosts") > start {
 		t.Errorf("wg-quick ran before the endpoint names were resolved: %v", host.commands)
 	}
@@ -81,9 +81,9 @@ func TestHostnameEndpointsAreFlushedAndResolvedBeforeTheMesh(t *testing.T) {
 func TestASyncedMeshResolvesItsEndpointsFirst(t *testing.T) {
 	fastResolve(t)
 	host := applied(t, "home-a")
-	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
-		host.files["/etc/wireguard/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
-	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	host.files["/srv/paisans/f2a9/psns-f2a9.conf"] = strings.Replace(
+		host.files["/srv/paisans/f2a9/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
+	adopt(t, host, "/srv/paisans/f2a9/psns-f2a9.conf")
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestASyncedMeshResolvesItsEndpointsFirst(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	sync := host.indexOf("wg syncconf psns-f2a9")
+	sync := host.indexOf(wgHelper + "sync")
 	poll := host.indexOf("getent ahosts")
 	if sync < 0 || poll < 0 || poll > sync {
 		t.Errorf("the peers were synced before their names were resolved: %v", host.commands)
@@ -121,7 +121,7 @@ func TestANameThatResolvesOnALaterPollLetsTheMeshStart(t *testing.T) {
 			t.Errorf("a poll did not flush the cache first:\n%s", poll)
 		}
 	}
-	if !host.ran("systemctl enable --now wg-quick@psns-f2a9") {
+	if !host.ran(wgHelper + "up") {
 		t.Error("the mesh was not started once its names resolved")
 	}
 }
@@ -143,7 +143,7 @@ func TestANameThatNeverResolvesStopsBeforeTheMesh(t *testing.T) {
 	if len(host.polls()) != 4 || *slept != 3 {
 		t.Errorf("%d polls and %d sleeps over a 6s wait polled every 2s, want 4 and 3", len(host.polls()), *slept)
 	}
-	if host.ran("wg-quick@psns-f2a9") || host.ran("wg syncconf") {
+	if host.ran(wgHelper) {
 		t.Errorf("the interface was touched: %v", host.commands)
 	}
 	if host.firstCompose() >= 0 {
@@ -196,7 +196,7 @@ func TestAddressEndpointsAreNotResolved(t *testing.T) {
 	if host.ran("getent") || host.ran("resolvectl") {
 		t.Errorf("addresses were resolved: %v", host.polls())
 	}
-	if !host.ran("systemctl enable --now wg-quick@psns-f2a9") {
+	if !host.ran(wgHelper + "up") {
 		t.Error("the mesh was not started")
 	}
 }

@@ -497,7 +497,7 @@ func (p *Plan) buildCut() (*Stage, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.Gate = fmt.Sprintf("no remaining site lists %s's WireGuard key as a peer, and `wg show` on each has no handshake from it", p.Site)
+	st.Gate = fmt.Sprintf("no remaining site lists %s's WireGuard key as a peer, and the WireGuard helper's show on each has no handshake from it", p.Site)
 	if len(p.evict.joining) > 0 {
 		st.Gate += fmt.Sprintf("; %s, not prepared yet, is neither dialled nor gated", joinAnd(p.Joining()))
 	}
@@ -524,14 +524,18 @@ func (p *Plan) buildCut() (*Stage, error) {
 }
 
 // handshakeGate passes when no remaining site's interface has a handshake
-// with any of keys. `wg show <interface> latest-handshakes` prints a public key and
-// a timestamp per peer (wireguard-tools, wg(8)), so a peer that was dropped
-// is not printed at all.
+// with any of keys. The WireGuard helper's show latest-handshakes prints a
+// public key and a timestamp per peer (wireguard-tools, wg(8)), so a peer
+// that was dropped is not printed at all.
 func (p *Plan) handshakeGate(keys ...string) error {
 	for _, name := range p.liveSites() {
-		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " latest-handshakes")
+		h := apply.WGHelper{T: p.transports[name], Iface: p.dep().Interface()}
+		out, err := h.Show("latest-handshakes")
+		if problem := apply.HelperReadProblem(name, h, err); problem != nil {
+			return problem
+		}
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s latest-handshakes`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
+			return fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", name, p.dep().Interface(), err)
 		}
 		for _, line := range strings.Split(out, "\n") {
 			if f := strings.Fields(line); len(f) > 0 && contains(keys, f[0]) {

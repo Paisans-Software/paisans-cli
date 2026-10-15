@@ -98,7 +98,7 @@ func TestBuildNamesTheConfigurationKey(t *testing.T) {
 			s := cfg.Sites["home-a"]
 			s.Address = "127.0.0.1"
 			cfg.Sites["home-a"] = s
-		}, "mesh.subnet (mesh_subnet): 127.0.0.0/24 overlaps 127.0.0.0/8"},
+		}, `mesh.subnet (mesh_subnet): "127.0.0.0/24" overlaps 127.0.0.0/8`},
 		{"home-a", func(cfg *config.Config) {
 			s := cfg.Sites["home-a"]
 			s.Address = "10.44.0.255"

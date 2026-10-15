@@ -198,17 +198,11 @@ func (r Request) Check() []string {
 	if r.Endpoint && r.ListenPort == 0 {
 		add("listen_port: 0, but the site has an endpoint, which other sites dial on a fixed port")
 	}
-	mesh, p := config.ParseMeshSubnet(r.MeshSubnet)
-	switch {
-	case p != "":
+	mesh, subnetProblems := config.CheckMeshSubnet(r.MeshSubnet)
+	for _, p := range subnetProblems {
 		add("mesh_subnet: %q %s", r.MeshSubnet, p)
-	default:
-		if ones, _ := mesh.Mask.Size(); ones < config.MeshMinPrefix {
-			add("mesh_subnet: %q is larger than a /%d, which is as large as a mesh may be", r.MeshSubnet, config.MeshMinPrefix)
-		}
-		for _, f := range config.MeshReservedOverlaps(mesh) {
-			add("mesh_subnet: %s overlaps %s, which the deployment must never reach", r.MeshSubnet, f)
-		}
+	}
+	if mesh != nil {
 		a := net.ParseIP(r.Address)
 		switch {
 		case a == nil || a.To4() == nil || !mesh.Contains(a):

@@ -204,7 +204,12 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    `--data-dir`, `data-root`.
 7. **The deployment's directory.** `install -d -m 750 -o <user> -g <user>
    /srv/paisans/<token>`. `/srv/paisans` itself stays root's, mode 755.
-8. **The WireGuard helper and its sudoers line** (below).
+8. **The WireGuard helper and its sudoers line** (below). Admit creates
+   `/etc/wireguard` root's, mode 700, when it is absent, and makes an
+   existing one root's and not writable by its group or others; one it
+   cannot make so (a link, or not a directory) stops admit. A directory the
+   deployment's user could write would let it plant a conf with `PostUp`,
+   which `wg-quick` runs as root, past the helper's checks.
 9. **The firewall.** ufw rules tagged `paisans-<token>:` as today: the SSH
    port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/443
    with `--public-ports`. The `br-+` rules go: a rootless container's traffic
@@ -361,7 +366,7 @@ Its verbs, the only arguments it accepts:
 | `up` | `systemctl enable --now wg-quick@psns-<token>` |
 | `restart` | `systemctl restart wg-quick@psns-<token>` |
 | `sync` | `wg-quick strip` the conf, then `wg syncconf` |
-| `show peers`, `show latest-handshakes`, `show public-key` | `wg show psns-<token> <field>` |
+| `show peers`, `show latest-handshakes`, `show public-key`, `show allowed-ips`, `show persistent-keepalive`, `show listen-port` | `wg show psns-<token> <field>`: what the conf holds already or how the mesh is doing, never a private key or the address a peer last sent from |
 | `log` | the unit's last 200 journal lines |
 
 **Validation is the security of this helper.** `wg-quick` runs a conf's
@@ -374,6 +379,13 @@ in the second), each value matched by a pattern, `ListenPort` equal to the
 admitted one and every `Address` inside the mesh subnet. Anything else
 refuses the whole file. The renderer stops writing the relay `PostUp`
 (*What it does*, step 13).
+
+`put` also refuses to install unless `/etc/wireguard` is a directory, not a
+link, owned by root (uid 0) with no group or other write bit, read with `ls
+-ldn` and refused when that cannot be read. It checks each time rather than
+trusting step 8 once, because its validation is worth nothing if the user
+can write a conf beside it. The refusal names the directory, and `apply`
+answers it with "the host's owner runs `paisans host admit` again".
 
 The script is embedded in the CLI beside `internal/hostprep/snippets` and has
 its own tests (*Tests*).

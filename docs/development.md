@@ -85,7 +85,7 @@ comma joined so the awk matches one with `index()`), and a claim refuses
 A site is one machine: `registry.Check` and `registry.Claim` refuse a host
 that runs another site of this deployment (`internal/registry/machine.go`),
 read from this deployment's entry, which names the site, or with no entry from
-the `Address` line of `/etc/wireguard/psns-<token>.conf`. The awk merge
+the `Address` line of `/srv/paisans/<token>/psns-<token>.conf`. The awk merge
 refuses the same thing under the lock, for two claims racing, and `Merge`
 mirrors it. `validate` refuses two sites with one mesh address
 (`duplicate-site-address`) and two at one ssh host and port or one dial
@@ -608,12 +608,23 @@ mounted file changed and whose container was left in place (`Action.Refresh`).
 
 **The mesh interface, `psns-<token>`, is up before any container moves.** Every service binds the site's
 mesh address, so the mesh comes up right after the files are written and before
-the gateway checks and stack actions below. A first apply enables and starts
-`wg-quick@psns-<token>`; a peer change is handed over with `wg syncconf` so the mesh
-stays up; a change to a line only wg-quick applies restarts it; and an
-unchanged file on a host whose interface is down starts it. A failure stops the
-apply there. `README.md` has the table under "`apply` brings the mesh
-interface up before anything binds to it".
+the gateway checks and stack actions below. Every mesh step goes through the
+WireGuard helper (`apply.WGHelper`, `internal/apply/helper.go`), whose script
+`internal/hostprep/wghelper.go` renders from
+`internal/hostprep/snippets/wg-helper.sh.tmpl`: `handMesh` puts the rendered
+file, then a first apply runs `up`; a peer change runs `sync` so the mesh
+stays up; a change to a line only wg-quick applies runs `restart`; and an
+unchanged file on a host whose interface is absent runs `up`, and on one whose
+link is down runs `restart`. An unchanged file on an up interface is read back
+(`runningStep`) and synced or restarted when the interface runs another key,
+`ListenPort`, peers, `AllowedIPs` or `PersistentKeepalive`, or lacks the file's
+`Address` or `MTU`. A failure stops the apply there. `internal/apply/wgcalls_test.go`
+refuses any `wg`, `wg-quick`, `journalctl` or `systemctl` command written
+directly in the packages that touch the mesh, and exempts two strings in
+`internal/siteremove/host.go`: `removeUnitsCommand`, which removes the removed
+site's own units, and `wireguardCommand`, which stops its interface, neither
+of which a helper verb does. `README.md` has the table under "`apply` brings
+the mesh interface up before anything binds to it".
 
 **The DNS token is checked from the site before Caddy asks the provider.**
 `Plan.DNSToken` is set on a Caddy site whose Caddy changes, reloads or is
@@ -1039,7 +1050,7 @@ specification. What the code relies on:
 The tests in `evict_test.go` run the same world, with a failover that
 promotes the `Sync Standby`, or the first streaming replica, once no
 remaining host's running interface lists the evicted key, and a running mesh
-file per host that only `wg syncconf` changes. They cover the order, the host
+file per host that only the helper's `sync` changes. They cover the order, the host
 never reached, a leader with and without a `Sync Standby`, objects lost at
 replication 1, a gateway replaced in the same edit, the token check, every
 refusal, a partial cut, and resuming from each stage.
@@ -1057,7 +1068,8 @@ its own rekey keeps its new key), and moves only the mesh file, by scoped
 `wireguard_next_private_key`, so `apply` and `apply --site` refuse while the
 secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
 they would put the old key back. Where a rekey stands is read
-from the secrets file and `wg show <interface> public-key`, and nothing else.
+from the secrets file and the WireGuard helper's `show public-key`, and
+nothing else.
 A site other sites relay through is found in the rendered mesh files, as the
 peer each of them routes the whole subnet through while it lacks a peer of its
 own for some other site, and Patroni is paused around its swap. The tests run
@@ -1880,7 +1892,7 @@ Nor have the review of what `paisans-stack.yaml` grants and its record on each
 host: the shell they send is run against local files in the tests, not
 observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover
 once its leader is cut off, `garage layout skip-dead-nodes` on a node that
-is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
+is down, a WireGuard key swapped by the helper's `sync`, and `patronictl pause
 --wait` and `resume --wait` around a relay's swap, with the pause read back as
 `pause: true` in `patronictl show-config`, are read from upstream source
 (Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only

@@ -1,10 +1,13 @@
 package apply_test
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // helperHost records each command and its stdin, and answers with out.
@@ -46,7 +49,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, field := range []string{"peers", "latest-handshakes", "public-key"} {
+	for _, field := range []string{"peers", "latest-handshakes", "public-key", "allowed-ips", "persistent-keepalive", "listen-port"} {
 		if out, err := w.Show(field); err != nil || out != "peer\n" {
 			t.Errorf("Show(%s) = %q, %v", field, out, err)
 		}
@@ -55,7 +58,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	const helper = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
-	want := []string{helper + "put", helper + "up", helper + "restart", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "log"}
+	want := []string{helper + "put", helper + "up", helper + "restart", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "show allowed-ips", helper + "show persistent-keepalive", helper + "show listen-port", helper + "log"}
 	if strings.Join(h.ran, "\n") != strings.Join(want, "\n") {
 		t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(h.ran, "\n"), strings.Join(want, "\n"))
 	}
@@ -68,13 +71,38 @@ func TestWGHelperCommandLines(t *testing.T) {
 // here, before it reaches the host.
 func TestWGHelperShowRefusesAnotherField(t *testing.T) {
 	h := &helperHost{}
-	for _, field := range []string{"", "dump", "peers; id", "private-key"} {
+	for _, field := range []string{"", "dump", "peers; id", "private-key", "endpoints", "preshared-keys"} {
 		if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).Show(field); err == nil {
 			t.Errorf("Show(%q) was not refused", field)
 		}
 	}
 	if len(h.ran) != 0 {
 		t.Errorf("ran %q", h.ran)
+	}
+}
+
+// ShowFields reads every field in one command, the helper once per field
+// behind a line naming it, and hands back each field's own lines.
+func TestWGHelperShowFieldsIsOneCommand(t *testing.T) {
+	h := &helperHost{out: "paisans-show:public-key\nkey\npaisans-show:peers\na\nb\n"}
+	got, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "peers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const helper = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	want := "echo paisans-show:public-key && " + helper + "show public-key && echo paisans-show:peers && " + helper + "show peers"
+	if len(h.ran) != 1 || h.ran[0] != want {
+		t.Errorf("ran %q, want %q", h.ran, want)
+	}
+	if got["public-key"] != "key\n" || got["peers"] != "a\nb\n" {
+		t.Errorf("read %q", got)
+	}
+	if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "endpoints"); err == nil {
+		t.Error("ShowFields took endpoints")
+	}
+	h.out = "paisans-show:public-key\nkey\n"
+	if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "peers"); err == nil {
+		t.Error("ShowFields took output without a field it asked for")
 	}
 }
 
@@ -101,6 +129,93 @@ func TestWGHelperRefusesABadInterface(t *testing.T) {
 		}
 		if len(h.ran) != 0 {
 			t.Errorf("interface %q ran %q", iface, h.ran)
+		}
+	}
+}
+
+// failingHost answers every command with out and a bare exit status, as a
+// transport that does not quote the output in its error would.
+type failingHost struct{ helperHost }
+
+func (h *failingHost) Run(command string) (string, error) {
+	h.ran = append(h.ran, command)
+	return h.out, errors.New("exit status 1")
+}
+
+func (h *failingHost) RunInput(command, stdin string) (string, error) { return h.Run(command) }
+
+// What the helper or sudo printed is why it failed, so every verb's error
+// carries it, whether or not the transport quoted it.
+func TestWGHelperErrorsCarryWhatTheHelperPrinted(t *testing.T) {
+	h := &failingHost{helperHost{out: "sudo: a password is required\n"}}
+	w := apply.WGHelper{T: h, Iface: "psns-f2a9"}
+	for name, call := range map[string]func() error{
+		"Put":     func() error { return w.Put([]byte("x")) },
+		"Up":      w.Up,
+		"Restart": w.Restart,
+		"Sync":    w.Sync,
+		"Show":    func() error { _, err := w.Show("peers"); return err },
+		"Log":     func() error { _, err := w.Log(); return err },
+	} {
+		if err := call(); err == nil || !strings.Contains(err.Error(), "sudo: a password is required") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// An error that already quotes the output does not quote it twice.
+func TestWGHelperErrorsQuoteTheOutputOnce(t *testing.T) {
+	h := &quotingHost{helperHost{out: "wg-psns-f2a9: line 3: no; nothing was installed\n"}}
+	err := apply.WGHelper{T: h, Iface: "psns-f2a9"}.Up()
+	if err == nil || strings.Count(err.Error(), "nothing was installed") != 1 {
+		t.Errorf("%v", err)
+	}
+}
+
+// quotingHost fails with its output in the error, as SSHTransport does.
+type quotingHost struct{ helperHost }
+
+func (h *quotingHost) Run(command string) (string, error) {
+	return h.out, fmt.Errorf("home-a: %s: exit status 65\n%s", command, h.out)
+}
+
+// CommandLine is what an operator types as the deployment's user, for a
+// message: sudo, the helper's path, unquoted, and the verb.
+func TestWGHelperCommandLine(t *testing.T) {
+	if got := (apply.WGHelper{Iface: "psns-f2a9"}).CommandLine("log"); got != "sudo /usr/local/libexec/paisans/wg-psns-f2a9 log" {
+		t.Errorf("CommandLine = %q", got)
+	}
+	if got := (apply.WGHelper{Iface: "wg0"}).CommandLine("log"); got != "the WireGuard helper's log" {
+		t.Errorf("CommandLine for no deployment's interface = %q", got)
+	}
+}
+
+// redactingHost fails as SSHTransport does: its error quotes the output,
+// redacted.
+type redactingHost struct{ helperHost }
+
+func (h *redactingHost) Run(command string) (string, error) {
+	return h.out, ui.RedactError(fmt.Errorf("home-a: %s: exit status 1\n%s", command, h.out))
+}
+
+// What the helper or sudo printed reaches an error only redacted: a secret
+// registered for display is never appended raw, whether the transport
+// quoted the output already or not.
+func TestWGHelperErrorsNeverCarryARegisteredSecret(t *testing.T) {
+	const secret = "wg-helper-test-secret-5f1c"
+	ui.Secret(secret)
+	out := "sudo: " + secret + " is not the password\n"
+	for name, w := range map[string]apply.WGHelper{
+		"bare":      {T: &failingHost{helperHost{out: out}}, Iface: "psns-f2a9"},
+		"redacting": {T: &redactingHost{helperHost{out: out}}, Iface: "psns-f2a9"},
+	} {
+		err := w.Up()
+		if err == nil || strings.Contains(err.Error(), secret) {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if strings.Count(err.Error(), "is not the password") != 1 {
+			t.Errorf("%s: the output is not quoted once: %v", name, err)
 		}
 	}
 }

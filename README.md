@@ -1754,7 +1754,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 | everything apply renders on a host | under `/srv/paisans/<token>/`: `/srv/paisans/f2a9/<stack>/`, `/srv/paisans/f2a9/.paisans-manifest.json` |
 | every service and every compose network | the Docker label `community.paisans.deployment=<id>`, the full id |
 | a firewall rule `host prepare` adds | the ufw comment `paisans-<token>: <why>` |
-| the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9` (see *Two deployments on one host never share a mesh*) |
+| the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9`; `apply` renders that file as `/srv/paisans/f2a9/psns-f2a9.conf` and the WireGuard helper `/usr/local/libexec/paisans/wg-psns-f2a9` installs it (see *Two deployments on one host never share a mesh*) |
 | `host prepare`'s own files | `paisans-<token>-watchdog.service`, `docker.service.d/paisans-<token>-after-wireguard.conf`, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, the configuration store's `/var/lib/paisans/config/<token>.git`, `.peers` and `.sync.json`, `/usr/local/lib/paisans-<token>/config-sync.sh` and the units `paisans-<token>-config-daemon.service`, `-config-sync.service` and `-config-sync.timer` |
 | a DNS record `dns init` creates | the comment `paisans-<token>: created by paisans dns init` |
 
@@ -1829,8 +1829,8 @@ that already runs another site of this deployment, naming that site and its
 mesh address, before anything is written, and a dry run refuses the same way.
 Which site a host runs is read from this deployment's registry entry, which
 names it; on a host with no entry, from the `Address` in
-`/etc/wireguard/psns-<token>.conf`, matched to the site `paisans-stack.yaml` gives
-that address. Reading the name first is what lets a site's address change: the
+`/srv/paisans/<token>/psns-<token>.conf`, matched to the site
+`paisans-stack.yaml` gives that address. Reading the name first is what lets a site's address change: the
 entry still names the site, and `apply` restarts the interface with the new
 `Address` (see *`apply` brings the mesh interface up before anything binds to
 it*). A host left by a site that `paisans-stack.yaml` no longer declares is cleaned
@@ -1911,7 +1911,7 @@ carries one address, one private key and one peer list, so a second
 deployment's peers in the first one's file would be routed by the wrong mesh.
 The name is derived from the token like every other name (`psns-f2a9`), and
 everything that touches the interface uses it: `/etc/wireguard/psns-f2a9.conf`,
-`wg-quick@psns-f2a9`, `wg syncconf psns-f2a9`, the firewall's
+`wg-quick@psns-f2a9`, its helper `/usr/local/libexec/paisans/wg-psns-f2a9`, the firewall's
 `allow in on psns-f2a9` and Docker's boot ordering. It is nine characters,
 inside Linux's limit of fifteen: `IFNAMSIZ` is 16 bytes including the
 terminating NUL (Linux v6.8, `include/uapi/linux/if.h`).
@@ -5735,16 +5735,37 @@ container is started, checked or restarted. A stack started first fails to bind
 its mesh address, and Docker restarts it in a loop rather than reporting it, so
 the apply would claim success over a site where nothing listens.
 
+**Every step goes through the WireGuard helper.** The deployment's user
+cannot create an interface, write `/etc/wireguard` or start a system unit,
+so `host admit` installs one root-owned script per deployment,
+`/usr/local/libexec/paisans/wg-psns-<token>`, and one sudoers line that
+lets that user run it and nothing else as root. `apply` writes the mesh
+file as `/srv/paisans/<token>/psns-<token>.conf`, its own copy, which it
+can read back and compare like any other file it renders, and hands it to
+the helper's `put` before every start, sync or restart; `put` installs it
+as `/etc/wireguard/psns-<token>.conf`, mode 600. `put` accepts only the
+keys `apply` renders, each value matching its pattern, the `ListenPort` the
+owner admitted, and an `Address` and `AllowedIPs` inside the mesh subnet,
+and refuses the whole file otherwise, because wg-quick runs a file's
+`PreUp`, `PostUp`, `PreDown` and `PostDown` as root and adds a route for
+each `AllowedIPs`: a helper that installed any file would hand root, or the
+host's routing, to whoever could run it. A file it refuses stops the apply
+with the line it refused, and a host where sudo will not run it stops the
+apply naming `paisans host admit`.
+
 What it runs depends on what changed, and the narrower action wins here as it
 does for stacks:
 
 | `psns-<token>.conf` | Interface | Action |
 |---------------------|-----------|--------|
-| new | any | `systemctl enable --now wg-quick@psns-<token>` |
-| unchanged | down | the same, so a rebooted or hand stopped site recovers on the next apply |
-| unchanged | up | nothing |
-| changed peers | up | `wg syncconf` from `wg-quick strip`, in place |
-| changed `Address`, `MTU`, `PostUp` or another wg-quick only line | up | `systemctl restart wg-quick@psns-<token>` |
+| new | any | `put`, then the helper's `up`: `systemctl enable --now wg-quick@psns-<token>` |
+| unchanged | absent | the same, so a rebooted or hand stopped site recovers on the next apply |
+| unchanged | down | `put`, then the helper's `restart`, since a down link carries nothing whatever it holds |
+| unchanged | up, running the file | nothing, and no `put` |
+| unchanged | up, differing in a way only wg-quick applies | `put`, then the helper's `restart` |
+| unchanged | up, differing in anything else the file sets | `put`, then the helper's `sync` |
+| changed peers | up | `put`, then the helper's `sync`: `wg syncconf` from `wg-quick strip`, in place |
+| changed `Address` or `MTU` | up | `put`, then the helper's `restart`: `systemctl restart wg-quick@psns-<token>` |
 
 **A peer change is synced rather than restarted.** A restart takes the
 interface down, and on a data site that partitions etcd and Patroni for as long as it is down; with election timeouts
@@ -5757,20 +5778,37 @@ Nor does it add routes, which wg-quick does at start for each peer's
 inside the mesh subnet, which the interface's own `Address` already routes
 (wireguard-tools, `src/wg-quick/linux.bash`).
 
-"Up" is read from the kernel (`ip link show psns-<token>`), not from the unit. An
-interface brought up by hand serves every service just as well, and starting the
-unit on top of it would fail on an interface that already exists.
+**An up interface is read back even when its file did not change.**
+Writing the file and handing it over are separate commands, so a run that
+stopped between them leaves the file as rendered and the interface on what
+it ran before. `apply` reads the interface's addresses and MTU with `ip`,
+and its key, `ListenPort`, peers, each peer's `AllowedIPs` and
+`PersistentKeepalive` with the helper's `show`. It restarts the interface
+when it lacks the file's `Address` or runs another `MTU`, which only
+wg-quick applies, and syncs it when any of the rest differs. A peer's
+`Endpoint` is not compared: `wg` reports the address a peer last sent from,
+resolved and after any NAT, which differs from the file on a mesh that
+works, so a run stopped after a change to nothing but an `Endpoint` is
+completed by the next change to the mesh file.
+
+"Up" is read from the kernel, not from the unit: `ip -br addr show dev
+psns-<token>` for its state and addresses and `ip -o link show dev
+psns-<token>` for its MTU, neither of which needs privilege. An interface
+brought up by hand serves every service just as well, and starting the unit
+on top of it would fail on an interface that already exists.
 
 **The interface is read back before any stack starts.** After it starts,
-restarts or syncs the mesh, `apply` reads `ip -br addr show psns-<token>` and
+restarts or syncs the mesh, `apply` reads `ip -br addr show dev psns-<token>` and
 carries on only when the interface exists, is not down and holds the site's
 `Address`. The unit's exit status alone is not enough: an etcd started over a
 missing interface crash loops on `bind: cannot assign requested address`, and
 the apply would blame the stack. When the mesh is not up, whether the unit
 failed or the interface is simply absent, the apply stops with
 `mesh: wg-quick@psns-<token> did not come up` and explains it from the unit's
-journal (`journalctl -u wg-quick@psns-<token> -n 20`, through the site's sudo):
-wg-quick's own error line by default, the whole journal with `-v`. A peer
+journal, which the deployment's user reads with the helper's `log`
+(`sudo /usr/local/libexec/paisans/wg-psns-<token> log`, the unit's last 200
+lines, of which `apply` keeps 20): wg-quick's own error line by default,
+the last 20 lines with `-v`. A peer
 `Endpoint` whose name does not resolve from the site is the common case, and
 is said as such: create its DNS record with `paisans dns init` and apply again.
 
@@ -8239,7 +8277,7 @@ describes.
    interface lists home-a as a peer with no endpoint: home-a dials out.
 6. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
    as a peer **with** an endpoint, and `PersistentKeepalive` so the NAT mapping
-   stays open, applied with `wg syncconf` so nothing on home-a restarts (see
+   stays open, synced through the helper so nothing on home-a restarts (see
    *`apply` brings the mesh interface up before anything binds to it*). Each
    of these applies ends by sweeping the images its site's stacks no longer
    use (see *`apply` prunes the images it superseded*).
@@ -8358,7 +8396,7 @@ skipped and why.
 
 | Stage | What runs | Gate |
 |-------|-----------|------|
-| 2. Mesh | each site's `psns-<token>.conf`, as a scoped `apply`, then `wg syncconf` (the new site's interface is started) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
+| 2. Mesh | each site's `psns-<token>.conf`, as a scoped `apply`, then the helper's `sync` (the new site's interface is started with its `up`) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
 | 3. etcd | for each joiner, every witness first: `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
 | 4. Replica | the new site's remaining files by a whole `apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
@@ -8492,7 +8530,7 @@ re-run impossible: a failure there names the `apply` that finishes it.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 1. Data out of the site | the leader switched over to the `Sync Standby` when the site holds it; `synchronous_mode` turned off when one data site remains, since a leader waiting on a standby that is leaving stops taking writes; Patroni stopped on the site and its member key deleted from etcd; its Garage node removed from the layout and the layout applied | another site leads and `patronictl list` no longer lists the site, with a `Sync Standby` when the end state wants one; no layout row for the site, and every remaining node settled (one live layout version, an empty resync queue) within an hour, and a run that times out resumes at this gate while Garage carries on copying |
-| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `apply`: `psns-<token>.conf` (`wg syncconf`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
+| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
 | 3. Clean the host | below; skipped with `--host-gone`. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
 | 4. DNS | the address records this deployment's `dns init` made for the site, deleted at the provider (below, *The site's DNS records go with it*); skipped, saying why in one line, when `acme.provider` is not set, its token is not in the secrets, or the site has no public address | listing the zones again finds nothing left to delete |
 | 5. Config | the site taken out of `paisans-stack.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
@@ -8769,7 +8807,7 @@ passwords and every Garage node one `rpc_secret`, and every published port
 binds the mesh address (see *So every published port binds the site's mesh
 address*). Each site has its own WireGuard key, each peer entry is a `/32`, and
 there is no preshared key, so removing the site's public key from every
-remaining site's mesh file and running `wg syncconf` drops it: no remaining
+remaining site's mesh file and syncing it through the helper drops it: no remaining
 site accepts a handshake from that key or routes anything to its address.
 Cutting the peer is what evicts.
 
@@ -8782,7 +8820,7 @@ cut:
 
 | Stage | What runs | Gate |
 |---|---|---|
-| 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `apply` and `wg syncconf`, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and `wg show` on each has no handshake with it |
+| 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `apply`, synced through the helper, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and the helper's `show` on each has no handshake with it |
 | 2. DNS | the site's address records deleted, as `site remove`'s DNS stage does, and also at names the configuration still wants (below) | listing the zones again finds nothing left to delete |
 | 3. Database | when the site leads, a wait for Patroni's own failover: the cut leader cannot renew its leader key, the key expires with Patroni's `ttl` (30 seconds by default), and a remaining member takes over; then `synchronous_mode` off when one data site remains, and the site's member key deleted from etcd, which it can no longer rewrite | a remaining site leads, and `patronictl list` no longer lists the site |
 | 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
@@ -8883,7 +8921,7 @@ decision.
   changed after it was read is refused rather than overwritten, since the write
   is the whole file and would lose the change.
 * The cut is rendered without it. The cut must not wait on a host or a DNS
-  record that does not exist yet, and `apply` stops before `wg syncconf` while
+  record that does not exist yet, and `apply` stops before the mesh is synced while
   a peer's endpoint name does not resolve; the `apply` that brings it up adds
   it as a peer on every site.
 * The only gateway or the only apps site is not refused when the
@@ -8922,28 +8960,27 @@ Each site goes through four stages, each ending at a gate:
 | Stage | What runs | Gate |
 |---|---|---|
 | 1. New key | a private key generated on the workstation, as `init` generates one, and written to the secrets file as `sites.<site>.wireguard_next_private_key`, beside the current | the file decrypts and holds it |
-| 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `apply` and `wg syncconf`; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
+| 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `apply`, synced through the helper; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
 | 3. Health | nothing | etcd healthy at every voter; exactly one Patroni member leading and `running`, and every other data site a member and `streaming` |
 | 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
 
 **A stopped run resumes.** A next key in the secrets file says the site is mid
-rekey, and which public key its host runs, read with `wg show <interface>
-public-key`, says whether stage 2 is done. A peer whose file was written but
-whose interface was not handed it is synced again. A site left mid rekey goes
-first in the next run, whether it is named or not, and its swap is finished
-before the cluster's health is read: a swap that stopped part way leaves its
-peers disagreeing about its key, which is often exactly why the cluster is
-unhealthy, so refusing on that health would leave the run unable to repair
-what it broke. The health check refuses only before a site's rekey starts. An
-`--all` run records the sites it has left in the secrets file
+rekey, and which public key its host runs, read through the WireGuard helper's
+`show public-key`, says whether stage 2 is done. A peer whose file was written
+but whose interface was not handed it is synced again. A site left mid rekey
+goes first in the next run, whether it is named or not, and its swap is
+finished before the cluster's health is read: a swap that stopped part way
+leaves its peers disagreeing about its key, which is often exactly why the
+cluster is unhealthy, so refusing on that health would leave the run unable to
+repair what it broke. The health check refuses only before a site's rekey
+starts. An `--all` run records the sites it has left in the secrets file
 (`mesh_rekey_remaining`), each taken off as its key is promoted, so a stopped
 `--all` run resumes with the sites it had left and does not rekey again a site
-it finished. Until stage 4, render still
-reads `wireguard_private_key`, the old key, so `apply`, with or without
-`--site`, refuses while any site has a next key in the secrets file and names
-the `mesh rekey` that finishes it: an `apply` then would hand the old key back
-to every peer and cut the site's tunnels, and a refusal costs nothing but the
-rekey's resume.
+it finished. Until stage 4, render still reads `wireguard_private_key`, the
+old key, so `apply`, with or without `--site`, refuses while any site has a
+next key in the secrets file and names the `mesh rekey` that finishes it: an
+`apply` then would hand the old key back to every peer and cut the site's
+tunnels, and a refusal costs nothing but the rekey's resume.
 
 **A relay's swap pauses Patroni.** A site with no dial endpoint routes
 everything it has no peer for through the first site that has one (*`site

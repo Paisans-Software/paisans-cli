@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // SetFast makes every wait a few polls with no sleep, so a gate that fails
@@ -66,3 +67,12 @@ func WorstCaseRemains() []string {
 	out = append(out, caddyKept(site, name, []string{path, path}, path))
 	return out
 }
+
+// MeshPlan runs meshPlan for name's site change, whose own scoped apply is
+// held (nil for none) over paths.
+func MeshPlan(site, name string, held *apply.Plan, paths []string, conf string, build func() (*apply.Plan, error)) (*apply.Plan, error) {
+	return meshPlan(site, name, &siteChange{site: name, plan: held, paths: paths}, conf, build)
+}
+
+// Rendered is the render without the site being removed.
+func (p *Plan) Rendered() *render.Plan { return p.rendered }

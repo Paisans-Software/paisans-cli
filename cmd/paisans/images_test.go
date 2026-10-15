@@ -2,13 +2,16 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -162,6 +165,69 @@ type deployedHost struct {
 func (h deployedHost) ReadFile(path string) (string, bool, error) {
 	content, ok := h.files[path]
 	return content, ok, nil
+}
+
+// Run answers the WireGuard helper's show reads, which a plan of an up mesh
+// sends in one command, from the mesh file the apply wrote: the interface
+// runs what its file says, so planning finds nothing to sync. Every other
+// command is the running host's.
+func (h deployedHost) Run(command string) (string, error) {
+	if !strings.HasPrefix(command, "echo paisans-show:") {
+		return h.runningHost.Run(command)
+	}
+	var conf string
+	for path, content := range h.files {
+		if strings.Contains(path, "/psns-") && strings.HasSuffix(path, ".conf") {
+			conf = content
+		}
+	}
+	var out strings.Builder
+	for _, part := range strings.Split(command, " && ") {
+		if field, ok := strings.CutPrefix(part, "echo paisans-show:"); ok {
+			out.WriteString("paisans-show:" + field + "\n")
+			continue
+		}
+		_, field, _ := strings.Cut(part, " show ")
+		switch field {
+		case "public-key":
+			m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(conf)
+			if m == nil {
+				return "", fmt.Errorf("the mesh file has no PrivateKey")
+			}
+			key, err := render.PublicKey(m[1])
+			if err != nil {
+				return "", err
+			}
+			out.WriteString(key + "\n")
+		case "listen-port":
+			port := "40123"
+			if m := regexp.MustCompile(`(?m)^ListenPort = (\S+)`).FindStringSubmatch(conf); m != nil {
+				port = m[1]
+			}
+			out.WriteString(port + "\n")
+		case "peers":
+			for _, m := range regexp.MustCompile(`(?m)^PublicKey = (\S+)`).FindAllStringSubmatch(conf, -1) {
+				out.WriteString(m[1] + "\n")
+			}
+		case "allowed-ips", "persistent-keepalive":
+			for _, peer := range regexp.MustCompile(`(?m)^\[Peer\]`).Split(conf, -1)[1:] {
+				key := regexp.MustCompile(`(?m)^PublicKey = (\S+)`).FindStringSubmatch(peer)
+				if key == nil {
+					continue
+				}
+				value := "(none)"
+				if field == "persistent-keepalive" {
+					value = "off"
+				}
+				attr := map[string]string{"allowed-ips": "AllowedIPs", "persistent-keepalive": "PersistentKeepalive"}[field]
+				if m := regexp.MustCompile(`(?m)^` + attr + ` = (.+)$`).FindStringSubmatch(peer); m != nil && strings.TrimSpace(m[1]) != "0" {
+					value = strings.ReplaceAll(strings.TrimSpace(m[1]), ", ", " ")
+				}
+				out.WriteString(key[1] + "\t" + value + "\n")
+			}
+		}
+	}
+	return out.String(), nil
 }
 
 func (h deployedHost) WriteFile(path, content string, _ uint32) error {

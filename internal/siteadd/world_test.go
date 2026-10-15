@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -46,7 +47,14 @@ type world struct {
 	starting map[string]int
 
 	// Knobs that break one thing.
-	noPing          bool
+	noPing bool
+	// pingOut is what a failed ping prints, when noPing is set.
+	pingOut string
+	// clock is what date +%s prints on every host, when set.
+	clock *string
+	// handshakesFail is what the helper's show latest-handshakes prints,
+	// failing, on every host and every time, when set.
+	handshakesFail  *string
 	promoteRefusals int
 	// addRefusals is how many learner adds etcd refuses as an unhealthy
 	// cluster, as it does until every voter has been connected five seconds.
@@ -70,6 +78,9 @@ type host struct {
 	commands []string
 	writes   int
 	wgUp     bool
+	// wgRun is the mesh file the running interface was last handed, by the
+	// helper's up, restart or sync, which is what its show answers from.
+	wgRun string
 }
 
 func (h *host) Describe() string { return h.name }
@@ -85,7 +96,21 @@ func (h *host) WriteFile(path, content string, mode uint32) error {
 	return nil
 }
 
-func (h *host) RunInput(command, stdin string) (string, error) { return h.Run(command) }
+func (h *host) RunInput(command, stdin string) (string, error) {
+	out, err := h.Run(command)
+	if err == nil && command == wgHelper+"put" {
+		h.files[wgInstalled] = stdin
+	}
+	return out, err
+}
+
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+)
 
 func (h *host) ran(sub string) int {
 	n := 0
@@ -109,6 +134,14 @@ func (h *host) Run(command string) (string, error) {
 	if w.failOnce != "" && strings.Contains(command, w.failOnce) {
 		w.failOnce = ""
 		return "failed by the test", fmt.Errorf("exit status 1")
+	}
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
+		return out, err
+	}
+	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
+		if out, ok := meshfake.ShowRunning(field, h.wgRun); ok {
+			return out, nil
+		}
 	}
 	if w.unreachable != "" && strings.Contains(command, w.unreachable) {
 		return "ssh: connect to host 203.0.113.10 port 22: Operation timed out\n",
@@ -171,26 +204,39 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.wgRun, "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
-	case strings.Contains(command, "enable --now wg-quick@psns-f2a9"), strings.Contains(command, "restart wg-quick@psns-f2a9"):
-		h.wgUp = true
+	case command == wgHelper+"up", command == wgHelper+"restart":
+		h.wgUp, h.wgRun = true, h.files[wgInstalled]
 		return "", nil
+	case command == wgHelper+"sync":
+		h.wgRun = h.files[wgInstalled]
+		return "", nil
+	case command == wgHelper+"put":
+		return "", nil
+	case command == "date +%s":
+		if w.clock != nil {
+			return *w.clock, nil
+		}
+		return "1000\n", nil
+	case strings.HasPrefix(command, "wg "), strings.Contains(command, "wg-quick"):
+		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {
+			if w.pingOut != "" {
+				return w.pingOut, fmt.Errorf("exit status 1")
+			}
 			return "100% packet loss", fmt.Errorf("exit status 1")
 		}
 		return "3 received", nil
-	case strings.Contains(command, "latest-handshakes"):
+	case command == wgHelper+"show latest-handshakes":
+		if w.handshakesFail != nil {
+			return *w.handshakesFail, fmt.Errorf("exit status 1")
+		}
 		return w.handshakes(h), nil
 	case strings.Contains(command, "--quiet etcd"):
 		if !w.running[h.name] {
@@ -337,12 +383,12 @@ func (w *world) stats(site string) (string, error) {
 	return b.String(), nil
 }
 
-// handshakes answers `wg show psns-f2a9 latest-handshakes` from the files: two
-// sites have a fresh handshake when each lists the other's key and both
-// interfaces are up.
+// handshakes answers the helper's show latest-handshakes from what each
+// interface runs: two sites have a fresh handshake when each runs the
+// other's key as a peer and both interfaces are up.
 func (w *world) handshakes(h *host) string {
 	var b strings.Builder
-	mine := h.files["/etc/wireguard/psns-f2a9.conf"]
+	mine := h.wgRun
 	for _, name := range w.cfg.SiteNames() {
 		if name == h.name {
 			continue
@@ -356,12 +402,11 @@ func (w *world) handshakes(h *host) string {
 			continue
 		}
 		stamp := 0
-		if h.wgUp && other.wgUp && strings.Contains(other.files["/etc/wireguard/psns-f2a9.conf"], w.key(h.name)) {
+		if h.wgUp && other.wgUp && strings.Contains(other.wgRun, w.key(h.name)) {
 			stamp = 990
 		}
 		fmt.Fprintf(&b, "%s\t%d\n", key, stamp)
 	}
-	b.WriteString("now 1000\n")
 	return b.String()
 }
 

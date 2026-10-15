@@ -116,11 +116,21 @@ const MaxInterfaceName = 15
 // under MaxInterfaceName with room to spare.
 func (d Deployment) Interface() string { return InterfacePrefix + d.Token() }
 
-// WireGuardConf is the interface's wg-quick file, as a rendered path
-// relative to the host's /: etc/wireguard/psns-<token>.conf. wg-quick names
-// the interface after the file.
+// WireGuardConf is the interface's wg-quick file as apply renders and writes
+// it, relative to the host's /: srv/paisans/<token>/psns-<token>.conf. It is
+// the deployment's own copy, in its own directory, because the deployment's
+// user can neither write /etc/wireguard nor read the file there; apply hands
+// it to the WireGuard helper, which checks it and installs it as
+// WireGuardInstalled. It sits directly under the root, so it is no stack's.
 func (d Deployment) WireGuardConf() string {
-	return "etc/wireguard/" + d.Interface() + ".conf"
+	return d.RelPath(d.Interface() + ".conf")
+}
+
+// WireGuardInstalled is where the WireGuard helper installs the interface's
+// file for wg-quick, which names the interface after it:
+// /etc/wireguard/psns-<token>.conf, root's, mode 600.
+func (d Deployment) WireGuardInstalled() string {
+	return "/etc/wireguard/" + d.Interface() + ".conf"
 }
 
 // WireGuardUnit is the systemd unit wireguard-tools ships to bring the
@@ -138,7 +148,8 @@ func (d Deployment) LabelFilter() string { return "label=" + Label + "=" + d.ID 
 // SplitRel splits a rendered path into its stack and the remainder within
 // that stack, when it lies under some deployment's root:
 // srv/paisans/f2a9/talk/.env is ("f2a9", "talk", ".env", true). A path
-// outside every root, such as etc/wireguard/psns-f2a9.conf, is not.
+// with no stack, such as srv/paisans/f2a9/psns-f2a9.conf, or outside every
+// root, such as etc/hosts, is not.
 func SplitRel(rel string) (token, stack, rest string, ok bool) {
 	base := strings.TrimPrefix(Base, "/") + "/"
 	if !strings.HasPrefix(rel, base) {

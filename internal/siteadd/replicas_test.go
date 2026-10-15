@@ -117,7 +117,7 @@ func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 	}
 	checked := 0
 	for _, e := range m.Files {
-		if e.Path == "etc/wireguard/psns-f2a9.conf" || e.Path == "srv/paisans/f2a9/infra/patroni.env" {
+		if e.Path == "srv/paisans/f2a9/psns-f2a9.conf" || e.Path == "srv/paisans/f2a9/infra/patroni.env" {
 			checked++
 			if sum := sha256.Sum256([]byte(h.files["/"+e.Path])); e.SHA256 != hex.EncodeToString(sum[:]) {
 				t.Errorf("home-c's manifest records /%s as it was before", e.Path)

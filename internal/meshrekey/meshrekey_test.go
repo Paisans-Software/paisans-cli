@@ -14,13 +14,22 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-const wgConf = "/etc/wireguard/psns-f2a9.conf"
+const wgConf = "/srv/paisans/f2a9/psns-f2a9.conf"
+
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+)
 
 var (
 	privateRe = regexp.MustCompile(`(?m)^PrivateKey = (\S+)`)
@@ -42,6 +51,8 @@ type mesh struct {
 	failOnce string
 	failSkip int
 	failHost string
+	// failOut is what the failed command prints, when set.
+	failOut string
 	// sick makes etcd answer one endpoint unhealthy.
 	sick bool
 	// patroni overrides a data site's role and state in `patronictl list`.
@@ -111,6 +122,13 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.files[strings.TrimSuffix(path, "'")] = stdin
 		return "", nil
 	}
+	if command == wgHelper+"put" {
+		out, err := h.Run(command)
+		if err == nil {
+			h.files[wgInstalled] = stdin
+		}
+		return out, err
+	}
 	return h.Run(command)
 }
 
@@ -150,20 +168,31 @@ func (h *host) Run(command string) (string, error) {
 			m.failSkip--
 		} else {
 			m.failOnce = ""
+			if m.failOut != "" {
+				return m.failOut, errors.New("exit status 1")
+			}
 			return "failed by the test", errors.New("exit status 1")
 		}
 	}
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
+		return out, err
+	}
+	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
+		if out, ok := meshfake.ShowRunning(field, h.run); ok {
+			return out, nil
+		}
+	}
 	switch {
+	case strings.HasPrefix(command, "wg "), strings.HasPrefix(command, "wg-quick "), strings.Contains(command, "wg syncconf"):
+		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case command == "true":
 		return "", nil
-	case strings.Contains(command, "wg syncconf"):
-		h.run = h.files[wgConf]
+	case command == wgHelper+"put":
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
-		return h.runsKey() + "\n", nil
-	case command == "wg show psns-f2a9 peers":
-		return strings.Join(h.peers(), "\n") + "\n", nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		h.run = h.files[wgInstalled]
+		return "", nil
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		mine := h.runsKey()
 		for _, key := range h.peers() {
@@ -184,8 +213,6 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		return "up\n", nil
 	case strings.Contains(command, "getent ahosts"):
 		return "", nil
 	case strings.Contains(command, "endpoint health --cluster"):
@@ -294,7 +321,7 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[d.Manifest()] = string(manifest) + "\n"
-		h.run = h.files[wgConf]
+		h.files[wgInstalled], h.run = h.files[wgConf], h.files[wgConf]
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
 		id, e := registry.For(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 		reg.Deployments[id] = e
@@ -331,7 +358,7 @@ func (m *mesh) joining(site string) {
 		if name == site || content == "" {
 			continue
 		}
-		h.files[wgConf], h.run = content, content
+		h.files[wgConf], h.files[wgInstalled], h.run = content, content, content
 		var man render.Manifest
 		if err := json.Unmarshal([]byte(h.files[d.Manifest()]), &man); err != nil {
 			m.t.Fatal(err)
@@ -445,7 +472,7 @@ func TestARekeyResumes(t *testing.T) {
 		fail string
 		from Stage
 	}{
-		{"wg syncconf", Swap},
+		{"' sync", Swap},
 		{"endpoint health", Health},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
@@ -487,6 +514,21 @@ func TestARekeyResumes(t *testing.T) {
 				t.Error("vm does not run its new key")
 			}
 		})
+	}
+}
+
+// sudo refusing the helper while a rekey reads its handshakes is the host's
+// owner's problem, said as such.
+func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
+	m := newMesh(t)
+	p, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.failOnce, m.failOut = "show latest-handshakes", "sudo: a password is required\n"
+	err = run(t, p)
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 }
 
@@ -570,7 +612,7 @@ func TestARelaysRekeyPausesPatroni(t *testing.T) {
 			pause = i
 		case strings.Contains(line, "patronictl") && strings.HasSuffix(line, "resume --wait"):
 			resume = i
-		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "wg syncconf"):
+		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "' sync"):
 			vmSync = i
 		}
 	}
@@ -591,7 +633,7 @@ func TestAStoppedRelaySwapResumesPatroni(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil || !strings.Contains(err.Error(), "Patroni stays paused") {
 		t.Fatalf("err = %v", err)
 	}
@@ -683,7 +725,7 @@ func TestAPartialSwapResumesOnAnUnhealthyCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil {
 		t.Fatal("the swap that missed vm passed")
 	}

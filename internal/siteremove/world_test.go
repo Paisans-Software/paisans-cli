@@ -25,6 +25,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
@@ -40,10 +41,15 @@ const (
 	ourID   = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 	otherID = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
 	root    = "/srv/paisans/f2a9"
-	wgConf  = "/etc/wireguard/psns-f2a9.conf"
-	record  = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
-	keysAt  = "/home/ubuntu/.ssh/authorized_keys"
-	alice   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
+	wgConf  = "/srv/paisans/f2a9/psns-f2a9.conf"
+	// wgHelper is the start of every command sent to the WireGuard helper
+	// for the fixture's interface, and wgInstalled is where its put
+	// installs the mesh file on a real host.
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+	record      = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
+	keysAt      = "/home/ubuntu/.ssh/authorized_keys"
+	alice       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
 )
 
 var dep = deployment.Deployment{ID: ourID}
@@ -97,7 +103,9 @@ type world struct {
 	activePocket string
 
 	// Knobs that break one thing.
-	failOnce    string
+	failOnce string
+	// failOut is what the command failOnce fails prints, when set.
+	failOut     string
 	unreachable map[string]bool
 	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
@@ -121,8 +129,8 @@ type host struct {
 	files    map[string]string
 	commands []string
 	wgUp     bool
-	// wgRun is the mesh file the running interface was last handed by `wg
-	// syncconf`, nil while it runs the file on disk.
+	// wgRun is the mesh file the running interface was last handed by the
+	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
 	patroniUp bool
 	etcdUp    bool
@@ -197,6 +205,12 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.commands = append(h.commands, command)
 		h.w.log = append(h.w.log, h.name+": "+command)
 		h.files[strings.TrimSuffix(path, "'")] = stdin
+		return "", nil
+	}
+	if command == wgHelper+"put" {
+		h.commands = append(h.commands, command)
+		h.w.log = append(h.w.log, h.name+": "+command)
+		h.files[wgInstalled] = stdin
 		return "", nil
 	}
 	return h.Run(command)
@@ -346,7 +360,18 @@ func (h *host) Run(command string) (string, error) {
 	}
 	if w.failOnce != "" && strings.Contains(command, w.failOnce) {
 		w.failOnce = ""
+		if w.failOut != "" {
+			return w.failOut, errors.New("exit status 1")
+		}
 		return "failed by the test", errors.New("exit status 1")
+	}
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
+		return out, err
+	}
+	switch field, _ := strings.CutPrefix(command, wgHelper+"show "); field {
+	case "allowed-ips", "persistent-keepalive", "listen-port":
+		out, _ := meshfake.ShowRunning(field, h.runningWG())
+		return out, nil
 	}
 	if h.webCommand(command) {
 		return h.web.Plain().Run(command)
@@ -610,25 +635,23 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
-	case strings.Contains(command, "wg syncconf"):
-		running := h.files[wgConf]
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		running := h.files[wgInstalled]
 		h.wgRun = &running
+		if command != wgHelper+"sync" {
+			h.wgUp = true
+		}
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
+	case command == wgHelper+"show public-key":
 		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
 		if m == nil {
 			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
@@ -638,13 +661,13 @@ func (h *host) Run(command string) (string, error) {
 			return "", err
 		}
 		return key + "\n", nil
-	case command == "wg show psns-f2a9 peers":
+	case command == wgHelper+"show peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\n")
 		}
 		return b.String(), nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\t1760000000\n")
@@ -1386,6 +1409,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		if running, ok := h.files[wgConf]; ok {
 			h.wgRun = &running
+			h.files[wgInstalled] = running
 		}
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"

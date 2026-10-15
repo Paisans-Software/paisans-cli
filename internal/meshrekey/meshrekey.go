@@ -11,18 +11,19 @@
 // until every peer knows the new key, and two sites down at once can cost
 // etcd its quorum. Each site goes through four stages, each ending at a
 // gate: the new key written to the secrets file as the site's next key; the
-// peers' mesh files and then the site's own handed the new key with `wg
-// syncconf`; the cluster's health; and the next key promoted. A run that
-// stops part way resumes: a next key in the file says a rekey is under way,
-// and which key the host runs, read with `wg show`, says whether its swap is
-// done. docs/specs/2026-10-11-site-evict.md, "Rekeying the mesh", is the
-// approved design.
+// peers' mesh files and then the site's own handed the new key by the
+// WireGuard helper's sync; the cluster's health; and the next key promoted.
+// A run that stops part way resumes: a next key in the file says a rekey is
+// under way, and which key the host runs, read through the WireGuard helper,
+// says whether its swap is done. docs/specs/2026-10-11-site-evict.md,
+// "Rekeying the mesh", is the approved design.
 package meshrekey
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -323,7 +324,7 @@ func (p *Plan) stages(s Site) []stageText {
 		all = append(all, stageText{Swap, "pause Patroni", fmt.Sprintf("`patronictl pause --wait`: %s reach each other only through %s, so its swap cuts them apart for a moment, which can cost etcd its quorum; paused, Patroni fails nothing over for a partition that heals in seconds", joinAnd(s.Relays), s.Name), "Patroni reports itself paused"})
 	}
 	all = append(all,
-		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
+		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface by the WireGuard helper's sync; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
 		stageText{Health, "check the cluster", "nothing changes", fmt.Sprintf("etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming; within %s", healthWait)},
 	)
 	if len(s.Relays) > 0 {
@@ -563,28 +564,33 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 		}
 		runs = key == newPublic
 	} else {
-		out, err := t.Run("wg show " + p.dep().Interface() + " peers")
+		peers, err := meshkey.Peers(name, t, p.dep())
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, strings.TrimSpace(out))
+			return err
 		}
-		runs = strings.Contains(out, newPublic)
+		runs = slices.Contains(peers, newPublic)
 	}
 	if runs {
 		return nil
 	}
-	if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
-		return fmt.Errorf("%s: %s: %w: %s", name, apply.WireGuardSync.Title(p.dep()), err, strings.TrimSpace(out))
+	if err := apply.SyncMesh(sp, t); err != nil {
+		return fmt.Errorf("%s: %s: %w", name, apply.WireGuardSync.Title(p.dep()), err)
 	}
 	return nil
 }
 
 // handshake reports whether site's interface has had a handshake with key.
-// `wg show <interface> latest-handshakes` prints each peer's public key and
-// the time of its last handshake, 0 for none (wireguard-tools, wg(8)).
+// The helper's show latest-handshakes prints, as `wg show <interface>
+// latest-handshakes` does, each peer's public key and the time of its last
+// handshake, 0 for none (wireguard-tools, wg(8)).
 func (p *Plan) handshake(site, key string) (bool, error) {
-	out, err := p.transports[site].Run("wg show " + p.dep().Interface() + " latest-handshakes")
+	h := apply.WGHelper{T: p.transports[site], Iface: p.dep().Interface()}
+	out, err := h.Show("latest-handshakes")
+	if problem := apply.HelperReadProblem(site, h, err); problem != nil {
+		return false, problem
+	}
 	if err != nil {
-		return false, fmt.Errorf("%s: `wg show %s latest-handshakes`: %w: %s", site, p.dep().Interface(), err, strings.TrimSpace(out))
+		return false, fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", site, p.dep().Interface(), err)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
@@ -825,7 +831,9 @@ func poll(wait, every time.Duration, check func() error) error {
 		if err = check(); err == nil {
 			return nil
 		}
-		if errors.Is(err, apply.ErrUnreachable) {
+		// Neither ssh failing after its retries nor sudo refusing the
+		// helper clears itself while a gate waits.
+		if errors.Is(err, apply.ErrUnreachable) || errors.Is(err, apply.ErrHelperRefused) {
 			return err
 		}
 		if i < n-1 {

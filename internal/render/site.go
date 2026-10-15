@@ -803,8 +803,11 @@ func (p *planner) renderTemplate(name string, data any) (string, error) {
 // A site with a dial endpoint (config.Site.DialEndpoint: its public_address,
 // or the endpoint it writes) is dialled by everyone else. Two sites that both
 // lack one cannot dial each other, so their traffic relays through a site
-// that has one. Relaying keeps this to static configuration with no daemon and
-// no coordination service, which is why plain WireGuard was chosen.
+// that has one. Relaying keeps this to static configuration with no daemon and no
+// coordination service. The relay forwards with the host's
+// net.ipv4.ip_forward, which host admit turns on for a site with an
+// endpoint: the file carries no PostUp, because wg-quick runs one as root
+// and the WireGuard helper refuses any.
 func (p *planner) renderWireGuard(site *siteView) (string, error) {
 	private := p.secrets.Sites[site.Name].WireGuardPrivateKey
 	if _, err := publicKey(private); err != nil {
@@ -860,7 +863,6 @@ func (p *planner) renderWireGuard(site *siteView) (string, error) {
 		"Site":       site,
 		"PrivateKey": private,
 		"MeshPrefix": p.cfg.Mesh.Prefix(),
-		"IsRelay":    isRelay,
 		"Peers":      peers,
 		"ListenPort": p.cfg.Sites[site.Name].ListenPort(),
 	})

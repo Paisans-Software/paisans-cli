@@ -3,8 +3,11 @@ package apply
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // HelperDir is where host admit installs each deployment's WireGuard helper.
@@ -52,8 +55,8 @@ func (h WGHelper) Put(conf []byte) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.T.RunInput(cmd, string(conf))
-	return err
+	out, err := h.T.RunInput(cmd, string(conf))
+	return withOutput(err, out)
 }
 
 // Up enables and starts the interface.
@@ -72,20 +75,74 @@ func (h WGHelper) Sync() error {
 	return h.run("sync")
 }
 
-// showFields are the fields the helper's show verb reads.
-var showFields = map[string]bool{"peers": true, "latest-handshakes": true, "public-key": true}
+// showFields are the fields the helper's show verb reads: each is held by
+// the interface's own conf already or says how the mesh is doing.
+var showFields = map[string]bool{
+	"peers": true, "latest-handshakes": true, "public-key": true,
+	"allowed-ips": true, "persistent-keepalive": true, "listen-port": true,
+}
+
+// showFieldList names showFields for a refusal.
+const showFieldList = "peers, latest-handshakes, public-key, allowed-ips, persistent-keepalive or listen-port"
 
 // Show reads one field of the running interface, as `wg show <iface>
 // <field>` prints it.
 func (h WGHelper) Show(field string) (string, error) {
 	if !showFields[field] {
-		return "", fmt.Errorf("the WireGuard helper shows peers, latest-handshakes or public-key, not %q", field)
+		return "", fmt.Errorf("the WireGuard helper shows %s, not %q", showFieldList, field)
 	}
 	cmd, err := h.command("show " + field)
 	if err != nil {
 		return "", err
 	}
-	return h.T.Run(cmd)
+	out, err := h.T.Run(cmd)
+	return out, withOutput(err, out)
+}
+
+// showMark starts each field's lines in ShowFields' output.
+const showMark = "paisans-show:"
+
+// ShowFields reads several fields of the running interface in one command,
+// so one ssh round trip: the helper once per field, each behind a line
+// that names the field. It returns each field's lines as the helper printed
+// them; what came before the first such line, which can only be what sudo
+// printed, goes with the first field. A field whose line is missing, such
+// as after a failure, is an error.
+func (h WGHelper) ShowFields(fields ...string) (map[string]string, error) {
+	var parts []string
+	for _, field := range fields {
+		if !showFields[field] {
+			return nil, fmt.Errorf("the WireGuard helper shows %s, not %q", showFieldList, field)
+		}
+		cmd, err := h.command("show " + field)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, "echo "+showMark+field, cmd)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("no field to show")
+	}
+	out, err := h.T.Run(strings.Join(parts, " && "))
+	if err != nil {
+		return nil, withOutput(err, out)
+	}
+	got := map[string]string{}
+	marked := map[string]bool{}
+	field := fields[0]
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimRight(line, "\r\n"), showMark); ok && slices.Contains(fields, name) {
+			field, marked[name] = name, true
+			continue
+		}
+		got[field] += line
+	}
+	for _, f := range fields {
+		if !marked[f] {
+			return nil, fmt.Errorf("the WireGuard helper's show %s printed nothing", f)
+		}
+	}
+	return got, nil
 }
 
 // Log is the interface unit's last journal lines.
@@ -94,7 +151,8 @@ func (h WGHelper) Log() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return h.T.Run(cmd)
+	out, err := h.T.Run(cmd)
+	return out, withOutput(err, out)
 }
 
 func (h WGHelper) run(verb string) error {
@@ -102,6 +160,31 @@ func (h WGHelper) run(verb string) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.T.Run(cmd)
-	return err
+	out, err := h.T.Run(cmd)
+	return withOutput(err, out)
+}
+
+// withOutput is err with what the helper or sudo printed, which is why it
+// failed: SSHTransport's error quotes the output already, and a transport
+// that does not loses nothing. The output is compared and appended
+// redacted only, as SSHTransport quotes it, so a secret registered for
+// display never reaches the error raw. Nil stays nil.
+func withOutput(err error, out string) error {
+	out = ui.Redact(strings.TrimRight(out, "\n"))
+	if err == nil || out == "" || strings.Contains(err.Error(), out) {
+		return err
+	}
+	return fmt.Errorf("%w\n%s", err, out)
+}
+
+// CommandLine is the helper's command for verb as an operator types it,
+// logged in as the deployment's user, for a message: sudo, the path
+// unquoted, and the verb. An Iface that is no deployment's has no helper,
+// so it is named in words instead.
+func (h WGHelper) CommandLine(verb string) string {
+	path, err := h.Path()
+	if err != nil {
+		return "the WireGuard helper's " + verb
+	}
+	return "sudo " + path + " " + verb
 }

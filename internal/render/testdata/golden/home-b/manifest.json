@@ -2,11 +2,6 @@
   "version": 1,
   "files": [
     {
-      "path": "etc/wireguard/psns-f2a9.conf",
-      "sha256": "452dd52d7a4646661ae0d41a988ad430e5e85792a74f6a76d098afdb870e985e",
-      "mode": "0600"
-    },
-    {
       "path": "srv/paisans/f2a9/account/.env",
       "sha256": "3fff2e91fe53ebcec336102ba5b5ed974b8d9d0105bad3b7779b52bce4a236f2",
       "mode": "0600"
@@ -79,6 +74,11 @@
     {
       "path": "srv/paisans/f2a9/infra/patroni.env",
       "sha256": "8a7bf5a399549846ead0821deb319c1e8d2add34e2611f417b6968dcd03bb733",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/psns-f2a9.conf",
+      "sha256": "123287ef6489074562f74a6c902d1d8fb45d976d9cdcc3cb3dc042774ee981d0",
       "mode": "0600"
     },
     {
