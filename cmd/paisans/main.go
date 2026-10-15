@@ -124,6 +124,8 @@ func main() {
 		err = runFailover(os.Args[2:])
 	case "doctor":
 		err = runDoctor(os.Args[2:])
+	case "images":
+		err = runImages(os.Args[2:], os.Stdout)
 	case "version", "--version":
 		err = runVersion(os.Args[2:], os.Stdout)
 	case "dns":
@@ -174,6 +176,12 @@ func groupError(w io.Writer, group, msg string) int {
 // (see ui.PrintError), and returns the status to exit with.
 func reportError(w io.Writer, err error, verbose bool) int {
 	ui.PrintError(w, err, verbose)
+	// Not a failure: --check found a build that would move or an override
+	// that lags, and the table already says which. It exits 3 so a schedule
+	// tells it from an error.
+	if errors.Is(err, errImagesMove) {
+		return 3
+	}
 	// Not a failure: a gate is waiting on Garage, and the next run resumes
 	// there. EX_TEMPFAIL (sysexits.h), "try again later", so a script can
 	// tell it from one.
