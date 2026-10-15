@@ -63,7 +63,7 @@ var helpSections = []helpSection{
 	{"Most of the time", []string{"apply"}},
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
 	{"Hosts and sites", []string{"host", "site", "mesh", "gateway", "storage", "prune"}},
-	{"Check", []string{"doctor", "preflight", "failover", "web-server", "version"}},
+	{"Check", []string{"doctor", "images", "preflight", "failover", "web-server", "version"}},
 	{"Configuration and secrets", []string{"config", "operator", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
 }
@@ -260,6 +260,14 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--execute]"},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
 			"Prints how to recover. Reaches hosts and changes none; exits 1 on any FAIL. With --execute it removes the config: keys that only repeat what gating renders, and records the ssh.user of a site it logs in to as the deployment's own user, both in " + config.FileName + ".",
+	},
+	{
+		name:    "images",
+		summary: "List every image each site runs and what the next apply runs.",
+		usage:   []string{"paisans images [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n               [--check]"},
+		detail: "List, for every site, each image its stacks run: where its reference comes from (the core catalog's foundation, the blueprint, or the configuration key that declares it), the build the site runs, and the build the next apply would run. " +
+			"An override names what it replaced, and says when that is a newer release. " +
+			"Reads every site over ssh and the registries; changes nothing. An image a registry cannot resolve shows unknown under newest. A site it cannot reach is listed as unknown and the command exits 1. --check exits 3 when a build would move or an override lags.",
 	},
 	{
 		name:    "version",

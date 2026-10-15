@@ -121,3 +121,26 @@ func TestCacheAnswersATrackOnce(t *testing.T) {
 		t.Errorf("asked %d times, got %s then %s", f.asked, a, b)
 	}
 }
+
+func TestOlderTag(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"v3.5.21", "v3.5.23", true},
+		{"v3.5.23", "v3.5.21", false},
+		{"v3.5.21", "v3.5.21", false},
+		{"3.0.11-alpine", "3.2.0-alpine", true},
+		{"4.0-p3", "4.0-p5", true},
+		{"17.4-1", "17.10-1", true},
+		{"v3.5", "v3.5.1", false},
+		{"latest", "v1.0.0", false},
+		{"", "v1.0.0", false},
+		{"1.99999999999999999999", "2.0", true},
+	}
+	for _, c := range cases {
+		if got := imagedigest.OlderTag(c.a, c.b); got != c.want {
+			t.Errorf("OlderTag(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

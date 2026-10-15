@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,6 +88,9 @@ type Config struct {
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
 	ACME ACME `yaml:"acme"`
+	// Infra overrides the images the infrastructure stack runs, each of
+	// which is otherwise the core catalog foundation's.
+	Infra Infra `yaml:"infra"`
 	// Operators is the people who may log in to the sites, under the name a
 	// site's ssh.keys lists them by.
 	Operators map[string]Operator `yaml:"operators"`
@@ -153,6 +157,83 @@ func (m Mesh) Contains(address string) bool {
 	}
 	ip := net.ParseIP(address)
 	return ip != nil && network.Contains(ip)
+}
+
+// Infra overrides the infrastructure stack's images. Each key is optional,
+// and an unset one takes the core catalog foundation's image. A value is one
+// full reference, exact or a track, for the reason App.Images gives.
+type Infra struct {
+	// Images is keyed by InfraImageKeys, the names foundation.yaml gives
+	// the images they replace. The heartbeat key replaces the image both the
+	// infrastructure stack's heartbeat and every Pocket ID stack's operators
+	// heartbeat run.
+	Images map[string]string `yaml:"images"`
+	// Postgres is keyed by Postgres major, then by InfraPostgresKeys. An
+	// entry applies only while cluster.postgres_version is its major, so a
+	// build of one major never follows the cluster onto another.
+	Postgres map[string]map[string]string `yaml:"postgres"`
+}
+
+// InfraImageKeys are the keys infra.images takes.
+var InfraImageKeys = []string{"etcd", "garage", "haproxy", "heartbeat"}
+
+// InfraPostgresKeys are the keys infra.postgres.<major> takes.
+var InfraPostgresKeys = []string{"spilo"}
+
+// DefaultPostgresVersion is the major a deployment runs when
+// cluster.postgres_version is left out.
+const DefaultPostgresVersion = "18"
+
+// PostgresMajor is the Postgres major the deployment runs.
+func (c *Config) PostgresMajor() string {
+	if c.Cluster.PostgresVersion == "" {
+		return DefaultPostgresVersion
+	}
+	return c.Cluster.PostgresVersion
+}
+
+// SpiloImage is the Spilo image infra.postgres declares for the major the
+// deployment runs, empty when it declares none.
+func (c *Config) SpiloImage() string {
+	return c.Infra.Postgres[c.PostgresMajor()]["spilo"]
+}
+
+// problems are infra's keys and references that cannot be rendered: a key
+// the toolkit does not run, or a value that is not one image reference.
+func (i Infra) problems() []string {
+	var out []string
+	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
+	for _, key := range sortedKeys(i.Images) {
+		if !slices.Contains(InfraImageKeys, key) {
+			add("infra.images.%s: not an image the infrastructure stack runs. infra.images takes %s; the gateway's Caddy is acme.image.", keyPath(key), strings.Join(InfraImageKeys, ", "))
+			continue
+		}
+		imageProblem(add, "infra.images."+keyPath(key), i.Images[key])
+	}
+	for _, major := range sortedKeys(i.Postgres) {
+		for _, key := range sortedKeys(i.Postgres[major]) {
+			path := fmt.Sprintf("infra.postgres.%s.%s", keyPath(major), keyPath(key))
+			if !slices.Contains(InfraPostgresKeys, key) {
+				add("%s: infra.postgres.<major> takes %s. A pinned app's own database is apps.<name>.images.", path, strings.Join(InfraPostgresKeys, ", "))
+				continue
+			}
+			imageProblem(add, path, i.Postgres[major][key])
+		}
+	}
+	return out
+}
+
+// imageProblem adds what is wrong with ref as the image at path: a control
+// character, nothing, or something no image reference holds.
+func imageProblem(add func(string, ...any), path, ref string) {
+	switch r, ok := ControlRune(ref); {
+	case ok:
+		add("%s %s", path, controlProblem(r))
+	case strings.TrimSpace(ref) == "":
+		add("%s: empty. Give a full image reference, or remove the key to take the core catalog's.", path)
+	case !imageRef.MatchString(ref):
+		add("%s: %s", path, imageRefProblem(ref))
+	}
 }
 
 // ACME is the certificate story: which DNS provider answers the challenge, and
@@ -1243,6 +1324,7 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 	}
 	problems = append(problems, smtpProblems("smtp", c.SMTP)...)
+	problems = append(problems, c.Infra.problems()...)
 	if !c.Etcd.MembersDerived && len(c.Etcd.Members) == 0 {
 		add("etcd.members: empty. No site would run etcd, so Patroni on every data site would have nowhere to keep its leader. Remove the key, and the voters are derived from the roles (every witness, then every data site), or list at least one site.")
 	}

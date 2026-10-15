@@ -801,7 +801,15 @@ pattern whose `*` each match one run of digits), an app's in its blueprint and
 the toolkit's own services' in `foundation.yaml` (`kinds.FoundationImage`,
 `kinds.SpiloImage`, `kinds.PostgresImage`; a reserved blueprint's service
 names its image with `foundation:`). An operator's `images` entry or
-`acme.image` may name a tag that moves too. `render` renders each as
+`acme.image` may name a tag that moves too. An operator's `infra` override is
+checked against the same table through `blueprints.CheckFoundationImage`, from
+`internal/validate`. Render records on each `render.ComposeImage` where its
+reference came from (`Origin`) and what it replaced (`Replaces`); an image a
+configuration key declares is never marked in `FoundationServices`, so the
+review exemption reaches only what the render took from the official core
+catalog's foundation. Apply resolves `Replaces` and warns, never refuses, when
+an override is an older release of the same repository
+(`imagedigest.OlderTag`). `render` renders each as
 configured, listing every image of every compose file per site in
 `Plan.Images`, with the configuration's names for each and the number of
 lines naming it, since render reaches no network.

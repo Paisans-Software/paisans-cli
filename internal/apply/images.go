@@ -249,13 +249,27 @@ type ImagePin struct {
 	// services, empty when the host has none, or its services disagree.
 	Deployed string
 	// Source is render.ManifestPin's: registry, deployed, held or
-	// configured.
+	// configured. Under TolerateUnresolved it is unresolved for an image
+	// the registry could not resolve, whose Reference is Image as rendered.
 	Source string
+	// Unresolved is why the registry could not resolve the image, when
+	// Source is unresolved.
+	Unresolved string
 	// Version and DeployedVersion are the version labels of Reference and
 	// Deployed, read only when the build moves and the resolver can, and
 	// empty otherwise.
 	Version         string
 	DeployedVersion string
+	// Origin and Replaces are render.ComposeImage's: the configuration key
+	// that declares the image, or where it came from when none does, and
+	// the reference it replaced.
+	Origin   string
+	Replaces string
+	// Replaced is the newest tag Replaces names, as a reference, when
+	// the resolver could say. Behind reports that it is a newer release of
+	// the same repository than the build the pin runs.
+	Replaced string
+	Behind   bool
 }
 
 // Moved reports whether the plan changes which build the services run,
@@ -267,7 +281,7 @@ type ImagePin struct {
 // same tag beside it is a first pin (see FirstPin), not a move, and only
 // another tag or another image is.
 func (p ImagePin) Moved() bool {
-	if p.Deployed == "" {
+	if p.Deployed == "" || p.Source == "unresolved" {
 		return false
 	}
 	if digestOf(p.Deployed) != "" {
@@ -282,7 +296,7 @@ func (p ImagePin) Moved() bool {
 // but the compose file changes, so the stack is recreated once, on the build
 // pinned.
 func (p ImagePin) FirstPin() bool {
-	return p.Deployed != "" && digestOf(p.Deployed) == "" && digestOf(p.Reference) != "" && nameOf(p.Reference) == strings.TrimSpace(p.Deployed)
+	return p.Source != "unresolved" && p.Deployed != "" && digestOf(p.Deployed) == "" && digestOf(p.Reference) != "" && nameOf(p.Reference) == strings.TrimSpace(p.Deployed)
 }
 
 // Describe is the pin as the dry run lists a moved image: the app (or infra),
@@ -368,7 +382,8 @@ func (p *Plan) FirstPins() []ImagePin {
 // ResolveImages and OtherSites describe. compose is the file as rendered,
 // current and found the host's copy. It returns the file to compare and
 // write, the pins for the plan and its manifest, and notes for the operator.
-func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
+// tolerate is TolerateUnresolved.
+func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose, tolerate bool) (string, []ImagePin, []Note, error) {
 	rendered, err := blueprints.ComposeMounts(compose)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("reading the images its compose file names: %w", err)
@@ -390,13 +405,16 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 				stackPeers = append(stackPeers, peer)
 			}
 		}
-		pin, imageNotes, err := pinImage(site, image, services, host, r, fresh, stackPeers)
+		pin, imageNotes, err := pinImage(site, image, services, host, r, fresh, stackPeers, tolerate)
 		if err != nil {
 			return "", nil, nil, err
 		}
 		notes = append(notes, imageNotes...)
 		if pin == nil {
 			continue
+		}
+		if pin.Replaces != "" && r != nil && pin.Source != "unresolved" {
+			notes = append(notes, checkLag(pin, r)...)
 		}
 		if pin.Reference != image.Image {
 			pinned[image.Image], lines[image.Image] = pin.Reference, image.Lines
@@ -421,10 +439,11 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 // pinImage decides the build of one image. services are the compose
 // services that run it, host the host's compose file, nil when it has none.
 // The pin is nil when nothing was pinned: no resolver, and no build of the
-// tag on the host to keep.
-func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
+// tag on the host to keep. With tolerate (TolerateUnresolved), an image the
+// registry cannot resolve is an unresolved pin and a note, not a refusal.
+func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose, tolerate bool) (*ImagePin, []Note, error) {
 	want := image.Image
-	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want}
+	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want, Origin: image.Origin, Replaces: image.Replaces}
 	deployed, _ := deployedRef(host, services)
 	if imagedigest.IsTrack(deployed) {
 		// No host can pull a track, so a file naming one runs nothing.
@@ -452,6 +471,9 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 			// runs nowhere here yet is resolved for a command that starts
 			// it (ResolveFresh).
 			resolved, err := resolve(want, fresh)
+			if err != nil && tolerate {
+				return unresolvedPin(pin, image, err)
+			}
 			if err != nil {
 				return nil, nil, unresolved(image, "", err, fresh)
 			}
@@ -509,7 +531,67 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 			Text: fmt.Sprintf("Resolving %s failed (%v), so the plan %s. A newer build, if one exists, arrives with the next apply that resolves %s.", ui.Name(want), failed, kept, ui.Name(want)),
 		}}, nil
 	}
+	if tolerate {
+		return unresolvedPin(pin, image, failed)
+	}
 	return nil, nil, unresolved(image, deployed, failed, r)
+}
+
+// unresolvedPin is pin for an image the registry could not resolve, under
+// TolerateUnresolved: it names Image as rendered, so its line is left as it
+// is, and a note gives the registry's answer.
+func unresolvedPin(pin *ImagePin, image render.ComposeImage, failed error) (*ImagePin, []Note, error) {
+	pin.Reference, pin.Source, pin.Unresolved = image.Image, "unresolved", failed.Error()
+	return pin, []Note{{
+		Hint: fmt.Sprintf("could not resolve %s %s; its newest build is unknown", imageLabel(image), ui.Name(image.Image)),
+		Text: fmt.Sprintf("Resolving %s failed (%v).", ui.Name(image.Image), failed),
+	}}, nil
+}
+
+// checkLag resolves the reference an override replaced, and marks the pin
+// Behind, with a warning, when that reference is a newer release of the same
+// repository. It only advises: a registry that cannot say leaves the pin
+// unmarked, and nothing is refused.
+func checkLag(pin *ImagePin, r Resolver) []Note {
+	replaced := pin.Replaces
+	if imagedigest.IsTrack(replaced) {
+		t, ok := r.(Tracker)
+		if !ok {
+			return nil
+		}
+		got, err := t.Track(replaced)
+		if err != nil {
+			return nil
+		}
+		replaced = got
+	}
+	pin.Replaced = replaced
+	ours, theirs := blueprints.ParseReference(nameOf(pin.Reference)), blueprints.ParseReference(nameOf(replaced))
+	if ours.Repository() != theirs.Repository() || !imagedigest.OlderTag(ours.Tag, theirs.Tag) {
+		return nil
+	}
+	pin.Behind = true
+	return []Note{{
+		Hint: fmt.Sprintf("%s is behind the image it replaces", pin.Origin),
+		Text: fmt.Sprintf("%s names %s, and without it the %s stack would run %s, a newer release. Update %s, or remove it to follow %s again.", ui.Name(pin.Origin), ui.Name(nameOf(pin.Reference)), ui.Name(pin.Stack), ui.Name(replaced), ui.Name(pin.Origin), ui.Name(pin.Replaces)),
+	}}
+}
+
+// ReferenceLabel names the build a reference names, for a table: its tag
+// and short digest, either alone when the reference names only one.
+func ReferenceLabel(ref string) string {
+	tag := blueprints.ParseReference(nameOf(ref)).Tag
+	digest := digestOf(ref)
+	if short, ok := strings.CutPrefix(digest, "sha256:"); ok && len(short) > 12 {
+		digest = "sha256:" + short[:12]
+	}
+	switch {
+	case digest == "":
+		return tag
+	case tag == "":
+		return digest
+	}
+	return tag + " (" + digest + ")"
 }
 
 // resolve is the build want names now, as a reference with its digest: a
@@ -564,12 +646,18 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 			Cause:   failed,
 		}
 	}
-	if image.Setting() == "" {
-		// No setting of the configuration decides it: it is the core
-		// catalog's foundation image, so the fix is the catalog's.
+	refused := errors.Is(failed, imagedigest.ErrNotFound) || errors.Is(failed, imagedigest.ErrDenied)
+	if image.Setting() == "" || image.Origin == render.OriginFoundation && refused {
+		// The core catalog's foundation image: the catalog's release fixes
+		// it, and the setting, when there is one, holds a build until then.
+		// One with a setting that the registry could not be asked about
+		// takes the advice below, which names that setting.
 		explain := fmt.Sprintf("Run apply again once this workstation reaches %s.", host)
-		if errors.Is(failed, imagedigest.ErrNotFound) || errors.Is(failed, imagedigest.ErrDenied) {
+		if refused {
 			explain = "It is the core catalog's own image (foundation.yaml), and its track names nothing this registry publishes anonymously. A release of the core catalog fixes it; pinning core to an older release in `catalogs` works until then."
+			if image.Setting() != "" {
+				explain += fmt.Sprintf(" So does setting %s to a published tag.", setting)
+			}
 		}
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("could not resolve %s (%s)", named, host),
@@ -905,7 +993,8 @@ func pinRecord(plan *Plan) []render.ManifestPin {
 	}
 	at := now().UTC().Format(time.RFC3339)
 	for _, pin := range plan.Pins {
-		if !settled[pin.Stack] {
+		// An unresolved pin names no build; Execute refuses its plan anyway.
+		if !settled[pin.Stack] || pin.Source == "unresolved" {
 			continue
 		}
 		for _, service := range pin.Services {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -49,17 +50,80 @@ type ComposeImage struct {
 	// a template points at the same reference was chosen by the template, not
 	// by the render, and is reviewed.
 	FoundationServices []string
+	// Origin is where Image came from: the configuration key that declares
+	// it (Eg: infra.images.etcd, apps.talk.images.app, acme.image), or
+	// OriginFoundation or OriginBlueprint when the configuration declares
+	// none.
+	Origin string
+	// Replaces is the reference the render takes when the configuration
+	// declares none, empty when it declares none or there is none.
+	Replaces string
 
+	// setting is Setting's answer for an image the configuration key of
+	// which the render knows directly: the infrastructure stack's and the
+	// operators heartbeat.
+	setting string
 	// blueprint is the app's blueprint, for Setting.
 	blueprint config.Blueprint
 }
 
+// The origins of an image no configuration key declares.
+const (
+	// OriginFoundation is the core catalog's foundation.yaml.
+	OriginFoundation = "foundation"
+	// OriginBlueprint is the image a blueprint names itself.
+	OriginBlueprint = "blueprint"
+)
+
+// imageOrigin is where the render took one service's image.
+type imageOrigin struct {
+	image string
+	// declared reports that a configuration key named image.
+	declared bool
+	// replaces is the reference the render takes without that key.
+	replaces string
+	// foundation reports that the render took image from the core
+	// catalog's foundation for one of the toolkit's own services, which is
+	// what marks it for the review exemption (FoundationServices).
+	foundation bool
+	// blueprint reports that a blueprint named image itself.
+	blueprint bool
+}
+
+// origin is o's ComposeImage.Origin, setting being the key that declares it.
+func (o imageOrigin) origin(setting string) string {
+	switch {
+	case o.declared:
+		return setting
+	case o.blueprint:
+		return OriginBlueprint
+	}
+	return OriginFoundation
+}
+
+// declaredOr is the reference the configuration declares, when it does, and
+// otherwise the foundation's image of that name.
+func declaredOr(declared, name string) (imageOrigin, error) {
+	def, err := blueprints.FoundationImage(name)
+	if err != nil {
+		return imageOrigin{}, err
+	}
+	if declared != "" {
+		return imageOrigin{image: declared, declared: true, replaces: def}, nil
+	}
+	return imageOrigin{image: def, foundation: true}, nil
+}
+
 // Setting is the configuration key that decides Image, for a message that
 // tells the operator where to pin it: acme.image for the gateway's Caddy,
+// infra.images.<key> for the rest of the infrastructure stack and the
+// operators heartbeat, infra.postgres.<major>.spilo for Spilo,
 // apps.<name>.images.<service> for a service of an app's blueprint, and empty
-// for an image only the core catalog's foundation decides (the rest of the
-// infrastructure stack, and the operators heartbeat).
+// for an image no configuration key decides.
 func (c ComposeImage) Setting() string {
+	if c.setting != "" {
+		return c.setting
+	}
 	if c.App == "" {
 		if len(c.Services) == 1 && c.Services[0] == "caddy" {
 			return "acme.image"
@@ -113,20 +177,34 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 		// ways is not the foundation's, so a declaration that happens to name
 		// a foundation image is still reviewed.
 		chosen, fromElsewhere := map[string]string{}, map[string]bool{}
+		// origins is where the render took each service's image, and
+		// settings the configuration key that decides it: keyed by compose
+		// service for infra and the injected heartbeat, by blueprint service
+		// for an app's.
+		origins := map[string]imageOrigin{}
+		settings := map[string]string{}
 		if stack == config.InfraStack {
 			// The infrastructure template is the toolkit's own, so each of
-			// its services running a foundation image was chosen by the
+			// its services running the foundation's image was chosen by the
 			// render. Only its own services count, so nothing else that
 			// reaches this file is marked.
-			fromFoundation, declared, err := p.infraImageOrigins()
+			infra, err := p.infraImageOrigins()
 			if err != nil {
 				return nil, err
 			}
-			fromElsewhere = declared
-			for name, service := range services {
-				if image := strings.TrimSpace(service.Image); fromFoundation[image] && infraServices[name] {
-					chosen[name] = image
+			// Every reference the render took from elsewhere is unmarked
+			// in this file, whichever service runs it.
+			for _, o := range infra {
+				if !o.foundation {
+					fromElsewhere[o.image] = true
 				}
+			}
+			for name, service := range services {
+				o, ok := infra[name]
+				if !ok || !infraServices[name] || o.image != strings.TrimSpace(service.Image) {
+					continue
+				}
+				origins[name], settings[name] = o, p.infraSetting(name)
 			}
 		} else {
 			declared, isApp := p.cfg.Apps[stack]
@@ -134,26 +212,40 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				continue
 			}
 			app = stack
-			images, foundation, err := p.appImageOrigins(declared)
+			appOrigins, err := p.appImageOrigins(declared)
 			if err != nil {
 				return nil, err
 			}
-			for service, image := range images {
-				if lines[image] > 0 {
-					named[image] = append(named[image], service)
+			for service, o := range appOrigins {
+				if !o.foundation {
+					fromElsewhere[o.image] = true
 				}
-				if foundation[service] {
-					chosen[service] = image
-				} else {
-					fromElsewhere[image] = true
+				// An origin labels the reference it chose, so it is kept
+				// only when the file runs that reference.
+				if lines[o.image] == 0 {
+					continue
 				}
+				named[o.image] = append(named[o.image], service)
+				origins[service], settings[service] = o, fmt.Sprintf("apps.%s.images.%s", stack, service)
 			}
 			injected, err := p.injectedImages(declared)
 			if err != nil {
 				return nil, err
 			}
-			for service, image := range injected {
-				chosen[service] = image
+			for service, o := range injected {
+				if !o.foundation {
+					fromElsewhere[o.image] = true
+				}
+				origins[service], settings[service] = o, "infra.images."+blueprints.FoundationHeartbeat
+			}
+		}
+		// A declared image is never the foundation's, even when it names the
+		// foundation's own reference: nobody reviewed the declaration.
+		for service, o := range origins {
+			if o.foundation {
+				chosen[service] = o.image
+			} else {
+				fromElsewhere[o.image] = true
 			}
 		}
 		// Asked once the origins are known, since choosing them is what
@@ -177,7 +269,30 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			}
 			sort.Strings(names)
 			sort.Strings(marked[image])
-			out[site] = append(out[site], ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, FoundationServices: marked[image], blueprint: p.cfg.Apps[app].Blueprint})
+			// The origin is the first of names that has one for this very
+			// reference, names being sorted, so it is the same on every
+			// render. A service whose origin is another reference (a
+			// template's hard-coded image under the name of a service the
+			// configuration overrides) lends this image nothing.
+			var origin imageOrigin
+			var setting, from string
+			for _, name := range names {
+				if o, ok := origins[name]; ok && o.image == image {
+					origin, setting, from = o, settings[name], name
+					break
+				}
+			}
+			ci := ComposeImage{Path: file.Path, Stack: stack, App: app, Image: image, Services: names, Lines: n, FoundationServices: marked[image], blueprint: p.cfg.Apps[app].Blueprint}
+			if setting != "" {
+				ci.Origin, ci.Replaces = origin.origin(setting), origin.replaces
+				// Setting answers for a blueprint's own service itself; the
+				// infrastructure stack's and the operators heartbeat's key is
+				// the render's to say.
+				if stack == config.InfraStack || !blueprints.Has(ci.blueprint, from) {
+					ci.setting = setting
+				}
+			}
+			out[site] = append(out[site], ci)
 		}
 	}
 	for site := range out {
@@ -196,44 +311,48 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 // templates/infra-compose.yaml.tmpl, writes.
 var infraServices = map[string]bool{"etcd": true, "patroni": true, "haproxy": true, "garage": true, "caddy": true, "heartbeat": true}
 
-// infraImageOrigins is each reference the infrastructure stack runs, split
-// by where the render took it: from the core catalog's foundation, which is
-// every one of its images and the gateway's Caddy by default, or from the
-// configuration, which is a Caddy image acme.image declares (caddyImage).
-func (p *planner) infraImageOrigins() (foundation, declared map[string]bool, err error) {
-	images, err := p.infraImages()
+// infraImageOrigins is infraOrigins and the gateway's Caddy: acme.image when
+// it declares one, the foundation's otherwise.
+func (p *planner) infraImageOrigins() (map[string]imageOrigin, error) {
+	out, err := p.infraOrigins()
 	if err != nil {
-		return nil, nil, err
-	}
-	foundation, declared = map[string]bool{}, map[string]bool{}
-	for _, image := range []string{images.etcd, images.spilo, images.haproxy, images.garage, images.heartbeat} {
-		foundation[image] = true
-	}
-	if ref := p.cfg.ACME.Image; ref != "" {
-		declared[ref] = true
-		return foundation, declared, nil
+		return nil, err
 	}
 	caddy, err := blueprints.FoundationImage(blueprints.FoundationCaddy)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	foundation[caddy] = true
-	return foundation, declared, nil
+	if ref := p.cfg.ACME.Image; ref != "" {
+		o := imageOrigin{image: ref, declared: true}
+		if acme.Published(p.cfg.ACME.Provider) {
+			o.replaces = caddy
+		}
+		out["caddy"] = o
+		return out, nil
+	}
+	out["caddy"] = imageOrigin{image: caddy, foundation: true}
+	return out, nil
 }
 
 // injectedImages are the services an app's stack runs that no service of
 // its blueprint names, with their images: services the toolkit adds to a
-// blueprint built into it, each the foundation's. The pocket-id blueprint's
-// operators heartbeat is the one, appValues.HeartbeatImage.
-func (p *planner) injectedImages(app config.App) (map[string]string, error) {
+// blueprint built into it. The pocket-id blueprint's operators heartbeat is
+// the one, appValues.HeartbeatImage, and infra.images.heartbeat overrides it.
+func (p *planner) injectedImages(app config.App) (map[string]imageOrigin, error) {
 	if app.Blueprint != config.BlueprintPocketID {
 		return nil, nil
 	}
-	heartbeat, err := blueprints.FoundationImage(blueprints.FoundationHeartbeat)
+	o, err := p.heartbeatOrigin()
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{operatorsHeartbeatService: heartbeat}, nil
+	return map[string]imageOrigin{operatorsHeartbeatService: o}, nil
+}
+
+// heartbeatOrigin is the heartbeat image: infra.images.heartbeat, or the
+// foundation's.
+func (p *planner) heartbeatOrigin() (imageOrigin, error) {
+	return declaredOr(p.cfg.Infra.Images[blueprints.FoundationHeartbeat], blueprints.FoundationHeartbeat)
 }
 
 // ImageLine is the reference an `image:` line of a compose file names,

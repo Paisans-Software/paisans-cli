@@ -218,3 +218,6 @@ func ResolveProbe(names []string) string { return resolveProbe(names) }
 func WaitServing(d deployment.Deployment, site, stack string, t Transport, stopped string, served diagnosis.Served) error {
 	return waitStack(d, site, stack, t, stopped, served)
 }
+
+// ChangeContent is what a change writes.
+func ChangeContent(c Change) string { return c.content }

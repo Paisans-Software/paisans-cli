@@ -104,34 +104,66 @@ func indent(n int, value string) string {
 // start.
 const secretSuffix = ".secret"
 
-// infraImages are the images the infrastructure stack runs, each the core
-// catalog foundation's: a track apply resolves while it plans, or a
-// reference to one build. Spilo's is the deployment's Postgres major's,
-// since Spilo publishes one repository per major.
+// infraImages are the images the infrastructure stack runs, each the
+// configuration's (infra) or else the core catalog foundation's: a track
+// apply resolves while it plans, or a reference to one build. Spilo's is the
+// deployment's Postgres major's, since Spilo publishes one repository per
+// major.
 type infraImages struct {
 	etcd, spilo, haproxy, garage, heartbeat string
 }
 
-func (p *planner) infraImages() (infraImages, error) {
-	var out infraImages
-	var err error
-	for _, image := range []struct {
-		name string
-		into *string
-	}{
-		{blueprints.FoundationEtcd, &out.etcd},
-		{blueprints.FoundationHAProxy, &out.haproxy},
-		{blueprints.FoundationGarage, &out.garage},
-		{blueprints.FoundationHeartbeat, &out.heartbeat},
+// infraOrigins is the image of each service the infrastructure template
+// writes but the gateway's Caddy, keyed by compose service name: what infra
+// declares, or else the core catalog foundation's. Spilo's is the
+// deployment's Postgres major's, since Spilo publishes one repository per
+// major, and infra.postgres declares it per major for the same reason.
+func (p *planner) infraOrigins() (map[string]imageOrigin, error) {
+	out := map[string]imageOrigin{}
+	for service, name := range map[string]string{
+		"etcd":      blueprints.FoundationEtcd,
+		"haproxy":   blueprints.FoundationHAProxy,
+		"garage":    blueprints.FoundationGarage,
+		"heartbeat": blueprints.FoundationHeartbeat,
 	} {
-		if *image.into, err = blueprints.FoundationImage(image.name); err != nil {
-			return infraImages{}, err
+		o, err := declaredOr(p.cfg.Infra.Images[name], name)
+		if err != nil {
+			return nil, err
 		}
+		out[service] = o
 	}
-	if out.spilo, err = blueprints.SpiloImage(p.postgresVersion()); err != nil {
-		return infraImages{}, fmt.Errorf("cluster.postgres_version: %w", err)
+	spilo, err := blueprints.SpiloImage(p.postgresVersion())
+	if err != nil {
+		return nil, fmt.Errorf("cluster.postgres_version: %w", err)
+	}
+	out["patroni"] = imageOrigin{image: spilo, foundation: true}
+	if declared := p.cfg.SpiloImage(); declared != "" {
+		out["patroni"] = imageOrigin{image: declared, declared: true, replaces: spilo}
 	}
 	return out, nil
+}
+
+// infraSetting is the configuration key that decides an infrastructure
+// service's image.
+func (p *planner) infraSetting(service string) string {
+	switch service {
+	case "patroni":
+		return "infra.postgres." + p.postgresVersion() + ".spilo"
+	case "caddy":
+		return "acme.image"
+	}
+	return "infra.images." + service
+}
+
+func (p *planner) infraImages() (infraImages, error) {
+	o, err := p.infraOrigins()
+	if err != nil {
+		return infraImages{}, err
+	}
+	return infraImages{
+		etcd: o["etcd"].image, spilo: o["patroni"].image, haproxy: o["haproxy"].image,
+		garage: o["garage"].image, heartbeat: o["heartbeat"].image,
+	}, nil
 }
 
 // caddyImage is the image the gateway runs, as the configuration names it.
@@ -1059,10 +1091,7 @@ func (p *planner) scope() string {
 }
 
 func (p *planner) postgresVersion() string {
-	if p.cfg.Cluster.PostgresVersion == "" {
-		return "18"
-	}
-	return p.cfg.Cluster.PostgresVersion
+	return p.cfg.PostgresMajor()
 }
 
 func (p *planner) replication() int {

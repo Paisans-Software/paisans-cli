@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -216,6 +217,9 @@ type Plan struct {
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
 	KeepImages bool
+	// listsImages is whether Build was given TolerateUnresolved: the plan
+	// lists images, and Execute refuses it.
+	listsImages bool
 	// Pins are the builds the images this site's compose files name are
 	// planned to run, one per image a compose file this plan read names
 	// (see render.Plan.Images). Execute records them in the manifest. See
@@ -427,10 +431,13 @@ type options struct {
 	arch string
 	// noSweepRead leaves Plan.Sweep unread; see SkipSweepRead.
 	noSweepRead bool
-	only        []string
-	except      []string
-	after       []*Plan
-	dbApps      []string
+	// tolerateUnresolved plans an image it cannot resolve; see
+	// TolerateUnresolved.
+	tolerateUnresolved bool
+	only               []string
+	except             []string
+	after              []*Plan
+	dbApps             []string
 	// replicationChange lets a garage.toml with a different
 	// replication_factor replace the deployed one. Only `storage add
 	// --change-replication` sets it; see GarageReplication.
@@ -470,6 +477,15 @@ func ReplicationChange() Option {
 // nothing about what the sweep would remove. Execute sweeps all the same.
 func SkipSweepRead() Option {
 	return func(o *options) { o.noSweepRead = true }
+}
+
+// TolerateUnresolved plans an image the registry cannot resolve as a pin
+// whose Source is unresolved, with the reason in ImagePin.Unresolved and a
+// note, where Build otherwise refuses. Its line is left as rendered, a track
+// included, so the plan is one to read and never to execute: it is for
+// `paisans images`, which lists what a site runs and writes nothing.
+func TolerateUnresolved() Option {
+	return func(o *options) { o.tolerateUnresolved = true }
 }
 
 // KeepImages leaves superseded images on the host for this run, as
@@ -573,6 +589,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	out.Report = o.report
 	out.Served = o.served
+	out.listsImages = o.tolerateUnresolved
 	// An earlier pass of the same apply already carried out these. See After.
 	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
 	for _, p := range o.after {
@@ -729,13 +746,15 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if FreshImages != nil && !leftAlone {
 				fresh = FreshImages()
 			}
-			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers)
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers, o.tolerateUnresolved)
 			if err != nil {
 				finish(done, err)
 				return nil, err
 			}
 			content = pinned
-			if track := unresolvedTrack(content); track != "" && !leftAlone {
+			// A track left by an image TolerateUnresolved kept unresolved
+			// is that image's line as rendered, in a plan never executed.
+			if track := unresolvedTrack(content); track != "" && !leftAlone && !o.tolerateUnresolved {
 				err := &ui.Problem{
 					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
 					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
@@ -745,7 +764,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 			if !leftAlone {
 				for _, pin := range pins {
-					if provenOn(pin, o.arch, out.recordedArch) {
+					if pin.Source == "unresolved" || provenOn(pin, o.arch, out.recordedArch) {
 						continue
 					}
 					note, err := platformCheck(site, o.arch, pin, r)
@@ -1126,11 +1145,15 @@ func Execute(plan *Plan, t Transport) error {
 	return execute(plan, t)
 }
 
-// Refusal is what Execute refuses before it writes anything: a file edited on
-// the host, too little free space for the pulls, or an image volume its
-// service does not mount. A caller that runs a site in several passes asks it
-// of the whole plan first, so nothing is written when any pass would refuse.
+// Refusal is what Execute refuses before it writes anything: a plan built
+// with TolerateUnresolved, a file edited on the host, too little free space
+// for the pulls, or an image volume its service does not mount. A caller
+// that runs a site in several passes asks it of the whole plan first, so
+// nothing is written when any pass would refuse.
 func Refusal(plan *Plan) error {
+	if plan.listsImages {
+		return errors.New("this plan was built to list images, not to apply them")
+	}
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		var names []string
 		for _, c := range conflicts {

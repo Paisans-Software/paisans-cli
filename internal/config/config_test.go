@@ -1029,3 +1029,58 @@ func TestSetSSHUserWritesTheFile(t *testing.T) {
 		t.Errorf("a second call changed the file:\n%s", second)
 	}
 }
+
+// infra overrides the infrastructure stack's images. Its keys are the
+// foundation's names for the images it replaces, so a key the toolkit does
+// not run is refused rather than silently ignored.
+func TestInfraImagesLoad(t *testing.T) {
+	doc := validConfig + "infra:\n  images:\n    etcd: \"gcr.io/etcd-development/etcd:v3.5.21\"\n  postgres:\n    \"17\":\n      spilo: \"example.org/pg-ha:17.4-1\"\n"
+	cfg, err := config.Load(write(t, doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Infra.Images["etcd"]; got != "gcr.io/etcd-development/etcd:v3.5.21" {
+		t.Errorf("infra.images.etcd is %q", got)
+	}
+	if got := cfg.Infra.Postgres["17"]["spilo"]; got != "example.org/pg-ha:17.4-1" {
+		t.Errorf("infra.postgres.17.spilo is %q", got)
+	}
+}
+
+func TestInfraImagesAreChecked(t *testing.T) {
+	const payload = "ghcr.io/x/etcd:v3.5.1     privileged: true"
+	cases := []struct{ body, want string }{
+		{"infra:\n  images:\n    caddy: \"ghcr.io/x/caddy:2.1.0\"\n", "infra.images.caddy"},
+		{"infra:\n  images:\n    etcd: \"\"\n", "infra.images.etcd: empty"},
+		{"infra:\n  images:\n    etcd: \"" + payload + "\"\n", "infra.images.etcd"},
+		{"infra:\n  images:\n    etcd: \"ghcr.io/x/etcd:v3 #\"\n", "infra.images.etcd"},
+		{"infra:\n  postgres:\n    \"17\":\n      app: \"postgres:17.1\"\n", "infra.postgres.17.app"},
+		{"infra:\n  postgres:\n    \"17\":\n      spilo: \"\"\n", "infra.postgres.17.spilo: empty"},
+	}
+	for _, c := range cases {
+		msg := loadErr(t, validConfig+c.body)
+		if !strings.Contains(msg, c.want) {
+			t.Errorf("%q: loaded, or refused without naming %s: %q", c.body, c.want, msg)
+		}
+	}
+}
+
+// The major a deployment runs is cluster.postgres_version, 18 when unset,
+// and the Spilo it declares is the entry for that major alone.
+func TestSpiloImageIsTheRunningMajors(t *testing.T) {
+	cfg := &config.Config{Infra: config.Infra{Postgres: map[string]map[string]string{"17": {"spilo": "a:17"}, "18": {"spilo": "a:18"}}}}
+	if got := cfg.PostgresMajor(); got != config.DefaultPostgresVersion {
+		t.Errorf("an unset postgres_version is %q", got)
+	}
+	if got := cfg.SpiloImage(); got != "a:18" {
+		t.Errorf("SpiloImage is %q, want the 18 entry", got)
+	}
+	cfg.Cluster.PostgresVersion = "17"
+	if got := cfg.SpiloImage(); got != "a:17" {
+		t.Errorf("SpiloImage is %q, want the 17 entry", got)
+	}
+	cfg.Cluster.PostgresVersion = "16"
+	if got := cfg.SpiloImage(); got != "" {
+		t.Errorf("SpiloImage is %q for a major with no entry", got)
+	}
+}

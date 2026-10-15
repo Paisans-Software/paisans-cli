@@ -3049,3 +3049,35 @@ about them, so a reject policy written there could refuse their mail.
 
 `go build ./... && go vet ./... && go test ./...`; the new tests in
 `internal/dns/mail_test.go` were checked to fail before the change.
+
+## 2026-10-15: An operator overrides the infrastructure stack's images
+
+Founder decision, 2026-10-15. Spec: `docs/specs/2026-10-15-infra-image-overrides.md`.
+
+### What was decided
+
+* `infra.images` (etcd, haproxy, garage, heartbeat) and
+  `infra.postgres.<major>.spilo` override the core catalog foundation's
+  images, with `apps.<name>.images`' semantics.
+* Spilo's override is keyed by Postgres major, so a build of one major never
+  follows the cluster onto another, and any provider works.
+* An override is always reviewed at apply.
+* `paisans images` lists each site's builds and what would move; an override
+  behind the release it replaced is a warning.
+
+### Why
+
+A security fix outside a foundation track waited for a core catalog release,
+and an operator had nothing to write that moved the infrastructure sooner.
+
+### What was weighed
+
+* **One key per subsystem** (`etcd.image`, `storage.garage.image`, ...): next
+  to related settings, but scattered, with no one place to audit.
+* **An operator-side overlay of `foundation.yaml`:** complete, but a second
+  path beside `apps.<name>.images` and `acme.image` for the same images.
+* **One flat `infra.images.spilo`, checked by reading the major from the
+  repository name:** works for Zalando's naming only.
+* **An override for a pinned app's own Postgres:** left out.
+* **The stale-override check in validate:** validate reads the file alone and
+  reaches no registry.

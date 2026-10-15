@@ -251,3 +251,30 @@ func nextPage(base, link string) (string, error) {
 	}
 	return "", nil
 }
+
+// digitRun is one run of digits in a tag.
+var digitRun = regexp.MustCompile(`[0-9]+`)
+
+// OlderTag reports whether tag a is an older release than tag b: their runs
+// of digits, read left to right as numbers, first differ lower in a. Tags
+// whose numbers agree as far as both go are not older, and neither is a tag
+// holding no number. It compares the versions of two builds of one
+// repository; two repositories' tags need not compare.
+func OlderTag(a, b string) bool {
+	x, y := digitRun.FindAllString(a, -1), digitRun.FindAllString(b, -1)
+	for i := 0; i < len(x) && i < len(y); i++ {
+		if c := compareNumbers(x[i], y[i]); c != 0 {
+			return c < 0
+		}
+	}
+	return false
+}
+
+// compareNumbers compares two runs of digits as numbers of any length.
+func compareNumbers(a, b string) int {
+	a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	if len(a) != len(b) {
+		return len(a) - len(b)
+	}
+	return strings.Compare(a, b)
+}
