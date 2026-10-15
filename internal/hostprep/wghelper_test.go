@@ -221,6 +221,40 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"CRLF line endings", strings.ReplaceAll(goodConf, "\n", "\r\n"), "carriage return"},
 		{"a NUL byte", replace("[Peer]", "[Peer]\x00"), "NUL byte"},
 		{"a conf over 64 KiB", goodConf + strings.Repeat("# padding\n", 7000), "larger than 65536 bytes"},
+		{"a hook behind a vertical tab", replace(keepalive, "\vPostUp = id\n"), "is not a key paisans writes"},
+		{"a hook behind a form feed", replace(keepalive, "\fPostUp = id\n"), "is not a key paisans writes"},
+		{"a hook followed by a form feed", replace(keepalive, "PostUp\f= id\n"), "is not a key paisans writes"},
+		{"a hook in fullwidth letters", replace(keepalive, "\uff30ostUp = id\n"), "is not a key paisans writes"},
+		{"a hook with a Cyrillic o", replace(keepalive, "P\u043estUp = id\n"), "is not a key paisans writes"},
+		{"a header behind a vertical tab", replace("[Peer]", "\v[Peer]"), "is not key = value"},
+		{"a hex octet in an Address", replace("Address = 10.44.0.4/24", "Address = 0x0a.44.0.4/24"), "is not one address"},
+		{"a plus octet in an Address", replace("Address = 10.44.0.4/24", "Address = +10.44.0.4/24"), "is not one address"},
+		{"a hex octet in AllowedIPs", replace("AllowedIPs = 10.44.0.3/32", "AllowedIPs = 0x0a.44.0.3/32"), "is not inside"},
+		{"a plus octet in AllowedIPs", replace("AllowedIPs = 10.44.0.3/32", "AllowedIPs = +10.44.0.3/32"), "is not inside"},
+		{"an exponent prefix in AllowedIPs", replace("AllowedIPs = 10.44.0.3/32", "AllowedIPs = 10.44.0.3/2e1"), "is not inside"},
+		{"an empty AllowedIPs", replace("AllowedIPs = 10.44.0.3/32", "AllowedIPs ="), "AllowedIPs is empty"},
+		{"a ListenPort with a plus", replace("ListenPort = 51820", "ListenPort = +51820"), "admitted on 51820"},
+		{"a ListenPort with a leading zero", replace("ListenPort = 51820", "ListenPort = 051820"), "admitted on 51820"},
+		{"a ListenPort in hex", replace("ListenPort = 51820", "ListenPort = 0xca6c"), "admitted on 51820"},
+		{"a ListenPort in exponent form", replace("ListenPort = 51820", "ListenPort = 5182e1"), "admitted on 51820"},
+		{"an Endpoint on 127.0.0.1", replace("Endpoint = vm.example.org:51820", "Endpoint = 127.0.0.1:53"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on 0.0.0.0", replace("Endpoint = vm.example.org:51820", "Endpoint = 0.0.0.0:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on 0.1.2.3", replace("Endpoint = vm.example.org:51820", "Endpoint = 0.1.2.3:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on link-local", replace("Endpoint = vm.example.org:51820", "Endpoint = 169.254.169.254:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on multicast", replace("Endpoint = vm.example.org:51820", "Endpoint = 224.0.0.1:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on broadcast", replace("Endpoint = vm.example.org:51820", "Endpoint = 255.255.255.255:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on ::1", replace("Endpoint = vm.example.org:51820", "Endpoint = [::1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on ::", replace("Endpoint = vm.example.org:51820", "Endpoint = [::]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on ::1 written out", replace("Endpoint = vm.example.org:51820", "Endpoint = [0:0:0:0:0:0:0:1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on fe80::", replace("Endpoint = vm.example.org:51820", "Endpoint = [fe80::1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on febf::", replace("Endpoint = vm.example.org:51820", "Endpoint = [FEBF::1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on a mapped loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = [::ffff:127.0.0.1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on a short loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 127.1:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on a decimal loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 2130706433:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on an octal loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 0177.0.0.1:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on a hex loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 0x7f.0.0.1:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on localhost", replace("Endpoint = vm.example.org:51820", "Endpoint = localhost:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint under .localhost", replace("Endpoint = vm.example.org:51820", "Endpoint = a.LOCALHOST:51820"), "loopback, link-local, multicast or unspecified"},
 		{"nothing", "", "no [Interface]"},
 	} {
 		for _, shell := range shells() {
@@ -379,6 +413,13 @@ func TestTheHelperRefusesBadValues(t *testing.T) {
 		"an IPv6 subnet":          func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "fd00::/64") },
 		"a subnet with no prefix": func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0") },
 		"the whole IPv4 space":    func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "0.0.0.0/0") },
+		"a /23 subnet":            func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/23") },
+		"a /16 subnet":            func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "192.168.0.0/16") },
+		"a loopback subnet":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "127.0.0.0/24") },
+		"a zero-net subnet":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "0.1.0.0/24") },
+		"a link-local subnet":     func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "169.254.1.0/24") },
+		"a multicast subnet":      func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "224.0.0.0/24") },
+		"a reserved subnet":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "240.0.0.0/24") },
 		"a negative port":         func() (string, error) { return hostprep.WGHelperScript(meshDeployment, -1, "10.44.0.0/24") },
 		"a port over 65535":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 65536, "10.44.0.0/24") },
 		"a relative conf directory": func() (string, error) {
@@ -391,5 +432,34 @@ func TestTheHelperRefusesBadValues(t *testing.T) {
 		if _, err := build(); err == nil {
 			t.Errorf("%s was rendered", name)
 		}
+	}
+}
+
+// Endpoints on a private LAN, a documentation range or a name are the
+// ordinary case: two sites may share a LAN.
+func TestTheHelperAcceptsEndpointsOnALan(t *testing.T) {
+	for _, ep := range []string{"192.168.1.20:51820", "10.0.0.5:51820", "172.16.3.4:51820", "198.51.100.9:1", "[fd00::5]:51820", "[2001:db8::3]:51820", "[fec0::1]:51820", "vm.example.org:51820", "localhostel.example.org:51820", "0xfoo.example.org:51820"} {
+		conf := strings.Replace(goodConf, "Endpoint = vm.example.org:51820", "Endpoint = "+ep, 1)
+		for _, shell := range shells() {
+			script, _ := helperIn(t, 51820, "10.44.0.0/24")
+			if out, code := runHelper(t, shell, script, conf, "put"); code != 0 {
+				t.Errorf("%s: Endpoint %s refused (exit %d): %s", shell, ep, code, out)
+			}
+		}
+	}
+}
+
+// sync holds the conf's private key in a temporary file, so the file lives
+// beside the conf in the root-owned directory, never under a TMPDIR.
+func TestSyncKeepsItsTemporaryFileBesideTheConf(t *testing.T) {
+	text, err := hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, `stripped=$(mktemp "$dir/.$iface.strip.XXXXXX")`) {
+		t.Error("sync does not make its temporary file in the conf directory")
+	}
+	if strings.Contains(text, "mktemp)") {
+		t.Error("the helper makes a temporary file under TMPDIR")
 	}
 }
