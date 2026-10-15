@@ -40,6 +40,16 @@ Founder decisions, 2026-10-15:
 * **The deployment's user keeps its own `authorized_keys`, maintained by the
   operators.** Only `host admit` and `host evict` need the owner's root
   login.
+* **`host allow`, `host disallow` and the key allowlist are removed.** They
+  limited which keys root could add to a shared login user, and after
+  admission no command writes keys as root.
+* **An owner without the deployment's configuration admits it from a
+  request.** The operator runs `host request` and sends the file; the owner
+  runs `host admit --request` on the host itself. The owner needs the CLI
+  and nothing else, so releases carry Linux binaries.
+* **Forwarding follows the site's endpoint.** A site with an endpoint relays
+  mesh traffic between sites that have none, as today, so admit turns on
+  `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
 
@@ -65,16 +75,35 @@ daemon. `paisans doctor` checks the same list on every run.
 ## `paisans host admit`
 
 The owner runs it once per deployment per host, and again whenever they
-change what they grant. It is the only command that uses sudo.
+change what they grant. It is the only command that uses sudo. It runs in
+one of two ways, and both do the same steps.
+
+**On the host, from a request.** The usual case on a borrowed host: the
+owner has the CLI but not the deployment's configuration.
+
+```sh
+sudo paisans host admit --request home-a.admit                                  # shows what it would do
+sudo paisans host admit --request home-a.admit --watchdog --public-ports --execute
+```
+
+**From a workstation, from the configuration.** For an operator who is also
+the host's owner, eg on the community's own hosts.
 
 ```sh
 paisans host admit --site home-a --ssh owner@home-a.example.org                # shows what it would do
-paisans host admit --site home-a --ssh owner@home-a.example.org --execute      # does it
 paisans host admit --site home-a --ssh owner@home-a.example.org --watchdog --public-ports --execute
 ```
 
-`--ssh` is required: it is the owner's login, not the deployment's. Sudo
-works as it does today (`SudoAuth`, asked once, at a terminal).
+`--ssh` is required with `--site`: it is the owner's login, not the
+deployment's. Sudo works as it does today (`SudoAuth`, asked once, at a
+terminal). `--request` and `--site` are refused together, and `--request`
+is refused unless the command runs as root on the host.
+
+Grants are opt-in. The plan lists the grants the deployment needs for its
+roles; the owner gives each by passing its flag. Admitting without one is
+allowed, and the admission record says it was not given, so the operator's
+next command refuses with what is missing rather than failing halfway
+through an apply.
 
 Like `host prepare`, it probes read only, prints the plan, and changes the
 host only with `--execute`. Every step is idempotent, so a re-run after a
@@ -129,23 +158,83 @@ govern.
     in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`. The
     output says plainly that this lets every local user on the host bind
     ports 80 to 1023.
-13. **Forwarding**, with `--relay`: `net.ipv4.ip_forward=1` in the same file,
-    for a site that relays mesh traffic. Today that is a `PostUp` in the
-    WireGuard conf, which runs as root; in this design no hook is accepted
-    (*The WireGuard helper*).
+13. **Forwarding**, for a site with an endpoint: `net.ipv4.ip_forward=1` in
+    the same file. Such a site relays mesh traffic between sites behind NAT,
+    which cannot dial each other (`isRelay` in `internal/render/site.go`).
+    Today that is a `PostUp` in the WireGuard conf, which runs as root; in
+    this design no hook is accepted (*The WireGuard helper*). The plan says
+    that this turns on routing between every interface on the host, which
+    the firewall's forward policy then governs.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
-    the user, the grants (`watchdog`, `public_ports`, `relay`), the ports the
-    firewall opened, and the time. It is how the deployment's own commands,
-    which cannot read root's files, learn what they were granted, and what
-    `host deployments` lists.
+    the user, the grants (`watchdog`, `public_ports`), whether forwarding is
+    on, the ports the firewall opened, the request's digest when there was
+    one, and the time. It is how the deployment's own commands, which cannot
+    read root's files, learn what they were granted, and what `host
+    deployments` lists.
 15. **The registry claim**, as today, under `/var/lib/paisans`, so two
     deployments on one host cannot collide on a token or a port.
-16. **The keys.** Write the `ssh.keys` operators' keys to the user's
-    `~/.ssh/authorized_keys`, owned by the user, so the operators can log in.
-    From then on the operators maintain them (*Keys*).
-17. **The check.** Connect as the user with an operator's key, run
-    `docker version` against the user's socket, and write `ssh.user` back
-    (*The deployment's user*).
+16. **The keys.** Write the `ssh.keys` operators' keys, from the
+    configuration or the request, to the user's `~/.ssh/authorized_keys`,
+    owned by the user, so the operators can log in. From then on the
+    operators maintain them (*Keys*).
+17. **The check.** With `--site`, connect as the user with an operator's
+    key, run `docker version` against the user's socket, and write
+    `ssh.user` back (*The deployment's user*). With `--request`, run
+    `docker version` as the user locally; the write-back happens on the
+    operator's next command, which is the first to connect.
+
+## `paisans host request`
+
+The operator's half of admission from a request:
+
+```sh
+paisans host request --site home-a > home-a.admit
+```
+
+It writes a short YAML document to stdout and prints a digest of it to
+stderr. The request holds nothing secret, so it can travel by email or chat:
+
+| Field | From |
+|-------|------|
+| `version` | the request format, so an older CLI refuses a newer request |
+| `deployment` | the deployment's ID |
+| `user` | `sites.<s>.ssh.user`, or the default |
+| `ssh_port`, `listen_port` | the site's SSH port and WireGuard `ListenPort` |
+| `mesh_subnet`, `address` | the mesh subnet and the site's address in it |
+| `endpoint` | whether the site has one, so forwarding is planned |
+| `grants` | what the roles need: `watchdog` for a data site, `public_ports` for a gateway or a Caddy monitor |
+| `operators` | each `ssh.keys` operator's name and public keys |
+
+**The digest is the owner's check that the request is the one the operator
+sent.** The request carries the keys that will get a shell on the owner's
+machine, so anyone who could change it on its way could put their own key
+in it. Admit prints the same digest, as twelve hex digits in three groups,
+and the owner compares the two over a channel they trust, eg a call.
+`--execute` with `--request` asks the owner to type the digest at a
+terminal, so it cannot be scripted past.
+
+Admit validates a request as strictly as a configuration: every field
+present, the user name accepted by the same pattern as `ssh.user`, every
+key a public key the toolkit can parse, the address inside the subnet.
+
+## Running on the host
+
+`--request` runs with no SSH, through a new local implementation of
+`apply.Transport` that runs each command with `sh -c` on the machine
+itself. It is only constructed by `host admit --request` and `host evict
+--request`, never by a command that changes a deployment, so a mistyped
+flag on a workstation cannot run a host's plan against the workstation.
+
+`host evict` takes the same `--request`, or `--deployment <id>` with
+`--user`, so an owner who has lost the file can still evict.
+
+## Linux binaries
+
+An owner on a host needs the CLI and nothing else: not Go, not Docker, not
+Homebrew. The release workflow attaches `linux/amd64` and `linux/arm64`
+binaries and a `SHA256SUMS` file to each release, and the guide for host
+owners gives the download and the check. Admit itself needs only the
+binary, run with sudo.
 
 A change of WireGuard port, SSH port or grant needs a re-run, because each
 is a root change. `host prepare` compares the declaration with the admission
@@ -153,15 +242,15 @@ record and refuses with the `host admit` line to run.
 
 ## `paisans host evict`
 
-The reverse, run by the owner with `--ssh`, `--execute` and a typed
-confirmation of the site's name at a terminal, as `site remove
---delete-data` asks. It stops the user's systemd instance, disables linger,
+The reverse, run by the owner the same two ways as admit, with `--execute`
+and the deployment's user name typed at a terminal, as `site remove
+--delete-data` asks for the site's. It stops the user's systemd instance, disables linger,
 removes the user with its home, `/srv/paisans/<token>`, the helper, the
 sudoers line, the udev rule, the egress table, the deployment's ufw rules,
 the admission record and the registry claim. Host-wide files (`delegate.conf`,
 `60-paisans.conf`) are removed only when no other deployment is admitted, and
-`ip_unprivileged_port_start` is restored only when no other admitted
-deployment holds `public_ports`.
+`ip_unprivileged_port_start` and `ip_forward` are each restored only when
+no other admitted deployment holds `public_ports` or has forwarding on.
 
 `site remove` does what the deployment's user can, then ends by printing the
 `host evict` line for the owner.
@@ -281,12 +370,14 @@ What changes in behaviour:
 
 ## Documentation
 
-* `docs/commands.md`: `host admit` and `host evict` replace `host allow` and
-  `host disallow`; `host prepare` and every `--sudo` flag are rewritten.
+* `docs/commands.md`: `host request`, `host admit` and `host evict` replace
+  `host allow` and `host disallow`; `host prepare` and every `--sudo` flag
+  are rewritten.
 * `README.md`: the sections on what `host prepare` does, on the login user's
   authorized keys, and on Docker being judged by its version.
-* A guide for host owners: what admitting a deployment changes on their
-  machine, what each flag grants, and how to evict.
+* A guide for host owners: installing the Linux binary and checking it,
+  comparing a request's digest, what admitting a deployment changes on
+  their machine, what each flag grants, and how to evict.
 * `docs/deployment-agent-rules.md`: `host admit` and `host evict` are owner
   actions, never run by an agent unattended.
 
@@ -299,6 +390,15 @@ What changes in behaviour:
   unknown key refused, an `Address` outside the subnet refused, the
   renderer's own output accepted.
 * The egress table renders the user's UID and subordinate range.
+* `host request`: a golden request per role mix; the digest is stable across
+  runs and changes with any field. Admit refuses a request with a missing
+  field, an unknown version, a bad key or a mistyped digest.
+* Admit plans the same steps from `--request` as from `--site` for the same
+  site.
+* The local transport is constructed by no command other than admit and
+  evict with `--request`.
+* The release workflow's artifacts include both Linux binaries and
+  `SHA256SUMS`.
 * The Docker-tagged tests run against a rootless daemon.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
   the deployment's user, then check that a container cannot connect to a
