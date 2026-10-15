@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -71,9 +72,12 @@ func TestFillGeneratesABlueprintsHeartbeatToken(t *testing.T) {
 	if !shape.MatchString(token) {
 		t.Fatalf("apps.notes.heartbeat_token is %q, not 32 lowercase hex characters", token)
 	}
-	for name := range cfg.Apps {
-		if _, ok := secrets.Apps[name]["heartbeat_token"]; ok && name != "notes" {
-			t.Errorf("apps.%s, a %s, was given a heartbeat token", name, cfg.Apps[name].Blueprint)
+	for name, app := range cfg.Apps {
+		_, declares := blueprints.HeartbeatOf(app.Blueprint)
+		if _, ok := secrets.Apps[name]["heartbeat_token"]; ok && !declares {
+			t.Errorf("apps.%s, a %s, was given a heartbeat token", name, app.Blueprint)
+		} else if !ok && declares {
+			t.Errorf("apps.%s, a %s, which declares a heartbeat, was given no heartbeat token", name, app.Blueprint)
 		}
 	}
 	if again, err := secretsgen.Fill(cfg, secrets); err != nil || again.Changed() {

@@ -259,6 +259,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.operators_heartbeat_token",
 		"apps.auth.dns_super_admins_heartbeat_token",
 		"apps.auth.dns_2fa_heartbeat_token",
+		"apps.wiki.heartbeat_token",
 	}
 	if got := paths(rs); !slices.Equal(got, want) {
 		t.Errorf("--all order:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(want, "\n      "))
@@ -1365,8 +1366,11 @@ func TestSecretsRotateTakesABlueprintsHeartbeatToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The core's wikijs declares a heartbeat too, so wiki's token is rotated
+	// beside notes'.
 	got := paths(rs)
-	if len(got) < 2 || got[len(got)-1] != "apps.notes.heartbeat_token" || got[len(got)-2] != "apps.auth.dns_2fa_heartbeat_token" {
-		t.Errorf("--all does not end with notes' heartbeat token after the continuity tokens: %v", got)
+	tail := []string{"apps.auth.dns_2fa_heartbeat_token", "apps.notes.heartbeat_token", "apps.wiki.heartbeat_token"}
+	if len(got) < len(tail) || !slices.Equal(got[len(got)-len(tail):], tail) {
+		t.Errorf("--all does not end with the blueprints' heartbeat tokens after the continuity tokens: %v", got)
 	}
 }

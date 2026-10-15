@@ -18,7 +18,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/compose.yaml",
-      "sha256": "e9712659c085d69b21e23ff93e18d2ee2d28f9472528d9f0a41b8696df717d34",
+      "sha256": "13dee61760fcef4cb60aaf0cbeba3e112922e7f5b6665990f9f96fbd29e789f9",
       "mode": "0644"
     },
     {
@@ -58,7 +58,7 @@
     },
     {
       "path": "srv/paisans/f2a9/blog/config.ini",
-      "sha256": "b130fefc4db9f9a0fa0ec04db6d94e4a3c8a754690dfb94af26e7cd6035c94ef",
+      "sha256": "a08a6a314f7e72af5fcd879b0a048bad2fd43ec024af534bbebd54ed2658bca0",
       "mode": "0600"
     },
     {
@@ -98,7 +98,7 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",
-      "sha256": "eca09d45555e06fdadc104969e9d7f1821c0f67afbb41af1874aede9e051a017",
+      "sha256": "334192d719a36aad7f395888a66aea672dbc347f18f0afb3ca32aff050b1b4d8",
       "mode": "0600"
     },
     {
@@ -128,12 +128,12 @@
     },
     {
       "path": "srv/paisans/f2a9/wiki/bootstrap.env",
-      "sha256": "c22b0eb6702007f8225be30f75ba98fbdaeb362bfc540f807d936017b08a600e",
+      "sha256": "598495c332a5a1d45e5c9dae461c368fb90d2085a1d7286595242656ce2af0d3",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/wiki/compose.yaml",
-      "sha256": "08c6a063f3e1a51e3e2faf92aa2dcf44eb1eca15a652b856a0ffdf4cdcdf2746",
+      "sha256": "c7f3b291f8dbdc9a6ba6a67ba575089cca6915520c2dfa77a1e3adaeb53aced6",
       "mode": "0644"
     }
   ]

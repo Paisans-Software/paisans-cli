@@ -22,7 +22,7 @@ server_name: "example.org"
 # the delegation documents are served somewhere else.
 public_baseurl: "https://chat.example.org/"
 # OFF, because the gateway serves the delegation documents on example.org
-# from this kind's wellknown snippet. Two competing answers to the same
+# from this blueprint's wellknown snippet. Two competing answers to the same
 # question is worse than either one.
 serve_server_wellknown: false
 pid_file: /data/homeserver.pid
@@ -64,10 +64,11 @@ enable_registration: false
 # Delegation to Matrix Authentication Service.
 #
 # This is the stable block, not `experimental_features.msc3861`. Synapse
-# v1.160.0, the version this kind pins, documents `matrix_authentication_service`
-# in docs/usage/configuration/config_documentation.md and its configuration
-# manual no longer mentions msc3861 anywhere; read at that tag on 2026-09-15
-# rather than recalled.
+# v1.160.0, the version this blueprint pins, documents
+# `matrix_authentication_service` in
+# docs/usage/configuration/config_documentation.md and its configuration manual
+# no longer mentions msc3861 anywhere; read at that tag on 2026-09-15 rather
+# than recalled.
 #
 # `endpoint` must have MAS's `discovery` and `oauth` resources mounted, which
 # is why the listener in mas.yaml carries both. `secret` is the same string as

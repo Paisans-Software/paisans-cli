@@ -3,23 +3,23 @@
 apiVersion: paisans.blueprint/v1
 name: writefreely
 services:
-  # This kind means the writefreely-wisp fork, not upstream WriteFreely.
+  # This blueprint means the writefreely-wisp fork, not upstream WriteFreely.
   # The fork adds Postgres and S3 support upstream does not have, so the
   # blog joins the same Patroni cluster and the same Garage node as
   # everything else instead of a SQLite file nothing else can reach.
   # Upstream's image has no [database] Postgres driver and no [storage]
-  # section at all, so it will reject the configuration this kind
-  # renders; do not point this kind at ghcr.io/writefreely/writefreely.
+  # section at all, so it will reject the configuration this blueprint
+  # renders; do not point this blueprint at ghcr.io/writefreely/writefreely.
   #
   # A track on the fork's 0.21 line, published as image tags like
   # 0.21.2-wisp for the release 0.21.2+wisp. 0.21.1+wisp was the first
-  # release carrying everything this kind's templates need: config.ini's
+  # release carrying everything this blueprint's templates need: config.ini's
   # locked_settings, [app] authorized_fetch, the S3 storage with
   # image_url_base, and the /healthz route the monitor checks. 0.21.2
   # creates the schema whenever the database has none, so a first start
   # that failed after generating its keys recovers on the next. The
   # track stops at 0.21 because a 0.x minor may change config.ini, which
-  # this kind renders; a new minor is taken by a catalog release.
+  # this blueprint renders; a new minor is taken by a catalog release.
   - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:0.21.*-wisp", purpose: "the application"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}

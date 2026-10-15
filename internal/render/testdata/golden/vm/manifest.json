@@ -8,22 +8,22 @@
     },
     {
       "path": "srv/paisans/f2a9/chat/.env",
-      "sha256": "8f364f18a7295851c66f2a99abe7dc9d22aa437f075aef581e7797c9b2d7eaff",
+      "sha256": "802dbc2bbfedb6b59676abda669a3faf653773c42e140e156b50d155f4c2e7c4",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/chat/compose.yaml",
-      "sha256": "dc31c6fa7754dd6307c03ffe311efd9e885c49db3ab283f03f4f64017005791f",
+      "sha256": "7d661bb671fbe34d5e53237895b090b98d0f6cc3c1d7358a220c67aa57608e26",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/chat/homeserver.yaml",
-      "sha256": "c353723290d0d4f74b915115e1326ed3cd77974efe33b4e5fee8e32d4534060f",
+      "sha256": "2cce2bd9d6fb190291506eff8d884e86aaba1d1871e4d2a61db52726d92cbf7c",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/chat/initdb.d/01-mas-database.sql",
-      "sha256": "ab221a57a36d9a875fa084d72a79ff240a98b0345ab5537c2e46ab8789bd8fa4",
+      "sha256": "0b50e0350faeb83af9f86267071be6b8735e6645e27d6ab154233e889c2e44ce",
       "mode": "0644"
     },
     {
@@ -83,7 +83,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/chat.caddy",
-      "sha256": "0dcee26a6564aae6b8175ceaa005b173f427fcc52caef38261ba7524b24387d3",
+      "sha256": "dc8a179f543b18289e217cae24d4b255f486a9798e26f0777bfcb28c43c8fa22",
       "mode": "0644"
     },
     {
