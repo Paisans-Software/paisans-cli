@@ -89,6 +89,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * Files in the deployment user's home (`~/.ssh/authorized_keys`, `~/.config/docker/daemon.json`) are written as that user (`runuser -u <user> --`), never by root, so a symlink the user plants cannot redirect a root write. A test plants `~/.ssh` as a link to a root-owned directory and admit leaves that directory untouched.
 * The admission record is written mode 0644, owned by root, via temp and rename; a golden plan and a test assert the mode, and a re-run that finds it otherwise restores 0644.
 * `--public-ports` checks 80 and 443 before granting, as root: `ss -Hltnp`, the system Docker's published ports when its socket exists, and DNAT rules for either port in `nft list ruleset`. Anything found refuses the grant, naming the process, the container and compose project, or the rule, and naming `web_server.managed_by: external`. Golden plans for each of the three holders.
+* For a site with `managed_by: external`: detect the owner's web server as root, record it in the admission record, and warn in the plan when Caddy's admin API listens on TCP. Golden plans for Caddy with and without a TCP admin API, nginx and Apache, on the host and in a container.
 * Any boot-ordering mechanism R10 calls for lands here.
 * README: the registry claim passages ("claim through sudo, since the registry is root's", under the registry section) say the claim happens in `host admit`.
 
@@ -103,7 +104,7 @@ Depends on: phases 2, 3, 5; R7, R8.
 * `internal/registry`: claims happen in admit; deployment commands read the admission record (mode 0644) as the deployment's user, with no sudo, instead.
 * `internal/siteremove/host.go`: user-side removal, then the `host evict` line. `cmd/paisans/hostdeployments.go`: lists admission records.
 * The gateway's Caddy serves `/.well-known/paisans/<token>` with the deployment's token (render templates, golden tree regenerated). The gateway's step in `apply` ends by fetching it through the public address on 443, and 80 expecting the redirect; any other answer fails the step: "443 on <site> answers, but not as this deployment". Tests with a fake fetcher for a matching body, another body, another server and no answer.
-* `web_server.managed_by: external`: per the founder's answer to the spec's *Open* item.
+* `web_server.managed_by: external` per the spec's *Behind the owner's web server*: admit detects the owner's server as root and records it (phase 5 adds the record fields and the request's `web_server` field); admit warns when Caddy's admin API listens on TCP; `validate` refuses `include_dir`; `apply` writes the snippet under `/srv/paisans/<token>/web-server/` and warns until `web-server check` passes; `show` fills the snippet from the record; the include, rollback and reload code in `internal/webserver` is removed. README, the guide `docs/guides/behind-your-own-web-server.md` and `docs/commands.md` rewritten to match.
 * Docker-tagged tests run against a rootless daemon.
 * README, each passage that names a root-owned path or sudo for a deployment command, rewritten to the paths under `deployment.Root()` and the user's own permissions: the seed written through `sudo` (account seed), the deployed record's "read through sudo instead" fallback, the config store "with `sudo` because the store is root's", gathering "with `sudo`", the host check's inventory "as root ... refuses unless it is 0", and doctor's Leftovers row. The admission record is described beside the deployed record: 0644, readable by the deployment's user without sudo, and `host deployments --sudo=false` lists admission records without the registry or directories.
 
@@ -141,5 +142,4 @@ Depends on: everything.
 | Question (spec *Open*) | Blocks |
 |---|---|
 | `watchdog: off` on a host admitted without `--watchdog` | phase 5 refusal rule |
-| `web_server.managed_by: external` | phase 6 |
 | `--home` for admit | phase 5 |

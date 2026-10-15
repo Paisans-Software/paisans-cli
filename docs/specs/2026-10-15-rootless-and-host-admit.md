@@ -222,6 +222,7 @@ stderr. The request holds nothing secret, so it can travel by email or chat:
 | `mesh_subnet`, `address` | the mesh subnet and the site's address in it |
 | `endpoint` | whether the site has one, so forwarding is planned |
 | `grants` | what the roles need: `watchdog` for a data site, `public_ports` for a gateway or a Caddy monitor |
+| `web_server` | for a site with `managed_by: external`: each app's hostname and its `listen` address |
 | `operators` | each `ssh.keys` operator's name and public keys |
 
 **The digest is the owner's check that the request is the one the operator
@@ -365,6 +366,38 @@ What moves:
 | `/srv/caddy.d` | `/srv/paisans/<token>/caddy.d` |
 | `/etc/docker/daemon.json` (mesh probe) | `~/.config/docker/daemon.json` |
 | WireGuard writes and `wg`, `systemctl`, `journalctl` on the mesh | the helper |
+
+## Behind the owner's web server
+
+A site with `web_server.managed_by: external` is handed to the owner's web
+server, and the owner installs it. The deployment's user cannot write the
+owner's configuration, test it or reload the server, and nothing grants it
+that: the toolkit renders, the owner installs.
+
+* **Admit detects the server**, as root, with the detection `web-server show`
+  runs today: Caddy, nginx or Apache, on the host or in a container, its
+  configuration path, and how it obtains certificates. The deployment's user
+  cannot repeat it: the system Docker socket, `ss -p`, `nginx -T` and
+  `/etc/letsencrypt/live` are root's. Admit writes the result into the
+  admission record.
+* **Admit warns about Caddy's admin API.** When the detected Caddy answers
+  its admin API on a TCP address (`localhost:2019` by default), any local
+  user, every admitted deployment's user among them, can replace its
+  configuration. Admit says so in its plan, with the fix: `admin
+  unix//run/caddy-admin.sock` or `admin off` in the global options block. It
+  is a warning, not a refusal: the server is the owner's.
+* **`include_dir` is refused** by `validate`. Nothing is written into the
+  owner's configuration and nothing of theirs is reloaded.
+* **`apply`** runs the app on `listen`, writes the snippet, filled in from
+  the admission record's detection, to
+  `/srv/paisans/<token>/web-server/<app>.<ext>` for reference, and runs
+  `web-server check` from outside. Until the check passes, the web server
+  step ends on a warning naming `paisans web-server show --app <app>` for
+  the owner; when the reference file changes, the warning says the owner's
+  copy needs replacing.
+* **`web-server show`** prints the sheet from the admission record, so it
+  fills in the right server's snippet as the deployment's user.
+* **`app remove` and `site remove`** say which block the owner removes.
 
 What changes in behaviour:
 
@@ -526,11 +559,6 @@ its.
 * **`watchdog: off`.** A data site that declares it needs no device. Is it
   allowed on a host admitted without `--watchdog`, or refused as the
   decision above reads?
-* **`web_server.managed_by: external`.** The include is written into the
-  owner's web server and reloaded with sudo. Under this design the CLI
-  cannot do either. Proposed: render the include under
-  `/srv/paisans/<token>/web-server/`, and have admit add one include line
-  to the owner's server, with reloads left to the owner.
 * **The home directory.** `/home/paisans-<token>` holds the Docker data
   directory, so it has to be on a disk with room. Should admit take a
   `--home`?
