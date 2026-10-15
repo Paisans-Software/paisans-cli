@@ -1046,9 +1046,9 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 * **A kept secret is a `KeptError`, not a refusal.** A precheck that finds
   nothing checks the secret (an admin role that cannot log in, a queue with no
   broker) returns one, and the engine lists it in `Run.Kept` and plans the
-  rest. A pending rotation's precheck is run too, except a pasted secret's,
-  and there any refusal, a `KeptError` included, means it cannot finish; its
-  refusal ends with `secretsrotate.CannotFinish`, as every such refusal does.
+  rest. A pending rotation's precheck is run too, and there any refusal, a
+  `KeptError` included, means it cannot finish; its refusal ends with
+  `secretsrotate.CannotFinish`, as every such refusal does.
 * **Stage 3 asks the rotator for its users again.** The plan's `Item.Uses`
   are only what it shows: a cluster role's switchover moves the leader, and
   the next cluster role in the same run restarts the new one last.
@@ -1056,6 +1056,21 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
   render with a probe value changes, and the host prints the hash of each
   line of its copy (`lineHashCommand`), so a file that differs elsewhere does
   not pass for a replaced secret.
+* **A pasted secret every host runs is asked for, never read from the file.**
+  It is an `Asker` whose `Asks` is true, so the plan marks the item `Asks`,
+  and `Run.Execute` refuses before anything changes unless `Run.Answer` took
+  a value for it. The command asks for every one (`askPasted`, through
+  `readRotateSecret`, which tests replace) after the `sign out` confirmation
+  and before any host is claimed, so a refusal leaves even the registries
+  alone. Stage 1 writes the answer under `rotations` in place of `Next`, and
+  `Promote` sets the path, which changes nothing for a value `secrets set`
+  already put there. A pending one is never asked for again.
+* **A bad pasted value is refused before it is written.** `Run.Answer` runs
+  the rotator's `Checked` on the answer, and the plan runs `Accepts` on a
+  value `secrets set` put in the file, because once a value is under
+  `rotations` a resumed run keeps it. For the DNS token both are a zone
+  lookup through `Env.DNSProvider` (`dns.For` unless a test replaces it);
+  a provider `dns.Implemented` lacks, and an SMTP password, have no check.
 * **Passwords never reach `argv` or a log, except where upstream leaves no
   other way in.** SQL goes on stdin with statement logging off, as `apply`'s
   bootstrap does; `rabbitmqctl` takes a password only as an argument, which
@@ -1785,7 +1800,8 @@ standby's closed port. The gateway's refusal of `X-API-Key` has run in the
 gateway's Caddy image in front of a stub, not on a deployed gateway with the
 account service calling Pocket ID over the mesh.
 
-`secrets rotate` has never been run against a real host either. Its `ALTER
+`secrets rotate` has never been run against a real host either, nor its DNS
+token check against a real provider. Its `ALTER
 ROLE` on the leader and the Patroni restarts and switchover around a cluster
 password, `rabbitmqctl change_password` in Mbin's broker, every Garage node
 restarted together for `rpc_secret`, and whether each app ends the sessions

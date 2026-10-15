@@ -2764,3 +2764,58 @@ sends it. The client's private address check guards against a configuration
 mistake, and the gateway rule is what holds when the code is wrong. The
 listener is on every HAProxy site, not only where the account service runs,
 so a later caller finds it there.
+
+## 2026-10-14: `secrets rotate` asks for a pasted secret's new value
+
+Founder decision. It amends `docs/specs/2026-10-12-secrets-rotate.md`, whose
+approved scope left reissuing a pasted secret out.
+
+### What was decided
+
+* `paisans secrets rotate` rotates the pasted secrets, `external.acme_dns_token`,
+  `external.smtp_password` and `apps.<app>.smtp_password`, as well as the
+  generated ones, and `--all` includes them.
+* When every host using one runs the value the secrets file holds,
+  `--execute` asks for the new value at a terminal, with echo off, naming the
+  path and its issuer, for every such secret in the run, before any host is
+  claimed. The answer is stage 1's next value under `rotations`, and stage 4
+  promotes it, as a generated secret's is. A resumed run does not ask again.
+* One already set anew with `paisans secrets set` is not asked for; the
+  file's value is handed out.
+* An empty answer refuses the run with nothing changed, naming `secrets set`
+  and `--replaced`. An unchanged answer is refused. With no terminal, the run
+  is refused with the steps: replace it at the issuer, `secrets set` it, run
+  again.
+* Stage 2 tries a DNS token against the community's zone at the provider,
+  read only, through `internal/dns`; a pasted or set token that fails is
+  refused before it is written. An SMTP password has no check.
+* `--replaced <path>` keeps its meaning: a pasted secret already replaced
+  and applied is listed, not rotated.
+
+### Why
+
+Before this, a pasted secret every host ran was refused, and `--all` refused
+the whole run until each one was replaced at its issuer and set with `secrets
+set` beforehand. That made the one command meant to replace every secret after
+an operator leaves stop on exactly the secrets an outsider is most likely to
+use, and sent the operator to a second command for each. Asking at the
+terminal keeps the run whole while the value still comes from the only place
+that can issue it. All the questions come before any host is claimed, with
+the `sign out` confirmation, so a run never waits on a person part way through
+with some hosts already changed.
+
+The DNS token is checked before it is written, not only at stage 2, because a
+value under `rotations` is what a resumed run hands out: a mistyped token
+written there could only be cleared by hand. The zone lookup is the read only
+call `dns init` already makes, so it adds no new credential use. Nothing in
+the toolkit logs in to a mail provider, so there is no SMTP check to reuse,
+and the plan says so rather than imply one.
+
+### What was weighed
+
+* **Refusing the pasted secrets until set by hand**, the approved spec's
+  scope. Not kept: it split one rotation into two commands and made `--all`
+  stop on them.
+* **Asking for each value when its rotation is reached.** Not chosen: a run
+  would pause part way with earlier secrets already changed, and an operator
+  who walked away would come back to a half finished run.

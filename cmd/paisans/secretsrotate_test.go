@@ -18,6 +18,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -533,8 +534,6 @@ func TestSecretsRotateNotes(t *testing.T) {
 		"oidc_clients.wiki.client_secret": "deleted at Pocket ID",
 		"apps.blog.s3_secret_access_key":  "deleted from Garage",
 		"storage.garage.rpc_secret":       "home-a, home-b",
-		"external.acme_dns_token":         "paisans secrets set external.acme_dns_token",
-		"external.smtp_password":          "paisans secrets set external.smtp_password",
 		"oidc_clients.chat.client_secret": "oidc client create --app chat --rotate-secret",
 		"oidc_clients.gate.client_secret": "oidc client create --app gate --rotate-secret",
 	} {
@@ -746,32 +745,253 @@ func TestSecretsRotateAllSkipsAnSMTPPasswordWithNoUsername(t *testing.T) {
 	}
 }
 
-// --all refuses a pasted secret every host already runs, and passes it with
-// --replaced.
-func TestSecretsRotateAllPassesWithReplaced(t *testing.T) {
+// --all holds the pasted secrets every host already runs, to be asked for at
+// --execute, rather than refusing the run over them; --replaced still lists
+// them as kept.
+func TestSecretsRotateAllIncludesPastedSecrets(t *testing.T) {
 	w, rec := fakeRotateHosts(t)
 	configPath, secretsPath := rotateDeployment(t, nil)
 	w.applied(t, configPath, secretsPath, nil)
-	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), terminalStdin(t, "", true), &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "--replaced") {
-		t.Fatalf("--all without --replaced: err = %v", err)
-	}
+	// The fake hosts hold no Patroni cluster document, so the plan stops at
+	// the cluster's admin role, after every pasted secret: what matters
+	// here is that none of those refuses it.
 	pasted := []string{"external.acme_dns_token", "external.smtp_password"}
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "--all"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cluster.admin_password") {
+		t.Fatalf("--all: err = %v\n%s", err, rec.Lines())
+	}
+	for _, p := range pasted {
+		if strings.Contains(err.Error(), p) {
+			t.Errorf("--all is refused on %s: %v", p, err)
+		}
+	}
 	args := []string{"--all"}
 	for _, p := range pasted {
 		args = append(args, "--replaced", p)
 	}
-	// The fake hosts hold no Patroni cluster document, so the plan stops at
-	// the cluster's admin role, after every pasted secret: what matters
-	// here is that none of those refuses it.
 	err = runSecretsRotate(rotateArgs(configPath, secretsPath, args...), terminalStdin(t, "", true), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "cluster.admin_password") {
 		t.Fatalf("--all with --replaced: err = %v\n%s", err, rec.Lines())
 	}
-	for _, p := range pasted {
-		if strings.Contains(err.Error(), p) {
-			t.Errorf("--all with --replaced is refused on %s: %v", p, err)
+}
+
+// pastedAtTerminal answers the prompt for a pasted secret's next value from
+// answers, by path, and records what was asked, with its issuer. A path with
+// no answer fails the test.
+func pastedAtTerminal(t *testing.T, answers map[string]string) *[]string {
+	t.Helper()
+	saved := readRotateSecret
+	t.Cleanup(func() { readRotateSecret = saved })
+	asked := &[]string{}
+	readRotateSecret = func(path, issuer string) (string, error) {
+		*asked = append(*asked, path+" at "+issuer)
+		v, ok := answers[path]
+		if !ok {
+			t.Errorf("asked for %s", path)
 		}
+		return v, nil
+	}
+	return asked
+}
+
+// claimed reports whether any host's registry was touched.
+func (w *rotateWorld) claimed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, c := range w.commands {
+		if strings.Contains(c, registry.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+// A pasted secret every host runs is asked for at --execute, before any host
+// is claimed, and the answer is stage 1's next value, written under
+// rotations; nothing shows it.
+func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	const next = "fixture-not-a-secret-desec-pasted"
+	asked := pastedAtTerminal(t, map[string]string{"external.acme_dns_token": next})
+	var out bytes.Buffer
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--execute"), terminalStdin(t, "", true), &out)
+	// The fake host refuses the apply after stage 1.
+	if err == nil {
+		t.Fatal("the fake host took an apply")
+	}
+	if !slices.Equal(*asked, []string{"external.acme_dns_token at desec"}) {
+		t.Errorf("asked %v", *asked)
+	}
+	if !w.claimed() {
+		t.Error("no host was claimed")
+	}
+	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if s.Rotations["external.acme_dns_token"] != next || s.External["acme_dns_token"] != "fixture-not-a-secret-desec" {
+		t.Errorf("after: rotations %v", s.Rotations)
+	}
+	if strings.Contains(rec.Lines()+out.String()+err.Error(), next) {
+		t.Error("the pasted value was shown")
+	}
+}
+
+// Every refusal of the ask happens before any host is claimed and leaves the
+// secrets file as it was: an answer equal to the value the hosts run, an
+// empty one, and a run with no terminal, which says how to set it instead.
+func TestSecretsRotatePastedRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		answer   string
+		terminal bool
+		want     []string
+	}{
+		{"unchanged", "fixture-not-a-secret-desec", true, []string{"unchanged", "Replace it at desec"}},
+		{"empty", "", true, []string{"nothing was pasted", "--replaced external.acme_dns_token", "paisans secrets set external.acme_dns_token"}},
+		{"no terminal", "", false, []string{"stdin is not one", "replace external.acme_dns_token at desec", "paisans secrets set external.acme_dns_token"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, rec := fakeRotateHosts(t)
+			configPath, secretsPath := rotateDeployment(t, nil)
+			w.applied(t, configPath, secretsPath, nil)
+			asked := pastedAtTerminal(t, map[string]string{"external.acme_dns_token": tc.answer})
+			before, _ := os.ReadFile(secretsPath)
+			err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--execute"), terminalStdin(t, "", tc.terminal), &bytes.Buffer{})
+			if err == nil {
+				t.Fatalf("not refused\n%s", rec.Lines())
+			}
+			for _, want := range append(tc.want, "Nothing was changed") {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err %v lacks %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "fixture-not-a-secret-desec") {
+				t.Errorf("the refusal shows the token: %v", err)
+			}
+			if !tc.terminal && len(*asked) != 0 {
+				t.Errorf("asked without a terminal: %v", *asked)
+			}
+			if w.claimed() {
+				t.Error("a host was claimed before the answer was taken")
+			}
+			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+				t.Error("a refused run changed the secrets file")
+			}
+		})
+	}
+}
+
+// A pasted secret already set anew with `secrets set`, which some host does
+// not run yet, is not asked for: the file's value is handed out. A resumed
+// rotation is not asked for again either: its next value is in the file.
+func TestSecretsRotatePastedNotAsked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(string) string
+		next string
+	}{
+		{"set with secrets set", func(text string) string {
+			return strings.Replace(text, `acme_dns_token: "fixture-not-a-secret-desec"`, `acme_dns_token: "fixture-not-a-secret-desec-set"`, 1)
+		}, "fixture-not-a-secret-desec-set"},
+		{"resumed", withRotation("external.acme_dns_token"), "next-not-a-secret-0001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, rec := fakeRotateHosts(t)
+			configPath, secretsPath := rotateDeployment(t, nil)
+			w.applied(t, configPath, secretsPath, nil)
+			configPath, secretsPath = rewriteSecrets(t, configPath, secretsPath, tc.edit)
+			asked := pastedAtTerminal(t, nil)
+			err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--execute"), terminalStdin(t, "", false), &bytes.Buffer{})
+			if err == nil {
+				t.Fatal("the fake host took an apply")
+			}
+			if len(*asked) != 0 || strings.Contains(err.Error(), "terminal") {
+				t.Errorf("asked %v: %v\n%s", *asked, err, rec.Lines())
+			}
+			s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
+			if lerr != nil {
+				t.Fatal(lerr)
+			}
+			if s.Rotations["external.acme_dns_token"] != tc.next {
+				t.Errorf("stage 1 wrote %v, want %s\n%s", s.Rotations, tc.next, rec.Lines())
+			}
+		})
+	}
+}
+
+// rewriteSecrets passes the secrets file at secretsPath through edit, after
+// the hosts were applied from it.
+func rewriteSecrets(t *testing.T, configPath, secretsPath string, edit func(string) string) (string, string) {
+	t.Helper()
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretsPath, []byte(edit(string(data))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return configPath, secretsPath
+}
+
+// The dry run lists a pasted secret every host runs as one --execute asks
+// for, says where it is replaced, and asks nothing.
+func TestSecretsRotateDryRunSaysItAsks(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	asked := pastedAtTerminal(t, nil)
+	if err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "external.smtp_password"), terminalStdin(t, "", true), &bytes.Buffer{}); err != nil {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	if len(*asked) != 0 {
+		t.Errorf("a dry run asked %v", *asked)
+	}
+	for _, want := range []struct{ kind, text string }{
+		{"note", "this run asks for external.acme_dns_token, external.smtp_password"},
+		{"pending", "stage 1, next value"},
+		{"pending", "replace it at desec when asked"},
+		{"pending", "replace it at the mail provider when asked"},
+		{"pending", "nothing checks it here: desec record management is not implemented"},
+	} {
+		if !rec.Has(want.kind, want.text) && !(want.kind == "pending" && endedWith(rec, want.text)) {
+			t.Errorf("the plan lacks %s %q:\n%s", want.kind, want.text, rec.Lines())
+		}
+	}
+}
+
+// The DNS token pasted is tried against the zone at the provider rotate
+// reaches through rotateDNSProvider, and one that cannot see it is refused
+// before any host is claimed.
+func TestSecretsRotatePastedTokenIsTriedAgainstTheZone(t *testing.T) {
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	data, _ := os.ReadFile(configPath)
+	if err := os.WriteFile(configPath, []byte(strings.Replace(string(data), "provider: desec", "provider: cloudflare", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.applied(t, configPath, secretsPath, nil)
+	provider := dnstest.New()
+	saved := rotateDNSProvider
+	rotateDNSProvider = provider.For("cloudflare")
+	t.Cleanup(func() { rotateDNSProvider = saved })
+	const next = "fixture-not-a-secret-cloudflare-pasted"
+	pastedAtTerminal(t, map[string]string{"external.acme_dns_token": next})
+	before, _ := os.ReadFile(secretsPath)
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.acme_dns_token", "--execute"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "does not work against cloudflare") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	if provider.Token != next {
+		t.Error("the pasted token was not the one tried")
+	}
+	if w.claimed() {
+		t.Error("a host was claimed")
+	}
+	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+		t.Error("the secrets file changed")
 	}
 }
 
@@ -1058,4 +1278,15 @@ func TestSecretsRotateNamesTheOperatorsHeartbeatToken(t *testing.T) {
 	if c := r.Cost(); c.SignsOut || !strings.Contains(c.Downtime, "operators heartbeat") {
 		t.Errorf("cost %+v", c)
 	}
+}
+
+// endedWith reports whether a step the recorder saw ended pending with a
+// result holding text.
+func endedWith(rec *ui.Recorder, text string) bool {
+	for _, e := range rec.Events {
+		if e.Kind == "pending" && strings.Contains(e.Extra, text) {
+			return true
+		}
+	}
+	return false
 }

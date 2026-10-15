@@ -220,8 +220,9 @@ paisans secrets rotate --all                               # dry run: every secr
 paisans secrets rotate --all --execute
 paisans secrets rotate cluster.standby_password --execute
 paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+paisans secrets rotate external.acme_dns_token --execute   # asks for the new token, then hands it to every site using it
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
-paisans secrets rotate external.acme_dns_token --execute   # hands the new token to every site using it
+paisans secrets rotate external.acme_dns_token --execute   # without a terminal: hands on the token set above
 paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token an eviction already applied
 paisans secrets rotate --all --restart --execute           # the full list again, whatever a stopped --all left
 ```
@@ -248,14 +249,26 @@ paisans secrets rotate --all --restart --execute           # the full list again
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
   in the run signs members out, and is refused without one. Refuses before
   anything changes when a `mesh rekey` is unfinished, a site does not answer
-  over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS token or
-  an SMTP password) is the value every host using it runs: replace it at its
-  issuer and set it with `secrets set` first, or name it with `--replaced` when
-  that was done and applied already. Which value a host runs is read per secret:
-  the host prints the hash of each line of the file that carries it, and the
-  lines that carry it are compared, so another change in that file does not
-  count. `--all` also refuses a secrets file that lacks a secret `init`
-  generates, naming `paisans init`.
+  over ssh, or etcd or Patroni is unhealthy. `--all` also refuses a secrets
+  file that lacks a secret `init` generates, naming `paisans init`.
+* **A pasted secret** (the DNS token or an SMTP password) **that every host
+  using it runs:** `--execute` asks for its new value at a terminal, with echo
+  off and before any host is claimed, naming where to replace it (the DNS
+  provider, or the mail provider). The dry run lists it as asked for at
+  `--execute`. An empty answer stops the run with nothing changed, naming
+  `secrets set` and `--replaced`; an answer equal to the value the hosts run is
+  refused as unchanged; and without a terminal the run is refused, with the
+  steps to replace it, `secrets set` it, and run again. A resumed rotation is
+  not asked for again. One already set with `secrets set`, which some host does
+  not run yet, is not asked for: the file's value is handed out. Which value a
+  host runs is read per secret: the host prints the hash of each line of the
+  file that carries it, and the lines that carry it are compared, so another
+  change in that file does not count.
+* **The DNS token's check:** the next token, pasted or set, looks up the
+  community domain's zone at the provider, read only, and one that cannot see
+  it is refused before it is written or handed to any Caddy. A provider whose
+  record management is not implemented is not checked, and neither is an SMTP
+  password; the plan says so.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
