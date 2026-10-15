@@ -1246,6 +1246,137 @@ func TestAHostWithoutTheHelperNamesHostAdmit(t *testing.T) {
 	}
 }
 
+// meshFailure runs a first apply on a host whose command matching fail
+// prints out and exits non zero, and returns the error.
+func meshFailure(t *testing.T, fail, out string) (*fakeHost, error) {
+	t.Helper()
+	host := newHost()
+	host.fail, host.failOut = fail, out
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host, apply.Execute(p, host)
+}
+
+// sudoWarning is what sudo prints, and then runs the command anyway, on a
+// host whose own name does not resolve, which is common on a fresh VM.
+const sudoWarning = "sudo: unable to resolve host vm: Name or service not known\n"
+
+// sudo's warning is not a refusal: a file the helper refused behind it is
+// still reported as the refused line.
+func TestASudoWarningDoesNotHideARefusedMeshFile(t *testing.T) {
+	host, err := meshFailure(t, wgHelper+"put", sudoWarning+"wg-psns-f2a9: line 5: ListenPort 51999, but this deployment was admitted on 51820; nothing was installed\n")
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(problem.Explain, "line 5: ListenPort 51999") {
+		t.Errorf("the explanation lacks the refused line:\n%s", problem.Explain)
+	}
+	if host.ran(wgHelper + "up") {
+		t.Error("the interface was started from a refused file")
+	}
+}
+
+// sudo's warning in front of a start that failed leaves it a start that
+// failed, explained from the helper's log.
+func TestASudoWarningDoesNotHideAFailedStart(t *testing.T) {
+	host := newHost()
+	host.fail, host.failOut = wgHelper+"up", sudoWarning+"Job for wg-quick@psns-f2a9.service failed\n"
+	host.journal = wgQuickJournal
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = apply.Execute(p, host)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || problem.Hint != "mesh: wg-quick@psns-f2a9 did not come up" {
+		t.Fatalf("%v", err)
+	}
+	if !host.ran(wgHelper + "log") {
+		t.Error("the helper's log was not read")
+	}
+	if strings.Contains(problem.Explain, "host admit") {
+		t.Errorf("a failed start reads as a missing admission:\n%s", problem.Explain)
+	}
+}
+
+// sudo that finds no helper at its path is a host that lost it: host admit
+// installs it again.
+func TestAHostThatLostTheHelperNamesHostAdmit(t *testing.T) {
+	host, err := meshFailure(t, wgHelper, "sudo: /usr/local/libexec/paisans/wg-psns-f2a9: command not found\n")
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper did not run on home-a" {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(problem.Explain, "paisans host admit") || !strings.Contains(problem.Explain, "command not found") {
+		t.Errorf("the explanation:\n%s", problem.Explain)
+	}
+	if host.firstCompose() >= 0 {
+		t.Errorf("a stack moved without the mesh: %v", host.commands)
+	}
+}
+
+// A refusal that says the host is wrong, not the file, is answered by the
+// owner running host admit again, not by a configuration change.
+func TestAHostSideRefusalNamesHostAdmitAgain(t *testing.T) {
+	_, err := meshFailure(t, wgHelper+"put", "wg-psns-f2a9: /etc/wireguard is not a directory; nothing was installed\n")
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
+		t.Fatalf("%v", err)
+	}
+	for _, want := range []string{"/etc/wireguard is not a directory", "runs `paisans host admit` again"} {
+		if !strings.Contains(problem.Explain, want) {
+			t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
+		}
+	}
+	if strings.Contains(problem.Explain, "from a new request") {
+		t.Errorf("a host-side refusal is blamed on the configuration:\n%s", problem.Explain)
+	}
+}
+
+// A put that failed for a reason that is not the helper's, such as ssh,
+// started nothing: it is reported as it is, without the journal of a
+// mesh that was never asked to come up.
+func TestAPutThatDidNotReachTheHelperIsNotAMeshThatDidNotComeUp(t *testing.T) {
+	host, err := meshFailure(t, wgHelper+"put", "ssh: connect to host vm port 22: Connection refused\n")
+	if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+		t.Fatalf("%v", err)
+	}
+	if strings.Contains(err.Error(), "did not come up") {
+		t.Errorf("a failed put reads as a failed start: %v", err)
+	}
+	if host.ran(wgHelper+"log") || host.ran(wgHelper+"up") {
+		t.Errorf("the apply went on past a failed put: %v", host.commands)
+	}
+}
+
+// What the host printed reaches the explanation through ui.Visible, so a
+// conf line or a journal line cannot move the operator's cursor.
+func TestHostTextInAMeshProblemIsMadeVisible(t *testing.T) {
+	_, err := meshFailure(t, wgHelper+"put", "wg-psns-f2a9: line 2: \"Bogus\x1b[2J\" is not key = value; nothing was installed\n")
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || strings.Contains(problem.Explain, "\x1b") || !strings.Contains(problem.Explain, `\x1b[2J`) {
+		t.Errorf("refused line: %v", err)
+	}
+	_, err = meshFailure(t, wgHelper, "sudo: a password is required\x1b[2J\n")
+	if !errors.As(err, &problem) || strings.Contains(problem.Explain, "\x1b") {
+		t.Errorf("sudo's line: %v", err)
+	}
+	host := newHost()
+	host.wgStays = true
+	host.journal = "Oct 11 09:00:01 vm wg-quick[811]: [#] ip link add psns-f2a9 type wireguard\nOct 11 09:00:01 vm wg-quick[811]: Line unrecognized: \x1b[2J\n"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = apply.Execute(p, host)
+	if !errors.As(err, &problem) || strings.Contains(problem.Explain, "\x1b") || !strings.Contains(problem.Explain, "Line unrecognized") {
+		t.Errorf("wg-quick's line: %v", err)
+	}
+}
+
 // SyncMesh puts the plan's file and syncs, for a caller resuming a run that
 // wrote the file and stopped before the interface had it.
 func TestSyncMeshPutsThenSyncs(t *testing.T) {

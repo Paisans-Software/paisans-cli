@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // HelperDir is where host admit installs each deployment's WireGuard helper.
@@ -111,9 +112,11 @@ func (h WGHelper) run(verb string) error {
 
 // withOutput is err with what the helper or sudo printed, which is why it
 // failed: SSHTransport's error quotes the output already, and a transport
-// that does not loses nothing. Nil stays nil.
+// that does not loses nothing. The output is compared and appended
+// redacted only, as SSHTransport quotes it, so a secret registered for
+// display never reaches the error raw. Nil stays nil.
 func withOutput(err error, out string) error {
-	out = strings.TrimRight(out, "\n")
+	out = ui.Redact(strings.TrimRight(out, "\n"))
 	if err == nil || out == "" || strings.Contains(err.Error(), out) {
 		return err
 	}

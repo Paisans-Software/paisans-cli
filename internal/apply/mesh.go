@@ -31,11 +31,12 @@ func meshAddressProbe(iface string) string {
 // bringUpMesh hands the interface the plan's file through the WireGuard
 // helper and runs the plan's step, then reads the interface back. A mesh
 // that did not come up is the operator's problem, explained from the unit's
-// journal; the helper's own refusals are already one; a read that failed is
-// returned as it is.
+// journal; the helper's own refusals are already one; a put that failed
+// otherwise started nothing, so it and a read that failed are returned as
+// they are.
 func bringUpMesh(plan *Plan, t Transport) error {
 	if err := handMesh(plan, t, plan.WireGuard); err != nil {
-		if errors.As(err, new(*ui.Problem)) {
+		if errors.As(err, new(*ui.Problem)) || errors.As(err, new(*putError)) {
 			return err
 		}
 		return meshProblem(plan, t, fmt.Errorf("%s: %w", plan.WireGuard.Title(plan.Deployment), err))
@@ -57,7 +58,10 @@ func handMesh(plan *Plan, t Transport, step WireGuardStep) error {
 		return fmt.Errorf("%s: this plan holds no mesh file to hand %s", plan.Site, h.Iface)
 	}
 	if err := h.Put([]byte(plan.meshConf)); err != nil {
-		return helperProblem(plan.Site, h, err)
+		if problem := helperProblem(plan.Site, h, err); problem != err {
+			return problem
+		}
+		return &putError{fmt.Errorf("%s: handing %s its mesh file through the WireGuard helper: %w", plan.Site, h.Iface, err)}
 	}
 	var err error
 	switch step {
@@ -74,6 +78,14 @@ func handMesh(plan *Plan, t Transport, step WireGuardStep) error {
 	return nil
 }
 
+// putError is a put that failed for a reason that is not the helper's,
+// such as ssh: nothing was installed and nothing was started, so there is
+// no unit whose journal could say more.
+type putError struct{ err error }
+
+func (e *putError) Error() string { return e.err.Error() }
+func (e *putError) Unwrap() error { return e.err }
+
 // SyncMesh hands the interface the plan's mesh file and syncs its peers in
 // place, for a caller resuming a run that wrote the file and stopped before
 // the interface had it.
@@ -81,43 +93,88 @@ func SyncMesh(plan *Plan, t Transport) error {
 	return handMesh(plan, t, WireGuardSync)
 }
 
-// helperProblem turns the WireGuard helper's two refusals into the
-// operator's problem and returns any other error as it is. sudo refusing it
-// is a host that has not admitted this deployment, or has lost the sudoers
-// line; put refusing the file names the line, and the usual cause is an
-// endpoint port or mesh subnet changed since the owner admitted it.
+// helperProblem turns the WireGuard helper's refusals into the operator's
+// problem and returns any other error as it is. put refusing the file is
+// read first, since sudo can print a warning and still run the helper: it
+// names the line, and the usual cause is an endpoint port or mesh subnet
+// changed since the owner admitted the deployment; a refusal that says the
+// host is wrong is answered by the owner running host admit again. sudo
+// refusing to run the helper at all is a host that has not admitted this
+// deployment, or has lost the helper or its sudoers line.
 func helperProblem(site string, h WGHelper, err error) error {
 	const stopped = "Nothing that binds the mesh address was started."
 	text := err.Error()
 	path, _ := h.Path()
-	if line := sudoRefusal(text); line != "" {
+	if line := refusedConf(text); line != "" {
+		advice := "The helper installs only what paisans renders, on the ListenPort and inside the mesh subnet the host's owner admitted. When the site's endpoint port or mesh.subnet has changed since, the owner admits the deployment again from a new request."
+		if hostRefusal(line) {
+			advice = "That is the host, not the mesh file: the host's owner runs `paisans host admit` again, which installs the helper and /etc/wireguard as the helper expects them, then apply again."
+		}
 		return &ui.Problem{
-			Hint:    "mesh: the WireGuard helper did not run on " + site,
-			Explain: fmt.Sprintf("sudo would not run %s (%s). `paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again.\n%s", path, line, stopped),
+			Hint:    "mesh: the WireGuard helper refused " + site + "'s mesh file",
+			Explain: fmt.Sprintf("%s. %s\n%s", ui.Visible(line), advice, stopped),
 			Cause:   err,
 		}
 	}
-	if line := refusedConf(text); line != "" {
+	if line := sudoRefusal(text, path); line != "" {
 		return &ui.Problem{
-			Hint:    "mesh: the WireGuard helper refused " + site + "'s mesh file",
-			Explain: fmt.Sprintf("%s. The helper installs only what paisans renders, on the ListenPort and inside the mesh subnet the host's owner admitted. When the site's endpoint port or mesh.subnet has changed since, the owner admits the deployment again from a new request.\n%s", line, stopped),
+			Hint:    "mesh: the WireGuard helper did not run on " + site,
+			Explain: fmt.Sprintf("sudo would not run %s (%s). `paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again.\n%s", path, ui.Visible(line), stopped),
 			Cause:   err,
 		}
 	}
 	return err
 }
 
-// sudoRefusal is the line sudo printed when it would not run the helper,
-// such as "sudo: a password is required" or "Sorry, user ... is not allowed
-// to execute ...", empty when there is none.
-func sudoRefusal(out string) string {
+// sudoRefusals are what sudo prints when it will not run a command, as
+// opposed to a warning it prints before running it anyway (Eg: "unable to
+// resolve host").
+var sudoRefusals = []string{
+	"a password is required",
+	"a terminal is required",
+	"no tty present",
+	" is not allowed to execute ",
+}
+
+// sudoRefusal is the line sudo printed when it would not run the helper at
+// path, such as "sudo: a password is required", "Sorry, user ... is not
+// allowed to execute ..." or "sudo: <path>: command not found", empty when
+// there is none.
+func sudoRefusal(out, path string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "sudo: ") || strings.Contains(line, " is not allowed to execute ") {
+		if path != "" && line == "sudo: "+path+": command not found" {
 			return line
+		}
+		for _, refusal := range sudoRefusals {
+			if strings.Contains(line, refusal) {
+				return line
+			}
 		}
 	}
 	return ""
+}
+
+// hostRefusals are the helper's refusals that say the host is wrong rather
+// than the file: what it installs into is not as host admit left it, or the
+// helper itself was rendered wrong.
+var hostRefusals = []string{" is not a directory", " is a directory"}
+
+// hostRefusal reports whether why, a refusal refusedConf read, is one host
+// admit answers rather than a configuration change.
+func hostRefusal(why string) bool {
+	if why == "the helper was rendered with a bad subnet or port" {
+		return true
+	}
+	if strings.HasPrefix(why, "line ") {
+		return false
+	}
+	for _, r := range hostRefusals {
+		if strings.HasSuffix(why, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // refusedConf is why the helper's put refused a file, from the line it
@@ -248,7 +305,7 @@ func meshProblem(plan *Plan, t Transport, cause error) error {
 		return problem
 	}
 	if line != "" {
-		problem.Explain = fmt.Sprintf("wg-quick: %s\n%s", line, stopped)
+		problem.Explain = fmt.Sprintf("wg-quick: %s\n%s", ui.Visible(line), stopped)
 		return problem
 	}
 	problem.Explain = fmt.Sprintf("Read why on %s with `%s`, fix it and apply again.\n%s", plan.Site, logCommand, stopped)

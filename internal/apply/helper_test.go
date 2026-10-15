@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // helperHost records each command and its stdin, and answers with out.
@@ -161,5 +162,35 @@ func TestWGHelperCommandLine(t *testing.T) {
 	}
 	if got := (apply.WGHelper{Iface: "wg0"}).CommandLine("log"); got != "the WireGuard helper's log" {
 		t.Errorf("CommandLine for no deployment's interface = %q", got)
+	}
+}
+
+// redactingHost fails as SSHTransport does: its error quotes the output,
+// redacted.
+type redactingHost struct{ helperHost }
+
+func (h *redactingHost) Run(command string) (string, error) {
+	return h.out, ui.RedactError(fmt.Errorf("home-a: %s: exit status 1\n%s", command, h.out))
+}
+
+// What the helper or sudo printed reaches an error only redacted: a secret
+// registered for display is never appended raw, whether the transport
+// quoted the output already or not.
+func TestWGHelperErrorsNeverCarryARegisteredSecret(t *testing.T) {
+	const secret = "wg-helper-test-secret-5f1c"
+	ui.Secret(secret)
+	out := "sudo: " + secret + " is not the password\n"
+	for name, w := range map[string]apply.WGHelper{
+		"bare":      {T: &failingHost{helperHost{out: out}}, Iface: "psns-f2a9"},
+		"redacting": {T: &redactingHost{helperHost{out: out}}, Iface: "psns-f2a9"},
+	} {
+		err := w.Up()
+		if err == nil || strings.Contains(err.Error(), secret) {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if strings.Count(err.Error(), "is not the password") != 1 {
+			t.Errorf("%s: the output is not quoted once: %v", name, err)
+		}
 	}
 }
