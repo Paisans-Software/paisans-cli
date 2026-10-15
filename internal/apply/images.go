@@ -568,8 +568,8 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 	if image.Setting() == "" || image.Origin == render.OriginFoundation && refused {
 		// The core catalog's foundation image: the catalog's release fixes
 		// it, and the setting, when there is one, holds a build until then.
-		// One the registry could not be asked about takes the advice below,
-		// which names its setting.
+		// One with a setting that the registry could not be asked about
+		// takes the advice below, which names that setting.
 		explain := fmt.Sprintf("Run apply again once this workstation reaches %s.", host)
 		if refused {
 			explain = "It is the core catalog's own image (foundation.yaml), and its track names nothing this registry publishes anonymously. A release of the core catalog fixes it; pinning core to an older release in `catalogs` works until then."

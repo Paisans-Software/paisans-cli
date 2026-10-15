@@ -137,3 +137,55 @@ func TestAnAppOverrideSaysWhatItReplaces(t *testing.T) {
 	}
 	t.Fatal("no site runs the talk override")
 }
+
+// An origin labels only the reference it chose: an image a compose service
+// runs that the app's override did not name (a template's hard-coded one)
+// takes neither the override's key nor what it replaces, though the service
+// shares the override's name. The fixture's talk declares images.app, which
+// its app and messenger services both run; app is made to run another.
+func TestAnOriginLabelsOnlyTheReferenceItChose(t *testing.T) {
+	cfg := fixture(t)
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const declared = "ghcr.io/example-org/mbin:v1.10.1-fork"
+	const hardCoded = "ghcr.io/example-org/hard-coded:1.0.0"
+	var files []render.File
+	for _, f := range plan.Files {
+		if f.Path == "home-a/srv/paisans/f2a9/talk/compose.yaml" {
+			// app's own image line: the first naming declared after app:.
+			at := strings.Index(f.Content, "\n  app:\n")
+			if at < 0 {
+				t.Fatalf("talk's compose file has no app service:\n%s", f.Content)
+			}
+			f.Content = f.Content[:at] + strings.Replace(f.Content[at:], declared, hardCoded, 1)
+			files = append(files, f)
+		}
+	}
+	if len(files) != 1 || !strings.Contains(files[0].Content, hardCoded) || !strings.Contains(files[0].Content, declared) {
+		t.Fatalf("no talk compose file on home-a to change: %d", len(files))
+	}
+	images, err := render.ListImages(cfg, fixtureSecrets(t), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen int
+	for _, image := range images["home-a"] {
+		switch image.Image {
+		case hardCoded:
+			seen++
+			if image.Origin != "" || image.Replaces != "" || len(image.FoundationServices) > 0 {
+				t.Errorf("the hard-coded image took an origin it did not have: %+v", image)
+			}
+		case declared:
+			seen++
+			if image.Origin != "apps.talk.images.app" || image.Replaces == "" {
+				t.Errorf("the declared image lost its origin: %+v", image)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("home-a lists %d of the two talk images: %+v", seen, images["home-a"])
+	}
+}

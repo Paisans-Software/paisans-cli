@@ -192,6 +192,13 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			if err != nil {
 				return nil, err
 			}
+			// Every reference the render took from elsewhere is unmarked
+			// in this file, whichever service runs it.
+			for _, o := range infra {
+				if !o.foundation {
+					fromElsewhere[o.image] = true
+				}
+			}
 			for name, service := range services {
 				o, ok := infra[name]
 				if !ok || !infraServices[name] || o.image != strings.TrimSpace(service.Image) {
@@ -210,9 +217,15 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				return nil, err
 			}
 			for service, o := range appOrigins {
-				if lines[o.image] > 0 {
-					named[o.image] = append(named[o.image], service)
+				if !o.foundation {
+					fromElsewhere[o.image] = true
 				}
+				// An origin labels the reference it chose, so it is kept
+				// only when the file runs that reference.
+				if lines[o.image] == 0 {
+					continue
+				}
+				named[o.image] = append(named[o.image], service)
 				origins[service], settings[service] = o, fmt.Sprintf("apps.%s.images.%s", stack, service)
 			}
 			injected, err := p.injectedImages(declared)
@@ -220,6 +233,9 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				return nil, err
 			}
 			for service, o := range injected {
+				if !o.foundation {
+					fromElsewhere[o.image] = true
+				}
 				origins[service], settings[service] = o, "infra.images."+blueprints.FoundationHeartbeat
 			}
 		}
@@ -253,13 +269,16 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 			}
 			sort.Strings(names)
 			sort.Strings(marked[image])
-			// The origin is the first of names that has one, names being
-			// sorted, so it is the same on every render.
+			// The origin is the first of names that has one for this very
+			// reference, names being sorted, so it is the same on every
+			// render. A service whose origin is another reference (a
+			// template's hard-coded image under the name of a service the
+			// configuration overrides) lends this image nothing.
 			var origin imageOrigin
-			var setting string
+			var setting, from string
 			for _, name := range names {
-				if o, ok := origins[name]; ok {
-					origin, setting = o, settings[name]
+				if o, ok := origins[name]; ok && o.image == image {
+					origin, setting, from = o, settings[name], name
 					break
 				}
 			}
@@ -269,7 +288,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 				// Setting answers for a blueprint's own service itself; the
 				// infrastructure stack's and the operators heartbeat's key is
 				// the render's to say.
-				if stack == config.InfraStack || !blueprints.Has(ci.blueprint, names[0]) {
+				if stack == config.InfraStack || !blueprints.Has(ci.blueprint, from) {
 					ci.setting = setting
 				}
 			}
