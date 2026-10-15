@@ -964,7 +964,8 @@ instance, clocks, and what is left over.
   `--execute`.
 * **Hosts:** every site, or the named ones, read only.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
-  repeats a value gating renders, before loading it. It changes no host; the
+  repeats a value gating renders, before loading it, and records the `ssh.user`
+  of a site it logs in to as the deployment's own user. It changes no host; the
   recoveries it prints are for a human to run.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.

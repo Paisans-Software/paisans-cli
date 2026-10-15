@@ -9061,8 +9061,10 @@ It **changes no host**. Every command it sends is a read: a list, a status, a
 key, a log tail. The recoveries it describes are printed for a human to run,
 because doctor is run in the middle of an outage and the one recovery that
 touches member data, a forced failover, loses commits. Which commits a
-community keeps is a human's decision. Its one change is to the local
-`paisans-stack.yaml`, and only with `--execute`: before it loads the file, it removes
+community keeps is a human's decision. Its changes are to the local
+`paisans-stack.yaml`, and only with `--execute`: it records the `ssh.user` of a
+site it logs in to as the deployment's own user, as any run with `--execute`
+does, and before it loads the file, it removes
 every `config:` key that only repeats a value gating makes the template write
 (Eg: `MBIN_USE_FEDERATION_ALLOW_LIST: true` on a gated Mbin), which `validate`
 otherwise refuses as `config-key-already-rendered`. The file then says the

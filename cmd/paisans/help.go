@@ -257,9 +257,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "doctor",
 		summary: "Report what is stuck on every site, and how to recover.",
-		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]..."},
+		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--execute]"},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
-			"Prints how to recover. Reaches hosts, changes nothing; exits 1 on any FAIL.",
+			"Prints how to recover. Reaches hosts and changes none; exits 1 on any FAIL. With --execute it removes the config: keys that only repeat what gating renders, and records the ssh.user of a site it logs in to as the deployment's own user, both in " + config.FileName + ".",
 	},
 	{
 		name:    "version",
@@ -353,7 +353,7 @@ var helpCommands = []helpCommand{
 		summary: "Remove the secrets of what " + config.FileName + " no longer declares.",
 		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
 		detail: "Remove the secrets that name something " + config.FileName + " no longer declares: a removed site's keys, a removed app's passwords and sign-in client, a Pocket ID group nothing names. Lists them by key, never by value.\n\n" +
-			"Only reads the gateways' deployment records; its --execute writes the local secrets file alone.",
+			"Only reads the gateways' deployment records; its --execute writes the local secrets file, and records the ssh.user of a gateway it logs in to as the deployment's own user.",
 	},
 	{
 		name:    "secrets rotate",
@@ -413,9 +413,9 @@ doctor, init, config and operator register are the only commands that reach a
 host. Each reads it to plan, and changes it only with --execute; config and
 operator register claim nothing, and their --execute only starts each site's
 configuration sync and, for publish and register, adds a version to its store;
-host deployments, preflight, doctor and init have no --execute and never change
-it; secrets prune only reads the gateways' deployment records, and its --execute
-writes the local secrets file alone. With --execute, a command first claims each
+host deployments, preflight and init have no --execute and never change it;
+doctor's --execute and secrets prune's change no host either, editing only the
+local files, and secrets prune only reads the gateways' deployment records. With --execute, a command first claims each
 host it writes to in /var/lib/paisans/registry.json, and refuses if another
 deployment there holds this one's token, WireGuard interface or listen port, or
 a mesh subnet overlapping this one's. apply and host prepare also refuse when

@@ -33,8 +33,9 @@ var doctorTransport = func(t apply.SSHTransport) apply.Transport { return t }
 var doctorNow = time.Now
 
 // runDoctor reads every site, or the ones --site names, and prints what is
-// stuck and how to recover. It changes nothing and has no --execute: see
-// internal/doctor for why. Its checks are doctor.Checks' graph, run at once
+// stuck and how to recover. It changes no host: see internal/doctor for why.
+// Its --execute edits only the local configuration (removeRedundantGateConfig,
+// and the ssh.user a login records). Its checks are doctor.Checks' graph, run at once
 // and printed as each ends. A site that does not answer is a finding, nothing
 // more is asked of it, and every other check runs with the sites that did.
 // It exits non zero when any finding is FAIL, so a script can tell a healthy
