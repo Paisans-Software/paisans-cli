@@ -3,7 +3,6 @@ package admission
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -230,7 +229,7 @@ func (r Request) Check() []string {
 			add("web_server[%d].hostname: %q is listed twice", i, w.Hostname)
 		}
 		hostnames[w.Hostname] = true
-		if !r.proxiesToThisHost(w.Listen) {
+		if !config.ProxiesToThisHost(w.Listen, r.Address) {
 			add("web_server[%d].listen: %q is not a loopback address or this site's mesh address, with a port", i, w.Listen)
 		}
 	}
@@ -278,21 +277,6 @@ func isNetworkOrBroadcast(a net.IP, mesh *net.IPNet) bool {
 		last[i] = mesh.IP.To4()[i] | ^mesh.Mask[len(mesh.Mask)-4+i]
 	}
 	return a.Equal(last)
-}
-
-// proxiesToThisHost reports whether listen is a host:port the owner's web
-// server may proxy a public hostname to: loopback or the site's own mesh
-// address, never a name, a LAN host or the cloud metadata address.
-func (r Request) proxiesToThisHost(listen string) bool {
-	host, port, err := net.SplitHostPort(listen)
-	if err != nil {
-		return false
-	}
-	if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 || strconv.Itoa(p) != port {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.To4() != nil && ip.String() == host && (ip.IsLoopback() || host == r.Address)
 }
 
 // Error is a request, or a record, refused, with every problem found.

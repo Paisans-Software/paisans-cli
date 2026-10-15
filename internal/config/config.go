@@ -374,17 +374,36 @@ func IncludeDirProblem(dir string) string {
 }
 
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it
-// is not one.
+// is not one. The port is 1 to 65535 written without leading zeros, the one
+// spelling a request carries, so the file and the request cannot disagree on
+// whether 08480 is 8480.
 func (i WebServer) ListenHostPort() (string, int, bool) {
 	host, port, err := net.SplitHostPort(i.Listen)
 	if err != nil || !isIPv4(host) {
 		return "", 0, false
 	}
 	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 {
+	if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
 		return "", 0, false
 	}
 	return host, n, true
+}
+
+// ProxiesToThisHost reports whether listen is an address the owner's web
+// server may be handed for a site whose mesh address is address: an IPv4
+// loopback address or the site's own mesh address, in plain dotted form, with
+// a port ListenHostPort accepts. A monitor behind the owner's web server is
+// handed to that server on the same host, so nothing beyond the host is
+// needed, and Docker publishes a port with rules of its own in front of the
+// firewall, so any other address would expose the app around the web
+// server. validate and host request both hold web_server.listen to it.
+func ProxiesToThisHost(listen, address string) bool {
+	host, _, ok := WebServer{Listen: listen}.ListenHostPort()
+	if !ok {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip.String() == host && (ip.IsLoopback() || host == address)
 }
 
 // WebServerManagedBy returns the site's declared web_server.managed_by, paisans when none is
@@ -1231,7 +1250,7 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if in.Listen != "" {
 				if _, _, ok := in.ListenHostPort(); !ok {
-					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
+					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port from 1 to 65535 written without leading zeros. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
 				}
 			}
 		}

@@ -1071,11 +1071,13 @@ configuration and into commands on the host (`web-server-include-dir-path`).
 
 `listen` belongs to `managed_by: external` alone, which cannot work without it
 (`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
-in front of ufw, so a `listen` the internet can reach would expose the app
-around the web server whatever the firewall says: only loopback, a private LAN
-address (RFC 1918, or `100.64.0.0/10` as Tailscale uses) or the site's own
-mesh address are accepted (`web-server-listen-public`), and all but loopback warn
-that ufw does not cover them (`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
+in front of ufw, so a `listen` anything else can reach would expose the app
+around the web server whatever the firewall says. The web server runs on the
+same host, so only an IPv4 loopback address or the site's own mesh address is
+accepted, with a port written without leading zeros, the rule `host request`
+holds the site's request to (`web-server-listen-public`); loopback is the one
+to use, and the mesh address warns that ufw does not cover it
+(`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
 external monitor hosts the monitor alone (`web-server-external-serves-one-app`).
 
 Either way the app is rendered for a proxy in front of it:
@@ -1086,10 +1088,9 @@ trusted may claim any client address. Behind the monitor's own Caddy that is
 the site's own mesh address, `/32`, since that Caddy runs on the host and dials
 the app there. For a loopback `listen` it is the pinned network's gateway,
 `10.255.255.1/32`, because Docker hands a connection on a loopback publish to
-the container from that gateway, never from 127.0.0.1. A LAN or mesh `listen`
-is reached by the web server's own address, which Docker's forwarding keeps
-and which the toolkit knows only by its network, so it is that private block
-or the mesh subnet.
+the container from that gateway, never from 127.0.0.1. A mesh `listen` is
+reached by the web server's own address, which Docker's forwarding keeps and
+which the toolkit knows only by its network, so it is the mesh subnet.
 
 Switching an existing site between the two `managed_by` values moves that pin, and the
 network on the host has to move with it, or `TRUST_PROXY` names a gateway the

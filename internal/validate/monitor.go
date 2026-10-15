@@ -181,21 +181,15 @@ func (c *checker) webServer() {
 				"an external web server serves one app but several are pinned",
 				"publishes one app, but %s are pinned to %s. With managed_by: external nothing but your own web server is in front of the site, and it is handed the monitor alone, so the others would be routed by nothing. Pin them elsewhere, or use managed_by: paisans.", strings.Join(pinned, ", "), name)
 		}
-		host, _, ok := site.WebServer.ListenHostPort()
-		if !ok {
-			continue // the loader has already reported this
-		}
-		ip := net.ParseIP(host)
 		switch {
-		case ip.IsLoopback():
-		case host == site.Address || (!c.cfg.Mesh.Contains(host) && (ip.IsPrivate() || cgnat.Contains(ip))):
+		case !config.ProxiesToThisHost(listen, site.Address):
+			c.refuse("web-server-listen-public", key+".listen",
+				"web_server listens beyond loopback and the site's mesh address",
+				"is %s. Your web server runs on this host, so it reaches the app on loopback, and Docker publishes a port with its own iptables rules, in front of ufw, so any other address exposes the app around your web server. Use loopback, 127.0.0.1, or this site's own mesh address, %s.", listen, site.Address)
+		case strings.HasPrefix(listen, site.Address+":"):
 			c.warn("web-server-listen-bypasses-firewall", key+".listen",
 				"web_server listens on a non-loopback address the firewall misses",
-				"is %s, which is not loopback. Docker publishes a port with its own iptables rules, in front of ufw, so the firewall does not protect it: anything that can reach %s can reach the app around your web server. Prefer 127.0.0.1 when the web server runs on this machine.", listen, host)
-		default:
-			c.refuse("web-server-listen-public", key+".listen",
-				"web_server listens on a public address",
-				"is %s. The app would be published where the proxy is not in front of it, and Docker's rules bypass ufw. Use loopback (127.0.0.1), a private LAN address (RFC 1918, or 100.64.0.0/10 as Tailscale uses), or this site's own mesh address, %s.", listen, site.Address)
+				"is %s, which is not loopback. Docker publishes a port with its own iptables rules, in front of ufw, so the firewall does not protect it: anything that can reach %s over the mesh can reach the app around your web server. Prefer 127.0.0.1.", listen, site.Address)
 		}
 	}
 }

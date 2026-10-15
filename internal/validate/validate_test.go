@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -640,9 +641,9 @@ func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 }
 
 // A listen address is where Docker publishes the app for the operator's web
-// server. Loopback is quiet; a LAN address or the site's own mesh address is
-// allowed with the firewall warning; anything the internet or another host
-// could be reached on is refused. 10.44.0.1 is RFC 1918 as well as inside the
+// server, which runs on the same host. Loopback is quiet; the site's own mesh
+// address is allowed with the firewall warning; anything else is refused, a
+// LAN address included, as host request refuses it. 10.44.0.1 is inside the
 // mesh, but it is another site's address, which nothing on this host binds.
 func TestWebServerListenAddresses(t *testing.T) {
 	for _, tc := range []struct {
@@ -650,7 +651,8 @@ func TestWebServerListenAddresses(t *testing.T) {
 		refused, warns bool
 	}{
 		{"127.0.0.1:8480", false, false},
-		{"192.168.1.20:8480", false, true},
+		{"192.168.1.20:8480", true, false},
+		{"100.101.102.103:8480", true, false},
 		{"10.44.0.4:8480", false, true},
 		{"10.44.0.1:8480", true, false},
 		{"203.0.113.20:8480", true, false},
@@ -721,16 +723,26 @@ func TestACMEProviderNeedsAnImageForAMonitorsCaddy(t *testing.T) {
 	}
 }
 
-// Carrier grade NAT space, which Tailscale uses, is as private to the site as
-// RFC 1918: allowed as a listen address, with the firewall warning.
-func TestACGNATListenIsWarnedNotRefused(t *testing.T) {
-	cfg := load(t, "uptime-without-smtp")
-	site := cfg.Sites["watch"]
-	site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}
-	cfg.Sites["watch"] = site
-	result := validate.Check(cfg)
-	if result.Has("web-server-listen-public") || !result.Has("web-server-listen-bypasses-firewall") {
-		t.Fatalf("%v", result.Findings)
+// validate holds a listen to the rule host request does, so a listen it
+// accepts is one the site's request carries, and its refusal recommends
+// loopback.
+func TestWebServerListenIsWhatTheRequestAccepts(t *testing.T) {
+	for _, listen := range []string{"127.0.0.1:8480", "10.44.0.4:8480", "192.168.1.20:8480", "100.101.102.103:8480", "127.0.0.1:08480"} {
+		cfg := load(t, "uptime-without-smtp")
+		site := cfg.Sites["watch"]
+		site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: listen}
+		cfg.Sites["watch"] = site
+		refused := len(validate.Check(cfg).Refusals()) > 0
+		_, err := admission.Build(cfg, "watch")
+		if refused == (err == nil) {
+			t.Errorf("%s: validate refused %v, host request refused %v (%v)", listen, refused, err != nil, err)
+		}
+	}
+	cfg := load(t, "web-server-listen-public")
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "web-server-listen-public" && !strings.Contains(f.Message, "Use loopback, 127.0.0.1") {
+			t.Errorf("the hint does not recommend loopback: %s", f)
+		}
 	}
 }
 
