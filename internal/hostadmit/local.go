@@ -5,14 +5,10 @@ package hostadmit
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -45,6 +41,7 @@ func (l local) RunInput(command, stdin string) (string, error) { return l.run(co
 func (l local) run(command string, stdin *string) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
 	// A command starts in the running user's home, as it does over ssh.
+	cmd.Dir = "/"
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home
 	}
@@ -59,81 +56,35 @@ func (l local) run(command string, stdin *string) (string, error) {
 	return out.String(), nil
 }
 
-// ReadFile reads a regular file. A missing path, and one that is not a
-// regular file, read as absent, as `[ -f ]` does over ssh.
-func (local) ReadFile(path string) (string, bool, error) {
-	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || (err == nil && !info.Mode().IsRegular()) {
-		return "", false, nil
-	}
+// ReadFile reads a regular file. The directories on the way are opened one
+// by one by descriptor and a link in any of them is an error naming it, as
+// is a link as the file itself, because this process runs as root and the
+// directories belong to the deployment's user. A missing path, and one
+// through a regular file, read as absent, as `[ -f ]` does over ssh; any
+// other kind of file, a FIFO among them, is an error and is never waited on.
+// The path must be absolute.
+func (l local) ReadFile(path string) (string, bool, error) {
+	content, found, err := readFile(path)
 	if err != nil {
-		return "", false, err
+		err = ui.RedactError(fmt.Errorf("%s: reading %s: %w", l.Describe(), path, err))
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false, err
-	}
-	return string(data), true, nil
+	return content, found, err
 }
 
-// WriteFile writes content to a new temporary file in path's directory,
-// sets its mode through the open descriptor and renames it over path,
-// creating the parent directories, so a failed write leaves the previous
-// file whole. The temporary name is random and opened exclusively, and
-// nothing is done to it by path, so a link planted beside the target by
-// the directory's owner is never followed by this process, which runs as
-// root.
-func (l local) WriteFile(path, content string, mode uint32) (err error) {
-	defer func() {
-		if err != nil {
-			err = ui.RedactError(fmt.Errorf("%s: writing %s: %w", l.Describe(), path, err))
-		}
-	}()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".paisans-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	fail := func(err error) error {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if _, err := f.WriteString(content); err != nil {
-		return fail(err)
-	}
-	if err := f.Chmod(fileMode(mode)); err != nil {
-		return fail(err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
+// WriteFile writes content to a new file with a random name in path's
+// directory, sets its mode, including setuid, setgid and sticky, and renames
+// it over path, so a failed write leaves the previous file whole. Missing
+// directories are created. Every directory on the way is opened by
+// descriptor without following links, and a link in any of them is an error
+// naming it; the temporary file is created exclusively and changed only
+// through its descriptor. A link planted by the directory's owner is
+// therefore never followed by this process, which runs as root. The path
+// must be absolute.
+func (l local) WriteFile(path, content string, mode uint32) error {
+	if err := writeFile(path, content, mode); err != nil {
+		return ui.RedactError(fmt.Errorf("%s: writing %s: %w", l.Describe(), path, err))
 	}
 	return nil
-}
-
-// fileMode converts Unix mode bits, setuid, setgid and sticky among them,
-// to Go's, which keep those three elsewhere.
-func fileMode(mode uint32) os.FileMode {
-	m := os.FileMode(mode & 0o777)
-	if mode&0o4000 != 0 {
-		m |= os.ModeSetuid
-	}
-	if mode&0o2000 != 0 {
-		m |= os.ModeSetgid
-	}
-	if mode&0o1000 != 0 {
-		m |= os.ModeSticky
-	}
-	return m
 }
 
 func firstLine(s string) string {
