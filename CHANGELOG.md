@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- `paisans doctor` reads Caddy's certificate failures, checks the DNS token from each Caddy site and the workstation (`--secrets`), and reports deployment hostnames whose records point elsewhere or are missing, never feeding Cloudflare's lockout.
 - `apply` checks the DNS token from every Caddy site before Caddy starts or reloads, and `dns init` and `dns prune` from the workstation, stopping on a refusal or no answer rather than feeding Cloudflare's lockout.
 - `paisans secrets list` prints every secret path the configuration needs, whether each is set, whether it is generated, pasted or captured, and the path `secrets rotate` takes, never a value.
 - SMTP settings are tried from a site over ssh: `secrets set` and `secrets rotate` log in and email the operators before writing a password, `apply` refuses settings that do not log in, `validate` warns.

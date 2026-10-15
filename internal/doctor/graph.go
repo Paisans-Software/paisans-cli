@@ -472,5 +472,8 @@ func (in Input) clone() Input {
 	out.Leftovers = slices.Clone(in.Leftovers)
 	out.Allowlists = slices.Clone(in.Allowlists)
 	out.Settings = slices.Clone(in.Settings)
+	out.Caddy = slices.Clone(in.Caddy)
+	out.Tokens = slices.Clone(in.Tokens)
+	out.Records.Entries = slices.Clone(in.Records.Entries)
 	return out
 }

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -14,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
@@ -47,6 +51,7 @@ func runDoctor(args []string) error {
 	fs.Var(&only, "site", "look at this site only (repeatable); every check then runs on the named sites alone")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker and /srv are root's")
 	execute := fs.Bool("execute", false, "remove the config: keys in "+config.FileName+" that only repeat a value gating requires, before reading any site; no site is changed")
+	secretsPath := fs.String("secrets", "", "path to the secrets, which hold the DNS token the workstation's check uses (default: secrets.enc.yaml beside the config)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -77,7 +82,10 @@ func runDoctor(args []string) error {
 		transports[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "", *sudo)), doctorSiteCommands)
 	}
 
-	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports})
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, token: &workstationToken{path: *secretsPath}})
 	report, _ := graph.Run(r, doctorAtOnce)
 	report.ShowEnd(r)
 	if report.Failed() {
@@ -155,6 +163,151 @@ func (b boundedTransport) timed(command string) (out string, before, after time.
 type doctorReads struct {
 	cfg        *config.Config
 	transports map[string]apply.Transport
+	// token is the workstation's DNS token, once Secrets has read it.
+	token *workstationToken
+}
+
+// workstationToken is the DNS token from the secrets file. It stays here,
+// out of doctor.Input, and is registered as a secret the moment it is read,
+// so that no line doctor prints can carry it.
+type workstationToken struct {
+	path  string
+	mu    sync.Mutex
+	value string
+}
+
+func (w *workstationToken) get() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.value
+}
+
+// redact is text without the token.
+func (w *workstationToken) redact(text string) string {
+	if t := w.get(); t != "" {
+		return strings.ReplaceAll(text, t, "[redacted]")
+	}
+	return text
+}
+
+// doctorDNSFor is dns.For, which tests replace with a provider held in
+// memory, since no test may reach a real one.
+var doctorDNSFor = dns.For
+
+// doctorSiteToken is the token check on a site. A package variable so that
+// a test can stand in for the provider.
+var doctorSiteToken = func(ctx context.Context, check dns.TokenCheck, host dns.Runner, envFile string) dns.TokenResult {
+	return check.OnSite(ctx, host, envFile)
+}
+
+// CaddyLog reads Caddy's certificate log lines over the site's transport,
+// through sudo as every other read, since Docker is root's.
+func (d doctorReads) CaddyLog(site string) doctor.CaddyLogProbe {
+	out, err := d.transports[site].Run(doctor.CaddyLogCommand(d.cfg.Deployment()))
+	p := doctor.CaddyLogProbe{Site: site, Out: out}
+	if err != nil {
+		p.Err = errText(out, err)
+	}
+	return p
+}
+
+// Secrets opens the secrets file as apply does, with the age key from the
+// workstation's keystore or a SOPS_AGE_* variable.
+func (d doctorReads) Secrets() doctor.SecretsProbe {
+	p := doctor.SecretsProbe{Path: ui.ShortPath(d.token.path)}
+	secrets, err := config.LoadDeploymentSecrets(d.token.path, d.cfg.ID)
+	if err != nil {
+		var problem *ui.Problem
+		if errors.As(err, &problem) {
+			p.Err = problem.Hint
+			if problem.Explain != "" {
+				p.More = strings.Split(problem.Explain, "\n")
+			}
+		} else {
+			p.Err = firstOf(err.Error())
+		}
+		return p
+	}
+	token := secrets.External["acme_dns_token"]
+	ui.Secret(token)
+	d.token.mu.Lock()
+	d.token.value = token
+	d.token.mu.Unlock()
+	return p
+}
+
+// SiteToken checks the token in the site's caddy.env, from the site, over
+// its transport: the file is root's and 0600, so it is read through sudo
+// as every other read here.
+func (d doctorReads) SiteToken(site string) dns.TokenResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	check := dns.TokenCheck{Provider: d.cfg.ACME.Provider, Domain: d.cfg.Community.Domain, Place: site}
+	return doctorSiteToken(ctx, check, d.transports[site], dns.CaddyEnvFile(d.cfg.Deployment()))
+}
+
+// WorkstationToken checks the secrets' token from this workstation, as dns
+// init does before its first records call.
+func (d doctorReads) WorkstationToken() dns.TokenResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	r := workstationTokenCheck(ctx, dns.TokenCheck{
+		Provider: d.cfg.ACME.Provider,
+		Domain:   d.cfg.Community.Domain,
+		Place:    dns.WorkstationPlace,
+		From:     "this workstation",
+	}, d.token.get())
+	r.Finding, r.Advice = d.token.redact(r.Finding), d.token.redact(r.Advice)
+	return r
+}
+
+// DNSProvider is the provider's API with the secrets' token, for the
+// records check, which only reads.
+func (d doctorReads) DNSProvider() (dns.Provider, error) {
+	p, err := doctorDNSFor(d.cfg.ACME.Provider, d.token.get())
+	if err != nil {
+		return nil, errors.New(d.token.redact(err.Error()))
+	}
+	return readOnlyProvider{p, d.token}, nil
+}
+
+// readOnlyProvider is the provider as doctor holds it: it refuses every
+// write, since doctor changes nothing, and strips the token from every
+// error, beside the provider's own redaction, so that a provider that
+// echoed it could not put it in a finding.
+type readOnlyProvider struct {
+	dns.Provider
+	token *workstationToken
+}
+
+func (r readOnlyProvider) err(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(r.token.redact(err.Error()))
+}
+
+func (r readOnlyProvider) LookupZone(ctx context.Context, name string) (string, bool, error) {
+	id, found, err := r.Provider.LookupZone(ctx, name)
+	return id, found, r.err(err)
+}
+
+func (r readOnlyProvider) Records(ctx context.Context, zoneID, name string) ([]dns.Record, error) {
+	records, err := r.Provider.Records(ctx, zoneID, name)
+	return records, r.err(err)
+}
+
+func (r readOnlyProvider) AllRecords(ctx context.Context, zoneID string) ([]dns.Record, error) {
+	records, err := r.Provider.AllRecords(ctx, zoneID)
+	return records, r.err(err)
+}
+
+func (readOnlyProvider) Create(context.Context, string, dns.Record) error {
+	return errors.New("doctor writes nothing at the DNS provider")
+}
+
+func (readOnlyProvider) Delete(context.Context, string, string) error {
+	return errors.New("doctor writes nothing at the DNS provider")
 }
 
 func (d doctorReads) Reach(site string) doctor.SiteReach {
