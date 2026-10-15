@@ -282,10 +282,19 @@ stderr. The request holds nothing secret, so it can travel by email or chat:
 **The digest is the owner's check that the request is the one the operator
 sent.** The request carries the keys that will get a shell on the owner's
 machine, so anyone who could change it on its way could put their own key
-in it. Admit prints the same digest, as twelve hex digits in three groups,
-and the owner compares the two over a channel they trust, eg a call.
-`--execute` with `--request` asks the owner to type the digest at a
-terminal, so it cannot be scripted past.
+in it. Admit prints the same digest, and the owner compares the two over a
+channel they trust, eg a call. `--execute` with `--request` asks the owner
+to type the digest at a terminal, so it cannot be scripted past.
+
+The digest is the first 80 bits of the SHA-256 of the request's bytes, in
+Crockford's base32: sixteen characters in four groups of four, printed in
+lower case, eg `7k2m-q9xd-4r8f-zt1c`. Eighty bits puts a forged request
+with the same digest out of reach; at 48 bits a forger who intercepts a
+request could vary a free field until a version carrying their own key
+matched, in hours on one GPU. Crockford's alphabet leaves out `i`, `l`, `o`
+and `u`, so what is read aloud is not misheard. The typed digest is read
+without regard to case, hyphens or spaces, with `i` and `l` taken as `1`
+and `o` as `0`.
 
 Admit validates a request as strictly as a configuration: every field
 present, the user name accepted by the same pattern as `ssh.user`, every
@@ -319,8 +328,10 @@ record and refuses with the `host admit` line to run.
 The reverse, run by the owner the same two ways as admit, with `--execute`
 and the deployment's user name typed at a terminal, as `site remove
 --delete-data` asks for the site's. It stops the user's systemd instance, disables linger,
-removes the user with its home, `/srv/paisans/<token>`, the helper, the
-sudoers line, the udev rule, the egress table, the deployment's ufw rules,
+stops `wg-quick@psns-<token>` and removes
+`/etc/wireguard/psns-<token>.conf`, then removes the user with its home,
+its `--data-dir` directory, `/srv/paisans/<token>`, the helper, the sudoers
+line, the udev rule, the egress table, the deployment's ufw rules,
 the admission record and the registry claim. Host-wide files (`delegate.conf`,
 `60-paisans.conf`) are removed only when no other deployment is admitted, and
 `ip_unprivileged_port_start` and `ip_forward` are each restored only when
@@ -385,6 +396,32 @@ container's users map into that range, so the UID alone misses them):
 
 A deployment that needs something on the owner's network asks the owner,
 who adds an accept rule. That is deliberately outside the CLI.
+
+**The mesh's own packets need a rule of their own.** WireGuard's UDP is sent
+by the kernel, not by the user, so the UID chain never sees it, and the
+deployment's user writes each peer's `Endpoint`. The helper refuses literal
+loopback, link-local and multicast endpoints, but a name resolves again at
+every up, restart and sync, as root, and the host's own addresses and the
+LAN are ordinary addresses. Once a handshake is up, moving a peer's
+endpoint keeps the session, so the user could send UDP whose payload they
+mostly choose to a service on the owner's loopback or LAN. So:
+
+* **The helper marks the socket.** `put` adds `FwMark = <mark>` to every
+  conf it installs, the mark baked in when admit renders the helper, one
+  per deployment. A conf that sets `FwMark` itself is refused, as today.
+* **The egress table filters the mark**, in a second output chain matching
+  `meta mark <mark>`, after the name was resolved, so nothing can change
+  between the check and the send. It drops loopback, link-local and
+  multicast, every address of the host itself (`fib daddr type local`),
+  and the private and shared ranges of rule 3 above. Everything else, the
+  public endpoints a mesh normally dials, passes.
+* **`--mesh-lan`** lets the deployment's sites dial each other on the
+  owner's LAN. With it, admit adds an accept for the private prefix of the
+  host's own LAN (the route of its default interface) in the mark chain,
+  and nothing wider. The plan says plainly that the deployment can then
+  send UDP to that LAN. It is off by default, and the flag is in the
+  admission record. Without it, sites on one LAN dial each other's public
+  address, which needs a router that loops it back.
 
 ## Keys
 
