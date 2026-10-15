@@ -14,5 +14,6 @@ func ValidAppName(s string) bool { return blueprintName.MatchString(s) }
 
 // ValidHostname reports whether s is a DNS name: dot-separated labels of
 // letters, digits and hyphens, none empty or over 63 characters, at most 253
-// in all. It is the rule ssh.host is held to.
+// in all. It is the one rule for an app's hostname, in the configuration and
+// in a request, and the rule ssh.host is held to.
 func ValidHostname(s string) bool { return isHostname(s) }

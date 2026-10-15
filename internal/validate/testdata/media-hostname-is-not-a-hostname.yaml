@@ -1,5 +1,5 @@
 # valid.yaml with one thing broken: blog declares a media hostname that is
-# not a hostname, because an underscore is not allowed in a DNS label. It
+# not a hostname, because a name here is lowercase. It
 # would be a site address the gateway cannot get a certificate for, and a URL
 # WriteFreely hands every browser.
 version: 1
@@ -78,7 +78,7 @@ apps:
     hostname: blog.example.org
     placement: cluster
     hostnames:
-      media: blog_media.example.org
+      media: Blog-Media.example.org
   auth:
     blueprint: pocket-id
     hostname: id.example.org
