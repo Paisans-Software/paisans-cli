@@ -183,7 +183,7 @@ func (c *checker) webServer() {
 		}
 		switch {
 		case !config.ProxiesToThisHost(listen, site.Address):
-			c.refuse("web-server-listen-public", key+".listen",
+			c.refuse("web-server-listen-not-this-host", key+".listen",
 				"web_server listens beyond loopback and the site's mesh address",
 				"is %s. Your web server runs on this host, so it reaches the app on loopback, and Docker publishes a port with its own iptables rules, in front of ufw, so any other address exposes the app around your web server. Use loopback, 127.0.0.1, or this site's own mesh address, %s.", listen, site.Address)
 		case strings.HasPrefix(listen, site.Address+":"):

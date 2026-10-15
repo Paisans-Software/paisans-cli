@@ -112,7 +112,7 @@ func trustProxy(cfg *config.Config, app string) string {
 		return WebServerGateway + "/32"
 	}
 	// The site's mesh address: validate refuses any other listen
-	// (web-server-listen-public).
+	// (web-server-listen-not-this-host).
 	return cfg.Mesh.Subnet
 }
 

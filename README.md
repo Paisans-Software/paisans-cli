@@ -1075,7 +1075,7 @@ in front of ufw, so a `listen` anything else can reach would expose the app
 around the web server whatever the firewall says. The web server runs on the
 same host, so only an IPv4 loopback address or the site's own mesh address is
 accepted, with a port written without leading zeros, the rule `host request`
-holds the site's request to (`web-server-listen-public`); loopback is the one
+holds the site's request to (`web-server-listen-not-this-host`); loopback is the one
 to use, and the mesh address warns that ufw does not cover it
 (`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
 external monitor hosts the monitor alone (`web-server-external-serves-one-app`).

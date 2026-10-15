@@ -133,7 +133,7 @@ func TestRulesFire(t *testing.T) {
 		{"monitor-without-public-address", "monitor-without-public-address", validate.Refuse},
 		{"web-server-outside-monitor", "web-server-outside-monitor", validate.Refuse},
 		{"web-server-listen-managed-by", "web-server-listen-managed-by", validate.Refuse},
-		{"web-server-listen-public", "web-server-listen-public", validate.Refuse},
+		{"web-server-listen-not-this-host", "web-server-listen-not-this-host", validate.Refuse},
 		{"web-server-listen-bypasses-firewall", "web-server-listen-bypasses-firewall", validate.Warn},
 		{"web-server-external-serves-one-app", "web-server-external-serves-one-app", validate.Refuse},
 		{"voters-share-a-relay", "voters-share-a-relay", validate.Refuse},
@@ -663,7 +663,7 @@ func TestWebServerListenAddresses(t *testing.T) {
 		site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: tc.listen}
 		cfg.Sites["watch"] = site
 		result := validate.Check(cfg)
-		if result.Has("web-server-listen-public") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
+		if result.Has("web-server-listen-not-this-host") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
 			t.Errorf("%s: %v", tc.listen, result.Findings)
 		}
 	}
@@ -738,9 +738,9 @@ func TestWebServerListenIsWhatTheRequestAccepts(t *testing.T) {
 			t.Errorf("%s: validate refused %v, host request refused %v (%v)", listen, refused, err != nil, err)
 		}
 	}
-	cfg := load(t, "web-server-listen-public")
+	cfg := load(t, "web-server-listen-not-this-host")
 	for _, f := range validate.Check(cfg).Refusals() {
-		if f.Rule == "web-server-listen-public" && !strings.Contains(f.Message, "Use loopback, 127.0.0.1") {
+		if f.Rule == "web-server-listen-not-this-host" && !strings.Contains(f.Message, "Use loopback, 127.0.0.1") {
 			t.Errorf("the hint does not recommend loopback: %s", f)
 		}
 	}
