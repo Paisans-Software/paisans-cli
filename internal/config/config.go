@@ -1221,8 +1221,11 @@ func (c *Config) structural(noSubnet bool) error {
 		case !ip.Equal(network.IP):
 			add("mesh.subnet: %q is a host address inside a network, not the network itself. Write %s.", c.Mesh.Subnet, network.String())
 		default:
-			if ones, _ := network.Mask.Size(); ones < 24 {
-				add("mesh.subnet: %q is larger than a /24. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet)
+			if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
+				add("mesh.subnet: %q is larger than a /%d. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet, MeshMinPrefix)
+			}
+			for _, r := range MeshReservedOverlaps(network) {
+				add("mesh.subnet: %q overlaps %s. A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space.", c.Mesh.Subnet, r)
 			}
 		}
 	}
@@ -1258,6 +1261,8 @@ func (c *Config) structural(noSubnet bool) error {
 			add("sites.%s.address: required. Every site needs a mesh address, and it never changes.", name)
 		} else if !isIPv4(site.Address) {
 			add("sites.%s.address: %q is not an IPv4 address. Use the site's WireGuard address, for example 10.44.0.1.", name, site.Address)
+		} else if _, mesh, err := net.ParseCIDR(c.Mesh.Subnet); err == nil && IsNetworkOrBroadcast(net.ParseIP(site.Address), mesh) {
+			add("sites.%s.address: %s is mesh.subnet %s's network or broadcast address, which no host may hold. Give the site another address inside the mesh.", name, site.Address, c.Mesh.Subnet)
 		}
 		if site.Endpoint != "" {
 			if _, err := ParseEndpointPort(site.Endpoint); err != nil {

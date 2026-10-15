@@ -141,21 +141,6 @@ func checkKeyType(pub ssh.PublicKey) error {
 	return fmt.Errorf("%q is not a key type a request accepts", pub.Type())
 }
 
-// meshMinPrefix is the shortest prefix the mesh may have: no larger than a /24,
-// which is what init picks. A larger mesh is what would swallow an owner's
-// LAN into the rules that trust the mesh. Whether the mesh overlaps the
-// owner's actual routes is checked by admit against the host itself; 10/8,
-// 192.168/16 and 100.64/10 are not refused here, since a /24 inside them is
-// normal.
-const meshMinPrefix = 24
-
-// forbiddenMesh is what a mesh subnet may not overlap. Admit's egress table
-// accepts the mesh subnet before it drops loopback and link-local, so a
-// subnet over either would let the deployment reach the owner's local
-// services and the cloud metadata address; this network, multicast and the
-// reserved range route nothing a mesh could use.
-var forbiddenMesh = []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/3"}
-
 // Check is every problem with r, each naming its field. Parse refuses a
 // request with any, and Build never returns one.
 func (r Request) Check() []string {
@@ -194,14 +179,11 @@ func (r Request) Check() []string {
 	case !ip.Equal(mesh.IP):
 		add("mesh_subnet: %q is not written as its network, %s", r.MeshSubnet, mesh)
 	default:
-		if ones, _ := mesh.Mask.Size(); ones < meshMinPrefix {
-			add("mesh_subnet: %q is larger than a /%d, which is as large as a mesh may be", r.MeshSubnet, meshMinPrefix)
+		if ones, _ := mesh.Mask.Size(); ones < config.MeshMinPrefix {
+			add("mesh_subnet: %q is larger than a /%d, which is as large as a mesh may be", r.MeshSubnet, config.MeshMinPrefix)
 		}
-		for _, f := range forbiddenMesh {
-			_, n, _ := net.ParseCIDR(f)
-			if n.Contains(mesh.IP) || mesh.Contains(n.IP) {
-				add("mesh_subnet: %s overlaps %s, which the deployment must never reach", r.MeshSubnet, f)
-			}
+		for _, f := range config.MeshReservedOverlaps(mesh) {
+			add("mesh_subnet: %s overlaps %s, which the deployment must never reach", r.MeshSubnet, f)
 		}
 		a := net.ParseIP(r.Address)
 		switch {
@@ -209,7 +191,7 @@ func (r Request) Check() []string {
 			add("address: %q is not an IPv4 address inside mesh_subnet %s", r.Address, r.MeshSubnet)
 		case a.String() != r.Address:
 			add("address: %q is not written as plain dotted IPv4, %s", r.Address, a)
-		case isNetworkOrBroadcast(a, mesh):
+		case config.IsNetworkOrBroadcast(a, mesh):
 			add("address: %s is the subnet's network or broadcast address", r.Address)
 		}
 	}
@@ -265,18 +247,6 @@ func (r Request) Check() []string {
 		}
 	}
 	return problems
-}
-
-func isNetworkOrBroadcast(a net.IP, mesh *net.IPNet) bool {
-	a = a.To4()
-	if a.Equal(mesh.IP) {
-		return true
-	}
-	last := make(net.IP, 4)
-	for i := range last {
-		last[i] = mesh.IP.To4()[i] | ^mesh.Mask[len(mesh.Mask)-4+i]
-	}
-	return a.Equal(last)
 }
 
 // Error is a request, or a record, refused, with every problem found.

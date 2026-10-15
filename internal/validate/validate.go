@@ -785,7 +785,7 @@ func (c *checker) meshIsNotPrivate() {
 	if err != nil {
 		return // the loader has already reported this
 	}
-	if network.IP.IsPrivate() || network.IP.IsLoopback() || network.IP.IsLinkLocalUnicast() {
+	if network.IP.IsPrivate() {
 		return
 	}
 	c.warn("mesh-subnet-is-not-private", "mesh.subnet",

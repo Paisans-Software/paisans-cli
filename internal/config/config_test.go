@@ -1105,3 +1105,33 @@ func TestAppHostnamesAreHeldToTheStrictRule(t *testing.T) {
 		}
 	}
 }
+
+// A mesh over this network, loopback, link-local or multicast is refused
+// where it is declared, by the rule a request is held to: the egress table
+// on an admitted host accepts the mesh before it drops those ranges.
+func TestMeshOverAReservedRangeIsRefused(t *testing.T) {
+	for _, c := range []struct{ subnet, address, overlaps string }{
+		{"0.0.0.0/24", "0.0.0.1", "0.0.0.0/8"},
+		{"127.44.0.0/24", "127.44.0.1", "127.0.0.0/8"},
+		{"169.254.44.0/24", "169.254.44.1", "169.254.0.0/16"},
+		{"239.1.0.0/24", "239.1.0.1", "224.0.0.0/3"},
+	} {
+		body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1)
+		body = strings.Replace(body, "address: 10.44.0.1", "address: "+c.address, 1)
+		got := loadErr(t, body)
+		if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "overlaps "+c.overlaps) {
+			t.Errorf("%s: got %q", c.subnet, got)
+		}
+	}
+}
+
+// A site address that is the mesh's network or broadcast address is
+// refused, as a request refuses it.
+func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {
+	for _, a := range []string{"10.44.0.0", "10.44.0.255"} {
+		got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: "+a, 1))
+		if !strings.Contains(got, "sites.home-a.address") || !strings.Contains(got, "network or broadcast address") {
+			t.Errorf("%s: got %q", a, got)
+		}
+	}
+}

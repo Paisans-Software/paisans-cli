@@ -13,6 +13,48 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// MeshMinPrefix is the shortest prefix mesh.subnet may have: no larger than a
+// /24, which is what init picks. The hosts' firewalls trust the whole mesh,
+// so a larger one could cover an owner's LAN.
+const MeshMinPrefix = 24
+
+// reservedMesh is what a mesh subnet may not overlap. An admitted host's
+// egress table accepts the mesh subnet before it drops loopback and
+// link-local, so a subnet over either would let the deployment reach the
+// owner's local services and the cloud metadata address; this network,
+// multicast and the reserved range route nothing a mesh could use.
+var reservedMesh = []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/3"}
+
+// MeshReservedOverlaps is each range in reservedMesh that mesh overlaps, in
+// that order, empty when it overlaps none. The loader refuses mesh.subnet
+// and a request refuses mesh_subnet by it.
+func MeshReservedOverlaps(mesh *net.IPNet) []string {
+	var out []string
+	for _, r := range reservedMesh {
+		_, n, _ := net.ParseCIDR(r)
+		if n.Contains(mesh.IP) || mesh.Contains(n.IP) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// IsNetworkOrBroadcast reports whether a is mesh's network or broadcast
+// address, which no site may hold: the first names the subnet and the last
+// reaches every host on it.
+func IsNetworkOrBroadcast(a net.IP, mesh *net.IPNet) bool {
+	a, network := a.To4(), mesh.IP.To4()
+	if a == nil || network == nil {
+		return false
+	}
+	mask := mesh.Mask[len(mesh.Mask)-4:]
+	last := make(net.IP, 4)
+	for i := range last {
+		last[i] = network[i] | ^mask[i]
+	}
+	return a.Equal(network) || a.Equal(last)
+}
+
 // ParseEndpointPort is the port of an endpoint written host:port.
 func ParseEndpointPort(endpoint string) (int, error) {
 	_, port, err := net.SplitHostPort(endpoint)

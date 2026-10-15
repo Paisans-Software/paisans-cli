@@ -22,7 +22,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `apps.*.hostname` and `apps.*.hostnames.*` must be DNS names, so an empty or over-long label or an underscore is refused by `validate` instead of later.
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires, so a LAN address is refused.
-- `mesh.subnet` larger than a /24 is refused, since the hosts' firewalls trust the whole mesh and a larger one could cover a LAN.
+- `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
 - `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
 - Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.
