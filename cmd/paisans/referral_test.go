@@ -1,0 +1,74 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+const referHomeB = "Run paisans doctor --site home-b, which says what the deployment is without while it is gone."
+
+// A site ssh cannot reach stops apply, and the stop refers the operator to
+// doctor for that site, once, after what ssh said.
+func TestAnApplyStoppedByAnUnreachableSiteRefersToDoctor(t *testing.T) {
+	down := &ui.Problem{Hint: "ubuntu@home-b cannot be reached over ssh", Explain: "Check that the host is up.", Cause: &apply.UnreachableError{Site: "home-b", Err: apply.ErrUnreachable}}
+	fakeConverge(t, map[string]error{"apply --site vm": fmt.Errorf("reading home-b's compose files: %w", down)})
+	err := converge(t, "--execute")
+	_, explain := ui.Describe(err)
+	if n := strings.Count(explain, referHomeB); n != 1 {
+		t.Errorf("the referral appears %d times, want once:\n%s", n, explain)
+	}
+	if i, j := strings.Index(explain, "Check that the host is up."), strings.Index(explain, referHomeB); i < 0 || j < i {
+		t.Errorf("the referral is not after ssh's advice:\n%s", explain)
+	}
+	if !errors.Is(err, apply.ErrUnreachable) {
+		t.Error("the referral hid the cause")
+	}
+}
+
+// Any other failure keeps today's text, and so does an ssh failure that
+// names no site.
+func TestAnApplyStoppedByAnythingElseKeepsItsText(t *testing.T) {
+	for _, stepErr := range []error{
+		errors.New("vm: boom"),
+		&ui.Problem{Hint: "ubuntu@203.0.113.10 cannot be reached over ssh", Explain: "Check that the host is up.", Cause: apply.ErrUnreachable},
+	} {
+		fakeConverge(t, map[string]error{"apply --site vm": stepErr})
+		err := converge(t, "--execute")
+		if strings.Contains(err.Error(), "paisans doctor") {
+			t.Errorf("%v: referred to doctor:\n%v", stepErr, err)
+		}
+	}
+}
+
+func TestInitRefersAnUnreachableSiteToDoctor(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].down = true
+	path, _ := initWorld(t, nil, sites, []byte{212, 37})
+	_, explain := ui.Describe(runInitQuietly(t, path))
+	if n := strings.Count(explain, referHomeB); n != 1 {
+		t.Errorf("the referral appears %d times, want once:\n%s", n, explain)
+	}
+	if strings.Contains(explain, "--site home-a") {
+		t.Errorf("a site that answered is referred:\n%s", explain)
+	}
+}
+
+// A site that answered ssh but whose registry could not be read is not
+// doctor's reach finding, and gets no referral.
+func TestInitDoesNotReferASiteThatAnswered(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].registry = "{not json"
+	path, _ := initWorld(t, nil, sites, []byte{212, 37})
+	err := runInitQuietly(t, path)
+	if err == nil {
+		t.Fatal("init read an unreadable registry")
+	}
+	if strings.Contains(err.Error(), "paisans doctor") {
+		t.Errorf("referred to doctor:\n%v", err)
+	}
+}
