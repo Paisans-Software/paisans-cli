@@ -14,7 +14,8 @@
 # and installs nothing.
 #
 # The verbs are the only arguments it takes:
-#   put           read a conf on stdin, check it, install it as {{.Conf}}, 600
+#   put           read a conf on stdin, check it, install it as {{.Conf}}, 600,
+#                 in a directory only root may write
 #   up            systemctl enable --now {{.Unit}}
 #   restart       systemctl restart {{.Unit}}
 #   sync          wg-quick strip the installed conf, then wg syncconf
@@ -40,6 +41,8 @@ port='{{.ListenPort}}'
 # The mesh subnet, as its network address and prefix length.
 net='{{.Network}}'
 prefix='{{.Prefix}}'
+# The uid that must own the conf directory: root on a host.
+owner='{{.Owner}}'
 # The largest conf put reads. A mesh of a hundred sites is under 20 KiB.
 max=65536
 
@@ -82,8 +85,8 @@ check() {
 	}
 	# blocked is whether an Endpoint host is a literal loopback, unspecified,
 	# link-local or multicast address, in any spelling libc or the kernel
-	# reads as one: 127.1, 2130706433, 0177.0.0.1, 0x7f.0.0.1, [::1], and
-	# localhost. It does not block names, which wg resolves as root at every
+	# reads as one: 127.1, 2130706433, 0177.0.0.1, 0x7f.0.0.1, [::1], [ff02::1]
+	# (all of ff00::/8), and localhost. It does not block names, which wg resolves as root at every
 	# up, restart and sync; the non-loopback addresses of this host; or LAN
 	# addresses, which stay allowed because two sites may share a LAN. Kernel
 	# WireGuard sends from no UID, so the UID-matched egress table does not
@@ -94,7 +97,7 @@ check() {
 	function blocked(h,    l, r, a, n, i) {
 		if (substr(h, 1, 1) == "[") {
 			h = tolower(substr(h, 2, length(h) - 2))
-			if (h ~ /^[0:]+$/ || h ~ /^[0:]*:0*1$/ || h ~ /^fe[89ab][0-9a-f]:/) return 1
+			if (h ~ /^[0:]+$/ || h ~ /^[0:]*:0*1$/ || h ~ /^fe[89ab][0-9a-f]:/ || h ~ /^ff/) return 1
 			r = h
 			if (sub(/^[0:]*:(ffff:)?/, "", r)) {
 				if (r ~ /^[0-9.]+$/) return ip4(r) < 0 || blockedval(ip4(r))
@@ -167,6 +170,9 @@ check() {
 		if (section == "Interface") {
 			if (k == "Address") {
 				if (!cidr(v) || cp != prefix || !inside()) no("Address " v " is not one address in " net "/" prefix)
+				# The network names the subnet and the broadcast reaches every
+				# host on it, so no site holds either, as validate says.
+				if (cv == netv || cv == netv + 2 ^ (32 - prefix) - 1) no("Address " v " is the network or broadcast address of " net "/" prefix)
 				address = 1
 			} else if (k == "PrivateKey") {
 				if (!key(v)) no("PrivateKey is not a WireGuard key")
@@ -221,9 +227,36 @@ check() {
 	}'
 }
 
+# rootonly is whether $dir is owned by $owner and neither its group nor
+# others may write it, read from ls -ldn, which POSIX defines and every
+# ls prints alike: the mode, the link count, then the numeric owner. A
+# listing that cannot be read or parsed, or that marks an ACL with +, is
+# not root's alone.
+rootonly() {
+	listing=$(ls -ldn "$dir") || return 1
+	set -f
+	# shellcheck disable=SC2086
+	set -- $listing
+	set +f
+	[ $# -ge 3 ] || return 1
+	case "$1" in
+	??????????+*) return 1 ;;
+	d????-??-*) ;;
+	*) return 1 ;;
+	esac
+	[ "$3" = "$owner" ]
+}
+
 put() {
 	if [ ! -d "$dir" ] || [ -L "$dir" ]; then
 		refuse "$dir is not a directory"
+	fi
+	# A directory the deployment's user could write would let it plant a
+	# conf with PostUp, which wg-quick runs as root at the next up, past
+	# every check below. host admit makes it root's, 700; put checks it
+	# each time rather than trusting that it stayed so.
+	if ! rootonly; then
+		refuse "$dir is not a directory only root may write"
 	fi
 	# -d follows a link, so a link to a directory is refused here too. A link
 	# to anything else is replaced by the rename below, never written through.

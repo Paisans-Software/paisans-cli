@@ -202,6 +202,8 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"a ListenPort other than the admitted one", replace("ListenPort = 51820", "ListenPort = 51821"), "admitted on 51820"},
 		{"no ListenPort on a host admitted with one", replace("ListenPort = 51820\n", ""), "no ListenPort"},
 		{"an Address outside the subnet", replace("Address = 10.44.0.4/24", "Address = 10.45.0.4/24"), "is not one address in 10.44.0.0/24"},
+		{"an Address that is the subnet's network", replace("Address = 10.44.0.4/24", "Address = 10.44.0.0/24"), "is the network or broadcast address of 10.44.0.0/24"},
+		{"an Address that is the subnet's broadcast", replace("Address = 10.44.0.4/24", "Address = 10.44.0.255/24"), "is the network or broadcast address of 10.44.0.0/24"},
 		{"an Address with another prefix", replace("Address = 10.44.0.4/24", "Address = 10.44.0.4/16"), "is not one address in 10.44.0.0/24"},
 		{"two Addresses on one line", replace("Address = 10.44.0.4/24", "Address = 10.44.0.4/24, 10.44.0.5/24"), "is not one address"},
 		{"an IPv6 Address", replace("Address = 10.44.0.4/24", "Address = fd00::4/64"), "is not one address"},
@@ -243,6 +245,8 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"an Endpoint on link-local", replace("Endpoint = vm.example.org:51820", "Endpoint = 169.254.169.254:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on multicast", replace("Endpoint = vm.example.org:51820", "Endpoint = 224.0.0.1:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on broadcast", replace("Endpoint = vm.example.org:51820", "Endpoint = 255.255.255.255:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on IPv6 multicast", replace("Endpoint = vm.example.org:51820", "Endpoint = [ff02::1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on IPv6 multicast in upper case", replace("Endpoint = vm.example.org:51820", "Endpoint = [FF05::2]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on ::1", replace("Endpoint = vm.example.org:51820", "Endpoint = [::1]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on ::", replace("Endpoint = vm.example.org:51820", "Endpoint = [::]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on ::1 written out", replace("Endpoint = vm.example.org:51820", "Endpoint = [0:0:0:0:0:0:0:1]:51820"), "loopback, link-local, multicast or unspecified"},
@@ -364,6 +368,55 @@ func TestPutRefusesALinkedConfDirectory(t *testing.T) {
 	}
 }
 
+// put installs only into a conf directory root holds alone: one the
+// deployment's user could write would let it plant a conf with PostUp
+// that wg-quick runs as root at the next up, past every check put makes.
+// The scratch directory stands in for /etc/wireguard with the test's own
+// uid as the owner put expects, and is refused when owned by anyone else
+// or writable by its group or others.
+func TestPutRefusesAConfDirectoryRootDoesNotHoldAlone(t *testing.T) {
+	render := func(t *testing.T, dir string, owner int) string {
+		t.Helper()
+		text, err := hostprep.WGHelperScriptOwnedBy(dir, owner, meshDeployment, 51820, "10.44.0.0/24")
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := filepath.Join(t.TempDir(), "wg-psns-f2a9")
+		if err := os.WriteFile(script, []byte(text), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return script
+	}
+	for _, c := range []struct {
+		name  string
+		mode  os.FileMode
+		owner int
+		ok    bool
+	}{
+		{"the owner's alone", 0o700, os.Getuid(), true},
+		{"readable by all", 0o755, os.Getuid(), true},
+		{"another owner's", 0o700, os.Getuid() + 1, false},
+		{"group writable", 0o770, os.Getuid(), false},
+		{"writable by others", 0o703, os.Getuid(), false},
+	} {
+		for _, shell := range shells() {
+			dir := t.TempDir()
+			if err := os.Chmod(dir, c.mode); err != nil {
+				t.Fatal(err)
+			}
+			out, code := runHelper(t, shell, render(t, dir, c.owner), goodConf, "put")
+			switch {
+			case c.ok && code != 0:
+				t.Errorf("%s: %s: refused (exit %d): %s", shell, c.name, code, out)
+			case !c.ok && (code != 65 || !strings.Contains(out, dir+" is not a directory only root may write")):
+				t.Errorf("%s: %s: exit %d, %q", shell, c.name, code, out)
+			case !c.ok && len(entries(t, dir)) != 0:
+				t.Errorf("%s: %s: put left %v", shell, c.name, entries(t, dir))
+			}
+		}
+	}
+}
+
 // The verbs are the only arguments the helper takes: anything else exits
 // 64 before running a command or touching the directory.
 func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
@@ -411,7 +464,7 @@ func TestTheHelperIsRenderedWithItsValuesBuiltIn(t *testing.T) {
 	}
 	for _, want := range []string{
 		"iface='psns-f2a9'\n", "dir='/etc/wireguard'\n", "unit='wg-quick@psns-f2a9'\n",
-		"port='51820'\n", "net='10.44.0.0'\n", "prefix='24'\n", "/usr/local/libexec/paisans/wg-psns-f2a9",
+		"port='51820'\n", "owner='0'\n", "net='10.44.0.0'\n", "prefix='24'\n", "/usr/local/libexec/paisans/wg-psns-f2a9",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the rendered helper lacks %q", want)

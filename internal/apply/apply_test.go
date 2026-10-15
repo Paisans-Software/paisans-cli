@@ -1746,18 +1746,20 @@ func TestEverySudoRefusalStopsTheApply(t *testing.T) {
 // A refusal that says the host is wrong, not the file, is answered by the
 // owner running host admit again, not by a configuration change.
 func TestAHostSideRefusalNamesHostAdmitAgain(t *testing.T) {
-	_, err := meshFailure(t, wgHelper+"put", "wg-psns-f2a9: /etc/wireguard is not a directory; nothing was installed\n")
-	var problem *ui.Problem
-	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
-		t.Fatalf("%v", err)
-	}
-	for _, want := range []string{"/etc/wireguard is not a directory", "runs `paisans host admit` again"} {
-		if !strings.Contains(problem.Explain, want) {
-			t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
+	for _, why := range []string{"/etc/wireguard is not a directory", "/etc/wireguard is not a directory only root may write"} {
+		_, err := meshFailure(t, wgHelper+"put", "wg-psns-f2a9: "+why+"; nothing was installed\n")
+		var problem *ui.Problem
+		if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
+			t.Fatalf("%v", err)
 		}
-	}
-	if strings.Contains(problem.Explain, "from a new request") {
-		t.Errorf("a host-side refusal is blamed on the configuration:\n%s", problem.Explain)
+		for _, want := range []string{why, "runs `paisans host admit` again"} {
+			if !strings.Contains(problem.Explain, want) {
+				t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
+			}
+		}
+		if strings.Contains(problem.Explain, "from a new request") {
+			t.Errorf("%s: a host-side refusal is blamed on the configuration:\n%s", why, problem.Explain)
+		}
 	}
 }
 

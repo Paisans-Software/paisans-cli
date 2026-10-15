@@ -216,7 +216,7 @@ func sudoRefusal(out, path string) string {
 // hostRefusals are the helper's refusals that say the host is wrong rather
 // than the file: what it installs into is not as host admit left it, or the
 // helper itself was rendered wrong.
-var hostRefusals = []string{" is not a directory", " is a directory"}
+var hostRefusals = []string{" is not a directory", " is a directory", " is not a directory only root may write"}
 
 // hostRefusal reports whether why, a refusal refusedConf read, is one host
 // admit answers rather than a configuration change.

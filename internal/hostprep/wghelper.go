@@ -13,7 +13,7 @@ import (
 // wgHelperData is what snippets/wg-helper.sh.tmpl is rendered with.
 type wgHelperData struct {
 	Interface, Path, Conf, Unit, Dir, Network string
-	ListenPort, Prefix                        int
+	ListenPort, Prefix, Owner                 int
 }
 
 // WGHelperScript is the WireGuard helper host admit installs for d at
@@ -24,10 +24,12 @@ type wgHelperData struct {
 // subnet are built in, so nothing the deployment's user passes it can widen
 // them.
 func WGHelperScript(d deployment.Deployment, listenPort int, subnet string) (string, error) {
-	return wgHelperScript(path.Dir(d.WireGuardInstalled()), d, listenPort, subnet)
+	return wgHelperScript(path.Dir(d.WireGuardInstalled()), 0, d, listenPort, subnet)
 }
 
-func wgHelperScript(dir string, d deployment.Deployment, listenPort int, subnet string) (string, error) {
+// wgHelperScript renders the helper with its conf directory at dir, which
+// put expects owner, a uid, to hold: root (0) on a host.
+func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort int, subnet string) (string, error) {
 	iface := d.Interface()
 	helper, err := apply.WGHelper{Iface: iface}.Path()
 	if err != nil {
@@ -43,6 +45,9 @@ func wgHelperScript(dir string, d deployment.Deployment, listenPort int, subnet 
 		return "", fmt.Errorf("the WireGuard helper for %s: mesh subnet %q %s", iface, subnet, strings.Join(problems, "; "))
 	}
 	prefix, _ := network.Mask.Size()
+	if owner < 0 {
+		return "", fmt.Errorf("the WireGuard helper for %s: owner %d is not a uid", iface, owner)
+	}
 	if !path.IsAbs(dir) || strings.ContainsAny(dir, "'\n") {
 		return "", fmt.Errorf("the WireGuard helper for %s: %q cannot be its conf directory", iface, dir)
 	}
@@ -55,5 +60,6 @@ func wgHelperScript(dir string, d deployment.Deployment, listenPort int, subnet 
 		Network:    network.IP.String(),
 		ListenPort: listenPort,
 		Prefix:     prefix,
+		Owner:      owner,
 	})
 }
