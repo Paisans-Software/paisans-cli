@@ -1,6 +1,7 @@
 package secretsrotate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -154,25 +156,207 @@ func (w *wrapWorld) setToken(token string) {
 	_ = w.store.Save(s)
 }
 
-// A token the hosts were last applied with has not been replaced at its
-// issuer: rotating it would recreate Caddy for nothing, so the run is
-// refused before anything changes, naming the command that sets a new one.
-func TestDNSTokenUnchangedSinceTheLastApplyIsRefused(t *testing.T) {
+// A token the hosts were last applied with has nothing new in the file, so
+// the plan asks for its next value at --execute rather than refusing, and
+// says where it is replaced. Unanswered, Execute changes nothing.
+func TestDNSTokenUnchangedSinceTheLastApplyIsAskedFor(t *testing.T) {
 	w := newWrapWorld(t)
-	_, err := Plan(w.env(), []Rotator{DNSToken()})
-	if err == nil {
-		t.Fatal("an unchanged token was planned")
+	e := w.env()
+	run, err := Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"external.acme_dns_token", "paisans secrets set external.acme_dns_token", "Nothing was changed"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal lacks %q: %v", want, err)
+	if !run.Items[0].Asks {
+		t.Fatal("an unchanged token is not asked for")
+	}
+	if got := run.Asked(); len(got) != 1 || got[0] != (Asking{Path: "external.acme_dns_token", Issuer: "desec"}) {
+		t.Errorf("asked %+v", got)
+	}
+	rec := &ui.Recorder{}
+	run.Show(rec)
+	if !rec.Has("pending", "stage 1, next value") || !endedWith(rec, "replace it at desec when asked") || !rec.Has("note", "this run asks for external.acme_dns_token") {
+		t.Errorf("the plan does not say it asks:\n%s", rec.Lines())
+	}
+	err = run.Execute(e, nil)
+	if err == nil || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("an unanswered run went on: %v", err)
+	}
+	if s, _ := w.store.Load(); len(s.Rotations) != 0 || len(w.log) != 0 {
+		t.Errorf("an unanswered run changed %v, %v", s.Rotations, w.log)
+	}
+}
+
+// The token asked for goes through all four stages: written under rotations
+// first, accepted, handed to every Caddy in turn, then promoted to the
+// file's own value.
+func TestDNSTokenAskedForIsRotated(t *testing.T) {
+	w := newWrapWorld(t)
+	e := w.env()
+	run, err := Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Answer(e, "external.acme_dns_token", newDNSToken); err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	run.Report = rec
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []string{"stage 1, next value", "stage 2, where it is checked", "hand infra the next value on vm", "hand infra the next value on watch", "stage 4, promote"} {
+		if !rec.Has("done", step) {
+			t.Errorf("%s did not run:\n%s", step, rec.Lines())
 		}
 	}
-	if strings.Contains(err.Error(), oldDNSToken) {
-		t.Errorf("the refusal carries the token: %v", err)
+	if w.presented["vm"] != newDNSToken || w.presented["watch"] != newDNSToken {
+		t.Errorf("presented %v", w.presented)
 	}
-	if len(w.log) != 0 {
-		t.Errorf("a refused plan changed %v", w.log)
+	s, _ := w.store.Load()
+	if s.External["acme_dns_token"] != newDNSToken || len(s.Rotations) != 0 {
+		t.Errorf("after: token %q, rotations %v", s.External["acme_dns_token"], s.Rotations)
+	}
+	if strings.Contains(rec.Lines(), newDNSToken) || strings.Contains(ui.Redact("x "+newDNSToken), newDNSToken) {
+		t.Error("the answer is shown or not registered as a secret")
+	}
+}
+
+// An answer that is empty, or the value every host runs, is refused with
+// nothing changed; the empty one names the other ways out.
+func TestDNSTokenAnswerRefusesEmptyAndUnchanged(t *testing.T) {
+	w := newWrapWorld(t)
+	e := w.env()
+	run, err := Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run.Answer(e, "external.acme_dns_token", "")
+	for _, want := range []string{"nothing was pasted", "--replaced external.acme_dns_token", "paisans secrets set external.acme_dns_token", "Nothing was changed"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("empty: %v lacks %q", err, want)
+		}
+	}
+	err = run.Answer(e, "external.acme_dns_token", oldDNSToken)
+	if err == nil || !strings.Contains(err.Error(), "unchanged") || strings.Contains(err.Error(), oldDNSToken) {
+		t.Errorf("unchanged: %v", err)
+	}
+	if err := run.Execute(e, nil); err == nil {
+		t.Error("a refused answer let the run go on")
+	}
+	if s, _ := w.store.Load(); len(s.Rotations) != 0 || len(w.log) != 0 {
+		t.Errorf("a refused answer changed %v, %v", s.Rotations, w.log)
+	}
+}
+
+// cloudflareWorld is the fixture with a DNS provider whose record management
+// exists, so stage 2 tries the token, against zones, a provider held in
+// memory: example.org is visible when zones holds it.
+func cloudflareWorld(t *testing.T, zones map[string]string) (*wrapWorld, Env) {
+	t.Helper()
+	w := newWrapWorld(t)
+	w.cfg.ACME.Provider = "cloudflare"
+	s, _ := w.store.Load()
+	w.applied(s, w.cfg.SiteNames()...)
+	e := w.env()
+	e.DNSProvider = func(name, token string) (dns.Provider, error) {
+		if name != "cloudflare" {
+			return nil, fmt.Errorf("asked for %s", name)
+		}
+		if token == "" {
+			return nil, errors.New("no token")
+		}
+		return zoneLookup(zones), nil
+	}
+	return w, e
+}
+
+// zoneLookup is a provider that only looks zones up.
+type zoneLookup map[string]string
+
+func (z zoneLookup) Name() string { return "cloudflare" }
+func (z zoneLookup) LookupZone(_ context.Context, name string) (string, bool, error) {
+	id, ok := z[name]
+	return id, ok, nil
+}
+func (zoneLookup) Records(context.Context, string, string) ([]dns.Record, error) {
+	return nil, errors.New("not read here")
+}
+func (zoneLookup) Create(context.Context, string, dns.Record) error { return errors.New("not here") }
+func (zoneLookup) AllRecords(context.Context, string) ([]dns.Record, error) {
+	return nil, errors.New("not read here")
+}
+func (zoneLookup) Delete(context.Context, string, string) error { return errors.New("not here") }
+
+// A pasted token that cannot see the zone is refused when it is answered,
+// before anything is written; one that can is rotated, and the plan says
+// what stage 2 checks.
+func TestDNSTokenAnswerIsTriedAgainstTheZone(t *testing.T) {
+	_, e := cloudflareWorld(t, nil)
+	run, err := Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run.Answer(e, "external.acme_dns_token", newDNSToken)
+	if err == nil || !strings.Contains(err.Error(), "does not work against cloudflare") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("a token that cannot see the zone was taken: %v", err)
+	}
+
+	w, e := cloudflareWorld(t, map[string]string{"example.org": "zone-1"})
+	run, err = Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	run.Show(rec)
+	if !endedWith(rec, "looks up example.org's zone at cloudflare") {
+		t.Errorf("the plan does not say what stage 2 checks:\n%s", rec.Lines())
+	}
+	if err := run.Answer(e, "external.acme_dns_token", newDNSToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := w.store.Load(); s.External["acme_dns_token"] != newDNSToken {
+		t.Errorf("after: %q", s.External["acme_dns_token"])
+	}
+}
+
+// A next token that stops working before stage 2, Eg: revoked at the provider
+// after a run stopped, stops the rotation at stage 2: no Caddy is handed it,
+// and it stays under rotations for the next run.
+func TestDNSTokenStage2FailureStopsBeforeStage3(t *testing.T) {
+	w, e := cloudflareWorld(t, map[string]string{})
+	s, _ := w.store.Load()
+	s.Rotations = map[string]string{"external.acme_dns_token": newDNSToken}
+	_ = w.store.Save(s)
+	run, err := Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Items[0].Asks || run.Items[0].From != StageChecked {
+		t.Errorf("a pending token: asks %t, from %d", run.Items[0].Asks, run.Items[0].From)
+	}
+	err = run.Execute(e, nil)
+	if err == nil || !strings.Contains(err.Error(), "does not work against cloudflare") {
+		t.Fatalf("got %v", err)
+	}
+	if len(w.log) != 0 || len(w.presented) != 0 {
+		t.Errorf("stage 3 ran: %v", w.log)
+	}
+	if s, _ := w.store.Load(); s.Rotations["external.acme_dns_token"] != newDNSToken || s.External["acme_dns_token"] != oldDNSToken {
+		t.Errorf("after: %v, %q", s.Rotations, s.External["acme_dns_token"])
+	}
+}
+
+// A token set with `secrets set` that cannot see the zone is refused when
+// the run is planned, before it is written under rotations.
+func TestDNSTokenSetThatDoesNotWorkIsRefused(t *testing.T) {
+	w, e := cloudflareWorld(t, map[string]string{})
+	w.setToken(newDNSToken)
+	_, err := Plan(e, []Rotator{DNSToken()})
+	if err == nil || !strings.Contains(err.Error(), "does not work against cloudflare") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -206,9 +390,9 @@ func TestDNSTokenPrecheckReadsOnlyLineHashes(t *testing.T) {
 
 // A carrying file that differs from what the hosts hold only elsewhere, Eg:
 // a comment an upgrade changed, is not a replaced secret: the check is made
-// on the lines that carry the token, so an unreplaced token is still
-// refused.
-func TestDNSTokenUnrelatedChangeInItsFileIsStillRefused(t *testing.T) {
+// on the lines that carry the token, so an unreplaced token is still asked
+// for.
+func TestDNSTokenUnrelatedChangeInItsFileIsStillAskedFor(t *testing.T) {
 	w := newWrapWorld(t)
 	for _, h := range w.hosts {
 		for path, content := range h.files {
@@ -217,8 +401,8 @@ func TestDNSTokenUnrelatedChangeInItsFileIsStillRefused(t *testing.T) {
 			}
 		}
 	}
-	_, err := Plan(w.env(), []Rotator{DNSToken()})
-	if err == nil || !strings.Contains(err.Error(), "paisans secrets set external.acme_dns_token") {
+	run, err := Plan(w.env(), []Rotator{DNSToken()})
+	if err != nil || !run.Items[0].Asks {
 		t.Fatalf("an unreplaced token passed for replaced: %v", err)
 	}
 	ok, err := HostsRun(w.env(), DNSToken())
@@ -238,6 +422,9 @@ func TestDNSTokenSetAnewReachesEveryCaddy(t *testing.T) {
 	run, err := Plan(e, []Rotator{DNSToken()})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if run.Items[0].Asks {
+		t.Error("a token set anew is asked for")
 	}
 	if got := fmt.Sprint(run.Items[0].Uses); got != fmt.Sprint([]Use{{Site: "vm", Stacks: []string{"infra"}}, {Site: "watch", Stacks: []string{"infra"}}}) {
 		t.Errorf("uses %s", got)
@@ -517,14 +704,32 @@ func TestWrappedRotationsKeepTheirPlaceInTheOrder(t *testing.T) {
 	}
 }
 
-// An SMTP password the hosts were last applied with has not been replaced at
-// the mail provider, and is refused like the DNS token, naming the command
-// that sets the new one.
-func TestSMTPPasswordUnchangedIsRefused(t *testing.T) {
+// An SMTP password the hosts were last applied with is asked for like the DNS
+// token, replaced at the mail provider, and nothing checks it here.
+func TestSMTPPasswordUnchangedIsAskedFor(t *testing.T) {
 	w := newWrapWorld(t)
-	_, err := Plan(w.env(), []Rotator{SMTPPassword("external.smtp_password")})
-	if err == nil || !strings.Contains(err.Error(), "paisans secrets set external.smtp_password") || !strings.Contains(err.Error(), "Nothing was changed") {
-		t.Fatalf("got %v", err)
+	e := w.env()
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run.Asked(); len(got) != 1 || got[0].Issuer != "the mail provider" {
+		t.Fatalf("asked %+v", got)
+	}
+	rec := &ui.Recorder{}
+	run.Show(rec)
+	if !endedWith(rec, "nothing checks it here") {
+		t.Errorf("the plan does not say nothing checks it:\n%s", rec.Lines())
+	}
+	const next = "fixture-not-a-secret-smtp-asked"
+	if err := run.Answer(e, "external.smtp_password", next); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := w.store.Load(); s.External["smtp_password"] != next || len(s.Rotations) != 0 {
+		t.Errorf("after: %v", s.Rotations)
 	}
 }
 
@@ -580,4 +785,15 @@ func TestPastedNextRegistersTheValue(t *testing.T) {
 	if strings.Contains(ui.Redact("the host said "+token), token) {
 		t.Fatal("the token is not registered as a secret")
 	}
+}
+
+// endedWith reports whether a step the recorder saw ended pending with a
+// result holding text.
+func endedWith(rec *ui.Recorder, text string) bool {
+	for _, e := range rec.Events {
+		if e.Kind == "pending" && strings.Contains(e.Extra, text) {
+			return true
+		}
+	}
+	return false
 }

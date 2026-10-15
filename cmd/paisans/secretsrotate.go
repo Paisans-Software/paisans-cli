@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/meshrekey"
 	"github.com/paisans-software/paisans-cli/internal/oidcclient"
@@ -21,11 +22,31 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/secretsrotate"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"golang.org/x/term"
 )
 
 // rotateHost is how `secrets rotate` reaches a site. Tests replace it.
 var rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
 	return siteTransport(name, site, "", sudo)
+}
+
+// rotateDNSProvider makes the provider a next DNS token is tried against, the
+// one dns init uses. Tests replace it: none may reach a real provider.
+var rotateDNSProvider = dns.For
+
+// readRotateSecret asks on the controlling terminal, with echo off, for the
+// next value of a pasted secret every host using it runs: it says the path,
+// that it is replaced at its issuer now, and how to stop. An empty answer
+// stops the run. Tests replace it, since a test has no terminal to type into.
+var readRotateSecret = func(path, issuer string) (string, error) {
+	tty, err := openTTY()
+	if err != nil {
+		return "", err
+	}
+	defer tty.Close()
+	fd := int(tty.Fd())
+	fmt.Fprintf(tty, "\nEvery host using %s runs the value the secrets file holds.\nReplace it at %s now, then paste the new one here. Where %s keeps the old one valid beside it, revoke the old one there once this rotation finishes.\n", path, issuer, issuer)
+	return askPassword(tty, "Paste it, or press Enter to stop with nothing changed: ", 0, false, func() ([]byte, error) { return term.ReadPassword(fd) })
 }
 
 const rotateUsage = "Usage: paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]... [--execute]"
@@ -61,7 +82,7 @@ type rotateWiring struct {
 	cfg *config.Config
 }
 
-// runSecretsRotate replaces generated secrets where they are checked and
+// runSecretsRotate replaces secrets where they are checked and
 // where they are used, in staged runs that resume: internal/secretsrotate,
 // and docs/specs/2026-10-12-secrets-rotate.md. Like every command that
 // changes a host, it plans from what it reads and changes nothing without
@@ -186,7 +207,8 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 			}
 			return nil
 		},
-		Now: time.Now,
+		Now:         time.Now,
+		DNSProvider: rotateDNSProvider,
 	}
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
 		if err := checkReplaced(env, replacedRs); err != nil {
@@ -217,6 +239,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
 	if *execute {
 		if err := run.ConfirmSignOut(confirm); err != nil {
+			return err
+		}
+		if err := askPasted(env, run, stdin); err != nil {
 			return err
 		}
 	}
@@ -266,6 +291,41 @@ func nothingToRotate(r ui.Reporter, env secretsrotate.Env, run *secretsrotate.Ru
 		return err
 	}
 	r.Result("Nothing to rotate: every secret the earlier --all run left is kept, and the secrets file no longer records that run. The secrets it finished were not rotated again.")
+	return nil
+}
+
+// askPasted asks for the next value of every pasted secret in the run whose
+// value every host using it runs, all before any host is claimed, so the run
+// never stops part way to wait on a person. Each answer is refused, with
+// nothing changed, when it is empty, unchanged, too long to be a credential,
+// or not accepted where the secret is checked (secretsrotate.Run.Answer). Run
+// without a terminal it is refused, with the way to set the value first.
+func askPasted(env secretsrotate.Env, run *secretsrotate.Run, stdin io.Reader) error {
+	asked := run.Asked()
+	if len(asked) == 0 {
+		return nil
+	}
+	if !stdinIsTerminal(stdin) {
+		var paths, steps []string
+		for _, a := range asked {
+			paths = append(paths, a.Path)
+			steps = append(steps, fmt.Sprintf("replace %s at %s and set it with `paisans secrets set %s < file`", a.Path, a.Issuer, a.Path))
+		}
+		return fmt.Errorf("secrets rotate: every host using %s runs the value the secrets file holds, so the new value is asked for at a terminal, and stdin is not one. Without one, %s, then run secrets rotate again, which hands out the value the file holds. Nothing was changed", strings.Join(paths, ", "), strings.Join(steps, "; "))
+	}
+	for _, a := range asked {
+		value, err := readRotateSecret(a.Path, a.Issuer)
+		ui.Secret(value)
+		if err != nil {
+			return fmt.Errorf("secrets rotate: reading %s: %w. Nothing was changed", a.Path, err)
+		}
+		if len(value) > maxSecret {
+			return fmt.Errorf("secrets rotate %s: more than %d bytes, which is not a credential this file holds. Nothing was changed", a.Path, maxSecret)
+		}
+		if err := run.Answer(env, a.Path, value); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -750,8 +810,6 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 func rotationNotes(cfg *config.Config, path string) []string {
 	parts := strings.Split(path, ".")
 	switch {
-	case path == "external.smtp_password", len(parts) == 3 && parts[0] == "apps" && parts[2] == "smtp_password":
-		return []string{fmt.Sprintf("the password the file holds now: replace it at the mail provider and set it with `paisans secrets set %s` before this runs, or it is refused as unchanged", path)}
 	case len(parts) == 3 && parts[0] == "oidc_clients":
 		app := parts[1]
 		return []string{fmt.Sprintf("as `paisans oidc client create --app %s --rotate-secret --execute`, then each site running %s applied in turn, each healthy before the next; the old client secrets are deleted at Pocket ID only after every site runs the new one", app, app)}
@@ -766,8 +824,6 @@ func rotationNotes(cfg *config.Config, path string) []string {
 			return nil
 		}
 		return []string{fmt.Sprintf("one step for every Garage node, named for %s: %s are restarted together with the new value, and storage is unavailable until every node lists every other as healthy", sites[0], strings.Join(sites, ", "))}
-	case path == "external.acme_dns_token":
-		return []string{fmt.Sprintf("the token the file holds now: replace it at %s and set it with `paisans secrets set external.acme_dns_token` before this runs, or it is refused as unchanged", cfg.ACME.Provider)}
 	}
 	return nil
 }

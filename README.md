@@ -2597,8 +2597,8 @@ is the approved design.
 
 | Stage | Work | Gate |
 |---|---|---|
-| 1. Next value | a new value generated on the workstation and written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
-| 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
+| 1. Next value | a new value generated on the workstation, or for a pasted secret the one its issuer gave, written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
+| 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; for the DNS token, a read only zone lookup at the provider with the next token; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
 | 3. Where it is used | every stack that presents the secret, by scoped `apply`, one site at a time | each stack healthy before the next site |
 | 4. Promote | the next value becomes the secret's own, and its entry under `rotations` is removed | the file decrypts and holds only the new value |
 
@@ -2645,8 +2645,8 @@ Finishing either command first costs nothing but its resume.
 
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
-| `external.acme_dns_token` | the provider | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that logs in to send mail with it, which takes a `username` | none |
+| `external.acme_dns_token` | the provider, asked for the zone with the next token at stage 2 | each site running the toolkit's Caddy | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, which nothing here logs in to | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
@@ -2710,25 +2710,57 @@ runs the new one (*`oidc client create` makes an app's client at Pocket ID*,
 file that lacks a secret `init` generates, naming `paisans init`, since a run
 that skipped one would leave it as the departed operator knew it.
 
-**A pasted secret is replaced by a person first.** The DNS token and the SMTP
-passwords are issued by a provider, and nothing here can issue them. The
-operator replaces each at its issuer and sets it with `paisans secrets set
-<path>`, and `secrets rotate` hands the value the file then holds to every
-stack that renders it, one site at a time. It is refused while every host
-using it runs the value the file holds, since rotating it then would restart
-them for nothing, and `--all` refuses until each pasted secret it includes has
-been replaced so. **Which value a host runs is read per secret, not per
-file.** The lines that carry the secret are the ones a render with any other
-value changes; the host prints the SHA-256 of each line of its own copy of
-that file, so only hashes cross ssh and nothing secret is on a command line;
-and the host runs the value when every carrying line's hash is among them. A
-file that differs only elsewhere, Eg: a comment an upgrade changed in
-`caddy.env`, or an app setting not yet applied, would otherwise pass for a
-secret replaced. That refusal cannot tell a secret never replaced from one
-replaced and then applied, as an eviction does with the DNS token, so the
-operator says which: **`--replaced <path>`** names a pasted secret every host
-using it already runs from the file. It is checked the same way, and refused
-for a generated secret, for one some host does not run yet, and for one whose
+**A pasted secret is replaced at its issuer, and pasted when the run asks.**
+The DNS token and the SMTP passwords are issued by a provider, and nothing
+here can issue them. When every host using one runs the value the secrets file
+holds, the file has nothing new to hand out, so `--execute` asks for the new
+value at a terminal: it names the path and where it is replaced (the
+`acme.provider` for the DNS token, the mail provider for an SMTP password),
+the operator replaces it there, and pastes the new one with echo off. Every
+pasted secret in the run is asked for before any host is claimed, with the
+`sign out` confirmation, so a run never stops part way to wait on a person
+(Founder decision). The answer goes under `rotations` as the next value,
+exactly as a generated secret's does, and stage 4 makes it the file's own, so
+a stopped run resumes with it and asks for nothing again. An empty answer
+stops the run with nothing changed and names the two other ways: set the new
+value first with `paisans secrets set <path>`, or pass `--replaced <path>` for
+one already replaced and applied. An answer equal to the value the hosts run is
+refused as unchanged. Without a terminal the run is refused before anything
+changes, with the steps that need none: replace it at its issuer, `paisans
+secrets set <path> < file`, and run `secrets rotate` again. Where the issuer
+keeps the old value valid beside the new one, revoke the old one there once
+the rotation finishes; where it replaces the value in place, the apps that use
+it fail to authenticate until stage 3 reaches them.
+
+**A pasted secret already set anew is not asked for.** One replaced with
+`paisans secrets set`, which some host does not run yet, has its next value in
+the file already, and `secrets rotate` hands that value to every stack that
+renders it, one site at a time.
+
+**The DNS token is tried before any Caddy gets it.** Stage 2 looks up the
+community domain's zone at the provider with the next token, the read only
+call `dns init` makes, and a token that cannot see the zone stops the
+rotation there, before stage 3. A pasted token is tried the same way as soon
+as it is given, and one set with `secrets set` when the run is planned, so a
+mistyped token is refused before it is written under `rotations`, where a
+resumed run would keep it. A provider whose record management is not
+implemented here (`dns init` lists those that are) is not checked, and the
+plan says so. Nothing here logs in to a mail provider, so an SMTP password has
+no stage 2 check: the plan says so, and a wrong one shows when the app next
+sends mail.
+
+**Which value a host runs is read per secret, not per file.** The lines that
+carry the secret are the ones a render with any other value changes; the host
+prints the SHA-256 of each line of its own copy of that file, so only hashes
+cross ssh and nothing secret is on a command line; and the host runs the value
+when every carrying line's hash is among them. A file that differs only
+elsewhere, Eg: a comment an upgrade changed in `caddy.env`, or an app setting
+not yet applied, would otherwise pass for a secret replaced, and its old value
+be handed out again. A secret replaced and then applied, as an eviction does
+with the DNS token, reads the same as one never replaced, so the operator says
+which: **`--replaced <path>`** names a pasted secret every host using it
+already runs from the file. It is checked the same way, and refused for a
+generated secret, for one some host does not run yet, and for one whose
 rotation is under way; a path it accepts is listed in the plan as replaced
 earlier and not rotated. No OIDC client secret is pasted: every one, the
 homeserver's and the gate's included, is minted by `oidc client create
@@ -2783,9 +2815,10 @@ includes it (Founder decision).
 **Refused before anything changes:** etcd or Patroni unhealthy, since a
 password changed on a limping cluster can leave a member unable to rejoin; a
 site that does not answer over ssh, since it would keep the old value and
-break when the old one is retired; a pasted secret not yet replaced; a pending
-rotation whose stage cannot be read from the hosts, or that cannot finish; and
-a pending `mesh rekey`.
+break when the old one is retired; a pasted secret to be asked for with no
+terminal to ask at, or whose answer is empty, unchanged, or a DNS token that
+cannot see the zone; a pending rotation whose stage cannot be read from the
+hosts, or that cannot finish; and a pending `mesh rekey`.
 
 **The signed copies.** The applies a rotation runs hand each stack its next
 value and nothing else: they neither ask for the review nor publish a version,
