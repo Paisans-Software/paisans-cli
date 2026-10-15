@@ -2,9 +2,14 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// errNoZone is FindZone's error, wrapped, when no zone the provider holds
+// contains the name.
+var errNoZone = errors.New("no zone holds the name")
 
 type zone struct{ id, name string }
 
@@ -53,5 +58,12 @@ func FindZone(ctx context.Context, provider Provider, name string, cache map[str
 		}
 		tried = append(tried, candidate)
 	}
-	return zone{}, fmt.Errorf("dns: no zone that %s can see holds %s (tried %s). Either the zone is not at this provider, or the token cannot read it: it needs read access to the zone as well as permission to edit its records", provider.Name(), name, strings.Join(tried, ", "))
+	return zone{}, &noZoneError{msg: fmt.Sprintf("dns: no zone that %s can see holds %s (tried %s). Either the zone is not at this provider, or the token cannot read it: it needs read access to the zone as well as permission to edit its records", provider.Name(), name, strings.Join(tried, ", "))}
 }
+
+// noZoneError is FindZone's refusal, which is errNoZone.
+type noZoneError struct{ msg string }
+
+func (e *noZoneError) Error() string { return e.msg }
+
+func (e *noZoneError) Is(target error) bool { return target == errNoZone }
