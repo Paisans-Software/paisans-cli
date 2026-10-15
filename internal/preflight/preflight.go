@@ -218,19 +218,28 @@ func (r *runner) existing() []string {
 	return out
 }
 
-// reachProbe proves a site answers: a word only a shell that ran the command
-// prints, so a login banner is not taken for an answer.
-const reachProbe = "echo paisans-answers"
+// reachProbe proves a site answers: reachWord, which only a shell that ran
+// the command prints, so a login banner is not taken for an answer.
+const (
+	reachWord  = "paisans-answers"
+	reachProbe = "echo " + reachWord
+)
 
-// ssh checks the site answers, as its ssh user.
+// ssh checks the site answers, as its ssh user, by running a command whose
+// output it knows.
 func (r *runner) ssh(name string) {
 	t, ok := r.transports[name]
 	if !ok || t == nil {
 		r.refuse(name, "ssh", "no way to reach this site was given, so nothing on it could be checked")
 		return
 	}
-	if out, err := t.Run(reachProbe); err != nil {
+	out, err := t.Run(reachProbe)
+	if err != nil {
 		r.refuse(name, "ssh", "%s does not answer: %s", t.Describe(), firstLine(errText(out, err)))
+		return
+	}
+	if !strings.Contains(out, reachWord) {
+		r.refuse(name, "ssh", "%s answered but did not run the command: %s printed %q, not %s. A login shell or forced command that ignores the command it is given does this", t.Describe(), reachProbe, firstLine(out), reachWord)
 		return
 	}
 	r.reachable[name] = true

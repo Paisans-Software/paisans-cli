@@ -8935,7 +8935,7 @@ at, and "could not look" is not "looked and it was fine".
 
 | Check | Where | How | Refused when |
 |---|---|---|---|
-| SSH | every site | `echo paisans-answers`, as the site's ssh user | the host does not answer, or ssh cannot log in |
+| SSH | every site | `echo paisans-answers`, as the site's ssh user | the host does not answer, ssh cannot log in, or the answer lacks `paisans-answers`, so the login ran no command |
 | Clock | every site | `timedatectl show -p NTPSynchronized --value` | not `yes` |
 | Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan, without the firewall's defaults on a shared host | it has any step left |

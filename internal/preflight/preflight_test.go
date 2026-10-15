@@ -65,7 +65,7 @@ func healthy(name string) *fakeHost {
 		name:  name,
 		files: map[string]string{"/etc/os-release": ubuntu},
 		rules: []rule{
-			{match: "echo paisans-answers"},
+			{match: "echo paisans-answers", out: "paisans-answers\n"},
 			{match: "timedatectl", out: "yes\n"},
 			{match: "ldd --version", out: "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39\nCopyright\n"},
 			{match: "dpkg --print-architecture", out: "amd64\n"},
@@ -238,6 +238,12 @@ func TestPreflightRefuses(t *testing.T) {
 			setup: func(h map[string]*fakeHost) {
 				h["vm"].override(rule{match: "echo paisans-answers", out: "ssh: connect to host port 2222: Connection refused", err: errors.New("exit status 255")})
 			}},
+		{name: "ssh answers with a banner and nothing else", site: "vm", check: "ssh", want: "answered but did not run the command",
+			setup: func(h map[string]*fakeHost) {
+				h["vm"].override(rule{match: "echo paisans-answers", out: "Welcome to Ubuntu 24.04 LTS\n"})
+			}},
+		{name: "ssh answers from a shell that ran nothing", site: "vm", check: "ssh", want: "answered but did not run the command",
+			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "echo paisans-answers"}) }},
 		{name: "clock", site: "vm", check: "clock", want: "not synchronised",
 			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "timedatectl", out: "no\n"}) }},
 		{name: "host prepare owes steps", site: "home-b", check: "prepared", want: "install Docker", steps: []string{"install Docker"}},
@@ -626,6 +632,18 @@ func TestTheSSHCheckAsksNoSudo(t *testing.T) {
 		}
 	}
 	if got := find(r, "home-a", "ssh"); len(got) != 1 || !strings.HasSuffix(got[0].Detail, " answers") {
+		t.Errorf("ssh check: %+v", got)
+	}
+}
+
+// A login banner before the probe's word is still an answer: the word is
+// what the check looks for, wherever it is.
+func TestTheSSHCheckPassesABannerBeforeTheWord(t *testing.T) {
+	prepared(t)
+	h := hosts()
+	h["vm"].override(rule{match: "echo paisans-answers", out: "Welcome to Ubuntu 24.04 LTS\npaisans-answers\n"})
+	r := run(t, fixture(t), h)
+	if got := find(r, "vm", "ssh"); len(got) != 1 || got[0].Refused || !strings.HasSuffix(got[0].Detail, " answers") {
 		t.Errorf("ssh check: %+v", got)
 	}
 }
