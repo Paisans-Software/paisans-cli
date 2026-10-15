@@ -158,44 +158,56 @@ func endReview(r ui.Reporter, line ui.Step, rev grant.Review, execute bool) {
 		}
 		return strings.Join(out, "; ")
 	}
-	// A foundation image's change is listed apart, after the rest, and is
-	// not approved: the team reviews foundation.yaml in the core catalog's
-	// pull requests.
-	var listed, foundation []grant.Change
+	// The changes are listed in groups, each under its heading: foundation
+	// images first, which are not approved here since the team reviews
+	// foundation.yaml in the core catalog's pull requests, then removals,
+	// which ask nothing either, and last what needs approval, under its
+	// count, so the count heads exactly what it counts, above the prompt.
+	var approve, removed, foundation []grant.Change
 	for _, c := range rev.Changes {
-		if c.Foundation {
+		switch {
+		case c.Foundation:
 			foundation = append(foundation, c)
-		} else {
-			listed = append(listed, c)
+		case c.NeedsApproval():
+			approve = append(approve, c)
+		default:
+			removed = append(removed, c)
 		}
 	}
 	switch {
 	case n > 0:
 		line.End(ui.Pending, join(what, earlier))
-	case len(listed) > 0 && len(foundation) > 0:
+	case len(removed) > 0 && len(foundation) > 0:
 		line.End(ui.OK, join("only removals and foundation images, nothing to approve", earlier))
 	case len(foundation) > 0:
 		line.End(ui.OK, join("only foundation images, nothing to approve", earlier))
-	case len(listed) > 0:
+	case len(removed) > 0:
 		line.End(ui.OK, join("only removals, nothing to approve", earlier))
 	case earlier != "":
 		line.End(ui.OK, earlier+", nothing new to approve")
 	default:
 		line.End(ui.OK, "")
 	}
-	for _, c := range listed {
-		r.Explain(c.Line())
+	group := func(heading string, changes []grant.Change) {
+		if len(changes) == 0 {
+			return
+		}
+		r.Explain(heading)
+		for _, c := range changes {
+			r.Explain(c.Line())
+		}
 	}
-	if len(foundation) > 0 {
-		r.Explain(foundationHeading)
-	}
-	for _, c := range foundation {
-		r.Explain(c.Line())
-	}
+	group(foundationHeading, foundation)
+	group(removedHeading, removed)
+	group(entries(n)+":", approve)
 }
 
-// foundationHeading heads the changes to foundation images in a review.
-const foundationHeading = "foundation images, reviewed in the core catalog:"
+// foundationHeading heads the changes to foundation images in a review, and
+// removedHeading its removals.
+const (
+	foundationHeading = "foundation images, reviewed in the core catalog:"
+	removedHeading    = "removed, nothing to approve:"
+)
 
 // approveReviews asks, once, for approval of every review that needs it.
 // It asks nothing when none does. Without a terminal it refuses, before any

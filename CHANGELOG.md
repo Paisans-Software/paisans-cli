@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- The grant review lists each site's foundation images first, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
+
 ### Fixed
 
 - A host ssh cannot reach is named once, with ssh's own words once, instead of repeated through every layer that tried to read it, and `init` lists each unreachable site on its own line.
