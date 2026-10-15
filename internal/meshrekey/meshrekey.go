@@ -572,8 +572,8 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 	if runs {
 		return nil
 	}
-	if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
-		return fmt.Errorf("%s: %s: %w: %s", name, apply.WireGuardSync.Title(p.dep()), err, strings.TrimSpace(out))
+	if err := apply.SyncMesh(sp, t); err != nil {
+		return fmt.Errorf("%s: %s: %w", name, apply.WireGuardSync.Title(p.dep()), err)
 	}
 	return nil
 }

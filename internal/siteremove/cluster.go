@@ -29,8 +29,11 @@ type siteChange struct {
 	// stopped around its restart.
 	dbApps []string
 	// sync hands the running interface the mesh file already on the host,
-	// which a run that stopped after writing it left unsynced.
+	// which a run that stopped after writing it left unsynced. mesh is the
+	// plan scoped to that file, which carries what the WireGuard helper's
+	// put is handed.
 	sync bool
+	mesh *apply.Plan
 }
 
 // haproxyFile is HAProxy's configuration, in rendered form.
@@ -379,8 +382,8 @@ func (p *Plan) applyChange(c *siteChange) error {
 	}
 	if c.sync {
 		p.work("update files on " + c.site)
-		if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
-			return fmt.Errorf("%s: %s: %w: %s", c.site, apply.WireGuardSync.Title(p.dep()), err, lastLines(out, 3))
+		if err := apply.SyncMesh(c.mesh, t); err != nil {
+			return fmt.Errorf("%s: %s: %w", c.site, apply.WireGuardSync.Title(p.dep()), err)
 		}
 	}
 	if c.haproxy {
@@ -662,7 +665,11 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
 			// The file was written by a run that stopped before the running
 			// interface was handed it.
-			c.sync = true
+			mesh, err := apply.Build(name, rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(p.dep().WireGuardConf()))
+			if err != nil {
+				return nil, nil, err
+			}
+			c.sync, c.mesh = true, mesh
 			st.Steps = append(st.Steps, Step{Site: name, Verb: "mesh", Title: "update files on " + name, Text: apply.WireGuardSync.Describe(p.dep())})
 		}
 		if c.plan != nil || c.sync {

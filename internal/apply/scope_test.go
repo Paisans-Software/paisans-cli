@@ -54,7 +54,7 @@ func TestAScopedApplyMovesOneFile(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if !host.ran("wg syncconf") {
+	if !host.ran(wgHelper + "sync") {
 		t.Error("the new peer was not handed to psns-f2a9")
 	}
 	if host.ran("docker compose") {
@@ -94,7 +94,13 @@ func TestAScopedApplyRollsBack(t *testing.T) {
 	if host.files["/"+wgFile] != before {
 		t.Error("psns-f2a9.conf was not restored")
 	}
-	if !host.ran("wg syncconf") {
+	if host.files[wgInstalled] != before {
+		t.Error("the helper was not handed the restored file")
+	}
+	if put, sync := host.indexOf(wgHelper+"put"), host.indexOf(wgHelper+"sync"); put < 0 || sync < put {
+		t.Errorf("the restored file was not put before the sync: %v", host.commands)
+	}
+	if !host.ran(wgHelper + "sync") {
 		t.Error("the restored peers were not handed to psns-f2a9")
 	}
 	again, err := apply.Build("home-a", plan(t), acmeModule(t), host)

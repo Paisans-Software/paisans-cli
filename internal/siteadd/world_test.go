@@ -85,7 +85,21 @@ func (h *host) WriteFile(path, content string, mode uint32) error {
 	return nil
 }
 
-func (h *host) RunInput(command, stdin string) (string, error) { return h.Run(command) }
+func (h *host) RunInput(command, stdin string) (string, error) {
+	out, err := h.Run(command)
+	if err == nil && command == wgHelper+"put" {
+		h.files[wgInstalled] = stdin
+	}
+	return out, err
+}
+
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+)
 
 func (h *host) ran(sub string) int {
 	n := 0
@@ -182,8 +196,10 @@ func (h *host) Run(command string) (string, error) {
 			return "up\n", nil
 		}
 		return "down\n", nil
-	case strings.Contains(command, "enable --now wg-quick@psns-f2a9"), strings.Contains(command, "restart wg-quick@psns-f2a9"):
+	case command == wgHelper+"up", command == wgHelper+"restart":
 		h.wgUp = true
+		return "", nil
+	case command == wgHelper+"put", command == wgHelper+"sync":
 		return "", nil
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {

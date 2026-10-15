@@ -187,6 +187,11 @@ type Plan struct {
 	// meshAddress is the Address line of the site's rendered WireGuard file
 	// (Eg: 10.44.0.1/24), which the interface must hold once WireGuard ran.
 	meshAddress string
+	// meshConf is the site's rendered WireGuard file, as written to
+	// deployment.WireGuardConf. Every mesh step hands it to the WireGuard
+	// helper's put before it starts, syncs or restarts the interface, so the
+	// interface runs what this apply wrote.
+	meshConf string
 	// meshEndpoints are the host names among the peer endpoints of that
 	// file, which must resolve before WireGuard runs.
 	meshEndpoints []string
@@ -287,37 +292,18 @@ type WireGuardStep int
 const (
 	// WireGuardNone means the interface is up and its file did not change.
 	WireGuardNone WireGuardStep = iota
-	// WireGuardStart enables the unit and starts it: a first apply, or an
-	// interface found down.
+	// WireGuardStart puts the file and enables and starts the unit through
+	// the WireGuard helper: a first apply, or an interface found down.
 	WireGuardStart
-	// WireGuardSync hands the running interface its new peers without taking
-	// it down, which is the ordinary update: a site joined or left.
+	// WireGuardSync puts the file and hands the running interface its peers
+	// without taking it down, which is the ordinary update: a site joined or
+	// left.
 	WireGuardSync
-	// WireGuardRestart takes the interface down and up again. Only a change to
-	// a line that wg-quick itself applies needs it, because `wg syncconf`
-	// never sees those lines.
+	// WireGuardRestart puts the file and restarts the interface. Only a
+	// change to a line that wg-quick itself applies needs it, because `wg
+	// syncconf`, which the helper's sync runs, never sees those lines.
 	WireGuardRestart
 )
-
-// Command is what the step runs on the host for d's interface, empty for
-// WireGuardNone.
-func (w WireGuardStep) Command(d deployment.Deployment) string {
-	iface := d.Interface()
-	switch w {
-	case WireGuardStart:
-		return "systemctl enable --now " + d.WireGuardUnit()
-	case WireGuardSync:
-		// Through a temporary file rather than a pipe. /bin/sh has no
-		// pipefail, so a `wg-quick strip` that failed would hand syncconf an
-		// empty configuration, and syncconf removes every peer it is not
-		// given: one failed command would cut this site off the mesh.
-		return "set -e; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; wg-quick strip " + iface + " > \"$f\"; wg syncconf " + iface + " \"$f\""
-	case WireGuardRestart:
-		return "systemctl restart " + d.WireGuardUnit()
-	default:
-		return ""
-	}
-}
 
 // Title is the step's name in the progress output (Eg: start mesh psns-566c).
 // Describe is the same step's detail.
@@ -820,6 +806,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			wireguard = &copied
 			wireguardBefore = current
 			out.meshAddress = wireguardAddress(file.Content)
+			out.meshConf = content
 			out.meshEndpoints = endpointNames(file.Content)
 		}
 
@@ -1237,13 +1224,13 @@ func execute(plan *Plan, t Transport) error {
 	// gateway gates as well, which need no mesh themselves, so that the one
 	// rule is simple: no container is started or checked on a site whose
 	// interface is down.
-	if command := plan.WireGuard.Command(plan.Deployment); command != "" {
+	if plan.WireGuard != WireGuardNone {
 		if err := resolveMeshEndpoints(plan, t); err != nil {
 			return err
 		}
 		done := plan.step(plan.WireGuard.Title(plan.Deployment))
 		done.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
-		err := bringUpMesh(plan, t, command)
+		err := bringUpMesh(plan, t)
 		finish(done, err)
 		if err != nil {
 			return err

@@ -198,7 +198,7 @@ func TestAnEvictionCutsFirstAndNeverReachesTheHost(t *testing.T) {
 	// The cut comes before anything the cluster does.
 	firstCut, firstDel := -1, -1
 	for i, line := range w.log {
-		if firstCut < 0 && strings.Contains(line, "wg syncconf") {
+		if firstCut < 0 && strings.Contains(line, "' sync") {
 			firstCut = i
 		}
 		if firstDel < 0 && strings.Contains(line, "del /service") {
@@ -336,7 +336,7 @@ func TestAnEvictedGatewayNeedsAWorkingToken(t *testing.T) {
 	}
 	for name, h := range w.hosts {
 		for _, c := range h.commands {
-			if strings.Contains(c, "syncconf") || strings.Contains(c, "member remove") {
+			if strings.Contains(c, "' sync") || strings.Contains(c, "member remove") {
 				t.Errorf("%s ran %q", name, c)
 			}
 		}
@@ -432,7 +432,7 @@ func TestAnEvictionResumesFromEachStage(t *testing.T) {
 			site, verb, text string
 		}
 	}{
-		{"wg syncconf", 1, nil},
+		{"' sync", 1, nil},
 		{"del /service", 3, []struct {
 			stage            int
 			site, verb, text string
@@ -481,7 +481,7 @@ func TestAnEvictionResumesFromEachStage(t *testing.T) {
 // interface took it is handed the file again, and nothing else is.
 func TestAPartialCutCompletesOnTheSiteThatMissedIt(t *testing.T) {
 	w, zone := evictWorld(t, "home-b")
-	w.failOnce = "wg syncconf"
+	w.failOnce = "' sync"
 	err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
 	if err == nil || !strings.Contains(err.Error(), "did not take on every remaining site") {
 		t.Fatalf("err = %v", err)
@@ -549,7 +549,7 @@ func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.failOnce = "wg syncconf"
+	w.failOnce = "' sync"
 	if err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone))); err == nil {
 		t.Fatal("the cut that missed a site passed")
 	}
@@ -594,7 +594,7 @@ func TestAHostileLeaderCannotBlockItsEviction(t *testing.T) {
 func TestAPartialCutResumesWithReplicasNotStreaming(t *testing.T) {
 	t.Run("the evicted site leads", func(t *testing.T) {
 		w, zone := hostileLeader(t)
-		w.failOnce = "wg syncconf"
+		w.failOnce = "' sync"
 		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
 			t.Fatal("the partial cut passed")
 		}
@@ -605,7 +605,7 @@ func TestAPartialCutResumesWithReplicasNotStreaming(t *testing.T) {
 	})
 	t.Run("another site leads", func(t *testing.T) {
 		w, zone := evictWorld(t, "home-a", leadersAway)
-		w.failOnce = "wg syncconf"
+		w.failOnce = "' sync"
 		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
 			t.Fatal("the partial cut passed")
 		}
@@ -685,7 +685,7 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 			}
 			for name, h := range w.hosts {
 				for _, c := range h.commands {
-					if strings.Contains(c, "syncconf") {
+					if strings.Contains(c, "' sync") {
 						t.Errorf("%s ran %q", name, c)
 					}
 				}

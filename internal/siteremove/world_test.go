@@ -41,9 +41,14 @@ const (
 	otherID = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
 	root    = "/srv/paisans/f2a9"
 	wgConf  = "/srv/paisans/f2a9/psns-f2a9.conf"
-	record  = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
-	keysAt  = "/home/ubuntu/.ssh/authorized_keys"
-	alice   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
+	// wgHelper is the start of every command sent to the WireGuard helper
+	// for the fixture's interface, and wgInstalled is where its put
+	// installs the mesh file on a real host.
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+	record      = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
+	keysAt      = "/home/ubuntu/.ssh/authorized_keys"
+	alice       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
 )
 
 var dep = deployment.Deployment{ID: ourID}
@@ -121,8 +126,8 @@ type host struct {
 	files    map[string]string
 	commands []string
 	wgUp     bool
-	// wgRun is the mesh file the running interface was last handed by `wg
-	// syncconf`, nil while it runs the file on disk.
+	// wgRun is the mesh file the running interface was last handed by the
+	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
 	patroniUp bool
 	etcdUp    bool
@@ -197,6 +202,12 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.commands = append(h.commands, command)
 		h.w.log = append(h.w.log, h.name+": "+command)
 		h.files[strings.TrimSuffix(path, "'")] = stdin
+		return "", nil
+	}
+	if command == wgHelper+"put" {
+		h.commands = append(h.commands, command)
+		h.w.log = append(h.w.log, h.name+": "+command)
+		h.files[wgInstalled] = stdin
 		return "", nil
 	}
 	return h.Run(command)
@@ -621,9 +632,12 @@ func (h *host) Run(command string) (string, error) {
 			return "up\n", nil
 		}
 		return "down\n", nil
-	case strings.Contains(command, "wg syncconf"):
-		running := h.files[wgConf]
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		running := h.files[wgInstalled]
 		h.wgRun = &running
+		if command != wgHelper+"sync" {
+			h.wgUp = true
+		}
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
@@ -1386,6 +1400,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		if running, ok := h.files[wgConf]; ok {
 			h.wgRun = &running
+			h.files[wgInstalled] = running
 		}
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"

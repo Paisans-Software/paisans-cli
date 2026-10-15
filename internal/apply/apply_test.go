@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,14 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// wgHelper is the start of every command apply sends the WireGuard helper
+// for the fixture's interface, and wgInstalled is where the helper's put
+// installs the mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
 )
 
 // fakeHost is a machine in a map. Every gate this package has is about what is
@@ -32,17 +41,23 @@ type fakeHost struct {
 	// host has none, which is the ordinary case on a first apply and the one
 	// that used to make apply impossible to complete.
 	running bool
-	// wgUp is whether psns-f2a9 exists. Starting or restarting the unit brings it
+	// wgUp is whether psns-f2a9 exists. The helper's up or restart brings it
 	// up, the way systemd would.
 	wgUp bool
-	// wgStays makes starting or restarting the unit succeed while psns-f2a9
+	// wgStays makes the helper's up or restart succeed while psns-f2a9
 	// stays down: the unit's exit status and the kernel disagree.
 	wgStays bool
 	// wgAddress, when set, is the address `ip -br addr show` prints for an
 	// up psns-f2a9 in place of the one its file declares.
 	wgAddress string
-	// journal is what `journalctl -u wg-quick@psns-f2a9` prints.
+	// journal is what the helper's log prints.
 	journal string
+	// wgRun is the mesh file psns-f2a9 runs: what the helper had installed
+	// when it was last brought up, restarted or synced.
+	wgRun string
+	// failOut, when set, is what a command matching fail prints in place of
+	// the fake's own refusal.
+	failOut string
 	// inputs is what each RunInput call sent on stdin, in order, beside its
 	// command in commands.
 	inputs []string
@@ -118,7 +133,13 @@ func (h *fakeHost) Run(command string) (string, error) {
 		return h.dns(command)
 	}
 	if h.fail != "" && strings.Contains(command, h.fail) {
+		if h.failOut != "" {
+			return h.failOut, fmt.Errorf("exit status 1")
+		}
 		return "refused by the fake host", fmt.Errorf("exit status 1")
+	}
+	if verb, ok := strings.CutPrefix(command, wgHelper); ok {
+		return h.helper(verb)
 	}
 	if strings.Contains(command, "echo paisans-sweep-end") {
 		return h.sweepRead(command), nil
@@ -213,26 +234,19 @@ func (h *fakeHost) Run(command string) (string, error) {
 		}
 		return "down\n", nil
 	}
-	if strings.Contains(command, "enable --now wg-quick@psns-f2a9") || strings.Contains(command, "restart wg-quick@psns-f2a9") {
-		h.wgUp = !h.wgStays
-		return "", nil
-	}
 	if strings.Contains(command, "ip -br addr show dev psns-f2a9") {
 		if !h.wgUp {
 			return "", nil
 		}
 		address := h.wgAddress
 		if address == "" {
-			for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
+			for _, line := range strings.Split(h.wgRun, "\n") {
 				if v, ok := strings.CutPrefix(line, "Address = "); ok {
 					address = v
 				}
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + " \n", nil
-	}
-	if strings.Contains(command, "journalctl -u wg-quick@psns-f2a9") {
-		return h.journal, nil
 	}
 	if strings.Contains(command, "ps --status running") {
 		if h.running {
@@ -241,6 +255,43 @@ func (h *fakeHost) Run(command string) (string, error) {
 		// What `docker compose ps --quiet` prints when the service has no
 		// running container: nothing, and a zero exit.
 		return "\n", nil
+	}
+	return "", nil
+}
+
+// helper answers the WireGuard helper's verbs the way the script does on a
+// host: put installs what it was sent, up and restart bring the interface
+// up from the installed file, sync hands it the installed file in place,
+// and show reads what it runs.
+func (h *fakeHost) helper(verb string) (string, error) {
+	switch verb {
+	case "put":
+		h.files[wgInstalled] = h.inputs[len(h.inputs)-1]
+	case "up", "restart":
+		h.wgUp = !h.wgStays
+		h.wgRun = h.files[wgInstalled]
+	case "sync":
+		h.wgRun = h.files[wgInstalled]
+	case "show public-key":
+		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.wgRun)
+		if m == nil {
+			return "", nil
+		}
+		key, err := render.PublicKey(m[1])
+		if err != nil {
+			return "", err
+		}
+		return key + "\n", nil
+	case "show peers":
+		var b strings.Builder
+		for _, m := range regexp.MustCompile(`(?m)^PublicKey = (\S+)`).FindAllStringSubmatch(h.wgRun, -1) {
+			b.WriteString(m[1] + "\n")
+		}
+		return b.String(), nil
+	case "log":
+		return h.journal, nil
+	default:
+		return "usage: wg-psns-f2a9 ...", fmt.Errorf("exit status 64")
 	}
 	return "", nil
 }
@@ -855,7 +906,7 @@ func TestAFirstApplyBringsUpTheMeshFirst(t *testing.T) {
 		if err := apply.Execute(p, host); err != nil {
 			t.Fatal(err)
 		}
-		start := host.indexOf("systemctl enable --now wg-quick@psns-f2a9")
+		start := host.indexOf(wgHelper + "up")
 		if start < 0 {
 			t.Fatalf("%s: psns-f2a9 was written and never started", site)
 		}
@@ -917,10 +968,10 @@ func TestAPeerChangeIsSyncedNotRestarted(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if !host.ran("wg syncconf psns-f2a9") {
+	if !host.ran(wgHelper + "sync") {
 		t.Error("the new peers were never handed to psns-f2a9")
 	}
-	if host.ran("restart wg-quick@psns-f2a9") {
+	if host.ran(wgHelper + "restart") {
 		t.Error("a peer change took the mesh down")
 	}
 }
@@ -946,7 +997,7 @@ func TestAnAddressChangeRestartsTheMesh(t *testing.T) {
 // since every one of them would fail to bind.
 func TestAMeshThatWillNotStartStopsTheApply(t *testing.T) {
 	host := newHost()
-	host.fail = "wg-quick@psns-f2a9"
+	host.fail = wgHelper + "up"
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -971,9 +1022,9 @@ func TestAMeshThatWillNotStartStopsTheApply(t *testing.T) {
 	}
 }
 
-// wgQuickJournal is what `journalctl -u wg-quick@psns-f2a9` prints after a
-// start that failed on a peer whose endpoint does not resolve: an earlier
-// attempt, then the one that matters.
+// wgQuickJournal is what the helper's log prints after a start that failed
+// on a peer whose endpoint does not resolve: an earlier attempt, then the
+// one that matters.
 const wgQuickJournal = `Oct 11 09:00:01 vm systemd[1]: Starting wg-quick@psns-f2a9.service - WireGuard via wg-quick(8) for psns-f2a9...
 Oct 11 09:00:01 vm wg-quick[811]: [#] ip link add psns-f2a9 type wireguard
 Oct 11 09:00:01 vm wg-quick[811]: Line unrecognized: ` + "`Bogus=1'" + `
@@ -1026,7 +1077,7 @@ func TestAMeshThatIsNotUpAfterItsStartStopsTheApply(t *testing.T) {
 	if !host.ran("ip -br addr show dev psns-f2a9") {
 		t.Error("the interface was never read after its start")
 	}
-	if !host.ran("journalctl -u wg-quick@psns-f2a9 -n 20 --no-pager") {
+	if !host.ran(wgHelper + "log") {
 		t.Error("wg-quick's own error was never read")
 	}
 	want := "health.example.org does not resolve from home-a; create its DNS record (paisans dns init) and apply again."
@@ -1044,7 +1095,7 @@ func TestAMeshThatIsNotUpAfterItsStartStopsTheApply(t *testing.T) {
 // A start that exits non zero gets the same diagnosis as one that lies.
 func TestAMeshWhoseStartFailsIsExplainedFromItsJournal(t *testing.T) {
 	host := newHost()
-	host.fail = "enable --now wg-quick@psns-f2a9"
+	host.fail = wgHelper + "up"
 	host.journal = wgQuickJournal
 	problem := meshProblem(t, host)
 	if !strings.Contains(problem.Explain, "health.example.org does not resolve from home-a") {
@@ -1083,9 +1134,9 @@ func TestAMeshWithoutItsAddressStopsTheApply(t *testing.T) {
 func TestAMeshFailureWithoutAJournalStillNamesTheMesh(t *testing.T) {
 	host := newHost()
 	host.wgStays = true
-	host.fail = "journalctl"
+	host.fail = wgHelper + "log"
 	problem := meshProblem(t, host)
-	if !strings.Contains(problem.Explain, "journalctl -u wg-quick@psns-f2a9") {
+	if !strings.Contains(problem.Explain, "sudo /usr/local/libexec/paisans/wg-psns-f2a9 log") {
 		t.Errorf("the explanation does not say where to look:\n%s", problem.Explain)
 	}
 }
@@ -1104,10 +1155,112 @@ func TestARestartedMeshIsReadBack(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	restart := host.indexOf("restart wg-quick@psns-f2a9")
+	restart := host.indexOf(wgHelper + "restart")
 	check := host.indexOf("ip -br addr show dev psns-f2a9")
 	if restart < 0 || check < restart {
 		t.Errorf("the restarted mesh was not read back: %v", host.commands)
+	}
+}
+
+// The helper is handed exactly the file this apply wrote, before the
+// interface is started from it, and nothing reaches the mesh except
+// through the helper: the deployment's user has no other way to it.
+func TestTheMeshFileIsPutBeforeTheInterfaceStarts(t *testing.T) {
+	host := newHost()
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	put, up := host.indexOf(wgHelper+"put"), host.indexOf(wgHelper+"up")
+	if put < 0 || up < put {
+		t.Fatalf("put at %d, up at %d: %v", put, up, host.commands)
+	}
+	if host.files[wgInstalled] == "" || host.files[wgInstalled] != host.files["/srv/paisans/f2a9/psns-f2a9.conf"] {
+		t.Error("the helper was handed something other than the file apply wrote")
+	}
+	for _, c := range host.commands {
+		if strings.HasPrefix(c, "wg ") || strings.Contains(c, "wg-quick") || strings.Contains(c, "journalctl") || strings.Contains(c, "systemctl") {
+			t.Errorf("%q reached the mesh without the helper", c)
+		}
+	}
+}
+
+// A file the helper refuses stops the apply before the interface or any
+// stack moves, quoting the line it refused and saying what changes it: the
+// owner admitted another port or subnet.
+func TestAMeshFileTheHelperRefusesStopsTheApply(t *testing.T) {
+	host := newHost()
+	host.fail = wgHelper + "put"
+	host.failOut = "wg-psns-f2a9: line 5: ListenPort 51999, but this deployment was admitted on 51820; nothing was installed\n"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = apply.Execute(p, host)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) {
+		t.Fatalf("a refused mesh file is not a problem for the operator: %v", err)
+	}
+	if problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
+		t.Errorf("hint = %q", problem.Hint)
+	}
+	for _, want := range []string{"line 5: ListenPort 51999, but this deployment was admitted on 51820", "admits the deployment again"} {
+		if !strings.Contains(problem.Explain, want) {
+			t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
+		}
+	}
+	if host.ran(wgHelper+"up") || host.firstCompose() >= 0 {
+		t.Errorf("the apply carried on past a refused mesh file: %v", host.commands)
+	}
+}
+
+// A host where sudo will not run the helper has not admitted the
+// deployment, or has lost its sudoers line: the apply says so and names
+// host admit, rather than quoting a bare exit status.
+func TestAHostWithoutTheHelperNamesHostAdmit(t *testing.T) {
+	host := newHost()
+	host.fail = wgHelper
+	host.failOut = "sudo: a password is required\n"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = apply.Execute(p, host)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) {
+		t.Fatalf("a refused sudo is not a problem for the operator: %v", err)
+	}
+	if problem.Hint != "mesh: the WireGuard helper did not run on home-a" {
+		t.Errorf("hint = %q", problem.Hint)
+	}
+	for _, want := range []string{"sudo: a password is required", "paisans host admit", "/usr/local/libexec/paisans/wg-psns-f2a9"} {
+		if !strings.Contains(problem.Explain, want) {
+			t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
+		}
+	}
+	if host.firstCompose() >= 0 {
+		t.Errorf("a stack moved without the mesh: %v", host.commands)
+	}
+}
+
+// SyncMesh puts the plan's file and syncs, for a caller resuming a run that
+// wrote the file and stopped before the interface had it.
+func TestSyncMeshPutsThenSyncs(t *testing.T) {
+	host := applied(t, "home-a")
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Scope("srv/paisans/f2a9/psns-f2a9.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.commands = nil
+	if err := apply.SyncMesh(p, host); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{wgHelper + "put", wgHelper + "sync"}
+	if strings.Join(host.commands, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ran %v, want %v", host.commands, want)
 	}
 }
 

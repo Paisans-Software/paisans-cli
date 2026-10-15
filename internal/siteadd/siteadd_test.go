@@ -77,7 +77,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 			t.Errorf("the dry run wrote %d file(s) on %s", h.writes, h.name)
 		}
 		for _, c := range h.commands {
-			for _, verb := range []string{"member add", "promote", "syncconf", "up -d", "restart", "edit-config"} {
+			for _, verb := range []string{"member add", "promote", "' sync", "' put", "up -d", "restart", "edit-config"} {
 				if strings.Contains(c, verb) {
 					t.Errorf("the dry run ran %q on %s", c, h.name)
 				}

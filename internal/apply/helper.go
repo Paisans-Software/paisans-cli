@@ -3,6 +3,7 @@ package apply
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
@@ -52,8 +53,8 @@ func (h WGHelper) Put(conf []byte) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.T.RunInput(cmd, string(conf))
-	return err
+	out, err := h.T.RunInput(cmd, string(conf))
+	return withOutput(err, out)
 }
 
 // Up enables and starts the interface.
@@ -85,7 +86,8 @@ func (h WGHelper) Show(field string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return h.T.Run(cmd)
+	out, err := h.T.Run(cmd)
+	return out, withOutput(err, out)
 }
 
 // Log is the interface unit's last journal lines.
@@ -94,7 +96,8 @@ func (h WGHelper) Log() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return h.T.Run(cmd)
+	out, err := h.T.Run(cmd)
+	return out, withOutput(err, out)
 }
 
 func (h WGHelper) run(verb string) error {
@@ -102,6 +105,29 @@ func (h WGHelper) run(verb string) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.T.Run(cmd)
-	return err
+	out, err := h.T.Run(cmd)
+	return withOutput(err, out)
+}
+
+// withOutput is err with what the helper or sudo printed, which is why it
+// failed: SSHTransport's error quotes the output already, and a transport
+// that does not loses nothing. Nil stays nil.
+func withOutput(err error, out string) error {
+	out = strings.TrimRight(out, "\n")
+	if err == nil || out == "" || strings.Contains(err.Error(), out) {
+		return err
+	}
+	return fmt.Errorf("%w\n%s", err, out)
+}
+
+// CommandLine is the helper's command for verb as an operator types it,
+// logged in as the deployment's user, for a message: sudo, the path
+// unquoted, and the verb. An Iface that is no deployment's has no helper,
+// so it is named in words instead.
+func (h WGHelper) CommandLine(verb string) string {
+	path, err := h.Path()
+	if err != nil {
+		return "the WireGuard helper's " + verb
+	}
+	return "sudo " + path + " " + verb
 }

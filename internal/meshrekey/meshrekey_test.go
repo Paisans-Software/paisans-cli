@@ -22,6 +22,14 @@ import (
 
 const wgConf = "/srv/paisans/f2a9/psns-f2a9.conf"
 
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+)
+
 var (
 	privateRe = regexp.MustCompile(`(?m)^PrivateKey = (\S+)`)
 	peerRe    = regexp.MustCompile(`(?m)^PublicKey = (\S+)`)
@@ -111,6 +119,13 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.files[strings.TrimSuffix(path, "'")] = stdin
 		return "", nil
 	}
+	if command == wgHelper+"put" {
+		out, err := h.Run(command)
+		if err == nil {
+			h.files[wgInstalled] = stdin
+		}
+		return out, err
+	}
 	return h.Run(command)
 }
 
@@ -156,8 +171,10 @@ func (h *host) Run(command string) (string, error) {
 	switch {
 	case command == "true":
 		return "", nil
-	case strings.Contains(command, "wg syncconf"):
-		h.run = h.files[wgConf]
+	case command == wgHelper+"put":
+		return "", nil
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		h.run = h.files[wgInstalled]
 		return "", nil
 	case command == "wg show psns-f2a9 public-key":
 		return h.runsKey() + "\n", nil
@@ -294,7 +311,7 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[d.Manifest()] = string(manifest) + "\n"
-		h.run = h.files[wgConf]
+		h.files[wgInstalled], h.run = h.files[wgConf], h.files[wgConf]
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
 		id, e := registry.For(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 		reg.Deployments[id] = e
@@ -331,7 +348,7 @@ func (m *mesh) joining(site string) {
 		if name == site || content == "" {
 			continue
 		}
-		h.files[wgConf], h.run = content, content
+		h.files[wgConf], h.files[wgInstalled], h.run = content, content, content
 		var man render.Manifest
 		if err := json.Unmarshal([]byte(h.files[d.Manifest()]), &man); err != nil {
 			m.t.Fatal(err)
@@ -445,7 +462,7 @@ func TestARekeyResumes(t *testing.T) {
 		fail string
 		from Stage
 	}{
-		{"wg syncconf", Swap},
+		{"' sync", Swap},
 		{"endpoint health", Health},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
@@ -570,7 +587,7 @@ func TestARelaysRekeyPausesPatroni(t *testing.T) {
 			pause = i
 		case strings.Contains(line, "patronictl") && strings.HasSuffix(line, "resume --wait"):
 			resume = i
-		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "wg syncconf"):
+		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "' sync"):
 			vmSync = i
 		}
 	}
@@ -591,7 +608,7 @@ func TestAStoppedRelaySwapResumesPatroni(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil || !strings.Contains(err.Error(), "Patroni stays paused") {
 		t.Fatalf("err = %v", err)
 	}
@@ -683,7 +700,7 @@ func TestAPartialSwapResumesOnAnUnhealthyCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil {
 		t.Fatal("the swap that missed vm passed")
 	}

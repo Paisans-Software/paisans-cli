@@ -111,7 +111,7 @@ func TestRefusals(t *testing.T) {
 			}
 			for name, h := range w.hosts {
 				for _, c := range h.commands {
-					for _, verb := range []string{"member remove", "switchover", "stop", "layout remove", "syncconf", "restart", "ufw delete", "rm -"} {
+					for _, verb := range []string{"member remove", "switchover", "stop", "layout remove", "' sync", "' put", "restart", "ufw delete", "rm -"} {
 						if strings.Contains(c, verb) {
 							t.Errorf("a refused removal ran %q on %s", c, name)
 						}
