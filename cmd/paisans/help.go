@@ -163,9 +163,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "host prepare",
 		summary: "Take a blank host to the state apply assumes.",
-		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute]"},
+		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute]", "paisans host prepare --all [--config " + config.FileName + "] [--execute]"},
 		detail: "Take a blank host to the state apply assumes: Docker, the WireGuard tools, a firewall, and a watchdog on a data site. " +
-			"Installs only what is missing. Writes nothing without --execute.",
+			"Installs only what is missing. Writes nothing without --execute. " +
+			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
 	},
 	{
 		name:    "host deployments",
