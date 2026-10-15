@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // The request is stdout and nothing else, so it can be redirected to the
@@ -81,5 +84,34 @@ func TestHostRequestUsageMatchesTheNotAdmittedLine(t *testing.T) {
 	}
 	if got := c.usage[0]; !strings.HasPrefix(got, "paisans host request --site <name>") || !strings.HasSuffix(got, "> <name>.admit") {
 		t.Errorf("usage %q does not agree with the not-admitted message", got)
+	}
+}
+
+// A stray argument is echoed quoted, so what it holds cannot pass for text
+// of the message.
+func TestHostRequestQuotesAStrayArgument(t *testing.T) {
+	var err error
+	captureOutput(t, func() {
+		err = runHostRequest([]string{"--site", "vm", "--config", fixtureConfig(), "a b\nc"})
+	})
+	if err == nil || !strings.Contains(err.Error(), `"a b\nc"`) {
+		t.Errorf("got %v, want the argument quoted", err)
+	}
+}
+
+// A configuration validate refuses gets no request: nothing on stdout, and
+// the refusal the other commands give.
+func TestHostRequestRefusesAConfigurationValidateRefuses(t *testing.T) {
+	path := filepath.Join("..", "..", "internal", "validate", "testdata", "duplicate-site-address.yaml")
+	var err error
+	stdout, _ := captureOutput(t, func() {
+		err = runHostRequest([]string{"--site", "home-a", "--config", path})
+	})
+	var p *ui.Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, "was refused") {
+		t.Errorf("got %v, want the refused problem", err)
+	}
+	if stdout != "" {
+		t.Errorf("wrote to stdout:\n%s", stdout)
 	}
 }

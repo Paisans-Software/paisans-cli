@@ -429,14 +429,16 @@ doctor, init, config and operator register are the only commands that reach a
 host. Each reads it to plan, and changes it only with --execute; config and
 operator register claim nothing, and their --execute only starts each site's
 configuration sync and, for publish and register, adds a version to its store;
-host request, host deployments, preflight and init have no --execute and never change it;
+host deployments, preflight and init have no --execute and never change it;
 doctor's --execute and secrets prune's change no host either, editing only the
 local files, and secrets prune only reads the gateways' deployment records. With --execute, a command first claims each
 host it writes to in /var/lib/paisans/registry.json, and refuses if another
 deployment there holds this one's token, WireGuard interface or listen port, or
 a mesh subnet overlapping this one's. apply and host prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; site
+no host, only the DNS provider's API, and change it only with --execute; host
+request reaches no host and takes no --execute, writing only to stdout and
+stderr; site
 remove also deletes the removed site's records there. web-server show and
 web-server check change nothing: check looks at a monitor's public hostname as
 any visitor could, and with managed_by: external both read the monitor's web

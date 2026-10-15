@@ -23,7 +23,7 @@ func runHostRequest(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host request takes no argument: paisans host request --site <name> > <name>.admit. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("host request takes no argument: paisans host request --site <name> > <name>.admit. Got extra argument(s): %s", quoteAll(fs.Args()))
 	}
 	if *site == "" {
 		return fmt.Errorf("host request: name the site with --site, Eg: paisans host request --site <name> > <name>.admit")
@@ -49,4 +49,14 @@ func runHostRequest(args []string) error {
 	}
 	r.Result("digest %s: tell it to the host's owner over a channel you both trust, such as a call; host admit shows the same", admission.Digest(data))
 	return nil
+}
+
+// quoteAll is args each quoted and joined by spaces, so an argument holding
+// spaces or a newline cannot pass for text of the message.
+func quoteAll(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = fmt.Sprintf("%q", a)
+	}
+	return strings.Join(q, " ")
 }
