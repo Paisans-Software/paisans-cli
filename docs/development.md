@@ -614,11 +614,17 @@ WireGuard helper (`apply.WGHelper`, `internal/apply/helper.go`), whose script
 `internal/hostprep/snippets/wg-helper.sh.tmpl`: `handMesh` puts the rendered
 file, then a first apply runs `up`; a peer change runs `sync` so the mesh
 stays up; a change to a line only wg-quick applies runs `restart`; and an
-unchanged file on a host whose interface is down runs `up`. An unchanged file
-on an up interface is read back (`runningStep`) and synced or restarted when
-the interface runs another key, other peers or no address. A failure stops the
-apply there. `README.md` has the table under "`apply` brings the mesh
-interface up before anything binds to it".
+unchanged file on a host whose interface is absent runs `up`, and on one whose
+link is down runs `restart`. An unchanged file on an up interface is read back
+(`runningStep`) and synced or restarted when the interface runs another key,
+`ListenPort`, peers, `AllowedIPs` or `PersistentKeepalive`, or lacks the file's
+`Address` or `MTU`. A failure stops the apply there. `internal/apply/wgcalls_test.go`
+refuses any `wg`, `wg-quick`, `journalctl` or `systemctl` command written
+directly in the packages that touch the mesh, and exempts two strings in
+`internal/siteremove/host.go`: `removeUnitsCommand`, which removes the removed
+site's own units, and `wireguardCommand`, which stops its interface, neither
+of which a helper verb does. `README.md` has the table under "`apply` brings
+the mesh interface up before anything binds to it".
 
 **The DNS token is checked from the site before Caddy asks the provider.**
 `Plan.DNSToken` is set on a Caddy site whose Caddy changes, reloads or is

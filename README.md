@@ -5756,15 +5756,16 @@ apply naming `paisans host admit`.
 What it runs depends on what changed, and the narrower action wins here as it
 does for stacks:
 
-| `psns-<token>.conf` | Interface | Action, after the helper's `put` |
+| `psns-<token>.conf` | Interface | Action |
 |---------------------|-----------|--------|
-| new | any | the helper's `up`: `systemctl enable --now wg-quick@psns-<token>` |
-| unchanged | down | the same, so a rebooted or hand stopped site recovers on the next apply |
+| new | any | `put`, then the helper's `up`: `systemctl enable --now wg-quick@psns-<token>` |
+| unchanged | absent | the same, so a rebooted or hand stopped site recovers on the next apply |
+| unchanged | down | `put`, then the helper's `restart`, since a down link carries nothing whatever it holds |
 | unchanged | up, running the file | nothing, and no `put` |
-| unchanged | up, with another key or other peers | the helper's `sync` |
-| unchanged | up, without the file's `Address` | the helper's `restart` |
-| changed peers | up | the helper's `sync`: `wg syncconf` from `wg-quick strip`, in place |
-| changed `Address` or `MTU` | up | the helper's `restart`: `systemctl restart wg-quick@psns-<token>` |
+| unchanged | up, differing in a way only wg-quick applies | `put`, then the helper's `restart` |
+| unchanged | up, differing in anything else the file sets | `put`, then the helper's `sync` |
+| changed peers | up | `put`, then the helper's `sync`: `wg syncconf` from `wg-quick strip`, in place |
+| changed `Address` or `MTU` | up | `put`, then the helper's `restart`: `systemctl restart wg-quick@psns-<token>` |
 
 **A peer change is synced rather than restarted.** A restart takes the
 interface down, and on a data site that partitions etcd and Patroni for as long as it is down; with election timeouts
@@ -5780,9 +5781,15 @@ inside the mesh subnet, which the interface's own `Address` already routes
 **An up interface is read back even when its file did not change.**
 Writing the file and handing it over are separate commands, so a run that
 stopped between them leaves the file as rendered and the interface on what
-it ran before. `apply` reads the interface's address with `ip`, and its key
-and peers with the helper's `show`, and restarts or syncs it when they are
-not the file's.
+it ran before. `apply` reads the interface's addresses and MTU with `ip`,
+and its key, `ListenPort`, peers, each peer's `AllowedIPs` and
+`PersistentKeepalive` with the helper's `show`. It restarts the interface
+when it lacks the file's `Address` or runs another `MTU`, which only
+wg-quick applies, and syncs it when any of the rest differs. A peer's
+`Endpoint` is not compared: `wg` reports the address a peer last sent from,
+resolved and after any NAT, which differs from the file on a mesh that
+works, so a run stopped after a change to nothing but an `Endpoint` is
+completed by the next change to the mesh file.
 
 "Up" is read from the kernel (`ip link show psns-<token>`), not from the unit. An
 interface brought up by hand serves every service just as well, and starting the
