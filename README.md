@@ -5791,12 +5791,14 @@ resolved and after any NAT, which differs from the file on a mesh that
 works, so a run stopped after a change to nothing but an `Endpoint` is
 completed by the next change to the mesh file.
 
-"Up" is read from the kernel (`ip link show psns-<token>`), not from the unit. An
-interface brought up by hand serves every service just as well, and starting the
-unit on top of it would fail on an interface that already exists.
+"Up" is read from the kernel, not from the unit: `ip -br addr show dev
+psns-<token>` for its state and addresses and `ip -o link show dev
+psns-<token>` for its MTU, neither of which needs privilege. An interface
+brought up by hand serves every service just as well, and starting the unit
+on top of it would fail on an interface that already exists.
 
 **The interface is read back before any stack starts.** After it starts,
-restarts or syncs the mesh, `apply` reads `ip -br addr show psns-<token>` and
+restarts or syncs the mesh, `apply` reads `ip -br addr show dev psns-<token>` and
 carries on only when the interface exists, is not down and holds the site's
 `Address`. The unit's exit status alone is not enough: an etcd started over a
 missing interface crash loops on `bind: cannot assign requested address`, and
