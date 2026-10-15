@@ -4,10 +4,9 @@ name: release
 # and publishes the GitHub Release, with the static Linux binaries and their
 # SHA256SUMS that `make release-binaries` builds attached to it. A host owner
 # downloads one of those to run `paisans host admit` on the host itself.
-# Any other push to main is a no-op. The
-# version is the constant in internal/version/version.go, which `make bump`
-# sets on develop; the "Release X to main" pull request from develop brings
-# it here.
+# Any other push to main is a no-op. The version is the constant in
+# internal/version/version.go, which `make bump` sets on develop; the
+# "Release X to main" pull request from develop brings it here.
 #
 # That pull request is merged with a merge commit, never squashed or rebased.
 # A merge commit keeps main an ancestor of develop, so the next release pull
@@ -193,7 +192,9 @@ jobs:
           echo "id=${id}" >> "$GITHUB_OUTPUT"
 
       # Uploaded by release id, because the API's lookup of a release by its
-      # tag does not return a draft.
+      # tag does not return a draft. If this step or the publish fails, the
+      # tag exists and a re-run releases nothing: delete the draft release and
+      # the tag, then re-run the job.
       - name: Attach the Linux binaries
         if: steps.decide.outputs.release == 'true'
         env:
