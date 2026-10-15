@@ -54,6 +54,10 @@ type Reads interface {
 // calls, given the probes of the check's own subject, so the graph's
 // findings for a complete Input are Diagnose's.
 //
+// Reads that answer DNSReads as well get the DNS checks after the rest:
+// Caddy's certificates on each Caddy site, the DNS token from each place
+// that uses it, and the zone's records.
+//
 // A check that needs any of several sites' checks names only the sites
 // asked; one whose sites were all left out by --site needs nothing, runs,
 // and says what it could not ask, as Diagnose does.
@@ -306,6 +310,9 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 			},
 			Judge: func(in Input) []Finding { return Allowlist(cfg, bySite(in.Allowlists, site, AllowlistProbe.site)) },
 		})
+	}
+	if dr, ok := reads.(DNSReads); ok {
+		addDNS(g, cfg, sites, dr)
 	}
 	return g
 }

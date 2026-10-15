@@ -77,6 +77,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"read " + mesh.DaemonConfig,
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"),
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.2:8008"),
+		doctor.CaddyLogCommand(cfg.Deployment()),
 	}
 	prefixes = []string{
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
@@ -119,6 +120,9 @@ func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
 	t.Cleanup(func() { doctorTransport, doctorNow, doctorAtOnce = saved, savedNow, savedAtOnce })
 }
 
+// quietCaddyLog is a caddy container with no certificate line in its log.
+const quietCaddyLog = "now 1760000000\nstarted 2025-10-09T08:00:00Z\n"
+
 // stuckHosts are the four sites of the stuck case: home-b led and is down,
 // home-a is a replica /sync no longer names, and vm overlaps the mesh.
 func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHost {
@@ -148,11 +152,13 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		doctor.CaddyLogCommand(cfg.Deployment()):   quietCaddyLog,
 	}
 	watch := map[string]string{
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-health-app-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		doctor.CaddyLogCommand(cfg.Deployment()):   quietCaddyLog,
 	}
 	return map[string]doctorHost{
 		"home-a.local":      {name: "home-a.local", answers: homeA, sent: sent, writes: writes},
@@ -318,14 +324,15 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 {"id":"b","name":"/paisans-f2a9-old-app-1","pid":11,"labels":{"community.paisans.deployment":"` + id + `","com.docker.compose.project":"paisans-f2a9-old","com.docker.compose.service":"app"},"networks":{"paisans-f2a9-old_default":{}},"ports":{}}
 {"id":"c","name":"/blog-ghost-1","pid":12,"labels":{"com.docker.compose.project":"blog"},"networks":{"web":{}},"ports":{}}
 `,
-		probes[4]:  "",
-		probes[5]:  "",
-		probes[6]:  "",
-		probes[7]:  "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
-		probes[8]:  "[]",
-		probes[9]:  "ufw absent\n",
-		probes[10]: "inactive\n",
-		probes[11]: "/srv/caddy.d/blog.caddy\n",
+		probes[4]:                                "",
+		probes[5]:                                "",
+		probes[6]:                                "",
+		probes[7]:                                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
+		probes[8]:                                "[]",
+		probes[9]:                                "ufw absent\n",
+		probes[10]:                               "inactive\n",
+		probes[11]:                               "/srv/caddy.d/blog.caddy\n",
+		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
 	withDoctorHosts(t, map[string]doctorHost{

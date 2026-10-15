@@ -9118,6 +9118,23 @@ closing list is usually the cause of those after it:
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
 | SSH allowlist | `/etc/paisans/ssh-allow.<user>` on every site that answered (see *host prepare manages the login user's authorized keys*) | never. No list is `info`, since every key is then allowed; a list says how many keys it holds, and each key `ssh.keys` names that it does not hold and that is not in the login user's `authorized_keys` yet is a `WARN`, as the refusal the next `host prepare` would give when it appends that key, with the `host allow` that allows it. A key already in `authorized_keys` is never appended, so it is no warning; where `authorized_keys` could not be read, every key the list lacks is reported, as the refusal host prepare would give if it had to add it. Nothing is broken now, so it is never a `FAIL` |
+| Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
+| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there through sudo and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
+| DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
+
+The provider judges the address a call comes from (Cloudflare's Client IP
+Address Filtering), so the token is checked from every place that uses it: a
+token allowed from the workstation and not the gateway passes `dns init` and
+fails every certificate Caddy asks for. The zone lookup comes first because
+the filter applies to it and not to verify, so a token refused from a place is
+refused by its first call there and nothing more is asked. Calls with a refused
+token are also what keep Cloudflare's lockout, `10502`, going (observed on
+staging, where it held while Caddy retried and ended once the filter admitted
+the gateway), so while any Caddy log shows a `10502` in the last five minutes
+no token check is made from anywhere, and each says so: fix the token's
+filter, and Caddy's next scheduled attempt succeeds with nothing restarted.
+For a provider doctor has no check for, the token and records checks are
+skipped and say so; Caddy's log is what tells whether it gets certificates.
 
 The health check names each member rather than using `--cluster`, because
 `--cluster` first asks the cluster for its member list (etcd v3.5.16,

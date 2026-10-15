@@ -181,6 +181,14 @@ func (c TokenCheck) fail(r TokenResult) TokenResult {
 // errNoToken is a host whose caddy.env holds no token.
 var errNoToken = errors.New("no token")
 
+// unreadableEnv is a host whose caddy.env could not be read at all, with
+// why. It is not errNoToken: caddy.env is root's and 0600, so a check that
+// runs without root sees a file it cannot read, which says nothing about
+// the token in it.
+type unreadableEnv struct{ reason string }
+
+func (e unreadableEnv) Error() string { return e.reason }
+
 // tokenCaller makes one GET at the provider's API from one place.
 type tokenCaller interface {
 	// get returns the HTTP status and body, and an error only when there
@@ -312,12 +320,32 @@ func (c TokenCheck) unanswered(caller tokenCaller, err error) TokenResult {
 			Advice:  "apply renders it from external.acme_dns_token. Set that in the secrets and apply again.",
 		})
 	}
+	var unreadable unreadableEnv
+	if errors.As(err, &unreadable) {
+		return c.fail(TokenResult{
+			Unanswered: true,
+			Finding:    "cannot read caddy.env on " + c.from() + ": " + unreadable.reason,
+			Advice:     "Nothing judged the token. caddy.env is root's, so the check reads it through sudo; check that the ssh user has sudo there, and that apply has rendered the file.",
+		})
+	}
 	return c.fail(TokenResult{
 		Unanswered: true,
 		Finding:    "cloudflare did not answer from " + c.from() + ": " + caller.redact(err.Error()),
 		Advice:     "Nothing judged the token. Check that " + c.from() + " reaches api.cloudflare.com over HTTPS.",
 	})
 }
+
+// FilterAdvice is what to do about Cloudflare's 9109, a token refused from
+// the address a call came from. Doctor gives the same advice for the 9109
+// it reads in Caddy's log.
+const FilterAdvice = "Add the address to the token's Client IP Address Filtering, or remove the filter. " +
+	"It is the address in Cloudflare's message, because that is what Cloudflare judged, and it can differ from the site's public_address behind NAT."
+
+// LockoutAdvice is what to do about Cloudflare's 10502, its lockout, which
+// it holds while calls with a refused token keep arriving (observed on
+// staging): fixing the token ends it.
+const LockoutAdvice = "It does so while calls with a refused token keep arriving, as Caddy's retries do. " +
+	"Fix what it refuses the token for, usually its Client IP Address Filtering; after that Caddy's next scheduled attempt succeeds, with nothing restarted."
 
 // location is the address in a 9109 message: "Cannot use the access token
 // from location: 203.0.113.7".
@@ -371,15 +399,13 @@ func (c TokenCheck) judge(caller tokenCaller, status int, body []byte, result an
 				Code:    9109,
 				Address: address,
 				Finding: finding,
-				Advice: "Add the address to the token's Client IP Address Filtering, or remove the filter. " +
-					"It is the address in Cloudflare's message, because that is what Cloudflare judged, and it can differ from the site's public_address behind NAT.",
+				Advice:  FilterAdvice,
 			}), false
 		case 10502:
 			return c.fail(TokenResult{
 				Code:    10502,
 				Finding: "cloudflare is locking the DNS token out",
-				Advice: "It does so while calls with a refused token keep arriving, as Caddy's retries do. " +
-					"Fix what it refuses the token for, usually its Client IP Address Filtering; after that Caddy's next scheduled attempt succeeds, with nothing restarted.",
+				Advice:  LockoutAdvice,
 			}), false
 		case 1000:
 			return c.fail(TokenResult{
@@ -480,6 +506,9 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 		return 0, nil, errors.New(curlCause(out, err))
 	}
 	kind, rest, _ := strings.Cut(out, "\n")
+	if reason, ok := strings.CutPrefix(kind, "unreadable "); ok {
+		return 0, nil, unreadableEnv{strings.TrimSpace(strings.TrimPrefix(reason, "sed: "))}
+	}
 	switch strings.TrimSpace(kind) {
 	case "none":
 		return 0, nil, errNoToken
@@ -504,9 +533,13 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 
 // remoteGet is the host's command for one GET. A literal string is
 // replaced by a POSIX loop rather than sed, because sed would need the
-// token in its arguments.
+// token in its arguments. A file sed cannot read, missing or not readable
+// by the user the command runs as, prints "unreadable" and sed's error
+// first, so that it is told apart from a file that holds no token.
 func remoteGet(envFile, target string) string {
-	return "t=$(sed -n 's/^ACME_DNS_TOKEN=//p' " + quote(envFile) + " 2>/dev/null); " +
+	return "f=" + quote(envFile) + "; " +
+		`e=$(sed -n 1p "$f" 2>&1 >/dev/null); if [ $? -ne 0 ]; then printf 'unreadable %s\n' "$e" | head -n 1; exit 0; fi; ` +
+		`t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
 		`if [ -z "$t" ]; then echo none; exit 0; fi; ` +
 		`case $t in cfat_*) echo account;; *) echo user;; esac; ` +
 		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$t" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +

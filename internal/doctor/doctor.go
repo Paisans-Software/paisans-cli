@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -71,7 +72,7 @@ const (
 	SectionAllowlist  = "ssh allowlist"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist}
+var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -226,6 +227,14 @@ type Input struct {
 	Leftovers  []LeftoverProbe
 	Allowlists []AllowlistProbe
 	Settings   []SettingsProbe
+	// Caddy is each Caddy site's certificate log, Secrets whether the
+	// secrets opened, Tokens each place's DNS token check, and Records
+	// the zone compared with what the deployment needs (see dnschecks.go).
+	// None of them holds the token.
+	Caddy   []CaddyLogProbe
+	Secrets SecretsProbe
+	Tokens  []dns.TokenResult
+	Records RecordsProbe
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -274,6 +283,10 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
 	findings = append(findings, Allowlist(cfg, in.Allowlists)...)
+	findings = append(findings, CaddyCertificates(cfg, in.Caddy)...)
+	findings = append(findings, Secrets(in.Secrets)...)
+	findings = append(findings, Tokens(in)...)
+	findings = append(findings, Records(in.Records)...)
 	return Report{Sites: len(in.Sites), Reached: len(reached), Findings: findings}
 }
 

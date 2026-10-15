@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -720,5 +722,34 @@ func TestAccountJoinHostnameInEitherMode(t *testing.T) {
 		if w.Name == "invite.example.org" {
 			t.Errorf("a stale hostnames.invite: %s %s is wanted", w.Type, w.Name)
 		}
+	}
+}
+
+// A gateway's Caddy serves every hostname but a monitor's, and a monitor's
+// Caddy serves the hostnames of the apps pinned to it.
+func TestServedHostnamesSplitsGatewayAndMonitor(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(site string) []string {
+		var out []string
+		for _, h := range ServedHostnames(cfg, site) {
+			out = append(out, h.Name)
+		}
+		return out
+	}
+	var gateway []string
+	for _, h := range GatewayHostnames(cfg) {
+		gateway = append(gateway, h.Name)
+	}
+	if got := names("vm"); !slices.Equal(got, gateway) || slices.Contains(got, "health.example.org") {
+		t.Errorf("vm serves %v, want the gateway's %v", got, gateway)
+	}
+	if got := names("watch"); !slices.Equal(got, []string{"health.example.org"}) {
+		t.Errorf("watch serves %v", got)
+	}
+	if got := names("home-a"); len(got) != 0 {
+		t.Errorf("home-a runs no Caddy and serves %v", got)
 	}
 }
