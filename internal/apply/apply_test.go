@@ -1318,6 +1318,28 @@ func TestAHostThatLostTheHelperNamesHostAdmit(t *testing.T) {
 	}
 }
 
+// Each way sudo refuses to run the helper stops the apply as sudo's
+// refusal, with what answers it: host admit, or for a host whose sudo
+// wants a terminal, the owner lifting that for the helper.
+func TestEverySudoRefusalStopsTheApply(t *testing.T) {
+	for line, want := range map[string]string{
+		"sudo: sorry, you must have a tty to run sudo":                                                   "requires a terminal",
+		"sudo: unable to execute /usr/local/libexec/paisans/wg-psns-f2a9: Permission denied":             "paisans host admit",
+		"sudo: account validation failure, is your account locked?":                                      "paisans host admit",
+		"sudo: PAM account management error: Authentication service cannot retrieve authentication info": "paisans host admit",
+	} {
+		_, err := meshFailure(t, wgHelper, line+"\n")
+		var problem *ui.Problem
+		if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper did not run on home-a" {
+			t.Errorf("%s: %v", line, err)
+			continue
+		}
+		if !strings.Contains(problem.Explain, want) || !strings.Contains(problem.Explain, line) {
+			t.Errorf("%s: the explanation lacks %q or the line:\n%s", line, want, problem.Explain)
+		}
+	}
+}
+
 // A refusal that says the host is wrong, not the file, is answered by the
 // owner running host admit again, not by a configuration change.
 func TestAHostSideRefusalNamesHostAdmitAgain(t *testing.T) {

@@ -117,9 +117,13 @@ func helperProblem(site string, h WGHelper, err error) error {
 		}
 	}
 	if line := sudoRefusal(text, path); line != "" {
+		advice := "`paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
+		if strings.Contains(line, ttyRefusal) {
+			advice = "sudo on this host requires a terminal (requiretty), and apply has none: the host's owner removes that requirement for the helper, then apply again."
+		}
 		return &ui.Problem{
 			Hint:    "mesh: the WireGuard helper did not run on " + site,
-			Explain: fmt.Sprintf("sudo would not run %s (%s). `paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again.\n%s", path, ui.Visible(line), stopped),
+			Explain: fmt.Sprintf("sudo would not run %s (%s). %s\n%s", path, ui.Visible(line), advice, stopped),
 			Cause:   err,
 		}
 	}
@@ -133,17 +137,24 @@ var sudoRefusals = []string{
 	"a password is required",
 	"a terminal is required",
 	"no tty present",
+	ttyRefusal,
 	" is not allowed to execute ",
+	"account validation failure",
+	"PAM account management error",
 }
+
+// ttyRefusal is what sudo prints when its requiretty option is set, which
+// host admit does not answer: the owner lifts it for the helper.
+const ttyRefusal = "sorry, you must have a tty to run sudo"
 
 // sudoRefusal is the line sudo printed when it would not run the helper at
 // path, such as "sudo: a password is required", "Sorry, user ... is not
-// allowed to execute ..." or "sudo: <path>: command not found", empty when
-// there is none.
+// allowed to execute ...", "sudo: <path>: command not found" or "sudo:
+// unable to execute <path>: ...", empty when there is none.
 func sudoRefusal(out, path string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if path != "" && line == "sudo: "+path+": command not found" {
+		if path != "" && (line == "sudo: "+path+": command not found" || strings.HasPrefix(line, "sudo: unable to execute "+path+":")) {
 			return line
 		}
 		for _, refusal := range sudoRefusals {
