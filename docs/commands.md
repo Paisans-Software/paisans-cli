@@ -550,14 +550,19 @@ and a watchdog on a data site. Installs only what is missing.
 ```
 paisans host prepare --site home-a            # shows what it would do
 paisans host prepare --site home-a --execute  # does it
+paisans host prepare --all --execute          # every site, one at a time
 ```
 
 * **Alone:** the whole apply runs it for every site, so a single run is for one
   host on its own: preparing a new machine before declaring the rest of a
   change, or reaching a host through `--ssh`.
-* **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`,
-  `--sudo`. It reads no secrets.
-* **Hosts:** the one site's. It runs the host check first, which refuses a
+* **Flags:** `--site <name>` or `--all`, `--config`, `--ssh` (with `--site`
+  only), `--execute`, `--sudo`. It reads no secrets.
+* **`--all`:** every site the configuration declares, in its order, each
+  exactly as `--site` prepares it, with its own review. Every sudo password is
+  asked first. It stops at the first site that fails; re-running it resumes
+  there, since a prepared host plans nothing.
+* **Hosts:** the one site's, or with `--all` each site's in turn. It runs the host check first, which refuses a
   Docker snap and a Docker older than engine 25.0.0 or compose 2.24.0,
   whatever its source.
 * **Docker:** left as it is wherever `docker compose` works, from any source.

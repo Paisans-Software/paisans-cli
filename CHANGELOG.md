@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, asking every sudo password first and stopping at the first failure.
+
 ### Fixed
 
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
