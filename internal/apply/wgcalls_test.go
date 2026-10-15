@@ -11,20 +11,60 @@ import (
 	"testing"
 )
 
-// meshCommand matches a string that starts a wg, wg-quick, journalctl or
-// systemctl command, at its start or after a shell separator, with or
-// without sudo in front.
-var meshCommand = regexp.MustCompile(`(^|[;&|]\s*)(sudo\s+(-n\s+)?)?(wg|wg-quick|journalctl|systemctl)\s`)
+// meshWords are the commands that reach the mesh interface or its unit.
+const meshWords = `wg|wg-quick|journalctl|systemctl`
+
+// meshCommand matches one of meshWords where a shell starts a command: at
+// the start of the string or of a line, after ;, &, |, ( (which covers &&,
+// || and $( ) or a backtick, or inside sh -c '. Before the word it allows
+// sudo with its flags, env with its assignments, exec, command or nohup, in
+// any order, and an absolute path. Group 1 is the word and group 2 the
+// argument after it, if any.
+var meshCommand = regexp.MustCompile(
+	"(?:^|[\\n;&|(`]|\\b(?:ba)?sh\\s+-c\\s+['\"])\\s*" +
+		`(?:(?:sudo(?:\s+(?:-[ugCDhpRrTU]\s+\S+|-\S+))*|env(?:\s+\S+=\S*)*|exec|command|nohup)\s+)*` +
+		`(?:/\S*/)?(` + meshWords + ")" +
+		"(?:$|[\\s'\"`;&|)]\\s*(\\S*))")
+
+// meshWord matches a string that is nothing but one of meshWords, Eg: a
+// constant joined to its arguments elsewhere.
+var meshWord = regexp.MustCompile(`^\s*(?:/\S*/)?(?:` + meshWords + `)\s*$`)
+
+// directMeshCommand reports whether s, a string in a package that touches
+// the mesh, runs one of meshWords directly. systemctl --user is the
+// deployment user's own systemd and does not reach the mesh, so that one
+// command is allowed; any other in the same string is still caught.
+func directMeshCommand(s string) bool {
+	if meshWord.MatchString(s) {
+		return true
+	}
+	for _, m := range meshCommand.FindAllStringSubmatch(s, -1) {
+		if m[1] == "systemctl" && m[2] == "--user" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// exemptLiterals are, by file, the exact strings that may run a mesh
+// command directly, and why.
+var exemptLiterals = map[string]map[string]string{
+	filepath.Join("..", "siteremove", "host.go"): {
+		// removeUnitsCommand
+		`for f in /etc/systemd/system/%[1]s*; do [ -e "$f" ] || continue; systemctl disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; for f in /etc/systemd/system/*.d/%[1]s*; do [ -e "$f" ] || continue; rm -f -- "$f"; rmdir "$(dirname "$f")" 2>/dev/null || true; done; systemctl daemon-reload`: "site remove's host step removes the removed site's own units, which no helper verb does",
+		// wireguardCommand
+		`systemctl disable --now %[1]s >/dev/null 2>&1 || true; if systemctl is-active --quiet %[1]s; then echo "%[1]s is still active"; exit 1; fi`: "site remove's host step stops the removed site's own interface, which no helper verb does",
+	},
+}
 
 // Every command that reaches the mesh interface goes through the WireGuard
 // helper, because it is the one thing the deployment's user may run as
 // root: one written directly fails on a host, without sudo. This walks the
-// packages that touch the mesh and refuses a string literal that starts
-// such a command. A systemctl --user command is the user's own and allowed.
+// packages that touch the mesh and refuses a string literal that runs such
+// a command, or that is one of their names on its own.
 func TestTheMeshIsReachedOnlyThroughTheHelper(t *testing.T) {
-	exempt := map[string]string{
-		filepath.Join("..", "siteremove", "host.go"): "site remove's host step stops the removed site's own units and interface, which no helper verb does",
-	}
+	used := map[string]bool{}
 	for _, dir := range []string{".", "../meshkey", "../meshrekey", "../siteadd", "../siteremove", "../doctor"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
@@ -34,7 +74,7 @@ func TestTheMeshIsReachedOnlyThroughTheHelper(t *testing.T) {
 			t.Fatalf("%s holds no Go file; the walk would pass on nothing", dir)
 		}
 		for _, file := range files {
-			if strings.HasSuffix(file, "_test.go") || exempt[file] != "" {
+			if strings.HasSuffix(file, "_test.go") {
 				continue
 			}
 			fset := token.NewFileSet()
@@ -48,11 +88,90 @@ func TestTheMeshIsReachedOnlyThroughTheHelper(t *testing.T) {
 					return true
 				}
 				s, err := strconv.Unquote(lit.Value)
-				if err == nil && meshCommand.MatchString(s) && !strings.Contains(s, "--user") {
-					t.Errorf("%s: %q runs a mesh command directly; go through apply.WGHelper", fset.Position(lit.Pos()), s)
+				if err != nil || !directMeshCommand(s) {
+					return true
 				}
+				if exemptLiterals[file][s] != "" {
+					used[s] = true
+					return true
+				}
+				t.Errorf("%s: %q runs a mesh command directly; go through apply.WGHelper", fset.Position(lit.Pos()), s)
 				return true
 			})
+		}
+	}
+	// An exemption nothing matches any more is stale, and would silently
+	// cover a new string with the same text.
+	for file, literals := range exemptLiterals {
+		for s := range literals {
+			if !used[s] {
+				t.Errorf("%s: the exempt string %q is not in the file any more; remove its exemption", file, s)
+			}
+		}
+	}
+}
+
+// The guard's matcher catches each form a direct command can take, and
+// lets prose and the user's own systemd through.
+func TestTheMeshGuardCatchesEachForm(t *testing.T) {
+	caught := []string{
+		"wg show ",
+		"wg",
+		"wg-quick",
+		" journalctl ",
+		"systemctl",
+		"/usr/bin/wg",
+		"wg show psns-f2a9 peers",
+		"wg-quick up psns-f2a9",
+		"journalctl -u wg-quick@psns-f2a9",
+		"systemctl restart wg-quick@psns-f2a9",
+		"sudo wg show x",
+		"sudo -n wg show x",
+		"sudo -u root wg show x",
+		"sudo -n -u root -E wg show x",
+		"env wg show x",
+		"env LC_ALL=C wg show x",
+		"sudo env PATH=/usr/sbin wg show x",
+		"exec wg-quick down x",
+		"/usr/bin/wg show x",
+		"sudo /usr/bin/wg show x",
+		"true; wg show x",
+		"true;wg show x",
+		"true && wg show x",
+		"false || wg show x",
+		"echo x | wg setconf x /dev/stdin",
+		"x\nwg show x",
+		"echo $(wg show x)",
+		"echo `wg show x`",
+		"(wg show x)",
+		"sh -c 'wg show x'",
+		`sh -c "wg show x"`,
+		"bash -c 'sudo wg show x'",
+		"wg\tshow x",
+		"systemctl --user status docker; systemctl stop x",
+		"systemctl --user restart docker && sudo systemctl restart wg-quick@x",
+		"x; systemctl",
+	}
+	for _, s := range caught {
+		if !directMeshCommand(s) {
+			t.Errorf("%q is not caught", s)
+		}
+	}
+	allowed := []string{
+		"systemctl --user status docker",
+		"As that user, check `systemctl --user status docker`, and that DOCKER_HOST is set",
+		"restart x, so it is up on its file's Address and MTU, which only wg-quick applies",
+		"wg-quick: %s\n%s",
+		" wg-quick[",
+		"wgsomething show",
+		"swg show",
+		"sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' show peers",
+		"the WireGuard helper's show latest-handshakes",
+		"/etc/wireguard/psns-f2a9.conf",
+	}
+	for _, s := range allowed {
+		if directMeshCommand(s) {
+			t.Errorf("%q is caught, and runs no mesh command", s)
 		}
 	}
 }

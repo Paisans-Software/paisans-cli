@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 )
@@ -45,7 +46,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 					More: []string{
 						"Every service on the site binds its mesh address, which exists only while the interface is up, so nothing on this site can reach another one.",
 						"recover:",
-						fmt.Sprintf("  1. `systemctl status %s` and `journalctl -u %s` on %s say why it did not come up.", d.WireGuardUnit(), d.WireGuardUnit(), p.Site),
+						fmt.Sprintf("  1. `%s`, as the deployment's user on %s, prints %s's journal, which says why it did not come up.", apply.WGHelper{Iface: iface}.CommandLine("log"), p.Site, d.WireGuardUnit()),
 						fmt.Sprintf("  2. `paisans apply --site %s --execute` starts it and enables it at boot.", p.Site),
 					}})
 			default:

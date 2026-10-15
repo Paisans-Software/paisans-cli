@@ -497,7 +497,7 @@ func (p *Plan) buildCut() (*Stage, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.Gate = fmt.Sprintf("no remaining site lists %s's WireGuard key as a peer, and `wg show` on each has no handshake from it", p.Site)
+	st.Gate = fmt.Sprintf("no remaining site lists %s's WireGuard key as a peer, and the WireGuard helper's show on each has no handshake from it", p.Site)
 	if len(p.evict.joining) > 0 {
 		st.Gate += fmt.Sprintf("; %s, not prepared yet, is neither dialled nor gated", joinAnd(p.Joining()))
 	}

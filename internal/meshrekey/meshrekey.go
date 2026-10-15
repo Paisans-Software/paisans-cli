@@ -324,7 +324,7 @@ func (p *Plan) stages(s Site) []stageText {
 		all = append(all, stageText{Swap, "pause Patroni", fmt.Sprintf("`patronictl pause --wait`: %s reach each other only through %s, so its swap cuts them apart for a moment, which can cost etcd its quorum; paused, Patroni fails nothing over for a partition that heals in seconds", joinAnd(s.Relays), s.Name), "Patroni reports itself paused"})
 	}
 	all = append(all,
-		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
+		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface by the WireGuard helper's sync; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
 		stageText{Health, "check the cluster", "nothing changes", fmt.Sprintf("etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming; within %s", healthWait)},
 	)
 	if len(s.Relays) > 0 {
