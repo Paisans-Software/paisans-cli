@@ -849,3 +849,87 @@ func TestCheckPlatformsWithoutAnArchAsksNothing(t *testing.T) {
 		t.Fatalf("asked: %v %+v %v", r.asked, notes, refusals)
 	}
 }
+
+// An override behind the track it replaced is a warning, naming the key
+// and the newer release; it never stops the plan.
+func TestAnOverrideBehindItsTrackIsAWarning(t *testing.T) {
+	const old = "gcr.io/etcd-development/etcd:v3.4.30"
+	rendered := planWith(t, func(c *config.Config) { c.Infra.Images = map[string]string{"etcd": old} })
+	p, err := apply.Build("home-a", rendered, acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pin *apply.ImagePin
+	for i := range p.Pins {
+		if p.Pins[i].Origin == "infra.images.etcd" {
+			pin = &p.Pins[i]
+		}
+	}
+	if pin == nil {
+		t.Fatalf("no pin from infra.images.etcd: %+v", p.Pins)
+	}
+	// The fake registry puts a track on its pattern with each * as 0.
+	if !pin.Behind || pin.Replaced != "gcr.io/etcd-development/etcd:v3.5.0" {
+		t.Errorf("the pin is %+v, want behind v3.5.0", pin)
+	}
+	var warned bool
+	for _, n := range p.Notes {
+		if n.Hint != "" && strings.Contains(n.Hint, "infra.images.etcd") && strings.Contains(n.Text, "v3.5.0") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no warning names the key and the newer release: %+v", p.Notes)
+	}
+}
+
+func TestAnOverrideAheadOfItsTrackIsNotBehind(t *testing.T) {
+	rendered := planWith(t, func(c *config.Config) {
+		c.Infra.Images = map[string]string{"etcd": "gcr.io/etcd-development/etcd:v3.5.21"}
+	})
+	p, err := apply.Build("home-a", rendered, acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range p.Pins {
+		if pin.Origin == "infra.images.etcd" && pin.Behind {
+			t.Errorf("v3.5.21 is called behind v3.5.0: %+v", pin)
+		}
+	}
+}
+
+// Two repositories' version schemes need not compare, so a fork is shown
+// beside what it replaced and never judged.
+func TestAnOverrideInAnotherRepositoryIsNotJudged(t *testing.T) {
+	rendered := planWith(t, func(c *config.Config) {
+		c.Infra.Images = map[string]string{"etcd": "ghcr.io/example-org/etcd:v1.0.0"}
+	})
+	p, err := apply.Build("home-a", rendered, acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range p.Pins {
+		if pin.Origin != "infra.images.etcd" {
+			continue
+		}
+		if pin.Behind || pin.Replaced == "" {
+			t.Errorf("a fork was judged, or what it replaced not shown: %+v", pin)
+		}
+		return
+	}
+	t.Fatal("no pin from infra.images.etcd")
+}
+
+func TestBuildLabel(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("1a", 32)
+	cases := map[string]string{
+		"gcr.io/etcd-development/etcd:v3.5.21@" + digest: "v3.5.21 (sha256:1a1a1a1a1a1a)",
+		"gcr.io/etcd-development/etcd@" + digest:         "sha256:1a1a1a1a1a1a",
+		"gcr.io/etcd-development/etcd:v3.5.21":           "v3.5.21",
+	}
+	for ref, want := range cases {
+		if got := apply.BuildLabel(ref); got != want {
+			t.Errorf("BuildLabel(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}

@@ -256,6 +256,16 @@ type ImagePin struct {
 	// empty otherwise.
 	Version         string
 	DeployedVersion string
+	// Origin and Replaces are render.ComposeImage's: the configuration key
+	// that declares the image, or where it came from when none does, and
+	// the reference it replaced.
+	Origin   string
+	Replaces string
+	// Replaced is the newest tag Replaces names now, as a reference, when
+	// the resolver could say. Behind reports that it is a newer release of
+	// the same repository than the build the pin runs.
+	Replaced string
+	Behind   bool
 }
 
 // Moved reports whether the plan changes which build the services run,
@@ -398,6 +408,9 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 		if pin == nil {
 			continue
 		}
+		if pin.Replaces != "" && r != nil {
+			notes = append(notes, checkLag(pin, r)...)
+		}
 		if pin.Reference != image.Image {
 			pinned[image.Image], lines[image.Image] = pin.Reference, image.Lines
 		}
@@ -424,7 +437,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 // tag on the host to keep.
 func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
 	want := image.Image
-	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want}
+	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want, Origin: image.Origin, Replaces: image.Replaces}
 	deployed, _ := deployedRef(host, services)
 	if imagedigest.IsTrack(deployed) {
 		// No host can pull a track, so a file naming one runs nothing.
@@ -510,6 +523,52 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 		}}, nil
 	}
 	return nil, nil, unresolved(image, deployed, failed, r)
+}
+
+// checkLag resolves the reference an override replaced, and marks the pin
+// Behind, with a warning, when that reference is a newer release of the same
+// repository. It only advises: a registry that cannot say leaves the pin
+// unmarked, and nothing is refused.
+func checkLag(pin *ImagePin, r Resolver) []Note {
+	replaced := pin.Replaces
+	if imagedigest.IsTrack(replaced) {
+		t, ok := r.(Tracker)
+		if !ok {
+			return nil
+		}
+		got, err := t.Track(replaced)
+		if err != nil {
+			return nil
+		}
+		replaced = got
+	}
+	pin.Replaced = replaced
+	ours, theirs := blueprints.ParseReference(nameOf(pin.Reference)), blueprints.ParseReference(replaced)
+	if ours.Repository() != theirs.Repository() || !imagedigest.OlderTag(ours.Tag, theirs.Tag) {
+		return nil
+	}
+	pin.Behind = true
+	return []Note{{
+		Hint: fmt.Sprintf("%s is behind the image it replaces", pin.Origin),
+		Text: fmt.Sprintf("%s names %s, and without it the %s stack would run %s, a newer release. Update %s, or remove it to follow %s again.", ui.Name(pin.Origin), ui.Name(nameOf(pin.Reference)), ui.Name(pin.Stack), ui.Name(replaced), ui.Name(pin.Origin), ui.Name(pin.Replaces)),
+	}}
+}
+
+// BuildLabel names one build for a table: its tag and short digest, either
+// alone when the reference names only one.
+func BuildLabel(ref string) string {
+	tag := blueprints.ParseReference(nameOf(ref)).Tag
+	digest := digestOf(ref)
+	if short, ok := strings.CutPrefix(digest, "sha256:"); ok && len(short) > 12 {
+		digest = "sha256:" + short[:12]
+	}
+	switch {
+	case digest == "":
+		return tag
+	case tag == "":
+		return digest
+	}
+	return tag + " (" + digest + ")"
 }
 
 // resolve is the build want names now, as a reference with its digest: a
