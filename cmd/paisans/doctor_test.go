@@ -180,7 +180,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 	withDoctorHosts(t, stuckHosts(cfg, &sent, &writes))
 
 	rec := withRecorder(t, true)
-	runErr := runDoctor([]string{"--config", fixtureConfig(), "--sudo=false"})
+	runErr := runDoctor([]string{"--config", fixtureConfig()})
 	out := rec.Lines()
 	if runErr == nil || !strings.Contains(runErr.Error(), "marked FAIL") {
 		t.Fatalf("doctor should fail on a cluster with no primary, got %v\n%s", runErr, out)
@@ -256,7 +256,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 }
 
 func TestDoctorRefusesAnUndeclaredSite(t *testing.T) {
-	err := runDoctor([]string{"--config", fixtureConfig(), "--sudo=false", "--site", "nowhere"})
+	err := runDoctor([]string{"--config", fixtureConfig(), "--site", "nowhere"})
 	if err == nil || !strings.Contains(err.Error(), `declares no site "nowhere"`) {
 		t.Fatalf("err = %v", err)
 	}
@@ -280,7 +280,7 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 		}},
 	})
 	rec := withRecorder(t, true)
-	runErr := runDoctor([]string{"--config", fixtureConfig(), "--sudo=false", "--site", "vm"})
+	runErr := runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
 	out := rec.Lines()
 	for _, s := range sent {
 		if !strings.HasPrefix(s, "vm.example.org: ") {
@@ -482,7 +482,7 @@ func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
 		return h
 	}
 	_ = withRecorder(t, false)
-	_ = runDoctor([]string{"--config", fixtureConfig(), "--sudo=false"})
+	_ = runDoctor([]string{"--config", fixtureConfig()})
 	busiest := 0
 	for name, h := range hosts {
 		if *h.peak > 2 {

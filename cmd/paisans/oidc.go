@@ -85,11 +85,10 @@ func runOIDCClientCreate(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The calls need no root and a dry run reaches the host without sudo,
-	// so only a run that will change something claims it, through sudo,
-	// since the registry is root's.
+	// The calls need no root, and only a run that will change something
+	// claims the host in its registry.
 	if *execute {
-		if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination, true)}); err != nil {
+		if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 			return err
 		}
 	}

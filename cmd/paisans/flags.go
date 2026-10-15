@@ -55,6 +55,12 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		routeRetries(r)
 		routeHolds(r)
 		routeKeyNotices(r)
+		routeLoginNotes(r)
+		// Once a command run with --execute has set it, the steps it runs
+		// in this process leave it set, whatever their own flags.
+		if executes(fs) {
+			recordLogins = true
+		}
 		return r
 	}
 }
@@ -145,5 +151,6 @@ func errReporter(r ui.Reporter) ui.Reporter {
 	routeRetries(e)
 	routeHolds(e)
 	routeKeyNotices(e)
+	routeLoginNotes(e)
 	return e
 }

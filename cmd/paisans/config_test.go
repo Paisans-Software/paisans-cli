@@ -188,7 +188,7 @@ func recoverHosts(t *testing.T, answer string) {
 	t.Cleanup(func() { reachDestination, configSiteTransport = savedDest, savedSite })
 	id, _ := config.LoadBytes(must(os.ReadFile(fixtureConfig())))
 	reg := `{"version":1,"deployments":{"` + id.ID + `":{"token":"x","root":"/srv/paisans/x","domain":"example.org","site":"home-a","claimed_at":"2026-10-12T00:00:00Z"}}}`
-	reachDestination = func(dest config.Destination, _ bool) apply.Transport {
+	reachDestination = func(dest config.Destination) apply.Transport {
 		return &storeHost{name: dest.String(), answer: answer, registry: reg}
 	}
 	configSiteTransport = func(name string, _ config.Site) apply.Transport {
@@ -434,7 +434,7 @@ func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 	recoverHosts(t, answer)
 	var runs []string
 	bad := `{"version":1,"deployments":{"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01;touch /pwned":{"token":"x","root":"/srv/paisans/x","domain":"example.org","site":"home-a","claimed_at":"2026-10-12T00:00:00Z"}}}`
-	reachDestination = func(dest config.Destination, _ bool) apply.Transport {
+	reachDestination = func(dest config.Destination) apply.Transport {
 		reg := ""
 		if dest.Host == "203.0.113.9" {
 			reg = bad

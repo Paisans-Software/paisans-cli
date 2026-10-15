@@ -117,7 +117,7 @@ func TestInitUsesAgeKeyFromVariable(t *testing.T) {
 			withKeystore(t, ks)
 			path, _ := initWorld(t, nil, fakeSites(), nil)
 			recipient, from := c.set(t)
-			out := initDefaultOutput(t, "--config", path, "--sudo=false")
+			out := initDefaultOutput(t, "--config", path)
 
 			dir := filepath.Dir(path)
 			if got, _ := config.Recipients(dir); len(got) != 1 || got[0] != recipient {
@@ -196,7 +196,7 @@ func TestInitRefusesAgeVariableWithoutOneKey(t *testing.T) {
 			path, _ := initWorld(t, nil, fakeSites(), nil)
 			c.set(t)
 			keyFile := filepath.Join(t.TempDir(), "deployment.key")
-			args := []string{"--config", path, "--sudo=false"}
+			args := []string{"--config", path}
 			for _, a := range c.args {
 				args = append(args, strings.ReplaceAll(a, "KEYFILE", keyFile))
 			}
@@ -248,7 +248,7 @@ func keystoreAndVariable(t *testing.T, ks keystore.Store) string {
 func TestAgeVariableOverKeystoreIsShown(t *testing.T) {
 	ks := keystore.NewMemory()
 	path := keystoreAndVariable(t, ks)
-	out := initDefaultOutput(t, "--config", path, "--sudo=false")
+	out := initDefaultOutput(t, "--config", path)
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestAgeVariableNamingTheSavedKeyIsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SOPS_AGE_KEY", saved)
-	out := initDefaultOutput(t, "--config", path, "--sudo=false")
+	out := initDefaultOutput(t, "--config", path)
 	if strings.Contains(out, "saved age key is not used") {
 		t.Errorf("init reported the saved key passed over by itself:\n%s", out)
 	}

@@ -87,7 +87,17 @@ func setSSHUser(data []byte, site, user string) ([]byte, error) {
 		return splice(data, edit{at, at, "user: " + plainOrQuoted(user) + ", "}), nil
 	}
 	at := lines.start(first.Line)
-	return splice(data, edit{at, at, fmt.Sprintf("%*suser: %s\n", first.Column-1, "", plainOrQuoted(user))}), nil
+	return splice(data, edit{at, at, fmt.Sprintf("%*suser: %s%s", first.Column-1, "", plainOrQuoted(user), lineEnding(data))}), nil
+}
+
+// lineEnding is the line ending data is written with: CRLF when any line
+// ends in one, so a file saved on Windows gets no bare LF line among its
+// own, and LF otherwise.
+func lineEnding(data []byte) string {
+	if bytes.Contains(data, []byte("\r\n")) {
+		return "\r\n"
+	}
+	return "\n"
 }
 
 // plainOrQuoted is value as YAML is to read it back: plain when the plain

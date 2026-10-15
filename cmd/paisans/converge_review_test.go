@@ -21,7 +21,7 @@ import (
 func fakeRunGrants(t *testing.T, stale ...string) {
 	t.Helper()
 	saved, savedRender := convergeRecord, convergeRender
-	convergeRecord = func(_ *config.Config, site string, g grant.Grant, _ bool) (grant.Record, error) {
+	convergeRecord = func(_ *config.Config, site string, g grant.Grant) (grant.Record, error) {
 		for _, s := range stale {
 			if s == site {
 				return grant.Record{}, nil
@@ -39,7 +39,7 @@ func convergeWith(t *testing.T, stdin io.Reader, stdout io.Writer, extra ...stri
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), stdin, stdout)
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, extra...), stdin, stdout)
 	})
 	return err
 }
@@ -143,11 +143,11 @@ func TestConvergeReviewNeedsEverySite(t *testing.T) {
 	fakeChecks(t, nil)
 	fakeRunGrants(t)
 	read := convergeRecord
-	convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
+	convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
 		if site == "watch" {
 			return grant.Record{}, errors.New("ssh: connect to host watch.example.org port 22: Connection refused")
 		}
-		return read(cfg, site, g, sudo)
+		return read(cfg, site, g)
 	}
 	rec := recordConverge(t)
 	if err := convergeWith(t, noTerminalStdin(), io.Discard); err != nil || !rec.Has("fail", "watch") {
@@ -191,8 +191,8 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 		}
 	}
 	ran := fakeConverge(t, map[string]error{"apply --site home-a": errors.New("home-a: boom")})
-	convergeGrantHost = func(_ *config.Config, site string, _ bool) registry.Runner { return hosts[site] }
-	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant, _ bool) (grant.Record, error) {
+	convergeGrantHost = func(_ *config.Config, site string) registry.Runner { return hosts[site] }
+	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant) (grant.Record, error) {
 		rec, _, _, err := grant.Read(hosts[site], cfg.Deployment())
 		return rec, err
 	}

@@ -22,8 +22,8 @@ import (
 )
 
 // removeHost is how `app remove` reaches a site. Tests replace it.
-var removeHost = func(name string, site config.Site, sudo bool) appremove.Host {
-	return siteTransport(name, site, "", sudo)
+var removeHost = func(name string, site config.Site) appremove.Host {
+	return siteTransport(name, site, "")
 }
 
 // removeClients is Pocket ID's API on site, for `app remove`. It goes
@@ -48,7 +48,6 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually stop, remove and delete")
 	deleteData := fs.Bool("delete-data", false, "also delete the app's database, Garage bucket and keys, named volumes and data directories; asks for the app's name at a terminal")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and Docker are root's")
 	// The app comes first, as `app remove talk --execute`, or after the flags.
 	app := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -57,13 +56,15 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	r := reporter()
 	if app == "" && fs.NArg() > 0 {
 		app = fs.Arg(0)
 		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return err
 		}
 	}
+	// Once every flag is read, those after the app's name included, as
+	// the reporter and the login recording take --execute and -v from them.
+	r := reporter()
 	if fs.NArg() > 0 {
 		return fmt.Errorf("app remove takes one app: paisans app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
@@ -102,7 +103,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	hosts := map[string]appremove.Host{}
 	in := appremove.Input{DeleteData: *deleteData}
 	for _, site := range cfg.SiteNames() {
-		hosts[site] = removeHost(site, cfg.Sites[site], *sudo)
+		hosts[site] = removeHost(site, cfg.Sites[site])
 		st, err := ui.Get(r, "read "+site, func() (appremove.SiteState, error) {
 			return appremove.ProbeSite(cfg, app, site, hosts[site])
 		})
@@ -172,11 +173,9 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// The app, and each group only it named, leave every gateway's
 	// deployment record, so secrets prune may remove their secrets.
-	deployed, _ := readDeploymentRecord(r, cfg, func(gw string, elevated bool) registry.Runner {
-		return registryHost(gw, cfg.Sites[gw], "", elevated && *sudo)
-	})
+	deployed, _ := readDeploymentRecord(r, cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "") })
 	forget := func(execute bool) bool {
-		return forgetInRecords(r, cfg, appRecordNames(cfg, app, deployed), app, execute, *sudo)
+		return forgetInRecords(r, cfg, appRecordNames(cfg, app, deployed), app, execute)
 	}
 	if plan.Empty() {
 		recordLeft := forget(*execute)
@@ -199,21 +198,21 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	touched := map[string]registry.Runner{}
 	for _, s := range plan.Sites {
 		if !s.Empty() {
-			touched[s.Site] = registryHost(s.Site, cfg.Sites[s.Site], "", *sudo)
+			touched[s.Site] = registryHost(s.Site, cfg.Sites[s.Site], "")
 		}
 	}
 	if plan.Client.Delete != nil {
-		touched[plan.Client.Site] = registryHost(plan.Client.Site, cfg.Sites[plan.Client.Site], "", *sudo)
+		touched[plan.Client.Site] = registryHost(plan.Client.Site, cfg.Sites[plan.Client.Site], "")
 	}
 	if db := plan.Database; db != nil && (db.DropDatabase || db.DropRole) {
-		touched[db.Leader] = registryHost(db.Leader, cfg.Sites[db.Leader], "", *sudo)
+		touched[db.Leader] = registryHost(db.Leader, cfg.Sites[db.Leader], "")
 	}
 	if st := plan.Storage; st != nil && (len(st.Buckets) > 0 || len(st.Keys) > 0) {
-		touched[st.Anchor] = registryHost(st.Anchor, cfg.Sites[st.Anchor], "", *sudo)
+		touched[st.Anchor] = registryHost(st.Anchor, cfg.Sites[st.Anchor], "")
 	}
 	for _, m := range plan.Monitors {
 		if m.Pending() {
-			touched[m.Site] = registryHost(m.Site, cfg.Sites[m.Site], "", *sudo)
+			touched[m.Site] = registryHost(m.Site, cfg.Sites[m.Site], "")
 		}
 	}
 	if err := claimHosts(r, cfg, *execute, touched); err != nil {

@@ -16,18 +16,38 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// reachDestination is how a command with no configuration reaches the host
-// --ssh names: the way the operator's own ssh reaches it, with their agent,
-// keys and ssh config, since there are no declared keys to offer. A port
-// other than 22 goes in an ssh:// URL, the one destination form that
-// carries it. Tests replace it.
-var reachDestination = func(dest config.Destination, sudo bool) apply.Transport {
-	to := dest.User + "@" + dest.Host
+// destinationArg is dest as ssh takes it: user@host, or an ssh:// URL for a
+// port other than 22, the one destination form that carries it.
+func destinationArg(dest config.Destination) string {
 	if dest.Port != 0 && dest.Port != config.DefaultSSHPort {
-		to = "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
+		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
 	}
-	return siteTransport("", config.Site{}, to, sudo)
+	return dest.User + "@" + dest.Host
 }
+
+// reachDestination is how a command with no configuration reaches the host
+// --ssh names as the deployment's user: the way the operator's own ssh
+// reaches it, with their agent, keys and ssh config, since there are no
+// declared keys to offer. Tests replace it.
+var reachDestination = func(dest config.Destination) apply.Transport {
+	return siteTransport("", config.Site{}, destinationArg(dest))
+}
+
+// ownerTransport is how host deployments reaches a host as its owner: the
+// operator's own ssh to the destination --ssh names, through sudo unless
+// --sudo=false, since the registry and every deployment's directories are
+// root's. It is the one transport the CLI gives sudo: every other command
+// logs in as the deployment's user, which has none.
+func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
+	t := apply.SSHTransport{Destination: destinationArg(dest), Sudo: sudo}
+	if sudo {
+		t.Auth = sudoAuthFor(t.Describe())
+	}
+	return t
+}
+
+// reachOwner is ownerTransport for host deployments. Tests replace it.
+var reachOwner = func(dest config.Destination, sudo bool) apply.Transport { return ownerTransport(dest, sudo) }
 
 // deploymentsProbe lists, read only, each directory under the deployments'
 // base, each site file in render.HostSitesDir and, where Docker is
@@ -95,7 +115,7 @@ func runHostDeployments(args []string) error {
 		return fmt.Errorf("host deployments: --ssh: %w", err)
 	}
 	r := reporter()
-	t := reachDestination(dest, *sudo)
+	t := reachOwner(dest, *sudo)
 	// The probe first, since it fails on a registry directory it may not
 	// read, which reading the registry would take for an empty one.
 	r.Section(fmt.Sprintf("deployments on %s", dest))

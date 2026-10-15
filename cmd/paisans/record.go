@@ -27,17 +27,17 @@ func deploymentRecord(cfg *config.Config, hosts recordHosts) (deployrecord.Recor
 	return deployed, missing
 }
 
-// recordHosts reaches a gateway to read its deployment record: as the ssh
-// user when elevated is false, and as the command reaches it otherwise,
-// through sudo unless the operator turned it off.
-type recordHosts func(gw string, elevated bool) registry.Runner
+// recordHosts reaches a gateway to read its deployment record, as the ssh
+// user.
+type recordHosts func(gw string) registry.Runner
 
-// recordReaders is every gateway paisans-stack.yaml declares, each read as the
-// ssh user and through hosts(gw, true) only when that is denied.
+// recordReaders is every gateway paisans-stack.yaml declares, each read as
+// the ssh user.
 func recordReaders(cfg *config.Config, hosts recordHosts) map[string]registry.Runner {
 	out := map[string]registry.Runner{}
 	for _, gw := range cfg.GatewaySites() {
-		out[gw] = deployrecord.ReadAsUser(hosts(gw, false), func() registry.Runner { return hosts(gw, true) })
+		h := hosts(gw)
+		out[gw] = deployrecord.ReadAsUser(h, func() registry.Runner { return h })
 	}
 	return out
 }
@@ -68,18 +68,14 @@ func gatewayHosts(cfg *config.Config, hosts func(string) registry.Runner) map[st
 }
 
 // applyRecordHosts is how an apply of site reaches each gateway to read its
-// deployment record: as the ssh user, so that applying a site that is not a
-// gateway asks for no gateway's sudo password, and the applied site's own
-// sudo read through transport, the one the apply runs through.
-func applyRecordHosts(cfg *config.Config, site, destination string, transport registry.Runner, sudo bool) recordHosts {
-	return func(gw string, elevated bool) registry.Runner {
-		switch {
-		case gw == site && elevated:
-			return transport
-		case gw == site:
-			return registryHost(gw, cfg.Sites[gw], destination, false)
+// deployment record: site itself through destination, the --ssh the apply
+// was given, and every other gateway through its ssh section.
+func applyRecordHosts(cfg *config.Config, site, destination string) recordHosts {
+	return func(gw string) registry.Runner {
+		if gw == site {
+			return registryHost(gw, cfg.Sites[gw], destination)
 		}
-		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
+		return registryHost(gw, cfg.Sites[gw], "")
 	}
 }
 
@@ -198,8 +194,8 @@ func reportMissed(r ui.Reporter, res deployrecord.Result) {
 // the merged records still list one. A gateway it cannot reach is warned
 // about, never a failure: the removal it follows is done, and the next change
 // to the record catches that gateway up.
-func forgetInRecords(r ui.Reporter, cfg *config.Config, names deployrecord.Record, what string, execute, sudo bool) bool {
-	hosts := gatewayHosts(cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "", sudo) })
+func forgetInRecords(r ui.Reporter, cfg *config.Config, names deployrecord.Record, what string, execute bool) bool {
+	hosts := gatewayHosts(cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "") })
 	if len(hosts) == 0 {
 		return false
 	}
@@ -213,9 +209,7 @@ func forgetInRecords(r ui.Reporter, cfg *config.Config, names deployrecord.Recor
 		// A gateway that cannot be read is warned about below, not a
 		// failure, so the read always ends done.
 		_ = ui.Run(r, "read the deployment record", func() error {
-			deployed, found, missing = deployrecord.Gather(recordReaders(cfg, func(gw string, elevated bool) registry.Runner {
-				return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
-			}), d)
+			deployed, found, missing = deployrecord.Gather(recordReaders(cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "") }), d)
 			return nil
 		})
 		listed := found > 0 && listsAny(deployed, names)

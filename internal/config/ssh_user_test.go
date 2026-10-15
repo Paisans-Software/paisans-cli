@@ -49,6 +49,41 @@ func TestSetSSHUser(t *testing.T) {
 			"sites:\n  home-a:\n    ssh:\n      keys: [alice]\n  vm:\n    ssh:\n      keys: [alice]\n",
 			"sites:\n  home-a:\n    ssh:\n      user: paisans-f2a9\n      keys: [alice]\n  vm:\n    ssh:\n      keys: [alice]\n",
 		},
+		{
+			"written empty, in a flow mapping",
+			"sites:\n  home-a:\n    ssh: {user: \"\", host: home-a.local, keys: [alice]}\n",
+			"sites:\n  home-a:\n    ssh: {user: \"paisans-f2a9\", host: home-a.local, keys: [alice]}\n",
+		},
+		{
+			"written empty, quoted, with a trailing comment",
+			"sites:\n  home-a:\n    ssh:\n      user: \"\"   # set on first login\n      keys: [alice]\n",
+			"sites:\n  home-a:\n    ssh:\n      user: \"paisans-f2a9\"   # set on first login\n      keys: [alice]\n",
+		},
+		{
+			"present, quoted, with a trailing comment",
+			"sites:\n  home-a:\n    ssh:\n      user: \"paisans-f2a9\"   # set on first login\n      keys: [alice]\n",
+			"sites:\n  home-a:\n    ssh:\n      user: \"paisans-f2a9\"   # set on first login\n      keys: [alice]\n",
+		},
+		{
+			"absent, with CRLF line endings",
+			"sites:\r\n  home-a:\r\n    ssh:\r\n      keys: [alice]\r\n",
+			"sites:\r\n  home-a:\r\n    ssh:\r\n      user: paisans-f2a9\r\n      keys: [alice]\r\n",
+		},
+		{
+			"written empty, with CRLF line endings",
+			"sites:\r\n  home-a:\r\n    ssh:\r\n      user: \"\"\r\n      keys: [alice]\r\n",
+			"sites:\r\n  home-a:\r\n    ssh:\r\n      user: \"paisans-f2a9\"\r\n      keys: [alice]\r\n",
+		},
+		{
+			"ssh last, with no final newline",
+			"sites:\n  home-a:\n    roles: [data]\n    ssh:\n      keys: [alice]",
+			"sites:\n  home-a:\n    roles: [data]\n    ssh:\n      user: paisans-f2a9\n      keys: [alice]",
+		},
+		{
+			"ssh last, in a flow mapping, with no final newline",
+			"sites:\n  home-a:\n    ssh: {keys: [alice]}",
+			"sites:\n  home-a:\n    ssh: {user: paisans-f2a9, keys: [alice]}",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -67,6 +102,7 @@ func TestSetSSHUserRefuses(t *testing.T) {
 	cases := []struct{ name, in, site, user, want string }{
 		{"another name", "sites:\n  home-a:\n    ssh:\n      user: ubuntu\n      keys: [alice]\n", "home-a", "paisans-f2a9", "sites.home-a.ssh.user already names ubuntu"},
 		{"a user written with no value", "sites:\n  home-a:\n    ssh:\n      user:\n      keys: [alice]\n", "home-a", "paisans-f2a9", "written with no value"},
+		{"a user written with no value, in a flow mapping", "sites:\n  home-a:\n    ssh: {user: , keys: [alice]}\n", "home-a", "paisans-f2a9", "written with no value"},
 		{"an undeclared site", "sites:\n  home-a:\n    ssh:\n      keys: [alice]\n", "home-z", "paisans-f2a9", "sites.home-z is not declared"},
 		{"a site with no ssh section", "sites:\n  home-a:\n    roles: [data]\n", "home-a", "paisans-f2a9", "sites.home-a.ssh is not a section"},
 		{"a name this toolkit refuses", "sites:\n  home-a:\n    ssh:\n      keys: [alice]\n", "home-a", "bob; rm", "is not a user name this toolkit accepts"},

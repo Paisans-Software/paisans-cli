@@ -302,7 +302,7 @@ func TestSecretsPruneNeverDecryptsTheFile(t *testing.T) {
 func withRecords(t *testing.T, records map[string]string, down ...string) {
 	t.Helper()
 	saved := registryHost
-	registryHost = func(name string, site config.Site, destination string, sudo bool) registry.Runner {
+	registryHost = func(name string, site config.Site, destination string) registry.Runner {
 		return &initFake{name: name, down: slices.Contains(down, name), files: map[string]string{deployrecord.Path(fixtureDeployment()): records[name]}}
 	}
 	t.Cleanup(func() { registryHost = saved })

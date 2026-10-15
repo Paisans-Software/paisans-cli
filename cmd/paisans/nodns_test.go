@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	}
 	// No test reaches a host to ask whether it was the gateway; a test
 	// about the move says otherwise.
-	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
+	convergeHoldsGateway = func(*config.Config, string) (bool, error) { return false, nil }
 	// No test's apply reaches a configuration store; a test about the
 	// store sets gatherForApply back.
 	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {

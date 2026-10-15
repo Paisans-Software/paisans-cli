@@ -38,10 +38,9 @@ import (
 const partialWord = "partial"
 
 // configSiteTransport is how a config command reaches a site paisans-stack.yaml
-// declares: its ssh section, with sudo, since the store is root's. Tests
-// replace it.
+// declares: its ssh section. Tests replace it.
 var configSiteTransport = func(name string, site config.Site) apply.Transport {
-	return siteTransport(name, site, "", true)
+	return siteTransport(name, site, "")
 }
 
 // configSignWith is what git's user.signingKey is given to sign with the
@@ -146,10 +145,6 @@ type gatherMode struct {
 // gather carries the change (a newer head, or the accepted older one), and
 // the command records it with Local.RecordSeen once it commits its change.
 func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
-	names := slices.Sorted(maps.Keys(sites))
-	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
-		return configstore.Gathered{}, err
-	}
 	s := r.Step("gather the versions every site holds")
 	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute})
 	var rb *configstore.RollbackError
@@ -798,7 +793,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return sshFlagProblem(f, err)
 		}
-		hosts[dest.String()] = reachDestination(dest, true)
+		hosts[dest.String()] = reachDestination(dest)
 	}
 	deploymentID, err := recoverID(hosts, *id)
 	if err != nil {

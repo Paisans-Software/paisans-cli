@@ -33,8 +33,9 @@ var doctorTransport = func(t apply.SSHTransport) apply.Transport { return t }
 var doctorNow = time.Now
 
 // runDoctor reads every site, or the ones --site names, and prints what is
-// stuck and how to recover. It changes nothing and has no --execute: see
-// internal/doctor for why. Its checks are doctor.Checks' graph, run at once
+// stuck and how to recover. It changes no host: see internal/doctor for why.
+// Its --execute edits only the local configuration (removeRedundantGateConfig,
+// and the ssh.user a login records). Its checks are doctor.Checks' graph, run at once
 // and printed as each ends. A site that does not answer is a finding, nothing
 // more is asked of it, and every other check runs with the sites that did.
 // It exits non zero when any finding is FAIL, so a script can tell a healthy
@@ -48,7 +49,6 @@ func runDoctor(args []string) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	var only pathList
 	fs.Var(&only, "site", "look at this site only (repeatable); every check then runs on the named sites alone")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker and /srv are root's")
 	execute := fs.Bool("execute", false, "remove the config: keys in "+config.FileName+" that only repeat a value gating requires, before reading any site; no site is changed")
 	secretsPath := fs.String("secrets", "", "path to the secrets, which hold the DNS token the workstation's check uses (default: secrets.enc.yaml beside the config)")
 	if err := fs.Parse(args); err != nil {
@@ -78,7 +78,7 @@ func runDoctor(args []string) error {
 	}
 	transports := map[string]apply.Transport{}
 	for _, name := range sites {
-		transports[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "", *sudo)), doctorSiteCommands)
+		transports[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "")), doctorSiteCommands)
 	}
 
 	if *secretsPath == "" {
@@ -200,7 +200,7 @@ var doctorSiteToken = func(ctx context.Context, check dns.TokenCheck, host dns.R
 }
 
 // CaddyLog reads Caddy's certificate log lines over the site's transport,
-// through sudo as every other read, since Docker is root's.
+// as the ssh user, as every other read.
 func (d doctorReads) CaddyLog(site string) doctor.CaddyLogProbe {
 	out, err := d.transports[site].Run(doctor.CaddyLogCommand(d.cfg.Deployment()))
 	p := doctor.CaddyLogProbe{Site: site, Out: out}
@@ -236,8 +236,7 @@ func (d doctorReads) Secrets() doctor.SecretsProbe {
 }
 
 // SiteToken checks the token in the site's caddy.env, from the site, over
-// its transport: the file is root's and 0600, so it is read through sudo
-// as every other read here.
+// its transport, as the ssh user, as every other read here.
 func (d doctorReads) SiteToken(site string) dns.TokenResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -314,7 +313,6 @@ func (d doctorReads) Reach(site string) doctor.SiteReach {
 	r := doctor.SiteReach{Site: site, Destination: t.Describe()}
 	if out, err := t.Run(doctor.ReachCommand); err != nil {
 		r.Err = errText(out, err)
-		r.Sudo = errors.Is(err, apply.ErrSudo)
 	}
 	return r
 }

@@ -20,7 +20,8 @@ type Runner interface {
 // none is never asked for a password.
 type Host struct {
 	Plain Runner
-	Sudo  Runner
+	// Sudo is set by no command: each reads its web server as the ssh user.
+	Sudo Runner
 }
 
 // Server is a web server Detect recognises.
@@ -268,7 +269,7 @@ func listContainers(h Host) (Runner, []container, string) {
 	out, err := runner.Run(dockerPS)
 	if err != nil && strings.Contains(strings.ToLower(out+err.Error()), "permission denied") {
 		if h.Sudo == nil {
-			return nil, nil, "docker refuses the ssh user, and sudo is off (--sudo=false)"
+			return nil, nil, "docker refuses the ssh user"
 		}
 		runner = h.Sudo
 		out, err = runner.Run(dockerPS)

@@ -37,7 +37,6 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and /etc are not the deploy user's")
 	// The site may come before or after the flags. flag stops at the first
 	// argument that is not one, so a leading name is taken off first.
 	var site string
@@ -88,7 +87,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = siteTransport(name, cfg.Sites[name], "", *sudo)
+		transports[name] = siteTransport(name, cfg.Sites[name], "")
 	}
 	// The site being added is the one whose host the join changes from
 	// nothing; every other site already runs the deployment, and each is
@@ -147,7 +146,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// Site add writes to every site: the mesh, HAProxy and etcd change on
 	// each, not only on the new one.
-	if err := claimSites(r, cfg, *execute, *sudo, cfg.SiteNames()...); err != nil {
+	if err := claimSites(r, cfg, *execute, cfg.SiteNames()...); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read every site", func() (*siteadd.Plan, error) {

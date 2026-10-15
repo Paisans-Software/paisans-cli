@@ -42,7 +42,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | `--config <path>` | `paisans-stack.yaml` | every command except `host deployments` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
-| `--sudo` | on | every command that reaches a host over ssh, except `operator magic-link` and `oidc client create`, whose calls need no root | run remote commands through sudo; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`) |
+| `--sudo` | on | `host deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
 With `--execute`, a command first claims each host it writes to in
@@ -59,6 +59,13 @@ a terminal before that claim. Without a terminal they refuse, before any host
 changes; no flag answers the question. A run that adds or changes nothing asks
 nothing. Their dry runs show the same review and ask nothing (see *`apply` and
 `host prepare` review what `paisans-stack.yaml` grants* in `README.md`).
+
+A site that leaves `ssh.user` out is reached as the deployment's own user,
+`paisans-<token>`. Any run with `--execute` that logs in to it writes that
+name into the site's `ssh.user`, whatever the command, so the file names who
+logs in; a name already there is never changed, and a write that fails is a
+warning, since the login it records has worked. A run without `--execute`
+writes nothing and notes what `--execute` records.
 
 A command exits 0 when it did what it was asked, including when it ends on a
 warning (`!`, `WARN` off a terminal), 1 when it stopped on a failure or a
@@ -134,9 +141,9 @@ under `--verbose`.
 * **Alone:** the whole apply runs it whenever it has work, so it is typed on
   its own to see what is owed before any host is changed, or to generate the
   secrets for a site or app just declared without applying anything.
-* **Flags:** `--config`, `--secrets`, `--sudo` (on: each site's registry is
-  root's), `--age-private-key-file <path>` (keep a newly made age key in this
-  file, outside the configuration's directory, instead of the keystore).
+* **Flags:** `--config`, `--secrets`, `--age-private-key-file <path>` (keep a
+  newly made age key in this file, outside the configuration's directory,
+  instead of the keystore).
 * **Age key:** for a deployment with no secrets file and no `.sops.yaml`, it
   makes the age key and keeps it in the keystore, or in
   `--age-private-key-file`. With a `SOPS_AGE_*` variable set it makes none:
@@ -262,10 +269,9 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **Alone:** always, after a site or an app has been removed.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--without-record` (off:
   trust `paisans-stack.yaml` alone when no gateway's deployment record can be read;
-  with `--execute` it asks for the word `prune` at a terminal), `--sudo`.
-* **Hosts:** reads each gateway's deployment record, as the ssh user since it
-  holds only names and is world readable, and through sudo only for one
-  written with other modes. Changes none.
+  with `--execute` it asks for the word `prune` at a terminal).
+* **Hosts:** reads each gateway's deployment record, as the ssh user, since it
+  holds only names and is world readable. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
@@ -301,7 +307,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   first); `--replaced <path>` (repeatable: a pasted secret already replaced
   and applied, which every host using it runs; listed, not rotated, and
   refused for a generated secret or one some host does not run yet);
-  `--config`, `--secrets`, `--execute`, `--sudo`.
+  `--config`, `--secrets`, `--execute`.
 * **A stopped `--all`:** the secrets file records what it left
   (`rotate_remaining`), and the next `--all` does only that, saying so at
   every verbosity and in its result: the secrets the earlier run finished
@@ -377,8 +383,8 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
 
   And the flags every command shares.
-* **Hosts:** every site, over ssh with `sudo` since the stores are root's, and
-  each is reached, not only the ones named on the command line. `recover` has no
+* **Hosts:** every site, over ssh as the site's ssh user, and each is
+  reached, not only the ones named on the command line. `recover` has no
   `paisans-stack.yaml` to name them and so starts from `--from`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
   its peers; it reads what each site holds now, which can be staler. Only the
@@ -423,7 +429,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   record holds a newer revision, or another version at the same revision, makes
   `apply` ask for `rollback`. It needs the standard file names beside
   `paisans-stack.yaml` (a `--secrets` naming another file is refused), an operator's key in
-  the ssh-agent even for a dry run, and a sudo password for every site.
+  the ssh-agent even for a dry run.
 
 See *Every site keeps signed copies of the configuration* in `README.md` and
 `docs/specs/2026-10-12-config-store.md`.
@@ -557,11 +563,11 @@ paisans host prepare --all --execute          # every site, one at a time
   host on its own: preparing a new machine before declaring the rest of a
   change, or reaching a host through `--ssh`.
 * **Flags:** `--site <name>` or `--all`, `--config`, `--ssh` (with `--site`
-  only), `--execute`, `--sudo`. It reads no secrets.
+  only), `--execute`. It reads no secrets.
 * **`--all`:** every site the configuration declares, in its order, each
-  exactly as `--site` prepares it, with its own review. Every sudo password is
-  asked first. It stops at the first site that fails; re-running it resumes
-  there, since a prepared host plans nothing.
+  exactly as `--site` prepares it, with its own review. It stops at the first
+  site that fails; re-running it resumes there, since a prepared host plans
+  nothing.
 * **Hosts:** the one site's, or with `--all` each site's in turn. It runs the host check first, which refuses a
   Docker snap and a Docker older than engine 25.0.0 or compose 2.24.0,
   whatever its source.
@@ -617,8 +623,7 @@ says which carry this deployment's label.
 
 * **Alone:** always, for volumes that accumulated before `apply` removed its
   own.
-* **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`,
-  `--sudo`.
+* **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`.
 * **Hosts:** the one site's.
 * **`--execute`:** removes the volumes labelled with this deployment's id;
   every other volume is kept.
@@ -650,15 +655,14 @@ images it superseded* in `README.md`).
 
 * **Alone:** this is the command an operator types; everything else is the
   exception.
-* **Flags:** `--config`, `--secrets`, `--execute`, `--sudo`, `--min-free`
+* **Flags:** `--config`, `--secrets`, `--execute`, `--min-free`
   and `--keep-images` (handed to each `apply` step, below; the pull checks
   free space against `--min-free` too). `--ssh`,
   `--overwrite`, `--only` and `--recreate` are about one site and are refused
   without `--site`.
 * **Hosts:** every site, and each app behind the operator's own web server
-  from this machine, as a visitor would. Every host's sudo password is asked
-  for before the first step.
-* **Review:** after the sudo passwords and before the first step that
+  from this machine, as a visitor would.
+* **Review:** before the first step that
   changes a host (an `init` with work runs first: it writes only local
   files), one review of what `paisans-stack.yaml` grants on every site, under `review`, a line per site
   with each change under it: keys, images and the web server's directory.
@@ -678,8 +682,8 @@ images it superseded* in `README.md`).
   publishes the version, signed with the recorded key, after the `host prepare`
   steps; a version that reaches no site refuses, naming `host prepare`. See
   `paisans config`.
-* **Secrets:** each gateway's deployment record is read once, after the sudo
-  passwords, and each secret or recorded name `paisans-stack.yaml` no longer uses is
+* **Secrets:** each gateway's deployment record is read once, and each
+  secret or recorded name `paisans-stack.yaml` no longer uses is
   warned about once, by key, under `secrets`, dry run or not. The `apply`
   steps it runs do not read the record or warn again. An `init` it runs warns
   in its place.
@@ -731,12 +735,11 @@ starts, restarts or recreates what changed.
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
 
-  And `--config`, `--secrets`, `--execute`, `--sudo`.
+  And `--config`, `--secrets`, `--execute`.
 * **Hosts:** the site's own; an etcd member's apply also reads the other
   members, to compare the live membership. It reads every gateway's
-  deployment record as the ssh user, without sudo, since the record holds
-  only names and is world readable, so applying a site that is not a gateway
-  asks for no gateway's sudo password.
+  deployment record as the ssh user, since the record holds only names and
+  is world readable.
 * **Mail:** before the host check, dry run or not, every app the apply
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A
@@ -769,7 +772,7 @@ starts, restarts or recreates what changed.
   certificate gives, is checked again after 2, 4, 8 and 16 seconds and then
   30, up to a minute in all, the line saying what it waits for; any other
   failure, such as DNS, is reported at once. It
-  reaches the monitor through the same ssh and sudo as the rest of the apply,
+  reaches the monitor through the same ssh as the rest of the apply,
   `--ssh` included. A problem with the operator's web server ends it on the
   whole apply's warning with exit status 0, in place of `Applied <n> files to
   <site>.`; one apply could not do on the host, such as reading or writing the
@@ -802,7 +805,7 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   has not admitted, and a witness joining beside one is joined by that run.
   Typed alone, it shows a join's stages and gates, or resumes a join.
 * **Flags:** the site, as an argument before or after the flags; `--config`,
-  `--secrets`, `--execute`, `--sudo`. No `--ssh`, since it reaches several
+  `--secrets`, `--execute`. No `--ssh`, since it reaches several
   hosts.
 * **Hosts:** every site.
 * **Review:** stage 4 applies the new site's whole render, so `site add`
@@ -823,7 +826,7 @@ every site already running, each printed as `ok`, `WARNING` or `REFUSED`. Exits
 non zero on a refusal.
 
 * **Alone:** always, before a join, to see what would stop it.
-* **Flags:** `--site <new site>` (required), `--config`, `--sudo`. No `--ssh`.
+* **Flags:** `--site <new site>` (required), `--config`. No `--ssh`.
 * **Hosts:** every site, read only.
 * **`--execute`:** not taken.
 
@@ -885,7 +888,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
   | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, as `host deployments` lists it |
 
-  And the site as an argument, `--config`, `--secrets`, `--execute`, `--sudo`.
+  And the site as an argument, `--config`, `--secrets`, `--execute`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
   reaches the removed site's host not at all, so it says the site files apply
@@ -922,7 +925,7 @@ paisans mesh rekey --all --execute     # every site, one at a time
 
 * **Alone:** always. Nothing else rotates a WireGuard key.
 * **Flags:** `--all` (every site the configuration declares, in its order),
-  and the sites as arguments, `--config`, `--secrets`, `--execute`, `--sudo`.
+  and the sites as arguments, `--config`, `--secrets`, `--execute`.
 * **Hosts:** every site, since each is a peer of some site rekeyed. The
   secrets file is read and written on this machine only.
 * **`--execute`:** rekeys each site in four gated stages, and stops at the first
@@ -942,7 +945,7 @@ cluster and every app before and after each switch. Interrupts writes briefly,
 twice.
 
 * **Alone:** always, to prove failover works before an outage does.
-* **Flags:** `--config`, `--execute`, `--sudo`.
+* **Flags:** `--config`, `--execute`.
 * **Hosts:** every site, and every app's hostname from this machine.
 * **`--execute`:** switches. Without it, it checks and prints both switchover
   commands.
@@ -958,10 +961,11 @@ instance, clocks, and what is left over.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
-  `--sudo`, `--execute`.
+  `--execute`.
 * **Hosts:** every site, or the named ones, read only.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
-  repeats a value gating renders, before loading it. It changes no host; the
+  repeats a value gating renders, before loading it, and records the `ssh.user`
+  of a site it logs in to as the deployment's own user. It changes no host; the
   recoveries it prints are for a human to run.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
@@ -991,7 +995,7 @@ keeps its files on its own disk and is skipped: no key, no bucket.
   `storage.garage.sites` lists one site. Typed alone, it provisions an app's
   bucket after an `apply --site`.
 * **Flags:** `--site <name>` (required), `--config`, `--secrets`, `--ssh`,
-  `--execute`, `--sudo`.
+  `--execute`.
 * **Hosts:** the one site's Garage.
 * **`--execute`:** creates what is missing.
 
@@ -1015,7 +1019,7 @@ give it no key, no bucket and no media route.
   | `--wait <duration>` | `0` | how long a stage waiting on Garage polls before exiting; by default it reads once and exits with status 75 |
   | `--stop-test` | off | in the smoke stage, stop Garage on the last listed site and prove reads and an upload survive; refused unless uploads survive one node down |
 
-  And `--config`, `--secrets`, `--execute`, `--sudo`. It takes no site.
+  And `--config`, `--secrets`, `--execute`. It takes no site.
 * **Hosts:** every Garage site.
 * **`--execute`:** runs the stages, stopping at a gate that fails or waits.
 
@@ -1028,8 +1032,7 @@ new key imported and granted, the app applied alone on every site running it,
 a probe with the new key, and only then the old key deleted.
 
 * **Alone:** always, when a key may have leaked.
-* **Flags:** `--app <name>` (required), `--config`, `--secrets`, `--execute`,
-  `--sudo`.
+* **Flags:** `--app <name>` (required), `--config`, `--secrets`, `--execute`.
 * **Hosts:** the Garage sites and every site running the app.
 * **`--execute`:** runs the stages; a re-run resumes from the secrets file.
 
@@ -1094,8 +1097,7 @@ paisans gateway move --execute    # record, serve, dns add, dns remove, wait, st
 * **Alone:** when the new gateway has already been applied. The whole apply
   runs it last, after pass two, whenever a site without the gateway role still
   holds a gateway.
-* **Flags:** `--config`, `--secrets`, `--execute`, `--sudo` (on: run remote
-  commands through sudo).
+* **Flags:** `--config`, `--secrets`, `--execute`.
 * **Hosts:** reads every site without the gateway role, to find the old
   gateway; writes only to the old and new gateways' hosts. Also the DNS
   provider's API, and each hostname the gateway serves over HTTPS from this
@@ -1155,7 +1157,7 @@ paisans app remove docs --delete-data --execute      # and deletes its data, aft
 * **Flags:** the app, as an argument before or after the flags;
   `--delete-data` (off: also delete its database, bucket and keys, volumes and
   data directories, after the app's name is typed at a terminal), `--config`,
-  `--secrets`, `--execute`, `--sudo`.
+  `--secrets`, `--execute`.
 * **Hosts:** every site that holds the app, and its Pocket ID.
 * **`--execute`:** stops, removes and deletes.
 
@@ -1183,9 +1185,7 @@ paisans web-server check --app health   # from your machine, as a visitor would
   minute on a certificate or sign in failure and reporting a DNS or routing
   failure at once, so `check` is typed alone to check again once the web
   server is fixed. Typed alone it checks once.
-* **Flags:** `--app <name>` (required), `--config`, `--sudo` (on: read the web
-  server through sudo where the ssh user cannot; `--sudo=false` reads as the
-  ssh user alone).
+* **Flags:** `--app <name>` (required), `--config`. It reads as the ssh user.
 * **Hosts:** in `managed_by` `external`, the monitor over ssh, reading only:
   `show` always, `check` only when a check fails. `check` otherwise looks at
   the public hostname only.

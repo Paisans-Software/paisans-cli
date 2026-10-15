@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
@@ -65,14 +66,17 @@ func runDefault(t *testing.T, name string, fn func() error) string {
 func quietSSH(t *testing.T) { sshAnswering(t, quietHost) }
 
 // The remote command travels base64 encoded (apply.RemoteCommand), so the
-// script decodes it to answer the few probes whose silence would be read
-// as a failure: who it runs as, which OS, what volumes there are, and
-// that a file is absent.
+// script decodes it, drops the DOCKER_HOST export a site transport puts
+// first, and answers the few probes whose silence would be read as a
+// failure: who it runs as, which OS, what volumes there are, and that a
+// file is absent.
 const quietHost = `#!/bin/sh
 for last; do :; done
 b=${last#*printf %s }
 b=${b%% |*}
 cmd=$(printf %s "$b" | base64 -d 2>/dev/null)
+case $cmd in "export DOCKER_HOST="*) cmd=${cmd#*"
+"};; esac
 case "$cmd" in
 *"for n in "*) l=${cmd#*for n in }; l=${l%%; do*}; for n in $l; do echo "absent $(printf %s "$n" | tr -d "'")"; done;;
 *paisans-sweep-end*) l=${cmd#*for r in }; l=${l%%; do*}
@@ -84,6 +88,9 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
+# The host check's inventory asks id -u too, and refuses anyone but root
+# until phase 6 moves it to the user, so it is answered 0 here. The login
+# probe, a bare id -u, is answered 1000 before this script runs.
 *"id -u") echo 0;;
 "dpkg --print-architecture") echo amd64;;
 *"print-architecture"*) echo "arch amd64";;
@@ -96,16 +103,30 @@ exit 0
 `
 
 // sshAnswering puts an ssh on PATH that runs script for each connection.
+// The login probe a site transport sends first, a bare id -u, is answered
+// ahead of script, in the same file, as a login user with UID 1000, so
+// script answers only the commands it is about, and the test starts with no
+// Login from an earlier one.
 func sshAnswering(t *testing.T, script string) {
 	t.Helper()
+	resetLogins(t)
+	body, ok := strings.CutPrefix(script, "#!/bin/sh\n")
+	if !ok {
+		t.Fatal("a fake ssh script does not start #!/bin/sh")
+	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(loginProbe+body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Closed while the fake is still first on PATH, as main closes them.
 	t.Cleanup(apply.CloseConnections)
 }
+
+// loginProbe answers the login probe, a remote command that is exactly
+// id -u, with UID 1000, by matching its base64 as apply.RemoteCommand
+// sends it, so no other command is decoded twice.
+var loginProbe = "#!/bin/sh\ncase \"$*\" in *'printf %s " + base64.StdEncoding.EncodeToString([]byte("id -u")) + " |'*) echo 1000; exit 0;; esac\n"
 
 // runningHost is a host whose stacks come up: `ps` finds a running container,
 // so the gate after each stack passes and an execution carries on.
@@ -144,7 +165,7 @@ func fixtureRuns(t *testing.T) map[string]string {
 	t.Run("init", func(t *testing.T) {
 		path, _ := initWorld(t, nil, fakeSites(), make([]byte, 64))
 		t.Chdir(filepath.Dir(path))
-		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml", "--sudo=false"}) })
+		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml"}) })
 	})
 
 	work := t.TempDir()
@@ -234,21 +255,21 @@ func fixtureRuns(t *testing.T) map[string]string {
 	{
 		var sent, writes []string
 		withDoctorHosts(t, stuckHosts(mustLoad(t, cfg), &sent, &writes))
-		runs["doctor"] = runDefault(t, "doctor", func() error { return runDoctor([]string{"--config", cfg, "--sudo=false"}) })
+		runs["doctor"] = runDefault(t, "doctor", func() error { return runDoctor([]string{"--config", cfg}) })
 	}
 
 	{
 		savedSite, savedApp, savedReg := removeSiteHost, removeHost, registryHost
 		t.Cleanup(func() { removeSiteHost, removeHost, registryHost = savedSite, savedApp, savedReg })
 		quiet := runningHost{failingHost{match: "\x00"}}
-		removeSiteHost = func(string, config.Site, bool) apply.Transport { return quiet }
-		removeHost = func(string, config.Site, bool) appremove.Host { return quiet }
-		registryHost = func(string, config.Site, string, bool) registry.Runner { return quiet }
+		removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
+		removeHost = func(string, config.Site) appremove.Host { return quiet }
+		registryHost = func(string, config.Site, string) registry.Runner { return quiet }
 		runs["site remove dry run"] = runDefault(t, "site remove", func() error {
-			return runSiteRemove([]string{"watch", "--config", cfg, "--secrets", secrets, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runSiteRemove([]string{"watch", "--config", cfg, "--secrets", secrets}, strings.NewReader(""), io.Discard)
 		})
 		runs["app remove dry run"] = runDefault(t, "app remove", func() error {
-			return runAppRemove([]string{"old", "--config", cfg, "--secrets", secrets, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runAppRemove([]string{"old", "--config", cfg, "--secrets", secrets}, strings.NewReader(""), io.Discard)
 		})
 	}
 
@@ -256,10 +277,10 @@ func fixtureRuns(t *testing.T) map[string]string {
 	// as a clean, empty host.
 	quietSSH(t)
 	for name, args := range map[string][]string{
-		"host prepare dry run": {"host prepare", "--config", cfg, "--site", "home-a", "--sudo=false"},
-		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets, "--sudo=false"},
-		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets, "--sudo=false"},
-		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a", "--sudo=false"},
+		"host prepare dry run": {"host prepare", "--config", cfg, "--site", "home-a"},
+		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets},
+		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets},
+		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a"},
 	} {
 		run := map[string]func([]string) error{
 			"host prepare": runHostPrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,

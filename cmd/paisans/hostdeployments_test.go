@@ -66,12 +66,16 @@ func twoDeployments(t *testing.T) string {
 }
 
 // withHost stands h in for every host a command without a configuration
-// reaches.
+// reaches: as its owner, as host deployments does, or as the deployment's
+// user, as site remove --id does.
 func withHost(t *testing.T, h apply.Transport) {
 	t.Helper()
-	saved := reachDestination
-	reachDestination = func(config.Destination, bool) apply.Transport { return h }
-	t.Cleanup(func() { reachDestination = saved })
+	saved := reachOwner
+	reachOwner = func(config.Destination, bool) apply.Transport { return h }
+	t.Cleanup(func() { reachOwner = saved })
+	savedDest := reachDestination
+	reachDestination = func(config.Destination) apply.Transport { return h }
+	t.Cleanup(func() { reachDestination = savedDest })
 }
 
 func plainOutput(t *testing.T) *bytes.Buffer {
@@ -320,7 +324,9 @@ func TestHostDeploymentsKeptCaddyWithNoSitesLeft(t *testing.T) {
 
 // A host named only by --ssh is reached the way the operator's own ssh
 // reaches it, with their agent, keys and config: there are no declared keys
-// to offer, since there is no configuration.
+// to offer, since there is no configuration. A deployment command reaches it
+// as the deployment's user, without sudo; host deployments reaches it as its
+// owner, through sudo.
 func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 	for in, want := range map[string]string{
 		"ubuntu@192.0.2.10":         "ubuntu@192.0.2.10",
@@ -331,9 +337,22 @@ func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tr, ok := reachDestination(dest, true).(apply.SSHTransport)
-		if !ok || tr.Destination != want || !tr.Sudo || tr.Auth == nil {
-			t.Errorf("%s: %+v, want destination %s with sudo", in, tr, want)
+		tr, ok := reachDestination(dest).(apply.SSHTransport)
+		if !ok || tr.Destination != want || tr.Sudo || tr.Auth != nil {
+			t.Errorf("%s: %+v, want destination %s without sudo", in, tr, want)
+		}
+		owner := ownerTransport(dest, true)
+		if owner.Destination != want || !owner.Sudo || owner.Auth == nil {
+			t.Errorf("%s: owner %+v, want destination %s with sudo", in, owner, want)
+		}
+		if tr.Login == nil {
+			t.Errorf("%s: a deployment command's transport has no Login", in)
+		}
+		if owner.Login != nil {
+			t.Errorf("%s: the owner's transport points docker at a user's daemon", in)
+		}
+		if plain := ownerTransport(dest, false); plain.Sudo || plain.Auth != nil {
+			t.Errorf("%s: owner with --sudo=false %+v", in, plain)
 		}
 	}
 }

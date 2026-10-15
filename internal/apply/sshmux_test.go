@@ -78,7 +78,7 @@ func TestTheSocketDirectoryFallsBack(t *testing.T) {
 		t.Fatalf("want no sharing without a usable base, got %q", args)
 	}
 	tr := apply.SSHTransport{User: "ubuntu", Host: "203.0.113.10"}
-	if got, want := tr.SSHArgs([]string{"k1"}, "true"), []string{"-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "k1", "ubuntu@203.0.113.10", apply.RemoteCommand("true")}; !reflect.DeepEqual(got, want) {
+	if got, want := tr.SSHArgs([]string{"k1"}, "true"), []string{"-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "k1", "ubuntu@203.0.113.10", apply.RemoteCommand("", "true")}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unshared args:\n got %q\nwant %q", got, want)
 	}
 }

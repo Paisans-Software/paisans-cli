@@ -155,11 +155,6 @@ func (h archTransport) Run(command string) (string, error) {
 	return h.Transport.Run(command)
 }
 
-// SettlesSudo and PrepareSudo are the wrapped host's, so a run settles sudo
-// on it as it would unwrapped.
-func (h archTransport) SettlesSudo() bool  { return apply.SettlesSudo(h.Transport) }
-func (h archTransport) PrepareSudo() error { return apply.PrepareSudo(h.Transport) }
-
 // A whole apply reads every site's architecture before it plans, and its dry
 // run says what --execute would record without writing it.
 func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
@@ -170,14 +165,14 @@ func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
 	fakeConverge(t, nil)
 	recordConverge(t)
 	saved := convergeHost
-	convergeHost = func(string, config.Site, bool) apply.Transport {
+	convergeHost = func(string, config.Site) apply.Transport {
 		return archTransport{runningHost{failingHost{match: "\x00"}}, "arm64"}
 	}
 	t.Cleanup(func() { convergeHost = saved })
 	path := fixtureWithoutArch(t)
 	secrets := fixtureSecretsPath()
 	r := &ui.Recorder{}
-	_ = runConverge(r, convergeOptions{Config: path, Secrets: secrets, Execute: false, Sudo: false})
+	_ = runConverge(r, convergeOptions{Config: path, Secrets: secrets, Execute: false})
 	if r.Index("done", "read each site's architecture") < 0 {
 		t.Fatalf("no architecture read: %+v", r.Events)
 	}
@@ -283,7 +278,7 @@ func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
 	}
 	var err error
 	captureStdout(t, func() {
-		err = runConverge(rec, convergeOptions{Config: path, Secrets: fixtureSecretsPath(), Execute: true, Sudo: false, stdin: noTerminalStdin(), stdout: io.Discard})
+		err = runConverge(rec, convergeOptions{Config: path, Secrets: fixtureSecretsPath(), Execute: true, stdin: noTerminalStdin(), stdout: io.Discard})
 	})
 	if err != nil {
 		t.Fatalf("%v %s\n%s", err, problemText(err), rec.Lines())
@@ -313,7 +308,7 @@ func TestAnExecutedApplySitePublishesTheRecordedArch(t *testing.T) {
 	failingSSH(t)
 	withRecorder(t, false)
 	captureStdout(t, func() {
-		_ = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", "vm", "--execute"}, noTerminalStdin(), io.Discard)
+		_ = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--site", "vm", "--execute"}, noTerminalStdin(), io.Discard)
 	})
 	body, _ := os.ReadFile(path)
 	if strings.Count(string(body), "arch: amd64") != 1 {
@@ -346,7 +341,7 @@ const amd64OnlyMbin = "ghcr.io/example-org/mbin:v1.10.1-fork"
 func armWithAmd64OnlyMbin(t *testing.T) {
 	t.Helper()
 	saved, savedRender, savedDigests := convergeHost, convergeRender, imageDigests
-	convergeHost = func(string, config.Site, bool) apply.Transport {
+	convergeHost = func(string, config.Site) apply.Transport {
 		return archTransport{runningHost{failingHost{match: "\x00"}}, "arm64"}
 	}
 	convergeRender = func(*config.Config, *config.Secrets) (*render.Plan, error) {
@@ -370,7 +365,7 @@ func TestADryRunApplyRefusesAnImageWithoutTheSitesPlatform(t *testing.T) {
 	recordConverge(t)
 	armWithAmd64OnlyMbin(t)
 	r := &ui.Recorder{}
-	err := runConverge(r, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: false, Sudo: false})
+	err := runConverge(r, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: false})
 	if err == nil {
 		t.Fatalf("not refused:\n%s", r.Lines())
 	}
@@ -385,7 +380,7 @@ func TestAnExecutedApplyRefusesAnImageBeforeAnyHostPrepare(t *testing.T) {
 	armWithAmd64OnlyMbin(t)
 	var err error
 	captureStdout(t, func() {
-		err = runConverge(rec, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: true, Sudo: false, stdin: noTerminalStdin(), stdout: io.Discard})
+		err = runConverge(rec, convergeOptions{Config: fixtureWithoutArch(t), Secrets: fixtureSecretsPath(), Execute: true, stdin: noTerminalStdin(), stdout: io.Discard})
 	})
 	if err == nil {
 		t.Fatalf("not refused:\n%s", rec.Lines())
@@ -419,7 +414,7 @@ func TestSiteAddRefusesAnImageWithoutTheNewSitesPlatform(t *testing.T) {
 		log := loggingSSH(t, "")
 		fakeGrants(t, func(string) *grant.Record { return nil })
 		rec := recordConverge(t)
-		args := []string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}
+		args := []string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}
 		if execute {
 			args = append(args, "--execute")
 		}

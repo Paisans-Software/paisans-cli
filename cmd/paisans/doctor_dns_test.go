@@ -118,7 +118,7 @@ func TestDoctorChecksTheDNSTokenFromEveryPlace(t *testing.T) {
 	zone.Zones["example.org"] = "zone-1"
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, zone)
 	rec := withRecorder(t, true)
-	_ = runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"})
+	_ = runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"})
 
 	want := []string{"vm", dns.WorkstationPlace, "provider"}
 	if strings.Join(calls.places, ",") != strings.Join(want, ",") {
@@ -150,7 +150,7 @@ func TestDoctorWithoutSecretsChecksEveryOtherPlace(t *testing.T) {
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, dnstest.New())
 	rec := withRecorder(t, true)
 	missing := filepath.Join(t.TempDir(), "secrets.enc.yaml")
-	_ = runDoctor([]string{"--config", configPath, "--secrets", missing, "--sudo=false", "--site", "vm"})
+	_ = runDoctor([]string{"--config", configPath, "--secrets", missing, "--site", "vm"})
 	if strings.Join(calls.places, ",") != "vm" {
 		t.Errorf("checked %v, want vm alone", calls.places)
 	}
@@ -189,7 +189,7 @@ func TestDoctorPrintsNoToken(t *testing.T) {
 			withDoctorHosts(t, hosts)
 			withTokenChecks(t, tokenPassed, workstation, echoingProvider{zone})
 			rec := withRecorder(t, true)
-			err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"})
+			err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"})
 			out := rec.Lines()
 			if !strings.Contains(out, "check dns token workstation") {
 				t.Fatalf("the workstation's check did not run:\n%s", out)
@@ -236,7 +236,7 @@ func TestDoctorCallsNothingDuringALockout(t *testing.T) {
 	withDoctorHosts(t, hosts)
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, dnstest.New())
 	rec := withRecorder(t, true)
-	if err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"}); err == nil {
+	if err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"}); err == nil {
 		t.Error("a lockout is not a failure")
 	}
 	if len(calls.places) != 0 {

@@ -107,7 +107,7 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 		t.Fatal(err)
 	}
 	savedHost, savedRandom := initHost, meshRandom
-	initHost = func(_ string, site config.Site, _ bool) registry.Runner {
+	initHost = func(_ string, site config.Site) registry.Runner {
 		for _, f := range sites {
 			if f.name == site.SSH.Host {
 				return f
@@ -142,7 +142,7 @@ func fakeSites() map[string]*initFake {
 func runInitQuietly(t *testing.T, path string) error {
 	t.Helper()
 	var err error
-	captureStdout(t, func() { err = runInit([]string{"--config", path, "--sudo=false"}) })
+	captureStdout(t, func() { err = runInit([]string{"--config", path}) })
 	return err
 }
 

@@ -26,8 +26,8 @@ import (
 )
 
 // rotateHost is how `secrets rotate` reaches a site. Tests replace it.
-var rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+var rotateHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }
 
 // rotateDNSProvider makes the provider a next DNS token is tried against, the
@@ -96,7 +96,6 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
 	restart := fs.Bool("restart", false, "with --all: discard what an earlier --all run left and rotate every secret again (refused while a rotation is pending)")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and Docker are root's")
 	var replaced pathList
 	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable)")
 	var named []string
@@ -166,7 +165,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		oidcRetire: func(app string) error { return retireClientSecrets(r, cfg, store, app) },
 		s3Run: func(app string) error {
-			return runStorageRotateKey(subcommandArgs(r, "--config", *configPath, "--secrets", *secretsPath, "--app", app, "--execute", fmt.Sprintf("--sudo=%t", *sudo)))
+			return runStorageRotateKey(subcommandArgs(r, "--config", *configPath, "--secrets", *secretsPath, "--app", app, "--execute"))
 		},
 	}
 	targets, kept, err := rotateTargets(cfg, secrets, named, *all, wiring)
@@ -180,10 +179,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = rotateHost(name, cfg.Sites[name], *sudo)
-	}
-	if err := settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }); err != nil {
-		return err
+		transports[name] = rotateHost(name, cfg.Sites[name])
 	}
 	if err := reachEverySite(r, cfg, transports); err != nil {
 		return err

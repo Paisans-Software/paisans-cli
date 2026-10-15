@@ -225,7 +225,7 @@ func TestApplyRefusesMailThatDoesNotLogIn(t *testing.T) {
 	log := failingSSH(t)
 	withRecorder(t, false)
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
-		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute"}, extra...), strings.NewReader(""), io.Discard)
+		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, extra...), strings.NewReader(""), io.Discard)
 		if err == nil {
 			t.Fatalf("apply %v was not refused", extra)
 		}

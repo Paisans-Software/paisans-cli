@@ -80,7 +80,7 @@ func recordedClient(secrets *config.Secrets, app string) oidcclient.Recorded {
 // site's ssh section or destination verbatim, and without sudo: curl needs
 // no root.
 func clientAPI(cfg *config.Config, site, destination, key string) *pocketid.Client {
-	return &pocketid.Client{Transport: oidcTransport(siteTransport(site, cfg.Sites[site], destination, false)), BaseURL: pocketIDBase(cfg, site), APIKey: key, Networks: meshNetworks(cfg)}
+	return &pocketid.Client{Transport: oidcTransport(siteTransport(site, cfg.Sites[site], destination)), BaseURL: pocketIDBase(cfg, site), APIKey: key, Networks: meshNetworks(cfg)}
 }
 
 // probeError is a client plan that failed because Pocket ID could not be
@@ -596,7 +596,7 @@ func (c *clientStep) waitForPocketID() error {
 		if name == c.site {
 			destination = c.destination
 		}
-		transports[name] = standbyLook(siteTransport(name, c.cfg.Sites[name], destination, false))
+		transports[name] = standbyLook(siteTransport(name, c.cfg.Sites[name], destination))
 	}
 	// What the check saw is the detail of waiting for Pocket ID. A failure
 	// goes to the caller as an error, which is shown in full.

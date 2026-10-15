@@ -144,7 +144,7 @@ var standbyLook = func(t apply.SSHTransport) apply.Transport { return t }
 // pocketIDSite is adminSite for a Pocket ID that runs on more than one site:
 // with no --site, the site whose instance is active, since the others stand
 // by with their port closed and an API call there would be refused. It asks
-// without sudo, as the API calls themselves run: the active site is found by
+// as the ssh user, as the API calls themselves run: the active site is found by
 // /healthz on its mesh address, which needs no root, and a standby merely
 // reads as down when docker is not the deploy user's. An explicit --site is
 // used as given, through adminSite's own check. Asking each site is a step
@@ -176,7 +176,7 @@ func activeInstance(cfg *config.Config, appName, site, destination string) (stri
 		if name == site {
 			override = destination
 		}
-		transports[name] = standbyLook(siteTransport(name, cfg.Sites[name], override, false))
+		transports[name] = standbyLook(siteTransport(name, cfg.Sites[name], override))
 	}
 	list := apply.LookAtInstances(cfg, appName, transports)
 	if _, err := apply.OneActive(cfg.Deployment(), appName, list); err != nil {

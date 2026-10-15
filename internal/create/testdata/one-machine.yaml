@@ -54,7 +54,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.10
     ssh:
-      user: ubuntu
       keys: [alice, bob]
   health:
     roles: [monitor]
@@ -63,7 +62,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.50
     ssh:
-      user: ubuntu
       keys: [alice, bob]
 
 storage:

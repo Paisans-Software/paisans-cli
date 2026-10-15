@@ -71,23 +71,14 @@ func TestWebServerCheckFailsOnAFailedItem(t *testing.T) {
 	}
 }
 
-// The monitor's host is read as the ssh user, and through sudo with the
-// answer every transport to that host shares (sudoAuthFor): inside apply,
-// the password settled at the start of the run, so reading the web server
-// asks for nothing more.
-func TestWebServerHostSharesTheRunsSudo(t *testing.T) {
-	cfg := fixture(t)
-	h := webServerHost(cfg, "watch", true)
-	plain, ok := h.Plain.(apply.SSHTransport)
-	if !ok || plain.Sudo {
+// The monitor's host is read as the ssh user, never through sudo.
+func TestWebServerHostReadsAsTheSSHUser(t *testing.T) {
+	h := webServerHost(fixture(t), "watch")
+	if plain, ok := h.Plain.(apply.SSHTransport); !ok || plain.Sudo {
 		t.Fatalf("plain %#v", h.Plain)
 	}
-	sudo, ok := h.Sudo.(apply.SSHTransport)
-	if !ok || !sudo.Sudo || sudo.Auth == nil || sudo.Auth != sudoAuthFor(sudo.Describe()) {
-		t.Fatalf("sudo %#v", h.Sudo)
-	}
-	if h := webServerHost(cfg, "watch", false); h.Sudo != nil {
-		t.Errorf("--sudo=false still reads through sudo: %#v", h.Sudo)
+	if h.Sudo != nil {
+		t.Errorf("read through sudo: %#v", h.Sudo)
 	}
 }
 
@@ -121,16 +112,11 @@ func TestWebServerShowPrintsTheDetectedServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, webServerAsks{"health sudo=true"}) {
+	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
 		t.Errorf("asked %v", *asked)
 	}
 	if !strings.Contains(out, caddyAutomatic.Summary()) || strings.Contains(out, "proxy_pass") || strings.Contains(out, "tls /etc/ssl") {
 		t.Errorf("sheet:\n%s", out)
-	}
-	if out2 := captureStdout(t, func() {
-		runWebServer([]string{"show", "--app", "health", "--sudo=false", "--config", externalFixture(t)})
-	}); !slices.Equal(*asked, webServerAsks{"health sudo=true", "health sudo=false"}) {
-		t.Errorf("asked %v:\n%s", *asked, out2)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 func holdsGateway(t *testing.T, site string, err error) {
 	t.Helper()
 	saved := convergeHoldsGateway
-	convergeHoldsGateway = func(_ *config.Config, s string, _ bool) (bool, error) { return s == site, err }
+	convergeHoldsGateway = func(_ *config.Config, s string) (bool, error) { return s == site, err }
 	t.Cleanup(func() { convergeHoldsGateway = saved })
 }
 
