@@ -330,40 +330,49 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // the C library that built it, and naming the release keeps a pull from
 // changing it under an existing data directory.
 func (p *planner) appImages(app config.App) (map[string]string, error) {
-	out, _, err := p.appImageOrigins(app)
-	return out, err
+	origins, err := p.appImageOrigins(app)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(origins))
+	for service, o := range origins {
+		out[service] = o.image
+	}
+	return out, nil
 }
 
-// appImageOrigins is appImages, and the services whose image it took from
-// the core catalog's foundation for the toolkit: one a reserved or core
-// blueprint names with foundation:, and the database's, which the toolkit
-// chooses for every blueprint, when the configuration declares neither. A
-// foundation: in a blueprint from any other catalog is that catalog's
-// choice, which the team that reviews foundation.yaml did not review, so it
-// is not counted.
-func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string]bool, error) {
-	out, foundation := map[string]string{}, map[string]bool{}
+// appImageOrigins is where appImages took each service's image. A
+// declaration wins and replaces the default. The foundation mark is for the
+// image the core catalog's foundation chose for the toolkit: one a reserved
+// or core blueprint names with foundation:, and the database's, which the
+// toolkit chooses for every blueprint. A foundation: in a blueprint from any
+// other catalog is that catalog's choice, which the team that reviews
+// foundation.yaml did not review, so it is not marked.
+func (p *planner) appImageOrigins(app config.App) (map[string]imageOrigin, error) {
+	out := map[string]imageOrigin{}
 	toolkits := blueprints.ToolkitBlueprint(app.Blueprint)
 	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
-		switch {
-		case app.Images[service.Name] != "":
-			out[service.Name] = app.Images[service.Name]
-		case err != nil:
-			return nil, nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
-		case image != "":
-			out[service.Name] = image
-			foundation[service.Name] = service.Foundation != "" && toolkits
-		case service.Name == blueprints.PostgresService:
-			pg, err := blueprints.PostgresImage(p.postgresVersion())
-			if err != nil {
-				return nil, nil, err
+		def := imageOrigin{image: image, foundation: service.Foundation != "" && toolkits, blueprint: service.Foundation == ""}
+		if err == nil && image == "" && service.Name == blueprints.PostgresService {
+			pg, pgErr := blueprints.PostgresImage(p.postgresVersion())
+			if pgErr != nil {
+				return nil, pgErr
 			}
-			out[service.Name] = pg
-			foundation[service.Name] = true
+			def = imageOrigin{image: pg, foundation: true}
+		}
+		if declared := app.Images[service.Name]; declared != "" {
+			out[service.Name] = imageOrigin{image: declared, declared: true, replaces: def.image}
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
+		}
+		if def.image != "" {
+			out[service.Name] = def
 		}
 	}
-	return out, foundation, nil
+	return out, nil
 }
 
 // dbIdentifier keeps app names usable as Postgres identifiers without

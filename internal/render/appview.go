@@ -467,9 +467,11 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.PocketID = pid
 		v.OperatorsHeartbeat = len(appHeartbeatTargets(p.cfg)) > 0
 		v.Reconciler = p.reconcilerValuesFor(app)
-		if v.HeartbeatImage, err = blueprints.FoundationImage(blueprints.FoundationHeartbeat); err != nil {
+		heartbeat, err := p.heartbeatOrigin()
+		if err != nil {
 			return appValues{}, err
 		}
+		v.HeartbeatImage = heartbeat.image
 		dns, err := p.dnsValuesFor(planned.Name)
 		if err != nil {
 			return appValues{}, err

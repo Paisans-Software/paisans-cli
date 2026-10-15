@@ -564,12 +564,18 @@ func unresolved(image render.ComposeImage, deployed string, failed error, r Reso
 			Cause:   failed,
 		}
 	}
-	if image.Setting() == "" {
-		// No setting of the configuration decides it: it is the core
-		// catalog's foundation image, so the fix is the catalog's.
+	refused := errors.Is(failed, imagedigest.ErrNotFound) || errors.Is(failed, imagedigest.ErrDenied)
+	if image.Setting() == "" || image.Origin == render.OriginFoundation && refused {
+		// The core catalog's foundation image: the catalog's release fixes
+		// it, and the setting, when there is one, holds a build until then.
+		// One the registry could not be asked about takes the advice below,
+		// which names its setting.
 		explain := fmt.Sprintf("Run apply again once this workstation reaches %s.", host)
-		if errors.Is(failed, imagedigest.ErrNotFound) || errors.Is(failed, imagedigest.ErrDenied) {
+		if refused {
 			explain = "It is the core catalog's own image (foundation.yaml), and its track names nothing this registry publishes anonymously. A release of the core catalog fixes it; pinning core to an older release in `catalogs` works until then."
+			if image.Setting() != "" {
+				explain += fmt.Sprintf(" So does setting %s to a published tag.", setting)
+			}
 		}
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("could not resolve %s (%s)", named, host),
