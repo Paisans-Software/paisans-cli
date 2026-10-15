@@ -591,6 +591,20 @@ unchanged file on a host whose interface is down starts it. A failure stops the
 apply there. `README.md` has the table under "`apply` brings the mesh
 interface up before anything binds to it".
 
+**The DNS token is checked from the site before Caddy asks the provider.**
+`Plan.DNSToken` is set on a Caddy site whose Caddy changes, reloads or is
+recreated, when `acme.provider` is set (`render.Plan.ACMEProvider` and
+`Domain` carry what it checks). `checkDNSToken` (`internal/apply/dnstoken.go`)
+runs it as the step `check DNS token`, after the module check and before
+`validate gateway config`, and stops the site on any failure, a provider that
+does not answer included. The check itself is `dns.TokenCheck`
+(`internal/dns/token.go`), one piece of code with two transports: `OnSite`
+reads `ACME_DNS_TOKEN` from `dns.CaddyEnvFile` on the host and calls curl
+there with the header on stdin, and `FromWorkstation` calls over HTTPS with
+the secrets file's token, which `dnsSetup` runs before `dns init` and `dns
+prune` read the zone. Both make the zone lookup first, since only it is
+subject to the address filter, and verify only after it passed.
+
 **The infrastructure stack moves first, and app stacks only after their
 databases exist.** Sorted order alone started `blog` and `docs` before
 `infra`. Between the infrastructure stack and the first app stack, a site in

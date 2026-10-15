@@ -9294,6 +9294,32 @@ up with the new major version. Naming the major version is the fix.
 Everything else is checked at `apply`, by asking the binary which modules it has
 rather than inferring it from a name.
 
+#### The token is checked from the server before Caddy uses it
+
+A DNS token can be restricted to the addresses it is used from (Cloudflare's
+Client IP Address Filtering), and the provider judges the address each call
+comes from. A token that works from the workstation can be refused from the
+gateway, and Caddy, refused, retries every hostname against every certificate
+authority until the provider locks the token out, a lockout that holds while
+the retries keep arriving.
+
+So on each site whose Caddy is about to start, reload or be recreated, `apply`
+first runs `check DNS token` there: after the gateway's files are written and
+its modules checked, before `validate gateway config`. It reads the token from
+the `caddy.env` it has just written, on the host, and hands it to curl through
+a configuration on stdin, so the token never leaves the host and is in no
+command line. It looks up the zone holding `community.domain`, which the
+address filter applies to, and then verifies that the token is `active`. A
+refusal stops that site's apply with the gateway unchanged, still serving the
+certificates it holds, and so does a provider API that does not answer,
+because then nothing can tell a token Caddy can use from one it cannot.
+Founder decision. A provider the toolkit has no check for is not gated, and
+the step says so.
+
+`dns init` and `dns prune` run the same check from the workstation before
+their first records call, so a token filtered away from it is reported as
+refused `from this workstation`, with the address the provider judged.
+
 ### Trusted proxies must be the mesh subnet — set this at `init`
 
 This is the one item that is expensive to retrofit, and it fails quietly.
