@@ -12,6 +12,7 @@ func ValidOperatorName(s string) bool { return keyName.MatchString(s) }
 // ValidAppName reports whether s is a name an app may have under apps.
 func ValidAppName(s string) bool { return blueprintName.MatchString(s) }
 
-// ValidHostname reports whether s holds only what a DNS name holds, the rule
-// an app's hostname is held to.
-func ValidHostname(s string) bool { return nameChars(s) }
+// ValidHostname reports whether s is a DNS name: dot-separated labels of
+// letters, digits and hyphens, none empty or over 63 characters, at most 253
+// in all. It is the rule ssh.host is held to.
+func ValidHostname(s string) bool { return isHostname(s) }

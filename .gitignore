@@ -29,7 +29,8 @@
 secrets/
 
 # A real deployment's config names real hosts. The toolkit repo ships only
-# examples; a deployment keeps its own config directory elsewhere.
+# examples, plus one test fixture of placeholders (the exception below); a
+# deployment keeps its own config directory elsewhere.
 paisans-stack.yaml
 !examples/paisans-stack.example.yaml
 !internal/admission/testdata/paisans-stack.yaml

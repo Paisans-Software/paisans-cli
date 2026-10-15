@@ -3,6 +3,7 @@ package admission
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -108,12 +109,46 @@ func canonicalKey(line string) (string, error) {
 	case err != nil:
 		return "", fmt.Errorf("not an OpenSSH public key (%v)", err)
 	case len(options) > 0:
-		return "", fmt.Errorf("carries options (%s)", strings.Join(options, ","))
+		return "", fmt.Errorf("carries options (%q)", strings.Join(options, ","))
 	case len(strings.TrimSpace(string(rest))) > 0:
 		return "", fmt.Errorf("more than one key on the line")
 	}
+	if err := checkKeyType(pub); err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))), nil
 }
+
+// minRSABits is the shortest RSA key a request accepts.
+const minRSABits = 3072
+
+// checkKeyType accepts the key types a current OpenSSH generates, and RSA only
+// at a size that is still sound. A request is admission to a shell, so a
+// certificate, whose trust lies with a CA the host does not know, and an
+// obsolete type are refused by name.
+func checkKeyType(pub ssh.PublicKey) error {
+	switch pub.Type() {
+	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
+		return nil
+	case ssh.KeyAlgoRSA:
+		if cp, ok := pub.(ssh.CryptoPublicKey); ok {
+			if k, ok := cp.CryptoPublicKey().(interface{ Size() int }); ok && k.Size()*8 < minRSABits {
+				return fmt.Errorf("an ssh-rsa key of %d bits, under %d", k.Size()*8, minRSABits)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("%q is not a key type a request accepts", pub.Type())
+}
+
+// meshMinPrefix is the shortest prefix the mesh may have: no larger than a /24,
+// which is what init picks. A larger mesh is what would swallow an owner's
+// LAN into the rules that trust the mesh. Whether the mesh overlaps the
+// owner's actual routes is checked by admit against the host itself; 10/8,
+// 192.168/16 and 100.64/10 are not refused here, since a /24 inside them is
+// normal.
+const meshMinPrefix = 24
 
 // forbiddenMesh is what a mesh subnet may not overlap. Admit's egress table
 // accepts the mesh subnet before it drops loopback and link-local, so a
@@ -155,20 +190,31 @@ func (r Request) Check() []string {
 	switch {
 	case err != nil || ip.To4() == nil:
 		add("mesh_subnet: %q is not an IPv4 network", r.MeshSubnet)
+	case mesh.String() != r.MeshSubnet && ip.Equal(mesh.IP):
+		add("mesh_subnet: %q is not written as plain dotted IPv4, %s", r.MeshSubnet, mesh)
 	case !ip.Equal(mesh.IP):
 		add("mesh_subnet: %q is not written as its network, %s", r.MeshSubnet, mesh)
 	default:
+		if ones, _ := mesh.Mask.Size(); ones < meshMinPrefix {
+			add("mesh_subnet: %q is larger than a /%d, which is as large as a mesh may be", r.MeshSubnet, meshMinPrefix)
+		}
 		for _, f := range forbiddenMesh {
 			_, n, _ := net.ParseCIDR(f)
 			if n.Contains(mesh.IP) || mesh.Contains(n.IP) {
 				add("mesh_subnet: %s overlaps %s, which the deployment must never reach", r.MeshSubnet, f)
 			}
 		}
-		if a := net.ParseIP(r.Address); a == nil || a.To4() == nil || !mesh.Contains(a) {
+		a := net.ParseIP(r.Address)
+		switch {
+		case a == nil || a.To4() == nil || !mesh.Contains(a):
 			add("address: %q is not an IPv4 address inside mesh_subnet %s", r.Address, r.MeshSubnet)
+		case a.String() != r.Address:
+			add("address: %q is not written as plain dotted IPv4, %s", r.Address, a)
+		case isNetworkOrBroadcast(a, mesh):
+			add("address: %s is the subnet's network or broadcast address", r.Address)
 		}
 	}
-	apps := map[string]bool{}
+	apps, hostnames := map[string]bool{}, map[string]bool{}
 	for i, w := range r.WebServer {
 		switch {
 		case !config.ValidAppName(w.App):
@@ -177,15 +223,19 @@ func (r Request) Check() []string {
 			add("web_server[%d].app: %s is listed twice", i, w.App)
 		}
 		apps[w.App] = true
-		if !config.ValidHostname(w.Hostname) {
+		switch {
+		case !config.ValidHostname(w.Hostname):
 			add("web_server[%d].hostname: %q is not a hostname", i, w.Hostname)
+		case hostnames[w.Hostname]:
+			add("web_server[%d].hostname: %q is listed twice", i, w.Hostname)
 		}
-		if _, _, ok := (config.WebServer{Listen: w.Listen}).ListenHostPort(); !ok {
-			add("web_server[%d].listen: %q is not an IPv4 address and a port", i, w.Listen)
+		hostnames[w.Hostname] = true
+		if !r.proxiesToThisHost(w.Listen) {
+			add("web_server[%d].listen: %q is not a loopback address or this site's mesh address, with a port", i, w.Listen)
 		}
 	}
 	if len(r.Operators) == 0 {
-		add("operators: none, so nobody could log in as %s", r.User)
+		add("operators: none, so nobody could log in as %q", r.User)
 	}
 	names, keys := map[string]bool{}, map[string]string{}
 	for i, o := range r.Operators {
@@ -197,7 +247,7 @@ func (r Request) Check() []string {
 		}
 		names[o.Name] = true
 		if len(o.Keys) == 0 {
-			add("operators[%d].keys: none for %s", i, o.Name)
+			add("operators[%d].keys: none for %q", i, o.Name)
 		}
 		for j, k := range o.Keys {
 			canonical, err := canonicalKey(k)
@@ -210,12 +260,39 @@ func (r Request) Check() []string {
 				continue
 			}
 			if first, dup := keys[k]; dup {
-				add("operators[%d].keys[%d]: the same key as %s's", i, j, first)
+				add("operators[%d].keys[%d]: the same key as %q's", i, j, first)
 			}
 			keys[k] = o.Name
 		}
 	}
 	return problems
+}
+
+func isNetworkOrBroadcast(a net.IP, mesh *net.IPNet) bool {
+	a = a.To4()
+	if a.Equal(mesh.IP) {
+		return true
+	}
+	last := make(net.IP, 4)
+	for i := range last {
+		last[i] = mesh.IP.To4()[i] | ^mesh.Mask[len(mesh.Mask)-4+i]
+	}
+	return a.Equal(last)
+}
+
+// proxiesToThisHost reports whether listen is a host:port the owner's web
+// server may proxy a public hostname to: loopback or the site's own mesh
+// address, never a name, a LAN host or the cloud metadata address.
+func (r Request) proxiesToThisHost(listen string) bool {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 || strconv.Itoa(p) != port {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.String() == host && (ip.IsLoopback() || host == r.Address)
 }
 
 // Error is a request, or a record, refused, with every problem found.
