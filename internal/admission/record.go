@@ -16,16 +16,51 @@ import (
 // refused rather than read in part.
 const RecordVersion = 1
 
-// Dir is where admission records live on a host: root's, mode 755, so
+// Dir is where admission records live on a host: root's, mode DirMode, so
 // every deployment's user reads its own record and none can write one.
+// Phase 5's writer creates it root-owned, and refuses to write if it is a
+// link or not root's.
 const Dir = "/etc/paisans"
 
+// DirMode is Dir's mode: the deployment's user lists and reads it, only root
+// writes it.
+const DirMode = 0o755
+
 // Mode is the record's mode. It is world readable because the deployment's
-// own user reads it without sudo, and it holds nothing secret.
+// own user reads it without sudo, and it holds nothing secret. The writer
+// makes the file root-owned with this mode, writes it to a temporary file
+// in Dir, fsyncs it and renames it over the record, so a reader never sees
+// half a record, and never follows a link at Dir or at the target.
 const Mode = 0o644
 
-// Path is the record of the deployment with token on a host.
-func Path(token string) string { return Dir + "/admitted." + token + ".json" }
+// ValidToken reports whether s is a deployment token: exactly
+// deployment.TokenLength lower-case hex digits, which names no directory.
+func ValidToken(s string) bool {
+	if len(s) != deployment.TokenLength {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// Path is the record of the deployment with token on a host,
+// /etc/paisans/admitted.<token>.json. It refuses a token that is not a
+// deployment token, so the writer, which runs as root, cannot be made to
+// write elsewhere; it is the only way to build the path.
+func Path(token string) (string, error) {
+	if !ValidToken(token) {
+		return "", fmt.Errorf("%q is not a deployment token: a token is %d lower-case hex digits", token, deployment.TokenLength)
+	}
+	return Dir + "/admitted." + token + ".json", nil
+}
+
+// MaxSize is the largest record ParseRecord reads: a record is under 2 KiB,
+// so a larger file is not one.
+const MaxSize = 64 * 1024
 
 // ErrNotAdmitted is a host with no record for the deployment: its owner has
 // not admitted it, or has evicted it.
@@ -73,8 +108,8 @@ type Ports struct {
 // WebServer is the owner's web server as admit detected it, as root, since
 // the deployment's user cannot: the system Docker socket, ss -p, nginx -T
 // and /etc/letsencrypt are root's. web-server show fills its snippet from
-// it. Every field is a string or a list of strings, so the record reads the
-// same to any toolkit of its version.
+// it. Every field is a string, so the record reads the same to any toolkit of
+// its version.
 type WebServer struct {
 	// Server is caddy, nginx or apache, "" when not determined (Why says).
 	Server string `json:"server"`
@@ -119,13 +154,18 @@ func NewRecord(req Request, granted Grants, digest string, at time.Time) Record 
 	}
 }
 
-// EncodeRecord is the record's file: indented JSON with a final newline.
-func EncodeRecord(r Record) []byte {
+// EncodeRecord is the record's file: indented JSON with a final newline, the
+// only bytes ParseRecord accepts. The writer writes exactly these, with Mode,
+// to Path(token).
+func EncodeRecord(r Record) ([]byte, error) {
 	if r.Ports.Public == nil {
 		r.Ports.Public = []int{}
 	}
-	out, _ := json.MarshalIndent(r, "", "  ")
-	return append(out, '\n')
+	out, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encoding the admission record: %w", err)
+	}
+	return append(out, '\n'), nil
 }
 
 // recordFields is every key a record holds; a record missing one was not
@@ -137,7 +177,13 @@ var recordFields = []string{"version", "deployment", "user", "grants", "forwardi
 // accepts.
 func ParseRecord(data []byte, token string) (Record, error) {
 	refuse := func(problems ...string) (Record, error) {
-		return Record{}, &Error{What: "the admission record " + Path(token), Problems: problems}
+		return Record{}, &Error{What: "the admission record for " + strconv.Quote(token), Problems: problems}
+	}
+	if !ValidToken(token) {
+		return refuse(fmt.Sprintf("%q is not a deployment token", token))
+	}
+	if len(data) > MaxSize {
+		return refuse(fmt.Sprintf("it is %d bytes, and a record is at most %d", len(data), MaxSize))
 	}
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(data, &keys); err != nil {
@@ -180,8 +226,31 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if at, err := time.Parse(time.RFC3339, r.AdmittedAt); err != nil || at.UTC().Format(time.RFC3339) != r.AdmittedAt {
 		problems = append(problems, fmt.Sprintf("admitted_at: %q is not an RFC 3339 time in UTC", r.AdmittedAt))
 	}
+	if r.Ports.SSH < 1 || r.Ports.SSH > 65535 {
+		problems = append(problems, fmt.Sprintf("ports.ssh: %d is not a port", r.Ports.SSH))
+	}
+	if r.Ports.WireGuard < 0 || r.Ports.WireGuard > 65535 {
+		problems = append(problems, fmt.Sprintf("ports.wireguard: %d is not a port, or 0 for none", r.Ports.WireGuard))
+	}
+	seen := map[int]bool{}
+	for _, p := range r.Ports.Public {
+		switch {
+		case p < 1 || p > 65535:
+			problems = append(problems, fmt.Sprintf("ports.public: %d is not a port", p))
+		case seen[p]:
+			problems = append(problems, fmt.Sprintf("ports.public: %d is listed twice", p))
+		}
+		seen[p] = true
+	}
 	if len(problems) > 0 {
 		return refuse(problems...)
+	}
+	// The same bytes EncodeRecord writes, so a repeated key, a key in
+	// another case, a null, a missing nested field or a changed layout,
+	// which the decoder above reads differently from jq or a person, is
+	// refused rather than read.
+	if want, err := EncodeRecord(r); err != nil || !bytes.Equal(want, data) {
+		return refuse("it is not exactly as host admit wrote it: something changed it after it was written (a repeated or differently cased key, a null, spacing or line endings). Run host admit again")
 	}
 	return r, nil
 }
@@ -195,12 +264,16 @@ type Reader interface {
 // whatever user t logs in as: the record is mode 644, so the deployment's
 // own user reads it without sudo. ErrNotAdmitted when there is none.
 func Read(t Reader, token string) (Record, error) {
-	content, found, err := t.ReadFile(Path(token))
+	path, err := Path(token)
 	if err != nil {
-		return Record{}, fmt.Errorf("reading the admission record %s: %w", Path(token), err)
+		return Record{}, err
+	}
+	content, found, err := t.ReadFile(path)
+	if err != nil {
+		return Record{}, fmt.Errorf("reading the admission record %s: %w", path, err)
 	}
 	if !found {
-		return Record{}, fmt.Errorf("%s: %w", Path(token), ErrNotAdmitted)
+		return Record{}, fmt.Errorf("%s: %w", path, ErrNotAdmitted)
 	}
 	return ParseRecord([]byte(content), token)
 }

@@ -27,6 +27,15 @@ func (h *host) ReadFile(path string) (string, bool, error) {
 	return c, ok, nil
 }
 
+func encode(t *testing.T, r admission.Record) []byte {
+	t.Helper()
+	b, err := admission.EncodeRecord(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 var at = time.Date(2026, 10, 15, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600))
 
 // The record admit writes for the home-a request, with both grants given:
@@ -36,7 +45,7 @@ func TestRecordGolden(t *testing.T) {
 	rec := admission.NewRecord(req, admission.Grants{Watchdog: true, PublicPorts: true}, admission.Digest(admission.Encode(req)), at)
 	rec.DataDir = "/srv/data/paisans-f2a9"
 	rec.WebServer = &admission.WebServer{Server: "caddy", Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic", AdminTCP: "localhost:2019"}
-	got := admission.EncodeRecord(rec)
+	got := encode(t, rec)
 	path := filepath.Join("testdata", "admitted.f2a9.json")
 	if *update {
 		if err := os.WriteFile(path, got, 0o644); err != nil {
@@ -54,8 +63,8 @@ func TestRecordGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(admission.EncodeRecord(back)) != string(got) {
-		t.Errorf("read back differently:\n%s", admission.EncodeRecord(back))
+	if string(encode(t, back)) != string(got) {
+		t.Errorf("read back differently:\n%s", encode(t, back))
 	}
 }
 
@@ -145,7 +154,7 @@ func TestParseRecordRefuses(t *testing.T) {
 // A record with no digest, as admit writes from the configuration, is read.
 func TestParseRecordWithoutDigest(t *testing.T) {
 	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)
-	back, err := admission.ParseRecord(admission.EncodeRecord(rec), "f2a9")
+	back, err := admission.ParseRecord(encode(t, rec), "f2a9")
 	if err != nil || back.Digest != "" {
 		t.Errorf("got %+v, %v", back, err)
 	}
@@ -153,10 +162,95 @@ func TestParseRecordWithoutDigest(t *testing.T) {
 
 // The path, the mode and the directory phase 5 writes to.
 func TestRecordPlace(t *testing.T) {
-	if got := admission.Path("f2a9"); got != "/etc/paisans/admitted.f2a9.json" {
-		t.Errorf("Path = %s", got)
+	if got, err := admission.Path("f2a9"); err != nil || got != "/etc/paisans/admitted.f2a9.json" {
+		t.Errorf("Path = %s, %v", got, err)
 	}
-	if admission.Mode != 0o644 {
-		t.Errorf("Mode = %o", admission.Mode)
+	if admission.Mode != 0o644 || admission.DirMode != 0o755 {
+		t.Errorf("Mode = %o, DirMode = %o", admission.Mode, admission.DirMode)
+	}
+	for _, token := range []string{"../../tmp/x", "", "F2A9", "f2a", "f2a9a", "f2a/", "f2a9\n", "g2a9"} {
+		if got, err := admission.Path(token); err == nil || got != "" || !strings.Contains(err.Error(), "token") {
+			t.Errorf("Path(%q) = %q, %v", token, got, err)
+		}
+		if _, err := admission.Read(&host{files: map[string]string{}}, token); err == nil || errors.Is(err, admission.ErrNotAdmitted) {
+			t.Errorf("Read(%q): %v", token, err)
+		}
+	}
+}
+
+// ParseRecord reads exactly the bytes EncodeRecord writes, so a duplicate
+// key, a key in another case, a null, a reordering or a change of spacing
+// cannot make paisans read a record differently from jq or a person.
+func TestParseRecordByteExact(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "admitted.f2a9.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := string(data)
+	for _, c := range []struct{ name, data string }{
+		{"a repeated key", strings.Replace(g, `"user": "paisans-f2a9",`, `"user": "paisans-f2a9", "user": "paisans-zzzz",`, 1)},
+		{"a key in another case", strings.Replace(g, `"forwarding": true,`, `"forwarding": true, "User": "paisans-zzzz",`, 1)},
+		{"a repeated key in grants", strings.Replace(g, `"watchdog": true,`, `"watchdog": true, "watchdog": false,`, 1)},
+		{"a key in another case in grants", strings.Replace(g, `"watchdog": true,`, `"watchdog": true, "Watchdog": false,`, 1)},
+		{"null grants", strings.Replace(g, "\"grants\": {\n    \"watchdog\": true,\n    \"public_ports\": true\n  }", `"grants": null`, 1)},
+		{"a null field", strings.Replace(g, `"forwarding": true`, `"forwarding": null`, 1)},
+		{"a ports object without ssh", strings.Replace(g, "    \"ssh\": 22,\n", "", 1)},
+		{"a change of spacing", strings.Replace(g, `"version": 1`, `"version":  1`, 1)},
+		{"no final newline", strings.TrimSuffix(g, "\n")},
+		{"windows line endings", strings.ReplaceAll(g, "\n", "\r\n")},
+		{"keys reordered", strings.Replace(strings.Replace(g, `"version": 1,`, ``, 1), `"deployment"`, `"version": 1, "deployment"`, 1)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := admission.ParseRecord([]byte(c.data), "f2a9")
+			if err == nil {
+				t.Fatal("read")
+			}
+		})
+	}
+	_, err = admission.ParseRecord([]byte(strings.Replace(g, `"version": 1`, `"version":  1`, 1)), "f2a9")
+	if err == nil || !strings.Contains(err.Error(), "not exactly as host admit wrote it") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// Ports are ports: the SSH port 1-65535, the WireGuard port 0 (none) to
+// 65535, each public port 1-65535 and none twice.
+func TestParseRecordPorts(t *testing.T) {
+	good := admission.NewRecord(build(t, "home-a"), admission.Grants{PublicPorts: true}, "", at)
+	for _, c := range []struct {
+		name string
+		edit func(*admission.Record)
+		want string
+	}{
+		{"ssh 0", func(r *admission.Record) { r.Ports.SSH = 0 }, "ports.ssh: 0"},
+		{"ssh negative", func(r *admission.Record) { r.Ports.SSH = -5 }, "ports.ssh: -5"},
+		{"ssh too high", func(r *admission.Record) { r.Ports.SSH = 65536 }, "ports.ssh: 65536"},
+		{"wireguard negative", func(r *admission.Record) { r.Ports.WireGuard = -1 }, "ports.wireguard: -1"},
+		{"wireguard too high", func(r *admission.Record) { r.Ports.WireGuard = 70000 }, "ports.wireguard: 70000"},
+		{"public 0", func(r *admission.Record) { r.Ports.Public = []int{0} }, "ports.public: 0"},
+		{"public too high", func(r *admission.Record) { r.Ports.Public = []int{80, 99999} }, "ports.public: 99999"},
+		{"public twice", func(r *admission.Record) { r.Ports.Public = []int{443, 443} }, "ports.public: 443 is listed twice"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := good
+			c.edit(&r)
+			if _, err := admission.ParseRecord(encode(t, r), "f2a9"); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("got %v\nwant it to say %q", err, c.want)
+			}
+		})
+	}
+	r := good
+	r.Ports.WireGuard = 0
+	r.Ports.Public = []int{}
+	if _, err := admission.ParseRecord(encode(t, r), "f2a9"); err != nil {
+		t.Errorf("no WireGuard port: %v", err)
+	}
+}
+
+// A record over 64 KiB is refused before it is decoded.
+func TestParseRecordSize(t *testing.T) {
+	big := strings.Repeat(" ", 64*1024+1)
+	if _, err := admission.ParseRecord([]byte(big), "f2a9"); err == nil || !strings.Contains(err.Error(), "65537 bytes") || !strings.Contains(err.Error(), "65536") {
+		t.Errorf("got %v", err)
 	}
 }
