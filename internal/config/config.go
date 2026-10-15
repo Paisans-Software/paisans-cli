@@ -164,8 +164,9 @@ func (m Mesh) Contains(address string) bool {
 // full reference, exact or a track, for the reason App.Images gives.
 type Infra struct {
 	// Images is keyed by InfraImageKeys, the names foundation.yaml gives
-	// the images they replace. The heartbeat's replaces the infrastructure
-	// stack's and every Pocket ID stack's operators heartbeat both.
+	// the images they replace. The heartbeat key replaces the image both the
+	// infrastructure stack's heartbeat and every Pocket ID stack's operators
+	// heartbeat run.
 	Images map[string]string `yaml:"images"`
 	// Postgres is keyed by Postgres major, then by InfraPostgresKeys. An
 	// entry applies only while cluster.postgres_version is its major, so a
