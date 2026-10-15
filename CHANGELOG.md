@@ -26,6 +26,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `paisans doctor` fails a running container whose healthcheck reports unhealthy, showing the last lines its healthchecks printed, and warns while a healthcheck is still starting.
 - `host prepare` lets containers reach Pocket ID's API on their own site's mesh address, port 1413, wherever the account service runs; the default deny dropped its calls, so member pages timed out.
 - A failed login link email says Pocket ID's cause without its wrapping and connection string format, and once, not on every operator's line, when every email failed the same way.
 - `paisans secrets set <key>` at a terminal asks for that key's value with echo off instead of refusing, so a set credential can be replaced by hand.
