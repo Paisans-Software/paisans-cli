@@ -282,10 +282,19 @@ stderr. The request holds nothing secret, so it can travel by email or chat:
 **The digest is the owner's check that the request is the one the operator
 sent.** The request carries the keys that will get a shell on the owner's
 machine, so anyone who could change it on its way could put their own key
-in it. Admit prints the same digest, as twelve hex digits in three groups,
-and the owner compares the two over a channel they trust, eg a call.
-`--execute` with `--request` asks the owner to type the digest at a
-terminal, so it cannot be scripted past.
+in it. Admit prints the same digest, and the owner compares the two over a
+channel they trust, eg a call. `--execute` with `--request` asks the owner
+to type the digest at a terminal, so it cannot be scripted past.
+
+The digest is the first 80 bits of the SHA-256 of the request's bytes, in
+Crockford's base32: sixteen characters in four groups of four, printed in
+lower case, eg `7k2m-q9xd-4r8f-zt1c`. Eighty bits puts a forged request
+with the same digest out of reach; at 48 bits a forger who intercepts a
+request could vary a free field until a version carrying their own key
+matched, in hours on one GPU. Crockford's alphabet leaves out `i`, `l`, `o`
+and `u`, so what is read aloud is not misheard. The typed digest is read
+without regard to case, hyphens or spaces, with `i` and `l` taken as `1`
+and `o` as `0`.
 
 Admit validates a request as strictly as a configuration: every field
 present, the user name accepted by the same pattern as `ssh.user`, every
@@ -319,8 +328,10 @@ record and refuses with the `host admit` line to run.
 The reverse, run by the owner the same two ways as admit, with `--execute`
 and the deployment's user name typed at a terminal, as `site remove
 --delete-data` asks for the site's. It stops the user's systemd instance, disables linger,
-removes the user with its home, `/srv/paisans/<token>`, the helper, the
-sudoers line, the udev rule, the egress table, the deployment's ufw rules,
+stops `wg-quick@psns-<token>` and removes
+`/etc/wireguard/psns-<token>.conf`, then removes the user with its home,
+its `--data-dir` directory, `/srv/paisans/<token>`, the helper, the sudoers
+line, the udev rule, the egress table, the deployment's ufw rules,
 the admission record and the registry claim. Host-wide files (`delegate.conf`,
 `60-paisans.conf`) are removed only when no other deployment is admitted, and
 `ip_unprivileged_port_start` and `ip_forward` are each restored only when
