@@ -1,7 +1,8 @@
 # Every deployment runs as its own unprivileged user, admitted once by the host's owner
 
 Status: draft, awaiting founder approval. Docker's behaviour is cited from
-its rootless documentation (*Sources*); nothing here has run on a host yet.
+its rootless documentation (*Sources*), and what a host did is under
+*Observed*. No toolkit code has run rootless yet.
 
 ## Why
 
@@ -132,15 +133,21 @@ govern.
    so its Docker daemon and timers, run without a login session and start at
    boot.
 5. **cgroup delegation.** `/etc/systemd/system/user@.service.d/delegate.conf`
-   with `Delegate=cpu cpuset io memory pids`, then `daemon-reload`. Without it
-   only `memory` and `pids` are delegated, so compose CPU limits fail. The
+   with `Delegate=cpu cpuset io memory pids`, then `daemon-reload`. Ubuntu
+   24.04 already delegates `cpu`, `memory` and `pids`, so compose CPU and
+   memory limits work without it; it adds `cpuset` and `io` (*Observed*).
+   Admit writes it before the user's manager first starts and never
+   restarts `user@<uid>.service` for a user that is already running,
+   because that restarts the user's daemon and every container in it. The
    file is host wide and shared by every admitted deployment; it is written
    once and never removed by `evict` while another deployment is admitted.
-6. **The rootless daemon.** As the user, with its runtime directory:
-   `dockerd-rootless-setuptool.sh install --force`. `--force` is what lets it
-   install beside a running system daemon. Then `~/.config/docker/daemon.json`
-   with `"userland-proxy": false`, so a published port carries the client's
-   source address (*Sources*), and the deployment's `default-address-pools`.
+6. **The rootless daemon.** First `br_netfilter`: loaded now and listed in
+   `/etc/modules-load.d/paisans.conf`, because without it the daemon refuses
+   to start with the userland proxy off (*Observed*). Then, as the user,
+   with its runtime directory: `dockerd-rootless-setuptool.sh install
+   --force`. Then `~/.config/docker/daemon.json` with `"userland-proxy":
+   false`, so a published port carries the client's source address
+   (*Observed*), and the deployment's `default-address-pools`.
 7. **The deployment's directory.** `install -d -m 750 -o <user> -g <user>
    /srv/paisans/<token>`. `/srv/paisans` itself stays root's, mode 755.
 8. **The WireGuard helper and its sudoers line** (below).
@@ -152,7 +159,10 @@ govern.
 10. **Egress.** An nftables table that keeps the deployment off the owner's
     network (below).
 11. **The watchdog**, with `--watchdog`: softdog as `host prepare` does today,
-    and a udev rule giving `/dev/watchdog` to the user. One deployment per
+    and a udev rule giving `/dev/watchdog` and `/dev/watchdog0` to the
+    user, owner and group both, mode 600. The group matters: a device whose
+    group is root's cannot be `chown`ed inside the user namespace, and the
+    infra compose does that for Patroni (*Observed*). One deployment per
     host can hold it; a second is refused.
 12. **Low ports**, with `--public-ports`: `net.ipv4.ip_unprivileged_port_start=80`
     in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`. The
@@ -298,7 +308,8 @@ its own tests (*Tests*).
 Every infra container shares the host's network namespace, so without a
 rule it can reach the owner's services bound to `127.0.0.1` and the owner's
 LAN. Admit loads an nftables table `inet paisans_<token>` from a unit
-`paisans-<token>-egress.service`, so it survives a reboot, with an output
+`paisans-<token>-egress.service`, ordered before `user@<uid>.service` so
+no container starts unfiltered at boot, with an output
 chain that matches the user's UID and its whole subordinate range (a
 container's users map into that range, so the UID alone misses them):
 
@@ -422,11 +433,68 @@ Docker's rootless documentation, read 2026-10-15:
   24.04's user namespace restriction and the bundled `rootlesskit` profile;
   `--cap-add` applies only inside the user namespace.
 
+## Observed
+
+On a blank Ubuntu 24.04.1 VPS (kernel 6.8, amd64), 2026-10-15, with a second
+host as the mesh peer. Docker Engine 29.9.1 from Docker's repository,
+RootlessKit 3.3.0. The spike plan is
+`docs/superpowers/plans/2026-10-15-rootless-research-spike.md`; R-numbers are
+its.
+
+* **R1, host networking.** A rootless container with `network_mode: host`
+  bound the WireGuard address in the host's namespace (`ss` shows the
+  user's UID), and the peer read it over the mesh. Its socket survived a
+  `wg-quick` restart. Caddy bound `*:80` once `ip_unprivileged_port_start`
+  was 80; at 1024 it failed with `bind: permission denied`.
+* **R2, beside a system daemon.** The setup tool installed with and without
+  `--force`. The system daemon, its socket and its container were
+  untouched. The storage driver reports `overlayfs`, the containerd image
+  store, with the data directory under the user's home.
+* **R3, egress.** With the table loaded, host-networked containers as
+  container root and as UID 5432, and bridge containers, could not reach
+  the host's `127.0.0.1` or `169.254.169.254`; the mesh, DNS through
+  `127.0.0.53`, the internet and image pulls worked. Root on the host
+  still reached its own service.
+* **R4, the watchdog.** With owner and group both the user's, a container
+  `chown`ed the device to its `postgres` user, which opened it and
+  disarmed it. With the group left as root's, `chown` failed with
+  `Operation not permitted`. Left armed, it rebooted the host in about 85
+  seconds.
+* **R5, delegation.** Ubuntu 24.04 delegated `cpu memory pids` by default
+  and `--cpus 0.5 --memory 64m` worked; the drop-in added `cpuset io`.
+  Restarting `user@` restarted the user's daemon: a container with a
+  restart policy came back, one without did not.
+* **R6, source address.** The daemon would not start with
+  `"userland-proxy": false` until `br_netfilter` was loaded (`stat
+  /proc/sys/net/bridge/bridge-nf-call-iptables: no such file or
+  directory`). With it, a published port logged the peer's real address;
+  with the default proxy, `172.17.0.1`.
+* **R7, sockets.** `ss -Hltnu` as the user listed root's loopback listener
+  and sshd, without process names.
+* **R8, volumes.** `du` on a volume was denied below a directory owned by
+  a container user; `docker system df -v` reported its size.
+* **R9, the helper.** `sudo -n -l` listed only the helper; it ran with no
+  password and no terminal, a bad verb exited 64, `sudo -n true` was
+  refused.
+* **R10, boot.** After a reboot: `wg-quick` up at 14.7 s, the user's
+  manager at 17.0 s, its daemon at 25.4 s; the mesh-bound container was up
+  with no restarts, as were the system daemon's container and a second
+  user's daemon. Nothing orders them, so the reverse was forced: with the
+  interface down the container restarted on `Errno 99 Address not
+  available` and was serving 6 seconds after the interface came up. Every
+  infra service has `restart: unless-stopped`, which is what makes boot
+  order safe.
+* **R14, R15, the users.** `paisans-0a0b` was accepted without
+  `--badname`; `useradd` gave each of two users its own 65,536 subordinate
+  IDs, without overlap, and each daemon listed only its own containers.
+* **R18, R20.** The restriction on unprivileged user namespaces was on and
+  the deb's `rootlesskit` profile was loaded. Engine 29.9.1.
+
 ## Open
 
-* **Patroni's watchdog device in a rootless container.** The device is the
-  user's, which is root inside the container, so the `chown postgres` in
-  the infra compose should work. Unobserved.
+* **`br_netfilter` is host wide.** It sends bridged traffic on the owner's
+  own bridges through their iptables rules. The system Docker usually loads
+  it anyway; admit says so in the plan.
 * **`watchdog: off`.** A data site that declares it needs no device. Is it
   allowed on a host admitted without `--watchdog`, or refused as the
   decision above reads?
