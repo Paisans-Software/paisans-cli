@@ -1985,7 +1985,15 @@ app trusts the mesh subnet and every service binds an address in it, so moving
 it is a rebuild of every site.
 
 `validate` refuses a file without `mesh.subnet` and says to run `init`, and
-refuses one that is not an IPv4 network or a site address outside it.
+refuses one that is not an IPv4 network, one larger than a /24, and one
+overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`.
+The hosts' firewalls trust the whole mesh, so a larger one could cover an
+owner's LAN; an admitted host's egress table accepts the mesh before it
+drops loopback and link-local, so a mesh over those would let the
+deployment reach the owner's local services and the cloud metadata address,
+and this network and multicast route nothing a mesh could use. It refuses a
+site address outside the mesh, and one that is the mesh's network or
+broadcast address.
 
 `doctor` has a `mesh` section, checked on every site it reaches: the
 interface exists and is up (`ip -j link show dev psns-<token>`), and the live
