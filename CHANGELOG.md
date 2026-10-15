@@ -16,6 +16,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `paisans secrets set <key>` at a terminal asks for that key's value with echo off instead of refusing, so a set credential can be replaced by hand.
 - A host ssh cannot reach is named once, with ssh's own words once, instead of repeated through every layer that tried to read it, and `init` lists each unreachable site on its own line.
 
 ## [0.1.0] - 2026-10-14

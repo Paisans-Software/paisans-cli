@@ -617,3 +617,124 @@ func TestSecretsSetWithNoKeyRefusesAPipe(t *testing.T) {
 		t.Error("a piped value was written with no key")
 	}
 }
+
+// keyAtTerminal makes stdin read as a terminal and answers the prompt for a
+// named key with answer, recording the key asked for and whether it was
+// already set. A nil answer fails the read, as an interrupted prompt does.
+func keyAtTerminal(t *testing.T, answer *string) (stdin *os.File, asked *[]string, wasSet *[]bool) {
+	t.Helper()
+	savedTerminal, savedRead := isTerminal, readKeySecret
+	t.Cleanup(func() { isTerminal, readKeySecret = savedTerminal, savedRead })
+	isTerminal = func(*os.File) bool { return true }
+	asked, wasSet = &[]string{}, &[]bool{}
+	readKeySecret = func(key string, set bool) (string, error) {
+		*asked = append(*asked, key)
+		*wasSet = append(*wasSet, set)
+		if answer == nil {
+			return "", errors.New("interrupted")
+		}
+		return *answer, nil
+	}
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f, asked, wasSet
+}
+
+func setAtTerminal(t *testing.T, configPath, secretsPath, key string, stdin *os.File) (string, error) {
+	t.Helper()
+	var err error
+	printed := captureStdout(t, func() {
+		err = runSecretsSet([]string{key, "--config", configPath, "--secrets", secretsPath}, stdin)
+	})
+	return printed, err
+}
+
+// Given a key at a terminal, it asks for that key with echo off, says it
+// replaces a value already set, writes the answer, and prints only the name.
+func TestSecretsSetWithAKeyAtATerminalReplacesASetValue(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	if _, err := set(t, configPath, secretsPath, "external.acme_dns_token", "not-a-real-token-old\n"); err != nil {
+		t.Fatal(err)
+	}
+	answer := "not-a-real-token-new"
+	stdin, asked, wasSet := keyAtTerminal(t, &answer)
+
+	printed, err := setAtTerminal(t, configPath, secretsPath, "external.acme_dns_token", stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(*asked, []string{"external.acme_dns_token"}) || !slices.Equal(*wasSet, []bool{true}) {
+		t.Errorf("asked for %v (set %v), want external.acme_dns_token, set", *asked, *wasSet)
+	}
+	if !strings.Contains(printed, "Set external.acme_dns_token.") || strings.Contains(printed, answer) || strings.Contains(printed, "not-a-real-token-old") {
+		t.Errorf("printed %q, want the key and never a value", printed)
+	}
+	if s, _ := config.LoadSecrets(secretsPath); s.External["acme_dns_token"] != answer {
+		t.Errorf("stored %q, want the answer", s.External["acme_dns_token"])
+	}
+}
+
+// An owed key not yet set is asked for too, and says it is not set.
+func TestSecretsSetWithAKeyAtATerminalSetsAnOwedKey(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	answer := "AKIAEXAMPLE"
+	stdin, _, wasSet := keyAtTerminal(t, &answer)
+
+	if _, err := setAtTerminal(t, configPath, secretsPath, "backup.destinations.offsite.access_key_id", stdin); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(*wasSet, []bool{false}) {
+		t.Errorf("set reported as %v, want not set", *wasSet)
+	}
+	if s, _ := config.LoadSecrets(secretsPath); s.Backup.Destinations["offsite"].AccessKeyID != answer {
+		t.Errorf("stored %q", s.Backup.Destinations["offsite"].AccessKeyID)
+	}
+}
+
+// An empty answer writes nothing and says so; an interrupted one is an error
+// that writes nothing.
+func TestSecretsSetWithAKeyAtATerminalWritesNothingOnAnEmptyAnswer(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	if _, err := set(t, configPath, secretsPath, "external.acme_dns_token", "not-a-real-token-old\n"); err != nil {
+		t.Fatal(err)
+	}
+	empty := ""
+	stdin, _, _ := keyAtTerminal(t, &empty)
+	printed, err := setAtTerminal(t, configPath, secretsPath, "external.acme_dns_token", stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(printed, "Nothing was written") {
+		t.Errorf("printed %q, want it to say nothing was written", printed)
+	}
+	if s, _ := config.LoadSecrets(secretsPath); s.External["acme_dns_token"] != "not-a-real-token-old" {
+		t.Errorf("an empty answer changed the value to %q", s.External["acme_dns_token"])
+	}
+
+	stdin, _, _ = keyAtTerminal(t, nil)
+	if _, err := setAtTerminal(t, configPath, secretsPath, "external.acme_dns_token", stdin); err == nil || !strings.Contains(err.Error(), "Nothing was written") {
+		t.Errorf("an interrupted prompt: %v", err)
+	}
+	if s, _ := config.LoadSecrets(secretsPath); s.External["acme_dns_token"] != "not-a-real-token-old" {
+		t.Errorf("an interrupted prompt changed the value to %q", s.External["acme_dns_token"])
+	}
+}
+
+// A key the pipe would refuse is refused at a terminal before anything is
+// asked, so nothing is pasted that cannot be written.
+func TestSecretsSetWithAKeyAtATerminalRefusesBeforeAsking(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	answer := "not-a-real-value"
+	stdin, asked, _ := keyAtTerminal(t, &answer)
+	for _, key := range []string{"backup.restic_password", "nonsense.key"} {
+		if _, err := setAtTerminal(t, configPath, secretsPath, key, stdin); err == nil {
+			t.Errorf("%s was accepted", key)
+		}
+	}
+	if len(*asked) != 0 {
+		t.Errorf("asked for %v before refusing", *asked)
+	}
+}
