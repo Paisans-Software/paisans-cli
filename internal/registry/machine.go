@@ -10,8 +10,8 @@ import (
 // A site is one machine. Everything a deployment owns on a host is named for
 // the deployment and nothing narrower: its root /srv/paisans/<token>, its
 // manifest, its compose projects paisans-<token>-<stack>, its WireGuard
-// interface psns-<token> and its mesh file /srv/paisans/<token>/psns-<token>.conf, and its one
-// entry in this registry. Two sites of one deployment on one machine would
+// interface psns-<token>, its mesh file /srv/paisans/<token>/psns-<token>.conf
+// and its one entry in this registry. Two sites of one deployment on one machine would
 // write the same files, replace each other's containers and fight over one
 // interface with two addresses. Roles combine on one site, and a second
 // environment is a second deployment, which the registry keeps apart from the

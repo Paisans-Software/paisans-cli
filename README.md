@@ -1829,8 +1829,8 @@ that already runs another site of this deployment, naming that site and its
 mesh address, before anything is written, and a dry run refuses the same way.
 Which site a host runs is read from this deployment's registry entry, which
 names it; on a host with no entry, from the `Address` in
-`/etc/wireguard/psns-<token>.conf`, matched to the site `paisans-stack.yaml` gives
-that address. Reading the name first is what lets a site's address change: the
+`/srv/paisans/<token>/psns-<token>.conf`, matched to the site
+`paisans-stack.yaml` gives that address. Reading the name first is what lets a site's address change: the
 entry still names the site, and `apply` restarts the interface with the new
 `Address` (see *`apply` brings the mesh interface up before anything binds to
 it*). A host left by a site that `paisans-stack.yaml` no longer declares is cleaned

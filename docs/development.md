@@ -85,7 +85,7 @@ comma joined so the awk matches one with `index()`), and a claim refuses
 A site is one machine: `registry.Check` and `registry.Claim` refuse a host
 that runs another site of this deployment (`internal/registry/machine.go`),
 read from this deployment's entry, which names the site, or with no entry from
-the `Address` line of `/etc/wireguard/psns-<token>.conf`. The awk merge
+the `Address` line of `/srv/paisans/<token>/psns-<token>.conf`. The awk merge
 refuses the same thing under the lock, for two claims racing, and `Merge`
 mirrors it. `validate` refuses two sites with one mesh address
 (`duplicate-site-address`) and two at one ssh host and port or one dial
