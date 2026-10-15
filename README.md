@@ -4319,7 +4319,11 @@ old, genuine version, and applying it reaches only those sites.
 * a read-only `git daemon`, the unit `paisans-<token>-config-daemon`, bound to
   the site's mesh address and serving only that directory. The mesh is already
   let in whole by the firewall, and a mesh peer reads `paisans-stack.yaml` and the
-  encrypted secrets, both of which a peer is trusted with already;
+  encrypted secrets, both of which a peer is trusted with already. The address
+  exists only while the deployment's WireGuard unit is up, so the daemon is
+  bound to that unit and wanted by it: it starts and stops with the mesh, and
+  `host prepare` starts it only where the mesh is up already, leaving the first
+  start on a new host to `apply`'s;
 * a timer, `paisans-<token>-config-sync`, every 15 minutes, that fetches the
   versions each peer's mesh address serves, so a site that was down when a
   version was published learns of it.

@@ -1,7 +1,9 @@
 [Unit]
 Description=paisans {{.Token}}: serve configuration versions to mesh peers, read only
+# The daemon listens on the mesh address, so it runs while WireGuard does:
+# started with it (WantedBy below), and stopped with it.
 After={{.WireGuardUnit}}
-Requires={{.WireGuardUnit}}
+BindsTo={{.WireGuardUnit}}
 
 [Service]
 User=nobody
@@ -12,4 +14,4 @@ ExecStart=/usr/bin/git daemon --reuseaddr --listen={{.Address}} --port=9418 --ba
 Restart=on-failure
 
 [Install]
-WantedBy=multi-user.target
+WantedBy={{.WireGuardUnit}}

@@ -79,7 +79,10 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		})
 	}
 
-	data := map[string]string{"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "WireGuardUnit": d.WireGuardUnit(), "Receive": ConfigReceiveShell}
+	// WireGuard's unit by its full name: systemd takes a template instance
+	// only with its suffix, and ignores a dependency on one without.
+	wireGuard := d.WireGuardUnit() + ".service"
+	data := map[string]string{"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "WireGuardUnit": wireGuard, "Receive": ConfigReceiveShell}
 	peerList := ""
 	if len(peers) > 0 {
 		// A final newline, since read in the sync script drops a last line without one.
@@ -144,19 +147,32 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	if err != nil {
 		return out, err
 	}
-	if unitsChanged || !(daemonEnabled && daemonActive && timerEnabled && timerActive) {
-		command := "systemctl daemon-reload && systemctl enable --now " + daemonUnit + " " + timerUnit
+	// The daemon listens on the mesh address, which exists only while
+	// WireGuard is up, and WireGuard is first started by apply, after host
+	// prepare. Enabled, the daemon starts whenever WireGuard does (its
+	// WantedBy); it is started here only where the mesh is up, since started
+	// before, git daemon cannot bind and its restarts run out. A daemon not
+	// running on a mesh that is not up is as it should be.
+	_, meshUp, err := u.unitState(t, wireGuard)
+	if err != nil {
+		return out, err
+	}
+	if unitsChanged || !(daemonEnabled && (daemonActive || !meshUp) && timerEnabled && timerActive) {
+		// reenable for a changed unit, so links its earlier [Install] made
+		// go with it.
+		enable, start := "enable", "start"
 		if daemonChanged {
-			command += " && systemctl restart " + daemonUnit
+			enable, start = "reenable", "restart"
 		}
+		command := fmt.Sprintf("systemctl daemon-reload && systemctl enable --now %[1]s && systemctl %[2]s %[3]s && if systemctl is-active --quiet %[4]s; then systemctl %[5]s %[3]s; fi", timerUnit, enable, daemonUnit, wireGuard, start)
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "start the configuration store",
-			Describe: fmt.Sprintf("configuration store: enable and start %s and %s", daemonUnit, timerUnit),
+			Describe: fmt.Sprintf("configuration store: enable %s and %s, and start them, %s once %s is up", daemonUnit, timerUnit, daemonUnit, wireGuard),
 			Command:  command,
 		})
 	} else {
-		out.Present = append(out.Present, fmt.Sprintf("configuration store: %s and %s enabled and running", daemonUnit, timerUnit))
+		out.Present = append(out.Present, fmt.Sprintf("configuration store: %s and %s enabled, and running where %s is up", daemonUnit, timerUnit, wireGuard))
 	}
 	return out, nil
 }
