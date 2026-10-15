@@ -67,6 +67,7 @@ Depends on: phase 2; R9.
 * Modify `internal/render/templates/wireguard.conf.tmpl`: drop the relay `PostUp`.
 * Modify `internal/apply/apply.go` (mesh steps), `internal/apply/mesh.go`, `internal/meshrekey/meshrekey.go`, `internal/meshkey/meshkey.go`, `internal/siteadd/mesh.go`, `internal/doctor/mesh.go`: every `wg`, `wg-quick`, `systemctl ... wg-quick@` and `journalctl -u` goes through `WGHelper`.
 * Golden render tree regenerated and its diff read.
+* README: the mesh's `journalctl -u wg-quick@psns-<token>` "through the site's sudo" (*apply*, mesh failure) and any other `wg`/`wg-quick` passage name the helper instead.
 
 ## Phase 4: Requests and admission records
 
@@ -87,6 +88,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * Golden plans: blank Ubuntu 24.04, old system Docker (refused), current system Docker, snap Docker (refused), each grant, re-run with a grant removed, a privileged existing user (refused), second watchdog holder (refused), evict of one of two deployments.
 * The admission record is written mode 0644, owned by root, via temp and rename; a golden plan and a test assert the mode, and a re-run that finds it otherwise restores 0644.
 * Any boot-ordering mechanism R10 calls for lands here.
+* README: the registry claim passages ("claim through sudo, since the registry is root's", under the registry section) say the claim happens in `host admit`.
 
 ## Phase 6: Commands as the deployment's user
 
@@ -100,6 +102,7 @@ Depends on: phases 2, 3, 5; R7, R8.
 * `internal/siteremove/host.go`: user-side removal, then the `host evict` line. `cmd/paisans/hostdeployments.go`: lists admission records.
 * `web_server.managed_by: external`: per the founder's answer to the spec's *Open* item.
 * Docker-tagged tests run against a rootless daemon.
+* README, each passage that names a root-owned path or sudo for a deployment command, rewritten to the paths under `deployment.Root()` and the user's own permissions: the seed written through `sudo` (account seed), the deployed record's "read through sudo instead" fallback, the config store "with `sudo` because the store is root's", gathering "with `sudo`", the host check's inventory "as root ... refuses unless it is 0", and doctor's Leftovers row. The admission record is described beside the deployed record: 0644, readable by the deployment's user without sudo, and `host deployments --sudo=false` lists admission records without the registry or directories.
 
 ## Phase 7: Doctor
 
