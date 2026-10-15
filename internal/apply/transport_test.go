@@ -426,9 +426,6 @@ func TestARefusedDefaultUserIsNotAdmitted(t *testing.T) {
 	}
 }
 
-// A user the site names is the operator's choice, so its refusal is a key
-// problem, as before; so is a default user on a transport that names no
-// site, which has no request to send.
 // The other refusal ssh gives for a key it will not take reads the same.
 func TestARefusedDefaultUserIsNotAdmittedWhateverSshSaid(t *testing.T) {
 	for _, out := range []string{
@@ -470,6 +467,9 @@ func TestANotAdmittedDestinationNamesItsHost(t *testing.T) {
 	}
 }
 
+// A user the site names is the operator's choice, so its refusal is a key
+// problem; so is a default user on a transport that names no site, which has
+// no request to send.
 func TestARefusedDeclaredUserIsAKeyProblem(t *testing.T) {
 	for _, tr := range []apply.SSHTransport{
 		{Site: "home-a", User: "ubuntu", Host: "203.0.113.10", PublicKeys: []string{keyA}},
