@@ -169,14 +169,27 @@ func TestAnUnreachableSiteIsReportedNotCounted(t *testing.T) {
 }
 
 // docker could not be asked: down, since /healthz did not answer either, with
-// a detail that says the standby question went unanswered.
+// a detail that says the standby question went unanswered and points at the
+// deployment user's own rootless daemon, which every command asks, not at
+// sudo or the docker group.
 func TestNoDockerIsDownAndSaysWhy(t *testing.T) {
 	transports, _, _ := standbyWorld(t, []string{"active"}, []string{"nodocker"})
 	var out bytes.Buffer
 	if err := apply.CheckOneActive(standbyFixture(t), "auth", transports, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "home-b   down        /healthz did not answer on 10.44.0.2:1411, and docker could not be asked whether it stands by") {
-		t.Errorf("output:\n%s", out.String())
+	got := out.String()
+	if !strings.Contains(got, "home-b   down        /healthz did not answer on 10.44.0.2:1411, and the deployment user's rootless Docker daemon did not answer whether it stands by") {
+		t.Errorf("output:\n%s", got)
+	}
+	for _, want := range []string{"systemctl --user status docker", "DOCKER_HOST", "/run/user/<uid>/docker.sock"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the advice does not mention %s:\n%s", want, got)
+		}
+	}
+	for _, stale := range []string{"sudo", "docker group"} {
+		if strings.Contains(got, stale) {
+			t.Errorf("the advice still points at %s:\n%s", stale, got)
+		}
 	}
 }

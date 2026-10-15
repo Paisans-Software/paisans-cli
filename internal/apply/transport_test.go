@@ -635,33 +635,32 @@ func TestWriteFileRefusesALinkOrDirectoryTarget(t *testing.T) {
 	if err := os.WriteFile(linkedFile, []byte("precious"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for name, c := range map[string]struct{ link, want string }{
-		"symlink to a directory": {linkedDir, "symbolic link"},
-		"symlink to a file":      {linkedFile, "symbolic link"},
-		"directory":              {"", "directory"},
+	for name, c := range map[string]struct{ target, link, want string }{
+		"symlink to a directory": {filepath.Join(dir, "t-dirlink"), linkedDir, "symbolic link"},
+		"symlink to a file":      {filepath.Join(dir, "t-filelink"), linkedFile, "symbolic link"},
+		"directory":              {plainDir, "", "directory"},
 	} {
-		target := filepath.Join(dir, "t-"+strings.ReplaceAll(name, " ", "-"))
 		if c.link != "" {
-			if err := os.Symlink(c.link, target); err != nil {
+			if err := os.Symlink(c.link, c.target); err != nil {
 				t.Fatal(err)
 			}
-		} else if err := os.Mkdir(target, 0o755); err != nil {
-			t.Fatal(err)
 		}
-		err := func() error { _, err := writeFileScript(t, target, "A=1\n", 0o600); return err }()
-		if err == nil || !strings.Contains(err.Error(), target) || !strings.Contains(err.Error(), c.want) {
+		err := func() error { _, err := writeFileScript(t, c.target, "A=1\n", 0o600); return err }()
+		if err == nil || !strings.Contains(err.Error(), c.target) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: want a refusal naming the path and %q, got %v", name, c.want, err)
 		}
 	}
 	if got, _ := os.ReadFile(linkedFile); string(got) != "precious" {
 		t.Errorf("linked file changed: %q", got)
 	}
+	// Neither the directory written at nor the one a link names gained an
+	// entry: mv moves a file into a directory it is given.
 	for _, d := range []string{linkedDir, plainDir} {
 		if e, _ := os.ReadDir(d); len(e) != 0 {
-			t.Errorf("%s gained %d entries", d, len(e))
+			t.Errorf("%s gained %d entries", filepath.Base(d), len(e))
 		}
 	}
-	left, _ := filepath.Glob(filepath.Join(dir, ".t-*"))
+	left, _ := filepath.Glob(filepath.Join(dir, ".*"))
 	if len(left) != 0 {
 		t.Errorf("temporary files left behind: %v", left)
 	}
