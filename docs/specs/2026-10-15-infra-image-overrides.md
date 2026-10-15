@@ -87,6 +87,8 @@ Refused:
 * an etcd, HAProxy or Garage reference whose tag can leave the prefixes the
   toolkit is written against (`v3.`, `3.`, `v1.`). This is the check
   `foundation.yaml` gets (`checkImage`), exported and called, not copied.
+  A digest with no tag beside it is refused for the same images, since its
+  version cannot be checked; `repo:tag@sha256:...` is accepted.
 
 Warned:
 
