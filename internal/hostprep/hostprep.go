@@ -325,7 +325,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(store)
 
-	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSH.User, declared.SSH)
+	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSHUser(), declared.SSH)
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}

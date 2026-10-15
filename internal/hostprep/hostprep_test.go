@@ -2016,3 +2016,41 @@ func TestAFailedCaddyProbeIsAnError(t *testing.T) {
 		t.Fatal("a failed probe was read as no Caddy")
 	}
 }
+
+// A site that leaves ssh.user out has its keys managed for the deployment's
+// own user: its passwd entry, its authorized_keys and a sidecar named for it.
+func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
+	cfg := withKeys(t, "home-a", keyAlice)
+	s := cfg.Sites["home-a"]
+	s.SSH.User = ""
+	cfg.Sites["home-a"] = s
+	host := preparedHost(false)
+	host.responses[probePasswd] = "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/sh\n"
+	delete(host.files, authorizedKeys)
+	delete(host.files, ownedKeys)
+	plan, err := hostprep.Build("home-a", cfg, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := printed(plan)
+	if !strings.Contains(out, "ssh: authorize key "+fingerprint(keyAlice)+" (alice) for paisans-f2a9") {
+		t.Fatalf("alice's key is not authorized for paisans-f2a9:\n%s", out)
+	}
+	add := stepsLabelled(plan, "add")
+	if len(add) != 1 {
+		t.Fatalf("want one add, got:\n%s", out)
+	}
+	cmd := unlocked(t, add[0].Command)
+	for _, want := range []string{"'/home/paisans-f2a9/.ssh/authorized_keys'", "/etc/paisans/authorized_keys.paisans-f2a9.paisans-f2a9.owned"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("the add lacks %s: %s", want, cmd)
+		}
+	}
+	asked := false
+	for _, c := range host.ran {
+		asked = asked || strings.Contains(c, "getent passwd 'paisans-f2a9'")
+	}
+	if !asked {
+		t.Errorf("paisans-f2a9's passwd entry was not read:\n%s", strings.Join(host.ran, "\n"))
+	}
+}

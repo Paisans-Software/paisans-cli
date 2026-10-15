@@ -91,7 +91,7 @@ func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	if !ok {
 		return Grant{}, fmt.Errorf("no site %q is declared", site)
 	}
-	g := Grant{Login: declared.SSH.User, Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
+	g := Grant{Login: declared.SSHUser(), Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
 	if plan != nil {
 		images, err := ImagesOf(plan, site)
 		if err != nil {

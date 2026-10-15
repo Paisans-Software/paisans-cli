@@ -345,6 +345,45 @@ func TestSSHSectionLoads(t *testing.T) {
 	}
 }
 
+// ssh.user may be left out, or written empty: the site is then reached as
+// the deployment's own user, paisans-<token>. The default is not written
+// into ssh.user, so the file's own value stays apart from it.
+func TestSSHUserDefaultsToTheDeploymentsOwnUser(t *testing.T) {
+	for name, section := range map[string]string{
+		"left out":      "    ssh:\n      host: home-a.local\n      keys: [alice]\n",
+		"written empty": "    ssh:\n      host: home-a.local\n      user: \"\"\n      keys: [alice]\n",
+		"written as ~":  "    ssh:\n      host: home-a.local\n      user: ~\n      keys: [alice]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := config.Load(write(t, withSSH(section)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			site := cfg.Sites["home-a"]
+			if site.SSH.User != "" {
+				t.Errorf("ssh.user read as %q, want it empty", site.SSH.User)
+			}
+			if got := site.SSHUser(); got != "paisans-f2a9" {
+				t.Errorf("user is %q, want paisans-f2a9", got)
+			}
+			if got := site.Destination().String(); got != "paisans-f2a9@home-a.local:22" {
+				t.Errorf("destination is %q, want paisans-f2a9@home-a.local:22", got)
+			}
+		})
+	}
+}
+
+// A declared ssh.user is the user the site is reached as.
+func TestSSHUserIsTheDeclaredName(t *testing.T) {
+	cfg, err := config.Load(write(t, minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSHUser(); got != "ubuntu" {
+		t.Errorf("user is %q, want ubuntu", got)
+	}
+}
+
 // Each site gets only the keys of the admins it names.
 func TestSSHKeysAreOnlyTheListedAdmins(t *testing.T) {
 	admins := "operators:\n  alice:\n    name: Alice Example\n    email: alice@example.org\n    keys: |\n      " + fakeKeyA + "\n  bob:\n    name: Bob Example\n    email: bob@example.org\n    keys: |\n      " + fakeKeyB + "\n"
@@ -421,7 +460,6 @@ func TestSSHSectionRefusals(t *testing.T) {
 		name, section, want string
 	}{
 		{"missing", "", "sites.home-a.ssh: required"},
-		{"no user", "    ssh:\n      host: home-a.local\n" + key, "ssh.user: required"},
 		{"bad user", "    ssh:\n      host: home-a.local\n      user: \"bob; rm\"\n" + key, "is not a user name"},
 		{"port too high", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      port: 70000\n" + key, "ssh.port: 70000 is not a port"},
 		{"negative port", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      port: -1\n" + key, "ssh.port: -1 is not a port"},

@@ -4564,7 +4564,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
-      user: ubuntu         # required, and must already exist on the host
+      user: ubuntu         # optional: defaults to paisans-<token>; must already exist on the host
       port: 22             # optional: empty or 0 means 22
       keys: [alice, bob]   # required: the operators who may log in
 ```
@@ -4572,7 +4572,7 @@ sites:
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
-| `user` | yes | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
+| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
 | `port` | no | outside 1 to 65535 |
 | `keys` | yes | not a list; empty; an operator the `operators` section does not declare; an operator listed twice |
 
@@ -4594,6 +4594,11 @@ which `host prepare` records on the host beside each of their keys so an
 operator can trace a key there back to this file. Options are refused rather than carried: a line `host prepare` writes
 and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
+
+`user` defaults to `paisans-<token>`, the prefix every name the deployment owns
+on a host already carries, so a deployment that names no user logs in as one of
+its own rather than as a user another deployment shares. The user must exist on
+the host either way.
 
 A single string in place of the section, `ssh: home-a.local`, is refused, and
 the refusal says the section to write and its keys (`host`,
@@ -5276,7 +5281,8 @@ That binding is the renderer's, not `host prepare`'s.
 #### host prepare manages the login user's authorized keys
 
 `host prepare` makes every key of every operator in `ssh.keys` an authorized key of
-`ssh.user`, in `~<user>/.ssh/authorized_keys`. When the directory or the file
+the login user (`ssh.user`, or `paisans-<token>` when it is left out), in
+`~<user>/.ssh/authorized_keys`. When the directory or the file
 is missing it is created, 0700 and 0600, owned by the user. A user that does
 not exist is refused: creating users is out of scope.
 
@@ -5424,7 +5430,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 
 | Part | Holds | Comes from |
 |---|---|---|
-| login | `ssh.user` | the site's `ssh` section |
+| login | `ssh.user`, or `paisans-<token>` when it is left out | the site's `ssh` section |
 | keys | per key: its operator, its SHA256 fingerprint and its comment | every key of every operator in the site's `ssh.keys` |
 | images | per service: its stack, its name, the image reference as the compose file writes it, and whether it is a foundation image (see below) | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |

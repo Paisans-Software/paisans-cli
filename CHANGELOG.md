@@ -16,6 +16,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
 
 ### Removed

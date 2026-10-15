@@ -1640,7 +1640,7 @@ func siteTransport(name string, site config.Site, override string, sudo bool) ap
 		for i, k := range keys {
 			lines[i] = k.Line
 		}
-		t = apply.SSHTransport{Site: name, User: site.SSH.User, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, Sudo: sudo}
+		t = apply.SSHTransport{Site: name, User: site.SSHUser(), Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, Sudo: sudo}
 	}
 	if sudo {
 		t.Auth = sudoAuthFor(t.Describe())
