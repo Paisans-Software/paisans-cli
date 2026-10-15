@@ -401,6 +401,50 @@ func TestSSHAuthenticationFailuresAreProblems(t *testing.T) {
 	apply.ForgetContacts()
 }
 
+// A site that names no ssh.user is reached as the deployment's own user,
+// which exists on a host only once its owner has admitted the deployment.
+// A host that refuses that login is said to be one that has not admitted
+// it, with the request to send its owner, rather than as a key problem.
+func TestARefusedDefaultUserIsNotAdmitted(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+	_, err := tr.Run("true")
+	if s.calls != 1 || errors.Is(err, apply.ErrUnreachable) {
+		t.Errorf("retried or called unreachable: %d calls, %v", s.calls, err)
+	}
+	p := problemOf(t, err)
+	if p.Hint != "site home-a is not admitted on 203.0.113.10" {
+		t.Errorf("hint %q", p.Hint)
+	}
+	for _, want := range []string{"paisans-f2a9", "paisans host request --site home-a > home-a.admit", "sites.home-a.ssh.user"} {
+		if !strings.Contains(p.Explain, want) {
+			t.Errorf("explain lacks %q:\n%s", want, p.Explain)
+		}
+	}
+}
+
+// A user the site names is the operator's choice, so its refusal is a key
+// problem, as before; so is a default user on a transport that names no
+// site, which has no request to send.
+func TestARefusedDeclaredUserIsAKeyProblem(t *testing.T) {
+	for _, tr := range []apply.SSHTransport{
+		{Site: "home-a", User: "ubuntu", Host: "203.0.113.10", PublicKeys: []string{keyA}},
+		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true},
+	} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{"Permission denied (publickey).\n", 255}}}
+		s.install(t)
+		_, err := tr.Run("true")
+		if p := problemOf(t, err); !strings.Contains(p.Hint, "did not accept your ssh key") {
+			t.Errorf("%+v: hint %q", tr, p.Hint)
+		}
+	}
+	apply.ForgetContacts()
+}
+
 // A sudo probe that never reached ssh (here: no key to offer) is that
 // failure, not sudo refusing the user, which it never asked.
 func TestASudoProbeThatNeverRanIsNotARefusal(t *testing.T) {

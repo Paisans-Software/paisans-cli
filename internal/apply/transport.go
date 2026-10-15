@@ -99,6 +99,11 @@ type SSHTransport struct {
 	// every copy of the transport to one destination, so the UID is asked
 	// once a run. See Login.
 	Login *Login
+	// DefaultUser reports that User is the deployment's own user because the
+	// site's ssh section names none. That user exists only on a host whose
+	// owner has admitted the deployment, so a login it refuses is reported
+	// as a host that has not (see authProblem).
+	DefaultUser bool
 	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero is
 	// DefaultConnectTimeout. ssh's own is the operating system's TCP connect
 	// timeout, which is 75 seconds on macOS for a host that is switched off
@@ -493,7 +498,8 @@ func connectionFailed(err error, out string) bool {
 // use: the host's key is not the one known, or is not known and ssh could
 // not ask, or the host accepted none of the operator's keys. ssh says each
 // on its own last line and exits 255, as for connectionFailed. Nil for
-// anything else.
+// anything else. A refusal of the deployment's default user is a host that
+// has not admitted the deployment.
 func (t SSHTransport) authProblem(err error, out string) error {
 	var exit interface{ ExitCode() int }
 	if !errors.As(err, &exit) || exit.ExitCode() != 255 {
@@ -511,6 +517,12 @@ func (t SSHTransport) authProblem(err error, out string) error {
 		return &ui.Problem{
 			Hint:    t.Describe() + "'s host key is not known",
 			Explain: fmt.Sprintf("ssh could not ask whether to trust it. Connect once with %s, check the fingerprint it shows, accept it, and run again.", t.connectCommand()),
+			Cause:   err,
+		}
+	case (strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures")) && t.DefaultUser && t.Site != "":
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, t.Host),
+			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans host request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", t.User, t.Host, t.Site, t.Site, t.Site),
 			Cause:   err,
 		}
 	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):
