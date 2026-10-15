@@ -333,9 +333,8 @@ It reads the machine's web server over ssh, changing nothing, and prints:
   set `acme_dns` (below).
 
 It looks for a container publishing 443 or 80 first, then for the process
-listening on 443 or 80 on the machine itself, using sudo only where docker or
-`ss` need it; it asks for the password once. What the snippet says about the
-certificate follows what it found:
+listening on 443 or 80 on the machine itself, as the site's ssh user. What the
+snippet says about the certificate follows what it found:
 
 | Found | Certificate in the snippet |
 |---|---|
@@ -457,7 +456,7 @@ web server
 
 When one fails the app's line is a warning, `!`, with the checks that failed
 under it, an error several share said once, and the web server it finds in
-front of the app, read with the sudo password the run asked for at its start.
+front of the app, read as the site's ssh user.
 When the app's site file step above already warned, the check's line says
 only that it fails until that is fixed, so each problem comes with one set of
 instructions. The run ends on a warning, `! Deployment complete, but 1 app

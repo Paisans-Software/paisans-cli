@@ -21,6 +21,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
+- When sudo refuses the login outright, `host deployments` advises naming a login that has sudo with `--ssh`, since it reads no site's ssh section.
 
 ### Removed
 

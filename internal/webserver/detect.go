@@ -20,7 +20,8 @@ type Runner interface {
 // none is never asked for a password.
 type Host struct {
 	Plain Runner
-	Sudo  Runner
+	// Sudo is set by no command: each reads its web server as the ssh user.
+	Sudo Runner
 }
 
 // Server is a web server Detect recognises.

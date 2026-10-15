@@ -93,3 +93,80 @@ func isSSHTransport(expr ast.Expr) bool {
 	}
 	return false
 }
+
+// No command reads a web server through sudo: webserver.Host's Sudo runner
+// is set only by the webserver package's own tests, which exercise the
+// branches that use it. A Host literal or assignment setting Sudo anywhere
+// else, tests included, is a command reaching for root.
+func TestNoCommandReadsTheWebServerThroughSudo(t *testing.T) {
+	own := filepath.Join("internal", "webserver") + string(filepath.Separator)
+	for _, root := range []string{"../../cmd", "../../internal"} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel := strings.TrimPrefix(path, "../../")
+			if d.IsDir() || !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			test := strings.HasSuffix(path, "_test.go")
+			if test && strings.HasPrefix(rel, own) {
+				return nil
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			inWebserver := file.Name.Name == "webserver"
+			importsWebserver := false
+			for _, imp := range file.Imports {
+				if strings.HasSuffix(strings.Trim(imp.Path.Value, `"`), "/internal/webserver") {
+					importsWebserver = true
+				}
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.CompositeLit:
+					if !isWebServerHost(n.Type, inWebserver) {
+						return true
+					}
+					for _, e := range n.Elts {
+						if kv, ok := e.(*ast.KeyValueExpr); ok {
+							if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Sudo" {
+								t.Errorf("%s sets Sudo on a webserver.Host", rel)
+							}
+						}
+					}
+				case *ast.AssignStmt:
+					// Without type information an assignment's receiver is
+					// not known, so .Sudo is refused wherever the file can
+					// hold a webserver.Host: its package, or one importing it.
+					if !inWebserver && !importsWebserver {
+						return true
+					}
+					for _, lhs := range n.Lhs {
+						if sel, ok := lhs.(*ast.SelectorExpr); ok && sel.Sel.Name == "Sudo" {
+							t.Errorf("%s assigns .Sudo where a webserver.Host can be", rel)
+						}
+					}
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func isWebServerHost(expr ast.Expr, inWebserver bool) bool {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		x, ok := e.X.(*ast.Ident)
+		return ok && x.Name == "webserver" && e.Sel.Name == "Host"
+	case *ast.Ident:
+		return inWebserver && e.Name == "Host"
+	}
+	return false
+}

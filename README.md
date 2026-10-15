@@ -1023,8 +1023,8 @@ compose file takes effect once the container is recreated (`docker compose up
 -d <service>`), and `docker restart` is not enough. When the server's
 container lacks the directory, apply reads the labels compose put on it
 (`com.docker.compose.project`, `.service`, `.project.working_dir`,
-`.project.config_files`) and the compose files they name, through sudo only
-where the ssh user may not, and says which it is, in a few lines with the
+`.project.config_files`) and the compose files they name, as the site's ssh
+user, and says which it is, in a few lines with the
 command that recreates the container: the line declared on the server's
 service for a container created before it; declared on another service, named
 with the one it belongs to; declared at a container path the configuration
@@ -1123,9 +1123,8 @@ refuses, below); the snippet for the web server in front of the monitor; and
 the ufw warning when `listen` is not loopback. It finds that web server over
 ssh, reading only, through the transport `apply` uses: the container
 publishing 443 or 80 (`docker ps`), and its configuration from the
-container's mounts; failing that, the process listening on 443 or 80 (`ss
--ltnp`). For Caddy it asks the admin
-API on `localhost:2019`, on the host or inside the container: a Caddy that
+container's mounts; failing that, the process listening on 443 or 80
+(`ss -ltnp`). For Caddy it asks the admin API on `localhost:2019`, on the host or inside the container: a Caddy that
 obtains its own certificates gets a site level `tls { issuer acme }`, one that
 loads certificate files gets a `tls` line following their pattern for the new
 name, and where a
@@ -4844,8 +4843,6 @@ terminal:
 sudo password for owner@203.0.113.10, host home-a-01:
 ```
 
-It asks before its first sudo command.
-
 The prompt names the destination ssh reached and the name the host gives
 itself (`uname -n`). An address alone is often one the operator does not
 recognise, and typing a root password needs certainty about which machine is
@@ -5572,9 +5569,9 @@ operator to type `approve` at a terminal, through the same prompt `site remove
 --delete-data` uses, before its first change: the registry claim, which comes
 before the plan, so that an operator who does not approve leaves the host
 exactly as it was. Anything else, or end of input, stops the command with
-nothing changed. `apply` with no `--site` asks once for every site, before its first step; each step it
-runs then checks that it applies what was approved, and refuses anything that
-changed since, rather than asking again. An `init` it runs comes first, since
+nothing changed. `apply` with no `--site` asks once for every site, before
+its first step; each step it runs then checks that it applies what was
+approved, and refuses anything that changed since, rather than asking again. An `init` it runs comes first, since
 it changes no host and the images are rendered from the secrets it generates.
 
 **No terminal, no approval.** When something needs approval and standard input
@@ -9089,7 +9086,7 @@ closing list is usually the cause of those after it:
 
 | Check | How | FAIL when |
 |---|---|---|
-| Reach | `true` over ssh, on every site asked | the site does not answer, or sudo cannot be used. The finding says what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it |
+| Reach | `true` over ssh, on every site asked | the site does not answer. The finding says what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route`, `ip -j addr`, `docker network inspect` and `/etc/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
@@ -9100,7 +9097,7 @@ closing list is usually the cause of those after it:
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped when the inventory cannot be read, since it reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
-| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there through sudo and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
+| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
 
 The provider judges the address a call comes from (Cloudflare's Client IP

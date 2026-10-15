@@ -8,7 +8,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// ReachCommand is the trivial command that proves a site answers: ssh connected and the login worked.
+// ReachCommand is the trivial command that proves a site answers: ssh
+// connected and the login worked.
 const ReachCommand = "true"
 
 // SiteReach is one site's answer to ReachCommand.

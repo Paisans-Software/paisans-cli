@@ -236,8 +236,8 @@ and nothing else (`appadmin.MagicLink`): it finds the account as apply does,
 by username then email, refuses one apply has not made or that is disabled,
 and prints the link once on `--execute`, emailed too when apply's are. It
 reads `apps.<app>.static_api_key` from the secrets file, so it takes
-`--secrets`. Its calls to Pocket ID never use sudo, because curl needs no root;
-only the claim `--execute` makes in the host registry, which is root's, does.
+`--secrets`. Its calls to Pocket ID need no root, and a run with `--execute`
+claims its host in the registry.
 See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 `README.md`.
 

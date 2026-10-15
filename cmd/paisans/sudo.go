@@ -13,7 +13,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 )
 
-// sudoAuths holds one SudoAuth per destination for the whole run, so the owner's transport (ownerTransport), built more than once, asks for its sudo password once.
+// sudoAuths holds one SudoAuth per destination for the whole run, so the
+// owner's transport (ownerTransport), built more than once, asks for its sudo
+// password once.
 var (
 	sudoAuthsMu sync.Mutex
 	sudoAuths   = map[string]*apply.SudoAuth{}

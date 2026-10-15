@@ -9,7 +9,8 @@ import (
 )
 
 // A site's section becomes the transport's user, host, port and keys; --ssh
-// replaces all four rather than one of them. Either way the transport keeps the site's name, for messages.
+// replaces all four rather than one of them. Either way the transport keeps
+// the site's name, for messages.
 func TestSiteTransportUsesTheSectionOrTheOverride(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {

@@ -31,7 +31,8 @@ func deploymentRecord(cfg *config.Config, hosts recordHosts) (deployrecord.Recor
 // user.
 type recordHosts func(gw string) registry.Runner
 
-// recordReaders is every gateway paisans-stack.yaml declares, each read as the ssh user.
+// recordReaders is every gateway paisans-stack.yaml declares, each read as
+// the ssh user.
 func recordReaders(cfg *config.Config, hosts recordHosts) map[string]registry.Runner {
 	out := map[string]registry.Runner{}
 	for _, gw := range cfg.GatewaySites() {

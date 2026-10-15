@@ -155,11 +155,6 @@ func (h archTransport) Run(command string) (string, error) {
 	return h.Transport.Run(command)
 }
 
-// SettlesSudo and PrepareSudo are the wrapped host's, so a run settles sudo
-// on it as it would unwrapped.
-func (h archTransport) SettlesSudo() bool  { return apply.SettlesSudo(h.Transport) }
-func (h archTransport) PrepareSudo() error { return apply.PrepareSudo(h.Transport) }
-
 // A whole apply reads every site's architecture before it plans, and its dry
 // run says what --execute would record without writing it.
 func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {

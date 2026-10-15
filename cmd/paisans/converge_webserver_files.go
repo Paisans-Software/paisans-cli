@@ -13,7 +13,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
-// webServerFilesHost reaches a monitor site to write the toolkit's files for its web server, as the ssh user. Tests replace it.
+// webServerFilesHost reaches a monitor site to write the toolkit's files for
+// its web server, as the ssh user. Tests replace it.
 var webServerFilesHost = webServerHost
 
 // convergeWebServerFiles writes each external app's site into the include
