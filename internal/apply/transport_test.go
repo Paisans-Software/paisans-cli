@@ -429,6 +429,47 @@ func TestARefusedDefaultUserIsNotAdmitted(t *testing.T) {
 // A user the site names is the operator's choice, so its refusal is a key
 // problem, as before; so is a default user on a transport that names no
 // site, which has no request to send.
+// The other refusal ssh gives for a key it will not take reads the same.
+func TestARefusedDefaultUserIsNotAdmittedWhateverSshSaid(t *testing.T) {
+	for _, out := range []string{
+		"Too many authentication failures\n",
+		"Received disconnect from 203.0.113.10 port 22:2: Too many authentication failures\n",
+	} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{out, 255}}}
+		s.install(t)
+		tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+		_, err := tr.Run("true")
+		if p := problemOf(t, err); p.Hint != "site home-a is not admitted on 203.0.113.10" {
+			t.Errorf("%q: hint %q", out, p.Hint)
+		}
+	}
+	apply.ForgetContacts()
+}
+
+// A transport built from a Destination names the host it reaches, never an
+// empty one.
+func TestANotAdmittedDestinationNamesItsHost(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", Destination: "paisans-f2a9@203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+	_, err := tr.Run("true")
+	p := problemOf(t, err)
+	if p.Hint != "site home-a is not admitted on 203.0.113.10" {
+		t.Errorf("hint %q", p.Hint)
+	}
+	for _, bad := range []string{" on .", " on ,", "user, and "} {
+		if strings.Contains(p.Explain, bad) {
+			t.Errorf("explain has empty text %q:\n%s", bad, p.Explain)
+		}
+	}
+	if !strings.Contains(p.Explain, "paisans-f2a9, and 203.0.113.10 refused it") {
+		t.Errorf("explain:\n%s", p.Explain)
+	}
+}
+
 func TestARefusedDeclaredUserIsAKeyProblem(t *testing.T) {
 	for _, tr := range []apply.SSHTransport{
 		{Site: "home-a", User: "ubuntu", Host: "203.0.113.10", PublicKeys: []string{keyA}},
