@@ -1,6 +1,7 @@
 package admission_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -302,5 +303,15 @@ func TestAForgedKeyChangesTheDigest(t *testing.T) {
 	}
 	if admission.Digest(data) == typed {
 		t.Fatal("a request with a key added has the digest of the one sent")
+	}
+}
+
+// A request over MaxRequestSize is refused before it is decoded, since it
+// comes from outside the host.
+func TestParseRefusesAnOversizedRequest(t *testing.T) {
+	big := strings.Repeat(" ", admission.MaxRequestSize+1)
+	_, err := admission.Parse([]byte(big))
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%d bytes, and a request is at most %d", admission.MaxRequestSize+1, admission.MaxRequestSize)) {
+		t.Errorf("got %v", err)
 	}
 }

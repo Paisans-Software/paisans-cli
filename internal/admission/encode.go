@@ -79,6 +79,11 @@ var fields = map[string][]string{
 	"operators":  {"name", "keys"},
 }
 
+// MaxRequestSize is the largest request Parse reads. A request is a few KiB
+// even with many operators' keys, and it comes from outside the host, so a
+// larger file is refused before it is decoded.
+const MaxRequestSize = 64 * 1024
+
 // Parse reads a request as host admit does, refusing anything it would
 // have to guess at: a version other than RequestVersion, a field missing
 // or unknown, any problem Check finds, and a file that is not exactly the
@@ -89,6 +94,9 @@ var fields = map[string][]string{
 func Parse(data []byte) (Request, error) {
 	refuse := func(problems ...string) (Request, error) {
 		return Request{}, &Error{What: "the request", Problems: problems}
+	}
+	if len(data) > MaxRequestSize {
+		return refuse(fmt.Sprintf("it is %d bytes, and a request is at most %d", len(data), MaxRequestSize))
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
