@@ -960,3 +960,36 @@ func TestASettingHoldsNoControlCharacter(t *testing.T) {
 		}
 	}
 }
+
+// SetSSHUser writes the file in place, keeping its mode, and Load then reads
+// the name as declared; a second call with the same name changes nothing.
+func TestSetSSHUserWritesTheFile(t *testing.T) {
+	path := write(t, withSSH("    ssh:\n      host: home-a.local\n      keys: [alice]\n"))
+	if err := config.SetSSHUser(path, "home-a", "paisans-f2a9"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSH.User; got != "paisans-f2a9" {
+		t.Errorf("ssh.user read as %q, want paisans-f2a9", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600", info.Mode().Perm())
+	}
+	if err := config.SetSSHUser(path, "home-a", "paisans-f2a9"); err != nil {
+		t.Fatal(err)
+	}
+	if second, _ := os.ReadFile(path); string(second) != string(first) {
+		t.Errorf("a second call changed the file:\n%s", second)
+	}
+}
