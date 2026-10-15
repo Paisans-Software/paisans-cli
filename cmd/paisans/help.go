@@ -353,6 +353,7 @@ var helpCommands = []helpCommand{
 		},
 		detail: "Read one value from stdin and write it into the encrypted secrets file, printing only its name. " +
 			"For credentials issued elsewhere, so they never touch an echoing terminal or an editor.\n\n" +
+			"With a key, at a terminal, ask for its value with echo off, saying whether it is already set; an empty answer writes nothing.\n\n" +
 			"With no key, at a terminal, ask for each secret still owed in turn, saying why it is owed, and read each with echo off. " +
 			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.",
 	},

@@ -2445,8 +2445,11 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 Every other way of getting a value into the file leaves a copy: an argument is
 in shell history and in `ps`, an echoed prompt is in a scrollback buffer, and
 `sops secrets.enc.yaml` opens the whole decrypted file in an editor that may
-keep swap or backup files. Given a key, it refuses a terminal on stdin for the
-same reason.
+keep swap or backup files. Given a key at a terminal, it asks for that key's
+value on the controlling terminal with echo off rather than reading what is
+typed on stdin, says whether the key is already set (never its value), and
+writes nothing on an empty answer. That is how a set credential is replaced by
+hand, Eg: a DNS token reissued before `paisans secrets rotate`.
 
 Given no key at a terminal, `paisans secrets set` asks for each secret still
 owed in turn, saying why each is owed, and reads the answer on the controlling
