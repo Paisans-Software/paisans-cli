@@ -7,7 +7,7 @@ DEFAULTVER := $(shell sed -n 's/^const Version = "\(.*\)"/\1/p' $(VERSION_FILE))
 # kacl-cli, the changelog tool CI runs, at the version CI pins.
 KACL ?= uvx --from python-kacl==0.7.0 kacl-cli
 
-.PHONY: bump bump-major bump-minor bump-patch
+.PHONY: bump bump-major bump-minor bump-patch release-binaries
 
 # Prepare a release: set the version constant, move the [Unreleased] bullets
 # in CHANGELOG.md into a dated section for it, and commit both. The release
@@ -72,3 +72,29 @@ bump-minor:
 
 bump-patch:
 	@"$(MAKE)" bump VERSION=$$(echo "$(DEFAULTVER)" | awk -F. '{print $$1"."$$2"."$$3+1}')
+
+# The Linux binaries a release attaches, with a SHA256SUMS file beside them,
+# in dist/. A host owner runs `paisans host admit` on the host itself and
+# needs the CLI and nothing else, so each binary is static (CGO_ENABLED=0)
+# and runs on any Linux of its architecture with no Go and no C library.
+# .github/workflows/release.yml runs this target, so a local run builds what
+# a release ships.
+#
+# dist/ is emptied first, so SHA256SUMS lists only what this run built.
+# SHA256SUMS names the files without a directory, so `sha256sum -c` works in
+# whatever directory they were downloaded to. -trimpath keeps the builder's
+# paths out of the binary; -s -w drops the symbol table and DWARF, which a
+# release binary has no use for.
+RELEASE_PLATFORMS := linux/amd64 linux/arm64
+
+release-binaries:
+	rm -rf dist
+	mkdir -p dist
+	@for p in $(RELEASE_PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; \
+		echo "building dist/paisans-$$os-$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="-s -w" \
+			-o dist/paisans-$$os-$$arch ./cmd/paisans || exit 1; \
+	done
+	cd dist && shasum -a 256 paisans-* > SHA256SUMS
+	@cat dist/SHA256SUMS

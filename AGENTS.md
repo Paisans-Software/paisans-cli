@@ -252,7 +252,8 @@ head commit's message with `kacl-skip:`.
    or a rebase**, which keeps `main` an ancestor of `develop`.
    `.github/workflows/release.yml` sees a version on `main` with no tag, tags
    it and publishes the GitHub Release, with the changes since the previous
-   release listed under the operator notes.
+   release listed under the operator notes and the Linux binaries and
+   `SHA256SUMS` that `make release-binaries` builds attached.
 
 **Release is a human action.** Tagging and publishing leave this repository
 and cannot be walked back. An agent may run `make bump` and open the

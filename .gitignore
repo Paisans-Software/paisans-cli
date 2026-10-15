@@ -53,3 +53,9 @@ archive/
 /paisans
 /cmd/paisans/paisans
 /bin/
+
+# make release-binaries writes the release's Linux binaries and SHA256SUMS
+# here. Ignoring it is load-bearing: Go stamps a binary -dirty when the tree
+# holds untracked files, so an unignored dist/ marks every binary after the
+# first one built.
+/dist/
