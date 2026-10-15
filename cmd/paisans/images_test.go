@@ -152,6 +152,38 @@ func (downRegistry) Track(string) (string, error) {
 	return "", errors.New("dial tcp: lookup registry: no such host")
 }
 
+// deployedHost is a site an apply has run on: it reads back what the apply
+// wrote, so its compose files name the builds that apply pinned.
+type deployedHost struct {
+	runningHost
+	files map[string]string
+}
+
+func (h deployedHost) ReadFile(path string) (string, bool, error) {
+	content, ok := h.files[path]
+	return content, ok, nil
+}
+
+func (h deployedHost) WriteFile(path, content string, _ uint32) error {
+	h.files[path] = content
+	return nil
+}
+
+// deployedSite applies cfg to home-a through imageDigests and returns the
+// host it leaves, running exactly the builds that apply pinned.
+func deployedSite(t *testing.T, cfg *config.Config, secrets *config.Secrets) deployedHost {
+	t.Helper()
+	host := deployedHost{runningHost: runningHost{failingHost{match: "\x00"}}, files: map[string]string{}}
+	plan, err := planSiteApply(cfg, secrets, "home-a", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(plan, host); err != nil {
+		t.Fatal(err)
+	}
+	return host
+}
+
 // A registry that cannot be reached, on a site that can, is unknown under
 // newest for each image it could not resolve. The site is read, every other
 // column prints, and the command does not fail.
@@ -203,5 +235,61 @@ func TestImagesCountsManySitesItCannotRead(t *testing.T) {
 	}
 	if problem := unreadProblem([]string{"a", "b", "c"}); problem.Hint != "could not read a, b, c" {
 		t.Errorf("problem: %+v", problem)
+	}
+}
+
+// A site that runs exactly what the next apply would, with no override
+// behind, passes --check.
+func TestImagesCheckPassesASiteThatRunsTheNewestBuilds(t *testing.T) {
+	cfg, secrets := imagesFixture(t, nil)
+	withImagesTransport(t, nil)
+	host := deployedSite(t, cfg, secrets)
+	imagesTransport = func(string, config.Site) apply.Transport { return host }
+	var out strings.Builder
+	if err := writeImages(&ui.Recorder{}, cfg, secrets, &out, true); err != nil {
+		t.Fatalf("--check: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "moves on next apply") {
+		t.Errorf("a build moves:\n%s", out.String())
+	}
+}
+
+// The same site with an override behind its track fails --check with
+// errImagesMove, though no build moves.
+func TestImagesCheckFailsAnOverrideBehind(t *testing.T) {
+	cfg, secrets := imagesFixture(t, func(c *config.Config) {
+		c.Infra.Images = map[string]string{"etcd": "gcr.io/etcd-development/etcd:v3.4.30"}
+	})
+	withImagesTransport(t, nil)
+	host := deployedSite(t, cfg, secrets)
+	imagesTransport = func(string, config.Site) apply.Transport { return host }
+	var out strings.Builder
+	if err := writeImages(&ui.Recorder{}, cfg, secrets, &out, true); !errors.Is(err, errImagesMove) {
+		t.Fatalf("--check: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "moves on next apply") || !strings.Contains(out.String(), "behind gcr.io/etcd-development/etcd:v3.5.0") {
+		t.Errorf("table:\n%s", out.String())
+	}
+}
+
+// A registry that cannot be reached keeps the builds a site runs, which
+// print under running, with newest unknown.
+func TestImagesShowsNewestUnknownForADeployedBuild(t *testing.T) {
+	cfg, secrets := imagesFixture(t, nil)
+	withImagesTransport(t, nil)
+	host := deployedSite(t, cfg, secrets)
+	imagesTransport = func(string, config.Site) apply.Transport { return host }
+	imageDigests = downRegistry{}
+	rows, _, unread, err := imageRows(&ui.Recorder{}, cfg, secrets)
+	if err != nil || len(unread) != 0 {
+		t.Fatalf("err %v, unread %v", err, unread)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no rows")
+	}
+	for _, row := range rows {
+		if row.newest != "unknown" || row.running == "-" || row.running == "unknown" || row.moves {
+			t.Errorf("row %+v", row)
+		}
 	}
 }
