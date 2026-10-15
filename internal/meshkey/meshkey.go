@@ -24,31 +24,29 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// RunningKey is the public key site's interface runs, reached through t and
-// the WireGuard helper's show public-key, which prints it as `wg show
-// <interface> public-key` does (wireguard-tools, wg(8)).
+// RunningKey is the public key site's interface runs, empty for none,
+// reached through t and the WireGuard helper's show public-key, which prints
+// it as `wg show <interface> public-key` does (wireguard-tools, wg(8)). It
+// is read as apply reads it back: what sudo warns before running the helper
+// is not the key, so a host that already runs a site's next key is never
+// taken for one that does not.
 func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string, error) {
 	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("public-key")
 	if err != nil {
 		return "", fmt.Errorf("%s: reading %s's key through the WireGuard helper: %w", site, d.Interface(), err)
 	}
-	return strings.TrimSpace(out), nil
+	return apply.ReadMeshKey(site, out)
 }
 
 // Peers is the public keys site's interface lists as peers, reached through
-// t and the helper's show peers, one per line (wireguard-tools, wg(8)).
+// t and the helper's show peers, one per line (wireguard-tools, wg(8)), read
+// as strictly as RunningKey.
 func Peers(site string, t apply.Transport, d deployment.Deployment) ([]string, error) {
 	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("peers")
 	if err != nil {
 		return nil, fmt.Errorf("%s: reading %s's peers through the WireGuard helper: %w", site, d.Interface(), err)
 	}
-	var keys []string
-	for _, line := range strings.Split(out, "\n") {
-		if key := strings.TrimSpace(line); key != "" {
-			keys = append(keys, key)
-		}
-	}
-	return keys, nil
+	return apply.ReadMeshPeers(site, out)
 }
 
 // AsRunning is secrets as the mesh runs them: a copy in which every site

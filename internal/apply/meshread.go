@@ -253,22 +253,48 @@ func badShow(site, field, line, shape string) error {
 	return fmt.Errorf(`%s: the WireGuard helper's show %s printed "%s", not %s`, site, field, ui.Visible(line), shape)
 }
 
+// ReadMeshKey parses the helper's show public-key, strictly: the one key it
+// printed, or empty for an interface with none ("(none)"). sudo's warnings
+// are not read as the key, and anything else is an error that quotes it,
+// never a key that matches nothing.
+func ReadMeshKey(site, out string) (string, error) {
+	keys := showLines(out)
+	switch {
+	case len(keys) == 1 && keys[0] == "(none)":
+		return "", nil
+	case len(keys) == 1 && wgKey.MatchString(keys[0]):
+		return keys[0], nil
+	case len(keys) == 0:
+		return "", fmt.Errorf("%s: the WireGuard helper's show public-key printed no key", site)
+	default:
+		return "", badShow(site, "public-key", strings.Join(keys, "\n"), "one key")
+	}
+}
+
+// ReadMeshPeers parses the helper's show peers, strictly: one key per line,
+// without sudo's warnings, and anything else is an error that quotes it.
+func ReadMeshPeers(site, out string) ([]string, error) {
+	var peers []string
+	for _, line := range showLines(out) {
+		if !wgKey.MatchString(line) {
+			return nil, badShow(site, "peers", line, "a key")
+		}
+		peers = append(peers, line)
+	}
+	return peers, nil
+}
+
 // readRunning parses what the helper showed of the running interface,
 // strictly: every line must be its field's shape, and anything else is an
 // error that quotes it rather than a difference that plans a sync.
 func readRunning(site string, shown map[string]string) (meshRunning, error) {
 	out := meshRunning{peers: map[string]meshPeer{}}
 
-	keys := showLines(shown["public-key"])
-	switch {
-	case len(keys) == 1 && keys[0] == "(none)":
-	case len(keys) == 1 && wgKey.MatchString(keys[0]):
-		out.key = keys[0]
-	case len(keys) == 0:
-		return out, fmt.Errorf("%s: the WireGuard helper's show public-key printed no key", site)
-	default:
-		return out, badShow(site, "public-key", strings.Join(keys, "\n"), "one key")
+	key, err := ReadMeshKey(site, shown["public-key"])
+	if err != nil {
+		return out, err
 	}
+	out.key = key
 
 	ports := showLines(shown["listen-port"])
 	if len(ports) != 1 || !wgPort.MatchString(ports[0]) {
@@ -276,11 +302,12 @@ func readRunning(site string, shown map[string]string) (meshRunning, error) {
 	}
 	out.port = ports[0]
 
-	for _, line := range showLines(shown["peers"]) {
-		if !wgKey.MatchString(line) {
-			return out, badShow(site, "peers", line, "a key")
-		}
-		out.peers[line] = meshPeer{keepalive: "off"}
+	peers, err := ReadMeshPeers(site, shown["peers"])
+	if err != nil {
+		return out, err
+	}
+	for _, peer := range peers {
+		out.peers[peer] = meshPeer{keepalive: "off"}
 	}
 
 	for _, line := range showLines(shown["allowed-ips"]) {
