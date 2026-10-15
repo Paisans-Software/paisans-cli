@@ -261,12 +261,6 @@ func (h *fakeHost) Run(command string) (string, error) {
 	if strings.Contains(command, "getent ahosts") {
 		return h.resolveProbe(command), nil
 	}
-	if strings.Contains(command, "ip link show psns-f2a9") {
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
-	}
 	if strings.Contains(command, "ip -br addr show dev psns-f2a9") {
 		if !h.wgUp {
 			return "", nil
