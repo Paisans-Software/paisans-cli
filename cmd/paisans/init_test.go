@@ -507,6 +507,9 @@ func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
 	if !rec.Has("warn", "Secret for external.acme_dns_token needs to be set") {
 		t.Errorf("an owed secret is no longer warned about:\n%s", rec.Lines())
 	}
+	if !rec.Has("result", "Run `paisans secrets set` to set the") {
+		t.Errorf("init does not say how to set what is owed:\n%s", rec.Lines())
+	}
 	want := "7 sign in clients (account, blog, chat, gate, health, talk, wiki) are created by apply"
 	if !rec.Has("pending", want) {
 		t.Errorf("no pending line %q:\n%s", want, rec.Lines())

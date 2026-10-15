@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- `init` ends by naming `paisans secrets set` when a secret only the operator can give is unset, and the SMTP password's reason names the mail host and login instead of `apps.<app>.smtp_password`.
+
 ### Fixed
 
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.

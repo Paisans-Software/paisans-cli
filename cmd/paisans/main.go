@@ -317,7 +317,7 @@ func runInit(args []string) error {
 	if !filled.Changed() {
 		r.Detail("%s already has every generated secret (%d)", *secretsPath, len(filled.Kept))
 		reportOwed(r, filled)
-		r.Result("Every generated secret is already present. Nothing written.")
+		r.Result("Every generated secret is already present. Nothing written.%s", setOwed(filled))
 		return nil
 	}
 
@@ -339,7 +339,7 @@ func runInit(args []string) error {
 		r.Detail("Encrypted to %d age recipient(s) from %s.", len(recipients), config.SOPSConfigName)
 	}
 	reportOwed(r, filled)
-	r.Result("Generated %s, kept %d.", plural(len(filled.Generated), "secret"), len(filled.Kept))
+	r.Result("Generated %s, kept %d.%s", plural(len(filled.Generated), "secret"), len(filled.Kept), setOwed(filled))
 	return nil
 }
 
@@ -373,6 +373,18 @@ type secretsWriteError struct{ err error }
 
 func (e *secretsWriteError) Error() string { return e.err.Error() }
 func (e *secretsWriteError) Unwrap() error { return e.err }
+
+// setOwed is the next step for the secrets only the operator can provide,
+// "" when none is owed: secrets set, which asks for each one at a terminal.
+func setOwed(filled secretsgen.Result) string {
+	switch len(filled.Owed) {
+	case 0:
+		return ""
+	case 1:
+		return " Run `paisans secrets set` to set the one only you can give, " + filled.Owed[0].Name + "."
+	}
+	return fmt.Sprintf(" Run `paisans secrets set` to set the %d only you can give; it asks for each in turn.", len(filled.Owed))
+}
 
 // reportOwed warns of each secret only the operator can provide. Leaving
 // these silent would let an operator believe an install is finished when
