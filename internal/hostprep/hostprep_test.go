@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -163,7 +164,7 @@ func preparedHost(gateway bool) *fakeHost {
 	// Only the gateway, vm, has an endpoint, so only it opens WireGuard's port.
 	firewall := "ufw present\nstatus active\n" + owned("allow 22/tcp", "allow in on psns-f2a9")
 	if !gateway {
-		firewall += owned("allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp")
+		firewall += owned("allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
 	}
 	if gateway {
 		firewall += owned("allow 51820/udp", "allow 80/tcp", "allow 443/tcp")
@@ -497,7 +498,7 @@ func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
 		"rule allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp")
+		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
 	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
 	if err != nil {
 		t.Fatal(err)
@@ -664,7 +665,7 @@ func TestAFreshGatewaySiteDiffersFromADataSite(t *testing.T) {
 // Only the missing rule is planned on a firewall that is already up.
 func TestOnlyMissingFirewallRulesArePlanned(t *testing.T) {
 	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" + owned("allow 22/tcp", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp")
+	host.responses[probeFirewall] = "ufw present\nstatus active\n" + owned("allow 22/tcp", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
 	plan, err := hostprep.Build("home-a", fixture(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -815,7 +816,8 @@ func TestARemovedPackageIsNotInstalled(t *testing.T) {
 
 // An apps site lets its containers reach the database proxy and, where Garage
 // runs, object storage on its own mesh address, over the compose bridges and
-// nothing wider. A gateway only site gets neither, and so does the fixture's
+// nothing wider; where the account service runs, also HAProxy's route to
+// Pocket ID's API. A gateway only site gets none, and so does the fixture's
 // monitor site, where the monitor is the only app and does not check itself.
 func TestContainerRulesReachOnlyWhatAppsUse(t *testing.T) {
 	cfg := fixture(t)
@@ -823,7 +825,7 @@ func TestContainerRulesReachOnlyWhatAppsUse(t *testing.T) {
 	for _, r := range hostprep.ContainerRules(cfg, "home-a") {
 		got = append(got, r.String())
 	}
-	if want := "5000/tcp on br-+ to 10.44.0.1,3900/tcp on br-+ to 10.44.0.1"; strings.Join(got, ",") != want {
+	if want := "5000/tcp on br-+ to 10.44.0.1,3900/tcp on br-+ to 10.44.0.1,1413/tcp on br-+ to 10.44.0.1"; strings.Join(got, ",") != want {
 		t.Errorf("home-a: got %s, want %s", strings.Join(got, ","), want)
 	}
 	for _, site := range []string{"vm", "watch"} {
@@ -1016,15 +1018,15 @@ func TestAForeignActionIsWarnedOrRefused(t *testing.T) {
 // comment remove the commented rule just adopted.
 func TestALegacyRuleIsAdoptedWithoutAGap(t *testing.T) {
 	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\n"
+	host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 1413 proto tcp\n"
 	plan, err := hostprep.Build("home-a", fixture(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := printed(plan)
 	t.Logf("\n%s", out)
-	if len(plan.Steps) != 4 {
-		t.Fatalf("want four adoptions, got:\n%s", out)
+	if len(plan.Steps) != 5 {
+		t.Fatalf("want five adoptions, got:\n%s", out)
 	}
 	for _, s := range plan.Steps {
 		if s.Label != "adopt" || !strings.HasPrefix(s.Command, "ufw allow ") || !strings.Contains(s.Command, " comment 'paisans-f2a9: ") {
@@ -1056,7 +1058,7 @@ func TestALegacyRuleIsAdoptedWithoutAGap(t *testing.T) {
 func TestSSHIsNeverRemoved(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 22/tcp", "allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp") +
+		owned("allow 22/tcp", "allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp") +
 		owned("allow 22", "allow from 192.0.2.0/24 to any port 22 proto tcp")
 	plan, err := hostprep.Build("home-a", fixture(t), host)
 	if err != nil {
@@ -1111,7 +1113,7 @@ func TestMovingTheSSHPortKeepsTheOldAllow(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
 		"rule allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp")
+		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
 	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
 	if err != nil {
 		t.Fatal(err)
@@ -1133,7 +1135,7 @@ func TestAnOldSSHAllowWithoutOnePortIsNamedByItsRule(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
 		"rule allow 22,2200/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp")
+		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
 	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
 	if err != nil {
 		t.Fatal(err)
@@ -1600,6 +1602,38 @@ func TestContainerRulesLetTheMonitorReachLocalApps(t *testing.T) {
 	}
 }
 
+// The account service calls Pocket ID's API at its own site's HAProxy on the
+// mesh address, and that call arrives on a compose bridge, where the default
+// deny dropped it on the first real host: every page that reads a member
+// timed out. A site without the account service gets no such rule.
+func TestContainerRulesLetTheAccountServiceReachPocketIDsAPI(t *testing.T) {
+	cfg := fixture(t)
+	api := func(site string) []hostprep.Rule {
+		var out []hostprep.Rule
+		for _, r := range hostprep.ContainerRules(cfg, site) {
+			if r.Port == render.PocketIDAPIPort {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	for _, site := range render.AppSites(cfg)["account"] {
+		rules := api(site)
+		if len(rules) != 1 {
+			t.Fatalf("%s runs the account service: got %v, want one rule to port %d", site, rules, render.PocketIDAPIPort)
+		}
+		if r := rules[0]; r.Interface != "br-+" || r.To != cfg.Sites[site].Address || r.Proto != "tcp" {
+			t.Errorf("%s: rule is wider or other than a bridge to the mesh address: %s", site, r)
+		}
+	}
+	delete(cfg.Apps, "account")
+	for name := range cfg.Sites {
+		if rules := api(name); len(rules) != 0 {
+			t.Errorf("%s runs no account service and was given %v", name, rules)
+		}
+	}
+}
+
 // Docker starts after the mesh interface at boot, or a container publishing
 // a port on the mesh address fails to bind it and is never retried. The drop-in is written
 // when missing or different, and installing it reloads systemd without
@@ -1794,7 +1828,7 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 		},
 		"legacy rule": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
-			host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\n"
+			host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 1413 proto tcp\n"
 			return hostprep.Build("home-a", fixture(t), host)
 		},
 		"watchdog unit disabled": func(t *testing.T) (*hostprep.Plan, error) {
