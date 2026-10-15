@@ -5119,6 +5119,7 @@ which a package upgrade replaces, untouched.
 | 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in `managed_by: paisans` |
 | `br-+` to the site's mesh address, cluster port | sites with the apps role |
 | `br-+` to the site's mesh address, Garage's S3 port | sites with the apps role that are also Garage sites |
+| `br-+` to the site's mesh address, 1413, HAProxy's route to Pocket ID's API | sites the account service runs on, which call that API there with the static key |
 | `br-+` to the site's mesh address, the port of each other app that runs there | sites an uptime monitor runs on, so its direct checks of those apps arrive |
 
 Nothing is listed per site. A site that gains the gateway role gains 80 and 443
