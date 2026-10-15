@@ -12,8 +12,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Local is the transport for a command run on the host itself: each command
@@ -42,13 +44,17 @@ func (l local) RunInput(command, stdin string) (string, error) { return l.run(co
 // first line, as the ssh transport's is.
 func (l local) run(command string, stdin *string) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
+	// A command starts in the running user's home, as it does over ssh.
+	if home, err := os.UserHomeDir(); err == nil {
+		cmd.Dir = home
+	}
 	if stdin != nil {
 		cmd.Stdin = strings.NewReader(*stdin)
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("%s: %s: %w\n%s", l.Describe(), firstLine(command), err, strings.TrimRight(out.String(), "\n"))
+		return out.String(), ui.RedactError(fmt.Errorf("%s: %s: %w\n%s", l.Describe(), firstLine(command), err, strings.TrimRight(out.String(), "\n")))
 	}
 	return out.String(), nil
 }
@@ -57,7 +63,7 @@ func (l local) run(command string, stdin *string) (string, error) {
 // regular file, read as absent, as `[ -f ]` does over ssh.
 func (local) ReadFile(path string) (string, bool, error) {
 	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || (err == nil && !info.Mode().IsRegular()) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -70,18 +76,40 @@ func (local) ReadFile(path string) (string, bool, error) {
 	return string(data), true, nil
 }
 
-// WriteFile writes content to a temporary file beside path, sets its mode
-// and renames it over path, creating the parent directories, so a failed
-// write leaves the previous file whole.
-func (local) WriteFile(path, content string, mode uint32) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+// WriteFile writes content to a new temporary file in path's directory,
+// sets its mode through the open descriptor and renames it over path,
+// creating the parent directories, so a failed write leaves the previous
+// file whole. The temporary name is random and opened exclusively, and
+// nothing is done to it by path, so a link planted beside the target by
+// the directory's owner is never followed by this process, which runs as
+// root.
+func (l local) WriteFile(path, content string, mode uint32) (err error) {
+	defer func() {
+		if err != nil {
+			err = ui.RedactError(fmt.Errorf("%s: writing %s: %w", l.Describe(), path, err))
+		}
+	}()
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".paisans-tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".paisans-tmp-*")
+	if err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp, os.FileMode(mode)); err != nil {
+	tmp := f.Name()
+	fail := func(err error) error {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		return fail(err)
+	}
+	if err := f.Chmod(fileMode(mode)); err != nil {
+		return fail(err)
+	}
+	if err := f.Close(); err != nil {
 		os.Remove(tmp)
 		return err
 	}
@@ -90,6 +118,22 @@ func (local) WriteFile(path, content string, mode uint32) error {
 		return err
 	}
 	return nil
+}
+
+// fileMode converts Unix mode bits, setuid, setgid and sticky among them,
+// to Go's, which keep those three elsewhere.
+func fileMode(mode uint32) os.FileMode {
+	m := os.FileMode(mode & 0o777)
+	if mode&0o4000 != 0 {
+		m |= os.ModeSetuid
+	}
+	if mode&0o2000 != 0 {
+		m |= os.ModeSetgid
+	}
+	if mode&0o1000 != 0 {
+		m |= os.ModeSticky
+	}
+	return m
 }
 
 func firstLine(s string) string {
