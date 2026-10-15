@@ -1212,14 +1212,10 @@ func (c *Config) structural(noSubnet bool) error {
 	case c.Mesh.Subnet == "":
 		add("mesh.subnet: required. Run `paisans init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.")
 	default:
-		ip, network, err := net.ParseCIDR(c.Mesh.Subnet)
+		network, p := ParseMeshSubnet(c.Mesh.Subnet)
 		switch {
-		case err != nil:
-			add("mesh.subnet: %q is not a network in CIDR notation. Write it as an address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet)
-		case ip.To4() == nil:
-			add("mesh.subnet: %q is IPv6. The mesh is IPv4 only for now.", c.Mesh.Subnet)
-		case !ip.Equal(network.IP):
-			add("mesh.subnet: %q is a host address inside a network, not the network itself. Write %s.", c.Mesh.Subnet, network.String())
+		case p != "":
+			add("mesh.subnet: %q %s. Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet, p)
 		default:
 			if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
 				add("mesh.subnet: %q is larger than a /%d. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet, MeshMinPrefix)
@@ -1261,6 +1257,8 @@ func (c *Config) structural(noSubnet bool) error {
 			add("sites.%s.address: required. Every site needs a mesh address, and it never changes.", name)
 		} else if !isIPv4(site.Address) {
 			add("sites.%s.address: %q is not an IPv4 address. Use the site's WireGuard address, for example 10.44.0.1.", name, site.Address)
+		} else if a := net.ParseIP(site.Address).To4().String(); a != site.Address {
+			add("sites.%s.address: %q is not written as plain dotted IPv4, %s. Write it as four dotted numbers, for example 10.44.0.1.", name, site.Address, a)
 		} else if _, mesh, err := net.ParseCIDR(c.Mesh.Subnet); err == nil && IsNetworkOrBroadcast(net.ParseIP(site.Address), mesh) {
 			add("sites.%s.address: %s is mesh.subnet %s's network or broadcast address, which no host may hold. Give the site another address inside the mesh.", name, site.Address, c.Mesh.Subnet)
 		}

@@ -13,6 +13,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ParseMeshSubnet is subnet as a network, or what is wrong with how it is
+// written: not CIDR, not IPv4, a host address rather than the network, or
+// any spelling but the canonical one net.IPNet prints, so a leading zero or
+// an IPv4-mapped IPv6 form never reaches a host as a second spelling of one
+// mesh. The loader holds mesh.subnet to it and a request its mesh_subnet.
+func ParseMeshSubnet(subnet string) (*net.IPNet, string) {
+	ip, network, err := net.ParseCIDR(subnet)
+	switch {
+	case err != nil:
+		return nil, "is not a network in CIDR notation"
+	case ip.To4() == nil:
+		return nil, "is not IPv4"
+	case !ip.Equal(network.IP):
+		return nil, "is a host address inside a network, not the network itself, " + network.String()
+	case network.String() != subnet:
+		return nil, "is not written in its canonical form, " + network.String()
+	}
+	return network, ""
+}
+
 // MeshMinPrefix is the shortest prefix mesh.subnet may have: no larger than a
 // /24, which is what init picks. The hosts' firewalls trust the whole mesh,
 // so a larger one could cover an owner's LAN.

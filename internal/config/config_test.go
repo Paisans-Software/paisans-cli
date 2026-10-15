@@ -1153,3 +1153,25 @@ func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
 		}
 	}
 }
+
+// mesh.subnet is written in its canonical form, the one spelling a request
+// carries, so a configuration validate accepts is one host request takes.
+func TestMeshSubnetIsWrittenCanonically(t *testing.T) {
+	for _, c := range []struct{ subnet, want string }{
+		{"10.44.0.0/024", `mesh.subnet: "10.44.0.0/024" is not written in its canonical form, 10.44.0.0/24`},
+		{"::ffff:10.44.0.0/120", `mesh.subnet: "::ffff:10.44.0.0/120" is not written in its canonical form`},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1))
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q\nwant it to say %q", c.subnet, got, c.want)
+		}
+	}
+}
+
+// A site address is written as plain dotted IPv4, as a request carries it.
+func TestSiteAddressIsWrittenCanonically(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: ::ffff:10.44.0.1", 1))
+	if !strings.Contains(got, `sites.home-a.address: "::ffff:10.44.0.1" is not written as plain dotted IPv4, 10.44.0.1`) {
+		t.Errorf("got %q", got)
+	}
+}

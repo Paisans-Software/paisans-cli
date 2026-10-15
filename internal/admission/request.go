@@ -195,14 +195,10 @@ func (r Request) Check() []string {
 	if r.Endpoint && r.ListenPort == 0 {
 		add("listen_port: 0, but the site has an endpoint, which other sites dial on a fixed port")
 	}
-	ip, mesh, err := net.ParseCIDR(r.MeshSubnet)
+	mesh, p := config.ParseMeshSubnet(r.MeshSubnet)
 	switch {
-	case err != nil || ip.To4() == nil:
-		add("mesh_subnet: %q is not an IPv4 network", r.MeshSubnet)
-	case mesh.String() != r.MeshSubnet && ip.Equal(mesh.IP):
-		add("mesh_subnet: %q is not written as plain dotted IPv4, %s", r.MeshSubnet, mesh)
-	case !ip.Equal(mesh.IP):
-		add("mesh_subnet: %q is not written as its network, %s", r.MeshSubnet, mesh)
+	case p != "":
+		add("mesh_subnet: %q %s", r.MeshSubnet, p)
 	default:
 		if ones, _ := mesh.Mask.Size(); ones < config.MeshMinPrefix {
 			add("mesh_subnet: %q is larger than a /%d, which is as large as a mesh may be", r.MeshSubnet, config.MeshMinPrefix)
