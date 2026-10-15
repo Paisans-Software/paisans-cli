@@ -277,7 +277,7 @@ func TestAHeartbeatDeclaredReferenceIsReviewedWhereverItRunsInItsStack(t *testin
 		t.Fatal(err)
 	}
 	image := authImage(t, plan, "home-a", reconciler)
-	if image.Lines != 2 {
+	if !slices.Contains(image.Services, "reconciler") || image.Lines != 2 {
 		t.Fatalf("the reconciler and the operators heartbeat do not both run %s: %+v", reconciler, image)
 	}
 	if len(image.FoundationServices) > 0 {

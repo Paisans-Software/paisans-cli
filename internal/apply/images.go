@@ -577,8 +577,8 @@ func checkLag(pin *ImagePin, r Resolver) []Note {
 	}}
 }
 
-// ReferenceLabel names the build a reference names, for a table: its tag and short digest, either
-// alone when the reference names only one.
+// ReferenceLabel names the build a reference names, for a table: its tag
+// and short digest, either alone when the reference names only one.
 func ReferenceLabel(ref string) string {
 	tag := blueprints.ParseReference(nameOf(ref)).Tag
 	digest := digestOf(ref)
