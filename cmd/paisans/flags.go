@@ -55,6 +55,7 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		routeRetries(r)
 		routeHolds(r)
 		routeKeyNotices(r)
+		routeLoginNotes(r)
 		return r
 	}
 }

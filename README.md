@@ -4578,7 +4578,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
-      user: ubuntu         # optional: defaults to paisans-<token>; must already exist on the host
+      user: ubuntu         # optional: defaults to paisans-<token>, written here on its first login
       port: 22             # optional: empty or 0 means 22
       keys: [alice, bob]   # required: the operators who may log in
 ```
@@ -4617,7 +4617,10 @@ the host either way.
 A host refuses that user until its owner has admitted the deployment, so a
 command whose login as the default user is refused says the site is not
 admitted there, with the `paisans host request --site <site>` line whose file
-the owner admits it from, rather than that a key was not accepted.
+the owner admits it from, rather than that a key was not accepted. The first
+command that logs in as the default writes it into `user`, so the file names
+who logs in; a name already there is never changed, and a write that fails is
+a warning, since the login it records has worked.
 
 Every command runs docker against the login user's own rootless daemon: its
 first command on a site asks `id -u`, once a run, and every command after it

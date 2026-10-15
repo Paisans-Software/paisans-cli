@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // logins holds one apply.Login per destination for the whole run, so a site
@@ -32,4 +35,40 @@ func loginFor(destination string, connected func()) *apply.Login {
 	l := apply.NewLogin(connected)
 	logins[destination] = l
 	return l
+}
+
+// loginReporter is the reporter a recorded login user is told through: the
+// running command's, set by commonFlags (routeLoginNotes), as the retry lines
+// are. Nil says nothing.
+var loginReporter ui.Reporter
+
+// routeLoginNotes sends the notes recordSSHUser makes to r.
+func routeLoginNotes(r ui.Reporter) { loginReporter = r }
+
+// recordMu takes turns between recordSSHUser's writes: a command that
+// reaches several sites at once, as doctor does, can log in to two of them
+// together, and SetSSHUser reads the file and writes it whole.
+var recordMu sync.Mutex
+
+// recordSSHUser is what a transport calls once it has logged in to site as
+// user, the deployment's own, which the declaration at path leaves out of
+// ssh.user: it writes the name there, so the file says who logs in, and a
+// later run reads it as declared. The login it records has already worked,
+// so a write that fails is said and is never the command's failure.
+func recordSSHUser(path, site, user string) func() {
+	return func() {
+		recordMu.Lock()
+		defer recordMu.Unlock()
+		err := config.SetSSHUser(path, site, user)
+		r := loginReporter
+		if r == nil {
+			return
+		}
+		if err != nil {
+			r.Note(fmt.Sprintf("%s: ssh.user %s could not be recorded in %s", site, user, config.FileName),
+				err.Error()+". The command goes on as "+user+"; write user: "+user+" under sites."+site+".ssh yourself, or leave it for the next command to try.")
+			return
+		}
+		r.Note(fmt.Sprintf("%s: ssh.user %s recorded in %s", site, user, config.FileName), "")
+	}
 }
