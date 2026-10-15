@@ -2993,31 +2993,57 @@ still the deployment's, so the claim is not over while the data is there.
 Keeping it also stops another site of the same deployment being deployed
 onto the data unannounced: the claim check names what the removal kept.
 
-## 2026-10-14: `dns init` writes DMARC for a domain that only sends mail
+## 2026-10-15: `dns init` writes DMARC for send-only names and for hostnames below the registrable domain
 
 Founder decision. It amends *`dns init` publishes the no-mail records* above,
-where a domain with mail had its DMARC policy checked and never written.
+where a domain with mail had its DMARC policy checked and never written, and
+where the domain's `sp=reject` was taken to cover every hostname.
 
 ### What was decided
 
-* When `community.domain` has mail of its own, holds no MX record, and has no
-  DMARC policy, `dns init` creates `v=DMARC1; p=reject; sp=reject;` at
-  `_dmarc.<community.domain>`.
-* Any existing DMARC policy there, however weak, is still a note and is never
-  replaced. A missing policy at a domain with an MX record is still a note.
-* `dns prune` never deletes that record.
+* Every mail name under `community.domain`, not only the domain itself, has
+  its DMARC policy checked.
+* A mail name with no MX record and no DMARC policy gets
+  `v=DMARC1; p=reject; sp=reject;` written at its `_dmarc`. An existing
+  policy, however weak, is still a note and never replaced; a missing one at
+  a name with an MX record is still a note. `dns prune` never deletes it.
+* When `community.domain` is below its registrable domain under the public
+  suffix list, every hostname that gets an address record also gets the
+  lockdown DMARC policy at its own `_dmarc`, except one that is itself a
+  registrable domain. `dns prune` treats it like the hostname's SPF.
+* The registrable domain above `community.domain` has its DMARC policy
+  checked and warned about, never written, and not checked at all when the
+  DNS provider does not hold it.
 
 ### Why
 
-A domain with no MX receives no mail, so its mail is a relay sending in its
+A name with no MX receives no mail, so its mail is a relay sending in its
 name, and nobody runs a mail service there whose policy `dns init` would be
-overriding. Without a policy, every hostname under the domain can be forged as
-a sender, and the note asked the operator to write by hand a record the
-toolkit could write itself. Relaxed alignment is what keeps the deployment's
-own mail delivered: a relay commonly signs with a subdomain it has verified,
-which relaxed alignment accepts for any name under the same organizational
-domain. Prune keeps it because the deployment's mail depends on it once the
-relay is configured, and removing a reject policy only weakens the domain.
+overriding. The note asked the operator to write by hand a record the toolkit
+could write itself. Relaxed alignment is what keeps the deployment's own mail
+delivered: a relay commonly signs with a subdomain it has verified, which
+relaxed alignment accepts for any name under the same registrable domain.
+Prune keeps it because the deployment's mail depends on it, and removing a
+reject policy only weakens the name.
+
+A receiver following RFC 7489 that finds no policy at a name's own `_dmarc`
+looks at the registrable domain, never at the names between. A staging
+deployment at `staging.example.org` therefore had its hostnames governed by
+`example.org`'s policy, which the toolkit neither writes nor checked, and
+its own `sp=reject` reached none of them. A record per hostname is within the
+names the toolkit already writes SPF at. The registrable domain is not: it
+holds names other services send from, and a missing MX there says nothing
+about them, so a reject policy written there could refuse their mail.
+
+### What was weighed
+
+* **Writing the registrable domain's policy when it has no MX.** Not chosen:
+  the toolkit cannot see which names under it send mail.
+* **The zone apex as the registrable domain.** Not chosen: a delegated
+  subzone's apex is not a registrable domain, and receivers use the public
+  suffix list.
+* **Strict alignment for a send-only name.** Not chosen: a relay signing as
+  a sibling name would have the deployment's own mail rejected.
 
 ### What was run
 

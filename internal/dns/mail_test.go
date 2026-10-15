@@ -498,3 +498,132 @@ func TestMailNameOutsideTheDomainIsNotRead(t *testing.T) {
 		}
 	}
 }
+
+// staged is declared with community.domain a name below the registrable
+// domain, as a staging deployment inside a community's zone is.
+func staged() *config.Config {
+	cfg := declared()
+	cfg.Community.Domain = "staging.example.org"
+	site := cfg.Sites["vm"]
+	site.Endpoint = "vm.staging.example.org:51820"
+	cfg.Sites["vm"] = site
+	cfg.Apps = map[string]config.App{
+		"talk": {Blueprint: config.Blueprint("mbin"), Hostname: "talk.staging.example.org"},
+	}
+	return cfg
+}
+
+// Every mail name under the domain has its DMARC policy checked, and one
+// that receives no mail gets the sender's policy written, as the domain does.
+func TestEveryMailNameUnderTheDomainGetsItsDMARCChecked(t *testing.T) {
+	cfg := declared()
+	cfg.Apps["auth"] = config.App{Blueprint: config.BlueprintPocketID, Hostname: "id.example.org", SMTP: &config.SMTP{FromAddress: "noreply@id.example.org"}}
+	got := wantsOf(t, cfg)
+	if w := got["TXT _dmarc.id.example.org"]; !w.Advisory || w.Sources[0] != "apps.auth.smtp.from_address" {
+		t.Fatalf("the app sender's DMARC policy should be checked: %+v", w)
+	}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	p := plan(t, fake.serve(t), cfg)
+	created := false
+	for _, e := range p.Creates() {
+		created = created || (e.Name == "_dmarc.id.example.org" && e.Content == dmarcSender)
+	}
+	if !created {
+		t.Errorf("a send-only app sender's DMARC policy should be created: %+v", p.Entries)
+	}
+}
+
+// Below the registrable domain, a receiver with no policy at a hostname's own
+// _dmarc uses the registrable domain's, not community.domain's, so each
+// hostname gets its own. At the registrable domain, the domain's covers them.
+func TestHostnamesBelowTheRegistrableDomainGetTheirOwnDMARC(t *testing.T) {
+	got := wantsOf(t, staged())
+	for _, name := range []string{"talk.staging.example.org", "talk-media.staging.example.org", "vm.staging.example.org"} {
+		w, ok := got["TXT _dmarc."+name]
+		if !ok || w.Content != dmarcLockdown || w.Advisory {
+			t.Errorf("%s: got %+v, want its own %q", name, w, dmarcLockdown)
+		}
+	}
+	if w := got["TXT _dmarc.staging.example.org"]; w.Content != dmarcLockdown || w.Advisory {
+		t.Errorf("the domain's own policy: %+v", w)
+	}
+	for key := range wantsOf(t, declared()) {
+		if strings.HasPrefix(key, "TXT _dmarc.") && key != "TXT _dmarc.example.org" {
+			t.Errorf("at the registrable domain, %s is not needed", key)
+		}
+	}
+}
+
+// The registrable domain above community.domain holds names the deployment
+// does not run, so its policy is only checked: a note when missing or weak,
+// never a create, and nothing at all when the provider does not hold it.
+func TestRegistrableDomainAboveIsOnlyChecked(t *testing.T) {
+	w := wantsOf(t, staged())["TXT _dmarc.example.org"]
+	if !w.Advisory || !w.Parent {
+		t.Fatalf("the registrable domain's policy should be checked: %+v", w)
+	}
+
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	c := fake.serve(t)
+	p := plan(t, c, staged())
+	shown := &ui.Recorder{}
+	p.Show(shown)
+	if !shown.Has("note", "TXT _dmarc.example.org is not this toolkit's to write") {
+		t.Errorf("no note for the registrable domain's missing policy:\n%s", shown.Lines())
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range fake.posts {
+		if rec.Name == "_dmarc.example.org" {
+			t.Fatalf("wrote the registrable domain's DMARC policy: %+v", rec)
+		}
+	}
+
+	fake = newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject"}}
+	for _, e := range plan(t, fake.serve(t), staged()).Entries {
+		if e.Name == "_dmarc.example.org" && e.Action != Present {
+			t.Errorf("a strong policy there: got %s", e.Action)
+		}
+	}
+
+	fake = newFake()
+	fake.zones["staging.example.org"] = "zone-2"
+	for _, e := range plan(t, fake.serve(t), staged()).Entries {
+		if e.Name == "_dmarc.example.org" {
+			t.Errorf("checked a registrable domain the provider does not hold: %+v", e)
+		}
+	}
+}
+
+// A hostname's own DMARC policy is a no-mail record like its SPF: prune
+// removes it once nothing wants it.
+func TestPruneRemovesAHostnamesDMARCNothingWants(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "gone", Type: "TXT", Name: "_dmarc.old.staging.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "talk", Type: "TXT", Name: "_dmarc.talk.staging.example.org", Content: dmarcLockdown, Comment: comment},
+	}
+	c := fake.serve(t)
+	cfg := staged()
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := BuildPrune(context.Background(), c, cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removes := map[string]bool{}
+	for _, e := range p.Removes() {
+		removes[e.ID] = true
+	}
+	if !removes["gone"] || removes["talk"] {
+		t.Errorf("removes %v, want gone only", removes)
+	}
+}

@@ -84,6 +84,11 @@ type Want struct {
 	// creates one only where it is missing at a domain that holds no MX
 	// record, as dmarcSender.
 	Advisory bool
+	// Parent is an advisory DMARC policy at the registrable domain above
+	// community.domain. That domain holds names the deployment does not run,
+	// so it is never created, and a provider that does not hold it means it
+	// is not checked.
+	Parent bool
 	// Leftover is a record that must not be there if this deployment's dns
 	// init made it: a no-mail record at a name that has since been given mail.
 	// One found is a conflict that dns prune resolves; none is Clear. It is
@@ -471,6 +476,9 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 	existing := map[string][]Record{}
 	for _, w := range wants {
 		z, err := FindZone(ctx, provider, w.Name, zones)
+		if w.Parent && errors.Is(err, errNoZone) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

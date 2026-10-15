@@ -3981,7 +3981,14 @@ provider recommends for a domain that sends no mail:
 | `community.domain` and every name that gets an address record | TXT `v=spf1 -all` | no server may send as this name. SPF applies only to the exact name it is published at, and a wildcard reaches no name that holds another record, so each hostname carries its own |
 | `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
 | `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
-| `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`). A receiver finding no policy at a hostname's own `_dmarc` applies this one |
+| `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`) |
+| `_dmarc.<hostname>`, for every name that gets an address record, when `community.domain` is below its registrable domain | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a hostname's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so each hostname carries its own. A hostname that is itself a registrable domain gets none |
+
+When `community.domain` is below its registrable domain, `dns init` also checks
+the registrable domain's DMARC policy and never writes it, since that domain
+holds names the deployment does not run: a policy that is missing, or weaker
+than `p=reject` and `sp=reject` with no `pct` below 100, is a `!` note. A
+registrable domain the DNS provider does not hold is not checked.
 
 **A name with mail of its own gets none of them.** Some communities run mail
 at their domain through a hosted service (Eg: Google Workspace, Fastmail or
@@ -3998,15 +4005,14 @@ A sender in an `smtp` block makes its own domain one of these without being
 listed: the domain of `smtp.from_address`, and of every `from_address` an app
 that sends mail declares for itself, so the toolkit never locks out mail it
 configured. Every other name is locked down as above, the hostnames under a
-mail domain included. When `community.domain` itself has mail, its DMARC
-policy is what those hostnames rely on, and `dns init` checks it: a policy
-weaker than `p=reject` and `sp=reject` with no `pct` below 100 is a `!` note,
-never a conflict and never replaced. A missing policy is a note too while the
-domain holds an MX record, since whoever runs that mail sets it. With no MX,
-the domain only sends, through a relay, and `dns init` creates
-`v=DMARC1; p=reject; sp=reject;` at `_dmarc.<community.domain>`. Its relaxed
-alignment passes mail the relay signs for any name under the same
-organizational domain, such as a subdomain the relay has verified. `dns prune`
+mail domain included. `dns init` checks the DMARC policy of every mail name
+under `community.domain`: a policy weaker than `p=reject` and `sp=reject` with
+no `pct` below 100 is a `!` note, never a conflict and never replaced. A
+missing policy is a note too while the name holds an MX record, since whoever
+runs that mail sets it. With no MX, the name only sends, through a relay, and
+`dns init` creates `v=DMARC1; p=reject; sp=reject;` at its `_dmarc`. Its
+relaxed alignment passes mail the relay signs for any name under the same
+registrable domain, such as a subdomain the relay has verified. `dns prune`
 never deletes it. `validate` refuses an entry that is not a hostname
 (`mail-domain-is-not-a-hostname`) or is outside `community.domain`
 (`mail-domain-outside-the-domain`), since `dns init` publishes nothing there.
