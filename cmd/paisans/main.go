@@ -175,13 +175,13 @@ func groupError(w io.Writer, group, msg string) int {
 // reportError prints the error that ends a command, in the refusal's form
 // (see ui.PrintError), and returns the status to exit with.
 func reportError(w io.Writer, err error, verbose bool) int {
-	ui.PrintError(w, err, verbose)
 	// Not a failure: --check found a build that would move or an override
 	// that lags, and the table already says which. It exits 3 so a schedule
 	// tells it from an error.
 	if errors.Is(err, errImagesMove) {
 		return 3
 	}
+	ui.PrintError(w, err, verbose)
 	// Not a failure: a gate is waiting on Garage, and the next run resumes
 	// there. EX_TEMPFAIL (sysexits.h), "try again later", so a script can
 	// tell it from one.

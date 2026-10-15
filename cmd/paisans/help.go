@@ -264,10 +264,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "images",
 		summary: "List every image each site runs and what the next apply runs.",
-		usage:   []string{"paisans images [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--check]"},
+		usage:   []string{"paisans images [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n               [--check]"},
 		detail: "List, for every site, each image its stacks run: where its reference comes from (the core catalog's foundation, the blueprint, or the configuration key that declares it), the build the site runs, and the build the next apply would run. " +
 			"An override names what it replaced, and says when that is a newer release. " +
-			"Reads every site over ssh and the registries; changes nothing. --check exits 3 when a build would move or an override lags.",
+			"Reads every site over ssh and the registries; changes nothing. A site it cannot reach is listed as unknown and the command exits 1. --check exits 3 when a build would move or an override lags.",
 	},
 	{
 		name:    "version",

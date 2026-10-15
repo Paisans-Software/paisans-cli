@@ -29,6 +29,8 @@ var errImagesMove = errors.New("a build would move, or an override lags")
 // imageRow is one image one site runs, as `paisans images` prints it.
 type imageRow struct {
 	site, stack, service, origin, running, newest, note string
+	// moves is whether the next apply changes the build the site runs.
+	moves bool
 }
 
 func runImages(args []string, stdout io.Writer) error {
@@ -62,7 +64,14 @@ func runImages(args []string, stdout io.Writer) error {
 	if !secrets.Encrypted {
 		warnUnencrypted(r, *secretsPath)
 	}
-	rows, lags, err := imageRows(r, cfg, secrets)
+	return writeImages(r, cfg, secrets, stdout, *check)
+}
+
+// writeImages prints the table imageRows lists. It returns an error naming
+// each site that could not be read, after the whole table is out, and
+// errImagesMove when check is set and a build would move or an override lags.
+func writeImages(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, stdout io.Writer, check bool) error {
+	rows, lags, unread, err := imageRows(r, cfg, secrets)
 	if err != nil {
 		return err
 	}
@@ -71,14 +80,20 @@ func runImages(args []string, stdout io.Writer) error {
 	moves := lags
 	for _, row := range rows {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.site, row.stack, row.service, row.origin, row.running, row.newest, row.note)
-		if strings.HasPrefix(row.note, "moves") {
+		if row.moves {
 			moves = true
 		}
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	if *check && moves {
+	if len(unread) > 0 {
+		return &ui.Problem{
+			Hint:    "could not read " + strings.Join(unread, ", "),
+			Explain: "Their running builds are unknown; the table lists what the configuration would run there. Run again once ssh reaches them.",
+		}
+	}
+	if check && moves {
 		return errImagesMove
 	}
 	return nil
@@ -86,15 +101,17 @@ func runImages(args []string, stdout io.Writer) error {
 
 // imageRows plans every site as a dry run of apply does and lists each image
 // it would run, and reports whether any override lags what it replaced. A
-// site that cannot be planned is warned about and listed from the render
-// alone, so one site down hides nothing about the others. It writes nothing
+// site that cannot be planned is warned about, listed from the render alone
+// and named in the third result, so one site down hides nothing about the
+// others. It writes nothing
 // to any host and asks for no sudo: a plan only reads (apply.Build).
-func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]imageRow, bool, error) {
+func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]imageRow, bool, []string, error) {
 	defer cacheDigests()()
 	defer planEverySite()()
 	var rendered *render.Plan
 	var rows []imageRow
 	lags := false
+	var unread []string
 	seen := map[string]bool{}
 	for _, site := range cfg.SiteNames() {
 		plan, err := planSiteApply(cfg, secrets, site, imagesTransport(site, cfg.Sites[site]), apply.SkipSweepRead())
@@ -102,12 +119,13 @@ func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]im
 			r.Warn(fmt.Sprintf("could not plan %s; its running builds are unknown", site), err.Error())
 			if rendered == nil {
 				if rendered, err = render.Build(cfg, secrets); err != nil {
-					return nil, false, err
+					return nil, false, nil, err
 				}
 			}
 			for _, image := range rendered.Images[site] {
 				rows = append(rows, imageRow{site: site, stack: image.Stack, service: strings.Join(image.Services, ","), origin: image.Origin, running: "unknown", newest: "unknown"})
 			}
+			unread = append(unread, site)
 			continue
 		}
 		reportNotes(r, plan, seen)
@@ -116,7 +134,7 @@ func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]im
 			lags = lags || pin.Behind
 		}
 	}
-	return rows, lags, nil
+	return rows, lags, unread, nil
 }
 
 // pinRow is one pin as a row: the build the site runs, the build the next
@@ -132,6 +150,7 @@ func pinRow(site string, pin apply.ImagePin) imageRow {
 	}
 	var notes []string
 	if pin.Moved() || pin.FirstPin() || (pin.Deployed == "" && pin.Reference != "") {
+		row.moves = true
 		notes = append(notes, "moves on next apply")
 	}
 	switch {

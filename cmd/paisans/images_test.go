@@ -64,7 +64,7 @@ func TestImagesListsEveryImageAndWhereItCameFrom(t *testing.T) {
 	cfg, secrets := imagesFixture(t, func(c *config.Config) {
 		c.Infra.Images = map[string]string{"etcd": "gcr.io/etcd-development/etcd:v3.4.30"}
 	})
-	rows, lags, err := imageRows(&ui.Recorder{}, cfg, secrets)
+	rows, lags, _, err := imageRows(&ui.Recorder{}, cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +98,12 @@ func TestImagesKeepsGoingPastASiteItCannotReach(t *testing.T) {
 	}
 	withImagesTransport(t, func(string, config.Site) apply.Transport { return downHost{} })
 	rec := &ui.Recorder{Verbose_: true}
-	rows, _, err := imageRows(rec, cfg, secrets)
+	rows, _, unread, err := imageRows(rec, cfg, secrets)
 	if err != nil {
 		t.Fatalf("one site down stopped the listing: %v", err)
+	}
+	if len(unread) != 1 || unread[0] != "home-a" {
+		t.Errorf("unread sites: %v", unread)
 	}
 	if len(rows) == 0 {
 		t.Fatal("a site that cannot be reached listed nothing")
@@ -116,7 +119,25 @@ func TestImagesKeepsGoingPastASiteItCannotReach(t *testing.T) {
 }
 
 func TestImagesCheckExitsThreeWhenSomethingWouldMove(t *testing.T) {
-	if got := reportError(&strings.Builder{}, errImagesMove, false); got != 3 {
+	var out strings.Builder
+	if got := reportError(&out, errImagesMove, false); got != 3 {
 		t.Errorf("errImagesMove exits %d", got)
+	}
+	if out.Len() != 0 {
+		t.Errorf("--check printed %q", out.String())
+	}
+}
+
+func TestImagesPrintsTheTableThenFailsForASiteItCannotRead(t *testing.T) {
+	cfg, secrets := imagesFixture(t, nil)
+	withImagesTransport(t, func(string, config.Site) apply.Transport { return downHost{} })
+	var out strings.Builder
+	err := writeImages(&ui.Recorder{}, cfg, secrets, &out, false)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "home-a") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out.String(), "SITE") || !strings.Contains(out.String(), "unknown") {
+		t.Errorf("the table was not written:\n%s", out.String())
 	}
 }
