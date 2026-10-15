@@ -3999,10 +3999,15 @@ listed: the domain of `smtp.from_address`, and of every `from_address` an app
 that sends mail declares for itself, so the toolkit never locks out mail it
 configured. Every other name is locked down as above, the hostnames under a
 mail domain included. When `community.domain` itself has mail, its DMARC
-policy is what those hostnames rely on, and `dns init` checks it without ever
-writing it: a policy that is missing, or weaker than `p=reject` and
-`sp=reject` with no `pct` below 100, is a `!` note, never a conflict and never
-a create. `validate` refuses an entry that is not a hostname
+policy is what those hostnames rely on, and `dns init` checks it: a policy
+weaker than `p=reject` and `sp=reject` with no `pct` below 100 is a `!` note,
+never a conflict and never replaced. A missing policy is a note too while the
+domain holds an MX record, since whoever runs that mail sets it. With no MX,
+the domain only sends, through a relay, and `dns init` creates
+`v=DMARC1; p=reject; sp=reject;` at `_dmarc.<community.domain>`. Its relaxed
+alignment passes mail the relay signs for any name under the same
+organizational domain, such as a subdomain the relay has verified. `dns prune`
+never deletes it. `validate` refuses an entry that is not a hostname
 (`mail-domain-is-not-a-hostname`) or is outside `community.domain`
 (`mail-domain-outside-the-domain`), since `dns init` publishes nothing there.
 

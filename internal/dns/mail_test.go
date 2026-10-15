@@ -213,11 +213,13 @@ func TestMailRecordsAreCreatedAndReadBack(t *testing.T) {
 	}
 }
 
-// An advisory DMARC policy that is missing is a note, never a create and
+// An advisory DMARC policy that is missing, at a domain that receives mail,
+// is a note, never a create and
 // never a refusal, and Execute writes nothing for it.
 func TestAdvisoryDMARCWarnsAndWritesNothing(t *testing.T) {
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{ID: "mx", Type: "MX", Name: "example.org", Content: "mx.example.net", Priority: new(int)}}
 	c := fake.serve(t)
 	cfg := declared()
 	cfg.Community.MailDomains = []string{"example.org"}
@@ -241,6 +243,75 @@ func TestAdvisoryDMARCWarnsAndWritesNothing(t *testing.T) {
 	for _, rec := range fake.posts {
 		if rec.Name == "_dmarc.example.org" {
 			t.Fatalf("wrote the mail domain's DMARC policy: %+v", rec)
+		}
+	}
+}
+
+// A domain that sends mail and receives none, with no DMARC policy, gets the
+// sender's policy written: reject, with relaxed alignment, so mail a relay
+// signs for a name under the same organizational domain still passes. Once
+// written it reads back present, is never a leftover, and prune keeps it.
+func TestSendOnlyDomainGetsItsDMARCPolicyWritten(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	c := fake.serve(t)
+	cfg := declared()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@example.org"}
+	p := plan(t, c, cfg)
+	var dmarc *Entry
+	for i, e := range p.Creates() {
+		if e.Name == "_dmarc.example.org" {
+			dmarc = &p.Creates()[i]
+		}
+	}
+	if dmarc == nil || dmarc.Content != dmarcSender || dmarc.Advisory {
+		t.Fatalf("the send-only domain's DMARC policy should be created: %+v", p.Entries)
+	}
+	shown := &ui.Recorder{}
+	p.Show(shown)
+	if !shown.Has("pending", `create TXT _dmarc.example.org -> "v=DMARC1; p=reject; sp=reject;"`) {
+		t.Errorf("plan lines:\n%s", shown.Lines())
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	again := plan(t, c, cfg)
+	if len(again.Creates()) != 0 || len(again.Conflicts()) != 0 {
+		t.Fatalf("second run should be all present: %+v", again.Entries)
+	}
+	for _, e := range again.Entries {
+		if e.Name == "_dmarc.example.org" && e.Action != Present {
+			t.Errorf("the written policy reads back %s: %s", e.Action, e.Detail)
+		}
+	}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := BuildPrune(context.Background(), c, cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range pruned.Removes() {
+		if e.Name == "_dmarc.example.org" {
+			t.Errorf("prune would delete the sender's DMARC policy")
+		}
+	}
+}
+
+// A send-only domain's existing policy is somebody's: a weak one is still a
+// note, never replaced and never a refusal.
+func TestSendOnlyDomainWithAWeakPolicyIsANote(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=none"}}
+	c := fake.serve(t)
+	cfg := declared()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@example.org"}
+	p := plan(t, c, cfg)
+	for _, e := range p.Entries {
+		if e.Name == "_dmarc.example.org" && e.Action != Warn {
+			t.Errorf("a weak policy at a send-only domain: got %s, want %s", e.Action, Warn)
 		}
 	}
 }
@@ -370,7 +441,8 @@ func TestNoMailRecordLeftAtAMailNameIsAConflict(t *testing.T) {
 	}
 
 	// dns prune removes exactly those, and dns init then has nothing in its
-	// way: a warning for the DMARC policy that is now the mail's to set.
+	// way. The domain now has mail but no MX, so it sends and receives none,
+	// and its sender's DMARC policy is dns init's to write.
 	wants, err := Desired(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -386,12 +458,12 @@ func TestNoMailRecordLeftAtAMailNameIsAConflict(t *testing.T) {
 	if n := len(again.Conflicts()); n != 0 {
 		t.Fatalf("after prune: %d conflict(s): %+v", n, again.Conflicts())
 	}
-	warned := false
-	for _, e := range again.Entries {
-		warned = warned || (e.Action == Warn && e.Name == "_dmarc.example.org")
+	created := false
+	for _, e := range again.Creates() {
+		created = created || (e.Name == "_dmarc.example.org" && e.Content == dmarcSender)
 	}
-	if !warned {
-		t.Errorf("after prune, the missing DMARC policy should be a warning")
+	if !created {
+		t.Errorf("after prune, the send-only domain's DMARC policy should be created: %+v", again.Entries)
 	}
 }
 

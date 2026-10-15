@@ -80,8 +80,9 @@ type Want struct {
 	Priority int
 	// Advisory is a record the deployment relies on but is somebody else's
 	// to write: the DMARC policy of a domain with mail of its own. It is
-	// checked and warned about, never created, and prune never counts it as
-	// wanted.
+	// checked and warned about, and prune never counts it as wanted. Build
+	// creates one only where it is missing at a domain that holds no MX
+	// record, as dmarcSender.
 	Advisory bool
 	// Leftover is a record that must not be there if this deployment's dns
 	// init made it: a no-mail record at a name that has since been given mail.
@@ -491,6 +492,24 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		if w.Leftover || w.Advisory {
 			if r, ok := ownNoMail(w, records, plan.comment); ok {
 				action, detail = Conflict, leftover(w, r)
+			}
+		}
+		if action == Warn {
+			domain := strings.TrimPrefix(w.Name, "_dmarc.")
+			at, ok := existing[domain]
+			if !ok {
+				dz, err := FindZone(ctx, provider, domain, zones)
+				if err != nil {
+					return nil, err
+				}
+				if at, err = provider.Records(ctx, dz.id, domain); err != nil {
+					return nil, err
+				}
+				existing[domain] = at
+			}
+			if sendOnly(w, records, at) {
+				w.Advisory, w.Content = false, dmarcSender
+				action, detail = Create, ""
 			}
 		}
 		if action == Conflict && w.ViaGateway {

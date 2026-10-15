@@ -2992,3 +2992,34 @@ hand. The entry is the proof the host was claimed by that id, and the data is
 still the deployment's, so the claim is not over while the data is there.
 Keeping it also stops another site of the same deployment being deployed
 onto the data unannounced: the claim check names what the removal kept.
+
+## 2026-10-14: `dns init` writes DMARC for a domain that only sends mail
+
+Founder decision. It amends *`dns init` publishes the no-mail records* above,
+where a domain with mail had its DMARC policy checked and never written.
+
+### What was decided
+
+* When `community.domain` has mail of its own, holds no MX record, and has no
+  DMARC policy, `dns init` creates `v=DMARC1; p=reject; sp=reject;` at
+  `_dmarc.<community.domain>`.
+* Any existing DMARC policy there, however weak, is still a note and is never
+  replaced. A missing policy at a domain with an MX record is still a note.
+* `dns prune` never deletes that record.
+
+### Why
+
+A domain with no MX receives no mail, so its mail is a relay sending in its
+name, and nobody runs a mail service there whose policy `dns init` would be
+overriding. Without a policy, every hostname under the domain can be forged as
+a sender, and the note asked the operator to write by hand a record the
+toolkit could write itself. Relaxed alignment is what keeps the deployment's
+own mail delivered: a relay commonly signs with a subdomain it has verified,
+which relaxed alignment accepts for any name under the same organizational
+domain. Prune keeps it because the deployment's mail depends on it once the
+relay is configured, and removing a reject policy only weakens the domain.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`; the new tests in
+`internal/dns/mail_test.go` were checked to fail before the change.

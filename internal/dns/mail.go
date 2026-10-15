@@ -39,6 +39,13 @@ import (
 // hostnames under it still get their own SPF, and dns init warns when the
 // domain's DMARC policy, which they then rely on, is missing or weaker than
 // reject.
+//
+// The one exception is a domain with mail that holds no MX record and no
+// DMARC policy. It sends mail, through a relay, and receives none, so nobody
+// runs a mail service there whose policy dns init would be overriding, and
+// dns init writes dmarcSender. Relaxed alignment lets mail the relay signs
+// for any name under the same organizational domain pass. An existing
+// policy, however weak, is still only warned about.
 
 // The lockdown contents. These are what dns init writes and the only TXT and
 // MX contents dns prune will delete.
@@ -46,6 +53,9 @@ const (
 	spfLockdown   = "v=spf1 -all"
 	dkimLockdown  = "v=DKIM1; p="
 	dmarcLockdown = "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;"
+	// dmarcSender is the policy for a domain that sends mail and receives
+	// none. dns prune never deletes it: the domain's mail depends on it.
+	dmarcSender = "v=DMARC1; p=reject; sp=reject;"
 	// nullMX is RFC 7505's: preference 0, target the root.
 	nullMX = "."
 )
@@ -290,6 +300,26 @@ func satisfies(p purpose, r Record) bool {
 
 func isRoot(target string) bool {
 	return strings.TrimSpace(target) == "."
+}
+
+// sendOnly reports whether a missing advisory DMARC policy is dns init's to
+// write: nothing at its name says DMARC, and the domain it covers, whose
+// records are at, holds no MX record.
+func sendOnly(w Want, records, at []Record) bool {
+	if !w.Advisory || wantPurpose(w) != purposeDMARC {
+		return false
+	}
+	for _, r := range records {
+		if competes(purposeDMARC, r) {
+			return false
+		}
+	}
+	for _, r := range at {
+		if strings.EqualFold(r.Type, "MX") {
+			return false
+		}
+	}
+	return true
 }
 
 // classifyMail is classify for a lockdown record.

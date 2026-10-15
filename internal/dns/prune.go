@@ -348,6 +348,8 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 			case address:
 			case !rules.mail:
 				reasons = append(reasons, fmt.Sprintf("it is a %s record; site remove removes only A and AAAA records, and dns prune removes a no-mail record nothing wants any more", typ))
+			case typ == "TXT" && strings.HasPrefix(name, "_dmarc.") && strings.Join(strings.Fields(txtText(r.Content)), " ") == dmarcSender:
+				reasons = append(reasons, "it is the DMARC policy dns init writes for a domain that sends mail and receives none, and that mail depends on it")
 			case !isLockdown(r):
 				reasons = append(reasons, fmt.Sprintf("it is a %s record holding something other than the no-mail content dns init writes at this kind of name; prune removes only A and AAAA records and those", typ))
 			}
