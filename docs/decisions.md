@@ -2962,3 +2962,33 @@ decides which one is right.
   short of memory, for a process that already runs and holds the state.
 * **Drift making the container unhealthy.** Not chosen: `apply`'s health gate
   would then fail an `apply` that left a drifted bootstrap running.
+
+## 2026-10-15: A removal that keeps data keeps the registry entry
+
+Founder decision. It amends `docs/specs/2026-10-10-remove-without-config.md`,
+which left a deployment with no registry entry out of `--id`'s scope.
+
+### What was decided
+
+* A host stage of `site remove` that keeps data, files under
+  `/srv/paisans/<token>` that apply did not write or named volumes, because
+  `--delete-data` was not given, keeps the deployment's registry entry,
+  marked `"kept": "data"`, instead of deleting it. A host with no entry gets
+  one.
+* A later run with `--delete-data`, by `--id` or with a configuration,
+  deletes the data and then the entry. A later run without it leaves the
+  entry as it is.
+* `host deployments` shows the entry as `data kept`, with the command that
+  deletes it. A claim by the same id writes the entry without the mark, as
+  for a kept Caddy.
+
+### Why
+
+Every removal that kept data said `--delete-data deletes it`. With no
+configuration that was false: `--id` finds the deployment by its registry
+entry, and the first run had deleted it, so the second was refused with
+`no deployment ... has id or token`, and the data could only be deleted by
+hand. The entry is the proof the host was claimed by that id, and the data is
+still the deployment's, so the claim is not over while the data is there.
+Keeping it also stops another site of the same deployment being deployed
+onto the data unannounced: the claim check names what the removal kept.

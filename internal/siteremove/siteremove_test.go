@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 )
@@ -64,7 +65,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 		{3, "home-b", "remove", "paisans-f2a9-watchdog.service"},
 		{3, "home-b", "remove", "drop-in /etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf"},
 		{3, "home-b", "delete", "allow in on psns-f2a9"},
-		{3, "home-b", "remove", "deployment " + ourID},
+		{3, "home-b", "mark", `"kept: data"`},
 		{5, "home-b", "remove", "sites.home-b"},
 	} {
 		if !hasStep(p, want.stage, want.site, want.verb, want.text) {
@@ -207,8 +208,10 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 	if !strings.Contains(b.files[keysAt], alice) || !strings.Contains(b.files[keysAt], "bob@example.org") || !strings.Contains(b.files[keysAt], "# managed by hand") {
 		t.Errorf("authorized_keys after:\n%s", b.files[keysAt])
 	}
-	if reg := b.files["/var/lib/paisans/registry.json"]; strings.Contains(reg, ourID) || !strings.Contains(reg, otherID) {
-		t.Errorf("the registry after:\n%s", reg)
+	// The data stays, and so does the entry that names it, marked kept, so
+	// that a later --delete-data finds it.
+	if reg, _ := registry.Parse([]byte(b.files["/var/lib/paisans/registry.json"])); reg.Deployments[ourID].Kept != registry.KeptData || reg.Deployments[otherID].Site == "" {
+		t.Errorf("the registry after:\n%s", b.files["/var/lib/paisans/registry.json"])
 	}
 
 	cfg, err := config.Load(w.configPath)

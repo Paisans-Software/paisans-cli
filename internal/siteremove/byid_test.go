@@ -65,6 +65,48 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	}
 }
 
+// A removal without --delete-data keeps the data and the registry entry that
+// names it, marked kept, so a later run by --id finds the deployment and
+// deletes the data; a run without --delete-data in between leaves the entry
+// as it is.
+func TestByIDDeletesDataARemovalWithoutDeleteDataKept(t *testing.T) {
+	w := setup(t)
+	h := w.hosts["home-b"]
+	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{})); err != nil {
+		t.Fatal(err)
+	}
+	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
+	if reg.Deployments[ourID].Kept != registry.KeptData {
+		t.Fatalf("the registry entry is not marked kept for its data:\n%s", h.files[registry.Path])
+	}
+	if _, ok := h.files[root+"/infra/postgres/PG_VERSION"]; !ok {
+		t.Fatal("data was deleted without --delete-data")
+	}
+
+	again := byID(t, w, "home-b", "f2a9", siteremove.Options{})
+	if !again.DataKept || hasStep(again, 1, "home-b", "mark", "") || hasStep(again, 1, "home-b", "remove", registry.Path) {
+		t.Errorf("a second run without --delete-data changes the entry:\n%s", printed(again))
+	}
+
+	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{DeleteData: true})); err != nil {
+		t.Fatal(err)
+	}
+	reg, _ = registry.Parse([]byte(h.files[registry.Path]))
+	if _, ok := reg.Deployments[ourID]; ok {
+		t.Error("the registry entry is still there")
+	}
+	for path := range h.files {
+		if strings.HasPrefix(path, root+"/") {
+			t.Errorf("%s is still there", path)
+		}
+	}
+	for _, v := range h.volumes {
+		if v.Deployment == ourID {
+			t.Errorf("volume %s is still there", v.Name)
+		}
+	}
+}
+
 // DNS is the one thing the configuration would have said that is reported as
 // unchecked; neither the secrets file nor Pocket ID is mentioned.
 func TestByIDSaysWhatItDidNotRead(t *testing.T) {

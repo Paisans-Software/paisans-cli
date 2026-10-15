@@ -150,6 +150,9 @@ type Plan struct {
 	// CaddyKept are the host owner's site files in /srv/caddy.d that the
 	// gateway's Caddy is kept for, empty when it is not kept.
 	CaddyKept []string
+	// DataKept is whether the host keeps this deployment's data, and its
+	// registry entry marked kept for it, because --delete-data was not given.
+	DataKept bool
 	// forced is a plan BuildForced or BuildForcedByID made, and declared
 	// whether paisans-stack.yaml still declares its site.
 	forced, declared bool

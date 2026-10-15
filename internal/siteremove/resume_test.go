@@ -55,7 +55,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			if err := siteremove.Execute(again); err != nil {
 				t.Fatalf("resuming: %v\n%s", err, rec.Lines())
 			}
-			if w.member("home-b") != nil || strings.Contains(w.hosts["home-b"].files["/var/lib/paisans/registry.json"], ourID) {
+			if w.member("home-b") != nil || !strings.Contains(w.hosts["home-b"].files["/var/lib/paisans/registry.json"], `"kept":"data"`) {
 				t.Error("the resumed removal did not finish")
 			}
 		})
