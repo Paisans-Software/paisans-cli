@@ -1059,10 +1059,7 @@ func (p *planner) scope() string {
 }
 
 func (p *planner) postgresVersion() string {
-	if p.cfg.Cluster.PostgresVersion == "" {
-		return "18"
-	}
-	return p.cfg.Cluster.PostgresVersion
+	return p.cfg.PostgresMajor()
 }
 
 func (p *planner) replication() int {
