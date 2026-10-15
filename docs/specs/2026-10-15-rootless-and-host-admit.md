@@ -118,6 +118,16 @@ host only with `--execute`. Every step is idempotent, so a re-run after a
 failure resumes, and a re-run with different flags changes only what they
 govern.
 
+**A data site without `--watchdog` stops admit before anything else.** The
+request's `grants` say whether the site needs the watchdog, and the check
+runs first, before any probe of the host, the plan or the digest prompt.
+Without the flag, admit exits 1 having read and changed nothing, saying the
+site is a data site, that its Patroni member needs the watchdog to fail over
+safely and that the watchdog can reboot the machine, and that the owner
+either admits it with `--watchdog` or does not admit it. A re-run that drops
+`--watchdog` from a data site already admitted stops the same way, and
+leaves the grant in place.
+
 ### What it does
 
 1. **Docker.** If Docker is absent, install it from Docker's apt repository
