@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -30,8 +31,8 @@ type siteChange struct {
 	dbApps []string
 	// sync hands the running interface the mesh file already on the host,
 	// which a run that stopped after writing it left unsynced. mesh is the
-	// plan scoped to that file, which carries what the WireGuard helper's
-	// put is handed.
+	// plan that carries that file for the WireGuard helper's put: plan when
+	// it holds the file, otherwise one scoped to it (see meshPlan).
 	sync bool
 	mesh *apply.Plan
 }
@@ -620,7 +621,7 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 				return nil, nil, err
 			}
 			if conflicts := sp.Conflicts(); len(conflicts) > 0 {
-				return nil, nil, fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", p.Site, name, conflicts[0].Path)
+				return nil, nil, hostEdited(p.Site, name, conflicts[0].Path)
 			}
 			c.plan, c.paths = sp, moved
 			for _, w := range sp.Writes() {
@@ -665,7 +666,10 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
 			// The file was written by a run that stopped before the running
 			// interface was handed it.
-			mesh, err := apply.Build(name, rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(p.dep().WireGuardConf()))
+			conf := p.dep().WireGuardConf()
+			mesh, err := meshPlan(p.Site, name, c, conf, func() (*apply.Plan, error) {
+				return apply.Build(name, rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(conf))
+			})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -717,4 +721,29 @@ func (p *Plan) runForget(records map[string]registry.Runner) error {
 		p.Notes = append(p.Notes, recordMissed(gw, res.Missed[gw].Error()))
 	}
 	return nil
+}
+
+// meshPlan is the plan whose mesh file a resumed sync on name hands the
+// WireGuard helper: the site's own scoped apply when its scope holds the
+// file, otherwise one built scoped to the file alone, refused as the site's
+// own is when somebody edited the file on the host, since the helper would
+// install the render while the edit stayed in place.
+func meshPlan(site, name string, c *siteChange, conf string, build func() (*apply.Plan, error)) (*apply.Plan, error) {
+	if c.plan != nil && slices.Contains(c.paths, conf) {
+		return c.plan, nil
+	}
+	mesh, err := build()
+	if err != nil {
+		return nil, err
+	}
+	if conflicts := mesh.Conflicts(); len(conflicts) > 0 {
+		return nil, hostEdited(site, name, conflicts[0].Path)
+	}
+	return mesh, nil
+}
+
+// hostEdited refuses a scoped apply of name's files because somebody edited
+// path on the host.
+func hostEdited(site, name, path string) error {
+	return fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", site, name, path)
 }
