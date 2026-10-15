@@ -8927,8 +8927,8 @@ Each site goes through four stages, each ending at a gate:
 | 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
 
 **A stopped run resumes.** A next key in the secrets file says the site is mid
-rekey, and which public key its host runs, read with `wg show <interface>
-public-key`, says whether stage 2 is done. A peer whose file was written but
+rekey, and which public key its host runs, read through the WireGuard
+helper's `show public-key`, says whether stage 2 is done. A peer whose file was written but
 whose interface was not handed it is synced again. A site left mid rekey goes
 first in the next run, whether it is named or not, and its swap is finished
 before the cluster's health is read: a swap that stopped part way leaves its

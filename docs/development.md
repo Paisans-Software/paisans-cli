@@ -1057,7 +1057,8 @@ its own rekey keeps its new key), and moves only the mesh file, by scoped
 `wireguard_next_private_key`, so `apply` and `apply --site` refuse while the
 secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
 they would put the old key back. Where a rekey stands is read
-from the secrets file and `wg show <interface> public-key`, and nothing else.
+from the secrets file and the WireGuard helper's `show public-key`, and
+nothing else.
 A site other sites relay through is found in the rendered mesh files, as the
 peer each of them routes the whole subnet through while it lacks a peer of its
 own for some other site, and Patroni is paused around its swap. The tests run

@@ -26,6 +26,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
 - Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
 - `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
+- `site add`, `site remove` and `mesh rekey` read each site's handshakes, peers and key through the WireGuard helper, as the deployment's user, instead of running `wg show`.
 - `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
 - Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.

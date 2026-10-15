@@ -14,8 +14,8 @@
 // peers' mesh files and then the site's own handed the new key with `wg
 // syncconf`; the cluster's health; and the next key promoted. A run that
 // stops part way resumes: a next key in the file says a rekey is under way,
-// and which key the host runs, read with `wg show`, says whether its swap is
-// done. docs/specs/2026-10-11-site-evict.md, "Rekeying the mesh", is the
+// and which key the host runs, read through the WireGuard helper, says
+// whether its swap is done. docs/specs/2026-10-11-site-evict.md, "Rekeying the mesh", is the
 // approved design.
 package meshrekey
 
@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -563,11 +564,11 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 		}
 		runs = key == newPublic
 	} else {
-		out, err := t.Run("wg show " + p.dep().Interface() + " peers")
+		peers, err := meshkey.Peers(name, t, p.dep())
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, strings.TrimSpace(out))
+			return err
 		}
-		runs = strings.Contains(out, newPublic)
+		runs = slices.Contains(peers, newPublic)
 	}
 	if runs {
 		return nil
@@ -579,12 +580,13 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 }
 
 // handshake reports whether site's interface has had a handshake with key.
-// `wg show <interface> latest-handshakes` prints each peer's public key and
-// the time of its last handshake, 0 for none (wireguard-tools, wg(8)).
+// The helper's show latest-handshakes prints, as `wg show <interface>
+// latest-handshakes` does, each peer's public key and the time of its last
+// handshake, 0 for none (wireguard-tools, wg(8)).
 func (p *Plan) handshake(site, key string) (bool, error) {
-	out, err := p.transports[site].Run("wg show " + p.dep().Interface() + " latest-handshakes")
+	out, err := apply.WGHelper{T: p.transports[site], Iface: p.dep().Interface()}.Show("latest-handshakes")
 	if err != nil {
-		return false, fmt.Errorf("%s: `wg show %s latest-handshakes`: %w: %s", site, p.dep().Interface(), err, strings.TrimSpace(out))
+		return false, fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", site, p.dep().Interface(), err)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)

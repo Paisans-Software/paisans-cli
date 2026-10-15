@@ -11,13 +11,22 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// handshakeProbe prints each peer's latest handshake and the host's own clock,
-// so an age is computed against the clock that wrote the timestamp. `wg show
-// <interface> latest-handshakes` prints one line per peer, its public key and
-// a Unix time, 0 for a peer that has never completed one (wireguard-tools,
-// wg(8), "latest-handshakes").
-func handshakeProbe(d deployment.Deployment) string {
-	return "wg show " + d.Interface() + ` latest-handshakes; echo "now $(date +%s)"`
+// handshakes reads each peer's latest handshake on t's interface through the
+// WireGuard helper, then the host's own clock, so an age is computed against
+// the clock that wrote the timestamp. The helper prints one line per peer,
+// its public key and a Unix time, 0 for a peer that has never completed one
+// (wireguard-tools, wg(8), "latest-handshakes"); the clock is appended as
+// "now <time>", which handshakeAges reads.
+func handshakes(t apply.Transport, d deployment.Deployment) (string, error) {
+	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("latest-handshakes")
+	if err != nil {
+		return out, err
+	}
+	now, err := t.Run("date +%s")
+	if err != nil {
+		return now, err
+	}
+	return out + "now " + strings.TrimSpace(now) + "\n", nil
 }
 
 // buildMesh is stage 2: every site's WireGuard file with the new peer, written as a
@@ -28,7 +37,7 @@ func (p *Plan) buildMesh(rendered *render.Plan) (*Stage, error) {
 		Number: 2,
 		Name:   "mesh",
 		Short:  "mesh handshakes and ping",
-		Gate: fmt.Sprintf("a handshake younger than %d seconds between every pair of sites, read from `wg show` on both ends, and %s's mesh address %s answers ping from every site",
+		Gate: fmt.Sprintf("a handshake younger than %d seconds between every pair of sites, read through the WireGuard helper on both ends, and %s's mesh address %s answers ping from every site",
 			handshakeMaxAge, p.Site, p.cfg.Sites[p.Site].Address),
 		OnFailure: "restore the previous " + p.cfg.Deployment().Interface() + ".conf on every existing site and sync it, so the running cluster is untouched; the new site's interface is left, since no existing site has it as a peer any more",
 	}
@@ -123,12 +132,12 @@ func (p *Plan) meshGate() error {
 		}
 		views := map[string]map[string]int64{}
 		for _, name := range p.cfg.SiteNames() {
-			out, err := p.transports[name].Run(handshakeProbe(p.cfg.Deployment()))
+			out, err := handshakes(p.transports[name], p.cfg.Deployment())
 			if err != nil {
 				if errors.Is(err, apply.ErrUnreachable) {
 					return fmt.Errorf("%s: could not read host state, so its handshakes are unknown: %w", name, err)
 				}
-				problems = append(problems, fmt.Sprintf("%s: `wg show %s` failed: %s", name, p.cfg.Deployment().Interface(), lastLines(out, 2)))
+				problems = append(problems, fmt.Sprintf("%s: reading %s's handshakes failed: %s", name, p.cfg.Deployment().Interface(), lastLines(out, 2)))
 				continue
 			}
 			views[name] = handshakeAges(out)
@@ -160,10 +169,10 @@ func (p *Plan) meshGate() error {
 			sleep(meshPoll)
 		}
 	}
-	return fmt.Errorf("the mesh is not whole after %s:\n  %s\nCheck that each endpoint's port is open to UDP and forwarded, and read `wg show %s` on the sites named", meshWait, strings.Join(problems, "\n  "), p.cfg.Deployment().Interface())
+	return fmt.Errorf("the mesh is not whole after %s:\n  %s\nCheck that each endpoint's port is open to UDP and forwarded, and read %s on the sites named", meshWait, strings.Join(problems, "\n  "), apply.WGHelper{Iface: p.cfg.Deployment().Interface()}.CommandLine("show latest-handshakes"))
 }
 
-// handshakeAges reads handshakeProbe's output: each peer's key and the age of
+// handshakeAges reads handshakes' output: each peer's key and the age of
 // its latest handshake in seconds, -1 for none yet.
 func handshakeAges(out string) map[string]int64 {
 	var now int64

@@ -177,6 +177,8 @@ func (h *host) Run(command string) (string, error) {
 		}
 	}
 	switch {
+	case strings.HasPrefix(command, "wg "), strings.HasPrefix(command, "wg-quick "), strings.Contains(command, "wg syncconf"):
+		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case command == "true":
 		return "", nil
 	case command == wgHelper+"put":
@@ -184,11 +186,7 @@ func (h *host) Run(command string) (string, error) {
 	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
 		h.run = h.files[wgInstalled]
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
-		return h.runsKey() + "\n", nil
-	case command == "wg show psns-f2a9 peers":
-		return strings.Join(h.peers(), "\n") + "\n", nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		mine := h.runsKey()
 		for _, key := range h.peers() {
@@ -209,8 +207,6 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		return "up\n", nil
 	case strings.Contains(command, "getent ahosts"):
 		return "", nil
 	case strings.Contains(command, "endpoint health --cluster"):

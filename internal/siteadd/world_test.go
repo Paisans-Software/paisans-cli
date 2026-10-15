@@ -70,6 +70,9 @@ type host struct {
 	commands []string
 	writes   int
 	wgUp     bool
+	// wgRun is the mesh file the running interface was last handed, by the
+	// helper's up, restart or sync, which is what its show answers from.
+	wgRun string
 }
 
 func (h *host) Describe() string { return h.name }
@@ -128,8 +131,7 @@ func (h *host) Run(command string) (string, error) {
 		return out, err
 	}
 	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
-		// The interface runs what the helper last installed.
-		if out, ok := showRunning(field, h.files[wgInstalled]); ok {
+		if out, ok := showRunning(field, h.wgRun); ok {
 			return out, nil
 		}
 	}
@@ -194,28 +196,30 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.wgRun, "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
 	case command == wgHelper+"up", command == wgHelper+"restart":
-		h.wgUp = true
+		h.wgUp, h.wgRun = true, h.files[wgInstalled]
 		return "", nil
-	case command == wgHelper+"put", command == wgHelper+"sync":
+	case command == wgHelper+"sync":
+		h.wgRun = h.files[wgInstalled]
 		return "", nil
+	case command == wgHelper+"put":
+		return "", nil
+	case command == "date +%s":
+		return "1000\n", nil
+	case strings.HasPrefix(command, "wg "), strings.Contains(command, "wg-quick"):
+		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {
 			return "100% packet loss", fmt.Errorf("exit status 1")
 		}
 		return "3 received", nil
-	case strings.Contains(command, "latest-handshakes"):
+	case command == wgHelper+"show latest-handshakes":
 		return w.handshakes(h), nil
 	case strings.Contains(command, "--quiet etcd"):
 		if !w.running[h.name] {
@@ -362,12 +366,12 @@ func (w *world) stats(site string) (string, error) {
 	return b.String(), nil
 }
 
-// handshakes answers `wg show psns-f2a9 latest-handshakes` from the files: two
-// sites have a fresh handshake when each lists the other's key and both
-// interfaces are up.
+// handshakes answers the helper's show latest-handshakes from what each
+// interface runs: two sites have a fresh handshake when each runs the
+// other's key as a peer and both interfaces are up.
 func (w *world) handshakes(h *host) string {
 	var b strings.Builder
-	mine := h.files["/srv/paisans/f2a9/psns-f2a9.conf"]
+	mine := h.wgRun
 	for _, name := range w.cfg.SiteNames() {
 		if name == h.name {
 			continue
@@ -381,12 +385,11 @@ func (w *world) handshakes(h *host) string {
 			continue
 		}
 		stamp := 0
-		if h.wgUp && other.wgUp && strings.Contains(other.files["/srv/paisans/f2a9/psns-f2a9.conf"], w.key(h.name)) {
+		if h.wgUp && other.wgUp && strings.Contains(other.wgRun, w.key(h.name)) {
 			stamp = 990
 		}
 		fmt.Fprintf(&b, "%s\t%d\n", key, stamp)
 	}
-	b.WriteString("now 1000\n")
 	return b.String()
 }
 

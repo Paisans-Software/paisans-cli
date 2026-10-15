@@ -635,11 +635,6 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
 	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
 		running := h.files[wgInstalled]
 		h.wgRun = &running
@@ -650,7 +645,7 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
-	case command == "wg show psns-f2a9 public-key", command == wgHelper+"show public-key":
+	case command == wgHelper+"show public-key":
 		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
 		if m == nil {
 			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
@@ -660,13 +655,13 @@ func (h *host) Run(command string) (string, error) {
 			return "", err
 		}
 		return key + "\n", nil
-	case command == "wg show psns-f2a9 peers", command == wgHelper+"show peers":
+	case command == wgHelper+"show peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\n")
 		}
 		return b.String(), nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\t1760000000\n")

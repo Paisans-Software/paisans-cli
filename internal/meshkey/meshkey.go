@@ -5,8 +5,8 @@
 // key beside it. The swap hands the host the next key before the file
 // promotes it, so for a while the host runs a key the file does not call
 // current. Every command that renders mesh files and writes them to a host
-// mid rekey renders that site with the key its host runs, read with `wg show`
-// as the rekey's own resume reads it: rendering the file's current key would
+// mid rekey renders that site with the key its host runs, read through the
+// WireGuard helper's show as the rekey's own resume reads it: rendering the file's current key would
 // hand the old key back to every peer and cut the site's tunnels.
 package meshkey
 
@@ -23,23 +23,23 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// RunningKey is the public key site's interface runs, reached through t.
-// `wg show <interface> public-key` prints it (wireguard-tools, wg(8)).
+// RunningKey is the public key site's interface runs, reached through t and
+// the WireGuard helper's show public-key, which prints it as `wg show
+// <interface> public-key` does (wireguard-tools, wg(8)).
 func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string, error) {
-	out, err := t.Run("wg show " + d.Interface() + " public-key")
+	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("public-key")
 	if err != nil {
-		return "", fmt.Errorf("%s: `wg show %s public-key`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+		return "", fmt.Errorf("%s: reading %s's key through the WireGuard helper: %w", site, d.Interface(), err)
 	}
 	return strings.TrimSpace(out), nil
 }
 
 // Peers is the public keys site's interface lists as peers, reached through
-// t. `wg show <interface> peers` prints one per line (wireguard-tools,
-// wg(8)).
+// t and the helper's show peers, one per line (wireguard-tools, wg(8)).
 func Peers(site string, t apply.Transport, d deployment.Deployment) ([]string, error) {
-	out, err := t.Run("wg show " + d.Interface() + " peers")
+	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("peers")
 	if err != nil {
-		return nil, fmt.Errorf("%s: `wg show %s peers`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+		return nil, fmt.Errorf("%s: reading %s's peers through the WireGuard helper: %w", site, d.Interface(), err)
 	}
 	var keys []string
 	for _, line := range strings.Split(out, "\n") {

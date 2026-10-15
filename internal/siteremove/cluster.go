@@ -568,16 +568,16 @@ func (p *Plan) haproxyGate(sites []string) error {
 }
 
 // meshGate passes when no remaining site has the removed site's key as a
-// WireGuard peer. `wg show <interface> peers` prints one public key per line
-// (wireguard-tools, wg(8)).
+// WireGuard peer. The WireGuard helper's show peers prints one public key per
+// line (wireguard-tools, wg(8)).
 func (p *Plan) meshGate(keys ...string) error {
 	for _, name := range p.liveSites() {
-		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " peers")
+		peers, err := meshkey.Peers(name, p.transports[name], p.dep())
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
+			return err
 		}
-		for _, line := range strings.Split(out, "\n") {
-			if contains(keys, strings.TrimSpace(line)) {
+		for _, peer := range peers {
+			if contains(keys, peer) {
 				return fmt.Errorf("%s still has %s as a WireGuard peer", name, p.Site)
 			}
 		}
