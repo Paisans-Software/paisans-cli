@@ -114,7 +114,7 @@ func ParseFoundation(raw []byte) (*foundationSpec, error) {
 		if !foundationNames[name] {
 			return nil, fmt.Errorf("%s: images.%s: not an image this toolkit runs; it runs %s", FoundationFile, name, strings.Join(sortedKeys(foundationNames), ", "))
 		}
-		if err := checkImage(name, s.Images[name]); err != nil {
+		if err := CheckFoundationImage(name, s.Images[name]); err != nil {
 			return nil, fmt.Errorf("%s: images.%s: %w", FoundationFile, name, err)
 		}
 	}
@@ -129,7 +129,7 @@ func ParseFoundation(raw []byte) (*foundationSpec, error) {
 		if images.Spilo == "" || images.App == "" {
 			return nil, fmt.Errorf("%s: postgres.%s: needs both spilo and app", FoundationFile, major)
 		}
-		if err := checkImage("spilo", images.Spilo); err != nil {
+		if err := CheckFoundationImage("spilo", images.Spilo); err != nil {
 			return nil, fmt.Errorf("%s: postgres.%s.spilo: %w", FoundationFile, major, err)
 		}
 		if err := checkPostgresImage(major, images.App); err != nil {
@@ -139,10 +139,8 @@ func ParseFoundation(raw []byte) (*foundationSpec, error) {
 	return &s, nil
 }
 
-// checkImage checks one image of the foundation: a track whose pattern
-// compiles, or a reference pinned to one build, and inside the tags the
-// toolkit supports for it.
-func checkImage(name, ref string) error {
+// CheckFoundationImage checks one image the toolkit runs in place of the foundation's named name: a track whose pattern compiles, or a reference pinned to one build, and inside the tags the toolkit supports for it.
+func CheckFoundationImage(name, ref string) error {
 	tag, err := imageTag(ref)
 	if err != nil {
 		return err
@@ -280,3 +278,6 @@ func postgresImages(major string) (postgresImage, error) {
 	}
 	return images, nil
 }
+
+// PostgresMajors are the Postgres majors the toolkit runs, sorted.
+func PostgresMajors() []string { return sortedKeys(postgresMajors) }

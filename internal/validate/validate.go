@@ -145,6 +145,7 @@ func Check(cfg *config.Config) Result {
 	c.sitesShareAMachine()
 	c.imageServices()
 	c.floatingImages()
+	c.infraImages()
 	c.clusterPlacementWithoutACluster()
 	c.acmeProviderHasAnImage()
 	c.acmeImageIsNotStockCaddy()
@@ -979,17 +980,97 @@ func (c *checker) floatingImages() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			ref := blueprints.ParseReference(app.Images[service])
-			why := ref.Floating()
-			if why == "" {
-				continue
-			}
-			c.refuse("floating-image-tag", fmt.Sprintf("apps.%s.images.%s", name, service),
-				"image tag is floating",
-				"is %q and %s. Two runs of `apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
-				app.Images[service], why)
+			c.floatingImage(fmt.Sprintf("apps.%s.images.%s", name, service), app.Images[service])
 		}
 	}
+	for _, key := range sortedKeys(c.cfg.Infra.Images) {
+		c.floatingImage("infra.images."+key, c.cfg.Infra.Images[key])
+	}
+	for _, major := range sortedKeys(c.cfg.Infra.Postgres) {
+		for _, key := range sortedKeys(c.cfg.Infra.Postgres[major]) {
+			c.floatingImage(fmt.Sprintf("infra.postgres.%s.%s", major, key), c.cfg.Infra.Postgres[major][key])
+		}
+	}
+}
+
+// floatingImage refuses ref, found at key, when it does not name one build.
+func (c *checker) floatingImage(key, ref string) {
+	why := blueprints.ParseReference(ref).Floating()
+	if why == "" {
+		return
+	}
+	c.refuse("floating-image-tag", key,
+		"image tag is floating",
+		"is %q and %s. Two runs of `apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
+		ref, why)
+}
+
+// zalandoSpilo is the repository prefix of the Spilo the toolkit is written
+// against, whose versions it can check.
+const zalandoSpilo = "ghcr.io/zalando/spilo-"
+
+// infraImages checks what infra overrides against what the toolkit's own
+// code speaks to: the versions of etcd, HAProxy, Garage and Spilo it is
+// written against, and the Postgres majors it runs.
+func (c *checker) infraImages() {
+	for _, key := range sortedKeys(c.cfg.Infra.Images) {
+		c.supportedVersion("infra.images."+key, key, c.cfg.Infra.Images[key])
+	}
+	if c.cfg.Infra.Images["heartbeat"] != "" {
+		c.warn("infra-heartbeat-covers-pocket-id", "infra.images.heartbeat",
+			"the heartbeat override covers Pocket ID's too",
+			"replaces the infrastructure stack's heartbeat and the operators heartbeat in every Pocket ID stack, which run the same image.")
+	}
+	majors := map[string]bool{}
+	for _, m := range blueprints.PostgresMajors() {
+		majors[m] = true
+	}
+	running := c.cfg.PostgresMajor()
+	for _, major := range sortedKeys(c.cfg.Infra.Postgres) {
+		key := "infra.postgres." + major
+		switch {
+		case !majors[major]:
+			c.refuse("infra-postgres-unknown-major", key,
+				"not a Postgres major the toolkit runs",
+				"is Postgres %s, and the toolkit runs %s.", major, strings.Join(blueprints.PostgresMajors(), ", "))
+			continue
+		case major != running:
+			c.warn("infra-postgres-unused-major", key,
+				"applies to no Postgres the deployment runs",
+				"is for Postgres %s, and cluster.postgres_version is %s, so nothing runs it. Remove it, or keep it only while a move to %s is planned.", major, running, major)
+		}
+		spilo := c.cfg.Infra.Postgres[major]["spilo"]
+		if spilo == "" {
+			continue
+		}
+		if strings.HasPrefix(spilo, zalandoSpilo) {
+			c.supportedVersion(key+".spilo", "spilo", spilo)
+			continue
+		}
+		c.warn("infra-spilo-unchecked", key+".spilo",
+			"the toolkit cannot check this Spilo",
+			"is %q, outside %s*. The toolkit is written against Spilo's and Patroni's environment and data path, and cannot check that this image follows them. apply's review asks for it.", spilo, zalandoSpilo)
+	}
+}
+
+// supportedVersion refuses ref as the image of the foundation's name when
+// its tag can leave the versions the toolkit's code is written against. A
+// reference with no tag cannot be checked, and is refused naming the form
+// that can.
+func (c *checker) supportedVersion(key, name, ref string) {
+	if blueprints.ParseReference(ref).Floating() != "" {
+		return // floating-image-tag already refuses it
+	}
+	err := blueprints.CheckFoundationImage(name, ref)
+	if err == nil {
+		return
+	}
+	if r := blueprints.ParseReference(ref); r.Digest != "" && blueprints.ParseReference(r.Name).Tag == "" {
+		err = fmt.Errorf("names a digest and no tag, so its version cannot be checked. Write the tag beside the digest (Eg: %s:<tag>@%s)", r.Name, r.Digest)
+	}
+	c.refuse("infra-image-unsupported-version", key,
+		"outside the versions the toolkit is written against",
+		"%v.", err)
 }
 
 // imageForAbsentPostgres warns about an image for a database that is not

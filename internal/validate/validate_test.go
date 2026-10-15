@@ -945,3 +945,95 @@ func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
 		}
 	}
 }
+
+// warnedFor reports whether rule warned about exactly the given key.
+func warnedFor(result validate.Result, rule, key string) bool {
+	for _, f := range result.Warnings() {
+		if f.Rule == rule && f.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func withInfra(t *testing.T, infra config.Infra) *config.Config {
+	t.Helper()
+	cfg := load(t, "valid")
+	cfg.Infra = infra
+	return cfg
+}
+
+// An override of an image the toolkit's code speaks to stays inside the
+// versions that code is written against, as the foundation's own track must.
+func TestAnInfraOverrideStaysOnASupportedVersion(t *testing.T) {
+	for key, ref := range map[string]string{
+		"etcd":    "gcr.io/etcd-development/etcd:v3.6.*",
+		"haproxy": "docker.io/library/haproxy:3.2.1-alpine",
+		"garage":  "docker.io/dxflrs/garage:v1.1.0",
+	} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{key: ref}})
+		if validate.Check(cfg).Has("infra-image-unsupported-version") {
+			t.Errorf("%s: %s was refused", key, ref)
+		}
+	}
+	for key, ref := range map[string]string{
+		"etcd":    "gcr.io/etcd-development/etcd:v4.0.0",
+		"haproxy": "docker.io/library/haproxy:*.0.1-alpine",
+		"garage":  "docker.io/dxflrs/garage:v2.0.0",
+	} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{key: ref}})
+		if !refusedFor(validate.Check(cfg), "infra-image-unsupported-version", "infra.images."+key) {
+			t.Errorf("%s: %s was not refused", key, ref)
+		}
+	}
+}
+
+func TestADigestOnlyInfraOverrideIsRefused(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd@sha256:" + strings.Repeat("a", 64)}})
+	if !refusedFor(validate.Check(cfg), "infra-image-unsupported-version", "infra.images.etcd") {
+		t.Error("a digest with no tag was accepted, and its version cannot be checked")
+	}
+	cfg = withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd:v3.5.21@sha256:" + strings.Repeat("a", 64)}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a tag with its digest beside it was refused")
+	}
+}
+
+func TestAnInfraOverrideIsNotLatest(t *testing.T) {
+	for _, ref := range []string{"gcr.io/etcd-development/etcd:latest", "gcr.io/etcd-development/etcd"} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": ref}})
+		if !refusedFor(validate.Check(cfg), "floating-image-tag", "infra.images.etcd") {
+			t.Errorf("%s was not refused", ref)
+		}
+	}
+}
+
+func TestSpiloOverridesAreCheckedByMajor(t *testing.T) {
+	spilo := func(major, ref string) config.Infra {
+		return config.Infra{Postgres: map[string]map[string]string{major: {"spilo": ref}}}
+	}
+	// valid.yaml runs Postgres 18.
+	if !refusedFor(validate.Check(withInfra(t, spilo("15", "ghcr.io/zalando/spilo-15:3.2-p1"))), "infra-postgres-unknown-major", "infra.postgres.15") {
+		t.Error("a major the toolkit does not run was accepted")
+	}
+	if !warnedFor(validate.Check(withInfra(t, spilo("17", "ghcr.io/zalando/spilo-17:4.0-p3"))), "infra-postgres-unused-major", "infra.postgres.17") {
+		t.Error("an entry for a major the deployment does not run was not warned about")
+	}
+	if !refusedFor(validate.Check(withInfra(t, spilo("18", "ghcr.io/zalando/spilo-18:5.0-p1"))), "infra-image-unsupported-version", "infra.postgres.18.spilo") {
+		t.Error("a Zalando Spilo outside the supported lines was accepted")
+	}
+	result := validate.Check(withInfra(t, spilo("18", "example.org/pg-ha:18.0-1")))
+	if !warnedFor(result, "infra-spilo-unchecked", "infra.postgres.18.spilo") {
+		t.Error("another provider's Spilo was not warned about")
+	}
+	if result.Has("infra-image-unsupported-version") {
+		t.Error("another provider's tag was held to Spilo's versions")
+	}
+}
+
+func TestAHeartbeatOverrideSaysItCoversPocketID(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"heartbeat": "docker.io/curlimages/curl:8.11.1"}})
+	if !warnedFor(validate.Check(cfg), "infra-heartbeat-covers-pocket-id", "infra.images.heartbeat") {
+		t.Error("the heartbeat override did not say it replaces the operators heartbeat too")
+	}
+}
