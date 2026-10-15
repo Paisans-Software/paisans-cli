@@ -293,3 +293,20 @@ func TestImagesShowsNewestUnknownForADeployedBuild(t *testing.T) {
 		}
 	}
 }
+
+// A site whose builds were rebuilt under the same tags fails --check on the
+// move alone: no override lags.
+func TestImagesCheckFailsABuildThatMoves(t *testing.T) {
+	cfg, secrets := imagesFixture(t, nil)
+	withImagesTransport(t, nil)
+	host := deployedSite(t, cfg, secrets)
+	imagesTransport = func(string, config.Site) apply.Transport { return host }
+	imageDigests = trackRegistry("sha256:" + strings.Repeat("ab", 32))
+	var out strings.Builder
+	if err := writeImages(&ui.Recorder{}, cfg, secrets, &out, true); !errors.Is(err, errImagesMove) {
+		t.Fatalf("--check: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "moves on next apply") || strings.Contains(out.String(), "behind ") {
+		t.Errorf("table:\n%s", out.String())
+	}
+}
