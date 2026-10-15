@@ -2469,6 +2469,16 @@ creates those with the shapes their consumers require, and it refuses an unknown
 top level section, because a value written where nothing reads it looks
 delivered and is not.
 
+**Secrets are listed by path, never by value.** `paisans secrets list` prints
+every secret the configuration needs, and every other one the file holds for
+something it still declares, by the dotted path `secrets set` and `secrets
+rotate` take: whether the file holds a value there, which of the three kinds it
+is, and the path `secrets rotate` takes for it. It prints no value, no part of
+one and no length, because an operator looking for a path has no use for the
+value, and a value on a terminal is in its scrollback. The kind says who fills
+an unset one: `init`, `secrets set`, or `apply --execute`. See *`paisans
+secrets list`* in [docs/commands.md](docs/commands.md).
+
 **Secrets nothing declares are pruned.** A site or an app taken out of
 `paisans-stack.yaml` leaves its secrets behind. A secret is orphaned when it names
 something the configuration does not declare:

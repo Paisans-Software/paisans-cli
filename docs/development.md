@@ -24,8 +24,8 @@ command: what it does, when it is run on its own rather than through the whole
 `apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
-validate and render touch nothing outside the working directory, and create
-writes one new file there. init writes only local files, and reads every site over ssh to settle the mesh subnet.
+validate, render and `secrets list` touch nothing outside the working
+directory, and create writes one new file there. init writes only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
@@ -128,6 +128,7 @@ paisans app remove docs                   # an app out of paisans-stack.yaml, of
 paisans site remove home-b                # a site out of the deployment, staged
 paisans site remove home-b --evict        # a site nobody else can reach, cut out first
 paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
+paisans secrets list                      # every secret's path, set or unset, never a value
 paisans secrets rotate --all              # every secret's rotation, in order, with its cost
 paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
