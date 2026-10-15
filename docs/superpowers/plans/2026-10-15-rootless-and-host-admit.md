@@ -105,6 +105,7 @@ Depends on: phases 2, 3, 5; R7, R8.
 * `internal/siteremove/host.go`: user-side removal, then the `host evict` line. `cmd/paisans/hostdeployments.go`: lists admission records.
 * The gateway's Caddy serves `/.well-known/paisans/<token>` with the deployment's token (render templates, golden tree regenerated). The gateway's step in `apply` ends by fetching it through the public address on 443, and 80 expecting the redirect; any other answer fails the step: "443 on <site> answers, but not as this deployment". Tests with a fake fetcher for a matching body, another body, another server and no answer.
 * `web_server.managed_by: external` per the spec's *Behind the owner's web server*: admit detects the owner's server as root and records it (phase 5 adds the record fields and the request's `web_server` field); admit warns when Caddy's admin API listens on TCP; `validate` refuses `include_dir`; `apply` writes the snippet under `/srv/paisans/<token>/web-server/` and warns until `web-server check` passes; `show` fills the snippet from the record; the include, rollback and reload code in `internal/webserver` is removed. README, the guide `docs/guides/behind-your-own-web-server.md` and `docs/commands.md` rewritten to match.
+* A deployment with sites missing, per the spec's section: classification once per run (admission record, login, the gateway's deployed record, etcd and Patroni membership), the effective topology in converge and rendering, the refusals, the `pending` plan section, the `Applied, degraded` ending and `--require-all`, and each manifest recording which sites were pending. Tests per the spec's *Tests*.
 * Docker-tagged tests run against a rootless daemon.
 * README, each passage that names a root-owned path or sudo for a deployment command, rewritten to the paths under `deployment.Root()` and the user's own permissions: the seed written through `sudo` (account seed), the deployed record's "read through sudo instead" fallback, the config store "with `sudo` because the store is root's", gathering "with `sudo`", the host check's inventory "as root ... refuses unless it is 0", and doctor's Leftovers row. The admission record is described beside the deployed record: 0644, readable by the deployment's user without sudo, and `host deployments --sudo=false` lists admission records without the registry or directories.
 
@@ -112,7 +113,7 @@ Depends on: phases 2, 3, 5; R7, R8.
 
 Depends on: phase 6.
 
-* `internal/doctor/reach.go` and new `internal/doctor/rootless.go`: the user is not privileged, the rootless socket answers, Engine 29.5 or later, linger on, `sudo -n -l` lists only the helper, the admission record matches the declaration. Each in the check graph from `docs/specs/2026-10-15-doctor-check-graph.md`, with the sudo finding removed, and a gateway check that fetches `/.well-known/paisans/<token>` from outside as `apply` does, sharing its code.
+* `internal/doctor/reach.go` and new `internal/doctor/rootless.go`: the user is not privileged, the rootless socket answers, Engine 29.5 or later, linger on, `sudo -n -l` lists only the helper, the admission record matches the declaration. Each in the check graph from `docs/specs/2026-10-15-doctor-check-graph.md`, with the sudo finding removed, and a gateway check that fetches `/.well-known/paisans/<token>` from outside as `apply` does, sharing its code, and a `WARN` for each pending or down site listing what the deployment is without.
 
 ## Phase 8: Linux release binaries
 
@@ -135,7 +136,7 @@ Depends on: phases 5 to 7.
 
 Depends on: everything.
 
-* Fresh VMs from `test-deployments/` (in the community repo), admitted with `--request` as an owner would, then `apply` as the deployment's user. Checks: a container cannot reach the host's `127.0.0.1` or LAN; `sudo -n` runs only the helper; reboot recovers; `host evict` leaves the host as the owner had it. On a second host, a system Docker with `"userland-proxy": false` publishing 443: admit `--public-ports` refuses; with the container started after admission, `apply` and `doctor` report the conflict.
+* Fresh VMs from `test-deployments/` (in the community repo), admitted with `--request` as an owner would, then `apply` as the deployment's user. Checks: a container cannot reach the host's `127.0.0.1` or LAN; `sudo -n` runs only the helper; reboot recovers; `host evict` leaves the host as the owner had it. On a second host, a system Docker with `"userland-proxy": false` publishing 443: admit `--public-ports` refuses; with the container started after admission, `apply` and `doctor` report the conflict. With one data site not yet admitted, `apply` runs degraded; admitting it, the next `apply` joins it. Stopping a joined site's host, `apply` runs degraded and keeps it as a member.
 
 ## Founder questions blocking phases
 

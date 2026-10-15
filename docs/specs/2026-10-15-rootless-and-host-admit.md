@@ -53,6 +53,10 @@ Founder decisions, 2026-10-15:
   `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
+* **A deployment runs on the sites it has.** A site whose host has not
+  admitted it yet, or cannot be used, does not hold up the rest, except
+  where the deployment cannot run without it (*A deployment with sites
+  missing*).
 
 ## The deployment's user
 
@@ -432,6 +436,65 @@ What changes in behaviour:
 * **`host deployments`** stays an owner's command with `--ssh` and sudo, and
   lists admission records beside what it lists today.
 
+## A deployment with sites missing
+
+Operators admit sites one host at a time, and a deployment that works on
+fewer sites should not wait for all of them. Each run classifies every
+declared site, once, at its start, and every step of the run uses that
+classification.
+
+**Whether a site has joined is read from the deployment, never from the
+site's own host.** A host that has evicted the deployment, one that is down
+and one that never admitted it look alike from outside: the login is
+refused or nothing answers. So the run reads the gateway's deployed record,
+which lists the sites deployed, and etcd's and Patroni's membership from any
+member that answers.
+
+| The site's host | Joined | The site is | Its place in the topology | The run |
+|---|---|---|---|---|
+| answers, and its admission record covers its roles | either | ready | as declared | normal |
+| refuses the login, does not answer, or is admitted without a grant its roles need | no | **pending** | left out: no mesh peer, no etcd or Patroni member, no Garage node, no DNS record, and its apps held back | goes on, degraded |
+| refuses the login or does not answer | yes | **down** | kept as declared: still a peer and a member, its records kept | goes on, degraded, without that site's steps |
+
+A down site is never removed by a run. The cluster keeps its member, as etcd
+and Patroni keep any member that is down, and only `site remove` takes it
+out. Its line cannot say whether the host is down or its owner evicted the
+deployment, so it says both: `home-b: its login is refused or it does not
+answer: the host is down, or its owner evicted this deployment. paisans site
+remove --site home-b --host-gone removes it from the deployment.`
+
+**Pending sites are left out as if not yet added.** The run plans the
+**effective topology**, the declaration less its pending sites, and renders
+every ready site from it. A pending data site joins through the path `site
+add` takes once its host admits it; the next `apply` finds it ready, with no
+other command. A site whose only route into the mesh is a pending site's
+`endpoint` is pending too, with that reason. Garage with fewer ready nodes
+than its replication holds back storage, and the apps that need it, with a
+warning.
+
+**What still refuses the run:** the gateway pending or down; no ready data
+site while an app needs a database; etcd or Patroni without a quorum among
+the members that answer; and `--site` naming a site that is pending or down.
+
+**What it says.** The plan opens with a `pending` section, a line per
+pending or down site with its reason and, for a pending one, its `paisans
+host request --site <s> > <s>.admit` line, then what the deployment is
+without (the wording of doctor's Reach row). The run ends `Applied,
+degraded: <n> sites pending or down (<names>)`, exit 0. `--require-all`
+makes a degraded run exit 1, for automation that must not pass on one.
+`doctor` reports each pending or down site as a `WARN` with the same list.
+
+**The declaration stays the only record.** The configuration store keeps
+`paisans-stack.yaml` as written; the effective topology is derived on every
+run and never published, so admitting a site creates no version. Each
+site's manifest records which sites were pending when its files were
+rendered, and the checks that compare a host with a render (an edited file,
+doctor's Leftovers) use that same view, so a file rendered without a pending
+site is not drift. Every run, `--site` included, classifies every site, so
+one site's files never disagree with another's about who is in the mesh.
+
+A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
+
 ## Documentation
 
 * `docs/commands.md`: `host request`, `host admit` and `host evict` replace
@@ -461,6 +524,15 @@ What changes in behaviour:
   site.
 * The local transport is constructed by no command other than admit and
   evict with `--request`.
+* Classification: a site whose login is refused and which the gateway's
+  record and the cluster do not list is pending; the same site listed there
+  is down; a timeout is treated the same way in each case.
+* The effective topology: golden renders of a three-site deployment with
+  one data site pending (no peer, no member, no records for it), and the
+  same with it down (rendered as declared).
+* Refusals: the gateway pending, the gateway down, no ready data site, and
+  `--site` naming a pending site.
+* `--require-all` exits 1 on a degraded run; without it, 0.
 * The release workflow's artifacts include both Linux binaries and
   `SHA256SUMS`.
 * The Docker-tagged tests run against a rootless daemon.
