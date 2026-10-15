@@ -446,6 +446,9 @@ func Execute(ctx context.Context, p *Plan, c *pocketid.Client, rec Recorder, new
 			if g, err = c.CreateGroup(ctx, step.Group); err == nil {
 				groups[step.Group] = &g
 				result = "created"
+			} else if made := existingGroup(ctx, c, step.Group, err); made != nil {
+				groups[step.Group], err = made, nil
+				result = "found, made since the plan was read"
 			}
 		case CreateClient:
 			var created pocketid.OIDCClient
@@ -543,6 +546,25 @@ func firstWords(line string) string {
 		return line[:i]
 	}
 	return line
+}
+
+// existingGroup is the group a create was refused for because its name is
+// taken, or nil. Pocket ID refuses a name already in use with 409
+// (service/user_group_service.go:175-176 at v2.18.0). apply plans every app's
+// client before it runs any, so two apps that read one missing group both
+// plan to create it, and the second meets the group the first made; so can a
+// group made by anything else after the plan was read. Finding it is the end
+// the plan was after.
+func existingGroup(ctx context.Context, c *pocketid.Client, name string, err error) *pocketid.Group {
+	var apiErr *pocketid.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 409 {
+		return nil
+	}
+	g, findErr := c.FindGroup(ctx, name)
+	if findErr != nil {
+		return nil
+	}
+	return g
 }
 
 func sortedKeys(m map[string]bool) []string {
