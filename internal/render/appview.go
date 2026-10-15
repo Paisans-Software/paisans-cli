@@ -169,6 +169,12 @@ type appValues struct {
 	OperatorsHeartbeat bool
 	HeartbeatImage     string
 
+	// HeartbeatURLs is every monitor's ping URL for the app's own heartbeat,
+	// space separated, for a blueprint that declares one; empty for any other
+	// and in a deployment with no monitor (appheartbeat.go). Each URL carries
+	// the token, so only a 0600 template should hold it.
+	HeartbeatURLs string
+
 	// DNS is a Pocket ID app's DNS continuity check, its Enabled false when
 	// the deployment renders none (dnscontinuity.go).
 	DNS dnsValues
@@ -444,6 +450,11 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.S3 = p.s3For(planned, app, v)
 	}
 	v.OIDC = p.oidcFor(planned)
+	heartbeatURLs, err := p.blueprintHeartbeatURLs(planned.Name, planned.Blueprint)
+	if err != nil {
+		return appValues{}, err
+	}
+	v.HeartbeatURLs = heartbeatURLs
 	v.Upstreams = p.upstreams(planned.Name)
 	if blueprints.SendsMail(planned.Blueprint) {
 		v.SMTP = p.smtpFor(planned.Name)
@@ -454,7 +465,7 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.PocketID = pid
-		v.OperatorsHeartbeat = len(operatorsHeartbeatTargets(p.cfg)) > 0
+		v.OperatorsHeartbeat = len(appHeartbeatTargets(p.cfg)) > 0
 		v.Reconciler = p.reconcilerValuesFor(app)
 		if v.HeartbeatImage, err = blueprints.FoundationImage(blueprints.FoundationHeartbeat); err != nil {
 			return appValues{}, err

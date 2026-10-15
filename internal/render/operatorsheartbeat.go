@@ -39,14 +39,15 @@ import (
 // of the app's stack its two files sit in.
 const operatorsHeartbeatService = "operators-heartbeat"
 
-// operatorsHeartbeatTargets is every monitor a Pocket ID app's instances push
-// to: each uptime app, in app order, the site heartbeat's targets
-// (heartbeatTargets) without its rule leaving out a monitor on the pushing
-// site. That rule is about the push proving the site reachable, which a push
-// from the monitor's own host cannot; this push carries the group's health,
-// which is the same news from any host, and the instance that is active may
-// be the one beside a monitor. Empty with no monitor, so nothing is rendered.
-func operatorsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
+// appHeartbeatTargets is every monitor an app's instances push a heartbeat
+// to, the operators heartbeat's and a blueprint's own (appheartbeat.go): each
+// uptime app, in app order, the site heartbeat's targets (heartbeatTargets)
+// without its rule leaving out a monitor on the pushing site. That rule is
+// about the push proving the site reachable, which a push from the monitor's
+// own host cannot; an app's push carries the app's health, which is the same
+// news from any host, and the instance pushing may be the one beside a
+// monitor. Empty with no monitor, so nothing is pushed.
+func appHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 	var out []heartbeatTarget
 	for _, name := range cfg.AppNames() {
 		app := cfg.Apps[name]
@@ -61,16 +62,17 @@ func operatorsHeartbeatTargets(cfg *config.Config) []heartbeatTarget {
 // by name when it is missing or not what the fork accepts, as a site's
 // heartbeat token is (heartbeatToken).
 func (p *planner) operatorsHeartbeatToken(app string) (string, error) {
-	return p.dnsHeartbeatToken(app, "operators_heartbeat_token")
+	return p.appHeartbeatToken(app, "operators_heartbeat_token")
 }
 
-// dnsHeartbeatToken is one of a Pocket ID app's continuity tokens from the
-// secrets, the operators heartbeat's or one of the DNS check's, refused by
-// name as operatorsHeartbeatToken is.
-func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
+// appHeartbeatToken is one of an app's heartbeat tokens from the secrets: a
+// Pocket ID app's continuity tokens, the operators heartbeat's or one of the
+// DNS check's, or the token of a blueprint's own heartbeat. Each is refused
+// by name as operatorsHeartbeatToken is.
+func (p *planner) appHeartbeatToken(app, key string) (string, error) {
 	token := p.appSecret(app, key)
 	if token == "" {
-		return "", fmt.Errorf("secrets apps.%s.%s: required for a deployment with a monitor, which expects every instance of %s to push with it. Run `paisans init` to generate it", app, key, app)
+		return "", fmt.Errorf("secrets apps.%s.%s: required, since every monitor expects every instance of %s to push with it. Run `paisans init` to generate it", app, key, app)
 	}
 	if !heartbeatTokenShape.MatchString(token) {
 		return "", fmt.Errorf("secrets apps.%s.%s: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and every instance would push at a URL the monitor answers 404 to. Run `paisans init` after removing it, which generates one in the right shape", app, key)
@@ -87,7 +89,7 @@ func (p *planner) dnsHeartbeatToken(app, key string) (string, error) {
 // replacing only the service whose configuration changed), which is how a new
 // monitor's URL reaches a host without touching Pocket ID.
 func (p *planner) operatorsHeartbeatFiles(base string, app plannedApp) ([]File, error) {
-	targets := operatorsHeartbeatTargets(p.cfg)
+	targets := appHeartbeatTargets(p.cfg)
 	if app.Blueprint != config.BlueprintPocketID || len(targets) == 0 {
 		return nil, nil
 	}
@@ -104,7 +106,7 @@ func (p *planner) operatorsHeartbeatFiles(base string, app plannedApp) ([]File, 
 	var dns []map[string]string
 	if p.dnsContinuity() {
 		for _, m := range dnsMonitors {
-			token, err := p.dnsHeartbeatToken(app.Name, m.Secret)
+			token, err := p.appHeartbeatToken(app.Name, m.Secret)
 			if err != nil {
 				return nil, err
 			}

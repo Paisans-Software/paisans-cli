@@ -3,6 +3,7 @@ package secretsrotate
 import (
 	"fmt"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
@@ -148,9 +149,10 @@ func (r heartbeat) Users(e Env) []Use {
 // Pocket ID keeps running throughout.
 const operatorsHeartbeatGap = "the operators heartbeat, which the monitors may refuse while they restart with the next token and until the active instance pushes it, normally within the grace before a heartbeat counts as missed"
 
-// operatorsHeartbeat rotates the token a Pocket ID app's instances push the
-// operator reconciler's answer with.
-type operatorsHeartbeat struct {
+// appHeartbeat rotates the token an app's instances push a heartbeat with:
+// one of a Pocket ID app's continuity heartbeats, or the heartbeat of a
+// blueprint that declares one.
+type appHeartbeat struct {
 	Generated
 	app, key string
 }
@@ -184,19 +186,49 @@ var ContinuityHeartbeats = []string{"operators_heartbeat_token", "dns_super_admi
 // no DNS check is replaced in the file and handed to monitors that do not
 // seed it, which costs a restart of each and nothing else.
 func ContinuityHeartbeat(app, key string) Rotator {
-	return operatorsHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
+	return appHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
 }
 
-func (r operatorsHeartbeat) Cost() Cost { return Cost{Downtime: operatorsHeartbeatGap} }
+// AppHeartbeat is the rotation of apps.<app>.heartbeat_token, the token every
+// instance of an app whose blueprint declares a heartbeat pushes it with
+// (internal/render/appheartbeat.go). It is handed out as the operators
+// heartbeat's is: every monitor learns it first, then the app's own stack on
+// each of its sites in turn, whose templates render .HeartbeatURLs with it, so
+// the service of the blueprint's that reads them is recreated with it. A
+// deployment with no monitor renders no URL, so the token is replaced in the
+// file and handed to nobody.
+func AppHeartbeat(app string) Rotator {
+	key := blueprints.HeartbeatTokenKey
+	return appHeartbeat{Generated: Generated{SecretPath: "apps." + app + "." + key}, app: app, key: key}
+}
 
-// Precheck refuses an app that is not a Pocket ID app, and one that runs on
-// no site.
-func (r operatorsHeartbeat) Precheck(e Env) error {
+// Cost is the refused pushes, of the operators heartbeat for a continuity
+// token and of the app's own heartbeat for a blueprint's.
+func (r appHeartbeat) Cost() Cost {
+	if r.key == blueprints.HeartbeatTokenKey {
+		return Cost{Downtime: fmt.Sprintf(appHeartbeatGap, r.app)}
+	}
+	return Cost{Downtime: operatorsHeartbeatGap}
+}
+
+// appHeartbeatGap is operatorsHeartbeatGap for a blueprint's own heartbeat,
+// named for the app.
+const appHeartbeatGap = "the %s heartbeat, which the monitors may refuse while they restart with the next token and until the app pushes it, normally within the grace before a heartbeat counts as missed"
+
+// Precheck refuses an app whose blueprint does not have the token: a
+// continuity token of an app that is not Pocket ID, or a heartbeat token of
+// an app whose blueprint declares no heartbeat. It refuses an app that runs
+// on no site too.
+func (r appHeartbeat) Precheck(e Env) error {
 	app, ok := e.Cfg.Apps[r.app]
 	if !ok {
 		return fmt.Errorf("the configuration declares no app %q", r.app)
 	}
-	if app.Blueprint != config.BlueprintPocketID {
+	if r.key == blueprints.HeartbeatTokenKey {
+		if _, ok := blueprints.HeartbeatOf(app.Blueprint); !ok {
+			return fmt.Errorf("apps.%s is %s, whose blueprint declares no heartbeat, so it has no %s", r.app, app.Blueprint, r.key)
+		}
+	} else if app.Blueprint != config.BlueprintPocketID {
 		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Blueprint, r.key, config.BlueprintPocketID)
 	}
 	return runsSomewhere(e, r.app)
@@ -204,14 +236,14 @@ func (r operatorsHeartbeat) Precheck(e Env) error {
 
 // Checked has nothing to do: the monitors check the token, and they are
 // handed it as the first users.
-func (r operatorsHeartbeat) Checked(e Env, next string) error { return nil }
+func (r appHeartbeat) Checked(e Env, next string) error { return nil }
 
-func (r operatorsHeartbeat) Accepts(e Env, next string) (bool, error) { return true, nil }
+func (r appHeartbeat) Accepts(e Env, next string) (bool, error) { return true, nil }
 
 // Users is every monitor, in app order, each on its own site, then every
 // site running the app, its own stack on each: the monitors
-// render.operatorsHeartbeatTargets has the app push to, and its pushers.
-func (r operatorsHeartbeat) Users(e Env) []Use {
+// render.appHeartbeatTargets has the app push to, and its pushers.
+func (r appHeartbeat) Users(e Env) []Use {
 	var out []Use
 	placed := render.AppSites(e.Cfg)
 	for _, name := range e.Cfg.AppNames() {

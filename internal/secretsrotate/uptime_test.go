@@ -35,7 +35,13 @@ type uptimeWorld struct {
 	// adminsSeededAtPush is what every monitor's seed held when auth's
 	// stack on a site was handed its token.
 	adminsSeededAtPush map[string]map[string]string
-	log                []string
+	// notesPushed is the token notes, an app whose blueprint declares a
+	// heartbeat, pushes with on a site, and notesSeededAtPush what every
+	// monitor's seed held when its stack there was handed it. Only a world
+	// that adds notes (withNotes) has it.
+	notesPushed       map[string]string
+	notesSeededAtPush map[string]map[string]string
+	log               []string
 }
 
 var heartbeatShape = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -72,6 +78,7 @@ func newUptimeWorld(t *testing.T) *uptimeWorld {
 		t: t, cfg: cfg, store: &memStore{s: s},
 		seeded: map[string]string{}, pushed: map[string]string{}, operatorsPushed: map[string]string{}, admin: map[string]string{},
 		unhealthy: map[string]error{}, seededAtPush: map[string]map[string]string{}, adminsSeededAtPush: map[string]map[string]string{},
+		notesPushed: map[string]string{}, notesSeededAtPush: map[string]map[string]string{},
 	}
 	w.render(s, func(string) {})
 	w.log = nil
@@ -128,6 +135,10 @@ func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed
 			w.seeded[stack+"/auth"] = token
 			changed(fmt.Sprintf("apply %s %s seed auth", site, stack))
 		}
+		if token, _ := s.Get("apps.notes.heartbeat_token"); w.seeded[stack+"/notes"] != token {
+			w.seeded[stack+"/notes"] = token
+			changed(fmt.Sprintf("apply %s %s seed notes", site, stack))
+		}
 		pass, _ := s.Get("apps." + stack + ".admin_password")
 		if w.admin[stack] != pass {
 			w.admin[stack] = pass
@@ -143,6 +154,14 @@ func (w *uptimeWorld) renderStack(site, stack string, s *config.Secrets, changed
 		if token, _ := s.Get("apps.auth.operators_heartbeat_token"); w.operatorsPushed[site] != token {
 			w.operatorsPushed[site] = token
 			changed(fmt.Sprintf("apply %s auth operators-heartbeat", site))
+		}
+	case "notes":
+		if site != "home-a" && site != "home-b" {
+			w.t.Fatalf("notes applied on %s, where it does not run", site)
+		}
+		if token, _ := s.Get("apps.notes.heartbeat_token"); w.notesPushed[site] != token {
+			w.notesPushed[site] = token
+			changed(fmt.Sprintf("apply %s notes", site))
 		}
 	default:
 		w.t.Fatalf("%s applied on %s: not a stack this world runs", stack, site)
@@ -170,6 +189,9 @@ func (w *uptimeWorld) env() Env {
 				}
 				if stack == "auth" {
 					w.adminsSeededAtPush[site] = maps(w.seeded)
+				}
+				if stack == "notes" {
+					w.notesSeededAtPush[site] = maps(w.seeded)
 				}
 				w.renderStack(site, stack, s, func(l string) { w.log = append(w.log, l) })
 			}

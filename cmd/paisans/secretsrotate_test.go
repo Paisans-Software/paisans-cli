@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -1289,4 +1291,82 @@ func endedWith(rec *ui.Recorder, text string) bool {
 		}
 	}
 	return false
+}
+
+// withHeartbeatApp is the fixture with notes, an app of a catalog blueprint
+// that declares a heartbeat, pinned to home-a, and its token in the secrets.
+func withHeartbeatApp(t *testing.T) (*config.Config, *config.Secrets) {
+	t.Helper()
+	coretest.Cache(t)
+	repo := filepath.Join(t.TempDir(), "paisans-example")
+	for name, content := range map[string]string{
+		"catalog.yaml":                          "apiVersion: paisans.catalog/v1\nname: example\n",
+		"blueprints/journal/blueprint.yaml":     "apiVersion: paisans.blueprint/v2\nname: journal\nservices:\n  - {name: app, image: \"ghcr.io/example/journal:2.4.1\"}\ndatabase: {engine: none}\nport: 8300\nconfig: {format: env, file: .env}\nheartbeat: {name: settings}\n",
+		"blueprints/journal/compose.yaml.tmpl":  "services: {}\n",
+		"blueprints/journal/caddy.snippet.tmpl": "\n",
+		"blueprints/journal/.env.secret.tmpl":   "HEARTBEAT_URLS={{ .HeartbeatURLs }}\n",
+	} {
+		p := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.org", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	git("add", "-A")
+	git("commit", "-q", "-m", "catalog")
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Catalogs = map[string]config.Catalog{"ex": {URL: repo, Commit: git("rev-parse", "HEAD")}}
+	cfg.Apps["notes"] = config.App{Blueprint: "ex/journal", Hostname: "notes.example.org",
+		Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}}
+	if problems := config.ResolveBlueprints(cfg); len(problems) > 0 {
+		t.Fatal(problems)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Apps["notes"] = map[string]any{"heartbeat_token": strings.Repeat("ef", 16)}
+	return cfg, s
+}
+
+// An app's own heartbeat token is rotated by name, at the cost of that
+// heartbeat's pushes refused while the monitors and the app take it, and by
+// --all with the other heartbeat tokens, last. An app whose blueprint
+// declares no heartbeat has no such token to rotate.
+func TestSecretsRotateTakesABlueprintsHeartbeatToken(t *testing.T) {
+	cfg, s := withHeartbeatApp(t)
+	r, err := rotatorFor("apps.notes.heartbeat_token", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path() != "apps.notes.heartbeat_token" {
+		t.Errorf("path %q", r.Path())
+	}
+	if c := r.Cost(); c.SignsOut || !strings.Contains(c.Downtime, "notes heartbeat") {
+		t.Errorf("cost %+v", c)
+	}
+	if _, err := rotatorFor("apps.talk.heartbeat_token", rotateWiring{cfg: cfg}); err == nil || !strings.Contains(err.Error(), "no rotation") {
+		t.Errorf("talk's heartbeat token: %v", err)
+	}
+	rs, _, err := rotateAll(cfg, s, rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := paths(rs)
+	if len(got) < 2 || got[len(got)-1] != "apps.notes.heartbeat_token" || got[len(got)-2] != "apps.auth.dns_2fa_heartbeat_token" {
+		t.Errorf("--all does not end with notes' heartbeat token after the continuity tokens: %v", got)
+	}
 }

@@ -1237,6 +1237,10 @@ from this configuration and the fork reconciles it at every start:
   instance pushes to the one token; a deployment with more than one Pocket ID
   app prefixes each continuity monitor with the app key, since the seed tells
   monitors apart by name.
+* every app whose blueprint declares a **heartbeat** gets one push monitor,
+  `<app> — <name>`, fed by a service of the blueprint's own under the app's
+  `heartbeat_token`, with the site heartbeat's schedule (see *A blueprint can
+  come from a catalog*).
 * a deployment on Cloudflare that has pasted `external.dns_members_token`
   gets two more beside it, `operator continuity: dns super admins` and
   `operator continuity: dns 2fa`, fed the same way from the reconciler's DNS
@@ -2358,7 +2362,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, the heartbeat token of each app whose blueprint declares a heartbeat, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an operator's address at the DNS provider when it is not their email (`operators.<operator>.dns_provider_email`) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
@@ -2661,6 +2665,7 @@ Finishing either command first costs nothing but its resume.
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
+| `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
@@ -2691,6 +2696,12 @@ token and restarts it to adopt it. Only then is the pusher handed the token.
   Pocket ID, its reconciler and its database keep running and nobody is
   signed out. A deployment with no monitor renders no pusher, so the token is
   replaced in the file and handed to nobody.
+* **An app's own `heartbeat_token`**, for a blueprint that declares a
+  heartbeat, is checked by every monitor in the same way. The pusher is the
+  app's own stack on each of its sites in turn, whose templates render
+  `.HeartbeatURLs` with the token, so the blueprint's service that reads them
+  is recreated with it. A deployment with no monitor renders no URL, so the
+  token is replaced in the file and handed to nobody.
 
 From the first monitor learning the token until the pusher sends it, a monitor
 that already holds it answers the old one with 404. That lasts one scoped
@@ -3205,6 +3216,37 @@ must say how to dump and restore it, or a deployment with backups refuses it
 (`blueprint-without-backup`). A gated app whose blueprint says the gate leaves
 something open past it, and enforces no setting to close it, is warned about
 (`gated-leaves-open`).
+
+**A catalog blueprint may declare a heartbeat**, for an app that knows
+something about itself no check from outside can ask, Eg: whether its
+settings still hold what the configuration says:
+
+```yaml
+apiVersion: paisans.blueprint/v2
+heartbeat:
+  name: "settings"   # the monitor is named "<app> — settings"
+```
+
+Each app of it gets a token, `apps.<app>.heartbeat_token`, generated at
+`init` (and by `apply`'s dry run, with the other generated secrets) in the
+site heartbeat token's shape, and refused by `render` when it is missing or of
+any other shape, monitor or not, so a monitor added later never meets an app
+without one. Every monitor's seed gets one push monitor per app,
+`<app> — <name>`, with the site heartbeat's interval, grace and threshold. The
+blueprint's templates read `.HeartbeatURLs`, every monitor's
+`https://<monitor hostname>/ping/<token>`, space separated, in app order, and
+empty in a deployment with no monitor, and hand it to a service of the
+blueprint's own that pushes. The URLs carry the token, so the template holding
+them is a `.secret.tmpl`. Every instance pushes to the one token and to every
+monitor, the one on its own site included, as the operators heartbeat does
+(see *The operators heartbeat is a service beside the reconciler*), so a
+cluster placed app keeps one history whichever instance pushes. `heartbeat` is
+read only from `apiVersion: paisans.blueprint/v2`, which is
+`paisans.blueprint/v1` with that one key: a toolkit that reads only v1 refuses
+the format by name and uses the newest catalog release it can read, rather
+than rendering the app without its monitor. `secrets rotate` replaces the
+token, by name or with `--all` (*A heartbeat token reaches the monitors before
+the pusher*).
 
 #### A blueprint ships a template set, not a single `.env`
 

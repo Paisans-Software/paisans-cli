@@ -583,6 +583,12 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.UptimeAdmin(app), nil
 		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
 			return secretsrotate.ContinuityHeartbeat(app, last), nil
+		case blueprints.HeartbeatTokenKey:
+			if w.cfg != nil {
+				if _, ok := blueprints.HeartbeatOf(w.cfg.Apps[app].Blueprint); ok {
+					return secretsrotate.AppHeartbeat(app), nil
+				}
+			}
 		}
 		if _, ok := secretsrotate.AppSelfBlueprint(last); ok {
 			return secretsrotate.AppSelf(app, last, costOf(w.cfg, app, last)), nil
@@ -767,6 +773,12 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			if has("apps." + app + "." + key) {
 				rs = append(rs, secretsrotate.ContinuityHeartbeat(app, key))
 			}
+		}
+	}
+	// Each app's own heartbeat, for a blueprint that declares one.
+	for _, app := range cfg.AppNames() {
+		if _, ok := blueprints.HeartbeatOf(cfg.Apps[app].Blueprint); ok && has("apps."+app+"."+blueprints.HeartbeatTokenKey) {
+			rs = append(rs, secretsrotate.AppHeartbeat(app))
 		}
 	}
 
