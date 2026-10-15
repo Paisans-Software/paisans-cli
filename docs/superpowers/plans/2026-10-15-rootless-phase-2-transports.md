@@ -1903,6 +1903,111 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+#### README passages beyond the list above
+
+Apply these in addition to the brief's README edits, in the same commit as the
+brief's docs changes. Line numbers are from README.md at the start of Task 6;
+locate each by its quoted text, not the number. Read every surrounding
+paragraph after editing: it must still read as one argument, describe current
+state only, and contain no em dashes.
+
+## A. Inside *A sudo that wants a password is asked for once, on a terminal* (~4809)
+
+Keep the heading text unchanged (other passages link to it).
+
+1. The brief's replacement of the opening paragraph stands.
+2. `gets it from the operator, once per site per run, on the controlling
+   terminal:` becomes `gets it from the operator, once per destination per run,
+   on the controlling terminal:`. The prompt example below it becomes:
+
+   ```
+   sudo password for owner@203.0.113.10, host home-a-01:
+   ```
+
+   (`host deployments` takes `--ssh` and names no site; the label comes from
+   `promptLabel` in `internal/apply/sudo.go`. Check the example against it.)
+3. The paragraph starting `The prompt names the site as \`paisans-stack.yaml\`
+   does and the name the host gives itself` is rewritten so it says the prompt
+   names the destination ssh reached and the name the host gives itself
+   (`uname -n`), that an address alone is often one the operator does not
+   recognise, and that the hostname says which machine answered. Keep its
+   second half (the hostname is left out when absent or outside letters,
+   digits, dots, hyphens and underscores, because a host must not write
+   terminal escapes into the prompt) unchanged. Add that a command given a
+   site (none today, but the transport supports it) prefixes `site <name>`,
+   only if the code does so; otherwise do not mention sites.
+4. In the paragraph starting `While the prompt waits, the progress display is
+   held.`, MOVE the sentences from `ssh asks on the terminal itself as well, to
+   accept a host key it does not know,` through `A key held by an agent (above)
+   is never asked for.` out of this section. Put them, adjusted to stand alone
+   (start with: `ssh asks on the terminal itself to accept a host key it does
+   not know, so every connection attempt ...`), as a new final paragraph of
+   *One connection per host, shared* (~4706). `(above)` still holds there,
+   since the agent is described at ~4651. The sudo paragraph keeps only what
+   is about the sudo prompt.
+5. Replace the paragraph and code block from `An unattended run needs
+   passwordless sudo for the ssh user, which is one line` through `and the
+   toolkit never makes it.` with:
+
+   ```
+   An unattended run of an owner's command needs a NOPASSWD sudoers rule for
+   the login `--ssh` names. Whether to write one is a decision about the host,
+   made by whoever owns it, and the toolkit never makes it.
+   ```
+
+   No sudoers example line.
+6. In the table row `wants a password, and there is no terminal (cron, CI)`,
+   keep the wording aligned with the code's message in `internal/apply/sudo.go`
+   (it says the ssh user; that user is the owner's login here). Leave it if it
+   already matches.
+
+## B. Elsewhere in README.md: passages that describe the sudo this task removes
+
+Each must match the code after Tasks 6 and 7. Where the code still does
+something different from the replacement below, make the text match the code
+and say so in the report.
+
+1. ~909: `server \`web-server show\` finds in front of it, read through the sudo
+   the run settled at its start, and` becomes `server \`web-server show\` finds
+   in front of it, read as the site's ssh user, and`.
+2. ~931: `reaching the monitor through the ssh and sudo the rest of its apply
+   uses` becomes `reaching the monitor through the ssh login the rest of its
+   apply uses`.
+3. ~1123-1127: `(\`docker ps\`, through sudo when docker refuses the ssh user)`
+   becomes `(\`docker ps\`)`, and `(\`sudo ss -ltnp\`)` becomes whatever
+   `internal/webserver/detect.go` actually runs after this task (read it). If
+   it still runs sudo through `webserver.Host.Sudo`, leave this sentence and
+   note it in the report.
+4. ~5585: `\`apply\` with no \`--site\` asks once for every site, at the point
+   where it settles \`sudo\` passwords, before its first step;` becomes
+   `\`apply\` with no \`--site\` asks once for every site, before its first step;`.
+5. ~5794-5797: `refuses as that command does, and the sudo password each host
+   asks for is asked once for the run, every one of them before the first step
+   (see *A sudo that wants a password is asked for once, on a terminal*). Then,
+   before` becomes `refuses as that command does. Then, before`.
+6. ~5824: `After \`configuration\`, \`sudo\` and \`etcd members\`,` becomes
+   `After \`configuration\` and \`etcd members\`,` (check the sentence still
+   parses).
+7. ~5890: `A sudo password or an ssh host key question a host asks during
+   prepare holds the block, one question at a time.` becomes `An ssh host key
+   question a host asks during prepare holds the block, one question at a
+   time.`
+
+## C. Not in this task
+
+Leave these alone; later phases own them: ~1403 (seed through sudo), ~1845-1849
+(registry claims through sudo), ~2504-2514 (deployed record read through sudo),
+~4355 (store with sudo), ~4978-4983 (inventory as root, beyond the brief's
+`--sudo=false` clause), ~5699 (journalctl through sudo), ~5756 (gathering with
+sudo), ~9113 (Leftovers row beyond the brief's clause).
+
+## Check
+
+`grep -n -i 'settle.*sudo\|sudo password each\|sudo the run\|\`sudo\` and' README.md`
+prints nothing.
+
+---
+
 ### Task 7: Checks and messages that assumed the sudo transport
 
 **Files:**
