@@ -257,7 +257,7 @@ func isHostname(s string) bool {
 }
 
 // sshProblems is structural's check of one site's ssh section.
-func sshProblems(name string, site Site, known map[string]Operator) []string {
+func sshProblems(name string, site Site, id string, known map[string]Operator) []string {
 	s := site.SSH
 	var problems []string
 	add := func(format string, args ...any) {
@@ -269,6 +269,8 @@ func sshProblems(name string, site Site, known map[string]Operator) []string {
 	}
 	if s.User != "" && !unixUser.MatchString(s.User) {
 		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters, or leave it out for the deployment's own user.", name, s.User)
+	} else if p := DeploymentUserProblem(s.User, id); s.User != "" && p != "" {
+		add("sites.%s.ssh.user: %s. host admit makes this user the deployment's and writes the operators' keys into it, so leave ssh.user out for the deployment's own user, or name another user of your own.", name, p)
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		add("sites.%s.ssh.port: %d is not a port. Give 1 to 65535, or leave it out for 22.", name, s.Port)

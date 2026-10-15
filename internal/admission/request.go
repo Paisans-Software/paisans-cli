@@ -94,9 +94,62 @@ func Build(cfg *config.Config, site string) (Request, error) {
 		last.Keys = append(last.Keys, key)
 	}
 	if problems := r.Check(); len(problems) > 0 {
+		for i, p := range problems {
+			problems[i] = r.withConfigKey(p, site)
+		}
 		return Request{}, &Error{What: "the request for " + site, Problems: problems}
 	}
 	return r, nil
+}
+
+// withConfigKey is a problem Check found, led by the configuration key the
+// operator edits to fix it and then the request's field, Eg:
+// sites.home-a.web_server.listen (web_server[0].listen): ...
+func (r Request) withConfigKey(problem, site string) string {
+	field, rest, ok := strings.Cut(problem, ": ")
+	if !ok {
+		return problem
+	}
+	var key string
+	switch name, _, _ := strings.Cut(field, "["); {
+	case field == "deployment":
+		key = "id"
+	case field == "user":
+		key = "sites." + site + ".ssh.user"
+	case field == "ssh_port":
+		key = "sites." + site + ".ssh.port"
+	case field == "listen_port":
+		key = "sites." + site + ".endpoint"
+	case field == "mesh_subnet":
+		key = "mesh.subnet"
+	case field == "address":
+		key = "sites." + site + ".address"
+	case name == "web_server":
+		var i int
+		if _, err := fmt.Sscanf(field, "web_server[%d]", &i); err == nil && i >= 0 && i < len(r.WebServer) {
+			switch {
+			case strings.HasSuffix(field, ".listen"):
+				key = "sites." + site + ".web_server.listen"
+			case strings.HasSuffix(field, ".hostname"):
+				key = "apps." + r.WebServer[i].App + ".hostname"
+			default:
+				key = "apps." + r.WebServer[i].App
+			}
+		}
+	case name == "operators":
+		key = "sites." + site + ".ssh.keys"
+		var i int
+		if _, err := fmt.Sscanf(field, "operators[%d]", &i); err == nil && i >= 0 && i < len(r.Operators) {
+			key = "operators." + r.Operators[i].Name
+			if strings.Contains(field, ".keys") {
+				key += ".keys"
+			}
+		}
+	}
+	if key == "" {
+		return problem
+	}
+	return key + " (" + field + "): " + rest
 }
 
 // canonicalKey is a public key line as type and base64 alone: its comment
@@ -152,14 +205,8 @@ func (r Request) Check() []string {
 	if !deployment.ValidID(r.Deployment) {
 		add("deployment: %q is not a deployment id", r.Deployment)
 	}
-	own := deployment.Deployment{ID: r.Deployment}.Prefix()
-	switch {
-	case !config.ValidUserName(r.User):
-		add("user: %q is not a user name paisans accepts", r.User)
-	case r.User == "root":
-		add("user: root is never a deployment's user")
-	case strings.HasPrefix(r.User, "paisans-") && deployment.ValidID(r.Deployment) && r.User != own:
-		add("user: %s is another deployment's name; this deployment's own user is %s", r.User, own)
+	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
+		add("user: %s", p)
 	}
 	if r.SSHPort < 1 || r.SSHPort > 65535 {
 		add("ssh_port: %d is not a port", r.SSHPort)

@@ -4689,7 +4689,11 @@ mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
 egress table accepts the mesh subnet before it drops the owner's loopback
 and link-local ranges, so a subnet over them would let the deployment reach
 what the table keeps it from. `host request` applies the same checks, so it
-never writes a request the owner's side would refuse.
+never writes a request the owner's side would refuse, and `validate` holds
+the configuration to each rule it can check from the file, `ssh.user`
+included, so a configuration it accepts gets a request. A refusal `host
+request` can still reach names the configuration key to change beside the
+request's field.
 
 #### Keys belong to operators, and sites name operators
 

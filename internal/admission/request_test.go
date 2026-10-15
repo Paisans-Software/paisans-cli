@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // What each role mix needs, and the rest of what Build reads from the site.
@@ -66,5 +67,44 @@ func TestBuildRefusesWhatParseWould(t *testing.T) {
 	var refused *admission.Error
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "overlaps 127.0.0.0/8") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// A refusal Build can still reach names the configuration key the operator
+// edits, beside the request's field.
+func TestBuildNamesTheConfigurationKey(t *testing.T) {
+	for _, c := range []struct {
+		site   string
+		mutate func(*config.Config)
+		want   string
+	}{
+		{"home-a", func(cfg *config.Config) {
+			s := cfg.Sites["home-a"]
+			s.SSH.User = "root"
+			cfg.Sites["home-a"] = s
+		}, "sites.home-a.ssh.user (user): root is never a deployment's user"},
+		{"status", func(cfg *config.Config) {
+			s := cfg.Sites["status"]
+			s.WebServer.Listen = "192.168.1.5:8480"
+			cfg.Sites["status"] = s
+		}, `sites.status.web_server.listen (web_server[0].listen): "192.168.1.5:8480" is not`},
+		{"home-a", func(cfg *config.Config) {
+			cfg.Mesh.Subnet = "127.0.0.0/24"
+			s := cfg.Sites["home-a"]
+			s.Address = "127.0.0.1"
+			cfg.Sites["home-a"] = s
+		}, "mesh.subnet (mesh_subnet): 127.0.0.0/24 overlaps 127.0.0.0/8"},
+		{"home-a", func(cfg *config.Config) {
+			s := cfg.Sites["home-a"]
+			s.Address = "10.44.0.255"
+			cfg.Sites["home-a"] = s
+		}, "sites.home-a.address (address): 10.44.0.255 is the subnet's network or broadcast address"},
+	} {
+		cfg := fixture(t)
+		c.mutate(cfg)
+		_, err := admission.Build(cfg, c.site)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("got %v\nwant it to say %q", err, c.want)
+		}
 	}
 }

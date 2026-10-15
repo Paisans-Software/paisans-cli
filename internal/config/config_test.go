@@ -1135,3 +1135,21 @@ func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {
 		}
 	}
 }
+
+// ssh.user is held to the rule a request's user is: never root, and never
+// another deployment's paisans- user, whose authorized_keys host admit would
+// otherwise write into. The deployment's own user and a user of the
+// owner's are accepted.
+func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
+	for _, c := range []struct{ user, want string }{
+		{"root", "sites.home-a.ssh.user: root is never a deployment's user"},
+		{"paisans-0a0b", "sites.home-a.ssh.user: paisans-0a0b is another deployment's name; this deployment's own user is paisans-f2a9"},
+		{"paisans-f2a9", ""},
+		{"ubuntu", ""},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "user: ubuntu", "user: "+c.user, 1))
+		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q", c.user, got)
+		}
+	}
+}

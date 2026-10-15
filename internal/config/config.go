@@ -1286,7 +1286,7 @@ func (c *Config) structural(noSubnet bool) error {
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
-		problems = append(problems, sshProblems(name, site, c.Operators)...)
+		problems = append(problems, sshProblems(name, site, c.ID, c.Operators)...)
 	}
 	problems = append(problems, c.operatorProblems()...)
 	for _, name := range c.AppNames() {
