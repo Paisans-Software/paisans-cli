@@ -17,6 +17,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
+- Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
 
@@ -44,8 +46,6 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - Errors refer to `paisans doctor` when its checks name the cause: a health gate TLS internal error on a hostname Caddy serves, an unreachable database or site, and `gateway move`'s token refusals.
 - `paisans doctor` runs its checks at once and prints each as it ends; a site that does not answer is one line naming what was not checked, and the failures are listed again, deepest first.
-- `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
-- Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - `paisans secrets rotate` asks at a terminal for a pasted secret's new value, the DNS token or an SMTP password, and `--all` includes them; a new DNS token is tried against the zone first.
 - The grant review lists each site's foundation images first, under `foundation images (required):`, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
 
