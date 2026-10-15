@@ -34,7 +34,10 @@ Founder decisions, 2026-10-15:
 * **The new command is `paisans host admit`, undone by `paisans host evict`.**
 * **Patroni's watchdog is the owner's to grant.** It reboots the whole
   machine. `host admit --watchdog` grants it; a data site on a host admitted
-  without it is refused.
+  without it is refused, whatever its `watchdog` mode. A Patroni member
+  without a watchdog can keep acting as leader after it has lost its lock,
+  so failover is not safe without one: `validate` refuses `watchdog: off` on
+  a data site.
 * **Ports below 1024 are the owner's to grant.** `host admit --public-ports`
   lowers `net.ipv4.ip_unprivileged_port_start` host wide and opens 80 and
   443. A gateway or a Caddy monitor on a host admitted without it is refused.
@@ -628,9 +631,6 @@ its.
 * **`br_netfilter` is host wide.** It sends bridged traffic on the owner's
   own bridges through their iptables rules. The system Docker usually loads
   it anyway; admit says so in the plan.
-* **`watchdog: off`.** A data site that declares it needs no device. Is it
-  allowed on a host admitted without `--watchdog`, or refused as the
-  decision above reads?
 * **The home directory.** `/home/paisans-<token>` holds the Docker data
   directory, so it has to be on a disk with room. Should admit take a
   `--home`?

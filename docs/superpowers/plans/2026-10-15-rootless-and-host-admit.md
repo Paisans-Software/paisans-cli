@@ -90,6 +90,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * The admission record is written mode 0644, owned by root, via temp and rename; a golden plan and a test assert the mode, and a re-run that finds it otherwise restores 0644.
 * `--public-ports` checks 80 and 443 before granting, as root: `ss -Hltnp`, the system Docker's published ports when its socket exists, and DNAT rules for either port in `nft list ruleset`. Anything found refuses the grant, naming the process, the container and compose project, or the rule, and naming `web_server.managed_by: external`. Golden plans for each of the three holders.
 * For a site with `managed_by: external`: detect the owner's web server as root, record it in the admission record, and warn in the plan when Caddy's admin API listens on TCP. Golden plans for Caddy with and without a TCP admin API, nginx and Apache, on the host and in a container.
+* A data site needs the `watchdog` grant whatever its `watchdog` mode, and `validate` refuses `watchdog: off` on a data site (`internal/config`, with a test and a CHANGELOG bullet).
 * Any boot-ordering mechanism R10 calls for lands here.
 * README: the registry claim passages ("claim through sudo, since the registry is root's", under the registry section) say the claim happens in `host admit`.
 
@@ -146,5 +147,4 @@ Depends on: everything.
 
 | Question (spec *Open*) | Blocks |
 |---|---|
-| `watchdog: off` on a host admitted without `--watchdog` | phase 5 refusal rule |
 | `--home` for admit | phase 5 |
