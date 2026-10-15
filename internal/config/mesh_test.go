@@ -211,11 +211,11 @@ func TestCheckMeshSubnet(t *testing.T) {
 		"10.44.0.0/024":  {"is not written in its canonical form, 10.44.0.0/24"},
 		"fd00::/64":      {"is not IPv4"},
 		"10.44.0.0":      {"is not a network in CIDR notation"},
-		"10.44.0.0/16":   {"is larger than a /24"},
-		"127.0.0.0/24":   {"overlaps 127.0.0.0/8"},
-		"0.0.0.0/0":      {"is larger than a /24", "overlaps 0.0.0.0/8", "overlaps 127.0.0.0/8", "overlaps 169.254.0.0/16", "overlaps 224.0.0.0/3"},
-		"169.254.1.0/24": {"overlaps 169.254.0.0/16"},
-		"240.0.0.0/24":   {"overlaps 224.0.0.0/3"},
+		"10.44.0.0/16":   {"is larger than a /24, the largest a mesh may be, so it cannot take in an owner's LAN"},
+		"127.0.0.0/24":   {"overlaps 127.0.0.0/8, which the deployment must never reach"},
+		"0.0.0.0/0":      {"is larger than a /24, the largest a mesh may be, so it cannot take in an owner's LAN", "overlaps 0.0.0.0/8, which the deployment must never reach", "overlaps 127.0.0.0/8, which the deployment must never reach", "overlaps 169.254.0.0/16, which the deployment must never reach", "overlaps 224.0.0.0/3, which the deployment must never reach"},
+		"169.254.1.0/24": {"overlaps 169.254.0.0/16, which the deployment must never reach"},
+		"240.0.0.0/24":   {"overlaps 224.0.0.0/3, which the deployment must never reach"},
 	} {
 		network, problems := config.CheckMeshSubnet(subnet)
 		if strings.Join(problems, "|") != strings.Join(want, "|") {

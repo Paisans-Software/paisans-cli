@@ -63,9 +63,9 @@ func MeshReservedOverlaps(mesh *net.IPNet) []string {
 // for mesh.subnet, by a request for mesh_subnet and by the WireGuard
 // helper's renderer: subnet as a network, and what is wrong with it. A
 // subnet ParseMeshSubnet refuses gives its phrase alone and no network;
-// otherwise each problem is one phrase, "is larger than a /24" for a prefix
-// shorter than MeshMinPrefix and "overlaps 127.0.0.0/8" for each reserved
-// range it overlaps. No problems means the subnet may be a mesh.
+// otherwise each problem is one phrase, "is larger than a /24, ..." for a
+// prefix shorter than MeshMinPrefix and "overlaps 127.0.0.0/8, ..." for each
+// reserved range it overlaps, each saying why. No problems means the subnet may be a mesh.
 func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
 	network, p := ParseMeshSubnet(subnet)
 	if p != "" {
@@ -73,10 +73,10 @@ func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
 	}
 	var problems []string
 	if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
-		problems = append(problems, fmt.Sprintf("is larger than a /%d", MeshMinPrefix))
+		problems = append(problems, fmt.Sprintf("is larger than a /%d, the largest a mesh may be, so it cannot take in an owner's LAN", MeshMinPrefix))
 	}
 	for _, r := range MeshReservedOverlaps(network) {
-		problems = append(problems, "overlaps "+r)
+		problems = append(problems, "overlaps "+r+", which the deployment must never reach")
 	}
 	return network, problems
 }
