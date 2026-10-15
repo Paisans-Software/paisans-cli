@@ -89,6 +89,37 @@ func TestGoldenTree(t *testing.T) {
 	compareTrees(t, golden, dir)
 }
 
+// The mesh file is the deployment's own, under its root, where apply writes
+// it as the deployment's user; the WireGuard helper installs it in
+// /etc/wireguard. It carries no hook: the helper refuses PreUp, PostUp,
+// PreDown and PostDown, since wg-quick runs them as root, and a relaying
+// site's forwarding is the host's sysctl.
+func TestTheMeshFileIsTheDeploymentsOwnAndRunsNothing(t *testing.T) {
+	plan := build(t)
+	d := fixture(t).Deployment()
+	seen := 0
+	for _, f := range plan.Files {
+		site, rel, _ := strings.Cut(f.Path, "/")
+		if !strings.HasSuffix(rel, ".conf") || !strings.Contains(rel, d.Interface()) {
+			continue
+		}
+		seen++
+		if rel != "srv/paisans/f2a9/psns-f2a9.conf" {
+			t.Errorf("%s renders its mesh file at %s", site, rel)
+		}
+		for _, line := range strings.Split(f.Content, "\n") {
+			key, _, _ := strings.Cut(strings.TrimSpace(line), "=")
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "preup", "postup", "predown", "postdown":
+				t.Errorf("%s's mesh file runs a command: %q", site, line)
+			}
+		}
+	}
+	if seen != 4 {
+		t.Errorf("%d mesh files rendered, want one for each of the fixture's four sites", seen)
+	}
+}
+
 // Determinism is not a nicety: rendering twice must produce byte identical
 // output, or a diff between two renders says nothing about what changed.
 func TestRenderIsDeterministic(t *testing.T) {
@@ -566,14 +597,14 @@ func TestWireGuardInterfaceAndListenPort(t *testing.T) {
 			t.Errorf("%s is still named for wg0", f.Path)
 		}
 	}
-	vmConf, ok := files["vm/etc/wireguard/psns-f2a9.conf"]
+	vmConf, ok := files["vm/srv/paisans/f2a9/psns-f2a9.conf"]
 	if !ok {
-		t.Fatal("no vm/etc/wireguard/psns-f2a9.conf was rendered")
+		t.Fatal("no vm/srv/paisans/f2a9/psns-f2a9.conf was rendered")
 	}
 	if !strings.Contains(vmConf, "\nListenPort = 51999\n") {
 		t.Errorf("vm does not listen on its endpoint's port:\n%s", vmConf)
 	}
-	home := files["home-a/etc/wireguard/psns-f2a9.conf"]
+	home := files["home-a/srv/paisans/f2a9/psns-f2a9.conf"]
 	if home == "" || strings.Contains(home, "ListenPort") {
 		t.Errorf("home-a, which has no endpoint, has a ListenPort:\n%s", home)
 	}
@@ -2616,7 +2647,7 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 		}
 	}
 	sort.Strings(mine)
-	want := "etc/wireguard/psns-f2a9.conf,srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh"
+	want := "srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
 	if got := strings.Join(mine, ","); got != want {
 		t.Fatalf("a storage site renders %s, want %s", got, want)
 	}
@@ -2631,8 +2662,8 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 	}
 	// It is a peer on the mesh like any other site; which sites dial it
 	// directly is the mesh's rule, not this role's.
-	if !strings.Contains(files["vm/etc/wireguard/psns-f2a9.conf"], "# store\n") {
-		t.Errorf("the gateway's mesh has no peer for the storage site:\n%s", files["vm/etc/wireguard/psns-f2a9.conf"])
+	if !strings.Contains(files["vm/srv/paisans/f2a9/psns-f2a9.conf"], "# store\n") {
+		t.Errorf("the gateway's mesh has no peer for the storage site:\n%s", files["vm/srv/paisans/f2a9/psns-f2a9.conf"])
 	}
 }
 
@@ -2657,7 +2688,7 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	for _, f := range plan.Files {
 		have[f.Path] = true
 	}
-	for _, want := range []string{"mon/etc/wireguard/psns-f2a9.conf", "mon/srv/paisans/f2a9/health/compose.yaml", "mon/srv/paisans/f2a9/health/monitors.json"} {
+	for _, want := range []string{"mon/srv/paisans/f2a9/psns-f2a9.conf", "mon/srv/paisans/f2a9/health/compose.yaml", "mon/srv/paisans/f2a9/health/monitors.json"} {
 		if !have[want] {
 			t.Errorf("%s was not rendered", want)
 		}
@@ -2954,9 +2985,9 @@ func TestPeersDialTheEffectiveEndpoint(t *testing.T) {
 			var home, vmConf string
 			for _, f := range plan.Files {
 				switch f.Path {
-				case "home-a/etc/wireguard/psns-f2a9.conf":
+				case "home-a/srv/paisans/f2a9/psns-f2a9.conf":
 					home = f.Content
-				case "vm/etc/wireguard/psns-f2a9.conf":
+				case "vm/srv/paisans/f2a9/psns-f2a9.conf":
 					vmConf = f.Content
 				}
 			}

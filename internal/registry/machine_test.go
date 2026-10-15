@@ -28,7 +28,7 @@ func (h *machineHost) ReadFile(path string) (string, bool, error) {
 
 func (h *machineHost) Describe() string { return "ubuntu@203.0.113.9" }
 
-const conf = "/etc/wireguard/psns-f2a9.conf"
+const conf = "/srv/paisans/f2a9/psns-f2a9.conf"
 
 func machineConfig() *config.Config {
 	return &config.Config{

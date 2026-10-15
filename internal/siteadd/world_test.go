@@ -171,7 +171,7 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}
@@ -342,7 +342,7 @@ func (w *world) stats(site string) (string, error) {
 // interfaces are up.
 func (w *world) handshakes(h *host) string {
 	var b strings.Builder
-	mine := h.files["/etc/wireguard/psns-f2a9.conf"]
+	mine := h.files["/srv/paisans/f2a9/psns-f2a9.conf"]
 	for _, name := range w.cfg.SiteNames() {
 		if name == h.name {
 			continue
@@ -356,7 +356,7 @@ func (w *world) handshakes(h *host) string {
 			continue
 		}
 		stamp := 0
-		if h.wgUp && other.wgUp && strings.Contains(other.files["/etc/wireguard/psns-f2a9.conf"], w.key(h.name)) {
+		if h.wgUp && other.wgUp && strings.Contains(other.files["/srv/paisans/f2a9/psns-f2a9.conf"], w.key(h.name)) {
 			stamp = 990
 		}
 		fmt.Fprintf(&b, "%s\t%d\n", key, stamp)

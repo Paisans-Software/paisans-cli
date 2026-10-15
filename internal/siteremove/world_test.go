@@ -40,7 +40,7 @@ const (
 	ourID   = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 	otherID = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
 	root    = "/srv/paisans/f2a9"
-	wgConf  = "/etc/wireguard/psns-f2a9.conf"
+	wgConf  = "/srv/paisans/f2a9/psns-f2a9.conf"
 	record  = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
 	keysAt  = "/home/ubuntu/.ssh/authorized_keys"
 	alice   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
@@ -610,7 +610,7 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}

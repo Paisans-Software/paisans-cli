@@ -20,7 +20,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-const wgConf = "/etc/wireguard/psns-f2a9.conf"
+const wgConf = "/srv/paisans/f2a9/psns-f2a9.conf"
 
 var (
 	privateRe = regexp.MustCompile(`(?m)^PrivateKey = (\S+)`)

@@ -2,11 +2,6 @@
   "version": 1,
   "files": [
     {
-      "path": "etc/wireguard/psns-f2a9.conf",
-      "sha256": "dda464d7c0af8594e3ccf85eeb55fb53b8f9f94910eee0162dd36d8ef380022b",
-      "mode": "0600"
-    },
-    {
       "path": "srv/paisans/f2a9/health/.env",
       "sha256": "0817453ab7e1334e19d91465280751f16b0e9518fa316fea6ea6ff284274d1b0",
       "mode": "0600"
@@ -40,6 +35,11 @@
       "path": "srv/paisans/f2a9/infra/compose.yaml",
       "sha256": "08d813aab28144ae3b167a2d91759fd37a5a4d55d55822edadd51d6931d47d5d",
       "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/psns-f2a9.conf",
+      "sha256": "8553386c2e6770de48b7ba7d45585507cf146b060ddddefeecbbbd7c0ebbdaf1",
+      "mode": "0600"
     }
   ]
 }

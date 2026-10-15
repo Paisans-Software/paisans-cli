@@ -558,7 +558,7 @@ func DatabaseApps(apps ...string) Option {
 }
 
 // Scope restricts an apply to the named files, as paths relative to the
-// site's root (Eg: etc/wireguard/psns-f2a9.conf). It is for a staged
+// site's root (Eg: srv/paisans/f2a9/psns-f2a9.conf). It is for a staged
 // operation such as `site add`, which has to move one file on every site and
 // nothing else: the new peer goes into the WireGuard file on every site before etcd may change, and
 // HAProxy's backend list changes on a site whose patroni.env changed too,
@@ -1660,7 +1660,7 @@ func heldRoute(exceptSet map[string]bool, file render.File, change Change) bool 
 
 // stackOf returns the stack directory a rendered path belongs to, empty when it
 // belongs to none. `srv/paisans/f2a9/talk/.env` is talk;
-// `etc/wireguard/psns-f2a9.conf` is not a stack at all.
+// `srv/paisans/f2a9/psns-f2a9.conf`, directly under the root, is not a stack at all.
 func stackOf(rel string) string {
 	_, stack, _, ok := deployment.SplitRel(rel)
 	if !ok {

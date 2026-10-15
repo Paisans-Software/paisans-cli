@@ -179,13 +179,15 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	// Two files at one path would leave one of them unwritten and the other
 	// reviewed and applied as if it were both (Eg: an app named for the
 	// infrastructure stack), so the render stops rather than choose.
-	// Nothing leaves the deployment's own directory but the WireGuard file
-	// wg-quick reads from /etc/wireguard: apply writes each file as root at
-	// its path, so a path that walks out would be written anywhere.
-	root, wg := cfg.Deployment().RelPath()+"/", cfg.Deployment().WireGuardConf()
+	// Nothing leaves the deployment's own directory, the mesh file included:
+	// apply writes each file at its path as the deployment's user, and the
+	// mesh file reaches /etc/wireguard only through the WireGuard helper,
+	// which checks it first. A path that walks out is refused here rather
+	// than written wherever it points.
+	root := cfg.Deployment().RelPath() + "/"
 	for _, f := range files {
 		_, rel := splitSite(f.Path)
-		if rel != path.Clean(rel) || path.IsAbs(rel) || (!strings.HasPrefix(rel, root) && rel != wg) {
+		if rel != path.Clean(rel) || path.IsAbs(rel) || !strings.HasPrefix(rel, root) {
 			return nil, fmt.Errorf("the configuration renders %s, outside the deployment's own directory", f.Path)
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-const wgFile = "etc/wireguard/psns-f2a9.conf"
+const wgFile = "srv/paisans/f2a9/psns-f2a9.conf"
 
 // appliedHost is home-a after a whole first apply of the fixture, with psns-f2a9 up.
 func appliedHost(t *testing.T) *fakeHost {

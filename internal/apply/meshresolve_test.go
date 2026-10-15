@@ -81,9 +81,9 @@ func TestHostnameEndpointsAreFlushedAndResolvedBeforeTheMesh(t *testing.T) {
 func TestASyncedMeshResolvesItsEndpointsFirst(t *testing.T) {
 	fastResolve(t)
 	host := applied(t, "home-a")
-	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
-		host.files["/etc/wireguard/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
-	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	host.files["/srv/paisans/f2a9/psns-f2a9.conf"] = strings.Replace(
+		host.files["/srv/paisans/f2a9/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
+	adopt(t, host, "/srv/paisans/f2a9/psns-f2a9.conf")
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)

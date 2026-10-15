@@ -91,9 +91,9 @@ func TestInfraServicesAreTheTemplates(t *testing.T) {
 	}
 }
 
-// Nothing the render writes leaves the deployment's root, except the
-// WireGuard file wg-quick reads where it reads it; an app whose name walks
-// out of the root is refused rather than written there.
+// Nothing the render writes leaves the deployment's root, the mesh file
+// included; an app whose name walks out of the root is refused rather than
+// written there.
 func TestNoFileLeavesTheDeploymentRoot(t *testing.T) {
 	for _, name := range []string{"../x", "..", "../../../etc/cron.d", "."} {
 		cfg := fixture(t)

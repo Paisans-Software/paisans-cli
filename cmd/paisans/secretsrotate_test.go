@@ -123,7 +123,7 @@ func (f rotateFake) Run(command string) (string, error) {
 func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.Run(command) }
 
 func (f rotateFake) ReadFile(path string) (string, bool, error) {
-	if path == registry.Path || strings.Contains(path, "wireguard") {
+	if path == registry.Path || strings.HasSuffix(path, "/psns-f2a9.conf") {
 		return "", false, nil
 	}
 	return "", false, errors.New("fake: no file here")

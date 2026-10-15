@@ -124,7 +124,7 @@ func TestOurOwnDeploymentIsClean(t *testing.T) {
 		}
 	}
 	h := cleanHost()
-	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"etc/wireguard/psns-f2a9.conf","sha256":"x","mode":"0600"}]}`
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"srv/paisans/f2a9/psns-f2a9.conf","sha256":"x","mode":"0600"}]}`
 	h.answers["ip -o link"] += "4: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000\\    link/none\n"
 	h.answers["ip -j route"] = `[{"dst":"default","dev":"eth0"},{"dst":"10.44.0.0/24","dev":"psns-f2a9"},{"dst":"172.18.0.0/16","dev":"br-` + id("5")[:12] + `"}]`
 	h.answers["docker inspect"] = fmt.Sprintf(`{"id":%q,"name":"/paisans-f2a9-infra-patroni-1","pid":1500,"labels":{"com.docker.compose.project":"paisans-f2a9-infra","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ports":{}}

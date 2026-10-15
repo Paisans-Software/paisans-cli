@@ -156,12 +156,12 @@ func TestAFailedMeshGateRollsBack(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
 	w.noPing = true
-	before := w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"]
+	before := w.hosts["home-a"].files["/srv/paisans/f2a9/psns-f2a9.conf"]
 	err := siteadd.Execute(build(t, w))
 	if err == nil || !strings.Contains(err.Error(), "stage 2") {
 		t.Fatalf("want a stage 2 failure, got %v", err)
 	}
-	if w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"] != before {
+	if w.hosts["home-a"].files["/srv/paisans/f2a9/psns-f2a9.conf"] != before {
 		t.Error("home-a's psns-f2a9.conf was not restored")
 	}
 	if w.hosts["home-a"].ran("member add") > 0 {

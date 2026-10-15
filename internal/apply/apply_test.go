@@ -223,7 +223,7 @@ func (h *fakeHost) Run(command string) (string, error) {
 		}
 		address := h.wgAddress
 		if address == "" {
-			for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+			for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
 				if v, ok := strings.CutPrefix(line, "Address = "); ok {
 					address = v
 				}
@@ -903,9 +903,9 @@ func TestAnUpMeshWithAnUnchangedFileIsLeftAlone(t *testing.T) {
 // enough to start an election.
 func TestAPeerChangeIsSyncedNotRestarted(t *testing.T) {
 	host := applied(t, "home-a")
-	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
-		host.files["/etc/wireguard/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
-	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	host.files["/srv/paisans/f2a9/psns-f2a9.conf"] = strings.Replace(
+		host.files["/srv/paisans/f2a9/psns-f2a9.conf"], "PersistentKeepalive = 25", "PersistentKeepalive = 30", 1)
+	adopt(t, host, "/srv/paisans/f2a9/psns-f2a9.conf")
 
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
@@ -929,9 +929,9 @@ func TestAPeerChangeIsSyncedNotRestarted(t *testing.T) {
 // leave the old one in place. That change needs a restart.
 func TestAnAddressChangeRestartsTheMesh(t *testing.T) {
 	host := applied(t, "home-a")
-	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
-		host.files["/etc/wireguard/psns-f2a9.conf"], "Address = 10.44.0.1/24", "Address = 10.44.0.9/24", 1)
-	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	host.files["/srv/paisans/f2a9/psns-f2a9.conf"] = strings.Replace(
+		host.files["/srv/paisans/f2a9/psns-f2a9.conf"], "Address = 10.44.0.1/24", "Address = 10.44.0.9/24", 1)
+	adopt(t, host, "/srv/paisans/f2a9/psns-f2a9.conf")
 
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
@@ -1094,9 +1094,9 @@ func TestAMeshFailureWithoutAJournalStillNamesTheMesh(t *testing.T) {
 // and a restart can fail to bring it back.
 func TestARestartedMeshIsReadBack(t *testing.T) {
 	host := applied(t, "home-a")
-	host.files["/etc/wireguard/psns-f2a9.conf"] = strings.Replace(
-		host.files["/etc/wireguard/psns-f2a9.conf"], "Address = 10.44.0.1/24", "Address = 10.44.0.9/24", 1)
-	adopt(t, host, "/etc/wireguard/psns-f2a9.conf")
+	host.files["/srv/paisans/f2a9/psns-f2a9.conf"] = strings.Replace(
+		host.files["/srv/paisans/f2a9/psns-f2a9.conf"], "Address = 10.44.0.1/24", "Address = 10.44.0.9/24", 1)
+	adopt(t, host, "/srv/paisans/f2a9/psns-f2a9.conf")
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)

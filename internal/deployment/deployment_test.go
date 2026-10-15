@@ -54,7 +54,8 @@ func TestNamesAndPathsDeriveFromTheToken(t *testing.T) {
 		d.RelPath("talk", ".env"): "srv/paisans/f2a9/talk/.env",
 		d.LabelFilter():           "label=community.paisans.deployment=" + fixtureID,
 		d.Interface():             "psns-f2a9",
-		d.WireGuardConf():         "etc/wireguard/psns-f2a9.conf",
+		d.WireGuardConf():         "srv/paisans/f2a9/psns-f2a9.conf",
+		d.WireGuardInstalled():    "/etc/wireguard/psns-f2a9.conf",
 		d.WireGuardUnit():         "wg-quick@psns-f2a9",
 	} {
 		if got != want {
@@ -68,7 +69,7 @@ func TestSplitRel(t *testing.T) {
 	if !ok || token != "f2a9" || stack != "talk" || rest != "config/x.yaml" {
 		t.Errorf("SplitRel = %q %q %q %v", token, stack, rest, ok)
 	}
-	for _, rel := range []string{"etc/wireguard/psns-f2a9.conf", "srv/talk/.env", "srv/paisans/f2a9/talk", "srv/paisans/f2a9/.paisans-manifest.json"} {
+	for _, rel := range []string{"srv/paisans/f2a9/psns-f2a9.conf", "srv/talk/.env", "srv/paisans/f2a9/talk", "srv/paisans/f2a9/.paisans-manifest.json"} {
 		if _, _, _, ok := deployment.SplitRel(rel); ok {
 			t.Errorf("SplitRel(%q) reported a stack", rel)
 		}
