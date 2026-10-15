@@ -80,6 +80,9 @@ func TestCheckRefuses(t *testing.T) {
 		{"a listen on port 0", func(r *admission.Request) {
 			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1:0"}}
 		}, `web_server[0].listen: "127.0.0.1:0" is not`},
+		{"an IPv6 loopback listen", func(r *admission.Request) {
+			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "[::1]:8480"}}
+		}, `web_server[0].listen: "[::1]:8480" is not`},
 		{"a hostname twice", func(r *admission.Request) {
 			r.WebServer = []admission.WebApp{
 				{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1:8480"},

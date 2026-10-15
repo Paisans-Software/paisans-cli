@@ -292,7 +292,7 @@ func (r Request) proxiesToThisHost(listen string) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.String() == host && (ip.IsLoopback() || host == r.Address)
+	return ip != nil && ip.To4() != nil && ip.String() == host && (ip.IsLoopback() || host == r.Address)
 }
 
 // Error is a request, or a record, refused, with every problem found.
