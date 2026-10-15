@@ -61,13 +61,11 @@ nothing. Their dry runs show the same review and ask nothing (see *`apply` and
 `host prepare` review what `paisans-stack.yaml` grants* in `README.md`).
 
 A site that leaves `ssh.user` out is reached as the deployment's own user,
-`paisans-<token>`. The first run with `--execute` that logs in to it writes
-that name into the site's `ssh.user`, so the file names who logs in; a name
-already there is never changed, and a write that fails is a warning, since the
-login it records has worked. A run without `--execute` writes nothing and notes
-what `--execute` records, and so does every command that only reads
-(`doctor`, `preflight`, `web-server show`) or whose `--execute` changes no host
-(`doctor`, `config pull`, `config recover`).
+`paisans-<token>`. Any run with `--execute` that logs in to it writes that
+name into the site's `ssh.user`, whatever the command, so the file names who
+logs in; a name already there is never changed, and a write that fails is a
+warning, since the login it records has worked. A run without `--execute`
+writes nothing and notes what `--execute` records.
 
 A command exits 0 when it did what it was asked, including when it ends on a
 warning (`!`, `WARN` off a terminal), 1 when it stopped on a failure or a

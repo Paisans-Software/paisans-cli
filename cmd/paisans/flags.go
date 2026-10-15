@@ -58,7 +58,7 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		routeLoginNotes(r)
 		// Once a command run with --execute has set it, the steps it runs
 		// in this process leave it set, whatever their own flags.
-		if executesOnHosts(fs) {
+		if executes(fs) {
 			recordLogins = true
 		}
 		return r

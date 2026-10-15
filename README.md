@@ -4617,12 +4617,12 @@ the host either way.
 A host refuses that user until its owner has admitted the deployment, so a
 command whose login as the default user is refused says the site is not
 admitted there, with the `paisans host request --site <site>` line whose file
-the owner admits it from, rather than that a key was not accepted. The first
-run with `--execute` that logs in as the default writes it into `user`, so the
-file names who logs in; a name already there is never changed, and a write
-that fails is a warning, since the login it records has worked. A run without
-`--execute`, and a command that only reads, writes nothing: it notes what
-`--execute` records, as it does for `arch`, because a dry run changes nothing.
+the owner admits it from, rather than that a key was not accepted. Any run with
+`--execute` that logs in as the default writes it into `user`, whatever the
+command, so the file names who logs in; a name already there is never
+changed, and a write that fails is a warning, since the login it records has
+worked. A run without `--execute` writes nothing: it notes what `--execute`
+records, as it does for `arch`, because a dry run changes nothing.
 
 Every command runs docker against the login user's own rootless daemon: its
 first command on a site asks `id -u`, once a run, and every command after it

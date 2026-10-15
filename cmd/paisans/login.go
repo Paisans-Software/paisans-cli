@@ -93,23 +93,16 @@ var loginReporter ui.Reporter
 func routeLoginNotes(r ui.Reporter) { loginReporter = r }
 
 // recordLogins is whether the run writes a login user it records: true
-// once a command run with --execute that changes hosts has started, set by
-// commonFlags (executesOnHosts), and left so for the steps that command
-// runs in this process. Any other run, read-only commands included, writes
-// nothing and only says what --execute records, as an architecture read
-// does.
+// once a command run with --execute has started, whatever the command, set
+// by commonFlags (executes), and left so for the steps that command runs in
+// this process. A run without --execute writes nothing and only says what
+// --execute records, as an architecture read does. Founder decision.
 var recordLogins bool
 
-// executeChangesNoHost names the commands whose --execute writes only on
-// this workstation, or only tidies paisans-stack.yaml, and so changes no
-// host: they record nothing either.
-var executeChangesNoHost = map[string]bool{"doctor": true, "config pull": true, "config recover": true}
-
-// executesOnHosts reports whether fs, parsed, is a command run with
-// --execute that changes hosts.
-func executesOnHosts(fs *flag.FlagSet) bool {
+// executes reports whether fs, parsed, is a command run with --execute.
+func executes(fs *flag.FlagSet) bool {
 	f := fs.Lookup("execute")
-	if f == nil || executeChangesNoHost[fs.Name()] {
+	if f == nil {
 		return false
 	}
 	g, ok := f.Value.(flag.Getter)

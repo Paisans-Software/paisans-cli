@@ -28,8 +28,8 @@ func loginNotes(t *testing.T) *ui.Recorder {
 	return rec
 }
 
-// executing makes the test's logins those of a command run with --execute
-// that changes hosts, which write the user they record.
+// executing makes the test's logins those of a command run with --execute,
+// which write the user they record.
 func executing(t *testing.T) {
 	t.Helper()
 	resetLogins(t)
@@ -215,17 +215,17 @@ func TestALoginWithoutExecuteRecordsNothing(t *testing.T) {
 	}
 }
 
-// Only a command run with --execute that changes hosts records: doctor's
-// --execute tidies the file alone, and config pull and recover write only
-// this workstation's files.
-func TestOnlyAnExecuteThatChangesHostsRecords(t *testing.T) {
+// Any command run with --execute records, whatever it changes, and a run
+// without it does not.
+func TestOnlyARunWithExecuteRecords(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		execute bool
 		want    bool
 	}{
 		{"apply", true, true}, {"apply", false, false}, {"preflight", false, false},
-		{"doctor", true, false}, {"config pull", true, false}, {"config recover", true, false},
+		{"doctor", true, true}, {"doctor", false, false}, {"config pull", true, true},
+		{"config recover", true, true}, {"secrets prune", true, true}, {"secrets prune", false, false},
 	} {
 		fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
 		if c.name != "preflight" {
@@ -238,7 +238,7 @@ func TestOnlyAnExecuteThatChangesHostsRecords(t *testing.T) {
 		if err := fs.Parse(args); err != nil {
 			t.Fatal(err)
 		}
-		if got := executesOnHosts(fs); got != c.want {
+		if got := executes(fs); got != c.want {
 			t.Errorf("%s execute=%v records %v, want %v", c.name, c.execute, got, c.want)
 		}
 	}
@@ -398,18 +398,22 @@ func TestADryRunApplyLeavesTheFile(t *testing.T) {
 	}
 }
 
-// doctor reads, with or without its --execute, which tidies the file
-// alone: it records no user.
-func TestDoctorRecordsNoUser(t *testing.T) {
-	for _, args := range [][]string{nil, {"--execute"}} {
+// doctor without --execute records no user, and with it records the user
+// of the site it logged in to, as any run with --execute does.
+func TestDoctorRecordsOnlyWithExecute(t *testing.T) {
+	for _, execute := range []bool{false, true} {
 		path := fixtureWithoutUsers(t)
 		before, _ := os.ReadFile(path)
 		failingSSH(t)
 		withRecorder(t, false)
-		_ = runDoctor(append([]string{"--config", path, "--site", "vm"}, args...))
+		args := []string{"--config", path, "--site", "vm"}
+		if execute {
+			args = append(args, "--execute")
+		}
+		_ = runDoctor(args)
 		after, _ := os.ReadFile(path)
-		if string(after) != string(before) {
-			t.Errorf("doctor %v changed the file:\n%s", args, after)
+		if changed := string(after) != string(before); changed != execute {
+			t.Errorf("doctor execute=%v changed the file %v:\n%s", execute, changed, after)
 		}
 	}
 }
