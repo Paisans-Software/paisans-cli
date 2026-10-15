@@ -49,7 +49,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, field := range []string{"peers", "latest-handshakes", "public-key"} {
+	for _, field := range []string{"peers", "latest-handshakes", "public-key", "allowed-ips", "persistent-keepalive", "listen-port"} {
 		if out, err := w.Show(field); err != nil || out != "peer\n" {
 			t.Errorf("Show(%s) = %q, %v", field, out, err)
 		}
@@ -58,7 +58,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	const helper = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
-	want := []string{helper + "put", helper + "up", helper + "restart", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "log"}
+	want := []string{helper + "put", helper + "up", helper + "restart", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "show allowed-ips", helper + "show persistent-keepalive", helper + "show listen-port", helper + "log"}
 	if strings.Join(h.ran, "\n") != strings.Join(want, "\n") {
 		t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(h.ran, "\n"), strings.Join(want, "\n"))
 	}
@@ -71,13 +71,38 @@ func TestWGHelperCommandLines(t *testing.T) {
 // here, before it reaches the host.
 func TestWGHelperShowRefusesAnotherField(t *testing.T) {
 	h := &helperHost{}
-	for _, field := range []string{"", "dump", "peers; id", "private-key"} {
+	for _, field := range []string{"", "dump", "peers; id", "private-key", "endpoints", "preshared-keys"} {
 		if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).Show(field); err == nil {
 			t.Errorf("Show(%q) was not refused", field)
 		}
 	}
 	if len(h.ran) != 0 {
 		t.Errorf("ran %q", h.ran)
+	}
+}
+
+// ShowFields reads every field in one command, the helper once per field
+// behind a line naming it, and hands back each field's own lines.
+func TestWGHelperShowFieldsIsOneCommand(t *testing.T) {
+	h := &helperHost{out: "paisans-show:public-key\nkey\npaisans-show:peers\na\nb\n"}
+	got, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "peers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const helper = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	want := "echo paisans-show:public-key && " + helper + "show public-key && echo paisans-show:peers && " + helper + "show peers"
+	if len(h.ran) != 1 || h.ran[0] != want {
+		t.Errorf("ran %q, want %q", h.ran, want)
+	}
+	if got["public-key"] != "key\n" || got["peers"] != "a\nb\n" {
+		t.Errorf("read %q", got)
+	}
+	if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "endpoints"); err == nil {
+		t.Error("ShowFields took endpoints")
+	}
+	h.out = "paisans-show:public-key\nkey\n"
+	if _, err := (apply.WGHelper{T: h, Iface: "psns-f2a9"}).ShowFields("public-key", "peers"); err == nil {
+		t.Error("ShowFields took output without a field it asked for")
 	}
 }
 

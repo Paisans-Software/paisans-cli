@@ -369,7 +369,7 @@ func TestPutRefusesALinkedConfDirectory(t *testing.T) {
 func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"bogus"}, {"put", "extra"}, {"up", "now"}, {"restart", "-f"}, {"sync", "x"},
-		{"show"}, {"show", "dump"}, {"show", "private-key"}, {"show", "peers", "extra"}, {"log", "-n", "1000"},
+		{"show"}, {"show", "dump"}, {"show", "private-key"}, {"show", "endpoints"}, {"show", "preshared-keys"}, {"show", "peers", "extra"}, {"log", "-n", "1000"},
 	} {
 		for _, shell := range shells() {
 			script, dir := helperIn(t, 51820, "10.44.0.0/24")
@@ -379,6 +379,23 @@ func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 			}
 			if names := entries(t, dir); len(names) != 0 {
 				t.Errorf("%s %v: left %v", shell, args, names)
+			}
+		}
+	}
+}
+
+// show reads only fields the interface's own conf already holds, or that
+// say how it is doing: never a key it keeps secret, and never where its
+// peers last sent from.
+func TestTheHelperShowsItsReadOnlyFields(t *testing.T) {
+	for _, field := range []string{"peers", "latest-handshakes", "public-key", "allowed-ips", "persistent-keepalive", "listen-port"} {
+		for _, shell := range shells() {
+			script, _ := helperIn(t, 51820, "10.44.0.0/24")
+			// wg is absent or finds no such interface here: either way the
+			// helper ran it rather than refusing the field.
+			out, code := runHelper(t, shell, script, "", "show", field)
+			if code == 64 || strings.Contains(out, "usage:") {
+				t.Errorf("%s show %s: exit %d, %q; the field was refused", shell, field, code, out)
 			}
 		}
 	}

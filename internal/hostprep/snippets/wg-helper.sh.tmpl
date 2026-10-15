@@ -18,7 +18,11 @@
 #   up            systemctl enable --now {{.Unit}}
 #   restart       systemctl restart {{.Unit}}
 #   sync          wg-quick strip the installed conf, then wg syncconf
-#   show FIELD    wg show {{.Interface}} FIELD: peers, latest-handshakes or public-key
+#   show FIELD    wg show {{.Interface}} FIELD: peers, latest-handshakes,
+#                 public-key, allowed-ips, persistent-keepalive or listen-port,
+#                 each of which the conf holds already or says how the mesh is
+#                 doing; no key the interface keeps secret, and no address a
+#                 peer last sent from
 #   log           the unit's last 200 journal lines
 # A wrong verb or argument count exits 64; a refused conf exits 65.
 set -eu
@@ -40,7 +44,7 @@ prefix='{{.Prefix}}'
 max=65536
 
 usage() {
-	echo "usage: $0 put | up | restart | sync | show peers|latest-handshakes|public-key | log" >&2
+	echo "usage: $0 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
 	exit 64
 }
 
@@ -272,7 +276,7 @@ sync)
 show)
 	[ $# -eq 2 ] || usage
 	case "$2" in
-	peers | latest-handshakes | public-key) exec wg show "$iface" "$2" ;;
+	peers | latest-handshakes | public-key | allowed-ips | persistent-keepalive | listen-port) exec wg show "$iface" "$2" ;;
 	*) usage ;;
 	esac
 	;;

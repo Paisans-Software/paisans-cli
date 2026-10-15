@@ -361,7 +361,7 @@ Its verbs, the only arguments it accepts:
 | `up` | `systemctl enable --now wg-quick@psns-<token>` |
 | `restart` | `systemctl restart wg-quick@psns-<token>` |
 | `sync` | `wg-quick strip` the conf, then `wg syncconf` |
-| `show peers`, `show latest-handshakes`, `show public-key` | `wg show psns-<token> <field>` |
+| `show peers`, `show latest-handshakes`, `show public-key`, `show allowed-ips`, `show persistent-keepalive`, `show listen-port` | `wg show psns-<token> <field>`: what the conf holds already or how the mesh is doing, never a private key or the address a peer last sent from |
 | `log` | the unit's last 200 journal lines |
 
 **Validation is the security of this helper.** `wg-quick` runs a conf's
