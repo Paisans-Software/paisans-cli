@@ -2891,3 +2891,74 @@ has no check.
   operators on every run against settings that already worked.
 * **Mailing only the operator running the command.** Not chosen: nothing in
   the configuration names them reliably.
+
+## 2026-10-14: What each Wiki.js group may do, and drift is reported
+
+Founder decision. The design is
+`docs/specs/2026-10-14-wikijs-groups-and-drift.md`; it amends the groups and
+bootstrap sections of `docs/specs/2026-10-13-wikijs-blueprint.md`.
+
+### What was decided
+
+* **The admin group gets a page rule as well as its permissions**,
+  `paisans-admin`, granting every page role everywhere, rewritten on every
+  run. Wiki.js checks a page rule after the permission, and a group created
+  through its API has a rule granting only reading and comments, so the admin
+  group could not write a page.
+* **The member group is seeded once**, in the run that creates it: members
+  read and edit pages, their source and history, assets and comments. They do
+  not move, rename or delete pages, nor write scripts or styles. After that
+  the group is the admins'.
+* **`admins/` is for admins only**, by a member rule whose regex excludes it.
+  No seeded rule is a deny, because an operator is in both groups and a deny
+  wins a tie.
+* **A guest reads only what `guest_paths` names**, read only, and only on an
+  ungated wiki. `Guests` is written on every run.
+* **The bootstrap polls every fifteen minutes** and reports drift in what it
+  writes on every run on its `/healthz` and to the monitor. It does not put
+  the configuration back until its next start, and drift does not make its
+  container unhealthy.
+* **The bootstrap pushes a heartbeat to the monitor** every minute: success,
+  or a failure carrying what drifted. A catalog blueprint may declare a
+  heartbeat, and Paisans generates its token, seeds its push monitor and
+  rotates it.
+* **`paisans doctor` fails a running container whose healthcheck reports
+  unhealthy**, for every blueprint.
+
+### Why
+
+A wiki members cannot write in is not a wiki, and an admin who cannot create
+a page has nothing to fix it with short of the break glass account. Seeding
+members once gives a new wiki a working default and leaves what members may do
+to the community. A guest's access, unlike a member's, decides what the
+internet reads, so it is the operator's, written down, and enforced. A change
+undone silently at the next restart is worse than one refused, so the
+bootstrap says when Wiki.js and the configuration disagree, and the operator
+decides which one is right.
+
+### What was weighed
+
+* **Seeding members on every run.** Not chosen: every change an admin made to
+  members in Wiki.js would be undone at the next restart.
+* **Leaving members at Wiki.js's defaults.** Not chosen: every new wiki would
+  need an admin to set up editing by hand before anyone could write.
+* **Members moving and deleting pages.** Not chosen: neither is undone from
+  history.
+* **A deny rule on `members` for `admins/`.** Not chosen: it locks out every
+  admin who is also a member, which is every operator.
+* **An ungated wiki public throughout.** Not chosen: a wiki could not then be
+  ungated and private.
+* **Putting drifted settings back at once.** Not chosen: it hides that
+  someone changed them, and fights an admin who has not yet been told why
+  their change keeps disappearing.
+* **Reporting drift in `apply`.** Not chosen: `apply` recreates the stack and
+  the bootstrap converges, so there is nothing left to report.
+* **The monitor checking the bootstrap's `/healthz` over the mesh.** Not
+  chosen: it needs a published port on every apps site, a way to choose one
+  where two wikis share a site, and a new kind of check in the blueprint
+  schema, where a push needs only a token.
+* **A curl sidecar pushing for the bootstrap**, as for the operator
+  reconciler. Not chosen: one more container per wiki, on hosts that may be
+  short of memory, for a process that already runs and holds the state.
+* **Drift making the container unhealthy.** Not chosen: `apply`'s health gate
+  would then fail an `apply` that left a drifted bootstrap running.
