@@ -189,3 +189,37 @@ func TestAnOriginLabelsOnlyTheReferenceItChose(t *testing.T) {
 		t.Fatalf("home-a lists %d of the two talk images: %+v", seen, images["home-a"])
 	}
 }
+
+// A reference the operator declared anywhere in the infrastructure stack is
+// reviewed wherever it runs there: acme.image naming the foundation's etcd
+// unmarks etcd on a site that runs no gateway, where no service runs the
+// declaration itself.
+func TestADeclaredReferenceIsReviewedWhereverItRunsInItsStack(t *testing.T) {
+	cfg := fixture(t)
+	etcd, err := blueprints.FoundationImage(blueprints.FoundationEtcd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ACME.Image = etcd
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []render.File
+	for _, f := range plan.Files {
+		if strings.HasSuffix(f.Path, "/infra/compose.yaml") {
+			files = append(files, f)
+		}
+	}
+	images, err := render.ListImages(cfg, fixtureSecrets(t), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := infraImage(t, &render.Plan{Images: images}, "home-a", "etcd")
+	if slices.Contains(image.Services, "caddy") {
+		t.Fatalf("home-a runs the gateway, so the declaration runs there itself: %+v", image)
+	}
+	if slices.Contains(image.FoundationServices, "etcd") {
+		t.Errorf("etcd runs a reference acme.image declares, and is marked the foundation's: %+v", image)
+	}
+}
