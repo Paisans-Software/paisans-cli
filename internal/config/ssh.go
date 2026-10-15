@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"net/mail"
@@ -159,6 +160,38 @@ type KeyList []NamedKey
 // keyName is what a key may be called: it goes into a command line and a
 // file on the host.
 var keyName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
+
+// MinRSABits is the shortest RSA key an operator may list.
+const MinRSABits = 3072
+
+// KeyTypeProblem says why pub is not a key an operator may list, "" when it
+// is one: the key types a current OpenSSH generates, and RSA only at a size
+// that is still sound, counted by the modulus's own bit length since a size
+// in bytes rounds up. A key is admission to a shell, so a certificate, whose
+// trust lies with a CA the host does not know, and an obsolete type are
+// refused by name. The loader holds operators.<name>.keys to it and a
+// request holds its operators' keys to it.
+func KeyTypeProblem(pub ssh.PublicKey) string {
+	switch pub.Type() {
+	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
+		return ""
+	case ssh.KeyAlgoRSA:
+		cp, ok := pub.(ssh.CryptoPublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		k, ok := cp.CryptoPublicKey().(*rsa.PublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		if bits := k.N.BitLen(); bits < MinRSABits {
+			return fmt.Sprintf("an ssh-rsa key of %d bits, under %d", bits, MinRSABits)
+		}
+		return ""
+	}
+	return fmt.Sprintf("%q, not a key type paisans accepts", pub.Type())
+}
 
 // AuthorizedKey is one public key, as an authorized_keys line carries it.
 type AuthorizedKey struct {
@@ -403,6 +436,12 @@ func (c *Config) operatorProblems() []string {
 			case len(options) > 0:
 				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone.", id, n+1, strings.Join(options, ","))
 				continue
+			}
+			if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil {
+				if p := KeyTypeProblem(pub); p != "" {
+					add("operators.%s.keys: line %d is %s. Give an ed25519 key (ssh-keygen -t ed25519), an ECDSA or security key, or an RSA key of %d bits or more; a certificate's trust lies with a CA the host does not know.", id, n+1, p, MinRSABits)
+					continue
+				}
 			}
 			switch first, dup := owner[key.Fingerprint]; {
 			case dup && first == id:

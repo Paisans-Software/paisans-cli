@@ -98,7 +98,7 @@ func TestCheckRefuses(t *testing.T) {
 		}, `web_server[0].hostname: "Status.example.org" is not a hostname`},
 		{"an rsa key under 3072 bits", func(r *admission.Request) { r.Operators[0].Keys = []string{keyLine(t, rsaKey(t, 2048))} }, "ssh-rsa key of 2048 bits, under 3072"},
 		{"an rsa key 6 bits short of 3072", func(r *admission.Request) { r.Operators[0].Keys = []string{keyLine(t, rsaModulus(3066))} }, "ssh-rsa key of 3066 bits, under 3072"},
-		{"a certificate", func(r *admission.Request) { r.Operators[0].Keys = []string{certLine(t)} }, `"ssh-ed25519-cert-v01@openssh.com" is not a key type`},
+		{"a certificate", func(r *admission.Request) { r.Operators[0].Keys = []string{certLine(t)} }, `"ssh-ed25519-cert-v01@openssh.com", not a key type`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := build(t, "home-a")

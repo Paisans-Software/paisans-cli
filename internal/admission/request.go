@@ -1,7 +1,7 @@
 package admission
 
 import (
-	"crypto/rsa"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -166,41 +166,10 @@ func canonicalKey(line string) (string, error) {
 	case len(strings.TrimSpace(string(rest))) > 0:
 		return "", fmt.Errorf("more than one key on the line")
 	}
-	if err := checkKeyType(pub); err != nil {
-		return "", err
+	if p := config.KeyTypeProblem(pub); p != "" {
+		return "", errors.New(p)
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))), nil
-}
-
-// minRSABits is the shortest RSA key a request accepts.
-const minRSABits = 3072
-
-// checkKeyType accepts the key types a current OpenSSH generates, and RSA only
-// at a size that is still sound. A request is admission to a shell, so a
-// certificate, whose trust lies with a CA the host does not know, and an
-// obsolete type are refused by name.
-func checkKeyType(pub ssh.PublicKey) error {
-	switch pub.Type() {
-	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
-		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
-		return nil
-	case ssh.KeyAlgoRSA:
-		// The modulus's own bit length: a size in bytes rounds up, and would
-		// pass a key up to seven bits short.
-		cp, ok := pub.(ssh.CryptoPublicKey)
-		if !ok {
-			return fmt.Errorf("an ssh-rsa key whose size cannot be read")
-		}
-		k, ok := cp.CryptoPublicKey().(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("an ssh-rsa key whose size cannot be read")
-		}
-		if bits := k.N.BitLen(); bits < minRSABits {
-			return fmt.Errorf("an ssh-rsa key of %d bits, under %d", bits, minRSABits)
-		}
-		return nil
-	}
-	return fmt.Errorf("%q is not a key type a request accepts", pub.Type())
 }
 
 // Check is every problem with r, each naming its field. Parse refuses a

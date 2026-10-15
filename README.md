@@ -4616,7 +4616,7 @@ sites:
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
-| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
+| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most; `root`; another deployment's `paisans-<token>` |
 | `port` | no | outside 1 to 65535 |
 | `keys` | yes | not a list; empty; an operator the `operators` section does not declare; an operator listed twice |
 
@@ -4627,7 +4627,7 @@ Each entry of `operators`:
 | the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
 | `name` | yes | not at least a first and a last name: split at its first space, either part is empty, Eg: `Alice` is refused and `Alice Example` is not |
 | `email` | yes | not an email address alone, Eg: `alice@example.org` |
-| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two operators, by fingerprint |
+| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); a type other than ed25519, ECDSA, a security key's `sk-` types or RSA of 3072 bits or more, so a certificate too; the same key twice, or under two operators, by fingerprint |
 
 `host` defaults to `public_address`, and without that to the host in
 `endpoint`, because on most sites they are the same address written twice.
