@@ -10,12 +10,17 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, asking every sudo password first and stopping at the first failure.
+
 ### Changed
 
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is just the login and mail host.
 
 ### Fixed
 
+- `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
 
 ## [0.2.0] - 2026-10-15

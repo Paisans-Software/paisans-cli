@@ -5,7 +5,7 @@
 # tokens it issues. The identity provider is upstream of `mas`, never of `app`.
 #
 # {{ .App.Name }} is pinned to {{ .App.Site }}: app, database and media
-# together, and this kind has no other placement. Synapse is the app that
+# together, and this blueprint has no other placement. Synapse is the app that
 # pinning exists for, because its media store cannot be moved into object
 # storage: the S3 storage provider supplements a local media directory rather
 # than replacing it, so a promoted site would not have the media. Cluster

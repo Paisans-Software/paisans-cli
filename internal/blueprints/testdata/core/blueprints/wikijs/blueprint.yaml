@@ -1,7 +1,10 @@
 # The wikijs blueprint, in the core catalog.
 # Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
-# Spec: paisans-cli docs/specs/2026-10-13-wikijs-blueprint.md.
-apiVersion: paisans.blueprint/v1
+# Spec: paisans-cli docs/specs/2026-10-13-wikijs-blueprint.md, with
+# docs/specs/2026-10-14-wikijs-groups-and-drift.md for groups, guests and
+# the settings heartbeat.
+# v2: the heartbeat below.
+apiVersion: paisans.blueprint/v2
 name: wikijs
 services:
   # Wiki.js 2.x, the line in maintenance; 3 is a beta. A track on 2.5,
@@ -10,10 +13,10 @@ services:
   - {name: "app", image: "ghcr.io/requarks/wiki:2.5.*", purpose: "the application"}
   # Paisans-Software/wikijs-bootstrap, published for amd64 and arm64.
   # NOTE THE MISSING `v`: docker/metadata-action's semver pattern strips
-  # it from the git tag. 0.1 is the first release, and a 0.x minor may
-  # change the environment bootstrap.env renders, so a new minor is
-  # taken by a catalog release.
-  - {name: "bootstrap", image: "ghcr.io/paisans-software/wikijs-bootstrap:0.1.*", purpose: "finishes setup and keeps sign-in, site settings and groups as configured"}
+  # it from the git tag. A 0.x minor may change the environment
+  # bootstrap.env renders, so a new minor is taken by a catalog release;
+  # 0.2 reads MEMBER_GROUP, GUEST_PATHS and HEARTBEAT_URLS.
+  - {name: "bootstrap", image: "ghcr.io/paisans-software/wikijs-bootstrap:0.2.*", purpose: "finishes setup and keeps sign-in, site settings and groups as configured"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
 # Fixed by the image's own config.yml (dev/build/config.yml:1), which
@@ -78,8 +81,18 @@ settings:
   # shows it; empty for Wiki.js's own.
   logo_url: {type: string, default: ""}
   # Per file, in MiB as Wiki.js counts it (server/app/data.yml:97,
-  # 5242880). The gateway's request body limit follows it.
+  # 5242880). The gateway's request body limit follows it, and the upload
+  # tmpfs holds ten files of it (compose.yaml.tmpl).
   upload_max_mb: {type: int, default: 5}
+  # Paths a guest may read, each a prefix with no leading slash, read
+  # only. Empty, the wiki is sign in only. The bootstrap writes the Guests
+  # group from it on every run, so a guest's access is this list's alone.
+  guest_paths: {type: list, default: []}
+# The bootstrap pushes its state here every minute: converged, or what
+# drifted from this configuration and what failed. Paisans generates the
+# token and seeds the monitor, "<app> — settings".
+heartbeat:
+  name: "settings"
 secrets:
   generate:
     # The break glass admin's, which the bootstrap signs in with.
@@ -87,6 +100,45 @@ secrets:
       never_rotate: "Wiki.js keeps the break glass admin's password hashed in its own database once setup has run, and nothing changes it there, so a rotated secret would no longer sign in and the bootstrap could not configure the wiki"
 # The rules validate holds a Wiki.js app to.
 checks:
+  # The bootstrap seeds the member group's permissions in the run that
+  # creates it, and refuses to start without it in SYNCED_GROUPS.
+  - id: wikijs-synced-groups-lack-member-group
+    level: refuse
+    hint: synced_groups does not include the member group
+    key: settings.synced_groups
+    rule: |-
+      type(app.settings.synced_groups) != list || (has(app.settings.member_group) ? app.settings.member_group : 'members') in app.settings.synced_groups
+    message: "does not include the member group. Add it, or members are in no Wiki.js group and can do nothing a guest cannot."
+  # The gate turns a guest away before Wiki.js sees them.
+  - id: wikijs-guest-paths-gated
+    level: refuse
+    hint: guest_paths is set on a gated wiki
+    key: settings.guest_paths
+    rule: |-
+      type(app.settings.guest_paths) != list || app.settings.guest_paths.size() == 0 || !app.gated
+    message: "names paths a guest may read, but the app is gated, so no guest reaches Wiki.js. Turn the gate off, or leave guest_paths empty."
+  # admins/ is the admins' alone: the member rule excludes it, and a guest
+  # must not read what a member cannot. Wiki.js matches a START rule as a
+  # plain string prefix (server/core/auth.js:255), so an entry admins/
+  # itself starts with, such as adm, opens it as well; the bootstrap refuses
+  # the same entries.
+  - id: wikijs-guest-paths-admins
+    level: refuse
+    hint: guest_paths opens admins/ to guests
+    key: settings.guest_paths
+    rule: |-
+      type(app.settings.guest_paths) != list || !app.settings.guest_paths.exists(p, type(p) == string && ('admins/'.startsWith(p) || p.startsWith('admins/')))
+    message: "names admins/, a path under it, or a prefix of it such as adm, which Wiki.js would match against admins/ too. Only admins may read admins/."
+  # Carried comma separated and bare in bootstrap.env, as synced_groups
+  # is; a page path in Wiki.js has no leading slash, and an empty entry
+  # would open every page.
+  - id: wikijs-guest-path-name
+    level: refuse
+    hint: a guest_paths entry cannot be passed to the bootstrap
+    key: settings.guest_paths
+    rule: |-
+      type(app.settings.guest_paths) != list || app.settings.guest_paths.all(p, type(p) != string || (p != '' && !p.startsWith('/') && !p.matches('[,$#"\'\\\\\\s\\x00-\\x1f\\x7f]')))
+    message: "holds an empty entry, one with a leading slash, or one with a comma, a $, a #, a quote, a backslash, a space or a control character. Each entry is a page path prefix such as public or docs/howto."
   # Without the admin group in synced_groups nobody but the break glass
   # admin can administer the wiki, and the bootstrap refuses to run.
   # Provisional: inferred, not decided.
@@ -128,6 +180,13 @@ checks:
     key: settings.admin_group
     rule: |-
       !has(app.settings.admin_group) || !(app.settings.admin_group in ['Administrators', 'Guests'])
+    message: "is one of Wiki.js's built-in groups, Administrators or Guests. Use a group of your own."
+  - id: wikijs-builtin-group
+    level: refuse
+    hint: a Wiki.js built-in group is named
+    key: settings.member_group
+    rule: |-
+      !has(app.settings.member_group) || !(app.settings.member_group in ['Administrators', 'Guests'])
     message: "is one of Wiki.js's built-in groups, Administrators or Guests. Use a group of your own."
   - id: wikijs-builtin-group
     level: refuse

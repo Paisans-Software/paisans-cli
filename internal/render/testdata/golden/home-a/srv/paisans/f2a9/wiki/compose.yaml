@@ -35,6 +35,21 @@ services:
       # storage module the bootstrap enables writes here, so it holds
       # nothing a member wrote.
       - /srv/paisans/f2a9/wiki/content:/wiki/data/content
+    # Where an upload lands before anything checks who sent it. multer writes
+    # every file of a POST /u to disk, and only then is write:assets checked
+    # (server/controllers/upload.js:13-27 at v2.5.315), so a refused upload
+    # stays until purgeUploads deletes files over fifteen minutes old, every
+    # fifteen minutes (server/jobs/purge-uploads.js, server/app/data.yml:121).
+    # A guest can send them without limit wherever the gate is off. Without a
+    # mount of its own this is the container's writable layer, on the disk
+    # Postgres shares; here it is capped at ten uploads of the largest size,
+    # the "0" written after the limit in MiB. tmpfs takes memory only for what
+    # it holds, and an accepted upload is moved out to data/cache at once
+    # (server/models/assets.js:144-145), so it is empty unless uploads are
+    # in flight or refused. As the image's node user, uid 1000, which writes
+    # here (dev/build/Dockerfile:35,47).
+    tmpfs:
+      - /wiki/data/uploads:size=50m,uid=1000,gid=1000,mode=0700
 
   # Finishes Wiki.js's setup once per database and keeps its sign-in, site
   # settings and groups as bootstrap.env says, on every start of this
@@ -44,7 +59,7 @@ services:
   bootstrap:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: ghcr.io/paisans-software/wikijs-bootstrap:0.1.*
+    image: ghcr.io/paisans-software/wikijs-bootstrap:0.2.*
     restart: unless-stopped
     env_file:
       - bootstrap.env
@@ -55,6 +70,19 @@ services:
     # with it; both come back under their restart policy.
     pid: "service:app"
     user: "1000:1000"
+    # The image's own check, with a start period of five minutes rather than
+    # the image's thirty seconds. A first deploy migrates an empty database,
+    # runs /finalize, restarts Wiki.js and converges before this turns
+    # healthy, and three failed checks after thirty seconds would mark it
+    # unhealthy within a minute, which apply counts as failed. Five minutes
+    # is apply's own health wait (paisans-cli internal/apply/health.go,
+    # healthWait), so the start period never ends before apply stops waiting.
+    healthcheck:
+      test: ["CMD", "/wikijs-bootstrap", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5m
     depends_on:
       - app
 

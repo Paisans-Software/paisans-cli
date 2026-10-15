@@ -1205,6 +1205,11 @@ func runHostPrepare(args []string) error {
 type hostPrepareOptions struct {
 	config, site, ssh string
 	execute, sudo     bool
+	// all prepares every site, one at a time: see hostPrepareAll.
+	all bool
+	// shown is set once a run of --all has shown the configuration's
+	// findings, so each later site does not show them again.
+	shown bool
 }
 
 // hostPrepareFlags registers host prepare's own flags on fs.
@@ -1212,6 +1217,7 @@ func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	o := &hostPrepareOptions{}
 	fs.StringVar(&o.config, "config", config.FileName, "path to the deployment declaration")
 	fs.StringVar(&o.site, "site", "", "the site to prepare, by the name it has in the configuration")
+	fs.BoolVar(&o.all, "all", false, "prepare every site the configuration declares, one at a time, in its order")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	fs.BoolVar(&o.execute, "execute", false, "actually install and configure what is missing")
 	fs.BoolVar(&o.sudo, "sudo", true, "run remote commands through sudo, since packages, the firewall and kernel modules are root's")
@@ -1259,8 +1265,11 @@ func runHostPrepareIn(env prepareEnv, args []string) error {
 // hostPrepare is host prepare with its flags parsed, reporting through env.
 func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	r := env.r
+	if o.all {
+		return hostPrepareAll(env, o)
+	}
 	if o.site == "" {
-		return fmt.Errorf("host prepare: --site is required. A site at a time is deliberate, the same reason apply --site takes one")
+		return fmt.Errorf("host prepare: name the site with --site, or pass --all for every one")
 	}
 
 	cfg, err := config.Load(o.config)
@@ -1268,7 +1277,9 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		return err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, o.config, result)
+	if !o.shown {
+		reportFindings(r, o.config, result)
+	}
 	if result.Refused() {
 		return refused(o.config, len(result.Refusals()), "")
 	}
@@ -1369,6 +1380,44 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		return err
 	}
 	r.Result("Prepared %s.", o.site)
+	return nil
+}
+
+// hostPrepareAll is host prepare --all: every site the configuration
+// declares, in its order, each as host prepare --site would prepare it, with
+// its own review. Every sudo password is asked before the first site is
+// reached. It stops at the first site that fails, and since a prepared host
+// plans nothing, running it again resumes there.
+func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
+	if o.site != "" || o.ssh != "" {
+		return &ui.Problem{Hint: "--all takes no --site or --ssh", Explain: "--all prepares every site through its own ssh section. Prepare one site with --site, reaching it through --ssh if need be, or pass --all alone."}
+	}
+	cfg, err := config.Load(o.config)
+	if err != nil {
+		return err
+	}
+	result := validate.Check(cfg)
+	reportFindings(env.r, o.config, result)
+	if result.Refused() {
+		return refused(o.config, len(result.Refusals()), "")
+	}
+	names := cfg.SiteNames()
+	if err := settleSudo(env.r, names, func(name string) apply.Transport {
+		return siteTransport(name, cfg.Sites[name], "", o.sudo)
+	}); err != nil {
+		return err
+	}
+	for _, name := range names {
+		site := o
+		site.all, site.site, site.shown = false, name, true
+		if err := hostPrepare(env, site); err != nil {
+			next := "Run paisans host prepare --all again to resume."
+			if o.execute {
+				next = "Run paisans host prepare --all --execute again to resume; a prepared host plans nothing."
+			}
+			return convergeStop("host prepare --all stopped at "+name, err, next)
+		}
+	}
 	return nil
 }
 

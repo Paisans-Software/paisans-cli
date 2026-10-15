@@ -24,6 +24,7 @@ reasons, values and requests behind it.
 paisans create                             # a new deployment's paisans-stack.yaml, from questions
 paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
 paisans host prepare --site vm --execute   # Docker, WireGuard and a firewall on a blank host
+paisans host prepare --all --execute       # the same on every site, one at a time
 paisans apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
 paisans apply --site vm --execute          # render the site and bring it up
 paisans site add home-b --execute          # join another data site to the running cluster
