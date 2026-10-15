@@ -156,30 +156,39 @@ func readFile(content string) (meshRunning, error) {
 		return out, err
 	}
 	out.key = key
-	var current string
+	// Each [Peer] section is collected whole and assigned to its PublicKey
+	// when the section ends, since its keys may come in any order.
+	inPeer, public, peer := false, "", meshPeer{keepalive: "off"}
+	end := func() {
+		if inPeer && public != "" {
+			slices.Sort(peer.allowed)
+			out.peers[public] = peer
+		}
+		inPeer, public, peer = false, "", meshPeer{keepalive: "off"}
+	}
 	for _, line := range strings.Split(content, "\n") {
+		if section := strings.TrimSpace(line); strings.HasPrefix(section, "[") {
+			end()
+			inPeer = section == "[Peer]"
+			continue
+		}
 		k, v, ok := strings.Cut(line, "=")
-		if !ok {
+		if !ok || !inPeer {
 			continue
 		}
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		switch k {
 		case "PublicKey":
-			current = v
-			out.peers[current] = meshPeer{keepalive: "off"}
+			public = v
 		case "AllowedIPs":
-			peer := out.peers[current]
 			for _, cidr := range strings.Split(v, ",") {
 				peer.allowed = append(peer.allowed, network(strings.TrimSpace(cidr)))
 			}
-			slices.Sort(peer.allowed)
-			out.peers[current] = peer
 		case "PersistentKeepalive":
-			peer := out.peers[current]
 			peer.keepalive = keepalive(v)
-			out.peers[current] = peer
 		}
 	}
+	end()
 	return out, nil
 }
 

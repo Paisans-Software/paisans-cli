@@ -1259,6 +1259,26 @@ func TestAnUpMeshComparesAllowedIPsAndKeepalive(t *testing.T) {
 	}
 }
 
+// A peer's keys may come in any order in its section: its AllowedIPs and
+// keepalive belong to the section's PublicKey even when they come first.
+func TestAPeersKeysInAnyOrderAreItsOwn(t *testing.T) {
+	const vm = "PublicKey = EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HI=\nAllowedIPs = 10.44.0.3/32\nEndpoint = vm.example.org:51820\n# Keeps the NAT mapping open from the side that dials out.\nPersistentKeepalive = 25\n"
+	rendered := meshPlan(t, func(c string) string {
+		if !strings.Contains(c, vm) {
+			t.Fatalf("the fixture's home-a lacks vm's peer as expected:\n%s", c)
+		}
+		return strings.Replace(c, vm, "AllowedIPs = 10.44.0.3/32\nPersistentKeepalive = 25\nPublicKey = EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HI=\nEndpoint = vm.example.org:51820\n", 1)
+	})
+	host := appliedWith(t, rendered)
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardNone {
+		t.Errorf("an interface on its file, whose peer lists PublicKey last, plans %v", p.WireGuard)
+	}
+}
+
 // A keepalive of 0 in the file is none, which the kernel prints as off.
 func TestAZeroKeepaliveIsOff(t *testing.T) {
 	zero := func(c string) string {
