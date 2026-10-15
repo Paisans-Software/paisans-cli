@@ -597,7 +597,7 @@ func owedSMTPPassword(cfg *config.Config, secrets *config.Secrets) (Owed, bool) 
 		}
 		return Owed{
 			Name: "external.smtp_password",
-			Why:  "issued by the mail provider for " + cfg.SMTPFor(name).Host,
+			Why:  "for " + cfg.SMTPFor(name).Username + " on " + cfg.SMTPFor(name).Host,
 		}, true
 	}
 	return Owed{}, false

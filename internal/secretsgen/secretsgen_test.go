@@ -610,8 +610,8 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 		t.Error("owed with no smtp host declared")
 	}
 	why, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{})["external.smtp_password"]
-	if !ok || !strings.Contains(why, "smtp.example.org") {
-		t.Errorf("not owed, or the reason does not name the host: %q", why)
+	if !ok || why != "for robot@example.org on smtp.example.org" {
+		t.Errorf("not owed, or the reason does not name the login and host: %q", why)
 	}
 	if _, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{External: map[string]string{"smtp_password": "x"}})["external.smtp_password"]; ok {
 		t.Error("owed although external.smtp_password is set")

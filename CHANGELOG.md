@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason names only the mail host.
+- `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is just the login and mail host.
 
 ### Fixed
 
