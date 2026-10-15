@@ -223,3 +223,64 @@ func TestADeclaredReferenceIsReviewedWhereverItRunsInItsStack(t *testing.T) {
 		t.Errorf("etcd runs a reference acme.image declares, and is marked the foundation's: %+v", image)
 	}
 }
+
+// authImage is the ComposeImage naming ref in the Pocket ID stack on site,
+// failing the test when there is none.
+func authImage(t *testing.T, plan *render.Plan, site, ref string) render.ComposeImage {
+	t.Helper()
+	for _, image := range plan.Images[site] {
+		if image.Stack == "auth" && image.Image == ref {
+			return image
+		}
+	}
+	t.Fatalf("%s's Pocket ID stack runs no %s: %+v", site, ref, plan.Images[site])
+	return render.ComposeImage{}
+}
+
+// A reference an app's images declares is reviewed wherever it runs in the
+// app's stack: the reconciler declared onto the foundation's heartbeat
+// reference unmarks the operators heartbeat, which runs that reference
+// undeclared.
+func TestAnAppDeclaredReferenceIsReviewedWhereverItRunsInItsStack(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	heartbeat, err := blueprints.FoundationImage(blueprints.FoundationHeartbeat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := cfg.Apps["auth"]
+	app.Images = map[string]string{"reconciler": heartbeat}
+	cfg.Apps["auth"] = app
+	plan, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := authImage(t, plan, "home-a", heartbeat)
+	if !slices.Contains(image.Services, "reconciler") || image.Lines != 2 {
+		t.Fatalf("the reconciler and the operators heartbeat do not both run %s: %+v", heartbeat, image)
+	}
+	if len(image.FoundationServices) > 0 {
+		t.Errorf("a reference apps.auth.images.reconciler declares is marked the foundation's: %+v", image)
+	}
+}
+
+// infra.images.heartbeat declared onto the reference the Pocket ID stack's
+// reconciler runs undeclared unmarks the reconciler.
+func TestAHeartbeatDeclaredReferenceIsReviewedWhereverItRunsInItsStack(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	reconciler, err := blueprints.FoundationImage(blueprints.FoundationOperatorReconciler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Infra.Images = map[string]string{"heartbeat": reconciler}
+	plan, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := authImage(t, plan, "home-a", reconciler)
+	if image.Lines != 2 {
+		t.Fatalf("the reconciler and the operators heartbeat do not both run %s: %+v", reconciler, image)
+	}
+	if len(image.FoundationServices) > 0 {
+		t.Errorf("a reference infra.images.heartbeat declares is marked the foundation's: %+v", image)
+	}
+}
