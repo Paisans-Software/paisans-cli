@@ -54,14 +54,12 @@ sites:
     endpoint: home-a.example.org:51820
     ssh:
       host: home-a.local
-      user: ubuntu
       keys: [alice, bob]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
-      user: ubuntu
       keys: [alice, bob]
   gateway:
     roles: [gateway, witness]
@@ -70,7 +68,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.10
     ssh:
-      user: ubuntu
       keys: [alice, bob]
   health:
     roles: [monitor]
@@ -79,7 +76,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.50
     ssh:
-      user: ubuntu
       keys: [alice, bob]
 
 # Every data site holds the database, and Patroni fails it over between them.

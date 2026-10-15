@@ -63,7 +63,9 @@ sites:
 {{- if .SSHHost}}
       host: {{q .SSHHost}}
 {{- end}}
+{{- if .SSHUser}}
       user: {{q .SSHUser}}
+{{- end}}
       keys: [{{$.OperatorIDs}}]
 {{- end}}
 {{- if .Synchronous}}

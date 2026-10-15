@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.
 - `preflight`'s ssh check asks only that each site answers as its ssh user, and `doctor` has no sudo finding, since no command they check for runs through sudo.
 - `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
+- `paisans create` asks each machine's SSH user as optional, offering the deployment's own user, `paisans-<token>`, when left blank, rather than defaulting to `ubuntu`.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
 - When sudo refuses the login outright, `host deployments` advises naming a login that has sudo with `--ssh`, since it reads no site's ssh section.
 

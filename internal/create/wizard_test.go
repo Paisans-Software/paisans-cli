@@ -502,3 +502,46 @@ func TestWizardWritesOpenSignup(t *testing.T) {
 		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
 	}
 }
+
+// The SSH user may be left empty: the machine is then reached as the
+// deployment's own user, which the question names, and the file writes no
+// user for it. A name given is written.
+func TestTheSSHUserMayBeLeftEmpty(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	var out strings.Builder
+	w := NewWizard(NewPrompter(strings.NewReader(script(lines...)), &out))
+	w.DefaultUser = "paisans-f2a9"
+	if err := w.Ask(SectionAll); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "SSH user (blank: paisans-f2a9, the deployment's own): ") {
+		t.Errorf("the question does not offer the deployment's user:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "must already exist") {
+		t.Errorf("the question still asks for an existing user:\n%s", out.String())
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "user:") {
+		t.Errorf("a user was written:\n%s", data)
+	}
+	for _, f := range check(t, data).Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
+	}
+
+	w.Answers.Sites[0].SSHUser = "admin"
+	data, err = Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "      user: admin\n") {
+		t.Errorf("a given user was not written:\n%s", data)
+	}
+}

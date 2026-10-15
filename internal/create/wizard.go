@@ -65,6 +65,10 @@ type Wizard struct {
 	// mailAsked is set once mail has been asked, after which sending none
 	// is the default when none was chosen.
 	mailAsked bool
+	// DefaultUser is the deployment's own user, paisans-<token>, which a
+	// machine whose SSH user is left empty is reached as. create sets it
+	// from the id it made; "" names it generically.
+	DefaultUser string
 }
 
 // NewWizard asks its questions through p.
@@ -242,7 +246,7 @@ func (w *Wizard) siteNames(sites []Site) []string {
 func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 	var sites []Site
 	for i, ss := range shapes[shape].sites {
-		d := Site{Name: ss.name, SSHUser: "ubuntu"}
+		d := Site{Name: ss.name}
 		if shape == ShapeOneMachine {
 			// The one machine is the whole deployment, so it is named for it.
 			if n := cmp.Or(slug(w.Answers.Name), slug(w.Answers.Domain)); n != "" {
@@ -296,7 +300,7 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 	w.p.Say("Roles: %s. The whole file is checked before it is written.", roleList(allRoles))
 	var sites []Site
 	for i := range count {
-		d := Site{Name: "site-" + strconv.Itoa(i+1), SSHUser: "ubuntu"}
+		d := Site{Name: "site-" + strconv.Itoa(i+1)}
 		if i < len(prev) {
 			d = prev[i]
 		}
@@ -329,7 +333,9 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 }
 
 // ssh asks how the toolkit reaches site. The host defaults to the public
-// address, so it is asked only as an override when there is one.
+// address, so it is asked only as an override when there is one. The user may
+// be left empty: the machine is then reached as the deployment's own user,
+// which host admit creates.
 func (w *Wizard) ssh(site *Site, d Site) error {
 	var err error
 	if site.PublicAddress != "" {
@@ -340,11 +346,11 @@ func (w *Wizard) ssh(site *Site, d Site) error {
 	if err != nil {
 		return err
 	}
-	user := d.SSHUser
-	if user == "" {
-		user = "ubuntu"
+	own := "the deployment's own user"
+	if w.DefaultUser != "" {
+		own = w.DefaultUser + ", the deployment's own"
 	}
-	site.SSHUser, err = w.p.Text("SSH user (must already exist)", user, checkUnixUser)
+	site.SSHUser, err = w.p.Optional("SSH user (blank: "+own+")", d.SSHUser, checkUnixUser)
 	return err
 }
 
@@ -563,7 +569,7 @@ func (w *Wizard) monitor() (bool, error) {
 	}
 	a.MonitorOnGateway = false
 	w.p.Say("It serves its own hostname, so it needs a public address.")
-	d := Site{Name: monitorSite, SSHUser: "ubuntu"}
+	d := Site{Name: monitorSite}
 	if a.Monitor != nil {
 		d = *a.Monitor
 	}
