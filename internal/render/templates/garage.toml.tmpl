@@ -1,0 +1,49 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Object storage ships from the first install, single node at init and
+# replicated once a site is added. Starting on local disk and moving later is a
+# migration with consequences outside the deployment: remote instances hold
+# media URLs we cannot recall.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+
+replication_factor = {{ .Replication }}
+# consistent, degraded or dangerous. dangerous confirms an upload once one copy
+# exists, so uploads continue while a site is down. Garage refuses to start if
+# replication_factor differs from the one its stored layout was built with, so
+# it changes only through `paisans storage add --change-replication`; this one
+# is read at every start and changes with an ordinary apply.
+consistency_mode = "{{ .Consistency }}"
+
+# No bootstrap_peers: an entry is <node public key>@<address>, and a node makes
+# its key on first start, so no configuration can name it in advance. `paisans
+# storage add` connects the nodes once, and each keeps the peers it has met in
+# meta/peer_list, redialled after a restart.
+rpc_bind_addr = "{{ .Site.Address }}:{{ .RPCPort }}"
+rpc_public_addr = "{{ .Site.Address }}:{{ .RPCPort }}"
+rpc_secret = "{{ .RPCSecret }}"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "{{ .Site.Address }}:{{ .S3Port }}"
+root_domain = ".s3.{{ .Domain }}"
+
+[s3_web]
+# The only way an object is readable without a credential. Garage's S3 API
+# refuses every unauthenticated request outright, so Mbin's media would answer
+# 403 to a browser without this endpoint.
+#
+# root_domain is a suffix that resolves nowhere on purpose. This endpoint
+# resolves a bucket from the request's Host, and the gateway is the only thing
+# that ever sends one: it rewrites a path style media URL into the vhost form
+# this expects. Nothing outside the mesh ever sends a Host matching it, so
+# there is no DNS record and no certificate here.
+#
+# No index document. A prefix with no object must be a 404.
+bind_addr = "{{ .Site.Address }}:{{ .WebPort }}"
+root_domain = ".web.garage.internal"
+
+[admin]
+api_bind_addr = "{{ .Site.Address }}:{{ .AdminPort }}"
+admin_token = "{{ .AdminToken }}"

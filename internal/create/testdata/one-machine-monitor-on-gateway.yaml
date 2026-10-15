@@ -1,0 +1,140 @@
+# Written by paisans v0.0.0-test on 2026-01-02.
+#
+# This file is plain and safe to commit. It holds no secrets: those live in
+# secrets.enc.yaml, encrypted with sops and age, which `paisans init` makes.
+
+version: 1
+# The deployment's identity. Never changes.
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+
+community:
+  name: Example Community
+  # ONE-WAY DOOR. Federation identity is the hostname, and remote instances
+  # record it. Changing this after federating is a rebuild, not a rename.
+  domain: example.org
+
+mesh:
+  # The private network every site sits on. `paisans init` checks it against
+  # every site before the first apply, and when it overlaps anything there it
+  # rolls another 10.x.y.0/24, moving each site's address with it. Once
+  # deployed it never changes.
+  subnet: 10.44.0.0/24
+
+# Certificates are always issued over DNS-01, so the gateway can hold valid
+# certificates before DNS points at it. This names where the domain's DNS
+# lives; its API token is owed to the secrets file, and `paisans init` says so.
+acme:
+  provider: cloudflare
+
+# The people who run the machines: they log in to every site, hold the
+# secrets and run apply. Each becomes a Pocket ID user and a community admin
+# on the first apply, and each key below an authorized key on every site that
+# names them. At least two, so that one lost workstation does not leave
+# nobody able to run the deployment.
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+
+# Every machine. Each address is the site's WireGuard address inside
+# mesh.subnet, stable forever, and each ssh section is how the toolkit reaches
+# the site: a public key per operator, never a private one.
+sites:
+  all-in-one:
+    roles: [data, apps, gateway, monitor]
+    address: 10.44.0.1
+    # What the internet reaches this site on. `paisans dns init` points
+    # hostnames at it, and the other sites dial it.
+    public_address: 203.0.113.10
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+
+storage:
+  # Object storage for the apps' uploads. Each app serves its objects on a
+  # hostname beside its own, <label>-media.example.org, which needs a DNS
+  # record too; `paisans dns init` makes it.
+  garage:
+    # Preference order: the first site takes every write. Put the site with
+    # the best upload first.
+    sites: [all-in-one]
+    # Copies of each object. One copy on one site is lost with that site, and
+    # validate warns about it until a second Garage site is added.
+    replication: 1
+
+# Every app is rendered to trust the mesh subnet for forwarded client
+# addresses, never one host, so the gateway role can move later.
+apps:
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    # Sign in for every other app. Its settings are rendered into its
+    # configuration, and its admin page for them is read only.
+    settings:
+      # The account service manages signup, bans and recovery, and nobody
+      # is a Pocket ID administrator. The toolkit renders Pocket ID's signup
+      # and email-code settings for it.
+      management: paisans
+      # Avatars and branding, about a megabyte: in Postgres they ride
+      # replication, and sign in gains no dependency on object storage.
+      file_backend: database
+      # Also the sender name on its mail.
+      app_name: Example Community
+  account:
+    blueprint: account
+    hostname: account.example.org
+    placement: cluster
+    # The community's account service, signing in through the pocket-id app.
+    settings:
+      # Members invite new people, who open their link on join.example.org.
+      signup: invite
+      # Everyone who signs up agrees to the code of conduct below before an
+      # account exists. Its SHA-256 is the version each person agrees to, so
+      # an edit is a new version.
+      code_of_conduct: |
+        # Be kind
+
+        Treat each other well.
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    placement: { pinned: all-in-one }
+    # The uptime monitor, beside the gateway: it checks every app and every
+    # other machine, but cannot report this machine failing. A small machine
+    # of its own with roles: [monitor] would. Its checks are generated from
+    # this file.
+    settings:
+      # Only members of this group may sign in: the operators, who run the
+      # machines it watches.
+      admin_group: operators
+
+# How the apps send mail: sign in links and codes, alerts, notifications and
+# account mail. The password is a secret, set with
+# `paisans secrets set external.smtp_password`.
+smtp:
+  host: smtp.example.org
+  port: 587
+  security: starttls
+  username: community@example.org
+  from_address: community@example.org
+  from_name: Example Community

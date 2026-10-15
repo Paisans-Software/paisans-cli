@@ -1,0 +1,213 @@
+# The writefreely blueprint, in the core catalog.
+# Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
+apiVersion: paisans.blueprint/v1
+name: writefreely
+services:
+  # This kind means the writefreely-wisp fork, not upstream WriteFreely.
+  # The fork adds Postgres and S3 support upstream does not have, so the
+  # blog joins the same Patroni cluster and the same Garage node as
+  # everything else instead of a SQLite file nothing else can reach.
+  # Upstream's image has no [database] Postgres driver and no [storage]
+  # section at all, so it will reject the configuration this kind
+  # renders; do not point this kind at ghcr.io/writefreely/writefreely.
+  #
+  # A track on the fork's 0.21 line, published as image tags like
+  # 0.21.2-wisp for the release 0.21.2+wisp. 0.21.1+wisp was the first
+  # release carrying everything this kind's templates need: config.ini's
+  # locked_settings, [app] authorized_fetch, the S3 storage with
+  # image_url_base, and the /healthz route the monitor checks. 0.21.2
+  # creates the schema whenever the database has none, so a first start
+  # that failed after generating its keys recovers on the next. The
+  # track stops at 0.21 because a 0.x minor may change config.ini, which
+  # this kind renders; a new minor is taken by a catalog release.
+  - {name: "app", image: "ghcr.io/josephquigley/writefreely-wisp:0.21.*-wisp", purpose: "the application"}
+  - {name: "postgres", purpose: "its own database, when the app is pinned"}
+database: {engine: postgres}
+# Not WriteFreely's default 8080: Mbin publishes 8080, and a pinned blog
+# on an apps site sits beside a clustered Mbin. WriteFreely reads its
+# port from the config.ini this toolkit renders, so the number is ours.
+port: 8081
+config:
+  # It also renders a `.env`, but only for its Postgres container's
+  # password. The application reads the file below, so that is where a
+  # passthrough key means anything.
+  format: ini
+  file: "config.ini"
+  # The database settings config.ini renders, in the fork's registry order,
+  # so the configuration is their only source: the fork reads each from the
+  # file on every start, never imports it, and refuses to change it from its
+  # admin page or `writefreely settings set`. app.federation_allowlist is not
+  # rendered, so it stays the admins' to edit.
+  locked_settings:
+    - app.site_name
+    - app.theme
+    - app.open_registration
+    - app.min_username_len
+    - app.federation
+    - app.public_stats
+    - app.private
+    - app.authorized_fetch
+    - app.local_timeline
+    - uploads.enabled
+    - uploads.max_size_mb
+  setting_keys:
+    - {key: "app.authorized_fetch", file: "config.ini", setting: "authorized_fetch"}
+    - {key: "app.federation", file: "config.ini", setting: "federation"}
+    - {key: "app.min_username_len", file: "config.ini", setting: "min_username_len"}
+    - {key: "app.private", file: "config.ini", setting: "private"}
+    - {key: "app.site_name", file: "config.ini", setting: "site_name"}
+    - {key: "app.theme", file: "config.ini", setting: "theme"}
+    - {key: "storage.s3_bucket", file: "config.ini", setting: "s3_bucket"}
+    - {key: "storage.s3_region", file: "config.ini", setting: "s3_region"}
+    - {key: "uploads.max_size_mb", file: "config.ini", setting: "uploads_max_size_mb"}
+  # The template's [uploads] comment says "dir is deliberately absent".
+  omitted_keys:
+    - {key: "uploads.dir", why: "uploads are stored in S3 through [storage], and dir names a path on one node that only the local image store reads, so it would do nothing here and suggest that it did"}
+# The writefreely-wisp fork's status-only route, from v0.21.1+wisp: GET
+# or HEAD, 200 with an empty body when the database answers SELECT 1,
+# an empty 503 when it does not, with no session or private mode check
+# (healthz.go:19-50 at develop f95d840).
+# healthz is a reserved username, so no blog can claim the path
+# (author/author.go:59).
+health: {path: "/healthz", status: [200]}
+# Cited at writefreely-wisp ff9dceb, except signed fetch, which is cited
+# at v0.21.1+wisp.
+gate:
+  gateable: true
+  open_paths:
+    # OIDC: /oauth/generic, /oauth/callback/generic, and
+    # /oauth/signup, the form a first sign-in submits
+    # (oauth.go:320-322).
+    - "/oauth/*"
+    # Discovery (routes.go:88-96). webfinger and host-meta open to
+    # anyone once an allow list is set (handle.go:72-77); nodeinfo
+    # still checks a signature, token or session in private mode.
+    - "/.well-known/webfinger"
+    - "/.well-known/host-meta"
+    - "/.well-known/nodeinfo"
+    - "/api/nodeinfo"
+    # What the sign-in page loads, served by the static fallback with
+    # no privacy check (routes.go:55, templates/base.tmpl:5-91).
+    - "/css/*"
+    - "/fonts/*"
+    - "/js/*"
+    - "/img/*"
+    - "/favicon.ico"
+    - "/local/custom.css"
+  # A blog's inbox, which checks the delivery's signature
+  # (routes.go:181, activitypub.go:405-409).
+  inbox_paths: ["/api/collections/*/inbox"]
+  # Empty: tokens come only from a password sign-in or signup
+  # (account.go:540), which disable_password_auth closes, but tokens
+  # already issued keep working and carry no scopes (handle.go:281-292).
+  auto_login:
+    # A signed-in member has no reason to be on /login.
+    # viewOauthInit takes no destination (oauth.go:135-166).
+    - {paths: ["/login"], target: "/oauth/generic"}
+    # wfu is set for anonymous visitors too (session.go:55-72), so
+    # only its absence means anything: a first visit.
+    - {paths: ["/"], target: "/oauth/generic", absent_cookies: ["wfu"]}
+  # The sign-in page, the one the rule above sends to /oauth/generic.
+  sign_in_path: "/login"
+  # authorized_fetch requires a valid signature on every ActivityPub
+  # read and inbox delivery, public or private, and leaves only
+  # discovery and the instance actor open (authorized_fetch.go:35-50 at
+  # v0.21.1+wisp, develop f95d840). Private mode is what makes it read
+  # only from the allowlist: with no allowlist, authorized_fetch admits
+  # any signer (federation_allowlist.go:213-216), while private mode
+  # admits a signer only through one (federation_allowlist.go:486-495),
+  # and an allowlist needs private mode (federation_allowlist.go:84-86).
+  # Both are locked in config.ini. See SignedFetchFor.
+  #
+  # A blog's outbox is an ActivityPub only route (authorized_fetch.go:
+  # 28-33), refused before any lookup (authorized_fetch.go:72-98), so
+  # an unsigned GET of any alias answers 401 (federation_allowlist.go:
+  # 336) whether the blog exists or not.
+  signed_fetch:
+    settings: ["app.authorized_fetch", "app.private"]
+    probe: "/api/collections/{hostname}/outbox"
+    status: [401]
+    # Without private mode the blog has no allowlist and admits a
+    # signature from any instance.
+    requires: "private"
+  # Each is rendered into config.ini's [app] and named in its
+  # locked_settings, which the writefreely-wisp fork reads from the file and
+  # refuses to change from its admin page or its own command line
+  # (config/locked.go at v0.21.1+wisp).
+  settings:
+    - name: "app.private"
+      want: "true"
+      when: "app.gated"
+      why: "only private mode makes the blog read from its allowlist alone; without it authorized fetch admits any signer"
+      config_key: "app.private"
+      setting: "private"
+    - name: "app.authorized_fetch"
+      want: "true"
+      when: "app.gated && app.federates"
+      why: "the gate leaves ActivityPub to the blog, and without authorized fetch it answers an unsigned read and accepts an unsigned delivery"
+      config_key: "app.authorized_fetch"
+      setting: "authorized_fetch"
+  live: {action: command-table, service: app, command: [writefreely, -c, /data/config.ini, settings, list], locked_mark: "(locked in config.ini)"}
+federation:
+  # Federation can be turned off in its settings.
+  federates: true
+  setting: "federation"
+hostname_roles: ["media"]
+storage:
+  s3: true
+  # With `[storage] type = s3` the fork writes images to the bucket and
+  # never reads them back to serve them. It requires `[storage]
+  # image_url_base`, publishes every image URL under it, and answers its
+  # own /uploads/ route with a redirect there, so the bucket has to answer
+  # a reader with no credential or no image on the blog loads at all.
+  public_reads: true
+  # Under /uploads/, served by uploadsHandler from the local image store
+  # (imagestore.go:364-386 at ff9dceb, the commit the pinned image is built
+  # from).
+  local_media_paths: ["/uploads/*"]
+# writefreely-wisp ff9dceb: the callback is app.Host +
+# "/oauth/callback/generic", built in configureGenericOauth
+# (oauth.go:249) and not configurable. Nothing in the fork sends a
+# code challenge, so PKCE is off. WriteFreely reads no groups claim
+# either; the restriction at Pocket ID is the whole control.
+oidc:
+  callback: "/oauth/callback/generic"
+  pkce: false
+  member_group_setting: "member_group"
+  default_admin_group: "admins"
+  default_member_group: "members"
+# The rules validate holds a WriteFreely app to, by the ids they have
+# always had.
+checks:
+  # The toolkit renders authorized_fetch into the app's configuration and
+  # locks it there, so a value read as on that the operator meant as off,
+  # such as the string "no", would be both wrong and out of reach of the
+  # app's admin page.
+  - id: authorized-fetch-not-a-boolean
+    level: refuse
+    hint: authorized_fetch is not true or false
+    key: settings.authorized_fetch
+    rule: |-
+      !has(app.settings.authorized_fetch) || type(app.settings.authorized_fetch) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.authorized_fetch) == string ? '"' + app.settings.authorized_fetch + '"' : string(app.settings.authorized_fetch)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  # config.ini locks every setting the toolkit renders, and the fork refuses
+  # to start on a locked value it would refuse to save (docs/settings.md,
+  # "Locking settings in config.ini", at writefreely-wisp v0.21.1+wisp). The
+  # ranges are its registry's (config/settings.go dbSettings).
+  - id: writefreely-setting-invalid
+    level: refuse
+    hint: writefreely setting is out of range
+    key: settings.min_username_len
+    rule: |-
+      !has(app.settings.min_username_len) || type(app.settings.min_username_len) != string || app.settings.min_username_len == '' || (int(app.settings.min_username_len.trim()) >= 1 && int(app.settings.min_username_len.trim()) <= 100)
+    message_expr: |-
+      'is "' + app.settings.min_username_len + '". WriteFreely accepts a whole number from 1 to 100, and config.ini locks this setting, so any other value stops the blog at startup.'
+  - id: writefreely-setting-invalid
+    level: refuse
+    hint: writefreely setting is out of range
+    key: settings.uploads_max_size_mb
+    rule: |-
+      !has(app.settings.uploads_max_size_mb) || type(app.settings.uploads_max_size_mb) != string || app.settings.uploads_max_size_mb == '' || (int(app.settings.uploads_max_size_mb.trim()) >= 1 && int(app.settings.uploads_max_size_mb.trim()) <= 1048576)
+    message_expr: |-
+      'is "' + app.settings.uploads_max_size_mb + '". WriteFreely accepts a whole number from 1 to 1048576, and config.ini locks this setting, so any other value stops the blog at startup.'

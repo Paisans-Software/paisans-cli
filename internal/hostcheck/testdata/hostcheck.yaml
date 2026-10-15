@@ -1,0 +1,101 @@
+# A data and apps site, a gateway, and two monitors, one serving its own
+# hostname and one behind the operator's web server, for the host check's
+# tests. The mesh is
+# the fixtures' usual private range; every other address is a documentation
+# range.
+version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+
+community:
+  name: "Fixture Community"
+  domain: example.org
+
+mesh:
+  subnet: 10.44.0.0/24
+
+acme:
+  provider: desec
+
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+sites:
+  home-a:
+    roles: [data, apps]
+    address: 10.44.0.1
+    public_address: 203.0.113.10
+    endpoint: 203.0.113.10:51820
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+  edge:
+    roles: [gateway, witness]
+    address: 10.44.0.3
+    public_address: 203.0.113.30
+    endpoint: 203.0.113.30:51820
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+  watch:
+    roles: [monitor]
+    address: 10.44.0.4
+    public_address: 203.0.113.40
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+  porch:
+    roles: [monitor]
+    address: 10.44.0.5
+    public_address: 203.0.113.50
+    web_server:
+      managed_by: external
+      listen: 127.0.0.1:8480
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+
+cluster:
+  sites: [home-a]
+  port: 5000
+  postgres_version: "18"
+
+storage:
+  garage:
+    sites: [home-a]
+    replication: 1
+
+etcd:
+  members: [home-a, edge]
+
+apps:
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    settings:
+      management: pocket-id
+      file_backend: database
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    placement: cluster
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    placement: { pinned: watch }
+    settings:
+      admin_group: admins
+  porch-health:
+    blueprint: uptime
+    hostname: porch-health.example.org
+    placement: { pinned: porch }
+    settings:
+      admin_group: admins

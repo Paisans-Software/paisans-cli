@@ -1,0 +1,290 @@
+// Package doctor is `paisans doctor`: it reads a running deployment and says
+// what is stuck, why, and how to recover, one line per finding.
+//
+// It never changes anything. There is no --execute: every command it sends a
+// host is a read (a list, a status, a log tail), and the recovery it suggests
+// is printed for a human to run. That is deliberate, because doctor is run in
+// the middle of an outage, and the one recovery it describes that touches
+// member data (a forced failover) loses commits. A tool that did that on its
+// own would be choosing which data a community keeps.
+//
+// The package holds no transport. cmd/paisans runs the commands named here on
+// each site and hands the outputs to Diagnose, so every judgement below is a
+// pure function of what the hosts said, and is tested with what real hosts
+// said.
+package doctor
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// Level is how bad a finding is.
+type Level int
+
+const (
+	// OK is a check that passed.
+	OK Level = iota
+	// Skip is a check that could not be made and says why. It is not a
+	// failure: nothing was found wrong, and nothing was found right either.
+	Skip
+	// Warn is a risk the operator should know about, not an outage.
+	Warn
+	// Fail is something broken now. Any Fail makes doctor exit non zero.
+	Fail
+	// Info is something worth knowing that is neither a risk nor a fault,
+	// Eg: a foreign site served by the gateway's Caddy.
+	Info
+)
+
+func (l Level) String() string {
+	switch l {
+	case Skip:
+		return "skip"
+	case Warn:
+		return "WARN"
+	case Fail:
+		return "FAIL"
+	case Info:
+		return "info"
+	}
+	return "ok"
+}
+
+// Sections, in the order they are printed. Reach is first because every
+// other check runs only on the sites it found; the rest go from the bottom of
+// the stack up, so the first failure printed is usually the cause of the
+// ones after it.
+const (
+	SectionReach      = "reach"
+	SectionMesh       = "mesh"
+	SectionEtcd       = "etcd"
+	SectionPatroni    = "patroni"
+	SectionContainers = "containers"
+	SectionSettings   = "settings"
+	SectionPocketID   = "pocket-id"
+	SectionClocks     = "clocks"
+	SectionLeftovers  = "leftovers"
+	SectionAllowlist  = "ssh allowlist"
+)
+
+var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist}
+
+// Finding is one line of the report, with any explanation, recovery advice or
+// evidence under it.
+type Finding struct {
+	Section string
+	Level   Level
+	Line    string
+	More    []string
+}
+
+// Report is every finding, and how many sites were asked and answered.
+type Report struct {
+	Sites    int
+	Reached  int
+	Findings []Finding
+}
+
+// Failed reports whether any finding is a Fail.
+func (r Report) Failed() bool { return r.Count(Fail) > 0 }
+
+// Count is the number of findings at a level.
+func (r Report) Count(l Level) int {
+	n := 0
+	for _, f := range r.Findings {
+		if f.Level == l {
+			n++
+		}
+	}
+	return n
+}
+
+// Show reports the findings: each check is a step titled by what it looked
+// at, whose result is the short finding. A check that passed or is only worth
+// knowing ends done. A warning is one warning line and a failure one refusal
+// line, each naming the check and the finding with no step of its own, so a
+// problem never shows two marks. A check that was skipped is a warning too:
+// it found nothing right, and a mark that says it passed would tell the
+// operator something doctor never looked at is fine. A failure carries its
+// recovery as the refusal's explanation, since the operator is reading this
+// in an outage and must have the advice without asking for it. A finding's
+// further lines are details of a step that passed, the detail of a warning
+// and the explanation of a failure.
+func (r Report) Show(rep ui.Reporter) {
+	rep.Detail("%d site(s), %d reached", r.Sites, r.Reached)
+	for _, section := range sections {
+		var opened bool
+		for _, f := range r.Findings {
+			if f.Section != section {
+				continue
+			}
+			if !opened {
+				rep.Section(section)
+				opened = true
+			}
+			r.show(rep, f)
+		}
+	}
+	rep.Detail("doctor changes nothing")
+	rep.Result("%s", r.Summary())
+}
+
+func (r Report) show(rep ui.Reporter, f Finding) {
+	title, result := f.Title()
+	switch f.Level {
+	case Skip:
+		rep.Warn(title+" skipped: "+result, strings.Join(f.More, "\n"))
+	case Warn:
+		rep.Warn(title+": "+result, strings.Join(f.More, "\n"))
+	case Fail:
+		rep.Refuse(title+": "+result, strings.Join(f.More, "\n"))
+	default:
+		s := rep.Step(title)
+		for _, more := range f.More {
+			s.Detail("%s", more)
+		}
+		s.Done(result)
+	}
+}
+
+// Title is the check's name, "check <section> <subject>" when the line
+// names a subject before its first colon (a site, "leader", "version"), and
+// the finding's text as the result. A subject is one short word: a longer
+// prefix is the finding's own sentence, not a name.
+func (f Finding) Title() (title, result string) {
+	subject, rest, ok := strings.Cut(f.Line, ": ")
+	if ok && subject != "" && len(subject) <= 20 && !strings.ContainsAny(subject, " ()`") {
+		return "check " + f.Section + " " + subject, rest
+	}
+	return "check " + f.Section, f.Line
+}
+
+// Summary is the closing line: how many checks passed, were skipped, warned
+// and failed. A skipped check is not a pass, so it is counted apart.
+func (r Report) Summary() string {
+	passed := r.Count(OK) + r.Count(Info)
+	parts := []string{fmt.Sprintf("%d %s passed", passed, plural(passed, "check"))}
+	if n := r.Count(Skip); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped", n))
+	}
+	if n := r.Count(Warn); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", n, plural(n, "warning")))
+	}
+	if n := r.Count(Fail); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", n))
+	}
+	return strings.Join(parts, ", ") + "."
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+// Input is everything the hosts said, gathered by cmd/paisans.
+type Input struct {
+	// Sites are the sites asked, in order: every declared site, or the ones
+	// --site named.
+	Sites      []string
+	Reach      []SiteReach
+	Mesh       []MeshProbe
+	Etcd       EtcdProbe
+	Patroni    PatroniProbe
+	Containers []SiteContainers
+	Standby    []StandbyProbe
+	Clocks     []ClockSample
+	Leftovers  []LeftoverProbe
+	Allowlists []AllowlistProbe
+	Settings   []SettingsProbe
+}
+
+// Reached is the set of sites that answered ssh, and can be asked the rest.
+func (in Input) Reached() map[string]bool {
+	out := map[string]bool{}
+	for _, r := range in.Reach {
+		if r.Answered() {
+			out[r.Site] = true
+		}
+	}
+	return out
+}
+
+// Asked is the set of sites doctor was told to look at.
+func (in Input) Asked() map[string]bool {
+	out := map[string]bool{}
+	for _, s := range in.Sites {
+		out[s] = true
+	}
+	return out
+}
+
+// destination is how a site was reached, for advice that names a host.
+func (in Input) destination(site string) string {
+	for _, r := range in.Reach {
+		if r.Site == site {
+			return r.Destination
+		}
+	}
+	return ""
+}
+
+// Diagnose turns what the hosts said into a report.
+func Diagnose(cfg *config.Config, in Input) Report {
+	reached := in.Reached()
+	var findings []Finding
+	findings = append(findings, Reach(cfg, in.Reach)...)
+	findings = append(findings, Mesh(cfg, in.Mesh)...)
+	findings = append(findings, Etcd(cfg, in)...)
+	findings = append(findings, Patroni(cfg, in)...)
+	findings = append(findings, Containers(cfg.Deployment(), in.Containers, LeaderName(in.Patroni.Cluster))...)
+	findings = append(findings, Settings(cfg, in.Settings)...)
+	// Only a cluster that answered can be said to have no primary.
+	noPrimary := len(in.Patroni.Cluster) > 0 && !HasLeader(in.Patroni.Cluster)
+	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)
+	findings = append(findings, Clocks(in.Clocks)...)
+	findings = append(findings, Leftovers(in.Leftovers)...)
+	findings = append(findings, Allowlist(cfg, in.Allowlists)...)
+	return Report{Sites: len(in.Sites), Reached: len(reached), Findings: findings}
+}
+
+// lastLines is the last n non empty lines of out.
+func lastLines(out string, n int) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimRight(line, " \r\t"); strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// shellQuote wraps a value in single quotes for /bin/sh.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}

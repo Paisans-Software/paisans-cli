@@ -1,0 +1,87 @@
+# Rendered by paisans. Do not edit.
+#
+# A build artifact: `paisans apply` renders it and refuses to overwrite one
+# that has been modified locally. Change paisans-stack.yaml or secrets.enc.yaml.
+#
+# A changed file needs a restart at most, not a recreate.
+#
+# THIS HOMESERVER DOES NOT AUTHENTICATE ANYBODY. Matrix Authentication Service
+# runs in front of it and owns the login; the identity provider is upstream of
+# MAS rather than of Synapse. Synapse is a resource server: it introspects the
+# token it is handed and serves the request.
+#
+# This file deliberately declares no identity provider of its own and no local
+# password database, and adding either would be a second way in. The account
+# creation path that the gate and the identity provider's group restriction
+# exist to control is MAS's, so a second one is not a fallback, it is a hole.
+
+# The name inside every user identifier: @someone:example.org. It cannot
+# be changed once an account or a room exists.
+server_name: "example.org"
+# Where clients reach the client-server API, which is not the same name when
+# the delegation documents are served somewhere else.
+public_baseurl: "https://chat.example.org/"
+# OFF, because the gateway serves the delegation documents on example.org
+# from this kind's wellknown snippet. Two competing answers to the same
+# question is worse than either one.
+serve_server_wellknown: false
+pid_file: /data/homeserver.pid
+report_stats: false
+log_config: "/data/log.config"
+signing_key_path: "/data/signing.key"
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    # The gateway terminates TLS and forwards, so the client address arrives in
+    # a header rather than on the connection.
+    x_forwarded: true
+    bind_addresses: ['0.0.0.0']
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: "chat"
+    password: "fixture-not-a-secret-chat-db"
+    database: "chat"
+    host: "postgres"
+    port: 5432
+    cp_min: 5
+    cp_max: 10
+
+# The S3 storage provider supplements this directory rather than replacing it,
+# so a local media store is always required.
+media_store_path: "/data/media_store"
+
+# Registration through Synapse is off and stays off. MAS provisions accounts,
+# and it only does so for somebody the identity provider let through.
+enable_registration: false
+
+# Delegation to Matrix Authentication Service.
+#
+# This is the stable block, not `experimental_features.msc3861`. Synapse
+# v1.160.0, the version this kind pins, documents `matrix_authentication_service`
+# in docs/usage/configuration/config_documentation.md and its configuration
+# manual no longer mentions msc3861 anywhere; read at that tag on 2026-09-15
+# rather than recalled.
+#
+# `endpoint` must have MAS's `discovery` and `oauth` resources mounted, which
+# is why the listener in mas.yaml carries both. `secret` is the same string as
+# mas.yaml's matrix.secret: it authenticates this homeserver to MAS and back,
+# so leaking it is an admin compromise, and the two drifting apart is a stack
+# where both containers start and every request between them is refused.
+matrix_authentication_service:
+  enabled: true
+  endpoint: "http://mas:8009/"
+  secret: "fixture-not-a-secret-chat-mas-matrix"
+
+# An allowlist posture starts with trusting no third party key server. Add one
+# only when federating with servers whose keys have to be fetched indirectly.
+trusted_key_servers: []
+
+# Set by `config` in paisans-stack.yaml, not by a template.
+require_auth_for_profile_requests: true

@@ -1,0 +1,528 @@
+package appremove
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/ui"
+
+	"github.com/paisans-software/pocketid-go"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+)
+
+const (
+	blogEnv     = "/srv/paisans/f2a9/blog/.env"
+	blogCompose = "/srv/paisans/f2a9/blog/compose.yaml"
+	blogUpload  = "/srv/paisans/f2a9/blog/data/upload-1"
+	talkEnv     = "/srv/paisans/f2a9/talk/.env"
+	blogRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/blog.caddy"
+	blogMedia   = "/srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy"
+	talkRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"
+)
+
+// world is blog taken out of the fixture's configuration and applied
+// everywhere since: its stack on home-a with an upload it wrote, its routes
+// on the gateway, vm, and talk, still declared, beside both.
+func world(t *testing.T) (*config.Config, map[string]*host) {
+	t.Helper()
+	cfg := fixture(t)
+	delete(cfg.Apps, "blog")
+	a, vm := newHost("home-a"), newHost("vm")
+	a.files[blogEnv] = "SECRET_KEY=x\n"
+	a.files[blogCompose] = "services: {}\n"
+	a.files[blogUpload] = "an upload"
+	a.files[talkEnv] = "talk\n"
+	a.containers = []hostcheck.Container{
+		{Name: "paisans-f2a9-blog-app-1", Deployment: ours, Project: "paisans-f2a9-blog", PID: 10},
+		{Name: "paisans-f2a9-blog-redis-1", Deployment: ours, Project: "paisans-f2a9-blog"},
+		{Name: "paisans-f2a9-talk-app-1", Deployment: ours, Project: "paisans-f2a9-talk", PID: 11},
+		// Somebody else's container that happens to carry the project's
+		// name, and another deployment's: neither is blog'.
+		{Name: "blog-by-hand", Project: "paisans-f2a9-blog", PID: 12},
+		{Name: "paisans-0c1d-blog-app-1", Deployment: theirs, Project: "paisans-f2a9-blog", PID: 13},
+	}
+	a.networks = []hostcheck.Network{
+		{Name: "paisans-f2a9-blog_default", Deployment: ours, Project: "paisans-f2a9-blog"},
+		{Name: "blog_default", Project: "paisans-f2a9-blog"},
+	}
+	a.volumes = []hostcheck.Volume{{Name: "paisans-f2a9-blog_cache", Deployment: ours, Project: "paisans-f2a9-blog"}}
+	a.manifest(t, a.entry(blogEnv, true), a.entry(blogCompose, true), a.entry(talkEnv, false))
+	vm.files[blogRoute] = "blog route\n"
+	vm.files[blogMedia] = "blog media route\n"
+	vm.files[talkRoute] = "talk route\n"
+	vm.manifest(t, vm.entry(blogRoute, true), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
+	return cfg, map[string]*host{"home-a": a, "home-b": newHost("home-b"), "vm": vm, "watch": newHost("watch")}
+}
+
+func probe(t *testing.T, cfg *config.Config, app string, hosts map[string]*host, deleteData bool) Input {
+	t.Helper()
+	in := Input{DeleteData: deleteData}
+	for _, site := range cfg.SiteNames() {
+		in.Sites = append(in.Sites, state(t, cfg, app, site, hosts[site]))
+	}
+	return in
+}
+
+func executor(hosts map[string]*host) *Executor {
+	m := map[string]Host{}
+	for k, v := range hosts {
+		m[k] = v
+	}
+	return &Executor{Hosts: m}
+}
+
+func TestRefusedBeforeAnyHost(t *testing.T) {
+	cfg := fixture(t)
+	for app, want := range map[string]string{
+		"talk":   "still in paisans-stack.yaml",
+		"infra":  "infrastructure stack",
+		"../etc": "not an app's name",
+		"":       "not an app's name",
+		"Blog":   "not an app's name",
+	} {
+		err := Refusal(cfg, app)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Refusal(%q) = %v, want %q", app, err, want)
+		}
+	}
+	delete(cfg.Apps, "blog")
+	if err := Refusal(cfg, "blog"); err != nil {
+		t.Errorf("an app out of the configuration is refused: %v", err)
+	}
+}
+
+// A route on the gateway still unmarked means no whole apply has run there
+// since blog left, so the gateway may still route to it.
+func TestAnUnmarkedEntryRefuses(t *testing.T) {
+	cfg, hosts := world(t)
+	vm := hosts["vm"]
+	vm.manifest(t, vm.entry(blogRoute, false), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
+	_, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans apply") {
+		t.Fatalf("Build = %v", err)
+	}
+	if strings.Contains(err.Error(), "talk") {
+		t.Errorf("a declared app's file was read as blog': %v", err)
+	}
+}
+
+func TestNothingFoundAnywhere(t *testing.T) {
+	cfg := fixture(t)
+	delete(cfg.Apps, "blog")
+	hosts := map[string]*host{"home-a": newHost("home-a"), "home-b": newHost("home-b"), "vm": newHost("vm"), "watch": newHost("watch")}
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Empty() {
+		t.Errorf("an empty world planned %+v", p)
+	}
+}
+
+func TestThePlanTakesOnlyWhatIsProvablyTheApps(t *testing.T) {
+	cfg, hosts := world(t)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	p.Show(rec)
+	printed := rec.Lines()
+	for _, want := range []string{
+		"pending: remove containers and networks",
+		"detail: stop paisans-f2a9-blog: 2 container(s), 1 running: paisans-f2a9-blog-app-1, paisans-f2a9-blog-redis-1",
+		"detail: remove network paisans-f2a9-blog_default",
+		"pending: remove files",
+		"detail: " + blogEnv,
+		"detail: " + blogRoute,
+		"detail: " + blogMedia,
+		"done: keep /srv/paisans/f2a9/blog",
+		"detail: /srv/paisans/f2a9/blog: data, written by the app",
+		"done: keep volumes",
+		"detail: volume paisans-f2a9-blog_cache. --delete-data deletes it",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("plan lacks %q:\n%s", want, printed)
+		}
+	}
+	for _, never := range []string{"blog-by-hand", "paisans-0c1d", "network blog_default", "talk"} {
+		if strings.Contains(printed, never) {
+			t.Errorf("plan names %q:\n%s", never, printed)
+		}
+	}
+}
+
+// The whole removal, then the same command again: the second run changes
+// nothing and finds only the data it kept.
+func TestRemovalResumesAndRepeats(t *testing.T) {
+	cfg, hosts := world(t)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor(hosts).Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	a, vm := hosts["home-a"], hosts["vm"]
+	for _, gone := range []string{blogEnv, blogCompose} {
+		if _, ok := a.files[gone]; ok {
+			t.Errorf("%s is still there", gone)
+		}
+	}
+	if _, ok := a.files[blogUpload]; !ok {
+		t.Error("the app's upload was deleted without --delete-data")
+	}
+	if _, ok := vm.files[blogRoute]; ok {
+		t.Error("the route is still there")
+	}
+	if got := a.manifestFiles(t); len(got) != 1 || got[0].Path != strings.TrimPrefix(talkEnv, "/") {
+		t.Errorf("home-a's manifest = %+v, want talk's entry alone", got)
+	}
+	if got := vm.manifestFiles(t); len(got) != 1 || got[0].Path != strings.TrimPrefix(talkRoute, "/") {
+		t.Errorf("vm's manifest = %+v, want talk's route alone", got)
+	}
+	names := map[string]bool{}
+	for _, c := range a.containers {
+		names[c.Name] = true
+	}
+	if names["paisans-f2a9-blog-app-1"] || !names["blog-by-hand"] || !names["paisans-0c1d-blog-app-1"] || !names["paisans-f2a9-talk-app-1"] {
+		t.Errorf("containers left: %v", names)
+	}
+	if len(a.volumes) != 1 {
+		t.Errorf("a named volume went without --delete-data")
+	}
+
+	// Stopped after the containers and before the files: the same command
+	// picks up there.
+	again, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(a.files) + len(vm.files)
+	if err := executor(hosts).Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.files)+len(vm.files) != before {
+		t.Error("a second run changed files")
+	}
+	for _, s := range again.Sites {
+		if s.Site == "home-a" && (len(s.Files) > 0 || len(s.Containers) > 0 || !s.Dir.Exists) {
+			t.Errorf("second plan on home-a: %+v", s)
+		}
+		if s.Site == "vm" && !s.Empty() {
+			t.Errorf("second plan on vm: %+v", s)
+		}
+	}
+}
+
+// An interrupted file step leaves files removed and their entries still
+// recorded. The next run drops those entries as gone.
+func TestAnEntryWhoseFileIsGoneIsDropped(t *testing.T) {
+	cfg, hosts := world(t)
+	delete(hosts["vm"].files, blogRoute)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor(hosts).Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if got := hosts["vm"].manifestFiles(t); len(got) != 1 {
+		t.Errorf("vm's manifest = %+v", got)
+	}
+}
+
+func TestAFileEditedOnTheHostIsKept(t *testing.T) {
+	cfg, hosts := world(t)
+	a := hosts["home-a"]
+	a.files[blogEnv] = "SECRET_KEY=edited\n"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	p.Show(rec)
+	if !rec.Has("warn", blogEnv+" and its manifest entry: edited on the host") ||
+		!rec.Has("warn", "/srv/paisans/f2a9/blog and everything in it, because a file in it was edited") {
+		t.Errorf("plan:\n%s", rec.Lines())
+	}
+	ex := executor(hosts)
+	if err := ex.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if a.files[blogEnv] != "SECRET_KEY=edited\n" || a.files[blogUpload] == "" {
+		t.Error("the edited file, or the directory holding it, was deleted")
+	}
+	entries := a.manifestFiles(t)
+	if len(entries) != 2 || entries[0].Path != strings.TrimPrefix(blogEnv, "/") {
+		t.Errorf("manifest = %+v, want the edited file's entry kept", entries)
+	}
+	if !strings.Contains(strings.Join(ex.Kept, "\n"), blogEnv+", edited on the host") {
+		t.Errorf("kept = %v", ex.Kept)
+	}
+}
+
+func TestDeleteDataTakesTheDirectoryAndVolumes(t *testing.T) {
+	cfg, hosts := world(t)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor(hosts).Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	a := hosts["home-a"]
+	if _, ok := a.files[blogUpload]; ok {
+		t.Error("the upload survived --delete-data")
+	}
+	if len(a.volumes) != 0 {
+		t.Errorf("volumes left: %+v", a.volumes)
+	}
+	if _, ok := a.files[talkEnv]; !ok {
+		t.Error("talk's file went with blog")
+	}
+	if !strings.Contains(strings.Join(a.sent, "\n"), "docker rm -v") {
+		t.Error("anonymous volumes were not removed with the containers")
+	}
+}
+
+func TestTheClientIsDeletedOnlyByItsRecordedID(t *testing.T) {
+	blog := &pocketid.OIDCClient{ID: "c-1", Name: "blog"}
+	other := &pocketid.OIDCClient{ID: "c-2", Name: "blog"}
+	renamed := &pocketid.OIDCClient{ID: "c-1", Name: "wiki"}
+	for name, tc := range map[string]struct {
+		st     ClientState
+		delete string
+		kept   int
+	}{
+		"recorded and named":   {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByID: blog, ByName: blog}, "c-1", 0},
+		"named, not recorded":  {ClientState{Name: "blog", Provider: "auth", ByName: other}, "", 1},
+		"recorded, other name": {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByID: renamed}, "", 1},
+		"recorded, gone":       {ClientState{Name: "blog", Provider: "auth", RecordedID: "c-1", ByName: other}, "", 1},
+		"no pocket-id":         {ClientState{Name: "blog", RecordedID: "c-1"}, "", 0},
+		"recorded, own name":   {ClientState{Name: "wiki", Provider: "auth", RecordedID: "c-1", ByID: renamed, ByName: renamed}, "c-1", 0},
+	} {
+		cp := planClient("blog", tc.st)
+		got := ""
+		if cp.Delete != nil {
+			got = cp.Delete.ID
+		}
+		if got != tc.delete || len(cp.Kept) != tc.kept {
+			t.Errorf("%s: delete %q kept %v", name, got, cp.Kept)
+		}
+		for _, k := range cp.Kept {
+			if !strings.Contains(k, "delete it in Pocket ID if it served only blog") {
+				t.Errorf("%s: kept without saying how to delete it: %s", name, k)
+			}
+		}
+	}
+}
+
+type fakeClients struct{ deleted []string }
+
+func (f *fakeClients) OIDCClientByID(context.Context, string) (*pocketid.OIDCClient, error) {
+	return nil, nil
+}
+func (f *fakeClients) FindOIDCClient(context.Context, string) (*pocketid.OIDCClient, error) {
+	return nil, nil
+}
+func (f *fakeClients) DeleteOIDCClient(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+// --delete-data: the database and role apply made, and the bucket and keys
+// storage init made, each proven before it goes.
+func TestDeleteDataDropsTheDatabaseAndBucket(t *testing.T) {
+	cfg, hosts := world(t)
+	a := hosts["home-a"]
+	a.db = &database{leader: "home-a", dbs: map[string]string{"blog": "blog", "talk": "talk"}, roles: map[string]bool{"blog": true, "talk": true}}
+	a.garage = &garageNode{
+		keys: map[string]bool{"GK000000000000000000000001": true, "GK000000000000000000000002": true},
+		buckets: map[string]*bucket{
+			"blog-uploads": {id: "aaaaaaaaaaaaaaaa1111", keys: []string{"GK000000000000000000000001"}, objects: []string{"a", "b/c", "d", "e"}},
+			"shared":       {id: "bbbbbbbbbbbbbbbb2222", keys: []string{"GK000000000000000000000001", "GK000000000000000000000002"}},
+		},
+	}
+	secrets := &config.Secrets{Apps: map[string]map[string]any{
+		"blog": {"s3_access_key_id": "GK000000000000000000000001", "s3_secret_access_key": "SECRET-blog"},
+		"talk": {"s3_access_key_id": "GK000000000000000000000002", "s3_secret_access_key": "SECRET-talk"},
+	}}
+	hm := map[string]Host{}
+	for k, v := range hosts {
+		hm[k] = v
+	}
+	in := probe(t, cfg, "blog", hosts, true)
+	var err error
+	if in.Database, err = ProbeDatabase(cfg, "blog", hm); err != nil {
+		t.Fatal(err)
+	}
+	if in.Storage, err = ProbeStorage(cfg, secrets, "blog", a); err != nil {
+		t.Fatal(err)
+	}
+	in.Client = ClientState{Provider: "auth", Site: "home-a", Name: "blog", RecordedID: "c-1", ByID: &pocketid.OIDCClient{ID: "c-1", Name: "blog"}}
+	p, err := Build(cfg, "blog", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Database.DropDatabase || !p.Database.DropRole || len(p.Storage.Buckets) != 1 || p.Storage.Buckets[0].Name != "blog-uploads" {
+		t.Fatalf("plan: db %+v storage %+v", p.Database, p.Storage)
+	}
+	if !strings.Contains(strings.Join(p.Storage.Kept, "\n"), "The bucket is shared, and the keys are GK000000000000000000000002") {
+		t.Errorf("kept = %v", p.Storage.Kept)
+	}
+	clients := &fakeClients{}
+	ex := executor(hosts)
+	ex.Clients = clients
+	if err := ex.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.db.dbs["blog"]; ok || a.db.roles["blog"] || a.db.dbs["talk"] == "" {
+		t.Errorf("databases %v roles %v", a.db.dbs, a.db.roles)
+	}
+	if _, ok := a.garage.buckets["blog-uploads"]; ok || a.garage.keys["GK000000000000000000000001"] || a.garage.buckets["shared"] == nil || !a.garage.keys["GK000000000000000000000002"] {
+		t.Errorf("garage: buckets %v keys %v", a.garage.buckets, a.garage.keys)
+	}
+	if len(clients.deleted) != 1 || clients.deleted[0] != "c-1" {
+		t.Errorf("deleted clients %v", clients.deleted)
+	}
+	for _, s := range a.sent {
+		if strings.Contains(s, "SECRET") {
+			t.Errorf("a secret reached a command line: %s", s)
+		}
+	}
+
+	// The same again: everything is gone, so nothing is planned.
+	in = probe(t, cfg, "blog", hosts, true)
+	in.Database, _ = ProbeDatabase(cfg, "blog", hm)
+	in.Storage, _ = ProbeStorage(cfg, secrets, "blog", a)
+	again, err := Build(cfg, "blog", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Database.DropDatabase || again.Database.DropRole || len(again.Storage.Buckets) > 0 || len(again.Storage.Keys) > 0 {
+		t.Errorf("second plan: db %+v storage %+v", again.Database, again.Storage)
+	}
+}
+
+// A database of the app's name owned by another role, or one a declared
+// app also uses, is not provably the removed app's.
+func TestADatabaseIsDroppedOnlyWithItsOwnRole(t *testing.T) {
+	cfg := fixture(t)
+	delete(cfg.Apps, "blog")
+	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "blog", Database: true, Owner: "postgres", Role: true}); dp.DropDatabase || dp.DropRole || len(dp.Kept) != 2 {
+		t.Errorf("foreign owner: %+v", dp)
+	}
+	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "talk", Database: true, Owner: "talk", Role: true}); dp.DropDatabase || len(dp.Kept) != 1 {
+		t.Errorf("a declared app's database: %+v", dp)
+	}
+	if dp := planDatabase(cfg, DatabaseState{Leader: "home-a", Name: "blog", Role: true}); !dp.DropRole || dp.DropDatabase {
+		t.Errorf("a role left alone by a stopped run: %+v", dp)
+	}
+}
+
+func TestKeyInfoIsReadWithoutItsSecret(t *testing.T) {
+	out := "Key name: blog\nKey ID: GK1\nSecret key: abc\nCan create buckets: false\n\nKey-specific bucket aliases:\n\nAuthorized buckets:\n  RWO  blog-uploads    aaaaaaaaaaaaaaaa\n  R                    bbbbbbbbbbbbbbbb\n"
+	h := &scripted{out: out}
+	kb, err := garage.ReadKeyBuckets(h, fixture(t).Deployment(), "GK1")
+	if err != nil || len(kb.Buckets) != 2 || kb.Buckets[1] != "bbbbbbbbbbbbbbbb" {
+		t.Errorf("ReadKeyBuckets = %+v, %v", kb, err)
+	}
+	h.fail = true
+	if _, err := garage.ReadKeyBuckets(h, fixture(t).Deployment(), "GK1"); err == nil || strings.Contains(err.Error(), "abc") {
+		t.Errorf("a failure: %v", err)
+	}
+}
+
+type scripted struct {
+	out  string
+	fail bool
+}
+
+func (s *scripted) Run(string) (string, error) {
+	if s.fail {
+		return s.out, errExit
+	}
+	return s.out, nil
+}
+func (s *scripted) Describe() string { return "home-a" }
+
+var errExit = &exitError{}
+
+type exitError struct{}
+
+func (*exitError) Error() string { return "exit status 1" }
+
+// A removal reports a section per site and a step per thing it does there,
+// and a failure marks the step that failed.
+func TestTheExecutorReportsEachStep(t *testing.T) {
+	cfg, hosts := world(t)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	ex := executor(hosts)
+	ex.Report = rec
+	if err := ex.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct{ kind, text string }{
+		{"section", "home-a"},
+		{"done", "remove containers and networks"},
+		{"done", "remove files"},
+	} {
+		if !rec.Has(want.kind, want.text) {
+			t.Errorf("no %s %q:\n%s", want.kind, want.text, rec.Lines())
+		}
+	}
+	for _, e := range rec.Events {
+		if e.Kind == "fail" {
+			t.Errorf("a clean removal failed %q", e.Text)
+		}
+	}
+}
+
+// What a removal leaves for the operator shows its first sentence without
+// --verbose, so every such sentence stays within 100 characters.
+func TestTheLeftForYouHintsStayShort(t *testing.T) {
+	cfg, hosts := world(t)
+	hosts["home-a"].files[blogEnv] = "SECRET_KEY=edited\n"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := &config.Secrets{Apps: map[string]map[string]any{"blog": {
+		"s3_access_key_id": "GKx", "s3_secret_access_key": "y", "previous_s3_access_key_id": "GKz", "previous_s3_secret_access_key": "w", "secret_key": "k",
+	}}}
+	ex := executor(hosts)
+	if err := ex.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	lines := append(Remains(p, secrets, ex.Kept), Remains(keep, secrets, nil)...)
+	// Every producer, with the longest inputs a real deployment gives it:
+	// 20-character names, 36-character client IDs, 63-character database
+	// names and several foreign key IDs.
+	site, long, uuid, path := strings.Repeat("s", 20), strings.Repeat("n", 63), strings.Repeat("u", 36), "/"+strings.Repeat("p", 59)
+	keys := []string{"GK" + strings.Repeat("a", 24), "GK" + strings.Repeat("b", 24), "GK" + strings.Repeat("c", 24)}
+	lines = append(lines,
+		clientKept(site, long, uuid, "pocket-id on "+site, "its ID is not the one recorded under oidc_clients."+site),
+		databaseNotApps(long), databaseDeclared(long, long), databaseForeign(long, site, long), roleKept(long, site),
+		keyDeclared(uuid), bucketUnread(long), bucketGranted(long, keys), bucketAliases(long, 99, 99),
+		dirEdited(site, path), dirData(site, path, 99999, "999.9 GiB"), fileEdited(site, path),
+		secretsLeft(site, strings.Repeat("apps.x.y, ", 20)), dnsLeft, dataKept(site))
+	for _, line := range lines {
+		hint, _, _ := strings.Cut(line, ". ")
+		if len(hint) > 100 {
+			t.Errorf("%d characters: %s", len(hint), hint)
+		}
+	}
+}

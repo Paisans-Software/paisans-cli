@@ -1,0 +1,493 @@
+# paisans-stack.yaml — the whole deployment, declared.
+#
+# This file is PLAIN and safe to commit. It holds no secrets: those live in
+# secrets.enc.yaml, encrypted with sops + age. Keeping them apart means routine
+# topology edits — adding an app, changing a hostname — need no decryption key,
+# and a change can be reviewed by someone who cannot read the secrets.
+#
+# It declares INTENT, never STATUS. Which node is currently primary lives in
+# etcd and is read with `paisans failover status`. A config file that records
+# runtime state drifts, and someone trusts a stale value during an incident.
+
+version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+
+community:
+  # What a member reads on the sign in page when the gate sends them there:
+  # the gate's client at Pocket ID carries this name. Changing it renames that
+  # client on the next apply.
+  name: "Example Community"
+  # ONE-WAY DOOR. Federation identity is the hostname, and remote instances
+  # have recorded it. Changing this after federating is a rebuild, not a rename.
+  domain: example.org
+  # Names under the domain whose mail somebody other than this toolkit runs
+  # (Eg: the domain itself on Google Workspace, Fastmail or Proton Mail).
+  # `paisans dns init` publishes no mail records at them. Every other name it
+  # publishes gets records saying it sends and receives no mail, so nobody can
+  # forge mail from it, and left out, that includes the domain itself. The
+  # domain of smtp.from_address below, and of any app's own from_address, is
+  # one of these without being listed.
+  # mail_domains: [example.org]
+
+mesh:
+  # The private network every site sits on. Declared, not derived: applications
+  # are rendered to trust this subnet for forwarded client addresses, so it has
+  # to be a value that never changes. Deriving the tightest network around
+  # today's addresses would widen it the moment a site was added, silently
+  # rewriting TRUSTED_PROXIES in every app. `paisans init` checks it against
+  # every site before the first apply, and rolls a random 10.x.y.0/24 (moving
+  # each site's address with it) when it overlaps another deployment's mesh,
+  # a route, an address or a Docker network on any of them. Once deployed it
+  # never changes.
+  subnet: 10.44.0.0/24
+
+# Certificates are issued over DNS-01, always. A gateway has to be able to hold
+# valid certificates before DNS points at it, which is what makes moving one an
+# overlap rather than a cutover, and a hostname behind a VPN has nothing on the
+# internet that can answer an HTTP-01 challenge.
+#
+# The provider named here decides two things: the directive in the gateway's
+# Caddyfile, and which image it runs, since a DNS provider in Caddy is a module
+# compiled into the binary rather than a setting.
+acme:
+  provider: cloudflare        # or desec
+  # Only for a provider this toolkit publishes no image for. It must carry that
+  # provider's module, and `apply` checks that it does before reloading
+  # anything.
+  # image: ghcr.io/example-org/caddy-route53:2.11.4
+
+# The operators: the people who run the machines. They log in to the sites,
+# hold the secrets and run apply. validate wants at least two whose keys are on
+# every site that runs Pocket ID, so one lost workstation does not leave
+# nobody able to run the deployment. apply makes each a Pocket ID user in
+# operators, members and every app's member and admin group, so every operator
+# is a community admin as well. Each site's ssh.keys names some of them, and
+# host prepare makes every key they list an authorized key there, so an
+# operator's keys are written once however many sites they reach. email is
+# required; name is optional.
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+
+sites:
+  home-a:
+    roles: [data, apps]
+    address: 10.44.0.1          # WireGuard address, stable forever
+    # Residential, but dialled: a dynamic DNS name and a forwarded UDP port.
+    # Two sites with no endpoint reach each other only through the first site
+    # that has one, so with this left out home-a and home-b would talk only
+    # through vm, and losing vm would leave each voter alone with no majority:
+    # the database read-only everywhere. One home with an endpoint keeps the
+    # two homes peered directly, and validate refuses the file without it.
+    endpoint: home-a.example.org:51820
+    # How the toolkit reaches the site, and who may log in. Every site has
+    # one, the gateway included. The keys are public keys, one per line,
+    # every operator's: the file is shared, so it never names a private key.
+    # Each operator's own ssh offers these and finds its private half in that
+    # operator's agent. `host prepare` makes them the user's authorized keys.
+    ssh:
+      host: home-a.local        # optional: defaults to public_address
+      user: ubuntu              # must already exist on the host
+      port: 22                  # optional: defaults to 22
+      keys: [alice, bob]
+
+  home-b:
+    roles: [data, apps]
+    address: 10.44.0.2
+    endpoint: null              # residential, changing address: dials out
+    ssh:
+      host: home-b.local
+      user: ubuntu
+      keys: [alice, bob]
+
+  vm:
+    roles: [gateway, witness]
+    address: 10.44.0.3
+    endpoint: vm.example.org:51820   # stable: the homes dial here
+    # What the internet reaches this site on, as the cloud provider reports it
+    # rather than as the host's own interface shows it. Optional. `paisans dns
+    # init` publishes every hostname below and the endpoint's name above as A
+    # records to it, and it is the default ssh.host. Set, it is also what the
+    # other sites' WireGuard dials, on the endpoint's port, so the mesh never
+    # waits on DNS: the endpoint may then be left out, for port 51820, or
+    # written as a port alone, ":51821".
+    # Private, carrier grade NAT and mesh addresses are refused.
+    # public_address: 203.0.113.10
+    # public_address6: 2001:db8::10    # optional, adds AAAA records
+    ssh:
+      host: vm.example.org      # could be left out with public_address set
+      user: ubuntu
+      keys: [alice, bob]
+
+  # The uptime monitor's own machine. Never the gateway or the witness: its job
+  # is to report their failures, so it must not fail with them. It serves its
+  # own hostname from its own address instead of through the gateway, so
+  # public_address is required here, and its hostname's record points at it.
+  health:
+    roles: [monitor]
+    address: 10.44.0.4
+    endpoint: health.example.org:51820
+    public_address: 203.0.113.20
+    # What is in front of the monitor. Left out, it is managed_by: paisans: the
+    # toolkit's own Caddy, the gateway's image, with certificates over DNS-01.
+    # On a machine that already runs a web server on 80 and 443, hand the app
+    # to that server instead; `paisans web-server show --app health` prints what
+    # to put in it, and docs/guides/behind-your-own-web-server.md walks
+    # through it.
+    # web_server:
+    #   managed_by: external
+    #   listen: 127.0.0.1:8480
+    ssh:
+      host: health.example.org
+      user: ubuntu
+      keys: [alice, bob]
+
+# One cluster. Multiple named clusters are out of scope: one cluster holds many
+# databases and replicates them together, so every app in it gets HA for free.
+# "HA for one app but not another" saves nothing. An app that must not share it
+# is `pinned` instead.
+#
+# cluster.sites and etcd.members are left out, and derived from the roles:
+# cluster.sites is every data site, and etcd.members every witness, then
+# every data site, each in name order. Here that is home-a and home-b, and
+# vm, home-a and home-b. Write either key only to choose differently, and
+# it is then used exactly as written: `etcd.members: [home-a]` runs one
+# voter by choice, which gives up automatic failover, and listing only some
+# of the data sites runs fewer voters than there are data sites.
+cluster:
+  port: 5000                  # local HAProxy port apps connect to
+  postgres_version: "18"
+  synchronous: true
+  synchronous_strict: false     # degrade to standalone rather than block writes
+
+etcd:
+  # Defaults (100ms / 1000ms) assume one datacenter. Measure real RTT through
+  # the tunnel and set these; identical on every member. Leaving the defaults
+  # produces phantom elections every time a home connection hiccups.
+  heartbeat_ms: 200
+  election_timeout_ms: 2000
+
+storage:
+  # There is no media hostname here. Each app that stores objects serves them
+  # on a hostname of its own, a sibling of the app's: talk.example.org gets
+  # talk-media.example.org, and each one needs a DNS record pointing at the
+  # gateway. An app can choose another name under `hostnames.media`, as blog
+  # does below.
+  garage:
+    # Preference order, not a set. The first site serves every media read the
+    # gateway passes on and takes every app's writes; the rest serve only
+    # when the ones before them are down. Put the site with the best upload
+    # first: a home line's upload is its slow direction. A new site joins at
+    # the end and moves up only after `paisans storage add` has passed.
+    sites: [home-a, home-b]
+    # A factor of 2 across 2 sites means a write needs both of them: losing a
+    # site keeps the database available through failover but stops uploads.
+    # That is a trade, not a free win, and it is the reason a third Garage
+    # location is worth considering. Validation warns about it on purpose.
+    replication: 2
+    # consistent (the default), degraded or dangerous. dangerous keeps
+    # uploads working with a site down by confirming an upload once one copy
+    # exists. Changing replication on a running cluster is `paisans storage
+    # add --change-replication`; changing this is an ordinary apply.
+    consistency: consistent
+    # What each node advertises to Garage's own layout, not a measurement of
+    # the disk: the toolkit has no way to know how much of it is meant for
+    # objects, so it takes your word and requires the unit suffix Garage
+    # does. Defaults to 100G when left unset.
+    capacity: 100G
+    # Per-site overrides, for nodes of different sizes. A host that exists
+    # only for Garage takes `roles: [storage]` and is listed above, at the
+    # end until `paisans storage add` has joined it.
+    # capacities:
+    #   store: 2T
+
+backup:
+  # Leave this section out, or write `enabled: false`, and nothing is backed
+  # up: validate and apply say so on every run. Adding it later is an ordinary
+  # apply; nothing has to be converted first.
+  #
+  # How often a run happens: daily, weekly, monthly or yearly. It is not how
+  # long backups are kept; that is `keep`, per destination.
+  schedule: daily
+  at: "03:00"                   # UTC
+  destinations:
+    # The first destination is the primary: Postgres streams its write ahead
+    # log to it continuously. The others receive a copy after each run, and
+    # each keeps its own retention. Two providers are two failure domains;
+    # one is a single point of loss, and validation warns about it.
+    #
+    # Credentials are secrets, never written here:
+    #   paisans secrets set backup.destinations.b2.access_key_id
+    #   paisans secrets set backup.destinations.b2.secret_access_key
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      # How many of each period's newest backup survive: the last seven
+      # nights, the newest of each of the last four weeks, and so on.
+      # Pruning deletes what no tier covers; this list is what approves it.
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage              # Garage's region is its own s3_region
+      bucket: paisans
+      # Nothing here is ever deleted, so this bucket only grows. Validation
+      # warns about it on every run.
+      prune: false
+
+# Optional. Git repositories of blueprints beyond the built in ones, each
+# named paisans-<name> and pinned to a commit; `paisans catalog add
+# example/blueprints` writes this one, and an app names a blueprint in it as
+# example/blueprints/<blueprint>. The core catalog, which every unqualified
+# name such as mbin means, is always there.
+# catalogs:
+#   example/blueprints:
+#     url: https://github.com/example/paisans-blueprints
+#     tag: v1.0.0
+#     commit: 4f2a0c0e9b1d7a3f5e6c8b2d4a6f8e0c1b3d5f7a
+
+# Every app is rendered with trusted proxies set to the mesh subnet, never to a
+# specific host. That is what lets the gateway role move between machines later
+# without breaking client-address handling. It is expensive to retrofit and
+# fails quietly, so it is not configurable here.
+apps:
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+    # gated is access policy, and access policy belongs in configuration, not
+    # in a hand edited Caddy include somebody has to remember exists. It puts
+    # the app behind the gate, which admits members and admins. Federation still
+    # works: ActivityPub goes to Mbin, which checks every signature, and this
+    # turns its allow list and private instance mode on. Mbin's mobile apps
+    # work too, on the token their sign-in earns. Nobody declares the gate:
+    # the toolkit runs it at gate.example.org, on the gateway, whenever an
+    # app sets gated or auto_login.
+    gated: true
+    # auto_login skips Mbin's own "Log in with" button for a member the gate
+    # has already signed in.
+    auto_login: true
+    # Its client at Pocket ID is restricted to settings.member_group and
+    # settings.admin_group, defaulting to members and admins, and Mbin reads
+    # the same two names from the groups claim: the admin group's members
+    # become administrators. An app using the gate must leave member_group at
+    # members, the group the gate admits, which validate checks. Both are left
+    # at their defaults here.
+    settings:
+      # Where Mbin's contact form sends each message, and the address its
+      # /api/info publishes. Optional: without it the contact form sends to
+      # the smtp block's from_address. Mbin reads the smtp block below for its
+      # mail, which is little, since every member signs in through Pocket ID.
+      contact_email: admins@example.org
+      # Optional, and true when absent: Mbin refuses an ActivityPub read with
+      # no valid HTTP signature, leaving open only its instance actor and
+      # discovery, which a peer needs before it can sign. Locked in Mbin, like
+      # every setting this file renders, so its admin page cannot turn it off.
+      # A gated app refuses false. See README, "Mbin and WriteFreely lock what
+      # the toolkit renders".
+      authorized_fetch: true
+    # Optional. Keys are service names in the blueprint's compose template; any
+    # key left out takes the default that blueprint ships. Declaring the
+    # reference is what makes running a fork, or holding a version back, a
+    # config edit.
+    # `latest` is refused: it makes two runs of `apply` differ from identical
+    # inputs. A digest (@sha256:...) is accepted and is the stronger form.
+    # A tag is resolved to the build it names each time `apply` plans, and
+    # that digest is what the host runs, so a rebuilt tag moves the app on the
+    # next apply; a digest here holds it on one build.
+    images:
+      app: ghcr.io/example-org/mbin:v1.2.3
+
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    # What Pocket ID's sign in page calls this app, as its client's name.
+    # Without it the client is named after the app's key, here "wiki".
+    display_name: Wiki
+    placement: cluster
+    settings:
+      # Pocket ID groups that become Wiki.js groups. Membership follows
+      # Pocket ID at every sign in; what each group may do is set in Wiki.js.
+      synced_groups: [admins, members]
+      site_title: "Example Wiki"
+
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    settings:
+      # Required. paisans: the account service (the account app below)
+      # manages signup, bans and recovery, nobody is a Pocket ID
+      # administrator, and the toolkit renders allow_user_signups and
+      # email_one_time_access_as_unauthenticated itself. pocket-id: Pocket
+      # ID's own admin pages do, every operator is its administrator, and
+      # there is no account app.
+      management: paisans
+      # Not `s3`. Uploads are ~1 MB of avatars and branding; in Postgres they
+      # ride streaming replication with no sync job, and the service that gates
+      # every other one gains no dependency on object storage being up.
+      file_backend: database
+      # Pocket ID's application configuration. Its admin page for these is
+      # read only: they are rendered into its .env, and changing one is an
+      # edit here and an apply, which restarts it. Anything left out takes
+      # Pocket ID's default. The full list is in README.md, "Pocket ID's
+      # configuration is rendered from paisans-stack.yaml".
+      app_name: Example ID       # also the sender name on its mail
+      session_duration: 10080    # minutes
+      # By name. apply finds or creates each group at the running Pocket ID
+      # and records its ID under pocket_id_groups in the secrets. members is
+      # the group the gate and every member facing app admit.
+      signup_default_groups: [members]
+      # Always false, and validate refuses true. A username is the identity
+      # other apps know a person by, such as their fediverse handle in Mbin,
+      # and those apps do not follow a rename.
+      allow_own_account_edit: false
+
+  chat:
+    blueprint: synapse
+    hostname: chat.example.org
+    hostnames:
+      # A second name because it serves something different: the apex carries
+      # the .well-known delegation documents so a member's identifier reads
+      # @name:example.org while the API itself stays on chat.example.org.
+      # This is also server_name, permanent from the first account or room.
+      wellknown: example.org
+    # Pinned: its S3 module supplements the media store rather than replacing
+    # it, so a local media directory is always required and it cannot follow a
+    # failover cleanly. Pinned means app, database and media together — a
+    # half-pinned app is less available than either site.
+    placement: { pinned: vm }
+
+  web:
+    blueprint: element
+    hostname: web.example.org
+    # Pinned, for the same reason the gate is: a static web client keeps
+    # nothing in Postgres, so there is no cluster for it to join and `cluster`
+    # placement is refused.
+    placement: { pinned: home-b }
+    settings:
+      # The homeserver's API hostname, which becomes base_url. It is NOT
+      # server_name: that is the name inside a member's identifier, and the
+      # toolkit reads it off the homeserver declared above rather than asking
+      # for it twice, because a client whose server_name disagrees with its
+      # homeserver offers accounts that do not exist. With the wellknown role
+      # set above, members here are @name:example.org while the client talks to
+      # chat.example.org.
+      homeserver: chat.example.org
+      brand: Example Chat
+
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    # This blueprint means the writefreely-wisp fork, not upstream WriteFreely: the
+    # fork adds Postgres and S3 support upstream does not have, so the blog
+    # could join the cluster like any other app. It is pinned here as an
+    # ordinary choice, not a forced one: pinning to a home is as valid as
+    # pinning to the gateway, and its availability is that site's.
+    placement: { pinned: home-a }
+    # Optional, and only for a blueprint that stores files. Left out, the blog's
+    # images go to Garage, because this deployment runs one; `local` keeps
+    # them in the blog's own stack directory on home-a instead, which only a
+    # pinned app may do, and gives it no bucket and no media hostname. See
+    # README, "A pinned app may keep its files on its own disk".
+    # storage: local
+    # Public, so anyone reads the blog, with auto-login: a member the gate has
+    # signed in is signed into the blog too, and its "Log in" link signs in at
+    # the gate first, so one sign-in covers every app.
+    auto_login: true
+    settings:
+      # WriteFreely reads config.ini rather than an environment, and this is
+      # what the [app] section is rendered from. A rendered file carrying a
+      # client secret is written 0600 and bind mounted, where `docker inspect`
+      # cannot reach it.
+      site_name: Example Community
+      oidc_display_name: Example
+      # Optional, and true when absent: a valid HTTP signature on every
+      # ActivityPub read and inbox delivery. config.ini locks it, with every
+      # other database setting it renders, so the blog's admin page cannot
+      # change it.
+      authorized_fetch: true
+      # The client admits only member_group (default members) and admins,
+      # and WriteFreely reads no groups claim.
+    # Not settings. A settings key works only if a template asks for it by
+    # name, and one no template reads is ignored without a word. A config key
+    # is passed through as written: here, max_blogs inside config.ini's
+    # existing [app] section. The toolkit does not interpret it, and refuses
+    # one the template already writes, such as app.site_name, rather than let
+    # it override the setting above. The fork moves [app] into its database on
+    # its first start, so a key added later is ignored; see the README.
+    config:
+      app.max_blogs: 3
+    # Optional. Without it this would be blog-media.example.org, derived from
+    # the hostname above. A media hostname is never a child of an app's own
+    # hostname (files.blog.example.org would share its cookie scope), and it
+    # is never gated: a federating server fetching an image is a machine.
+    hostnames:
+      media: images.example.org
+
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    # The uptime monitor. Pinned only, and only to a site holding the monitor
+    # role: it keeps SQLite on local disk, and it must not go dark with the
+    # gateway it reports on. Its monitors are not declared here: every app
+    # gets a public and a direct check, every other site a ping, and the
+    # monitor one check of its own public URL, generated from this file.
+    placement: { pinned: health }
+    settings:
+      # Only members of this identity provider group may sign in. Defaults to
+      # operators, the people who run the machines; admins lets every
+      # community admin in as well.
+      admin_group: admins
+    # Optional, any field of the smtp block below; the rest is inherited.
+    # smtp:
+    #   from_name: Example Health
+
+  # The community's account service, on account.example.org, signing in
+  # through the one pocket-id app above. People sign up on join.example.org:
+  # with signup: invite by opening a member's invite link, with signup: open
+  # on a registration page. Either way they agree to the code of conduct
+  # below and choose their details before any account exists; with
+  # require_approval an admin approves first. See "Accounts" in the README.
+  account:
+    blueprint: account
+    hostname: account.example.org
+    placement: cluster
+    settings:
+      # Required: invite (a member's invite link) or open (a registration
+      # page anyone can use). Either way people sign up on join.example.org,
+      # unless hostnames.join names another hostname for it.
+      signup: invite
+      # invite_quota belongs to invite links, and is refused with open.
+      invite_quota: 3
+      require_approval: true
+      # Replace this with the community's own code of conduct. Its SHA-256 is
+      # the version each person agrees to, so an edit is a new version.
+      code_of_conduct: |
+        ## Code of conduct
+
+        This is an example. Replace it with the community's own code of
+        conduct before anyone signs up.
+
+# How apps that send mail send it: the uptime monitor's alerts, the account
+# service's notices to admins and applicants, Pocket ID's
+# login codes and notices, which go out under its app_name rather than
+# from_name, and Mbin's contact form and account mails, which go out under its
+# hostname rather than from_name.
+# Each app may override any field in its own smtp block. The password is a
+# secret: apps.<app>.smtp_password if set, else external.smtp_password.
+smtp:
+  host: smtp.example.org
+  port: 587
+  security: starttls          # or tls; none only for a relay at a private address
+  username: health@example.org
+  from_address: health@example.org
+  from_name: Example Community

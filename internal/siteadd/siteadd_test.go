@@ -1,0 +1,536 @@
+package siteadd_test
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/preflight"
+	"github.com/paisans-software/paisans-cli/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+func build(t *testing.T, w *world) *siteadd.Plan {
+	t.Helper()
+	p, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func steps(p *siteadd.Plan, stage int) []siteadd.Step {
+	return p.Stages[stage-1].Steps
+}
+
+func hasStep(p *siteadd.Plan, stage int, site, verb string) bool {
+	for _, s := range steps(p, stage) {
+		if s.Site == site && s.Verb == verb {
+			return true
+		}
+	}
+	return false
+}
+
+// The dry run plans every stage from live state and changes nothing.
+func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	p := build(t, w)
+
+	if len(p.Stages) != 8 {
+		t.Fatalf("want 8 stages, got %d", len(p.Stages))
+	}
+	for _, want := range []struct {
+		stage      int
+		site, verb string
+	}{
+		{2, "home-a", "update"}, {2, "home-a", "mesh"}, {2, "vm", "update"}, {2, "home-b", "create"}, {2, "home-b", "mesh"},
+		{3, "vm", "add"}, {3, "vm", "write"}, {3, "vm", "start"}, {3, "vm", "promote"},
+		{3, "home-b", "add"}, {3, "home-b", "promote"},
+		{4, "home-b", "start"},
+		{5, "home-a", "set"},
+		{6, "home-a", "update"}, {6, "home-a", "restart"},
+	} {
+		if !hasStep(p, want.stage, want.site, want.verb) {
+			t.Errorf("stage %d has no %s %s step:\n%v", want.stage, want.verb, want.site, steps(p, want.stage))
+		}
+	}
+	// The witness joins first, and each joiner's --initial-cluster is the
+	// membership right after its own add.
+	var writes []string
+	for _, s := range steps(p, 3) {
+		if s.Verb == "write" {
+			writes = append(writes, s.Site+" "+s.Text)
+		}
+	}
+	if len(writes) != 2 || !strings.HasPrefix(writes[0], "vm ") ||
+		!strings.Contains(writes[0], "--initial-cluster=home-a=http://10.44.0.1:2380,vm=http://10.44.0.3:2380") ||
+		!strings.Contains(writes[1], "--initial-cluster=home-a=http://10.44.0.1:2380,home-b=http://10.44.0.2:2380,vm=http://10.44.0.3:2380") {
+		t.Errorf("the learners' flags are wrong:\n%s", strings.Join(writes, "\n"))
+	}
+
+	for _, h := range w.hosts {
+		if h.writes != 0 {
+			t.Errorf("the dry run wrote %d file(s) on %s", h.writes, h.name)
+		}
+		for _, c := range h.commands {
+			for _, verb := range []string{"member add", "promote", "syncconf", "up -d", "restart", "edit-config"} {
+				if strings.Contains(c, verb) {
+					t.Errorf("the dry run ran %q on %s", c, h.name)
+				}
+			}
+		}
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	p.Show(rec)
+	t.Log("\n" + rec.Lines())
+	if !rec.Has("section", "stage 3, etcd") || !rec.Has("detail", "rollback: ") || !rec.Has("pending", "gate: etcd healthy") {
+		t.Errorf("the printed plan is missing its stages:\n%s", rec.Lines())
+	}
+}
+
+// A whole join: three voters, a streaming synchronous replica, HAProxy with
+// both backends, and a second Build that has nothing left to do.
+func TestAJoinCompletesAndLeavesNothingToDo(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.promoteRefusals = 2
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+	vm := w.hosts["vm"].files["/srv/paisans/f2a9/infra/compose.yaml"]
+	if !strings.Contains(vm, "--initial-cluster-state=existing") || !strings.Contains(vm, "--initial-cluster=home-a=http://10.44.0.1:2380,vm=http://10.44.0.3:2380\n") {
+		t.Errorf("vm's etcd was not started as a joiner of two:\n%s", vm)
+	}
+	homeA := w.hosts["home-a"].files["/srv/paisans/f2a9/infra/compose.yaml"]
+	if !strings.Contains(homeA, "--initial-cluster=home-a=http://10.44.0.1:2380\n") {
+		t.Errorf("the founder's compose file changed")
+	}
+	if !w.syncMode || !strings.Contains(w.served["home-a"], "server home-b") {
+		t.Errorf("synchronous mode %v, HAProxy serves:\n%s", w.syncMode, w.served["home-a"])
+	}
+	for _, c := range w.hosts["home-a"].commands {
+		if strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart") || strings.Contains(c, "/srv/paisans/f2a9/infra/compose.yaml up -d") {
+			t.Errorf("the primary's whole stack was acted on: %s", c)
+		}
+	}
+
+	again := build(t, w)
+	if again.Pending() {
+		rec := &ui.Recorder{}
+		again.Show(rec)
+		t.Errorf("a finished join still plans work:\n%s", rec.Lines())
+	}
+	if !hasStep(again, 1, "home-b", "skip") {
+		t.Error("a started join runs preflight again, which a site holding 51820/udp would fail")
+	}
+	if err := siteadd.Execute(again); err != nil {
+		t.Errorf("re-running a finished join fails its gates: %v", err)
+	}
+	if len(again.Owed) == 0 {
+		t.Error("home-a's stale patroni.env is not noted")
+	}
+
+	// apply would now see the scoped writes as its own.
+	rendered := mustRender(t, w)
+	for _, name := range []string{"home-a", "vm"} {
+		ap, err := apply.Build(name, rendered, "", w.hosts[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := ap.Conflicts(); len(c) > 0 {
+			t.Errorf("%s: apply sees site add's files as edits: %v", name, c)
+		}
+	}
+}
+
+// A failed mesh gate restores every existing site's psns-f2a9.conf and stops
+// before etcd is touched.
+func TestAFailedMeshGateRollsBack(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.noPing = true
+	before := w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"]
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "stage 2") {
+		t.Fatalf("want a stage 2 failure, got %v", err)
+	}
+	if w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"] != before {
+		t.Error("home-a's psns-f2a9.conf was not restored")
+	}
+	if w.hosts["home-a"].ran("member add") > 0 {
+		t.Error("etcd was touched after a failed mesh gate")
+	}
+
+	// Fixed, the next run starts again at stage 2 and carries on.
+	w.noPing = false
+	p := build(t, w)
+	if !hasStep(p, 2, "home-a", "update") {
+		t.Error("after a rollback the mesh is not planned again")
+	}
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// etcd refuses a promotion until the learner has caught up; site add retries
+// a bounded number of times and then stops with the learner still a learner.
+func TestPromotionIsRetriedThenGivenUp(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.promoteRefusals = 1000
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "stage 3") || !strings.Contains(err.Error(), "still a learner") {
+		t.Fatalf("want a stage 3 promotion failure, got %v", err)
+	}
+	if n := w.hosts["home-a"].ran("member promote"); n != siteadd.PromoteAttempts() {
+		t.Errorf("promote tried %d times, want %d", n, siteadd.PromoteAttempts())
+	}
+	if w.hosts["home-a"].ran("--peer-urls=http://10.44.0.2:2380") > 0 {
+		t.Error("the new site was added while the witness was still a learner")
+	}
+}
+
+// A run that stopped with a learner added and not started resumes without
+// adding it again.
+func TestAStoppedEtcdJoinResumes(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.failOnce = "up -d etcd"
+	if err := siteadd.Execute(build(t, w)); err == nil || !strings.Contains(err.Error(), "stage 3") {
+		t.Fatalf("want a stage 3 failure, got %v", err)
+	}
+	p := build(t, w)
+	if len(steps(p, 2)) != 0 {
+		t.Errorf("the mesh is planned again: %v", steps(p, 2))
+	}
+	if hasStep(p, 3, "vm", "add") || !hasStep(p, 3, "vm", "start") {
+		t.Errorf("the learner is added again, or not started: %v", steps(p, 3))
+	}
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}
+
+// A replica whose lag rises fails stage 4, and the next run resumes there.
+func TestARisingLagStopsAtTheReplicaAndResumes(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.lags = []float64{5, 6, 7}
+	if err := siteadd.Execute(build(t, w)); err == nil || !strings.Contains(err.Error(), "stage 4") {
+		t.Fatalf("want a stage 4 failure, got %v", err)
+	}
+	w.lags = []float64{9, 4, 0}
+	p := build(t, w)
+	for stage := 2; stage <= 4; stage++ {
+		if len(steps(p, stage)) != 0 {
+			t.Errorf("stage %d is planned again: %v", stage, steps(p, stage))
+		}
+	}
+	if !hasStep(p, 5, "home-a", "set") {
+		t.Error("stage 5 is not planned")
+	}
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Replicated runs once stage 4's gate has passed, and only then: a replica
+// that has not caught up records nothing, and the run that resumes there
+// records it. A Replicated that fails stops the join at stage 4.
+func TestReplicatedRunsOnceStage4Passes(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.lags = []float64{5, 6, 7}
+	p := build(t, w)
+	var at []string
+	p.Replicated = func() error {
+		at = append(at, w.hosts["home-b"].files["/srv/paisans/f2a9/infra/compose.yaml"])
+		return nil
+	}
+	if err := siteadd.Execute(p); err == nil || len(at) != 0 {
+		t.Fatalf("err %v, Replicated ran %d time(s) on a failed gate", err, len(at))
+	}
+	w.lags = []float64{9, 4, 0}
+	p = build(t, w)
+	p.Replicated = func() error { at = append(at, "resumed"); return nil }
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if len(at) != 1 {
+		t.Errorf("Replicated ran %d time(s), want once", len(at))
+	}
+
+	w = newWorld(t)
+	p = build(t, w)
+	p.Replicated = func() error { return errors.New("record refused") }
+	err := siteadd.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "stage 4") || !strings.Contains(err.Error(), "record refused") {
+		t.Errorf("want a stage 4 stop naming the cause, got %v", err)
+	}
+	if w.syncMode {
+		t.Error("stage 5 ran after Replicated failed")
+	}
+}
+
+func TestNoSyncStandbyStopsAtStage5(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.noSyncStandby = true
+	if err := siteadd.Execute(build(t, w)); err == nil || !strings.Contains(err.Error(), "Sync Standby") {
+		t.Fatalf("want a stage 5 failure, got %v", err)
+	}
+}
+
+func TestHAProxyRoutingToAReplicaStopsAtStage6(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.replicaUp = true
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "replica home-b UP") {
+		t.Fatalf("want a stage 6 failure, got %v", err)
+	}
+}
+
+func TestAJoinOutsideTheScopeIsRefused(t *testing.T) {
+	w := newWorld(t)
+	s := w.cfg.Sites["home-a"]
+	s.Endpoint = ""
+	w.cfg.Sites["home-a"] = s
+	if _, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports()); err == nil || !strings.Contains(err.Error(), "relay") {
+		t.Errorf("a site without an endpoint was accepted: %v", err)
+	}
+	// A public address is dialled without an endpoint written, so it is
+	// not the relay case.
+	w = newWorld(t)
+	s = w.cfg.Sites["home-a"]
+	s.Endpoint, s.PublicAddress = "", "203.0.113.31"
+	w.cfg.Sites["home-a"] = s
+	if _, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports()); err != nil && strings.Contains(err.Error(), "has no endpoint") {
+		t.Errorf("a site dialled at its public address was refused for having no endpoint: %v", err)
+	}
+	w = newWorld(t)
+	if _, err := siteadd.Build(w.cfg, w.secrets, "home-a", w.transports()); err == nil {
+		t.Error("an existing data and apps site was accepted as a new data site")
+	}
+	// A new site with the apps role is still refused, but for what site add
+	// does not build, not for Pocket ID, which now stands by on a second
+	// apps site: the message says how to get there.
+	w = newWorld(t)
+	b := w.cfg.Sites["home-b"]
+	b.Roles = append(b.Roles, config.RoleApps)
+	w.cfg.Sites["home-b"] = b
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err == nil || !strings.Contains(err.Error(), "give it the apps role and run host prepare and apply") {
+		t.Errorf("a new data and apps site: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "placement decision") {
+		t.Errorf("the refusal still blames Pocket ID: %v", err)
+	}
+}
+
+// A written list that leaves the new site out is refused, naming the key and
+// that leaving it out derives it from the roles.
+func TestAWrittenListWithoutTheSiteIsRefused(t *testing.T) {
+	for key, edit := range map[string]func(*config.Config){
+		"cluster.sites": func(c *config.Config) { c.Cluster.Sites = []string{"home-a"} },
+		"etcd.members":  func(c *config.Config) { c.Etcd.Members = []string{"home-a", "vm"} },
+	} {
+		w := newWorld(t)
+		edit(w.cfg)
+		_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+		if err == nil || !strings.Contains(err.Error(), key+" is written and does not list it") || !strings.Contains(err.Error(), "derived from the roles") {
+			t.Errorf("%s without home-b: %v", key, err)
+		}
+	}
+}
+
+// etcd refuses a learner add as an "unhealthy cluster" until every voter has
+// been connected for five seconds, so the second learner, added right after the
+// first is promoted, is refused at first. The first real join stopped there.
+func TestALearnerAddRefusedAsUnhealthyIsRetried(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.addRefusals = 2
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatalf("a transient unhealthy cluster stopped the join: %v", err)
+	}
+}
+
+// Stage 6 stops the apps that reach the database through HAProxy before it
+// restarts, and starts and checks them after. A real join restarted HAProxy
+// under a running Mbin, whose workers never reconnected. A pinned app with its
+// own Postgres is left alone.
+func TestHAProxyRestartsWithItsDatabaseAppsStopped(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	p := build(t, w)
+	rec := &ui.Recorder{Verbose_: true}
+	p.Show(rec)
+	for _, want := range []struct{ kind, text string }{
+		{"pending", "stop account, auth, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, talk, wiki: they reach the database through this HAProxy"},
+		{"pending", "restart HAProxy on home-a"},
+		{"detail", "home-a: HAProxy alone"},
+		{"pending", "start account, auth, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, talk, wiki (docker compose -f /srv/paisans/f2a9/account/compose.yaml up -d;"},
+		{"pending", "check account, auth, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, talk, wiki: every container running"},
+	} {
+		if !rec.Has(want.kind, want.text) {
+			t.Errorf("the plan has no %s %q:\n%s", want.kind, want.text, rec.Lines())
+		}
+	}
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+
+	cmds := w.hosts["home-a"].commands
+	index := func(sub string) int {
+		for i, c := range cmds {
+			if strings.Contains(c, sub) {
+				return i
+			}
+		}
+		return -1
+	}
+	restart := index("restart haproxy")
+	if restart < 0 {
+		t.Fatal("HAProxy was not restarted")
+	}
+	for _, app := range []string{"auth", "talk", "wiki"} {
+		compose := "/srv/paisans/f2a9/" + app + "/compose.yaml"
+		stop, start, check := index(compose+" stop"), index(compose+" up -d"), index(compose+" ps --all")
+		if stop < 0 || stop > restart {
+			t.Errorf("%s was not stopped before HAProxy's restart (stop at %d, restart at %d)", app, stop, restart)
+		}
+		if start < restart {
+			t.Errorf("%s was not started after HAProxy's restart (start at %d, restart at %d)", app, start, restart)
+		}
+		if check < start {
+			t.Errorf("%s was not checked after it started", app)
+		}
+	}
+	for _, c := range cmds {
+		if strings.Contains(c, "/srv/paisans/f2a9/blog/") || strings.Contains(c, "/srv/paisans/f2a9/gate/") {
+			t.Errorf("an app that does not use the cluster's database was moved: %s", c)
+		}
+	}
+}
+
+// An app that does not come back healthy stops the join at stage 6, with
+// the cause read from its logs (the logs themselves with -v), and HAProxy's
+// own gate is not reached.
+func TestAnAppUnhealthyAfterHAProxyStopsAtStage6(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.unhealthy = "talk"
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "stack talk is not healthy") || !strings.Contains(err.Error(), "last 30 log lines") {
+		t.Fatalf("want a stage 6 failure naming talk, got %v", err)
+	}
+	shortAndVerbose(t, err, "site add home-b stopped at stage 6 (haproxy)", "stack talk is not healthy", "run site add again")
+	if w.hosts["home-a"].ran("/stats;csv") > 2 {
+		t.Error("HAProxy's gate ran after an app failed")
+	}
+}
+
+// A mesh probe that never reached its host says so and stops, and nothing is
+// rolled back: the mesh may be whole, and undoing stage 2 on the strength of
+// an ssh timeout would take down a tunnel that works.
+func TestAnUnreachableMeshProbeStopsWithoutRollingBack(t *testing.T) {
+	defer siteadd.SetFast()()
+	for _, probe := range []string{"ping ", "latest-handshakes"} {
+		w := newWorld(t)
+		p := build(t, w)
+		w.unreachable = probe
+		err := siteadd.Execute(p)
+		if err == nil || !strings.Contains(err.Error(), "stage 2") || !strings.Contains(err.Error(), "could not read host state") {
+			t.Fatalf("%s: want stage 2 to stop on the transport error, got %v", probe, err)
+		}
+		if strings.Contains(err.Error(), "cannot reach") || strings.Contains(err.Error(), "not whole") {
+			t.Errorf("%s: an unreachable probe was reported as a mesh fault: %v", probe, err)
+		}
+		if !strings.Contains(err.Error(), "nothing was rolled back") {
+			t.Errorf("%s: the failure does not say nothing was rolled back: %v", probe, err)
+		}
+		if strings.Contains(err.Error(), "Done.") {
+			t.Errorf("%s: stage 2 was rolled back on an ssh timeout: %v", probe, err)
+		}
+	}
+}
+
+// HAProxy's statistics probe never reaching a site is an error at plan time,
+// not "HAProxy lists too few sites", which planned a restart that stops every
+// database app on the site.
+func TestAnUnreachableHAProxyProbeIsNotARestart(t *testing.T) {
+	w := newWorld(t)
+	w.unreachable = "/stats;csv"
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err == nil || !strings.Contains(err.Error(), "could not read host state") {
+		t.Fatalf("want the transport error, got %v", err)
+	}
+}
+
+// A join reports each stage as a section, its work as steps and its gate as a
+// step of its own, and a failed gate marks that step and still returns the
+// error in full.
+func TestAJoinReportsStagesStepsAndGates(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	p := build(t, w)
+	rec := &ui.Recorder{}
+	p.Report = rec
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	for _, want := range []struct{ kind, text string }{
+		{"section", "stage 1, preflight"},
+		{"section", "stage 3, etcd"},
+		{"done", "update mesh on home-a"},
+		{"done", "promote vm to voter"},
+		{"done", "restart HAProxy on home-a"},
+		{"done", "gate: mesh handshakes and ping"},
+		{"done", "gate: home-b streams"},
+	} {
+		if !rec.Has(want.kind, want.text) {
+			t.Errorf("no %s %q:\n%s", want.kind, want.text, rec.Lines())
+		}
+	}
+	for _, e := range rec.Events {
+		if e.Kind == "fail" || e.Kind == "warn" {
+			t.Errorf("a clean join reported %s %q", e.Kind, e.Text)
+		}
+	}
+}
+
+// A refused or warned preflight check shows in a dry run without --verbose,
+// as the refusal or warning it is.
+func TestADryRunShowsPreflightFindingsByDefault(t *testing.T) {
+	defer siteadd.SetFast()()
+	defer siteadd.SetPreflight(preflight.Report{Checks: []preflight.Check{
+		{Site: "home-b", Name: "ports", Detail: "51820/udp is held by another service", Refused: true},
+		{Site: "home-b", Name: "disk", Detail: "9 GiB free", Warned: true},
+	}})()
+	w := newWorld(t)
+	p := build(t, w)
+	rec := &ui.Recorder{}
+	p.Show(rec)
+	if !rec.Has("refuse", "ports on home-b") || !rec.Has("warn", "disk on home-b") {
+		t.Errorf("preflight findings are not reported:\n%s", rec.Lines())
+	}
+	for _, e := range rec.Events {
+		if e.Kind == "refuse" && !strings.Contains(e.Extra, "51820/udp") {
+			t.Errorf("the refusal lacks its explanation: %+v", e)
+		}
+	}
+}

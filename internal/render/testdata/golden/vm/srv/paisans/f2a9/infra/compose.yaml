@@ -1,0 +1,77 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Infrastructure for site vm. Bind mounts under /srv/paisans/f2a9/infra, never named
+# volumes, so relocating a stack is a tar rather than a volumes-from dance.
+name: paisans-f2a9-infra
+
+services:
+  etcd:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "gcr.io/etcd-development/etcd:v3.5.*"
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - /usr/local/bin/etcd
+      - --name=vm
+      - --data-dir=/var/lib/etcd
+      - --listen-peer-urls=http://10.44.0.3:2380
+      - --listen-client-urls=http://10.44.0.3:2379,http://127.0.0.1:2379
+      - --initial-advertise-peer-urls=http://10.44.0.3:2380
+      - --advertise-client-urls=http://10.44.0.3:2379
+      - --initial-cluster=home-a=http://10.44.0.1:2380,home-b=http://10.44.0.2:2380,vm=http://10.44.0.3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=paisans
+      # Measured from real round trip through the tunnel, not guessed. The
+      # defaults assume one datacenter and produce phantom elections every
+      # time a home connection hiccups.
+      - --heartbeat-interval=200
+      - --election-timeout=2000
+      - --auto-compaction-mode=periodic
+      - --auto-compaction-retention=1h
+      - --quota-backend-bytes=2147483648
+    volumes:
+      - /srv/paisans/f2a9/infra/etcd:/var/lib/etcd
+  caddy:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "ghcr.io/paisans-software/caddy:2.*.*"
+    restart: unless-stopped
+    network_mode: host
+    # Relative to this file, so the path names the caddy/ directory the token
+    # is rendered into. The token stays out of this file because compose.yaml
+    # is 0644 and readable by anything that can list the stack.
+    env_file:
+      - caddy/caddy.env
+    volumes:
+      - /srv/paisans/f2a9/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # One file per application, imported by that application's host block.
+      - /srv/paisans/f2a9/infra/caddy/snippets:/etc/caddy/snippets:ro
+      # Site blocks the host's owner adds, imported by the Caddyfile. The
+      # host's directory, not this deployment's: paisans only creates it.
+      - /srv/caddy.d:/etc/caddy.d:ro
+      - /srv/paisans/f2a9/infra/caddy/data:/data
+      - /srv/paisans/f2a9/infra/caddy/config:/config
+  # This site's heartbeat: a push a minute to every monitor off this site, at
+  # its public hostname over the internet rather than the mesh, so that the
+  # ping over the mesh and this push fail separately and the monitor can tell
+  # a torn tunnel from a dead site. The URLs carry the site's token and stay
+  # in heartbeat.env, which is 0600; this file is 0644. On the default bridge,
+  # not the host's network: it dials out and listens for nothing.
+  heartbeat:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "docker.io/curlimages/curl:8.*.*"
+    restart: unless-stopped
+    env_file:
+      - heartbeat/heartbeat.env
+    entrypoint: ["/bin/sh", "/push.sh"]
+    volumes:
+      - /srv/paisans/f2a9/infra/heartbeat/push.sh:/push.sh:ro
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"

@@ -1,0 +1,52 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# One container: the gate. It runs the sign-in (/oauth2/start, the single
+# registered callback, /oauth2/sign_out) and answers the gateway's
+# forward_auth on /oauth2/auth for every app that sets gated or auto_login. It
+# admits members and admins, through OAUTH2_PROXY_ALLOWED_GROUPS, which fails
+# closed: a session outside both groups is refused, never waved through.
+#
+# The port is fixed rather than derived: 4180, this blueprint's port in
+# internal/render/plan.go's appPort, declared here as a literal.
+name: paisans-f2a9-gate
+
+services:
+  app:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "quay.io/oauth2-proxy/oauth2-proxy:v7.*.*"
+    restart: unless-stopped
+    env_file:
+      - .env
+    # The mesh address only. Docker's own iptables rules bypass a host
+    # firewall, so a port published on every interface of a host with a
+    # public address is reachable from the internet whatever ufw says. The
+    # gateway, over the mesh, is the only thing that should reach it.
+    ports:
+      - "10.44.0.3:4180:4180"
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
+      # Who the gate answers 202 for: members, the group every member facing
+      # app's client admits by default, and admins, since an admin can see
+      # everything a member can. The same two groups as the gate's client at
+      # Pocket ID (blueprints.OIDCClient). validate holds an app using the gate
+      # to the same member group. A comma separated list: oauth2-proxy reads it
+      # through viper, which splits a string on commas into a list
+      # (pkg/apis/options/load.go:27-55 at v7.15.4; viper v1.21.0,
+      # viper.go:977-1022).
+      OAUTH2_PROXY_ALLOWED_GROUPS: "members,admins"
+      # /oauth2/auth answers for Caddy; nothing is proxied through this
+      # container. A static upstream keeps that honest.
+      OAUTH2_PROXY_UPSTREAMS: "static://202"
+    healthcheck:
+      test: ["CMD", "/bin/oauth2-proxy", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"

@@ -1,0 +1,112 @@
+# A coherent three site deployment. Every fixture in this directory is a
+# variation on this one, so that a test names exactly the thing it breaks.
+version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+
+community:
+  name: "Fixture Community"
+  domain: example.org
+
+mesh:
+  subnet: 10.44.0.0/24
+
+acme:
+  provider: desec
+
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+sites:
+  home-a:
+    roles: [data, apps]
+    address: 10.44.0.1
+    endpoint: home-a.example.org:51820
+    ssh:
+      host: home-a.local
+      user: ubuntu
+      keys: [alice, bob]
+  home-b:
+    roles: [data, apps]
+    address: 10.44.0.2
+    ssh:
+      host: home-b.local
+      user: ubuntu
+      keys: [alice, bob]
+  vm:
+    roles: [gateway, witness]
+    address: 10.44.0.3
+    endpoint: vm.example.org:51820
+    ssh:
+      host: vm.example.org
+      user: ubuntu
+      keys: [alice, bob]
+  # The monitor's own machine, so that something watches the deployment.
+  watch:
+    roles: [monitor]
+    address: 10.44.0.4
+    public_address: 203.0.113.20
+    ssh:
+      host: watch.example.org
+      user: ubuntu
+      keys: [alice, bob]
+
+cluster:
+  sites: [home-a, home-b]
+  port: 5000
+  postgres_version: "18"
+  synchronous: true
+  synchronous_strict: false
+
+etcd:
+  members: [home-a, home-b, vm]
+  heartbeat_ms: 200
+  election_timeout_ms: 2000
+
+storage:
+  garage:
+    sites: [home-a]
+    replication: 1
+
+apps:
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    settings:
+      management: paisans
+      file_backend: database
+  account:
+    blueprint: account
+    hostname: account.example.org
+    placement: cluster
+    settings:
+      signup: invite
+      code_of_conduct: |
+        # Be kind
+
+        Treat each other well.
+      invite_quota: 0
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    placement: { pinned: watch }
+    settings:
+      admin_group: admins
+
+smtp:
+  host: smtp.example.org
+  security: starttls
+  username: health@example.org
+  from_address: health@example.org

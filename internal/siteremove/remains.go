@@ -1,0 +1,58 @@
+package siteremove
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/render"
+)
+
+// Every line a removal leaves for the operator is written here. The text
+// before its first ". " is the hint, so it holds only the site and the action
+// or fact, never a path, ID or fingerprint: those follow the first sentence,
+// on a line of their own under the hint, where a long one cannot push the
+// hint past a line.
+
+func volumeKept(site, name string) string {
+	return fmt.Sprintf("%s: volume kept; --delete-data deletes it. It is %s, this deployment's data", site, name)
+}
+
+func imageKept(site, id, why string) string {
+	return fmt.Sprintf("%s: image kept; remove it yourself once nothing runs from it. It is %s: %s", site, id, why)
+}
+
+func editedFileKept(site, path string) string {
+	return fmt.Sprintf("%s: an edited file kept; delete it by hand once nothing needs it. It is /%s, edited on the host since apply wrote it", site, path)
+}
+
+func reloadLeft(site, server, command string) string {
+	return fmt.Sprintf("%s: reload %s, which runs on the host itself, so that it stops serving the removed site file: its configuration validated without it, and this command does not restart a web server it does not run. Reload it with: %s", site, server, command)
+}
+
+func rootEditedKept(site, root string) string {
+	return fmt.Sprintf("%s: the deployment directory kept, because a file in it was edited on the host. It is %s, with everything in it", site, root)
+}
+
+func dataLeft(site, root string) string {
+	return fmt.Sprintf("%s: data left on the host in %s; --delete-data deletes it", site, root)
+}
+
+func recordMissed(gw, why string) string {
+	return fmt.Sprintf("%s: deployment record not updated; the next change catches it up. %s", gw, why)
+}
+
+func recordRaced(gw, site, why string) string {
+	return fmt.Sprintf("%s: deployment record changed meanwhile; take the site out again. Another command wrote it between the read and the write, so it may still list %s: run paisans site remove %s --force --ssh <its host> once this removal is done. %s", gw, site, site, why)
+}
+
+func secretsLeft(site string) string {
+	return fmt.Sprintf("secrets: run `paisans secrets prune` once nothing needs sites.%s. It holds its WireGuard key and heartbeat token, and this command never edits the secrets file", site)
+}
+
+func ownedNote(site, owed string) string {
+	return fmt.Sprintf("%s: run `paisans apply --site %s` when that is acceptable. %s", site, site, owed)
+}
+
+func caddyKept(site, container string, sites []string, dir string) string {
+	return fmt.Sprintf("%s: Caddy kept; it serves the host owner's sites in %s. It is %s, serving %s; its compose file, Caddyfile, caddy.env, certificates and state stay in %s, with --delete-data too, and so do its ufw allows for 80 and 443. Run this again once those sites have moved, and it goes", site, render.HostSitesDir, container, strings.Join(sites, ", "), dir)
+}

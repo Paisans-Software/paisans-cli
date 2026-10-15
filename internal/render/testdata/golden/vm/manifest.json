@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "etc/wireguard/psns-f2a9.conf",
+      "sha256": "b5ae1dbf7091abd7946b58c1ce2ee0346d02d1e5414dbe5377c92c4c02e5d766",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/.env",
+      "sha256": "8f364f18a7295851c66f2a99abe7dc9d22aa437f075aef581e7797c9b2d7eaff",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/compose.yaml",
+      "sha256": "dc31c6fa7754dd6307c03ffe311efd9e885c49db3ab283f03f4f64017005791f",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/homeserver.yaml",
+      "sha256": "c353723290d0d4f74b915115e1326ed3cd77974efe33b4e5fee8e32d4534060f",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/initdb.d/01-mas-database.sql",
+      "sha256": "ab221a57a36d9a875fa084d72a79ff240a98b0345ab5537c2e46ab8789bd8fa4",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/mas.yaml",
+      "sha256": "aa717a9872d2c4dd5bb05b7defc8410917b14c50dd628572bb6bb031fe11d107",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/gate/.env",
+      "sha256": "a28d85445353e03eb1b3fe4392de2ec6809da9726001750d497ccf2c8ad79285",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/gate/compose.yaml",
+      "sha256": "fa3f2fd668784837168a83c4713e2177e703c9a87ed4fc61fe86448734b7ca58",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
+      "sha256": "4167ab878b1efa927f850a28979c75dd969e30051b9214d9c8f0f1531e641b6b",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/caddy.env",
+      "sha256": "63c1ee176d77ecd7518a773aff4acfc7b4075ecc3ebe659f00909a0167bcdd44",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/account-join.caddy",
+      "sha256": "a5d3490da47b132f9d375c67acdc533845169d9fbf9c47629c8a4da726ae9be2",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/account.caddy",
+      "sha256": "7442eebe99ac3309d0a592a48e1ffdbcfc3eee6f9473565b9e8748057db3bd0a",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/auth.caddy",
+      "sha256": "fbc8336e2f6fb1a865f9863bd27d7e1d9f0ee4c519a1e5c8564d43fc2ed000cd",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy",
+      "sha256": "a86a4ca2490ae64dbf50d8d4019347156fb5822f6feec2622dd0634fb125d0f7",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/blog.caddy",
+      "sha256": "f8c20ca6b67c492430925b5d74ec986b6167f08be8cea95fb2169af90dfa3e49",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy",
+      "sha256": "3c99f5f2d8ca959da822af723e1c7d2957e2463acbb0e6604fc7946de342aa47",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/chat.caddy",
+      "sha256": "0dcee26a6564aae6b8175ceaa005b173f427fcc52caef38261ba7524b24387d3",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy",
+      "sha256": "836f6de3dfa8bf32660a9b53e579dd09e77660b2a892da796e79dfc2842b34a8",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/gate.caddy",
+      "sha256": "2fcf9e5e980af08b0c072c09c3b80b6c83e4ba1b1c4300f6ad6596f6612f870b",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/talk-media.caddy",
+      "sha256": "e9294a3439525cc3cc9cd86edb3ececb9c79e28ae0c5086809dca5e9dbebfa36",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/talk.caddy",
+      "sha256": "db0ec1436233c51821486ac4c685ac69c9be041dfee804f7ed7c1e37c2e5bbcd",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/web.caddy",
+      "sha256": "4be04cb8ce4acf3e0945ac16eeed26dc2791d19eb9f220bb10c29667a75a56f6",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/snippets/wiki.caddy",
+      "sha256": "2d6ca0fc88459922f5b0e5ffc30d97b3fe3012afc7f971c46854338bc8a910d3",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/compose.yaml",
+      "sha256": "7fa114d1954a365ba5c2c420a891ee3e383e0da69929db1964dbb38d13319d75",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/etcd-initial",
+      "sha256": "ba76b866cca9d84f06ab7bf484b87c06e2ccc96cbbbe83e063dd4ce73971b009",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/heartbeat/heartbeat.env",
+      "sha256": "11251819de98fdbfaff7c8bdd23f21682aa290585cf5a8097a5596ebd3796f7c",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/heartbeat/push.sh",
+      "sha256": "1e38ef1f8455e7f04a1a785c2f01b3b6d6ed11e1f61e928534c9b2ee48af1374",
+      "mode": "0644"
+    }
+  ]
+}

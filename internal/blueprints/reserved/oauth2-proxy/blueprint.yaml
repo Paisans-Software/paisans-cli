@@ -1,0 +1,54 @@
+# The oauth2-proxy blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/blueprints reads it; Parse there documents every key.
+apiVersion: paisans.blueprint/v1
+name: oauth2-proxy
+services:
+  # One instance, admitting members and admins: it runs the sign-in and
+  # answers the gateway's forward_auth for every app that sets gated
+  # or auto_login. It listens on 4180, this record's Port, spelled out
+  # in the compose and Caddy snippet templates too, because a Service
+  # here carries no port field and a port nobody declared is a port
+  # nobody can route to. Its image is the core catalog's
+  # foundation.yaml's.
+  - {name: "app", foundation: "oauth2-proxy", purpose: "the gate, admitting members, listening on 4180"}
+database: {engine: none}
+port: 4180
+config:
+  format: env
+  file: ".env"
+# /ping answers before any auth and needs no Host
+# (pkg/middleware/healthcheck.go:44-53 at v7.15.4, and on every v7); ran the image: 200
+# OK.
+health: {path: "/ping", status: [200]}
+# Part of the sign-in flow itself: gating it would gate the login. The
+# gate is never declared, so this can only be reached through a test.
+gate: {gateable: false}
+# oauth2-proxy v7.15.4, the gate: the toolkit renders no redirect
+# URL, so the callback is the proxy prefix, /oauth2, plus /callback
+# (oauthproxy.go:53,175-178, pkg/apis/options/options.go:103) on the
+# host the request came in on (oauthproxy.go:1113-1135), and
+# /oauth2/start is reached only on the gate's own hostname
+# (caddy.snippet.gates.tmpl). PKCE is on: the .env renders
+# OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256, and with a method set
+# every sign in sends a challenge (oauthproxy.go:833-851). It reads
+# the groups claim (pkg/apis/options/providers.go:10) and admits a
+# session in any group of OAUTH2_PROXY_ALLOWED_GROUPS
+# (providers/provider_default.go:125-138), which compose.yaml renders
+# from these two groups, so the gate and its client admit the same
+# people: members, and admins, since an admin can see everything a
+# member can (founder decision, 2026-10-12). Neither is a setting. No
+# launch URL: the gate has no page of its own.
+oidc:
+  callback: "/oauth2/callback"
+  no_launch: true
+  pkce: true
+  default_admin_group: "admins"
+  default_member_group: "members"
+  reads_groups: true
+secrets:
+  generate:
+    # The blueprint renders no session store, so oauth2-proxy keeps the whole
+    # session in the cookie, encrypted with this secret: a cookie sealed with
+    # the old one no longer opens.
+    - {name: cookie_secret, rotation_cost: signs-out}
+  self_rotated: ["cookie_secret"]

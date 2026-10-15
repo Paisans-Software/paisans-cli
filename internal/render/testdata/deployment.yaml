@@ -1,0 +1,220 @@
+# The fixture deployment. It exercises both placements: four clustered apps
+# and five pinned, on four sites with three stable endpoints. It is validated
+# before it is rendered (see fixture() in render_test.go), so it is a
+# configuration an operator could actually have written.
+version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+
+community:
+  name: "Fixture Community"
+  domain: example.org
+
+mesh:
+  subnet: 10.44.0.0/24
+
+acme:
+  provider: desec
+
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+sites:
+  home-a:
+    roles: [data, apps]
+    address: 10.44.0.1
+    arch: amd64
+    ssh:
+      host: home-a.local
+      user: ubuntu
+      keys: [alice, bob]
+  home-b:
+    roles: [data, apps]
+    address: 10.44.0.2
+    arch: amd64
+    # Dialled, so the two homes peer directly and vm is not the one path
+    # between them: validate refuses three voters of which only one is dialled.
+    endpoint: 198.51.100.2:51820
+    ssh:
+      host: home-b.local
+      user: ubuntu
+      keys: [alice, bob]
+  vm:
+    roles: [gateway, witness]
+    address: 10.44.0.3
+    arch: amd64
+    endpoint: vm.example.org:51820
+    ssh:
+      host: vm.example.org
+      user: ubuntu
+      keys: [alice, bob]
+  # The monitor's own machine, in `managed_by: paisans`: it runs the
+  # gateway's Caddy image and serves the monitor's hostname itself.
+  watch:
+    roles: [monitor]
+    address: 10.44.0.4
+    arch: amd64
+    endpoint: watch.example.org:51820
+    public_address: 203.0.113.20
+    ssh:
+      host: watch.example.org
+      user: ubuntu
+      keys: [alice, bob]
+
+cluster:
+  sites: [home-a, home-b]
+  port: 5000
+  postgres_version: "18"
+  synchronous: true
+  synchronous_strict: false
+
+etcd:
+  members: [home-a, home-b, vm]
+  heartbeat_ms: 200
+  election_timeout_ms: 2000
+
+storage:
+  garage:
+    sites: [home-a, home-b]
+    replication: 2
+
+apps:
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+    # Behind the gate, with auto-login: a member the gate signed in goes
+    # straight into Mbin.
+    gated: true
+    auto_login: true
+    settings:
+      # Where the contact form sends to, so the golden .env shows it apart
+      # from the sender the smtp block below gives.
+      contact_email: admins@example.org
+    images:
+      app: ghcr.io/example-org/mbin:v1.10.1-fork
+    # One passthrough key per format, so each merge is visible in the golden
+    # tree. Mbin reads its environment, so the key is a variable name.
+    config:
+      KBIN_META_TITLE: A place to talk
+  wiki:
+    blueprint: wikijs
+    hostname: wiki.example.org
+    placement: cluster
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    settings:
+      # The account app below manages accounts, so the toolkit renders
+      # signup closed and the email-code sign-in open.
+      management: paisans
+      file_backend: database
+      # Pocket ID's application configuration, rendered into its .env. The
+      # two groups' IDs are recorded under pocket_id_groups in the secrets.
+      app_name: Example ID
+      session_duration: 10080
+      signup_default_groups: [members, newcomers]
+      emails_verified: true
+      # Quoted in the .env, which the account app's ACCOUNT_ACCENT_COLOR follows.
+      accent_color: "#2f6f5e"
+  chat:
+    blueprint: synapse
+    hostname: chat.example.org
+    hostnames:
+      wellknown: example.org
+    placement: { pinned: vm }
+    images:
+      postgres: postgres:17-trixie
+    # The image above is an official one at an older major than the
+    # cluster's, which is what this fixture exercises; it carries no WAL-G,
+    # so the app is out of backups, and validate warns.
+    backup: false
+    # A yaml key in homeserver.yaml. Not url_preview_enabled: Synapse
+    # v1.160.0's synapse/config/repository.py raises a ConfigError for it
+    # unless url_preview_ip_range_blacklist is also set, and a list is not a
+    # value `config` can carry.
+    config:
+      require_auth_for_profile_requests: true
+  blog:
+    blueprint: writefreely
+    hostname: blog.example.org
+    # Public, with auto-login: anyone reads the blog, and a member the gate
+    # signed in is signed into it too.
+    auto_login: true
+    # Pinned as an ordinary choice, not a forced one: the writefreely-wisp
+    # fork this blueprint means supports Postgres and S3, so it could join the
+    # cluster instead.
+    placement: { pinned: home-a }
+    # An ini key goes inside the section that is already there. max_blogs is
+    # in the fork's setting registry, so `writefreely settings get
+    # app.max_blogs` reports it back.
+    config:
+      app.max_blogs: 3
+  web:
+    blueprint: element
+    hostname: web.example.org
+    # Pinned for the same reason as the blog, and refused otherwise: a static
+    # client keeps nothing in Postgres, so there is no cluster for it to join.
+    placement: { pinned: home-b }
+    settings:
+      homeserver: chat.example.org
+    # Not show_labs_settings, which the template already writes.
+    config:
+      default_theme: dark
+  account:
+    blueprint: account
+    hostname: account.example.org
+    placement: cluster
+    settings:
+      signup: invite
+      # One setting declared, so the golden .env shows it beside the defaults.
+      invite_quota: 5
+      # The text itself, not a path: rendered byte for byte into
+      # code-of-conduct.md in the app's directory.
+      code_of_conduct: |
+        # Be kind
+
+        To each other.
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    # The monitor on a site of its own, which neither the homes' failures nor
+    # the gateway's take down with them.
+    placement: { pinned: watch }
+    settings:
+      admin_group: admins
+    # One field overridden, so the golden seed shows the merge.
+    smtp:
+      from_name: Example Health
+
+# The deployment's mail server. The uptime app above inherits every field but
+# the one it overrides, and talk inherits all of them.
+smtp:
+  host: smtp.example.org
+  security: starttls
+  username: robot@example.org
+  from_address: hello@example.org
+  from_name: Example Community
+
+backup:
+  schedule: daily
+  at: "03:00"
+  destinations:
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: fixture-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    - name: home
+      endpoint: https://s3.home.example.org
+      region: garage
+      bucket: fixture-backups
+      keep: { weekly: 4, monthly: 12 }

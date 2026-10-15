@@ -1,0 +1,724 @@
+package dns
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// testToken is a placeholder, not a credential. It is distinctive so that the
+// assertion that it never appears in an error cannot pass by accident.
+const testToken = "placeholder-token-7f3a9c-not-a-secret"
+
+// fakeCloudflare is enough of Cloudflare's API v4 to plan and create against.
+// No test in this package talks to the real API.
+type fakeCloudflare struct {
+	mu      sync.Mutex
+	zones   map[string]string     // zone name -> id
+	records map[string][]cfRecord // zone id -> records
+	posts   []cfRecord
+	deletes []string // record ids, in order
+	lookups []string // zone names asked about, in order
+	pages   []string // page numbers asked for by whole zone listings
+	nextID  int
+	// dropWrites accepts a POST and stores nothing, to prove the read-back.
+	dropWrites bool
+	// dropDeletes answers a DELETE with success and removes nothing, to
+	// prove prune's confirming listing.
+	dropDeletes bool
+	// echoToken makes every response an error quoting the Authorization
+	// header back, the worst thing a provider could do with it.
+	echoToken bool
+	// failDelete is a record id whose DELETE the provider answers with an
+	// error, to prove a run that stops partway says where it stopped.
+	failDelete string
+}
+
+func newFake() *fakeCloudflare {
+	return &fakeCloudflare{zones: map[string]string{}, records: map[string][]cfRecord{}}
+}
+
+func (f *fakeCloudflare) serve(t *testing.T) *cloudflare {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(f.handle))
+	t.Cleanup(server.Close)
+	c := newCloudflare(testToken)
+	c.base = server.URL + "/client/v4"
+	return c
+}
+
+func writeEnvelope(w http.ResponseWriter, status int, result any, errs ...string) {
+	type cfError struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	body := map[string]any{"success": len(errs) == 0, "errors": []cfError{}, "result": result}
+	for _, e := range errs {
+		body["errors"] = append(body["errors"].([]cfError), cfError{Code: 9109, Message: e})
+	}
+	if list, ok := result.([]any); ok {
+		body["result_info"] = map[string]int{"page": 1, "total_pages": 1, "total_count": len(list)}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func (f *fakeCloudflare) handle(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.echoToken {
+		writeEnvelope(w, http.StatusForbidden, nil, "Invalid access token: "+r.Header.Get("Authorization"))
+		return
+	}
+	if r.Header.Get("Authorization") != "Bearer "+testToken {
+		writeEnvelope(w, http.StatusForbidden, nil, "Invalid access token")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/client/v4")
+	switch {
+	case r.Method == http.MethodGet && path == "/zones":
+		name := r.URL.Query().Get("name")
+		f.lookups = append(f.lookups, name)
+		result := []any{}
+		if id, ok := f.zones[name]; ok {
+			result = append(result, map[string]string{"id": id, "name": name})
+		}
+		writeEnvelope(w, http.StatusOK, result)
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/zones/") && strings.Contains(path, "/dns_records/"):
+		zoneID, recordID, _ := strings.Cut(strings.TrimPrefix(path, "/zones/"), "/dns_records/")
+		if recordID == f.failDelete {
+			writeEnvelope(w, http.StatusInternalServerError, nil, "Internal error")
+			return
+		}
+		f.deletes = append(f.deletes, recordID)
+		kept := f.records[zoneID][:0:0]
+		found := false
+		for _, rec := range f.records[zoneID] {
+			if rec.ID == recordID {
+				found = true
+				continue
+			}
+			kept = append(kept, rec)
+		}
+		if !found {
+			writeEnvelope(w, http.StatusNotFound, nil, "Record does not exist.")
+			return
+		}
+		if !f.dropDeletes {
+			f.records[zoneID] = kept
+		}
+		writeEnvelope(w, http.StatusOK, map[string]string{"id": recordID})
+	case strings.HasPrefix(path, "/zones/") && strings.HasSuffix(path, "/dns_records"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/zones/"), "/dns_records")
+		switch r.Method {
+		case http.MethodGet:
+			name := r.URL.Query().Get("name.exact")
+			if name == "" {
+				f.listPage(w, r, id)
+				return
+			}
+			result := []any{}
+			for _, rec := range f.records[id] {
+				if rec.Name == name {
+					result = append(result, rec)
+				}
+			}
+			writeEnvelope(w, http.StatusOK, result)
+		case http.MethodPost:
+			var rec cfRecord
+			if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+				writeEnvelope(w, http.StatusBadRequest, nil, "bad body")
+				return
+			}
+			f.posts = append(f.posts, rec)
+			f.nextID++
+			rec.ID = fmt.Sprintf("rec-new-%d", f.nextID)
+			if !f.dropWrites {
+				f.records[id] = append(f.records[id], rec)
+			}
+			writeEnvelope(w, http.StatusOK, rec)
+		}
+	default:
+		writeEnvelope(w, http.StatusNotFound, nil, "no route")
+	}
+}
+
+// listPage answers a whole zone listing one page at a time, as Cloudflare's
+// page and per_page parameters do.
+func (f *fakeCloudflare) listPage(w http.ResponseWriter, r *http.Request, zoneID string) {
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	perPage, err := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if err != nil || perPage < 1 {
+		perPage = 20
+	}
+	f.pages = append(f.pages, strconv.Itoa(page))
+	all := f.records[zoneID]
+	totalPages := (len(all) + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	result := []cfRecord{}
+	for i := (page - 1) * perPage; i < len(all) && i < page*perPage; i++ {
+		result = append(result, all[i])
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true, "errors": []any{}, "result": result,
+		"result_info": map[string]int{"page": page, "per_page": perPage, "count": len(result), "total_count": len(all), "total_pages": totalPages},
+	})
+}
+
+// declared is a gateway with a public address, two apps that each serve
+// their objects on a derived media hostname, and a site endpoint given as a
+// name.
+func declared() *config.Config {
+	return &config.Config{
+		ID:   fixtureID,
+		Mesh: config.Mesh{Subnet: "10.44.0.0/24"},
+		Sites: map[string]config.Site{
+			"home-a": {Roles: []config.Role{config.RoleData, config.RoleApps}, Address: "10.44.0.1"},
+			"vm": {
+				Roles: []config.Role{config.RoleGateway, config.RoleWitness}, Address: "10.44.0.3",
+				Endpoint: "vm.example.org:51820", PublicAddress: "203.0.113.10",
+			},
+		},
+		Apps: map[string]config.App{
+			"talk": {Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.org"},
+			"blog": {Blueprint: config.Blueprint("writefreely"), Hostname: "Blog.Example.org."},
+		},
+		Community: config.Community{Domain: "example.org"},
+		// Garage, so talk and blog keep their files in it and each has a
+		// media hostname, as they would by default in a real deployment.
+		Storage: config.Storage{Garage: config.Garage{Sites: []string{"home-a"}}},
+	}
+}
+
+// addressEntries are the entries for A and AAAA records.
+func addressEntries(entries []Entry) []Entry {
+	var out []Entry
+	for _, e := range entries {
+		if e.Type == "A" || e.Type == "AAAA" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func plan(t *testing.T, c *cloudflare, cfg *config.Config) *Plan {
+	t.Helper()
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Build(context.Background(), c, cfg.Deployment(), wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	c := fake.serve(t)
+	p := plan(t, c, declared())
+
+	out := &ui.Recorder{Verbose_: true}
+	p.Show(out)
+	t.Logf("dry run:\n%s", out.Lines())
+
+	// Five address records, and the no-mail records: SPF on each of those
+	// five names and on the domain, the domain's null MX, empty DKIM key
+	// and DMARC policy.
+	if len(p.Entries) != 14 || len(p.Creates()) != 14 || len(addressEntries(p.Entries)) != 5 {
+		t.Fatalf("want 14 creates, 5 of them addresses, got %+v", p.Entries)
+	}
+	// Each record to create is pending, its whole line in the title.
+	if !out.Has("pending", "create A talk.example.org -> 203.0.113.10 (zone example.org)") {
+		t.Errorf("a create is not pending:\n%s", out.Lines())
+	}
+	if len(fake.posts) != 0 {
+		t.Fatalf("planning wrote %d record(s)", len(fake.posts))
+	}
+	run := &ui.Recorder{}
+	if err := Execute(context.Background(), c, p, run); err != nil {
+		t.Fatal(err)
+	}
+	// Each record is one step, titled by what it creates, and ended only
+	// after it read back.
+	if !run.Has("done", "create A talk.example.org") {
+		t.Errorf("steps:\n%s", run.Lines())
+	}
+	if len(fake.posts) != 14 {
+		t.Fatalf("want 14 POSTs, got %d", len(fake.posts))
+	}
+	var addresses []cfRecord
+	for _, rec := range fake.posts {
+		if rec.Proxied || rec.TTL != 1 || rec.Comment != "paisans-f2a9: created by paisans dns init" {
+			t.Errorf("unexpected record body %+v", rec)
+		}
+		if rec.Type == "A" {
+			addresses = append(addresses, rec)
+			if rec.Content != "203.0.113.10" {
+				t.Errorf("unexpected address %+v", rec)
+			}
+		}
+	}
+	// blog was declared with capitals and a trailing dot, which its derived
+	// media hostname inherits, and both sort first.
+	if len(addresses) != 5 || addresses[0].Name != "blog-media.example.org" || addresses[1].Name != "blog.example.org" {
+		t.Errorf("names should be normalised and sorted, got %+v", addresses)
+	}
+
+	// A second run finds everything present and writes nothing.
+	again := plan(t, c, declared())
+	if len(again.Creates()) != 0 || len(again.Conflicts()) != 0 {
+		t.Fatalf("second run should be all present: %+v", again.Entries)
+	}
+}
+
+func TestExistingMatchingRecordIsPresent(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "A", Name: "talk.example.org", Content: "203.0.113.10"}}
+	p := plan(t, fake.serve(t), declared())
+	for _, e := range p.Entries {
+		want := Create
+		if e.Name == "talk.example.org" && e.Type == "A" {
+			want = Present
+		}
+		if e.Action != want {
+			t.Errorf("%s: got %s, want %s", e.Name, e.Action, want)
+		}
+	}
+
+	// A record already there is done, and only with --verbose.
+	quiet := &ui.Recorder{}
+	p.Show(quiet)
+	if quiet.Has("done", "") || !quiet.Has("pending", "create A ") {
+		t.Errorf("got:\n%s", quiet.Lines())
+	}
+	var b strings.Builder
+	p.Show(ui.NewPlain(&b, true))
+	shown := b.String()
+	t.Logf("\n%s", shown)
+	for _, want := range []string{
+		"  ok   A talk.example.org -> 203.0.113.10 (zone example.org)\n",
+		"  todo create A ",
+	} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	for _, line := range strings.Split(shown, "\n") {
+		for _, label := range []string{"present ", "create ", "A    "} {
+			if strings.HasPrefix(strings.TrimSpace(line), label) {
+				t.Errorf("a padded label: %q", line)
+			}
+		}
+	}
+}
+
+func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
+	cases := map[string]cfRecord{
+		"different address": {Type: "A", Name: "talk.example.org", Content: "198.51.100.7"},
+		"cname":             {Type: "CNAME", Name: "talk.example.org", Content: "elsewhere.example.net"},
+		"proxied":           {Type: "A", Name: "talk.example.org", Content: "203.0.113.10", Proxied: true},
+		"stray aaaa":        {Type: "AAAA", Name: "talk.example.org", Content: "2001:db8::99"},
+	}
+	for name, existing := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := newFake()
+			fake.zones["example.org"] = "zone-1"
+			fake.records["zone-1"] = []cfRecord{existing}
+			c := fake.serve(t)
+			p := plan(t, c, declared())
+			// A CNAME stands in the way of the name's SPF record too.
+			want := 1
+			if name == "cname" {
+				want = 2
+			}
+			if len(p.Conflicts()) != want || len(addressEntries(p.Conflicts())) != 1 {
+				t.Fatalf("want %d conflict(s), one an address, got %+v", want, p.Entries)
+			}
+			for _, e := range p.Conflicts() {
+				if e.Name != "talk.example.org" || e.Detail == "" {
+					t.Fatalf("a conflict on talk.example.org must say what is in the way: %+v", e)
+				}
+			}
+			shown := &ui.Recorder{}
+			p.Show(shown)
+			if i := shown.Index("refuse", "talk.example.org conflicts"); i < 0 || !strings.Contains(shown.Events[i].Extra, "wanted: talk.example.org -> 203.0.113.10 (zone example.org)") {
+				t.Errorf("the refusal lost what was wanted:\n%s", shown.Lines())
+			}
+			err := Execute(context.Background(), c, p, ui.Discard)
+			if err == nil {
+				t.Fatal("execute should refuse a plan with a conflict")
+			}
+			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", want) {
+				t.Errorf("err = %v, want ErrConflict with its message unchanged", err)
+			}
+			hint := "1 DNS record conflicts with the configuration"
+			if want != 1 {
+				hint = fmt.Sprintf("%d DNS records conflict with the configuration", want)
+			}
+			var q *ui.Problem
+			if !errors.As(err, &q) || q.Hint != hint || !strings.Contains(q.Explain, "Change each at your DNS provider") {
+				t.Errorf("not the Problem main prints: %#v", q)
+			}
+			if len(fake.posts) != 0 {
+				t.Fatalf("a conflict on one record must stop every write, got %d POST(s)", len(fake.posts))
+			}
+		})
+	}
+}
+
+func TestZoneWalkPicksTheZoneThatHoldsTheName(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-apex"
+	c := fake.serve(t)
+	z, err := FindZone(context.Background(), c, "talk.staging.example.org", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.name != "example.org" || z.id != "zone-apex" {
+		t.Fatalf("got %+v", z)
+	}
+	want := []string{"talk.staging.example.org", "staging.example.org", "example.org"}
+	if strings.Join(fake.lookups, ",") != strings.Join(want, ",") {
+		t.Fatalf("walk should go longest suffix first and stop before the TLD: %v", fake.lookups)
+	}
+
+	// A delegated subzone wins over its parent.
+	fake.zones["staging.example.org"] = "zone-sub"
+	z, err = FindZone(context.Background(), c, "talk.staging.example.org", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.id != "zone-sub" {
+		t.Fatalf("a delegated subzone should win, got %+v", z)
+	}
+
+	// No zone at all names what was tried, and never asks about the TLD.
+	fake.lookups = nil
+	_, err = FindZone(context.Background(), c, "talk.example.net", nil)
+	if err == nil || !strings.Contains(err.Error(), "example.net") {
+		t.Fatalf("want a no-zone error naming what was tried, got %v", err)
+	}
+	for _, asked := range fake.lookups {
+		if asked == "net" {
+			t.Fatal("the walk asked about a bare TLD")
+		}
+	}
+}
+
+func TestReadBackCatchesARecordThatDidNotLand(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.dropWrites = true
+	c := fake.serve(t)
+	err := Execute(context.Background(), c, plan(t, c, declared()), ui.Discard)
+	if err == nil || !strings.Contains(err.Error(), "does not read back") {
+		t.Fatalf("want a read-back failure, got %v", err)
+	}
+	if len(fake.posts) != 1 {
+		t.Fatalf("execute should stop at the first failure, got %d POSTs", len(fake.posts))
+	}
+}
+
+func TestUnsupportedProviderIsRefusedByName(t *testing.T) {
+	_, err := For("desec", testToken)
+	if err == nil {
+		t.Fatal("desec should be refused")
+	}
+	for _, want := range []string{"desec record management is not implemented yet", "cloudflare"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should contain %q: %v", want, err)
+		}
+	}
+	if _, err := For("cloudflare", " "); err == nil || !strings.Contains(err.Error(), "external.acme_dns_token") {
+		t.Errorf("an empty token should name the secret it comes from, got %v", err)
+	}
+}
+
+func TestTokenNeverAppearsInAnError(t *testing.T) {
+	check := func(t *testing.T, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if strings.Contains(err.Error(), testToken) {
+			t.Fatalf("the token leaked into an error: %v", err)
+		}
+	}
+	t.Run("provider echoes the header back", func(t *testing.T) {
+		fake := newFake()
+		fake.echoToken = true
+		c := fake.serve(t)
+		_, err := Build(context.Background(), c, deployment.Deployment{ID: fixtureID}, []Want{{Type: "A", Name: "talk.example.org", Content: "203.0.113.10"}})
+		check(t, err)
+		if !strings.Contains(err.Error(), "redacted") {
+			t.Errorf("expected the echoed token to be redacted: %v", err)
+		}
+		check(t, c.Create(context.Background(), "zone-1", Record{Type: "A", Name: "x.example.org", Content: "203.0.113.10"}))
+	})
+	t.Run("transport failure", func(t *testing.T) {
+		c := newCloudflare(testToken)
+		c.base = "http://127.0.0.1:1/" + testToken // even a URL carrying it
+		_, err := c.Records(context.Background(), "zone-1", "talk.example.org")
+		check(t, err)
+	})
+	t.Run("provider constructor", func(t *testing.T) {
+		_, err := For("desec", testToken)
+		check(t, err)
+	})
+}
+
+func TestDesiredRefusals(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*config.Config)
+		want   string
+	}{
+		"gateway without a public address": {
+			mutate: func(c *config.Config) {
+				vm := c.Sites["vm"]
+				vm.PublicAddress = ""
+				c.Sites["vm"] = vm
+			},
+			want: "sites.vm.public_address is not set",
+		},
+		"two gateways": {
+			mutate: func(c *config.Config) {
+				c.Sites["home-b"] = config.Site{Roles: []config.Role{config.RoleGateway}, Address: "10.44.0.2", PublicAddress: "203.0.113.11"}
+			},
+			want: "2 sites hold the gateway role",
+		},
+		"named endpoint without a public address": {
+			mutate: func(c *config.Config) {
+				c.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "home-a.example.org:51820"}
+			},
+			want: "sites.home-a.public_address is not set, but sites.home-a.endpoint names home-a.example.org",
+		},
+		"one name, two addresses": {
+			mutate: func(c *config.Config) {
+				c.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "talk.example.org:51820", PublicAddress: "203.0.113.12"}
+			},
+			want: "One name can point at one place",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := declared()
+			tc.mutate(cfg)
+			_, err := Desired(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestDesiredDerivesAndDedupes(t *testing.T) {
+	cfg := declared()
+	// An endpoint given as an address needs no record.
+	cfg.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "198.51.100.20:51820"}
+	// A role hostname is a public name too, and the same name twice is one record.
+	cfg.Apps["chat"] = config.App{Blueprint: config.Blueprint("synapse"), Hostname: "matrix.example.org", Hostnames: map[string]string{"wellknown": "example.org"}}
+	vm := cfg.Sites["vm"]
+	vm.PublicAddress6 = "2001:db8::10"
+	vm.Endpoint = "talk.example.org:51820"
+	cfg.Sites["vm"] = vm
+
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range wants {
+		if w.Type != "A" && w.Type != "AAAA" {
+			continue
+		}
+		got = append(got, w.Type+" "+w.Name)
+		if w.Name == "talk.example.org" && len(w.Sources) != 2 {
+			t.Errorf("talk.example.org should be one record with two sources, got %v", w.Sources)
+		}
+	}
+	want := []string{
+		"A blog-media.example.org", "AAAA blog-media.example.org",
+		"A blog.example.org", "AAAA blog.example.org",
+		"A example.org", "AAAA example.org",
+		"A matrix.example.org", "AAAA matrix.example.org",
+		"A talk-media.example.org", "AAAA talk-media.example.org",
+		"A talk.example.org", "AAAA talk.example.org",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+// An app keeping its files on its own disk has no media hostname, so dns
+// creates no record for one: there is no bucket and no route behind it.
+func TestALocalStorageAppGetsNoMediaRecord(t *testing.T) {
+	cfg := declared()
+	talk := cfg.Apps["talk"]
+	talk.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	talk.Storage = config.StorageLocal
+	cfg.Apps["talk"] = talk
+
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawBlogMedia bool
+	for _, w := range wants {
+		if w.Name == "talk-media.example.org" {
+			t.Errorf("talk keeps its files locally and still gets %s %s", w.Type, w.Name)
+		}
+		if w.Name == "blog-media.example.org" {
+			sawBlogMedia = true
+		}
+	}
+	if !sawBlogMedia {
+		t.Error("blog is still in Garage and lost its media record")
+	}
+}
+
+// A monitor serves its own hostname, so its records point at the monitor's
+// public address, IPv6 too, while every other app's stay on the gateway.
+func TestMonitorAppsPointAtTheMonitor(t *testing.T) {
+	cfg := declared()
+	cfg.Sites["watch"] = config.Site{Roles: []config.Role{config.RoleMonitor}, Address: "10.44.0.4", PublicAddress: "203.0.113.20", PublicAddress6: "2001:db8::20"}
+	cfg.Apps["health"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, w := range wants {
+		got[w.Type+" "+w.Name] = w.Content
+	}
+	if got["A health.example.org"] != "203.0.113.20" || got["AAAA health.example.org"] != "2001:db8::20" {
+		t.Errorf("the monitor: %v", got)
+	}
+	if got["A talk.example.org"] != "203.0.113.10" {
+		t.Errorf("an ordinary app moved off the gateway: %v", got)
+	}
+	if _, ok := got["AAAA talk.example.org"]; ok {
+		t.Errorf("the gateway has no IPv6 address, yet talk got AAAA: %v", got)
+	}
+
+	// The monitor's hostnames need no gateway, and its own address is
+	// required.
+	delete(cfg.Apps, "talk")
+	delete(cfg.Apps, "blog")
+	vm := cfg.Sites["vm"]
+	vm.Roles = []config.Role{config.RoleWitness}
+	cfg.Sites["vm"] = vm
+	if _, err := Desired(cfg); err != nil {
+		t.Fatalf("a deployment whose only hostname is the monitor's: %v", err)
+	}
+	watch := cfg.Sites["watch"]
+	watch.PublicAddress = ""
+	cfg.Sites["watch"] = watch
+	if _, err := Desired(cfg); err == nil || !strings.Contains(err.Error(), "sites.watch.public_address is not set") {
+		t.Fatalf("a monitor with no address: %v", err)
+	}
+}
+
+// The endpoint's name still gets its record when the site declares a public
+// address, though the mesh dials the address: the name is the operator's.
+// An endpoint written as a port alone, or left out, names nothing, so it adds
+// no record and no refusal.
+func TestEndpointRecordsFollowTheWrittenName(t *testing.T) {
+	cfg := declared()
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWant(wants, "A", "vm.example.org", "203.0.113.10") {
+		t.Errorf("no A vm.example.org -> 203.0.113.10: %+v", wants)
+	}
+	for _, endpoint := range []string{":51821", ""} {
+		vm := cfg.Sites["vm"]
+		vm.Endpoint = endpoint
+		cfg.Sites["vm"] = vm
+		wants, err := Desired(cfg)
+		if err != nil {
+			t.Fatalf("endpoint %q: %v", endpoint, err)
+		}
+		for _, w := range wants {
+			if w.Name == "vm.example.org" {
+				t.Errorf("endpoint %q: a record for a name nothing declares: %+v", endpoint, w)
+			}
+		}
+	}
+}
+
+func hasWant(wants []Want, typ, name, content string) bool {
+	for _, w := range wants {
+		if w.Type == typ && w.Name == name && w.Content == content {
+			return true
+		}
+	}
+	return false
+}
+
+// Every account app's join hostname is a record, in either signup mode:
+// derived as join.<domain> and named by the key to change, or the declared
+// hostnames.join. A stale hostnames.invite names no role and publishes
+// nothing.
+func TestAccountJoinHostnameInEitherMode(t *testing.T) {
+	keyOf := func(cfg *config.Config, name string) (string, bool) {
+		for _, h := range hostnames(cfg) {
+			if h.Name == name {
+				return h.Key, true
+			}
+		}
+		return "", false
+	}
+	for _, mode := range []string{"invite", "open"} {
+		cfg := declared()
+		cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+			Settings: map[string]any{"signup": mode}}
+		if key, ok := keyOf(cfg, "join.example.org"); !ok || key != "apps.account.hostnames.join (derived)" {
+			t.Errorf("signup %s: join.example.org is %q, %v", mode, key, ok)
+		}
+		cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+			Hostnames: map[string]string{"join": "welcome.example.org"},
+			Settings:  map[string]any{"signup": mode}}
+		if key, ok := keyOf(cfg, "welcome.example.org"); !ok || key != "apps.account.hostnames.join" {
+			t.Errorf("signup %s: welcome.example.org is %q, %v", mode, key, ok)
+		}
+		if _, ok := keyOf(cfg, "join.example.org"); ok {
+			t.Errorf("signup %s: the derived join.example.org is published beside the declared one", mode)
+		}
+	}
+	cfg := declared()
+	cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Hostname: "account.example.org",
+		Hostnames: map[string]string{"invite": "invite.example.org"},
+		Settings:  map[string]any{"signup": "invite"}}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range wants {
+		if w.Name == "invite.example.org" {
+			t.Errorf("a stale hostnames.invite: %s %s is wanted", w.Type, w.Name)
+		}
+	}
+}

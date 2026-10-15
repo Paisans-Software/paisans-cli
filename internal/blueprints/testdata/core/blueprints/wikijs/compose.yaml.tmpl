@@ -1,0 +1,89 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+{{- if .App.Pinned }}
+# {{ .App.Name }} is pinned to {{ .App.Site }}: app and database together,
+# because a half pinned app is less available than either site alone.
+{{- else }}
+# {{ .App.Name }} has cluster placement: an instance on every apps site, no
+# Postgres service of its own, and a connection to the local HAProxy on
+# {{ .DBHost }}:{{ .DBPort }}. The instances tell each other about changes
+# over Postgres LISTEN/NOTIFY (HA_ACTIVE in .env).
+{{- end }}
+name: {{ .Project }}
+
+services:
+  app:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ .Image "app" }}
+    restart: unless-stopped
+    env_file:
+      - .env
+    # The mesh address only. Docker's own iptables rules bypass a host
+    # firewall, so a port published on every interface of a host with a
+    # public address is reachable from the internet whatever ufw says. The
+    # gateway, over the mesh, is the only thing that should reach it.
+    ports:
+      - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+    # The image ships curl and a commented out check of its own
+    # (dev/build/Dockerfile:54 at v2.5.316). /healthz answers 200 while the
+    # database pool has a connection (blueprint.yaml).
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:{{ .App.Port }}/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+    volumes:
+      # The path the image declares as a VOLUME (dev/build/Dockerfile:49),
+      # bound here rather than left to Docker as an anonymous volume.
+      # Uploads live in Postgres (server/models/assets.js:128-139), and no
+      # storage module the bootstrap enables writes here, so it holds
+      # nothing a member wrote.
+      - {{ .DataPath }}/content:/wiki/data/content
+{{- if .App.Pinned }}
+    depends_on:
+      - postgres
+{{- end }}
+
+  # Finishes Wiki.js's setup once per database and keeps its sign-in, site
+  # settings and groups as bootstrap.env says, on every start of this
+  # container. It then stays up, and the image's own healthcheck reports
+  # healthy once a run has converged, so apply waits for it. It reaches the
+  # app by service name, never through the gateway.
+  bootstrap:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ .Image "bootstrap" }}
+    restart: unless-stopped
+    env_file:
+      - bootstrap.env
+    # The app's process namespace, so it can send SIGTERM to an instance
+    # that started before another finished setup and is still serving the
+    # setup page. As the app's user, uid 1000 (the image's node user), which
+    # may signal it. Stopping the app ends this namespace and this container
+    # with it; both come back under their restart policy.
+    pid: "service:app"
+    user: "1000:1000"
+    depends_on:
+      - app
+{{- if .App.Pinned }}
+
+  postgres:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ .Image "postgres" }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: {{ .DBName }}
+      POSTGRES_USER: {{ .DBUser }}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    volumes:
+      - {{ .DataPath }}/postgres:{{ .PostgresDataMount }}
+{{- end }}
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"

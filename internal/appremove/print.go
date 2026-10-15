@@ -1,0 +1,175 @@
+package appremove
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// Show lists the plan: a section per place it acts, a line per kind of thing
+// it does there, and each thing with what happens to it as a detail. Lines of
+// one kind that follow each other are listed as one. What it removes is
+// pending. What it keeps is marked done under --verbose, since nothing
+// happens to it, except a file edited on the host, which is a warning: the
+// operator decides what becomes of the edit.
+func (p *Plan) Show(r ui.Reporter) {
+	// A section opens with its first line, so a place where the plan only
+	// keeps things has no empty heading without --verbose.
+	last, heading := "", ""
+	open := func() {
+		if heading != "" {
+			r.Section(heading)
+			heading = ""
+		}
+	}
+	mark := func(title string, m ui.Mark, text string, args ...any) {
+		if m == ui.OK && !r.Verbose() {
+			return
+		}
+		open()
+		if title != last {
+			r.Step(title).End(m, "")
+			last = title
+		}
+		r.Detail(text, args...)
+	}
+	line := func(title, text string, args ...any) { mark(title, ui.Pending, text, args...) }
+	kept := func(title, text string, args ...any) { mark(title, ui.OK, text, args...) }
+	edited := func(text string, args ...any) {
+		open()
+		r.Warn(fmt.Sprintf(text, args...), "")
+		last = ""
+	}
+	section := func(format string, args ...any) {
+		heading = fmt.Sprintf(format, args...)
+		last = ""
+	}
+	for _, s := range p.Sites {
+		if s.Empty() {
+			if r.Verbose() {
+				r.Step(fmt.Sprintf("%s: nothing of %s", s.Site, p.App)).End(ui.OK, "")
+			}
+			continue
+		}
+		section("%s", s.Site)
+		if len(s.Containers) > 0 {
+			line("remove containers and networks", "stop %s: %d container(s), %d running: %s", s.Project, len(s.Containers), s.Running, strings.Join(s.Containers, ", "))
+		}
+		for _, n := range s.Networks {
+			line("remove containers and networks", "remove network %s", n)
+		}
+		for _, f := range s.Files {
+			switch f.State {
+			case Remove:
+				line("remove files", "/%s", f.Entry.Path)
+			case Gone:
+				line("drop manifest entries", "the manifest entry for /%s, whose file is gone", f.Entry.Path)
+			case Edited:
+				edited("keep /%s and its manifest entry: edited on the host since apply wrote it", f.Entry.Path)
+			}
+		}
+		for _, f := range s.WebServer {
+			line("remove site files", "%s, from the include directory of %s, which is then validated, and reloaded when it runs in a container", f.Path, f.Server)
+		}
+		dir := s.Dir
+		switch {
+		case !dir.Exists:
+		case p.DeleteData && s.edited(dir.Path):
+			edited("keep %s and everything in it, because a file in it was edited on the host", dir.Path)
+		case p.DeleteData:
+			line("delete "+dir.Path, "%s and everything in it: %d file(s), %s", dir.Path, dir.Files, size(dir.Bytes))
+		case len(s.DataEntries) > 0:
+			kept("keep "+dir.Path, "%s: %s, written by the app rather than by apply (%d file(s) and %s in the directory). --delete-data deletes it", dir.Path, strings.Join(s.DataEntries, ", "), dir.Files, size(dir.Bytes))
+		default:
+			line("remove empty directories", "%s once it is empty", dir.Path)
+		}
+		for _, v := range s.Volumes {
+			if p.DeleteData {
+				line("delete volumes", "volume %s", v)
+			} else {
+				kept("keep volumes", "volume %s. --delete-data deletes it", v)
+			}
+		}
+	}
+	c := p.Client
+	if c.Delete != nil || len(c.Kept) > 0 {
+		section("Pocket ID (%s on %s)", c.Provider, c.Site)
+		if c.Delete != nil {
+			line("delete client "+c.Delete.Name, "client %s (id %s): DELETE /api/oidc/clients/%s", c.Delete.Name, c.Delete.ID, c.Delete.ID)
+		}
+		for _, k := range c.Kept {
+			kept("keep client", "%s", k)
+		}
+	}
+	if db := p.Database; db != nil && (db.DropDatabase || db.DropRole || len(db.Kept) > 0) {
+		section("Postgres (the leader, %s)", db.Leader)
+		if db.DropDatabase {
+			line("drop database "+db.Name, "database %s", db.Name)
+		}
+		if db.DropRole {
+			line("drop role "+db.Name, "role %s", db.Name)
+		}
+		for _, k := range db.Kept {
+			kept("keep database", "%s", k)
+		}
+	}
+	if st := p.Storage; st != nil && (len(st.Buckets) > 0 || len(st.Keys) > 0 || len(st.Kept) > 0) {
+		section("Garage (on %s)", st.Anchor)
+		for _, b := range st.Buckets {
+			line("delete bucket "+b.Name, "bucket %s and its %d object(s), emptied with key %s first", b.Name, b.Objects, b.KeyID)
+		}
+		for _, k := range st.Keys {
+			line("delete S3 key "+k, "S3 key %s", k)
+		}
+		for _, k := range st.Kept {
+			kept("keep buckets and keys", "%s", k)
+		}
+	}
+	for _, m := range p.Monitors {
+		if !m.Pending() {
+			if r.Verbose() {
+				r.Step(fmt.Sprintf("%s: the monitor's seed already matches the render without %s", m.Site, p.App)).End(ui.OK, "")
+			}
+			continue
+		}
+		section("%s (the monitor)", m.Site)
+		for _, s := range m.Steps() {
+			line("apply "+m.App+" on "+m.Site, "%s", s.Text)
+		}
+	}
+}
+
+// Remains is what the operator still has to see to once the plan has run:
+// the app's secrets, its DNS records, and what a step kept. Nothing here is
+// changed by this command.
+func Remains(p *Plan, secrets *config.Secrets, kept []string) []string {
+	var out []string
+	if secrets != nil {
+		var keys []string
+		for k := range secrets.Apps[p.App] {
+			keys = append(keys, "apps."+p.App+"."+k)
+		}
+		sort.Strings(keys)
+		if _, ok := secrets.OIDCClients[p.App]; ok {
+			keys = append(keys, "oidc_clients."+p.App)
+		}
+		if len(keys) > 0 {
+			out = append(out, secretsLeft(p.App, strings.Join(keys, ", ")))
+		}
+	}
+	out = append(out, dnsLeft)
+	if !p.DeleteData {
+		out = append(out, dataKept(p.App))
+	}
+	out = append(out, p.Client.Kept...)
+	if p.Database != nil {
+		out = append(out, p.Database.Kept...)
+	}
+	if p.Storage != nil {
+		out = append(out, p.Storage.Kept...)
+	}
+	return append(out, kept...)
+}

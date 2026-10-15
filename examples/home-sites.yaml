@@ -1,0 +1,182 @@
+# home-sites.yaml — a deployment whose data lives at home, on connections
+# nothing can dial.
+#
+# The two homes have no static address, no dynamic DNS name and no forwarded
+# port. They dial out to the sites that can be dialled, and WireGuard's
+# keepalive holds their NAT open, so the gateway reaches their apps over the
+# mesh even though nothing on the internet reaches them. Everything the
+# internet or another site has to dial lives on a small VPS.
+#
+# Two homes reach each other only through a dialled site: the first one in the
+# mesh, here vm. What that costs, and what this layout buys back, is in the
+# notes on etcd below. See also README.md, "Where the mesh dials a site" and
+# "The voters that survive one loss must still dial each other".
+
+version: 1
+id: 3c7e1a52-9d4b-4f60-8a2e-6b1d0c9f7e34
+
+community:
+  name: "Example Community"
+  domain: example.org
+
+mesh:
+  subnet: 10.44.0.0/24
+
+acme:
+  provider: cloudflare
+
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+  bob:
+    name: Bob Example
+    email: bob@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org
+
+sites:
+  # The gateway and one tiebreaker. Its public_address is what the other sites
+  # dial (on 51820, with no endpoint written) and what the DNS records point
+  # at, and it is where the toolkit's ssh goes.
+  vm:
+    roles: [gateway, witness]
+    address: 10.44.0.3
+    public_address: 203.0.113.10
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+
+  # A second dialled voter, on another provider. It holds no data and serves
+  # nothing; it exists so that losing vm does not leave the homes' etcd
+  # without a majority.
+  vm2:
+    roles: [witness]
+    address: 10.44.0.5
+    public_address: 198.51.100.20
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+
+  # The homes: no endpoint and no public_address, so they only dial out.
+  # ssh.host is required, since there is no public address to default to: a
+  # name the workstation reaches, on the home LAN or a VPN such as Tailscale.
+  # A ProxyJump through vm over the mesh works too, but only once the mesh
+  # exists, so the first host prepare needs one of the other two.
+  home-a:
+    roles: [data, apps]
+    address: 10.44.0.1
+    ssh:
+      host: home-a.local
+      user: ubuntu
+      keys: [alice, bob]
+
+  home-b:
+    roles: [data, apps]
+    address: 10.44.0.2
+    ssh:
+      host: home-b.local
+      user: ubuntu
+      keys: [alice, bob]
+
+  # The monitor, on a third VPS, so it does not go dark with the gateway it
+  # reports on.
+  health:
+    roles: [monitor]
+    address: 10.44.0.4
+    public_address: 203.0.113.20
+    ssh:
+      user: ubuntu
+      keys: [alice, bob]
+
+cluster:
+  port: 5000
+  postgres_version: "18"
+  synchronous: true
+  synchronous_strict: false
+
+# Three voters, two of them dialled. With three or more voters the toolkit
+# refuses fewer than two dialled ones (voters-share-a-relay): with only vm
+# dialled, losing vm would cut home-a off from home-b, leave each one voter
+# of three, and put the database in read-only everywhere.
+#
+# home-b is a data site but not a voter: a Postgres replica that reaches etcd
+# by dialling vm and vm2. Left to the roles, the voters would be all four of
+# vm, vm2, home-a and home-b, which works but is an even count, and an even
+# count tolerates no more losses than one fewer.
+#
+# What survives what:
+#   vm2 or home-b down  nothing a member notices
+#   home-a down         vm and vm2 are a majority; Patroni promotes home-b
+#   vm down             the site is offline (it is the only gateway), but
+#                       vm2 and home-a keep etcd's majority, so the database
+#                       stays writable; home-b falls behind until vm returns,
+#                       since the homes' replication relays through it
+etcd:
+  members: [vm, vm2, home-a]
+  heartbeat_ms: 200
+  election_timeout_ms: 2000
+
+storage:
+  garage:
+    # Put the home with the better upload first: it takes every app's writes.
+    sites: [home-a, home-b]
+    replication: 2
+    capacity: 100G
+
+backup:
+  # Leave this out, or write `enabled: false`, and nothing is backed up;
+  # validate and apply say so on every run. See paisans-stack.example.yaml for what
+  # each key means. Credentials go in with `paisans secrets set
+  # backup.destinations.<name>.access_key_id` and `.secret_access_key`.
+  schedule: daily
+  at: "03:00"                   # UTC
+  destinations:
+    # The first is the primary, and takes Postgres's write ahead log.
+    - name: b2
+      endpoint: https://s3.us-west-004.backblazeb2.com
+      region: us-west-004
+      bucket: example-backups
+      keep: { daily: 7, weekly: 4, monthly: 6, yearly: 1 }
+    # A second provider, so one account or one region is not every backup.
+    - name: offsite
+      endpoint: https://s3.example.net
+      region: us-east-1
+      bucket: example-backups
+      keep: { weekly: 4, monthly: 12 }
+
+apps:
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+
+  auth:
+    blueprint: pocket-id
+    hostname: id.example.org
+    placement: cluster
+    settings:
+      # Pocket ID's own admin pages manage accounts, and every operator is
+      # its administrator. management: paisans needs an account app.
+      management: pocket-id
+      file_backend: database
+      app_name: Example ID
+      allow_own_account_edit: false   # always false; see README.md
+
+  health:
+    blueprint: uptime
+    hostname: health.example.org
+    placement: { pinned: health }
+    settings:
+      # Defaults to operators; admins lets every community admin in as well.
+      admin_group: admins
+
+smtp:
+  host: smtp.example.org
+  port: 587
+  security: starttls
+  username: health@example.org
+  from_address: health@example.org
+  from_name: Example Community

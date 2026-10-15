@@ -1,0 +1,54 @@
+# The foundation: the image of every service whose template is
+# the toolkit's own, the infrastructure stack's and the reserved
+# blueprints'. The toolkit names none of them itself, so a new release
+# of any of them reaches a deployment on its next apply, without a
+# toolkit release.
+#
+# Each is a track: a repository and a tag pattern in which each `*`
+# matches one run of digits. The toolkit's apply runs the newest tag
+# the registry publishes that matches the whole pattern, pinned by its
+# digest. A pattern says exactly how far a track may move, so each one
+# below stops where an upgrade stops being routine. The toolkit refuses
+# a track that leaves the versions its own code is written against
+# (internal/blueprints, supportedTags), and skips this catalog's release for
+# an older one when it does.
+apiVersion: paisans.foundation/v1
+images:
+  # 3.5 only: etcd upgrades one minor at a time, from the newest patch
+  # of the one before, so 3.6 is a step to take deliberately.
+  etcd: "gcr.io/etcd-development/etcd:v3.5.*"
+  # 3.0, the long term support line haproxy.cfg is written for.
+  haproxy: "docker.io/library/haproxy:3.0.*-alpine"
+  garage: "docker.io/dxflrs/garage:v1.*.*"
+  # Paisans-Software/caddy-dns, Caddy 2 with every DNS provider module
+  # Paisans publishes for. It rebuilds whenever upstream Caddy or
+  # its base image ships a fix.
+  caddy: "ghcr.io/paisans-software/caddy:2.*.*"
+  # The per site heartbeat: curl's own image, Alpine with curl and a
+  # shell and nothing else.
+  heartbeat: "docker.io/curlimages/curl:8.*.*"
+  pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
+  oauth2-proxy: "quay.io/oauth2-proxy/oauth2-proxy:v7.*.*"
+  # NOTE THE MISSING `v` in these three: docker/metadata-action's semver
+  # pattern strips it from the git tag.
+  # 0.3, the first that reads the operators and writes nothing.
+  operator-reconciler: "ghcr.io/paisans-software/operator-reconciler:0.3.*"
+  uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
+  account: "ghcr.io/paisans-software/paisans-account-service:0.2.*"
+# By Postgres major. A major is data, so a deployment's
+# cluster.postgres_version chooses it and no track moves it. Spilo
+# publishes one repository per major, each on its own release line.
+# The app image is what a pinned app's own database runs: Debian's, with
+# the Debian release in the tag, because the C library decides how
+# Postgres sorts text and an index is only valid under the one that
+# built it.
+postgres:
+  "16":
+    spilo: "ghcr.io/zalando/spilo-16:3.3-p*"
+    app: "docker.io/library/postgres:16.*-trixie"
+  "17":
+    spilo: "ghcr.io/zalando/spilo-17:4.0-p*"
+    app: "docker.io/library/postgres:17.*-trixie"
+  "18":
+    spilo: "ghcr.io/zalando/spilo-18:4.1-p*"
+    app: "docker.io/library/postgres:18.*-trixie"

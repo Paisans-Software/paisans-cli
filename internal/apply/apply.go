@@ -1,0 +1,1737 @@
+package apply
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// Change is what one file needs, decided before anything is written.
+type Change struct {
+	// Path is where the file lands on the host, absolute.
+	Path string
+	// Kind says what will happen to it.
+	Kind ChangeKind
+	// Mode is the mode the rendered file wants.
+	Mode uint32
+	// Stack is the directory under the deployment's root this file belongs to, empty for files
+	// outside one.
+	Stack string
+	// Overwritten marks a conflict the operator named with --overwrite: a file
+	// that differs from the last record and is replaced anyway, because they
+	// said so for that one path.
+	Overwritten bool
+	content     string
+	// before is what the host held, for a scoped plan's Rollback.
+	before string
+}
+
+// ChangeKind is what an apply will do to one file.
+type ChangeKind int
+
+const (
+	// Create is a file the host does not have.
+	Create ChangeKind = iota
+	// Update is a file that differs from what is rendered, and matches what the
+	// last apply recorded, so replacing it loses nothing.
+	Update
+	// Unchanged is a file already byte identical to what is rendered.
+	Unchanged
+	// Conflict is a file that differs from what the last apply recorded.
+	// Somebody edited it on the host. Nothing is written and nothing is
+	// restarted until that is resolved.
+	Conflict
+)
+
+func (k ChangeKind) String() string {
+	switch k {
+	case Create:
+		return "create"
+	case Update:
+		return "update"
+	case Unchanged:
+		return "unchanged"
+	default:
+		return "conflict"
+	}
+}
+
+// Action is what has to happen after files are written for a change to be
+// live. The narrower one is always preferred: a recreate is an outage, however
+// brief, and a restart is not.
+type Action struct {
+	Stack string
+	// Recreate means `docker compose up -d`, which replaces the container.
+	// Only an environment or a compose change needs it, because Compose passes
+	// environment at start and a running container cannot be told about a new
+	// value.
+	Recreate bool
+	// Force means `docker compose up -d --force-recreate`, which replaces
+	// every container of the stack even when Compose sees nothing changed. It
+	// is set for a stack a stopped apply still owes and for one the operator
+	// named with --recreate, never for an ordinary change: a plain `up -d`
+	// over a container that an earlier `up -d` left half built only starts
+	// it, network and all missing, because its configuration matches.
+	Force bool
+	// Down means `docker compose down` before the `up`, which removes the
+	// stack's containers and its default network. It is set only when that
+	// network on the host is addressed differently from what the compose file
+	// declares, since `up` then creates the network afresh as declared, and
+	// an app trusting the network's gateway as its proxy (TRUST_PROXY) would
+	// otherwise name an address its connections do not come from. See
+	// probeStaleNetworks.
+	Down bool
+	// Reason is quoted back to the operator, so that "why is it recreating"
+	// never needs guessing.
+	Reason string
+	// Services narrows a restart to these compose services, empty for every
+	// service of the stack. Only the infrastructure stack sets it: its
+	// services share one compose project, and restarting the whole project
+	// for a new garage.toml restarted Patroni, which on the primary is a
+	// failover, and HAProxy, which drops every app's database connection.
+	Services []string
+	// Refresh names the infrastructure services whose bind mounted files
+	// changed, for an `up -d` that was not forced. `up -d` replaces only a
+	// container whose configuration changed, and a bind mounted file is not
+	// configuration to Compose, so a haproxy.cfg changed beside a
+	// patroni.env left HAProxy running on the old file. Execute restarts
+	// each of these that `up -d` left in place, and none it replaced.
+	Refresh []string
+}
+
+// Command is what the action runs on the host, for deployment d.
+func (a Action) Command(d deployment.Deployment) string {
+	compose := d.ComposeCmd(a.Stack)
+	switch {
+	case a.Force:
+		return compose + " up -d --force-recreate"
+	case a.Recreate:
+		return compose + " up -d"
+	case len(a.Services) > 0:
+		return compose + " restart " + strings.Join(a.Services, " ")
+	default:
+		return compose + " restart"
+	}
+}
+
+// Note is one thing Build decided for the operator to read. Hint is set
+// when the operator has something to do: it is the short line that shows at
+// every verbosity, and Text says the rest. A note without one is information,
+// nothing is left undone by not reading it, and Text is shown only as detail.
+type Note struct {
+	Hint string
+	Text string
+}
+
+// Plan is everything one site's apply would do.
+type Plan struct {
+	Site      string
+	Transport string
+	// Deployment is whose files these are, and so where they land.
+	Deployment deployment.Deployment
+	Changes    []Change
+	Actions    []Action
+	// GatewayChanging is set when this site runs the gateway and its Caddy is
+	// about to change or be reloaded. That is the question every gate on the
+	// gateway is really asking, and it has two answers rather than one:
+	//
+	//   - a routing file changed, so the running Caddy is told to reload
+	//   - infra/compose.yaml changed, so the container is replaced, which
+	//     is how the image itself moves
+	//
+	// The second is the flagship workflow: a new build behind Caddy's tag,
+	// resolved while apply plans (see ResolveImages), changes exactly that
+	// one file on the host. It is an environment path rather than a routing
+	// one, so it yields an ordinary `up -d` in the Actions loop, and `up -d`
+	// exits 0 as soon as the container starts. A Caddy that cannot load its
+	// configuration dies a moment later and the apply has already reported
+	// success. Checking only before a reload would leave exactly that path
+	// unchecked.
+	GatewayChanging bool
+	// GatewayReload is set when this site serves the public entry point and a
+	// routing file changed. It is the narrower of the two: a new image is
+	// picked up by the recreate, not by a reload.
+	GatewayReload bool
+	// ACMEModule is the Caddy DNS module this deployment's gateway must have,
+	// as `caddy list-modules` prints it. Empty when this site runs no gateway.
+	ACMEModule string
+	// WireGuard is what the deployment's mesh interface needs before any
+	// stack moves. Every service binds
+	// the site's mesh address, so a stack started before the interface exists
+	// fails to bind, and a container that cannot bind is restarted in a loop
+	// by Docker rather than reported to the apply.
+	WireGuard WireGuardStep
+	// meshAddress is the Address line of the site's rendered WireGuard file
+	// (Eg: 10.44.0.1/24), which the interface must hold once WireGuard ran.
+	meshAddress string
+	// meshEndpoints are the host names among the peer endpoints of that
+	// file, which must resolve before WireGuard runs.
+	meshEndpoints []string
+	// Bootstrap is the per app database work, nil when this site does none.
+	// It runs after the infrastructure stack and before any app stack, and a
+	// failure stops the apply there. See WithDatabases.
+	Bootstrap *Bootstrap
+	// Disk is the free space check on Docker's data root, nil when no stack
+	// action will pull an image. Execute refuses before writing anything when
+	// it is short. See DiskCheck.
+	Disk *DiskCheck
+	// Prunes are the images on the host that this apply's stacks supersede,
+	// as Build saw them. Execute reads the host again after each stack is
+	// healthy, and removes only what no container uses by then.
+	Prunes []Prune
+	// Sweep is what the whole apply's last step would remove, as Build saw
+	// the host: see sweepImages. Empty for a plan that does not sweep.
+	Sweep []Prune
+	// Volumes is the check of every acted on image's declared volumes
+	// against what its service mounts, nil when no stack moves. Any uncovered
+	// path refuses the apply before anything is written. See VolumeCheck.
+	Volumes *VolumeCheck
+	// HostSites is set when this site's Caddy mounts the host's own
+	// render.HostSitesDir. Execute creates the directory, root's and 0755,
+	// before the first container that mounts it, when it is missing, and
+	// never touches what is inside it.
+	HostSites bool
+	// KeepImages skips pruning and the sweep for this run, as --keep-images
+	// does.
+	KeepImages bool
+	// Pins are the builds the images this site's compose files name are
+	// planned to run, one per image a compose file this plan read names
+	// (see render.Plan.Images). Execute records them in the manifest. See
+	// ResolveImages, and Caddy and Moved.
+	Pins []ImagePin
+	// recordedPins is what the manifest Build read recorded of the builds
+	// the site runs, kept for a stack whose compose file this plan does not
+	// settle.
+	recordedPins []render.ManifestPin
+	// recordedArch is the architecture the manifest Build read recorded,
+	// and Arch the one this plan was made for, which Execute records.
+	recordedArch string
+	Arch         string
+	// recordedWebServer is what the manifest Build read recorded of the files
+	// in the operator's web server's include directory. Apply writes them
+	// after every site is up, so every manifest write keeps them.
+	recordedWebServer []render.ManifestWebServer
+	// images is what each stack of this site renders, from its compose file.
+	images map[string][]string
+	// imageHistory is the manifest's record of every repository this site
+	// has rendered, as Build read it. See imageRecord.
+	imageHistory []render.ManifestImage
+	// scoped marks a plan built with Scope: it writes its files and syncs
+	// the mesh, and leaves every stack, gate and other file to its caller.
+	scoped bool
+	// partial marks a plan built with Only: like a scoped one, its manifest
+	// write keeps every entry outside the named stacks.
+	partial bool
+	// recorded is the manifest as Build read it, which a scoped plan's own
+	// manifest write keeps for every file outside its scope.
+	recorded map[string]render.ManifestFile
+	// Leftovers are the manifest's entries for files this site no longer
+	// renders, marked left over, set only on a whole plan. Its manifest write
+	// keeps them, and nothing deletes the files: they are this deployment's,
+	// and what to do with them is the operator's decision.
+	Leftovers []render.ManifestFile
+	// rendered is every path this site renders, relative to the root of the
+	// host, for the manifest write's left over marks.
+	rendered map[string]bool
+	// heldOwed is what the record of owed actions held for stacks this plan
+	// holds back with Except. Execute keeps it there, so the apply that
+	// releases a held stack still force-recreates it.
+	heldOwed []pendingAction
+	// HeldOverwrites are --overwrite paths in stacks this plan holds back
+	// with Except. They are not written, and the operator is told so.
+	HeldOverwrites []string
+	// Notes are things Build decided that the operator should read and
+	// that change nothing they asked for.
+	Notes []Note
+	// renderedChanges is every file this site renders, held back or not,
+	// for the prune keep set: an image a held stack renders is still the
+	// site's.
+	renderedChanges []Change
+	// Report receives each step Build and Execute take on the host as it
+	// starts and ends, and what Execute decided along the way that is not
+	// an error, such as a replica leaving the database work to the leader.
+	// Nil discards it. Build sets it from the Report option.
+	Report ui.Reporter
+}
+
+// WireGuardStep is the one thing an apply does to the deployment's mesh
+// interface, psns-<token>.
+type WireGuardStep int
+
+const (
+	// WireGuardNone means the interface is up and its file did not change.
+	WireGuardNone WireGuardStep = iota
+	// WireGuardStart enables the unit and starts it: a first apply, or an
+	// interface found down.
+	WireGuardStart
+	// WireGuardSync hands the running interface its new peers without taking
+	// it down, which is the ordinary update: a site joined or left.
+	WireGuardSync
+	// WireGuardRestart takes the interface down and up again. Only a change to
+	// a line that wg-quick itself applies needs it, because `wg syncconf`
+	// never sees those lines.
+	WireGuardRestart
+)
+
+// Command is what the step runs on the host for d's interface, empty for
+// WireGuardNone.
+func (w WireGuardStep) Command(d deployment.Deployment) string {
+	iface := d.Interface()
+	switch w {
+	case WireGuardStart:
+		return "systemctl enable --now " + d.WireGuardUnit()
+	case WireGuardSync:
+		// Through a temporary file rather than a pipe. /bin/sh has no
+		// pipefail, so a `wg-quick strip` that failed would hand syncconf an
+		// empty configuration, and syncconf removes every peer it is not
+		// given: one failed command would cut this site off the mesh.
+		return "set -e; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; wg-quick strip " + iface + " > \"$f\"; wg syncconf " + iface + " \"$f\""
+	case WireGuardRestart:
+		return "systemctl restart " + d.WireGuardUnit()
+	default:
+		return ""
+	}
+}
+
+// Title is the step's name in the progress output (Eg: start mesh psns-566c).
+// Describe is the same step's detail.
+func (w WireGuardStep) Title(d deployment.Deployment) string {
+	iface := d.Interface()
+	switch w {
+	case WireGuardStart:
+		return "start mesh " + iface
+	case WireGuardSync:
+		return "update mesh " + iface
+	case WireGuardRestart:
+		return "restart mesh " + iface
+	default:
+		return ""
+	}
+}
+
+// Describe says what the step does to d's interface, for a plan.
+func (w WireGuardStep) Describe(d deployment.Deployment) string {
+	iface := d.Interface()
+	switch w {
+	case WireGuardStart:
+		return "start " + iface + " and enable it at boot, before any stack moves"
+	case WireGuardSync:
+		return "give " + iface + " its new peers in place, without taking the mesh down"
+	case WireGuardRestart:
+		return "restart " + iface + ", because a line only wg-quick applies changed"
+	default:
+		return ""
+	}
+}
+
+// Whole reports whether the plan covers the whole site: built without Scope,
+// Only or Except. Only a whole plan marks files left over.
+func (p Plan) Whole() bool { return !p.scoped && !p.partial }
+
+// Conflicts returns the files somebody edited on the host.
+func (p Plan) Conflicts() []Change {
+	var out []Change
+	for _, c := range p.Changes {
+		if c.Kind == Conflict {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Writes returns the files this plan would write.
+func (p Plan) Writes() []Change {
+	var out []Change
+	for _, c := range p.Changes {
+		if c.Kind == Create || c.Kind == Update {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// remoteRoot is where a site's tree lands. The rendered tree is already shaped
+// like the host, so a path under it is the path on the host.
+const remoteRoot = "/"
+
+// manifestPath is where the last apply's record lives on the host, in the
+// deployment's own root. It is what separates "this file changed because we
+// changed it" from "somebody edited this on the host", and without it every
+// apply would be a blind overwrite.
+func manifestPath(d deployment.Deployment) string { return d.Manifest() }
+
+// HostSitesCommand creates render.HostSitesDir, root's and 0755, when it is
+// missing, and changes nothing when it exists.
+func HostSitesCommand() string {
+	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 -o root -g root %[1]s", render.HostSitesDir)
+}
+
+// gatewayCaddyfile and gatewayCompose are the two rendered files that say a
+// site runs the gateway and that its Caddy is about to be replaced, as paths
+// relative to the deployment's root.
+//
+// gatewayCompose is the whole infrastructure stack's compose file rather than
+// a Caddy specific one: the gateway shares it with etcd and Patroni, so a
+// change to it may or may not be the Caddy image. The check is cheap and
+// wrongly running it costs one container start, while wrongly skipping it
+// costs the public address of every application.
+const (
+	gatewayCaddyfile = "infra/caddy/Caddyfile"
+	gatewayCompose   = "infra/compose.yaml"
+)
+
+// wireguardProbe asks whether d's interface exists. It reads the kernel
+// rather than the unit, because an interface somebody brought up with a bare
+// `wg-quick up` is up for every service binding to it, and `systemctl enable
+// --now` on top of it would fail on an interface that already exists. It
+// prints rather than exits non zero, so that "down" cannot be confused with
+// ssh failing. The file and the unit are deployment.WireGuardConf and
+// WireGuardUnit.
+func wireguardProbe(d deployment.Deployment) string {
+	return "if ip link show " + d.Interface() + " >/dev/null 2>&1; then echo up; else echo down; fi"
+}
+
+// Option adjusts what Build plans, on the operator's word.
+type Option func(*options)
+
+type options struct {
+	scope      []string
+	overwrite  []string
+	recreate   []string
+	minFree    int64
+	minFreeSet bool
+	keepImages bool
+	// arch is the site's architecture; see Arch.
+	arch string
+	// noSweepRead leaves Plan.Sweep unread; see SkipSweepRead.
+	noSweepRead bool
+	only        []string
+	except      []string
+	after       []*Plan
+	dbApps      []string
+	// replicationChange lets a garage.toml with a different
+	// replication_factor replace the deployed one. Only `storage add
+	// --change-replication` sets it; see GarageReplication.
+	replicationChange bool
+	report            ui.Reporter
+	// resolver resolves the tags images are named by; see ResolveImages.
+	resolver Resolver
+	// peers are the compose files of this site's apps on the sites the
+	// apply does not cover; see OtherSites.
+	peers []PeerCompose
+}
+
+// Report sets the plan's Report before Build reads the host, so planning
+// reports its steps as Execute does. See Plan.Report.
+func Report(r ui.Reporter) Option {
+	return func(o *options) { o.report = r }
+}
+
+// ReplicationChange lets this apply replace a deployed garage.toml whose
+// replication_factor differs from the rendered one. It is for `storage add
+// --change-replication`, which stops every Garage node and sets its stored
+// layout aside first; any other caller gets the refusal in Build.
+func ReplicationChange() Option {
+	return func(o *options) { o.replicationChange = true }
+}
+
+// SkipSweepRead leaves Plan.Sweep empty, for a caller that plans a site only
+// to pull its images and never executes the plan: Build then asks the host
+// nothing about what the sweep would remove. Execute sweeps all the same.
+func SkipSweepRead() Option {
+	return func(o *options) { o.noSweepRead = true }
+}
+
+// KeepImages leaves superseded images on the host for this run, as
+// --keep-images does, for an operator who wants the old image to roll back to.
+func KeepImages() Option {
+	return func(o *options) { o.keepImages = true }
+}
+
+// MinFree sets the free space an apply needs on Docker's data root before it
+// pulls an image, as --min-free does. The default is DefaultMinFree.
+func MinFree(bytes int64) Option {
+	return func(o *options) { o.minFree, o.minFreeSet = bytes, true }
+}
+
+// Overwrite names conflicting files that may be replaced anyway, one path
+// each, as --overwrite does.
+func Overwrite(paths ...string) Option {
+	return func(o *options) { o.overwrite = append(o.overwrite, paths...) }
+}
+
+// Recreate names stacks to force-recreate although nothing about them
+// changed, as --recreate does.
+func Recreate(stacks ...string) Option {
+	return func(o *options) { o.recreate = append(o.recreate, stacks...) }
+}
+
+// Only restricts an apply to the named stacks, as `apply --only` does: their
+// files are compared and written, their actions and health gates run, and
+// nothing else on the site moves. The first real `site add` needed it: its
+// HAProxy restart broke Mbin's database connections, and the only way to
+// recreate Mbin through the toolkit was a whole apply, which would also have
+// recreated the primary's Patroni for an unrelated pending change. The
+// manifest keeps every entry outside the named stacks as it was, as a scoped
+// plan's does.
+func Only(stacks ...string) Option {
+	return func(o *options) { o.only = append(o.only, stacks...) }
+}
+
+// Except holds the named app stacks back from this apply: their files are
+// not compared or written, their actions and gates do not run, and the
+// manifest keeps their entries as the last apply recorded them. A held app's
+// route on this site's Caddy is held with it, since a route reloaded before
+// its app moves points at the app as it was; one the host does not have yet
+// is the exception, written and live in this pass because the Caddyfile
+// imports it (see heldRoute). Everything else on the site, the mesh included, applies as
+// usual. apply's identity
+// step uses it for an app whose client at Pocket ID is not in place, and to
+// start Pocket ID before the apps that sign in through it. A held stack that
+// a stopped apply still owes stays owed.
+func Except(stacks ...string) Option {
+	return func(o *options) { o.except = append(o.except, stacks...) }
+}
+
+// After tells a later pass of the same apply what the earlier passes did, so
+// that the operator's word is carried out once: an --overwrite path an earlier
+// pass replaced is no longer a conflict and is not named again, and a
+// --recreate stack an earlier pass acted on is not recreated twice. Those an
+// earlier pass held back with Except still apply. apply's identity step runs a
+// site in passes and passes each later one this.
+func After(done ...*Plan) Option {
+	return func(o *options) { o.after = append(o.after, done...) }
+}
+
+// DatabaseApps names the apps that reach the cluster's database through the
+// site's HAProxy, as ClusterDatabaseApps returns them. When the plan moves
+// HAProxy or Patroni on this site, each of them this site runs is restarted
+// after the infrastructure stack: see databasePathMoves.
+func DatabaseApps(apps ...string) Option {
+	return func(o *options) { o.dbApps = append(o.dbApps, apps...) }
+}
+
+// Scope restricts an apply to the named files, as paths relative to the
+// site's root (Eg: etc/wireguard/psns-f2a9.conf). It is for a staged
+// operation such as `site add`, which has to move one file on every site and
+// nothing else: the new peer goes into the WireGuard file on every site before etcd may change, and
+// HAProxy's backend list changes on a site whose patroni.env changed too,
+// where a whole apply would recreate the primary.
+//
+// A scoped plan compares, refuses on conflict and writes exactly like a whole
+// one, and records what it wrote in the same manifest, so a later apply sees
+// those files as its own. It plans no stack action, no gateway gate and no
+// image work, and does not read or write the record of owed actions: its
+// caller runs the one command the change needs. The manifest keeps every
+// entry outside the scope as it was.
+func Scope(paths ...string) Option {
+	return func(o *options) { o.scope = append(o.scope, paths...) }
+}
+
+// Build decides what one site's apply would do, without doing any of it.
+//
+// The order matters and is the whole design. Every file is compared against
+// both the rendered content and the manifest the last apply left behind, so a
+// conflict is found before a single byte is written. An apply that wrote files
+// as it discovered them could leave a stack half updated and then refuse.
+func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts ...Option) (*Plan, error) {
+	d := plan.Deployment
+	out := &Plan{Site: site, Transport: t.Describe(), Deployment: d}
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	out.Report = o.report
+	// An earlier pass of the same apply already carried out these. See After.
+	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
+	for _, p := range o.after {
+		for _, c := range p.Changes {
+			if c.Overwritten {
+				doneOverwrite[c.Path] = true
+			}
+		}
+		for _, a := range p.Actions {
+			doneStacks[a.Stack] = true
+		}
+	}
+	var overwrite, recreate []string
+	for _, path := range o.overwrite {
+		if !doneOverwrite[path] {
+			overwrite = append(overwrite, path)
+		}
+	}
+	for _, stack := range o.recreate {
+		if !doneStacks[stack] {
+			recreate = append(recreate, stack)
+		}
+	}
+
+	// Paths the operator has said may be replaced although they conflict.
+	// Each must name a file that really is a conflict: a path that is not one
+	// is refused below rather than ignored, so a typo cannot pass for consent.
+	named := map[string]bool{}
+	for _, path := range overwrite {
+		named[path] = true
+	}
+	used := map[string]bool{}
+
+	entries, manifest, err := readManifest(t, d)
+	if err != nil {
+		return nil, err
+	}
+	out.recordedPins = manifest.Pins
+	out.recordedArch, out.Arch = manifest.Arch, o.arch
+	if out.Arch == "" {
+		// A plan made without reading the architecture keeps the record.
+		out.Arch = manifest.Arch
+	}
+	out.recordedWebServer = manifest.WebServer
+	out.imageHistory = manifest.Images
+	recorded := make(map[string]string, len(entries))
+	for path, entry := range entries {
+		recorded[path] = entry.SHA256
+	}
+	inScope := map[string]bool{}
+	for _, path := range o.scope {
+		inScope[strings.TrimPrefix(path, "/")] = true
+	}
+	if len(o.scope) > 0 {
+		out.scoped = true
+		out.recorded = entries
+	}
+	var onlySet map[string]bool
+	if len(o.only) > 0 {
+		onlySet = map[string]bool{}
+		for _, stack := range o.only {
+			onlySet[stack] = true
+		}
+		out.partial = true
+		out.recorded = entries
+	}
+	var exceptSet map[string]bool
+	if len(o.except) > 0 {
+		exceptSet = map[string]bool{}
+		for _, stack := range o.except {
+			exceptSet[stack] = true
+		}
+		out.partial = true
+		out.recorded = entries
+	}
+
+	prefix := site + "/"
+	out.rendered = map[string]bool{}
+	for _, file := range plan.Files {
+		if rel, ok := strings.CutPrefix(file.Path, prefix); ok && rel != render.ManifestName {
+			out.rendered[rel] = true
+		}
+	}
+	if !out.scoped && !out.partial {
+		out.Leftovers = leftovers(entries, out.rendered, now())
+	}
+	stacks := map[string]bool{}
+	// Every stack this site renders, changed or not, which is what a
+	// --recreate may name.
+	rendered := map[string]bool{}
+	envChanged := map[string]bool{}
+	// The infrastructure services whose bind mounted files changed, and
+	// whether some changed infrastructure file belongs to no one service, in
+	// which case a restart is of the whole stack. See infraService.
+	infraServices := map[string]bool{}
+	infraWhole := false
+	// The same services, for a recreate: see Action.Refresh.
+	refresh := map[string]bool{}
+	// Whether this site runs the gateway at all, and which of the two ways its
+	// Caddy is about to change. render only emits a Caddyfile for a site
+	// holding the gateway role, so its presence in the rendered tree is the
+	// signal, regardless of whether it changed: an image only apply changes no
+	// routing file at all.
+	var isGateway, routingChanged, gatewayComposeChanged bool
+	// The mesh file's fate, and what was on the host before, which decides
+	// whether its change can be applied in place.
+	var wireguard *Change
+	var wireguardBefore string
+	reading := len(out.rendered)
+	if out.scoped {
+		reading = len(inScope)
+	}
+	done := out.step("read rendered files")
+	done.Detail("%d rendered file(s) from %s", reading, out.Transport)
+	for _, file := range plan.Files {
+		if !strings.HasPrefix(file.Path, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(file.Path, prefix)
+		if rel == render.ManifestName {
+			continue
+		}
+		if out.scoped && !inScope[rel] {
+			continue
+		}
+		remote := remoteRoot + rel
+
+		if rel == d.RelPath(gatewayCaddyfile) {
+			isGateway = true
+		}
+
+		current, found, err := t.ReadFile(remote)
+		if err != nil {
+			finish(done, err)
+			return nil, err
+		}
+		// Each image is pinned to a build here, against the host's copy,
+		// before anything is compared. See ResolveImages.
+		//
+		// A stack this plan leaves alone (outside --only, or held back with
+		// Except) is pinned as a command with no resolver pins it: to what
+		// the host runs, asking no registry. Its file is still compared, so
+		// an edit on the host is still a conflict, but nothing it would
+		// resolve to is planned, listed, or refused over.
+		content := file.Content
+		if images := fileImages(plan.Images[site], file.Path); len(images) > 0 {
+			stack := stackOf(rel)
+			leftAlone := (onlySet != nil && !onlySet[stack]) || exceptSet[stack]
+			r, peers := o.resolver, o.peers
+			if leftAlone {
+				r, peers = nil, nil
+			}
+			var fresh Resolver
+			if FreshImages != nil && !leftAlone {
+				fresh = FreshImages()
+			}
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers)
+			if err != nil {
+				finish(done, err)
+				return nil, err
+			}
+			content = pinned
+			if track := unresolvedTrack(content); track != "" && !leftAlone {
+				err := &ui.Problem{
+					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
+					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
+				}
+				finish(done, err)
+				return nil, err
+			}
+			if !leftAlone {
+				for _, pin := range pins {
+					if provenOn(pin, o.arch, out.recordedArch) {
+						continue
+					}
+					note, err := platformCheck(site, o.arch, pin, r)
+					if err != nil {
+						finish(done, err)
+						return nil, err
+					}
+					if note != nil {
+						notes = append(notes, *note)
+					}
+				}
+				out.Pins = append(out.Pins, pins...)
+				out.Notes = append(out.Notes, notes...)
+			}
+		}
+
+		change := Change{
+			Path:    remote,
+			Mode:    file.Mode,
+			Stack:   stackOf(rel),
+			content: content,
+			before:  current,
+		}
+		if rel == GarageConfig(d) && found && !o.replicationChange {
+			if err := garageReplicationGuard(site, current, file.Content); err != nil {
+				finish(done, err)
+				return nil, err
+			}
+		}
+		switch {
+		case !found:
+			change.Kind = Create
+		case current == content:
+			change.Kind = Unchanged
+		case recorded[rel] == "":
+			// Present on the host, different from what we render, and no
+			// record of us having written it. That is somebody else's file,
+			// and overwriting it is exactly what this gate exists to stop.
+			change.Kind = Conflict
+		case recorded[rel] != sum(current):
+			change.Kind = Conflict
+		default:
+			change.Kind = Update
+		}
+		if change.Kind == Conflict && named[remote] {
+			change.Kind = Update
+			change.Overwritten = true
+			used[remote] = true
+		}
+
+		if rel == d.WireGuardConf() {
+			copied := change
+			wireguard = &copied
+			wireguardBefore = current
+			out.meshAddress = wireguardAddress(file.Content)
+			out.meshEndpoints = endpointNames(file.Content)
+		}
+
+		if change.Stack != "" {
+			rendered[change.Stack] = true
+		}
+		out.renderedChanges = append(out.renderedChanges, change)
+		if onlySet != nil && !onlySet[change.Stack] {
+			continue
+		}
+		// A held file somebody edited on the host stays in the plan as the
+		// conflict it is. Holding a file back means not writing it, not
+		// overlooking it: dropped, it would let this pass apply the rest of
+		// the site, and a dry run show nothing, while the apply releasing the
+		// app refused on it. A conflict is never written or recorded, so
+		// keeping it changes nothing else here.
+		held := exceptSet[change.Stack] || heldRoute(exceptSet, file, change)
+		if held && change.Kind != Conflict {
+			if change.Overwritten {
+				out.HeldOverwrites = append(out.HeldOverwrites, change.Path)
+			}
+			continue
+		}
+		out.Changes = append(out.Changes, change)
+		// The gateway's routing files are the reload's alone. Making them an
+		// infrastructure action as well restarted Caddy after reloading it:
+		// two actions for one change, and the restart is the one that drops
+		// connections. A Caddy that is not running is started by Execute.
+		gatewayRouting := change.Stack == infraStack && isRouting(rel)
+		if (change.Kind == Create || change.Kind == Update) && !isRecord(d, rel) {
+			if change.Stack != "" && !gatewayRouting {
+				stacks[change.Stack] = true
+				if isEnvironment(rel) {
+					envChanged[change.Stack] = true
+				} else if change.Stack == infraStack {
+					if service := infraService(rel); service != "" {
+						infraServices[service] = true
+						refresh[service] = true
+					} else {
+						infraWhole = true
+					}
+				}
+			}
+			if isRouting(rel) {
+				routingChanged = true
+			}
+			// The compose file moves the image; an environment file under
+			// infra moves what the replaced container starts with. Both
+			// replace the gateway, so both need the gates. The heartbeat's
+			// own environment file is the exception: the heartbeat service
+			// alone reads it, and `up -d` replaces only the service whose
+			// configuration changed, so a new monitor's URL reaching the
+			// gateway site never touches Caddy.
+			if rel == d.RelPath(gatewayCompose) || (change.Stack == infraStack && isEnvironment(rel) && infraService(rel) != heartbeatService) {
+				gatewayComposeChanged = true
+			}
+		}
+	}
+
+	done.Done("")
+
+	for _, path := range overwrite {
+		if !used[path] {
+			return nil, fmt.Errorf("%s: --overwrite %s names no conflicting file. Only a file this site renders, and which differs from what the last apply recorded, can be overwritten", site, path)
+		}
+	}
+
+	if out.scoped {
+		for path := range inScope {
+			if !seenInScope(out.Changes, path) {
+				return nil, fmt.Errorf("%s: %s is not a file this site renders", site, path)
+			}
+		}
+		sort.Slice(out.Changes, func(i, j int) bool { return out.Changes[i].Path < out.Changes[j].Path })
+		if wireguard != nil {
+			step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+			if err != nil {
+				return nil, err
+			}
+			out.WireGuard = step
+		}
+		return out, nil
+	}
+
+	resumed, err := readPending(t, d)
+	if err != nil {
+		return nil, err
+	}
+	// A stack the record still owes is force-recreated, whether or not its
+	// files changed again since. The record says its last action did not
+	// finish, and an `up -d` that stopped part way can leave a container
+	// created and never attached to its network; a plain `up -d` or a restart
+	// would start that container as it is.
+	changedStacks := map[string]bool{}
+	for stack := range stacks {
+		changedStacks[stack] = true
+	}
+	owed := map[string]bool{}
+	// A restart an earlier pass held back while the database path moved is
+	// owed as a restart, not as a half built stack. See heldOwed.
+	dbOwed := map[string]bool{}
+	var live []pendingAction
+	for _, action := range resumed.Actions {
+		// An app removed from the configuration renders no stack here, and
+		// acting on it would fail every apply from now on.
+		if !rendered[action.Stack] {
+			out.Notes = append(out.Notes, Note{Text: fmt.Sprintf("%s was owed an action by a stopped apply, and this site no longer renders it, so the record of it is dropped", action.Stack)})
+			continue
+		}
+		live = append(live, action)
+		if action.DatabasePath {
+			dbOwed[action.Stack] = true
+		} else {
+			owed[action.Stack] = true
+		}
+		stacks[action.Stack] = true
+	}
+
+	forced := map[string]bool{}
+	for _, stack := range recreate {
+		if !rendered[stack] {
+			return nil, fmt.Errorf("%s: --recreate %s names no stack this site renders. Its stacks are %s", site, stack, strings.Join(sortedKeys(rendered), ", "))
+		}
+		forced[stack] = true
+		stacks[stack] = true
+		// The operator's --recreate of a held stack is carried to the apply
+		// that releases it, as an owed recreate.
+		if exceptSet[stack] && !owed[stack] {
+			out.heldOwed = append(out.heldOwed, pendingAction{Stack: stack, Recreate: true})
+		}
+	}
+
+	if onlySet != nil {
+		for stack := range onlySet {
+			if !rendered[stack] {
+				return nil, fmt.Errorf("%s: --only %s names no stack this site renders. Its stacks are %s", site, stack, strings.Join(sortedKeys(rendered), ", "))
+			}
+		}
+		for stack := range stacks {
+			if !onlySet[stack] {
+				delete(stacks, stack)
+			}
+		}
+		wireguard = nil
+	}
+	// What is owed outside this plan, held back or outside --only, stays
+	// owed: this plan's own record replaces the one it read.
+	for _, action := range live {
+		if exceptSet[action.Stack] || (onlySet != nil && !onlySet[action.Stack]) {
+			out.heldOwed = append(out.heldOwed, action)
+		}
+	}
+	for stack := range exceptSet {
+		delete(stacks, stack)
+	}
+
+	for _, stack := range stackOrder(stacks) {
+		action := Action{Stack: stack}
+		if owed[stack] {
+			action.Recreate, action.Force = true, true
+			action.Reason = "a previous apply stopped before this stack's action finished, so its containers may be half built and are replaced outright"
+		} else if forced[stack] {
+			action.Recreate, action.Force = true, true
+			action.Reason = "named with --recreate, so every container is replaced whether or not anything changed"
+		} else if envChanged[stack] {
+			action.Recreate = true
+			action.Reason = "an environment or compose file changed, and Compose passes environment at start, so a running container cannot be told about a new value"
+			if stack == infraStack && len(refresh) > 0 {
+				action.Refresh = sortedKeys(refresh)
+				action.Reason += "; " + strings.Join(action.Refresh, ", ") + " is restarted after it if `up -d` leaves its container in place, since a changed bind mounted file is not a reason Compose recreates one"
+			}
+		} else if dbOwed[stack] && !changedStacks[stack] {
+			action.Reason = databasePathReason + ", and it was held back from the pass that moved them"
+		} else {
+			action.Reason = "only bind mounted configuration changed, so the container keeps its identity"
+			if stack == infraStack && !infraWhole && len(infraServices) > 0 {
+				action.Services = sortedKeys(infraServices)
+				action.Reason += ", and only " + strings.Join(action.Services, ", ") + " is restarted, since the rest of the stack reads none of it"
+			}
+		}
+		out.Actions = append(out.Actions, action)
+	}
+	var dbApps []string
+	for _, app := range o.dbApps {
+		if !exceptSet[app] {
+			dbApps = append(dbApps, app)
+		}
+	}
+	out.restartDatabaseApps(dbApps, rendered)
+	// A held app is not restarted, but it still loses its connections when
+	// HAProxy or Patroni moves, so its restart is owed to the pass that
+	// releases it.
+	if out.databasePathMoves() {
+		for _, app := range o.dbApps {
+			if exceptSet[app] && rendered[app] && !out.owesHeld(app) {
+				out.heldOwed = append(out.heldOwed, pendingAction{Stack: app, DatabasePath: true})
+			}
+		}
+	}
+
+	sort.Slice(out.Changes, func(i, j int) bool { return out.Changes[i].Path < out.Changes[j].Path })
+
+	if err := out.probeStaleNetworks(t); err != nil {
+		return nil, fmt.Errorf("%s: %w", site, err)
+	}
+
+	need := DefaultMinFree
+	if o.minFreeSet {
+		need = o.minFree
+	}
+	out.KeepImages = o.keepImages
+	done = out.step("disk space")
+	err = out.probeImages(need, t)
+	if err != nil {
+		done.Fail(err)
+	} else {
+		if out.Disk != nil {
+			done.Detail("%s", out.Disk.Describe())
+		}
+		if out.Volumes != nil {
+			done.Detail("%s", out.Volumes.Describe())
+		}
+		done.Done(out.Disk.Summary())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", site, err)
+	}
+	if out.sweeps() && !o.noSweepRead {
+		out.probeSweep(t)
+	}
+
+	out.GatewayReload = isGateway && (routingChanged || resumed.GatewayReload)
+	out.GatewayChanging = isGateway && (routingChanged || gatewayComposeChanged || resumed.GatewayChanging)
+	if onlySet != nil && !onlySet[infraStack] {
+		out.GatewayReload, out.GatewayChanging = false, false
+	}
+	if out.GatewayChanging {
+		out.ACMEModule = acmeModule
+	}
+	out.HostSites = out.GatewayChanging && plan.HostSites[site]
+
+	if wireguard != nil {
+		step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+		if err != nil {
+			return nil, err
+		}
+		out.WireGuard = step
+	}
+
+	return out, nil
+}
+
+// wireguardStep decides what d's interface needs. Reading the host here is a
+// probe and changes nothing, so a dry run can show it.
+func wireguardStep(d deployment.Deployment, change Change, before string, t Transport) (WireGuardStep, error) {
+	switch change.Kind {
+	case Create:
+		return WireGuardStart, nil
+	case Conflict:
+		// Execute refuses before any step runs.
+		return WireGuardNone, nil
+	}
+	out, err := t.Run(wireguardProbe(d))
+	if err != nil {
+		return WireGuardNone, fmt.Errorf("asking whether %s is up: %w", d.Interface(), err)
+	}
+	if strings.TrimSpace(out) != "up" {
+		return WireGuardStart, nil
+	}
+	if change.Kind == Unchanged {
+		return WireGuardNone, nil
+	}
+	if wgQuickLines(before) != wgQuickLines(change.content) {
+		return WireGuardRestart, nil
+	}
+	return WireGuardSync, nil
+}
+
+// wgQuickOnly are the [Interface] keys wg-quick applies itself and `wg-quick
+// strip` removes, so `wg syncconf` never sees a change to one
+// (wireguard-tools, src/wg-quick/linux.bash, parse_options).
+var wgQuickOnly = map[string]bool{
+	"address": true, "dns": true, "mtu": true, "table": true, "saveconfig": true,
+	"preup": true, "postup": true, "predown": true, "postdown": true,
+}
+
+// wgQuickLines returns the wg-quick only lines of a configuration, in order,
+// as one comparable string.
+func wgQuickLines(content string) string {
+	var out []string
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if wgQuickOnly[strings.ToLower(strings.TrimSpace(key))] {
+			out = append(out, strings.ToLower(strings.TrimSpace(key))+"="+strings.TrimSpace(value))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// Execute carries out a plan. It refuses outright if anything conflicts,
+// because a partial apply across a stack is worse than no apply.
+func Execute(plan *Plan, t Transport) error {
+	if err := Refusal(plan); err != nil {
+		return err
+	}
+	if err := settleOwedVolumes(plan, t); err != nil {
+		return err
+	}
+	if plan.Volumes != nil && len(plan.Volumes.Uncovered) > 0 {
+		return volumeRefusal(plan)
+	}
+	return execute(plan, t)
+}
+
+// Refusal is what Execute refuses before it writes anything: a file edited on
+// the host, too little free space for the pulls, or an image volume its
+// service does not mount. A caller that runs a site in several passes asks it
+// of the whole plan first, so nothing is written when any pass would refuse.
+func Refusal(plan *Plan) error {
+	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
+		var names []string
+		for _, c := range conflicts {
+			names = append(names, "- "+c.Path)
+		}
+		files := fmt.Sprintf("%d files on %s were", len(conflicts), plan.Site)
+		if len(conflicts) == 1 {
+			files = "1 file on " + plan.Site + " was"
+		}
+		return &ui.Problem{
+			Hint: files + " edited on the host",
+			Explain: strings.Join(names, "\n") +
+				"\nRendered files are build artifacts and nothing edits them in place, so a difference here is a change somebody made on the machine, and applying would overwrite it. Copy what is wanted into the configuration and apply again, or, once you have looked at a file and want the rendered one, name it with --overwrite <path>.",
+		}
+	}
+
+	// A pull that fills the disk fails part way through a stack's action,
+	// with the old containers stopped and the new image half written, and it
+	// takes the database and every log down with it. Refusing here, before the
+	// first write, leaves the host exactly as it was.
+	if plan.Disk.Short() {
+		return diskRefusal(plan)
+	}
+
+	// An image declaring a volume its service does not mount leaks an
+	// anonymous volume on every recreate. Refuse before the first write.
+	// Execute then pulls what Build could not inspect, which is the one pull
+	// `up -d` would have made anyway, and checks those too.
+	if plan.Volumes != nil && len(plan.Volumes.Uncovered) > 0 {
+		return volumeRefusal(plan)
+	}
+	return nil
+}
+
+// execute is Execute once nothing refuses.
+func execute(plan *Plan, t Transport) error {
+	// Record what this apply owes before writing anything. Files that land
+	// before a gate stops the apply already match the render, so without
+	// this record the next apply would see nothing to do, and an app stack
+	// held back by a failed gate would stay down until something unrelated
+	// changed it.
+	//
+	// A reload is owed through GatewayChanging, which Build sets whenever it
+	// sets GatewayReload: a failed reload leaves the new routing written and
+	// recorded, and only this record brings the next apply back to it.
+	owes := len(plan.Actions) > 0 || plan.GatewayChanging
+	if owes {
+		if err := writePending(plan, plan.Actions, t); err != nil {
+			return err
+		}
+	}
+
+	writes := plan.Writes()
+	if len(writes) > 0 {
+		done := plan.step(fmt.Sprintf("write %d files", len(writes)))
+		for _, change := range writes {
+			done.Detail("%s %s", change.Kind, change.Path)
+		}
+		for _, change := range writes {
+			if err := t.WriteFile(change.Path, change.content, change.Mode); err != nil {
+				done.Fail(err)
+				return err
+			}
+		}
+		done.Done("")
+	}
+
+	// Record the files as soon as they are on the host, not only at the end.
+	// They are this apply's files whether or not a later gate or action
+	// succeeds, and a manifest written only on success turned every file of a
+	// failed first apply into "somebody else's": the next apply, carrying a
+	// fix to one of them, refused it as a host edit. Owed actions are tracked
+	// separately, in the pending record above.
+	if len(writes) > 0 {
+		if err := writeManifest(plan, t); err != nil {
+			return err
+		}
+	}
+
+	// The mesh comes up before anything that binds to it. It runs before the
+	// gateway gates as well, which need no mesh themselves, so that the one
+	// rule is simple: no container is started or checked on a site whose
+	// interface is down.
+	if command := plan.WireGuard.Command(plan.Deployment); command != "" {
+		if err := resolveMeshEndpoints(plan, t); err != nil {
+			return err
+		}
+		done := plan.step(plan.WireGuard.Title(plan.Deployment))
+		done.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
+		err := bringUpMesh(plan, t, command)
+		finish(done, err)
+		if err != nil {
+			return err
+		}
+	}
+
+	// The gateway's configuration is assembled from per app snippets, so a
+	// wrong snippet is a wrong file for every hostname at once. Check the
+	// binary and the configuration before the gateway changes at all, and
+	// refuse rather than proceed: the cost of a mistake should be an error
+	// message on the workstation, not the public address of every application.
+	//
+	// These gates run on GatewayChanging rather than on GatewayReload, and
+	// both run before the Actions loop below, because the loop is where an
+	// image change lands. `docker compose up -d` returns as soon as the
+	// container starts, so a Caddy that cannot load its configuration is
+	// reported as a successful apply and is discovered by whoever visits the
+	// site.
+	// The host's own Caddy site directory exists before the first container
+	// that mounts it, the validation below. An existing one is left exactly
+	// as it is, owner and mode included: it is the host's.
+	if plan.HostSites {
+		if out, err := t.Run(HostSitesCommand()); err != nil {
+			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir, out)
+		}
+	}
+
+	if plan.GatewayChanging && plan.ACMEModule != "" {
+		// Ask the binary rather than trusting the image's name. A DNS provider
+		// is compiled into Caddy, so a wrong image or a provider no module
+		// answers to both produce a gateway that cannot load its own
+		// configuration, and neither is visible in a reference string. This
+		// runs before validate on purpose: a binary without the module also
+		// fails to validate, but the missing module error says what to fix and
+		// a parse error does not.
+		// The identifier is shell quoted and matched as a fixed string. It is
+		// no longer a compile time literal: acme.Module derives one from
+		// acme.provider for any provider the toolkit publishes no image for,
+		// so the operator's configuration reaches this command line. Single
+		// quoting keeps it an argument rather than shell syntax, and -F keeps
+		// it a literal rather than a pattern whose dots match anything.
+		// Pull first, on its own. The module check below runs the image, and a
+		// run whose pull fails exits non zero exactly like a binary without
+		// the module: on the first real gateway a private image's
+		// "unauthorized" was reported as a missing DNS provider.
+		infra := plan.Deployment.ComposeCmd(infraStack)
+		done := plan.step("pull gateway image")
+		done.Detail("the gateway's Caddy image")
+		out, err := t.Run(infra + " pull caddy")
+		finish(done, err)
+		if err != nil {
+			return fmt.Errorf(
+				"%s: the gateway's Caddy image could not be pulled, so nothing was changed. If the registry answered unauthorized or denied, the image is private: make it public, or log the host in to that registry:\n%s",
+				plan.Site, out)
+		}
+		// grep -F takes each line of its pattern as a pattern of its own, so
+		// the module is checked to be one name before it is handed over: any
+		// module the image has would otherwise pass.
+		if !moduleName.MatchString(plan.ACMEModule) {
+			return fmt.Errorf("%s: %q is not a module name, so the gateway's Caddy was not checked for it and not reloaded", plan.Site, plan.ACMEModule)
+		}
+		command := fmt.Sprintf(
+			"%s run --rm --no-deps --entrypoint caddy caddy list-modules | grep -qxF %s",
+			infra, shellQuote(plan.ACMEModule))
+		done = plan.step("check gateway modules")
+		done.Detail("the gateway's Caddy has the %s module", plan.ACMEModule)
+		out, err = t.Run(command)
+		finish(done, err)
+		if err != nil {
+			return fmt.Errorf(
+				"%s: the gateway's Caddy has no %s module, so it cannot serve this configuration and was not reloaded. The image it runs was built without that provider:\n%s",
+				plan.Site, plan.ACMEModule, out)
+		}
+	}
+
+	if plan.GatewayChanging {
+		// `run --rm --no-deps`, the same shape as the module check, rather than
+		// `exec`. Nothing has started the infrastructure stack at this point:
+		// the Actions loop below is what does that, and on a first apply to a
+		// fresh host there is no container to exec into at all, so validating
+		// through exec made `apply` unable to complete a first install of a
+		// gateway site. It also made recovery impossible after a gateway died,
+		// since every later apply would refuse at this step. `run` starts a
+		// throwaway container with the service's own image and bind mounts,
+		// which is exactly what validation needs and needs nothing running.
+		done := plan.step("validate gateway config")
+		done.Detail("the gateway configuration validates")
+		out, err := t.Run(plan.Deployment.ComposeCmd(infraStack) + " run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile")
+		finish(done, err)
+		if err != nil {
+			return fmt.Errorf("%s: the assembled gateway configuration does not validate, so the gateway was not changed:\n%s", plan.Site, out)
+		}
+	}
+
+	// A routing change is a reload and nothing else, and exactly one thing
+	// makes the new routing live. When the infrastructure stack is also
+	// recreated, the reload waits for that: a Caddy `up -d` replaces reads the
+	// new files as it starts, and one it leaves in place is reloaded then
+	// (see runAction). A forced recreate replaces it outright. Otherwise the
+	// reload is here, before any stack moves, as it always was.
+	infraUp, infraForced := infraRecreate(plan)
+	if plan.GatewayReload && !infraUp && !infraForced {
+		running, err := t.Run(plan.Deployment.ComposeCmd(infraStack) + " ps --status running --quiet caddy")
+		if err != nil {
+			return fmt.Errorf("%s: asking whether the gateway is running: %w", plan.Site, err)
+		}
+		if strings.TrimSpace(running) != "" {
+			done := plan.step("reload gateway")
+			_, err := t.Run(reloadGateway(plan.Deployment))
+			finish(done, err)
+			if err != nil {
+				return fmt.Errorf("%s: reloading the gateway: %w", plan.Site, err)
+			}
+		} else {
+			// A stopped or absent gateway has nothing to reload, and no
+			// stack action will start it, since routing alone is not one.
+			// It starts on the configuration this apply just validated.
+			done := plan.step("start gateway")
+			done.Detail("the gateway (up -d caddy)")
+			_, err := t.Run(plan.Deployment.ComposeCmd(infraStack) + " up -d caddy")
+			finish(done, err)
+			if err != nil {
+				return fmt.Errorf("%s: starting the gateway: %w", plan.Site, err)
+			}
+			if err := waitHealthyStep(plan, infraStack, t); err != nil {
+				return err
+			}
+		}
+	}
+
+	// App stacks start only after their databases exist. An app started
+	// first connects, fails to authenticate as a role nobody created, and is
+	// restarted in a loop by Docker while the apply reports success.
+	bootstrapped := plan.Bootstrap == nil
+	for i, action := range plan.Actions {
+		if action.Stack != infraStack && !bootstrapped {
+			if err := runBootstrap(plan, t); err != nil {
+				return err
+			}
+			bootstrapped = true
+		}
+		// The anonymous volumes the containers about to be replaced mount,
+		// read before they are gone. See removeAbandonedVolumes. Not for a
+		// stack taken down first: `up -d` hands a replaced container's
+		// anonymous volumes to its successor, but after a `down` the new
+		// containers start on fresh ones, so the old volumes are dangling
+		// yet may hold the stack's data. They are kept for the operator.
+		var previous []string
+		if action.Recreate && !action.Down {
+			previous = recordAnonymousVolumes(plan, action.Stack, t)
+		}
+		done := plan.step(ActionTitle(action))
+		done.Detail("%s", action.Command(plan.Deployment))
+		if action.Reason != "" {
+			done.Detail("%s", action.Reason)
+		}
+		err := runAction(plan.Deployment, action, action.Stack == infraStack && plan.GatewayReload, t)
+		finish(done, err)
+		if err != nil {
+			return err
+		}
+		// `up -d` and `restart` return once the containers start, which says
+		// nothing about whether they stay up or pass their own checks. The
+		// stack stays in the pending record until this passes, so a failure
+		// here is resumed, and force-recreated, by the next apply.
+		if err := waitHealthyStep(plan, action.Stack, t); err != nil {
+			return err
+		}
+		// Only now, with the stack healthy on its new image, is the old one
+		// safe to lose. Before the gate it is the image a rollback would use.
+		if !plan.KeepImages {
+			done := plan.step("prune old images")
+			done.Detail("superseded images of %s", action.Stack)
+			pruneStack(plan, action.Stack, t)
+			done.Done("")
+		}
+		// Not tied to --keep-images: a volume the new containers do not
+		// mount is no way back to the old image, which is what that flag
+		// keeps.
+		removeAbandonedVolumes(plan, action.Stack, previous, t)
+		// The stack is done, so it leaves the record. Left in, a later stack
+		// failing would have the next apply force-recreate this one too, an
+		// outage for a stack that was fine. The last stack stays until the
+		// end, so that a bootstrap failing after it still leaves the record
+		// owing something and the next apply comes back to the bootstrap.
+		if i < len(plan.Actions)-1 {
+			if err := writePending(plan, plan.Actions[i+1:], t); err != nil {
+				return err
+			}
+		}
+	}
+
+	if !bootstrapped {
+		if err := runBootstrap(plan, t); err != nil {
+			return err
+		}
+	}
+
+	if err := writeManifest(plan, t); err != nil {
+		return err
+	}
+	if owes {
+		if len(plan.heldOwed) > 0 {
+			// Everything this plan moved is done; what it held back is still
+			// owed, and nothing else is.
+			data, err := json.MarshalIndent(pending{Version: 1, Actions: plan.heldOwed}, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err := t.WriteFile(pendingPath(plan.Deployment), string(data)+"\n", 0o600); err != nil {
+				return fmt.Errorf("%s: everything this apply moved was applied, but the record of the stacks it held back could not be written: %w", plan.Site, err)
+			}
+		} else if _, err := t.Run("rm -f " + shellQuote(pendingPath(plan.Deployment))); err != nil {
+			return fmt.Errorf("%s: everything was applied, but the record of owed actions could not be removed, so the next apply will repeat them: %w", plan.Site, err)
+		}
+	}
+	// Last, with every stack healthy and the manifest recording what this
+	// site uses: nothing after it could want an image it removes.
+	if plan.sweeps() {
+		sweepImages(plan, t)
+	}
+	return nil
+}
+
+// pendingPath records what an apply has written but not yet acted on. It
+// exists only between the start of an Execute and its successful end.
+func pendingPath(d deployment.Deployment) string { return d.Path(".paisans-pending.json") }
+
+// pending is what one apply owes the host. It holds no file content and no
+// credential, only stack names and which gates to run.
+type pending struct {
+	Version         int             `json:"version"`
+	Actions         []pendingAction `json:"actions"`
+	GatewayChanging bool            `json:"gateway_changing,omitempty"`
+	GatewayReload   bool            `json:"gateway_reload,omitempty"`
+}
+
+type pendingAction struct {
+	Stack    string `json:"stack"`
+	Recreate bool   `json:"recreate,omitempty"`
+	// DatabasePath marks a restart a held stack owes because HAProxy or
+	// Patroni moved while it was held, rather than an action that stopped
+	// part way. It is a restart when released, not a forced recreate.
+	DatabasePath bool `json:"database_path,omitempty"`
+}
+
+// owesHeld reports whether this plan already carries an owed action for a
+// held stack.
+func (p *Plan) owesHeld(stack string) bool {
+	for _, a := range p.heldOwed {
+		if a.Stack == stack {
+			return true
+		}
+	}
+	return false
+}
+
+func readPending(t Transport, d deployment.Deployment) (pending, error) {
+	content, found, err := t.ReadFile(pendingPath(d))
+	if err != nil || !found {
+		return pending{}, err
+	}
+	var p pending
+	if err := json.Unmarshal([]byte(content), &p); err != nil {
+		return pending{}, fmt.Errorf("%s is not readable: %w\nIt records actions a stopped apply still owes. Delete it and every stack will be acted on only when its files next change", pendingPath(d), err)
+	}
+	return p, nil
+}
+
+func writePending(plan *Plan, actions []Action, t Transport) error {
+	p := pending{Version: 1, GatewayChanging: plan.GatewayChanging, GatewayReload: plan.GatewayReload}
+	for _, action := range actions {
+		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate})
+	}
+	p.Actions = append(p.Actions, plan.heldOwed...)
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return t.WriteFile(pendingPath(plan.Deployment), string(data)+"\n", 0o600)
+}
+
+// infraStack is the site's own infrastructure: etcd, Patroni, HAProxy, Garage
+// and the gateway. Every app stack depends on it.
+const infraStack = "infra"
+
+// stackOrder puts the infrastructure stack first and the rest in sorted
+// order. Sorting alone put "blog" and "docs" ahead of "infra", which started
+// applications before the database and proxy they connect to.
+func stackOrder(stacks map[string]bool) []string {
+	var out []string
+	if stacks[infraStack] {
+		out = append(out, infraStack)
+	}
+	for _, stack := range sortedKeys(stacks) {
+		if stack != infraStack {
+			out = append(out, stack)
+		}
+	}
+	return out
+}
+
+// readManifest returns what the last apply recorded: its files, keyed by
+// path relative to the site root, and the manifest itself, for its record of
+// the site's Caddy build, of the images it rendered and of the files written
+// for the operator's web server. A host with no manifest is a first apply,
+// which is ordinary.
+func readManifest(t Transport, d deployment.Deployment) (map[string]render.ManifestFile, render.Manifest, error) {
+	var m render.Manifest
+	content, found, err := t.ReadFile(manifestPath(d))
+	if err != nil {
+		return nil, m, err
+	}
+	if !found {
+		return map[string]render.ManifestFile{}, m, nil
+	}
+	if err := json.Unmarshal([]byte(content), &m); err != nil {
+		return nil, m, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
+	}
+	out := make(map[string]render.ManifestFile, len(m.Files))
+	for _, file := range m.Files {
+		out[file.Path] = file
+	}
+	return out, m, nil
+}
+
+// now is the clock a left over mark is stamped with; tests replace it.
+var now = time.Now
+
+// leftovers is every recorded entry the site no longer renders, marked left
+// over, keeping the time an earlier apply first marked it.
+func leftovers(recorded map[string]render.ManifestFile, rendered map[string]bool, at time.Time) []render.ManifestFile {
+	var out []render.ManifestFile
+	for path, entry := range recorded {
+		if rendered[path] {
+			continue
+		}
+		if !entry.Leftover || entry.LeftoverSince == "" {
+			entry.Leftover = true
+			entry.LeftoverSince = at.UTC().Format(time.RFC3339)
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// writeManifest records what is now on the host, so the next apply can tell its
+// own writes from somebody's edit.
+//
+// A whole plan records what it renders, and keeps every entry for a file it
+// no longer renders, marked left over: the file is still on the host and
+// still this deployment's, and an entry dropped here would make it look like
+// somebody else's. A scoped one starts from the manifest it read and replaces
+// only its own files, because the rest of the site is still what the last
+// whole apply wrote.
+func writeManifest(plan *Plan, t Transport) error {
+	entries := map[string]render.ManifestFile{}
+	if plan.scoped || plan.partial {
+		for path, entry := range plan.recorded {
+			entries[path] = entry
+		}
+	} else {
+		for _, entry := range plan.Leftovers {
+			entries[entry.Path] = entry
+		}
+	}
+	for _, change := range plan.Changes {
+		if change.Kind == Conflict {
+			continue
+		}
+		path := strings.TrimPrefix(change.Path, remoteRoot)
+		entries[path] = render.ManifestFile{
+			Path:   path,
+			SHA256: sum(change.content),
+			Mode:   fmt.Sprintf("%04o", change.Mode),
+		}
+	}
+	files := make([]render.ManifestFile, 0, len(entries))
+	for _, entry := range entries {
+		files = append(files, entry)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return t.WriteFile(manifestPath(plan.Deployment), string(data)+"\n", 0o600)
+}
+
+// heldRoute reports whether file is a held app's route on this site's Caddy,
+// which Except holds back with the app although it lies in the
+// infrastructure stack's directory. Written while the app is held, it would
+// reach Caddy in the same pass's reload, routing to an app still running its
+// old configuration, or not yet started with the client it signs in through.
+//
+// A route not on the host yet is written all the same. The Caddyfile this
+// pass writes imports every route by path, and Caddy refuses to load an
+// import of a file that does not exist ("File to import not found",
+// caddyconfig/caddyfile/parse.go), so holding it would fail the gateway's
+// validation gate and stop the pass. That route goes live in this pass,
+// pointing wherever the app runs: a gateway routes to apps on other sites
+// too, so the app may already be serving there. It gets its client in the
+// second pass of its own site's apply.
+func heldRoute(exceptSet map[string]bool, file render.File, change Change) bool {
+	return file.App != "" && exceptSet[file.App] && change.Kind != Create
+}
+
+// stackOf returns the stack directory a rendered path belongs to, empty when it
+// belongs to none. `srv/paisans/f2a9/talk/.env` is talk;
+// `etc/wireguard/psns-f2a9.conf` is not a stack at all.
+func stackOf(rel string) string {
+	_, stack, _, ok := deployment.SplitRel(rel)
+	if !ok {
+		return ""
+	}
+	return stack
+}
+
+// isStackCompose reports whether a change is its stack's compose file.
+func isStackCompose(c Change) bool {
+	_, stack, rest, ok := deployment.SplitRel(strings.TrimPrefix(c.Path, remoteRoot))
+	return ok && c.Stack != "" && stack == c.Stack && rest == "compose.yaml"
+}
+
+// heartbeatService is the infrastructure stack's heartbeat pusher, whose
+// files sit under heartbeat/ (internal/render/heartbeat.go).
+const heartbeatService = "heartbeat"
+
+// infraService returns the compose service a file of the infrastructure stack
+// is mounted into, empty when it is not one service's. The templates put each
+// service's bind mounted files in a directory named for the service
+// (infra-compose.yaml.tmpl: haproxy/haproxy.cfg, garage/garage.toml, caddy/),
+// so the directory is the answer. A file at the top of the stack, such as
+// compose.yaml, belongs to the whole stack.
+func infraService(rel string) string {
+	_, stack, rest, ok := deployment.SplitRel(rel)
+	if !ok || stack != infraStack {
+		return ""
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0]
+}
+
+// isEnvironment reports whether a change to this file needs the container
+// replaced rather than restarted.
+//
+// Any `*.env` counts, not only a file named `.env`: patroni.env and
+// caddy/caddy.env reach their containers through `env_file`, which Compose
+// reads when it creates a container, so a restart keeps the old values. Every
+// env_file the templates render ends in .env, which is what makes the suffix
+// a sufficient test; parsing each compose file for its env_file list was the
+// alternative, and it answers the same question with a YAML parser in the
+// path of every apply.
+func isEnvironment(rel string) bool {
+	base := rel[strings.LastIndex(rel, "/")+1:]
+	return strings.HasSuffix(base, ".env") || base == "compose.yaml"
+}
+
+// isRouting reports whether a file is part of the assembled gateway
+// configuration. An environment file beside the Caddyfile is not: a reload
+// rereads the Caddyfile and never the container's environment, so treating
+// caddy.env as routing reloaded a Caddy that still held the old DNS token.
+func isRouting(rel string) bool {
+	return strings.Contains(rel, "/caddy/") && !isEnvironment(rel)
+}
+
+// isRecord reports whether a file is a record the toolkit keeps for itself
+// beside a stack, which no container mounts or reads. Writing one changes
+// nothing that runs, so it is never a reason to restart or recreate the
+// stack: on a deployment applied before the etcd record existed, treating its
+// first write as a change restarted etcd and Patroni for a file neither reads.
+func isRecord(d deployment.Deployment, rel string) bool {
+	return rel == render.EtcdInitialPath(d)
+}
+
+func sum(content string) string {
+	digest := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(digest[:])
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// GarageConfig is Garage's configuration file, in rendered form (relative to
+// a site's /).
+func GarageConfig(d deployment.Deployment) string {
+	return d.RelPath(infraStack, "garage", "garage.toml")
+}
+
+// garageReplicationLine matches the replication_factor setting as
+// garage.toml.tmpl renders it.
+var garageReplicationLine = regexp.MustCompile(`(?m)^\s*replication_factor\s*=\s*(\d+)\s*$`)
+
+// GarageReplication reads replication_factor out of a garage.toml, false when
+// the file does not set one.
+func GarageReplication(toml string) (int, bool) {
+	m := garageReplicationLine.FindStringSubmatch(toml)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// garageReplicationGuard refuses to replace a deployed garage.toml with one at
+// a different replication_factor.
+//
+// Garage v1.0.1 records the factor in its stored layout and refuses to start
+// when the configuration disagrees: "Prevous cluster layout has replication
+// factor 1, which is different than the one specified in the config file (2)"
+// (src/rpc/layout/manager.rs:46-56; observed). An apply that wrote the file
+// would restart Garage into that refusal and leave object storage down until
+// somebody read the container log. Refuse, not warn: the outcome is certain.
+// The change is `paisans storage add --change-replication`, which stops every
+// node and sets the stored layout aside first.
+func garageReplicationGuard(site, deployed, rendered string) error {
+	have, ok := GarageReplication(deployed)
+	if !ok {
+		return nil
+	}
+	want, ok := GarageReplication(rendered)
+	if !ok || have == want {
+		return nil
+	}
+	return fmt.Errorf("%s: Garage there runs at replication %d and the configuration says %d. Garage refuses to start when its stored layout disagrees with its configuration, so apply will not write this file. Change the factor with `paisans storage add --change-replication`, which stops every Garage node and rebuilds the layout, then run apply again. Nothing was changed", site, have, want)
+}
+
+// moduleName is a Caddy module identifier as `caddy list-modules` prints one
+// (Eg: dns.providers.desec).
+var moduleName = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)

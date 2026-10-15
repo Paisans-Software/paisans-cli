@@ -1,0 +1,25 @@
+# The element blueprint, in the core catalog.
+# Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
+apiVersion: paisans.blueprint/v1
+name: element
+services:
+  # No database: Element is a static client that talks to a homeserver
+  # the browser reaches directly.
+  # A track on the 1.x line; a release candidate (v1.12.28-rc.1)
+  # does not match it.
+  - {name: "app", image: "ghcr.io/element-hq/element-web:v1.*.*", purpose: "the web client"}
+database: {engine: none}
+port: 80
+# The homeserver it is a client of: the one at the hostname in
+# settings.homeserver, else at this app's own hostname.
+consumes:
+  - {role: matrix-homeserver, setting: homeserver}
+config:
+  format: json
+  file: "config.json"
+  setting_keys:
+    - {key: "brand", file: "config.json", setting: "brand"}
+# The static client has no health route; /version is a cheap file the
+# image serves. Ran v1.12.27: /version 200, /health 404.
+health: {path: "/version", status: [200]}
+gate: {gateable: true}

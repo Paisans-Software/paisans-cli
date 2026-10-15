@@ -1,0 +1,19 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Routing for talk, imported by the gateway's block for
+# talk.example.org.
+#
+# The upstream port is the one the app's compose.yaml publishes on the mesh
+# address of each site it runs on, and the one FrankenPHP is told to listen on
+# there (SERVER_NAME), so this routes plain HTTP: TLS ends at the gateway.
+#
+# Media is routed here, under /media: this app keeps it on its own site's
+# disk, and the web server in its own container serves it as static files.
+reverse_proxy 10.44.0.1:8080 {
+	# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+	import upstream_single
+	header_up X-Forwarded-Proto https
+	# A gated host block passes a block here for ActivityPub reads, to filter
+	# what comes back; every other import passes none.
+	{block}
+}

@@ -2,14 +2,36 @@
 .env
 .env.*
 !.env.example
+
+# The golden tree is rendered output, checked in so that a change to what
+# lands on a host shows up as a reviewable diff. Its .env files are built from
+# the fixture secrets, where every value is a fixed placeholder. Nothing real
+# goes in this directory.
+!internal/render/testdata/golden/**/.env
+!internal/render/testdata/golden-local-storage/**/.env
+!internal/render/testdata/golden-open-signup/**/.env
+
+# A blueprint's templates are source, and the templates that render an .env are
+# named for what they produce. The rule above matches them by accident, and the
+# failure is silent in the worst way: the files stay on the machine that wrote
+# them, tests pass there, and a fresh checkout renders no .env at all. The test
+# copy of the core catalog is held to the pin by TestTheTestCopyMatchesThePin,
+# which is how this was found missing from it.
+!internal/render/templates/**/.env*.tmpl
+!internal/blueprints/reserved/**/.env*.tmpl
+!internal/blueprints/testdata/core/**/.env*.tmpl
 *.key
 *.pem
+# Except the golden tree's, which are rendered from the throwaway pair in
+# internal/render/testdata/secrets.fixture.yaml and protect nothing.
+!internal/render/testdata/golden/**/*.pem
+!internal/render/testdata/golden-local-storage/**/*.pem
 secrets/
 
 # A real deployment's config names real hosts. The toolkit repo ships only
 # examples; a deployment keeps its own config directory elsewhere.
-paisans.yaml
-!examples/paisans.example.yaml
+paisans-stack.yaml
+!examples/paisans-stack.example.yaml
 
 # secrets.enc.yaml IS meant to be committed — but only ever encrypted. Refuse
 # the decrypted form outright: it is the one mistake with no undo once pushed.
@@ -21,6 +43,13 @@ secrets.dec.yaml
 .worktrees/
 
 # Local state
+out/
 archive/
 *.log
 .DS_Store
+
+# `go build ./cmd/paisans` writes the binary at the repository root, and
+# `go build -o bin/paisans ./cmd/paisans` in bin/.
+/paisans
+/cmd/paisans/paisans
+/bin/

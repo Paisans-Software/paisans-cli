@@ -1,0 +1,36 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Routing for {{ .App.Name }}, imported by the gateway's block for
+# {{ .Hostname }}.
+#
+# /finalize takes no authentication and no CSRF token (server/setup.js:76 at
+# v2.5.316): whoever reaches it first while the wiki is in setup mode owns it.
+# Only the bootstrap, on the stack's own network, may; the gateway refuses it
+# for every method, always.
+#
+# The setup server is a default Express app (server/setup.js:30), whose routes
+# match case insensitively and with or without a trailing slash, so
+# /finalize/ and /FINALIZE reach the same handler. A plain path matcher would
+# let /finalize/ through, and path_regexp is case sensitive, hence (?i) and the
+# trailing slashes. Caddy matches the cleaned, decoded path, so a doubled
+# slash or an escaped letter is refused too.
+@finalize path_regexp (?i)^/finalize/*$
+respond @finalize 404
+# Wiki.js caps each upload at upload_max_mb MiB. A request a member's browser
+# sends carries one file plus its multipart framing, so the gateway allows
+# half a MiB more than that, and an upload over the limit gets Wiki.js's own
+# message rather than a bare 413 from here. The ".5" is written after the
+# whole number, which Caddy reads as a decimal: 5 becomes 5.5MiB.
+request_body {
+	max_size {{ .SettingInt "upload_max_mb" 5 }}.5MiB
+}
+reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if gt (len .Upstreams) 1 }}
+	# Failover across apps sites; see upstream_failover in the Caddyfile.
+	import upstream_failover
+{{- else if .UpstreamElsewhere }}
+	# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+	import upstream_single
+{{- end }}
+	header_up X-Forwarded-Proto https
+}

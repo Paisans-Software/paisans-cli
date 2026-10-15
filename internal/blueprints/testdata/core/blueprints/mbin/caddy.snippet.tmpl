@@ -1,0 +1,33 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Routing for {{ .App.Name }}, imported by the gateway's block for
+# {{ .Hostname }}.
+#
+# The upstream port is the one the app's compose.yaml publishes on the mesh
+# address of each site it runs on, and the one FrankenPHP is told to listen on
+# there (SERVER_NAME), so this routes plain HTTP: TLS ends at the gateway.
+{{- if .LocalStorage }}
+#
+# Media is routed here, under /media: this app keeps it on its own site's
+# disk, and the web server in its own container serves it as static files.
+{{- else }}
+#
+# Media is not routed here. Upstream advises serving it from a hostname of
+# its own, so media URLs survive a change of storage provider and the S3
+# endpoint is not exposed to readers, and that is what
+# caddy.snippet.media.tmpl does: {{ .S3.MediaHostname }} is a separate site
+# block with its own snippet.
+{{- end }}
+reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if gt (len .Upstreams) 1 }}
+	# Failover across apps sites; see upstream_failover in the Caddyfile.
+	import upstream_failover
+{{- else if .UpstreamElsewhere }}
+	# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+	import upstream_single
+{{- end }}
+	header_up X-Forwarded-Proto https
+	# A gated host block passes a block here for ActivityPub reads, to filter
+	# what comes back; every other import passes none.
+	{block}
+}

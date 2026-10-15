@@ -1,0 +1,78 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/preflight"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/validate"
+)
+
+// runPreflight is stage 1 of `site add` on its own: every check, printed,
+// and nothing changed anywhere. It exists so an operator can fix a host and
+// look again without reading a site add plan each time.
+//
+// It takes no --ssh: it reaches every site, and one override cannot describe
+// several destinations.
+func runPreflight(args []string) error {
+	fs := newFlagSet("preflight", flag.ExitOnError)
+	reporter := commonFlags(fs)
+	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	site := fs.String("site", "", "the site being added, by the name it has in the configuration")
+	sudo := fs.Bool("sudo", true, "run remote commands through sudo")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	r := reporter()
+	if *site == "" {
+		return fmt.Errorf("preflight: --site is required: the site being added")
+	}
+	cfg, err := loadChecked(r, *configPath)
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Sites[*site]; !ok {
+		return fmt.Errorf("preflight: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	r.Section("preflight " + *site)
+	report, err := ui.Get(r, "check every site", func() (preflight.Report, error) {
+		return preflight.Run(cfg, *site, allSiteTransports(cfg, *sudo))
+	})
+	if err != nil {
+		return err
+	}
+	report.Show(r)
+	r.Result("%s", report.Summary())
+	if report.Refused() {
+		return fmt.Errorf("preflight refused adding %s: fix each check marked ✗ (FAIL off a terminal) and run it again", *site)
+	}
+	return nil
+}
+
+// loadChecked loads the configuration and refuses one validate refuses,
+// showing its findings through r.
+func loadChecked(r ui.Reporter, path string) (*config.Config, error) {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	result := validate.Check(cfg)
+	reportFindings(r, path, result)
+	if result.Refused() {
+		return nil, refused(path, len(result.Refusals()), "")
+	}
+	return cfg, nil
+}
+
+// allSiteTransports reaches every declared site through its ssh section.
+func allSiteTransports(cfg *config.Config, sudo bool) map[string]apply.Transport {
+	out := map[string]apply.Transport{}
+	for _, name := range cfg.SiteNames() {
+		out[name] = siteTransport(name, cfg.Sites[name], "", sudo)
+	}
+	return out
+}

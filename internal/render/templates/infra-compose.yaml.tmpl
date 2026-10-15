@@ -1,0 +1,143 @@
+# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+#
+# Infrastructure for site {{ .Site.Name }}. Bind mounts under {{ .Dir }}, never named
+# volumes, so relocating a stack is a tar rather than a volumes-from dance.
+name: {{ .Project }}
+
+services:
+{{- if .Site.IsEtcd }}
+  etcd:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .EtcdImage }}
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - /usr/local/bin/etcd
+      - --name={{ .Site.Name }}
+      - --data-dir=/var/lib/etcd
+      - --listen-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
+      - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }},http://127.0.0.1:{{ .EtcdClientPort }}
+      - --initial-advertise-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
+      - --advertise-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}
+{{- /* Both flags are read on this member's first start only, and are
+        repeated from etcd-initial beside this file ever after, so a cluster that
+        grows never changes them on a member already running. A template
+        comment rather than a YAML one: a new line in this file would change
+        the compose file of every deployment applied before it, and apply
+        recreates the stack for that. */}}
+      - --initial-cluster={{ .EtcdInitialCluster }}
+      - --initial-cluster-state={{ .EtcdInitialState }}
+      - --initial-cluster-token={{ .Scope }}
+      # Measured from real round trip through the tunnel, not guessed. The
+      # defaults assume one datacenter and produce phantom elections every
+      # time a home connection hiccups.
+      - --heartbeat-interval={{ .HeartbeatMS }}
+      - --election-timeout={{ .ElectionTimeoutMS }}
+{{- /* Runtime flags, read on every start, unlike the initial-cluster pair
+        above: changing them recreates this member and nothing else. See
+        etcdCompactionRetention and etcdQuotaBackendBytes in
+        internal/render/etcd.go for the values and their reasons. */}}
+      - --auto-compaction-mode=periodic
+      - --auto-compaction-retention={{ .EtcdCompactionRetention }}
+      - --quota-backend-bytes={{ .EtcdQuotaBackendBytes }}
+    volumes:
+      - {{ .Dir }}/etcd:/var/lib/etcd
+{{- end }}
+{{- if .Site.IsData }}
+  patroni:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .SpiloImage }}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - patroni.env
+    volumes:
+      - {{ .Dir }}/postgres:/home/postgres/pgdata
+{{- if not .Site.WatchdogOff }}
+    # Fencing needs the watchdog, and there is exactly one Patroni per data
+    # bearing host, so there is exactly one claimant for the device.
+    devices:
+      - /dev/watchdog:/dev/watchdog
+    # Spilo starts Patroni as postgres through chpst, which keeps only the
+    # primary group, so a root owned 0600 node is unusable and Patroni in
+    # required mode never takes the leader. Docker makes the container its own
+    # device node, so owning that copy changes nothing on the host. The image's
+    # own CMD follows unchanged. Widening the host's node instead (a udev
+    # rule) was tried first and rejected: chpst drops the group it relied on,
+    # and any mode wide enough would let every local user arm the timer.
+    command: ["/bin/sh", "-c", "chown postgres /dev/watchdog && exec /bin/sh /launch.sh init"]
+{{- end }}
+{{- end }}
+{{- if .Site.NeedsProxy }}
+  haproxy:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .HAProxyImage }}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - {{ .Dir }}/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+{{- end }}
+{{- if .Site.IsGarage }}
+  garage:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .GarageImage }}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - {{ .Dir }}/garage/garage.toml:/etc/garage.toml:ro
+      - {{ .Dir }}/garage/meta:/var/lib/garage/meta
+      - {{ .Dir }}/garage/data:/var/lib/garage/data
+{{- end }}
+{{- if .Site.RunsCaddy }}
+  caddy:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .CaddyImage }}
+    restart: unless-stopped
+    network_mode: host
+    # Relative to this file, so the path names the caddy/ directory the token
+    # is rendered into. The token stays out of this file because compose.yaml
+    # is 0644 and readable by anything that can list the stack.
+    env_file:
+      - caddy/caddy.env
+    volumes:
+      - {{ .Dir }}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # One file per application, imported by that application's host block.
+      - {{ .Dir }}/caddy/snippets:/etc/caddy/snippets:ro
+{{- if .Site.IsGateway }}
+      # Site blocks the host's owner adds, imported by the Caddyfile. The
+      # host's directory, not this deployment's: paisans only creates it.
+      - {{ .HostSitesSource }}:{{ .HostSites }}:ro
+{{- end }}
+      - {{ .Dir }}/caddy/data:/data
+      - {{ .Dir }}/caddy/config:/config
+{{- end }}
+{{- if .Site.Heartbeats }}
+  # This site's heartbeat: a push a minute to every monitor off this site, at
+  # its public hostname over the internet rather than the mesh, so that the
+  # ping over the mesh and this push fail separately and the monitor can tell
+  # a torn tunnel from a dead site. The URLs carry the site's token and stay
+  # in heartbeat.env, which is 0600; this file is 0644. On the default bridge,
+  # not the host's network: it dials out and listens for nothing.
+  heartbeat:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote .HeartbeatImage }}
+    restart: unless-stopped
+    env_file:
+      - heartbeat/heartbeat.env
+    entrypoint: ["/bin/sh", "/push.sh"]
+    volumes:
+      - {{ .Dir }}/heartbeat/push.sh:/push.sh:ro
+{{- end }}
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
