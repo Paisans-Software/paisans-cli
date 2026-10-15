@@ -92,7 +92,7 @@ func Parse(data []byte) (Request, error) {
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return refuse(fmt.Sprintf("it is not YAML (%v)", err))
+		return refuse(fmt.Sprintf("it is not YAML (%s)", strconv.Quote(err.Error())))
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
 		return refuse("it is not a request: a request is one YAML mapping, as paisans host request writes it")
@@ -101,7 +101,7 @@ func Parse(data []byte) (Request, error) {
 	if v := value(root, "version"); v == nil {
 		return refuse("version: missing")
 	} else if n, err := strconv.Atoi(v.Value); err != nil || v.Kind != yaml.ScalarNode || n != RequestVersion {
-		return refuse(fmt.Sprintf("version: %s, and this paisans reads version %d requests. Install the paisans release the operator runs, or ask them for a version %d request", v.Value, RequestVersion, RequestVersion))
+		return refuse(fmt.Sprintf("version: %s, and this paisans reads version %d requests. Install the paisans release the operator runs, or ask them for a version %d request", strconv.Quote(v.Value), RequestVersion, RequestVersion))
 	}
 	if problems := shape(root, ""); len(problems) > 0 {
 		return refuse(problems...)
@@ -110,7 +110,7 @@ func Parse(data []byte) (Request, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&r); err != nil {
-		return refuse(fmt.Sprintf("a field holds the wrong kind of value (%v)", err))
+		return refuse(fmt.Sprintf("a field holds the wrong kind of value (%s)", strconv.Quote(err.Error())))
 	}
 	if problems := r.Check(); len(problems) > 0 {
 		return refuse(problems...)
@@ -131,6 +131,15 @@ func value(m *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+// quoted is key k of the mapping at path, as path.k with k quoted, since k
+// comes from the file and may carry anything.
+func quoted(path, k string) string {
+	if path == "" {
+		return strconv.Quote(k)
+	}
+	return path + "." + strconv.Quote(k)
+}
+
 // shape is each field missing from or unknown to the mapping m found at
 // path, and to the mappings inside it.
 func shape(m *yaml.Node, path string) []string {
@@ -147,7 +156,7 @@ func shape(m *yaml.Node, path string) []string {
 	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if k := m.Content[i].Value; !known[k] {
-			problems = append(problems, at(k)+": not a field of a request")
+			problems = append(problems, quoted(path, k)+": not a field of a request")
 		}
 	}
 	for _, k := range fields[path] {
@@ -178,7 +187,7 @@ func shape(m *yaml.Node, path string) []string {
 // anyone's reach, where twelve hex digits (48 bits) would not be.
 //
 // Crockford's alphabet because a person reads it: it has no i, l, o or u,
-// so nothing is confused with 1 or 0 and no word is spelled by accident,
+// so nothing read aloud is misheard as 1, 0 or another letter,
 // and ParseDigest accepts the common misreadings instead of refusing them.
 const (
 	DigestBits  = 80
@@ -219,6 +228,11 @@ func Digest(data []byte) string {
 // refuses u, any other character outside the alphabet, and any length but
 // sixteen.
 func ParseDigest(typed string) (string, error) {
+	for _, r := range typed {
+		if r >= 0x80 {
+			return "", fmt.Errorf("%q is not a digest: %q is not one of the characters a digest is written in, 0-9 and a-z without i, l, o and u", typed, string(r))
+		}
+	}
 	var out strings.Builder
 	for _, r := range strings.ToLower(typed) {
 		switch r {

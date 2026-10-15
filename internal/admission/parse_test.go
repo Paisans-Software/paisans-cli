@@ -127,6 +127,8 @@ func TestParseDigestRefuses(t *testing.T) {
 		{"0123-4567-89ab-cde!", "!"},
 		{"0123-4567-89ab-cdé0", "é"},
 		{"0123_4567_89ab_cdef", "_"},
+		{"\u212a123-4567-89ab-cdef", "\u212a"},
+		{"0123-4567-89ab-cdef\u0130", "\u0130"},
 	} {
 		_, err := admission.ParseDigest(c.typed)
 		if err == nil {
@@ -206,15 +208,15 @@ func TestParseRefuses(t *testing.T) {
 		{"not YAML", "version: [1\n", "it is not YAML"},
 		{"a list, not a mapping", "- 1\n", "is one YAML mapping"},
 		{"empty", "", "is one YAML mapping"},
-		{"an unknown version", strings.Replace(g, "version: 1", "version: 2", 1), "version: 2, and this paisans reads version 1"},
-		{"version 0", strings.Replace(g, "version: 1", "version: 0", 1), "version: 0, and this paisans reads version 1"},
+		{"an unknown version", strings.Replace(g, "version: 1", "version: 2", 1), `version: "2", and this paisans reads version 1`},
+		{"version 0", strings.Replace(g, "version: 1", "version: 0", 1), `version: "0", and this paisans reads version 1`},
 		{"no version", strings.Replace(g, "version: 1\n", "", 1), "version: missing"},
 		{"a missing field", strings.Replace(g, "ssh_port: 22\n", "", 1), "ssh_port: missing"},
 		{"a missing grant", strings.Replace(g, "  public_ports: true\n", "", 1), "grants.public_ports: missing"},
 		{"a missing operator field", strings.Replace(g, "  - name: \"alice\"\n    keys:", "  - keys:", 1), "operators.name: missing"},
-		{"an unknown field", strings.Replace(g, "endpoint: true\n", "endpoint: true\nsudo: true\n", 1), "sudo: not a field of a request"},
-		{"an unknown grant", strings.Replace(g, "  watchdog: true\n", "  watchdog: true\n  docker: true\n", 1), "grants.docker: not a field of a request"},
-		{"an unknown operator field", strings.Replace(g, "  - name: \"alice\"\n", "  - name: \"alice\"\n    shell: \"/bin/sh\"\n", 1), "operators.shell: not a field of a request"},
+		{"an unknown field", strings.Replace(g, "endpoint: true\n", "endpoint: true\nsudo: true\n", 1), `"sudo": not a field of a request`},
+		{"an unknown grant", strings.Replace(g, "  watchdog: true\n", "  watchdog: true\n  docker: true\n", 1), `grants."docker": not a field of a request`},
+		{"an unknown operator field", strings.Replace(g, "  - name: \"alice\"\n", "  - name: \"alice\"\n    shell: \"/bin/sh\"\n", 1), `operators."shell": not a field of a request`},
 		{"a port as text", strings.Replace(g, "ssh_port: 22", "ssh_port: \"22\"", 1), "the wrong kind of value"},
 		{"a bad key", strings.Replace(g, alice, "ssh-ed25519 AAAAnotakey", 1), "operators[0].keys[0]: not an OpenSSH public key"},
 		{"no operator", g[:strings.Index(g, "operators:")] + "operators: []\n", "operators: none"},
@@ -228,6 +230,19 @@ func TestParseRefuses(t *testing.T) {
 		{"a value unquoted", strings.Replace(g, `user: "paisans-f2a9"`, `user: paisans-f2a9`, 1), "not exactly as paisans host request wrote it"},
 		{"an anchor", strings.Replace(g, `user: "paisans-f2a9"`, `user: &u "paisans-f2a9"`, 1), "not exactly as paisans host request wrote it"},
 		{"a second document", g + "---\nversion: 1\n", "not exactly as paisans host request wrote it"},
+		{"a byte order mark", "\ufeff" + g, "not exactly as paisans host request wrote it"},
+		{"a trailing space", strings.Replace(g, "endpoint: true\n", "endpoint: true \n", 1), "not exactly as paisans host request wrote it"},
+		{"a tab", strings.Replace(g, "endpoint: true\n", "endpoint:\ttrue\n", 1), "not exactly as paisans host request wrote it"},
+		{"no final newline", strings.TrimSuffix(g, "\n"), "not exactly as paisans host request wrote it"},
+		{"an extra final newline", g + "\n", "not exactly as paisans host request wrote it"},
+		{"fields reordered", strings.Replace(g, "ssh_port: 22\nlisten_port: 51820\n", "listen_port: 51820\nssh_port: 22\n", 1), "not exactly as paisans host request wrote it"},
+		{"an alias with no anchor", strings.Replace(g, `address: "10.44.0.1"`, "address: *u", 1), "it is not YAML"},
+		{"a merge key", strings.Replace(g, "grants:\n", "grants:\n  <<: {watchdog: true}\n", 1), "not a field of a request"},
+		{"a tag", strings.Replace(g, `user: "paisans-f2a9"`, `user: !!str "paisans-f2a9"`, 1), "not exactly as paisans host request wrote it"},
+		{"single quotes", strings.Replace(g, `user: "paisans-f2a9"`, `user: 'paisans-f2a9'`, 1), "not exactly as paisans host request wrote it"},
+		{"flow style", strings.Replace(g, "grants:\n  watchdog: true\n  public_ports: true\n", "grants: {watchdog: true, public_ports: true}\n", 1), "not exactly as paisans host request wrote it"},
+		{"a leading document marker", "---\n" + g, "not exactly as paisans host request wrote it"},
+		{"a non-scalar version", strings.Replace(g, "version: 1\n", "version: [1]\n", 1), `version: ""`},
 		{"a duplicate key", strings.Replace(g, "endpoint: true\n", "endpoint: true\nendpoint: false\n", 1), "already defined"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -239,6 +254,31 @@ func TestParseRefuses(t *testing.T) {
 				t.Errorf("got %v\nwant it to say %q", err, c.want)
 			}
 		})
+	}
+}
+
+// Whatever a refusal echoes from the file reaches the owner's terminal, so
+// it is quoted: no control byte survives into the message.
+func TestParseRefusalsEchoNothingRaw(t *testing.T) {
+	g := golden(t)
+	for name, data := range map[string]string{
+		"an unknown key":   strings.Replace(g, "endpoint: true\n", "endpoint: true\n\"a\\e[2Jb\": 1\n", 1),
+		"a version":        strings.Replace(g, "version: 1\n", "version: \"\\e[2J1\"\n", 1),
+		"an unknown grant": strings.Replace(g, "  watchdog: true\n", "  watchdog: true\n  \"\\e[2J\": true\n", 1),
+		"not YAML":         "version: [\"\\e[2J\n",
+		"a wrong kind":     strings.Replace(g, "ssh_port: 22", "ssh_port: \"\\e[2J\"", 1),
+	} {
+		_, err := admission.Parse([]byte(data))
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		for _, r := range err.Error() {
+			if r != '\n' && (r < 0x20 || r == 0x7f) {
+				t.Errorf("%s: the message carries control byte %q: %q", name, r, err.Error())
+				break
+			}
+		}
 	}
 }
 
@@ -255,7 +295,11 @@ func TestAForgedKeyChangesTheDigest(t *testing.T) {
 	if _, err := admission.Parse(data); err != nil {
 		t.Fatalf("the forgery is refused for another reason, so this test proves nothing: %v", err)
 	}
-	if admission.Digest(data) == admission.Digest(sent) {
+	typed, err := admission.ParseDigest(strings.ToUpper(admission.Digest(sent)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission.Digest(data) == typed {
 		t.Fatal("a request with a key added has the digest of the one sent")
 	}
 }
