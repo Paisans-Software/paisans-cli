@@ -6259,8 +6259,10 @@ database gets one pointing at doctor's Patroni check:
 A TLS error on a hostname Paisans does not serve gets no referral. A site ssh
 cannot reach, in `apply` or in `init`'s read of every site, ends with `Run
 paisans doctor --site <site>`, whose reach check says what the deployment is
-without while it is gone. Any other failure is reported as above, with no
-referral.
+without while it is gone. `gateway move` calls the DNS provider without the
+token check `dns init` makes, so a refusal there (Cloudflare's `9109` or
+`10502`) is worded as that check words it, with `Run paisans doctor`. Any
+other failure is reported as above, with no referral.
 
 **Failing on the first `restarting` rather than waiting it out is deliberate.**
 Every rendered service carries `restart: unless-stopped`, so `restarting` means

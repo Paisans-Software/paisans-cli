@@ -72,3 +72,26 @@ func TestInitDoesNotReferASiteThatAnswered(t *testing.T) {
 		t.Errorf("referred to doctor:\n%v", err)
 	}
 }
+
+// gateway move calls the provider without the token check dns init makes,
+// so its refusal is a bare HTTP 403 until the referral words it as the check
+// does and points to doctor.
+func TestAProviderRefusalInAGatewayMoveIsWordedAsTheTokenCheck(t *testing.T) {
+	raw := fmt.Errorf("gateway move: %w", errors.New("cloudflare: GET /zones/abc/dns_records: HTTP 403: [9109] Cannot use the access token from location: 203.0.113.7"))
+	err := referProvider(raw)
+	_, explain := ui.Describe(err)
+	want := "cloudflare refuses the token from this workstation (203.0.113.7). Add the address to the token's Client IP Address Filtering, or remove the filter. Run paisans doctor, which checks the token from every place that uses it."
+	if !strings.Contains(explain, want) {
+		t.Errorf("explanation lacks the referral:\n%s", explain)
+	}
+	if !errors.Is(err, errors.Unwrap(raw)) {
+		t.Error("the referral hid the cause")
+	}
+	if again := referProvider(err); strings.Count(again.Error(), "Run paisans doctor") != 1 {
+		t.Errorf("referred twice:\n%v", again)
+	}
+	other := errors.New("cloudflare: HTTP 500: upstream")
+	if got := referProvider(other); got != other {
+		t.Errorf("an unrecognised provider error changed: %v", got)
+	}
+}
