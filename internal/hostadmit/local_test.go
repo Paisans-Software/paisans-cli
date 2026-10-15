@@ -210,8 +210,36 @@ func TestLocalReadOfAFIFOFailsWithoutBlocking(t *testing.T) {
 // A relative path has no fixed meaning to a transport that runs as root.
 func TestLocalRefusesARelativePath(t *testing.T) {
 	linuxOnly(t)
+	t.Chdir(t.TempDir())
 	if err := hostadmit.Local().WriteFile("relative/file", "x", 0o600); err == nil {
 		t.Error("WriteFile accepted a relative path")
+	}
+	if entries, _ := os.ReadDir("."); len(entries) != 0 {
+		t.Errorf("a relative path created %v", entries)
+	}
+}
+
+// A device is refused on its type, before it is opened for reading.
+func TestLocalReadOfADeviceIsAnError(t *testing.T) {
+	linuxOnly(t)
+	if _, found, err := hostadmit.Local().ReadFile("/dev/null"); found || err == nil {
+		t.Errorf("/dev/null: found %v, %v", found, err)
+	}
+}
+
+// A home directory that does not exist is not a place to start a command.
+func TestLocalCommandsStartInTheRootWhenHomeIsMissing(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "missing"))
+	out, err := hostadmit.Local().Run("pwd")
+	if err != nil || strings.TrimSpace(out) != "/" {
+		t.Errorf("pwd = %q, %v", out, err)
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(file, nil, 0o600)
+	t.Setenv("HOME", file)
+	out, err = hostadmit.Local().Run("pwd")
+	if err != nil || strings.TrimSpace(out) != "/" {
+		t.Errorf("home is a file: pwd = %q, %v", out, err)
 	}
 }
 

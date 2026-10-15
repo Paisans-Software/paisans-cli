@@ -81,13 +81,28 @@ func readFile(path string) (string, bool, error) {
 		return "", false, err
 	}
 	defer unix.Close(dirfd)
-	fd, err := unix.Openat(dirfd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	// O_PATH opens nothing for reading, so a FIFO or a device is judged by
+	// its type before anything is waiting on it.
+	pfd, err := unix.Openat(dirfd, base, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) {
 		return "", false, nil
 	}
-	if errors.Is(err, unix.ELOOP) {
-		return "", false, fmt.Errorf("%s is a symbolic link", path)
+	if err != nil {
+		return "", false, err
 	}
+	defer unix.Close(pfd)
+	var before unix.Stat_t
+	if err := unix.Fstat(pfd, &before); err != nil {
+		return "", false, err
+	}
+	switch before.Mode & unix.S_IFMT {
+	case unix.S_IFREG:
+	case unix.S_IFLNK:
+		return "", false, fmt.Errorf("%s is a symbolic link", path)
+	default:
+		return "", false, fmt.Errorf("%s is not a regular file", path)
+	}
+	fd, err := unix.Open(fmt.Sprintf("/proc/self/fd/%d", pfd), unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return "", false, err
 	}
@@ -97,8 +112,8 @@ func readFile(path string) (string, bool, error) {
 	if err := unix.Fstat(fd, &st); err != nil {
 		return "", false, err
 	}
-	if st.Mode&unix.S_IFMT != unix.S_IFREG {
-		return "", false, fmt.Errorf("%s is not a regular file", path)
+	if st.Dev != before.Dev || st.Ino != before.Ino {
+		return "", false, fmt.Errorf("%s changed while it was opened", path)
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {

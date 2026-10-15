@@ -43,7 +43,9 @@ func (l local) run(command string, stdin *string) (string, error) {
 	// A command starts in the running user's home, as it does over ssh.
 	cmd.Dir = "/"
 	if home, err := os.UserHomeDir(); err == nil {
-		cmd.Dir = home
+		if info, err := os.Stat(home); err == nil && info.IsDir() {
+			cmd.Dir = home
+		}
 	}
 	if stdin != nil {
 		cmd.Stdin = strings.NewReader(*stdin)
