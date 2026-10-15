@@ -443,6 +443,90 @@ func TestOtherDownContainerShowsItsLastLines(t *testing.T) {
 	}
 }
 
+// Docker reports health in `docker ps` two ways: Docker 29.5 and later in
+// HealthStatus, earlier releases only in Status. Both read the same, and a
+// container with no healthcheck has none.
+func TestPSEntryHealth(t *testing.T) {
+	for _, c := range []struct {
+		e    PSEntry
+		want string
+	}{
+		{PSEntry{State: "running", Status: "Up 6 seconds (unhealthy)", HealthStatus: "unhealthy"}, "unhealthy"},
+		{PSEntry{State: "running", Status: "Up 6 seconds (unhealthy)"}, "unhealthy"},
+		{PSEntry{State: "running", Status: "Up 6 seconds (health: starting)"}, "starting"},
+		{PSEntry{State: "running", Status: "Up 2 hours (healthy)"}, "healthy"},
+		{PSEntry{State: "running", Status: "Up 6 seconds", HealthStatus: "none"}, ""},
+		{PSEntry{State: "running", Status: "Up 6 seconds"}, ""},
+		{PSEntry{State: "exited", Status: "Exited (1) 3 minutes ago"}, ""},
+	} {
+		if got := c.e.Health(); got != c.want {
+			t.Errorf("%+v: health %q, want %q", c.e, got, c.want)
+		}
+	}
+	if !(PSEntry{State: "running", Status: "Up 6 seconds (unhealthy)"}).Down() {
+		t.Error("a running container whose healthcheck reports unhealthy needs a look")
+	}
+	for _, s := range []string{"Up 6 seconds (health: starting)", "Up 2 hours (healthy)", "Up 2 hours"} {
+		if (PSEntry{State: "running", Status: s}).Down() {
+			t.Errorf("%q is not down", s)
+		}
+	}
+}
+
+// A container that runs but fails its healthcheck is a failure, and the
+// finding carries what the check printed, as `docker inspect` recorded it on
+// Docker Engine 29.7.2, so the operator sees why without asking Docker again.
+func TestUnhealthyContainerShowsItsHealthOutput(t *testing.T) {
+	labels := "community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01,com.docker.compose.project=paisans-f2a9-wiki"
+	sites := []SiteContainers{{
+		Site: "home-a",
+		PS: `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up 2 hours","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+{"Names":"paisans-f2a9-wiki-bootstrap-1","State":"running","Status":"Up 6 minutes (unhealthy)","HealthStatus":"unhealthy","Labels":"` + labels + `"}`,
+		Down: []ContainerProbe{{
+			Entry:   PSEntry{Names: "paisans-f2a9-wiki-bootstrap-1", State: "running", Status: "Up 6 minutes (unhealthy)", HealthStatus: "unhealthy", Labels: labels},
+			Inspect: `{"State":{"Status":"running","Running":true,"Paused":false,"Restarting":false,"OOMKilled":false,"Dead":false,"Pid":8880,"ExitCode":0,"Error":"","StartedAt":"2026-10-15T03:45:11.948468594Z","FinishedAt":"0001-01-01T00:00:00Z","Health":{"Status":"unhealthy","FailingStreak":3,"Log":[{"Start":"2026-10-15T03:45:14.033937428Z","End":"2026-10-15T03:45:14.066271636Z","ExitCode":1,"Output":"login failed\n"},{"Start":"2026-10-15T03:45:16.067314471Z","End":"2026-10-15T03:45:16.097151804Z","ExitCode":1,"Output":"login failed\n"},{"Start":"2026-10-15T03:45:18.099243138Z","End":"2026-10-15T03:45:18.130928055Z","ExitCode":1,"Output":"GET /healthz: 503\ngroup Members: missing\n"}]}},"RestartCount":0}`,
+			Logs:    "listening on :3000\n",
+		}},
+	}}
+	got := Containers(fixture(t).Deployment(), sites, "")
+	for _, f := range got {
+		if f.Level == OK {
+			t.Errorf("an unhealthy container leaves no site all running: %+v", f)
+		}
+	}
+	f := find(t, got, SectionContainers, "home-a: paisans-f2a9-wiki-bootstrap-1 running but unhealthy, failed its last 3 health check(s)")
+	if f.Level != Fail {
+		t.Fatalf("level %v", f.Level)
+	}
+	if text := strings.Join(f.More, "|"); text != "last health check output:|  login failed|  GET /healthz: 503|  group Members: missing|last log lines:|  listening on :3000" {
+		t.Fatalf("got %q", text)
+	}
+}
+
+// A healthcheck still in its start period has not failed. It is a warning
+// beside the site's line, which still counts it as running, because doctor
+// cannot yet say the container works.
+func TestStartingContainerIsAWarning(t *testing.T) {
+	id := "community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	sites := []SiteContainers{{
+		Site: "vm",
+		PS: `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up 2 hours (healthy)","Labels":"` + id + `"}
+{"Names":"paisans-f2a9-wiki-bootstrap-1","State":"running","Status":"Up 6 seconds (health: starting)","Labels":"` + id + `"}
+{"Names":"paisans-f2a9-chat-app-1","State":"running","Status":"Up 6 seconds","HealthStatus":"none","Labels":"` + id + `"}`,
+	}}
+	got := Containers(fixture(t).Deployment(), sites, "")
+	if f := find(t, got, SectionContainers, "vm: 3 paisans container(s), all running"); f.Level != OK {
+		t.Fatalf("%+v", f)
+	}
+	f := find(t, got, SectionContainers, "vm: paisans-f2a9-wiki-bootstrap-1 running, its healthcheck has not passed yet")
+	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "only once Docker reports it unhealthy") {
+		t.Fatalf("%+v", f)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want the site's line and one warning", got)
+	}
+}
+
 func TestPocketIDActiveCount(t *testing.T) {
 	none := Standby(fixture(t).Deployment(), []StandbyProbe{{App: "auth", Instances: []apply.Instance{{Site: "home-a", State: apply.Standby}, {Site: "home-b", State: apply.Unreachable, Detail: "did not answer ssh"}}}}, true)
 	f := find(t, none, SectionPocketID, "auth: no active instance, so sign in is down")

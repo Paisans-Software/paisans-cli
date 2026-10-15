@@ -17,15 +17,16 @@ import (
 // deployment's may be named anything. The keys of `{{json .}}` are the
 // methods of docker/cli's ContainerContext (docker/cli v27.3.1,
 // cli/command/formatter/container.go): Names, State, Status, Labels among
-// them.
+// them, and from docker/cli v29.5.0 HealthStatus.
 func ContainersCommand(d deployment.Deployment) string {
 	return "docker ps -a --filter " + shellQuote(d.LabelFilter()) + " --format '{{json .}}'"
 }
 
 // InspectCommand reads the state Docker recorded for one container: its
 // status, exit code, the error Docker itself hit starting it, and how often
-// it was restarted. The fields are the Engine API's ContainerState and
-// RestartCount (moby v27.3.1, api/types/types.go).
+// it was restarted, and for a container with a healthcheck what its last
+// checks printed. The fields are the Engine API's ContainerState, its Health,
+// and RestartCount (moby v27.3.1, api/types/types.go).
 func InspectCommand(name string) string {
 	return "docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' " + shellQuote(name)
 }
@@ -37,10 +38,11 @@ func LogCommand(name string) string {
 
 // PSEntry is one line of ContainersCommand's output.
 type PSEntry struct {
-	Names  string `json:"Names"`
-	State  string `json:"State"`
-	Status string `json:"Status"`
-	Labels string `json:"Labels"`
+	Names        string `json:"Names"`
+	State        string `json:"State"`
+	Status       string `json:"Status"`
+	HealthStatus string `json:"HealthStatus"`
+	Labels       string `json:"Labels"`
 }
 
 // ParsePS reads ContainersCommand's output, one JSON object per line.
@@ -60,9 +62,35 @@ func ParsePS(out string) ([]PSEntry, error) {
 	return list, nil
 }
 
-// Down reports whether a container needs a look: anything not running, and
-// one Docker keeps restarting.
-func (e PSEntry) Down() bool { return e.State != "running" }
+// Down reports whether a container needs a look: anything not running, which
+// includes one Docker keeps restarting, and one running whose healthcheck
+// reports it unhealthy.
+func (e PSEntry) Down() bool { return e.State != "running" || e.Health() == "unhealthy" }
+
+// Health is the container's healthcheck status, "healthy", "unhealthy" or
+// "starting", and empty for a container with no healthcheck. Docker 29.5
+// and later report it in HealthStatus, "none" where there is no healthcheck;
+// every release also ends Status with it, "Up 5 minutes (unhealthy)" or
+// "Up 5 seconds (health: starting)", which is all an earlier release has.
+func (e PSEntry) Health() string {
+	switch e.HealthStatus {
+	case "none":
+		return ""
+	case "":
+	default:
+		return e.HealthStatus
+	}
+	_, health, ok := strings.Cut(e.Status, "(")
+	if !ok || !strings.HasSuffix(health, ")") {
+		return ""
+	}
+	health = strings.TrimPrefix(strings.TrimSuffix(health, ")"), "health: ")
+	switch health {
+	case "healthy", "unhealthy", "starting":
+		return health
+	}
+	return ""
+}
 
 // label is the value of one label in the entry's comma separated Labels.
 func (e PSEntry) label(key string) (string, bool) {
@@ -100,8 +128,22 @@ type Inspected struct {
 		Restarting bool   `json:"Restarting"`
 		ExitCode   int    `json:"ExitCode"`
 		Error      string `json:"Error"`
+		// Health is absent for a container with no healthcheck. Docker
+		// keeps the last five checks in Log, oldest first.
+		Health *struct {
+			Status        string        `json:"Status"`
+			FailingStreak int           `json:"FailingStreak"`
+			Log           []HealthCheck `json:"Log"`
+		} `json:"Health"`
 	} `json:"State"`
 	RestartCount int `json:"RestartCount"`
+}
+
+// HealthCheck is one healthcheck Docker ran: how it exited and what it
+// printed.
+type HealthCheck struct {
+	ExitCode int    `json:"ExitCode"`
+	Output   string `json:"Output"`
 }
 
 // ParseInspect reads InspectCommand's output.
@@ -113,8 +155,8 @@ func ParseInspect(out string) (Inspected, error) {
 	return in, nil
 }
 
-// ContainerProbe is one container that is not running, with what Docker
-// says about it.
+// ContainerProbe is one container that is not running, or runs unhealthy,
+// with what Docker says about it.
 type ContainerProbe struct {
 	Entry      PSEntry
 	Inspect    string
@@ -128,7 +170,7 @@ type SiteContainers struct {
 	// PS is ContainersCommand's output, and PSErr why it failed.
 	PS    string
 	PSErr string
-	// Down is a probe of each container PS lists as not running.
+	// Down is a probe of each container PS lists as down (PSEntry.Down).
 	Down []ContainerProbe
 }
 
@@ -142,7 +184,8 @@ var databaseTrouble = regexp.MustCompile(`(?i)failed to connect|connection refus
 // builds its network afresh.
 var networkUnreachable = regexp.MustCompile(`(?i)network is unreachable`)
 
-// Containers is one line per site, and one per container that is down.
+// Containers is one line per site, one per container that is down, and a
+// warning for each running container whose healthcheck has not passed yet.
 // primary is the Patroni leader doctor found, empty when there is none or the
 // cluster did not answer: an app that cannot reach its database is waiting on
 // Patroni only when there is no primary.
@@ -190,6 +233,13 @@ func Containers(d deployment.Deployment, sites []SiteContainers, primary string)
 		for _, probe := range down {
 			out = append(out, containerFinding(d, s.Site, probe, primary))
 		}
+		for _, e := range list {
+			if e.State == "running" && e.Health() == "starting" {
+				out = append(out, Finding{Section: SectionContainers, Level: Warn, Line: fmt.Sprintf("%s: %s running, its healthcheck has not passed yet", s.Site, e.Names), More: []string{
+					"Docker has not yet seen it pass a healthcheck, nor fail enough of them to call it unhealthy, as in its start period. It is a failure only once Docker reports it unhealthy; run doctor again in a minute.",
+				}})
+			}
+		}
 	}
 	return out
 }
@@ -209,6 +259,11 @@ func containerFinding(dep deployment.Deployment, site string, d ContainerProbe, 
 		if in.State.Error != "" {
 			line += ": " + in.State.Error
 		}
+	}
+	h := in.State.Health
+	unhealthy := inspected && in.State.Status == "running" && h != nil && h.Status == "unhealthy"
+	if unhealthy {
+		line = fmt.Sprintf("%s: %s running but unhealthy, failed its last %d health check(s)", site, name, h.FailingStreak)
 	}
 	f := Finding{Section: SectionContainers, Level: Fail, Line: line}
 	restarting := d.Entry.State == "restarting" || in.State.Restarting
@@ -247,12 +302,40 @@ func containerFinding(dep deployment.Deployment, site string, d ContainerProbe, 
 		if !inspected && d.InspectErr != "" {
 			f.More = append(f.More, "docker inspect failed: "+firstLine(d.InspectErr))
 		}
+		if unhealthy {
+			f.More = append(f.More, healthOutput(h.Log)...)
+		}
 		if tail := lastLines(d.Logs, 3); len(tail) > 0 {
 			f.More = append(f.More, "last log lines:")
 			f.More = append(f.More, indent(tail)...)
 		}
 	}
 	return f
+}
+
+// healthOutput is the end of what a container's recent healthchecks printed,
+// oldest first, a line repeated by consecutive checks shown once. A check
+// that printed nothing is named by its exit code, so the finding always says
+// what the check reported.
+func healthOutput(log []HealthCheck) []string {
+	var lines []string
+	for _, check := range log {
+		for _, line := range lastLines(check.Output, 20) {
+			if len(lines) == 0 || lines[len(lines)-1] != line {
+				lines = append(lines, line)
+			}
+		}
+	}
+	if len(lines) > 3 {
+		lines = lines[len(lines)-3:]
+	}
+	if len(lines) == 0 {
+		if len(log) == 0 {
+			return nil
+		}
+		return []string{fmt.Sprintf("the last health check exited %d and printed nothing", log[len(log)-1].ExitCode)}
+	}
+	return append([]string{"last health check output:"}, indent(lines)...)
 }
 
 func anyMatch(lines []string, re *regexp.Regexp) bool {

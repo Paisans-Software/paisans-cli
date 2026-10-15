@@ -467,7 +467,7 @@ func gatherLeftovers(cfg *config.Config, site string, t apply.Transport) doctor.
 }
 
 // gatherContainers lists one site's containers and looks closer at each one
-// that is not running.
+// that is down: not running, or running unhealthy.
 func gatherContainers(d deployment.Deployment, site string, t apply.Transport) doctor.SiteContainers {
 	s := doctor.SiteContainers{Site: site}
 	out, err := t.Run(doctor.ContainersCommand(d))
