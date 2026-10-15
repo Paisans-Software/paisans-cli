@@ -29,8 +29,10 @@ Founder decisions, 2026-10-15:
   after it runs as the deployment's user without general sudo. Existing
   deployments are redeployed; nothing converts them.
 * **The deployment's user is `paisans-<token>`** (`Deployment.Prefix()`),
-  unless `sites.<s>.ssh.user` names another. Once a command has connected as
-  that user, the CLI writes it into `sites.<s>.ssh.user`.
+  unless `sites.<s>.ssh.user` names another. Once a command run with
+  `--execute` has connected as that user, the CLI writes it into
+  `sites.<s>.ssh.user`. A run without `--execute`, and a command that only
+  reads, writes nothing and says the user will be recorded by `--execute`.
 * **The new command is `paisans host admit`, undone by `paisans host evict`.**
 * **Patroni's watchdog is the owner's to grant.** It reboots the whole
   machine. `host admit --watchdog` grants it; a data site on a host admitted
