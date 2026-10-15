@@ -41,7 +41,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"host":        "Prepare a host, or list what is on it.",
+	"host":        "Prepare a host, list what is on it, or request admission.",
 	"site":        "Add a site to the running deployment, or remove one.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
@@ -174,6 +174,14 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
 		detail: "List every deployment in the registry of the host --ssh names (id, token, domain, site, roles and root, and a Caddy kept for /srv/caddy.d), and any deployment directory or labelled compose project no registry entry names. " +
 			"Needs no " + config.FileName + "; changes nothing.",
+	},
+	{
+		name:    "host request",
+		summary: "Write the request a host's owner admits a site from.",
+		usage:   []string{"paisans host request --site <name> [--config " + config.FileName + "] > <name>.admit"},
+		detail: "Write to stdout the request the host's owner admits the site from: the deployment's id, the site's user, SSH and WireGuard ports, mesh address and subnet, whether it has an endpoint, the grants its roles need, the apps handed to the owner's web server, and each operator's public keys. " +
+			"Print its digest, sixteen characters as xxxx-xxxx-xxxx-xxxx, to stderr, for the owner to compare over a channel you both trust, since the request carries the keys that will log in to their machine. " +
+			"Reaches no host; holds nothing secret.",
 	},
 	{
 		name:    "site add",
@@ -421,7 +429,7 @@ doctor, init, config and operator register are the only commands that reach a
 host. Each reads it to plan, and changes it only with --execute; config and
 operator register claim nothing, and their --execute only starts each site's
 configuration sync and, for publish and register, adds a version to its store;
-host deployments, preflight and init have no --execute and never change it;
+host request, host deployments, preflight and init have no --execute and never change it;
 doctor's --execute and secrets prune's change no host either, editing only the
 local files, and secrets prune only reads the gateways' deployment records. With --execute, a command first claims each
 host it writes to in /var/lib/paisans/registry.json, and refuses if another

@@ -4655,6 +4655,41 @@ the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
 
+#### A host's owner admits a site from a request
+
+An owner who does not have the deployment's configuration admits a site
+from a request: `paisans host request --site <site> > <site>.admit` writes
+it, and the owner admits the site from that file. The request holds what
+admission needs and nothing secret: the deployment's id, the site's user,
+its SSH and WireGuard ports, its mesh address and the mesh subnet, whether
+it has an endpoint, the grants its roles need (the watchdog for a data site,
+ports 80 and 443 for a gateway or a monitor running the toolkit's Caddy),
+the apps a monitor behind the owner's web server hands it, and each
+operator's public keys.
+
+Those keys get a shell on the owner's machine, so the request is only as
+trustworthy as the way it travelled. `host request` prints a digest of it
+on stderr: the first 80 bits of its SHA-256 as sixteen characters of
+Crockford base32 in four groups, `xxxx-xxxx-xxxx-xxxx`. The owner is shown
+the same digest of the file they were given and compares the two over a
+channel they trust, such as a call. A digest covers what admission acts on
+only if every byte it covers is read, so a request is refused unless it is
+exactly the bytes `host request` writes for what it holds: a comment, an
+anchor, a second document or rewritten line endings cannot carry something
+the owner was not shown. Keys travel without their comments, which are free
+text a forger could vary while searching for a request with a matching
+digest.
+
+A request is read as strictly as a configuration. An unknown version, a
+field missing or unknown, a user name `ssh.user` would refuse, `root`, a
+`paisans-` name other than the deployment's own, a key that is not a plain
+public key, and an address outside the subnet are each refused, and so is a
+mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
+egress table accepts the mesh subnet before it drops the owner's loopback
+and link-local ranges, so a subnet over them would let the deployment reach
+what the table keeps it from. `host request` applies the same checks, so it
+never writes a request the owner's side would refuse.
+
 #### Keys belong to operators, and sites name operators
 
 An operator's keys are the same on every site they reach, so they are written
