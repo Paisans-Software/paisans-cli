@@ -3,8 +3,11 @@ package apply
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -26,6 +29,70 @@ func wireguardAddress(content string) string {
 // with ssh failing.
 func meshAddressProbe(iface string) string {
 	return "ip -br addr show dev " + iface + " 2>/dev/null || true"
+}
+
+// runningStep is what an up interface whose file did not change still
+// needs. The helper's put and its sync or restart are separate commands
+// from writing the file, so a run that stopped between them leaves the file
+// as rendered and the interface on what it ran before. Read back: without
+// the file's Address it is restarted, since only wg-quick applies an
+// address; on another key or other peers it is synced; otherwise it needs
+// nothing. The address is read with ip, which needs no privilege, and the
+// key and peers through the helper's show.
+func runningStep(site string, d deployment.Deployment, content string, t Transport) (WireGuardStep, error) {
+	iface := d.Interface()
+	out, err := t.Run(meshAddressProbe(iface))
+	if err != nil {
+		return WireGuardNone, fmt.Errorf("reading %s: %w", iface, err)
+	}
+	fields := strings.Fields(out)
+	if address := wireguardAddress(content); address != "" && (len(fields) < 3 || !slices.Contains(fields[2:], address)) {
+		return WireGuardRestart, nil
+	}
+	h := WGHelper{T: t, Iface: iface}
+	key, err := h.Show("public-key")
+	if err != nil {
+		return WireGuardNone, helperProblem(site, h, err)
+	}
+	peers, err := h.Show("peers")
+	if err != nil {
+		return WireGuardNone, helperProblem(site, h, err)
+	}
+	want, err := fileKey(content)
+	if err != nil {
+		return WireGuardNone, fmt.Errorf("%s's mesh file: %w", site, err)
+	}
+	running := strings.Fields(peers)
+	listed := filePeers(content)
+	slices.Sort(running)
+	slices.Sort(listed)
+	if strings.TrimSpace(key) != want || !slices.Equal(running, listed) {
+		return WireGuardSync, nil
+	}
+	return WireGuardNone, nil
+}
+
+// fileKey is the public key of a WireGuard file's PrivateKey.
+func fileKey(content string) (string, error) {
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok && strings.TrimSpace(key) == "PrivateKey" {
+			return render.PublicKey(strings.TrimSpace(value))
+		}
+	}
+	return "", fmt.Errorf("it has no PrivateKey")
+}
+
+// filePeers is every PublicKey a WireGuard file lists, in its order.
+func filePeers(content string) []string {
+	var out []string
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok && strings.TrimSpace(key) == "PublicKey" {
+			out = append(out, strings.TrimSpace(value))
+		}
+	}
+	return out
 }
 
 // bringUpMesh hands the interface the plan's file through the WireGuard

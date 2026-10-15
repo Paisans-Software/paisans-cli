@@ -642,7 +642,7 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
+	case command == "wg show psns-f2a9 public-key", command == wgHelper+"show public-key":
 		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
 		if m == nil {
 			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
@@ -652,7 +652,7 @@ func (h *host) Run(command string) (string, error) {
 			return "", err
 		}
 		return key + "\n", nil
-	case command == "wg show psns-f2a9 peers":
+	case command == "wg show psns-f2a9 peers", command == wgHelper+"show peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\n")

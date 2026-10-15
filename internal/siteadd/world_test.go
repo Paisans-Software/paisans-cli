@@ -201,6 +201,22 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case command == wgHelper+"put", command == wgHelper+"sync":
 		return "", nil
+	case command == wgHelper+"show public-key":
+		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.files[wgInstalled])
+		if m == nil {
+			return "", nil
+		}
+		key, err := render.PublicKey(m[1])
+		if err != nil {
+			return "", err
+		}
+		return key + "\n", nil
+	case command == wgHelper+"show peers":
+		var b strings.Builder
+		for _, m := range regexp.MustCompile(`(?m)^PublicKey = (\S+)`).FindAllStringSubmatch(h.files[wgInstalled], -1) {
+			b.WriteString(m[1] + "\n")
+		}
+		return b.String(), nil
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {
 			return "100% packet loss", fmt.Errorf("exit status 1")

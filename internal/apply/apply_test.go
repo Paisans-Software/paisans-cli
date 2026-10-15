@@ -949,6 +949,81 @@ func TestAnUpMeshWithAnUnchangedFileIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A run that stopped after writing the mesh file and before the helper's
+// sync leaves the file as rendered and the interface on its old peers. The
+// next apply reads what the interface runs and syncs it, rather than taking
+// the unchanged file as done.
+func TestAnUpMeshRunningOtherPeersIsSynced(t *testing.T) {
+	host := applied(t, "home-a")
+	cut := strings.Index(host.wgRun, "[Peer]\n# watch")
+	if cut < 0 {
+		t.Fatalf("the fixture's home-a has no peer watch:\n%s", host.wgRun)
+	}
+	host.wgRun = host.wgRun[:cut]
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardSync {
+		t.Fatalf("an interface missing a peer of its unchanged file plans %v, want a sync", p.WireGuard)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(host.wgRun, "# watch") {
+		t.Error("the sync did not hand the interface its file")
+	}
+}
+
+// The same for a key: a rekey's swap stopped between the write and the sync.
+func TestAnUpMeshRunningAnotherKeyIsSynced(t *testing.T) {
+	host := applied(t, "home-a")
+	host.wgRun = regexp.MustCompile(`(?m)^PrivateKey = \S+`).ReplaceAllString(host.wgRun, "PrivateKey = ze/YeDqRtEZkDi4flVmds15ISgBxvSGCs7YNCBLBDHA=")
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardSync {
+		t.Errorf("an interface on another key plans %v, want a sync", p.WireGuard)
+	}
+}
+
+// An address is wg-quick's, which a sync never applies: an up interface
+// without its unchanged file's address is restarted.
+func TestAnUpMeshWithoutItsAddressIsRestarted(t *testing.T) {
+	host := applied(t, "home-a")
+	host.wgAddress = "10.44.0.9/24"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardRestart {
+		t.Errorf("an interface without its file's address plans %v, want a restart", p.WireGuard)
+	}
+}
+
+// Reading what an up interface runs is still a probe: a plan changes
+// nothing on the mesh.
+func TestPlanningAnUpMeshOnlyReadsIt(t *testing.T) {
+	host := applied(t, "home-a")
+	if _, err := apply.Build("home-a", plan(t), acmeModule(t), host); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range host.commands {
+		switch {
+		case strings.Contains(command, "ip link show psns-f2a9"),
+			strings.Contains(command, "ip -br addr show dev psns-f2a9"),
+			command == wgHelper+"show public-key",
+			command == wgHelper+"show peers",
+			strings.Contains(command, "echo paisans-sweep-end"):
+		default:
+			if strings.Contains(command, "psns-f2a9") {
+				t.Errorf("planning ran %q on the mesh", command)
+			}
+		}
+	}
+}
+
 // A peer change is applied in place. Restarting the interface would partition
 // etcd and Patroni for as long as it is down, which on a data site can be long
 // enough to start an election.

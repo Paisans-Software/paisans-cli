@@ -290,7 +290,8 @@ type Plan struct {
 type WireGuardStep int
 
 const (
-	// WireGuardNone means the interface is up and its file did not change.
+	// WireGuardNone means the interface is up, its file did not change, and
+	// it runs that file's address, key and peers.
 	WireGuardNone WireGuardStep = iota
 	// WireGuardStart puts the file and enables and starts the unit through
 	// the WireGuard helper: a first apply, or an interface found down.
@@ -328,9 +329,9 @@ func (w WireGuardStep) Describe(d deployment.Deployment) string {
 	case WireGuardStart:
 		return "start " + iface + " and enable it at boot, before any stack moves"
 	case WireGuardSync:
-		return "give " + iface + " its new peers in place, without taking the mesh down"
+		return "give " + iface + " its file's key and peers in place, without taking the mesh down"
 	case WireGuardRestart:
-		return "restart " + iface + ", because a line only wg-quick applies changed"
+		return "restart " + iface + ", so it runs its file's Address and MTU, which only wg-quick applies"
 	default:
 		return ""
 	}
@@ -882,7 +883,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		sort.Slice(out.Changes, func(i, j int) bool { return out.Changes[i].Path < out.Changes[j].Path })
 		if wireguard != nil {
-			step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+			step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
 			if err != nil {
 				return nil, err
 			}
@@ -1057,7 +1058,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
 
 	if wireguard != nil {
-		step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+		step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
 		if err != nil {
 			return nil, err
 		}
@@ -1069,7 +1070,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 
 // wireguardStep decides what d's interface needs. Reading the host here is a
 // probe and changes nothing, so a dry run can show it.
-func wireguardStep(d deployment.Deployment, change Change, before string, t Transport) (WireGuardStep, error) {
+func wireguardStep(site string, d deployment.Deployment, change Change, before string, t Transport) (WireGuardStep, error) {
 	switch change.Kind {
 	case Create:
 		return WireGuardStart, nil
@@ -1085,7 +1086,7 @@ func wireguardStep(d deployment.Deployment, change Change, before string, t Tran
 		return WireGuardStart, nil
 	}
 	if change.Kind == Unchanged {
-		return WireGuardNone, nil
+		return runningStep(site, d, change.content, t)
 	}
 	if wgQuickLines(before) != wgQuickLines(change.content) {
 		return WireGuardRestart, nil
