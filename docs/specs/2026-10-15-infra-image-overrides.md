@@ -1,6 +1,6 @@
 # An operator moves the infrastructure's images without a catalog release
 
-Status: draft, awaiting founder approval. Design agreed in session,
+Status: approved by the founder in session, 2026-10-15. Implemented
 2026-10-15. Builds on `docs/specs/2026-10-13-images-follow-tracks.md`.
 
 ## Why

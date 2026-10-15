@@ -102,12 +102,15 @@ paisans validate --offline   # the file alone; no site is reached
   through it the app's mail server. Changes none. A site that cannot be
   reached, or a secrets file that cannot be read, skips the mail check with a
   warning, so it works away from the hosts.
-* **Images:** an `infra` override is refused outside the versions the
-  toolkit is written against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3
-  and 4), and an etcd, HAProxy, Garage or Spilo override is refused with a
-  digest and no tag; warned about for a Postgres major the deployment does not
-  run, for a Spilo from another provider, and for the heartbeat, which it
-  replaces in every Pocket ID stack too.
+* **Images:** an `infra` override is refused under a key the infrastructure
+  stack does not run (`infra.images` takes etcd, haproxy, garage and
+  heartbeat), for a Postgres major the toolkit does not run, with a floating
+  tag (`latest`, or none), and outside the versions the toolkit is written
+  against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4); an etcd,
+  HAProxy, Garage or Zalando Spilo override is refused with a digest and no
+  tag. It is warned about for a Postgres major the deployment does not run,
+  for a Spilo from another provider, which the toolkit cannot check, and for
+  the heartbeat, which it replaces in every Pocket ID stack too.
 * **`--execute`:** not taken.
 
 ### `paisans create`
@@ -991,11 +994,14 @@ paisans images --check   # exit 3 when a build would move or an override lags
 * **Alone:** to see what the next apply moves, or on a schedule with
   `--check`.
 * **Flags:** `--config`, `--secrets`, `--check` (off: exit 0 however much
-  would move; on: exit 3 when anything would, with no error line).
+  would move; on: exit 3 when a build would move or an override lags, with no
+  error line).
 * **Hosts:** reads every site's compose files over ssh, as a dry run of
-  `apply` does, and the registries. Changes none, and asks for no sudo. A site
-  that cannot be read has `unknown` builds in the table, which is printed
-  whole, and the command exits 1, with or without `--check`.
+  `apply` does, and the registries. Changes none, and asks for no sudo. A
+  registry that cannot be reached shows `unknown` under newest for each image
+  it could not resolve, and the command carries on. A site that cannot be
+  read has `unknown` builds in the table, which is printed whole, and the
+  command exits 1, with or without `--check`.
 * **`--execute`:** not taken.
 
 ### `paisans version`
