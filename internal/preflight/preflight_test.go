@@ -65,7 +65,7 @@ func healthy(name string) *fakeHost {
 		name:  name,
 		files: map[string]string{"/etc/os-release": ubuntu},
 		rules: []rule{
-			{match: "sudo -n true"},
+			{match: "echo paisans-answers"},
 			{match: "timedatectl", out: "yes\n"},
 			{match: "ldd --version", out: "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39\nCopyright\n"},
 			{match: "dpkg --print-architecture", out: "amd64\n"},
@@ -236,15 +236,7 @@ func TestPreflightRefuses(t *testing.T) {
 	}{
 		{name: "ssh unreachable", site: "vm", check: "ssh", want: "does not answer",
 			setup: func(h map[string]*fakeHost) {
-				h["vm"].override(rule{match: "sudo -n true", out: "ssh: connect to host port 2222: Connection refused", err: errors.New("exit status 255")})
-			}},
-		{name: "sudo wants a password", site: "home-b", check: "ssh", want: "asks for a password",
-			setup: func(h map[string]*fakeHost) {
-				h["home-b"].override(rule{match: "sudo -n true", out: "sudo: a password is required\n", err: errors.New("exit status 1")})
-			}},
-		{name: "sudo cannot be asked", site: "home-b", check: "ssh", want: "no terminal to ask on",
-			setup: func(h map[string]*fakeHost) {
-				h["home-b"].override(rule{match: "sudo -n true", err: fmt.Errorf("home-b: sudo asks for a password, and there is no terminal to ask on: %w", apply.ErrSudo)})
+				h["vm"].override(rule{match: "echo paisans-answers", out: "ssh: connect to host port 2222: Connection refused", err: errors.New("exit status 255")})
 			}},
 		{name: "clock", site: "vm", check: "clock", want: "not synchronised",
 			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "timedatectl", out: "no\n"}) }},
@@ -441,7 +433,7 @@ func TestWatchdogOffNeedsNoDevice(t *testing.T) {
 func TestAnUnreachableNewSiteIsCheckedNoFurther(t *testing.T) {
 	prepared(t)
 	h := hosts()
-	h["home-b"].override(rule{match: "sudo -n true", out: "ssh: Could not resolve hostname", err: errors.New("exit status 255")})
+	h["home-b"].override(rule{match: "echo paisans-answers", out: "ssh: Could not resolve hostname", err: errors.New("exit status 255")})
 	r := run(t, fixture(t), h)
 	if len(h["home-b"].ran) != 1 {
 		t.Errorf("ran more than the ssh check on an unreachable host: %q", h["home-b"].ran)
@@ -616,5 +608,24 @@ func TestRunAllChecksEveryJoiningSite(t *testing.T) {
 	}
 	if _, err := RunAll(fixture(t), []string{"home-b", "nowhere"}, transportsOf(hosts())); err == nil {
 		t.Error("an undeclared joining site was accepted")
+	}
+}
+
+// The ssh check asks only that the site answers, as its ssh user: no
+// command here runs through sudo, so whether sudo works is not this check's
+// question.
+func TestTheSSHCheckAsksNoSudo(t *testing.T) {
+	prepared(t)
+	h := hosts()
+	r := run(t, fixture(t), h)
+	for name, host := range h {
+		for _, c := range host.ran {
+			if strings.Contains(c, "sudo") {
+				t.Errorf("%s: ran %q", name, c)
+			}
+		}
+	}
+	if got := find(r, "home-a", "ssh"); len(got) != 1 || !strings.HasSuffix(got[0].Detail, " answers") {
+		t.Errorf("ssh check: %+v", got)
 	}
 }

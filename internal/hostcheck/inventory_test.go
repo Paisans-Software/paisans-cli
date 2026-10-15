@@ -189,7 +189,7 @@ func TestAProbeThatIsNotRootIsRefused(t *testing.T) {
 	h := cleanHost()
 	h.answers["id -u"] = "1000\n"
 	_, err := hostcheck.Inspect(h, fixtureDeployment)
-	if err == nil || !strings.Contains(err.Error(), "uid 1000") || !strings.Contains(err.Error(), "--sudo") {
+	if err == nil || !strings.Contains(err.Error(), "uid 1000") || strings.Contains(err.Error(), "--sudo") {
 		t.Fatalf("got %v", err)
 	}
 	if len(h.ran) != 1 || !strings.Contains(h.ran[0], "id -u") {

@@ -269,7 +269,7 @@ func listContainers(h Host) (Runner, []container, string) {
 	out, err := runner.Run(dockerPS)
 	if err != nil && strings.Contains(strings.ToLower(out+err.Error()), "permission denied") {
 		if h.Sudo == nil {
-			return nil, nil, "docker refuses the ssh user, and sudo is off (--sudo=false)"
+			return nil, nil, "docker refuses the ssh user"
 		}
 		runner = h.Sudo
 		out, err = runner.Run(dockerPS)

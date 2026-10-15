@@ -4913,8 +4913,8 @@ An unattended run of an owner's command needs a NOPASSWD sudoers rule for
 the login `--ssh` names. Whether to write one is a decision about the host,
 made by whoever owns it, and the toolkit never makes it.
 
-`preflight` and `doctor` report each of these as a sudo problem
-(`apply.ErrSudo`), separately from a host that does not answer, so the finding
+`host deployments` reports each of these as a sudo problem
+(`apply.ErrSudo`), separately from a host that does not answer, so it
 points at sudoers rather than at the network. `host deployments --sudo=false`
 skips sudo entirely, and with it everything above.
 
@@ -8920,7 +8920,7 @@ at, and "could not look" is not "looked and it was fine".
 
 | Check | Where | How | Refused when |
 |---|---|---|---|
-| SSH and sudo | every site | `sudo -n true`, through the site's sudo (see *A sudo that wants a password is asked for once, on a terminal*) | the host does not answer, or sudo cannot be used: it refuses the user, wants a password with no terminal to ask on, or rejects the one typed |
+| SSH | every site | `echo paisans-answers`, as the site's ssh user | the host does not answer, or ssh cannot log in |
 | Clock | every site | `timedatectl show -p NTPSynchronized --value` | not `yes` |
 | Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan, without the firewall's defaults on a shared host | it has any step left |

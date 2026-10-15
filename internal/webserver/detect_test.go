@@ -150,14 +150,14 @@ func TestDetectAsksDockerThroughSudoWhenDenied(t *testing.T) {
 }
 
 // docker refused with no sudo to ask leaves the server undetermined, and
-// says why.
+// says why, naming no flag.
 func TestDetectWithoutSudoSaysDockerNeedsIt(t *testing.T) {
 	plain := &fakeHost{answers: []answer{
 		{key: "docker", out: "permission denied while trying to connect to the Docker daemon socket", err: errors.New("exit status 1")},
 		{key: "ss -ltnp", out: "State Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"},
 	}}
 	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
-	if ws.Server != "" || !strings.Contains(ws.Why, "sudo") {
+	if ws.Server != "" || !strings.Contains(ws.Why, "docker refuses the ssh user") || strings.Contains(ws.Why, "--sudo") {
 		t.Fatalf("got %+v", ws)
 	}
 }

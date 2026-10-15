@@ -163,7 +163,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		return nil, err
 	}
 	if uid := strings.TrimSpace(out); uid != "0" {
-		return nil, fail("asking who the probes run as", fmt.Errorf("they run as uid %s, not root, so ss cannot name the process behind another user's listener and every one of them would read as unowned. Run without --sudo=false, or as root", uid))
+		return nil, fail("asking who the probes run as", fmt.Errorf("they run as uid %s, not root, so ss cannot name the process behind another user's listener and every one of them would read as unowned", uid))
 	}
 
 	out, err = run("asking Docker for its version", dockerProbe)

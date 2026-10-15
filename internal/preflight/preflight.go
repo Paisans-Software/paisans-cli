@@ -10,7 +10,6 @@ package preflight
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"path"
@@ -219,33 +218,23 @@ func (r *runner) existing() []string {
 	return out
 }
 
-// ssh checks the site answers and that sudo can be used.
-//
-// One command does both: `sudo -n` fails rather than prompting, and its
-// failure says "sudo:", which is how a refused sudo is told apart from a host
-// that never answered. A transport that already runs everything through sudo
-// wraps this in another sudo, which runs it as root, where it always passes;
-// the outer sudo is then the one tested, and a host where it cannot be used
-// (a password and no terminal to ask on, a password it refused) is reported
-// with apply.ErrSudo.
+// reachProbe proves a site answers: a word only a shell that ran the command
+// prints, so a login banner is not taken for an answer.
+const reachProbe = "echo paisans-answers"
+
+// ssh checks the site answers, as its ssh user.
 func (r *runner) ssh(name string) {
 	t, ok := r.transports[name]
 	if !ok || t == nil {
 		r.refuse(name, "ssh", "no way to reach this site was given, so nothing on it could be checked")
 		return
 	}
-	out, err := t.Run("sudo -n true")
-	switch {
-	case err == nil:
-		r.reachable[name] = true
-		r.pass(name, "ssh", "%s answers, and sudo works", t.Describe())
-	case errors.Is(err, apply.ErrSudo):
-		r.refuse(name, "ssh", "%s", firstLine(err.Error()))
-	case strings.Contains(out, "sudo:"):
-		r.refuse(name, "ssh", "%s answers, but sudo asks for a password: %s. Every command here runs through sudo; it asks for the password on a terminal, and an unattended run needs the login user given passwordless sudo", t.Describe(), firstLine(out))
-	default:
+	if out, err := t.Run(reachProbe); err != nil {
 		r.refuse(name, "ssh", "%s does not answer: %s", t.Describe(), firstLine(errText(out, err)))
+		return
 	}
+	r.reachable[name] = true
+	r.pass(name, "ssh", "%s answers", t.Describe())
 }
 
 // clock checks systemd's view of time synchronisation. etcd's leases and
