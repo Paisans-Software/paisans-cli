@@ -236,6 +236,7 @@ func TestParseRefuses(t *testing.T) {
 		{"no final newline", strings.TrimSuffix(g, "\n"), "not exactly as paisans host request wrote it"},
 		{"an extra final newline", g + "\n", "not exactly as paisans host request wrote it"},
 		{"fields reordered", strings.Replace(g, "ssh_port: 22\nlisten_port: 51820\n", "listen_port: 51820\nssh_port: 22\n", 1), "not exactly as paisans host request wrote it"},
+		{"an alias of an anchor", strings.NewReplacer("  watchdog: true\n", "  watchdog: &t true\n", "  public_ports: true\n", "  public_ports: *t\n").Replace(g), "not exactly as paisans host request wrote it"},
 		{"an alias with no anchor", strings.Replace(g, `address: "10.44.0.1"`, "address: *u", 1), "it is not YAML"},
 		{"a merge key", strings.Replace(g, "grants:\n", "grants:\n  <<: {watchdog: true}\n", 1), "not a field of a request"},
 		{"a tag", strings.Replace(g, `user: "paisans-f2a9"`, `user: !!str "paisans-f2a9"`, 1), "not exactly as paisans host request wrote it"},
