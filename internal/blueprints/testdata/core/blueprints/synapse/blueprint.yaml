@@ -42,7 +42,7 @@ config:
   # single provider form), saml2_config, cas_config and jwt_config each
   # describe a way to register or log in, and password_config the local
   # password logins. Read in docs/usage/configuration/config_documentation.md
-  # at tag v1.160.0, the version the kind pins, on 2026-10-04.
+  # at tag v1.160.0, the version the blueprint pins, on 2026-10-04.
   omitted_keys:
     - {key: "cas_config", why: &identity "this homeserver is a resource server and Matrix Authentication Service owns every login, so an identity provider or a password database of its own would be a second way in that bypasses the group restriction at the identity provider"}
     - {key: "jwt_config", why: *identity}
@@ -68,7 +68,7 @@ hostname_roles: ["wellknown"]
 storage:
   # Synapse's S3 storage provider supplements its media store rather than
   # replacing it, so a local media directory is always required. Its media
-  # store is a directory the homeserver owns, which is also why the kind is
+  # store is a directory the homeserver owns, which is also why the blueprint is
   # pinned to one node.
   local_only: true
   local_only_reason: "its S3 storage provider supplements the local media store rather than replacing it, so the media directory is always required"
@@ -123,4 +123,4 @@ checks:
     hint: synapse app must be pinned to a site
     key: placement
     rule: app.placement != 'cluster'
-    message: "is cluster, and the synapse kind has no clustered form. Its media store cannot follow a failover, because the S3 storage provider supplements a local media directory rather than replacing it, and the kind renders its own Postgres plus the hook that creates the authentication service's database beside it. Pin it: placement: { pinned: <site> }."
+    message: "is cluster, and the synapse blueprint has no clustered form. Its media store cannot follow a failover, because the S3 storage provider supplements a local media directory rather than replacing it, and the blueprint renders its own Postgres plus the hook that creates the authentication service's database beside it. Pin it: placement: { pinned: <site> }."

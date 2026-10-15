@@ -4,7 +4,7 @@ apiVersion: paisans.blueprint/v1
 name: mbin
 services:
   # The paisans fork, not upstream: it carries the generic OIDC
-  # provider this kind's .env configures, which upstream does not
+  # provider this blueprint's .env configures, which upstream does not
   # have, and the Doctrine transport decorator the default
   # settings.queue (postgres) needs: on an image without it,
   # MESSENGER_TRANSPORT_DSN=doctrine:// fails every dispatch.
@@ -12,7 +12,7 @@ services:
   # A track: Paisans runs the newest of the fork's 1.x releases,
   # published as image tags like 1.15.1-paisans for the release
   # 1.15.1+paisans (linux/amd64 only, so an arm64 apps site cannot run
-  # it). This kind's templates need four things the fork has carried
+  # it). This blueprint's templates need four things the fork has carried
   # since 1.15.0+paisans: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
   # MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
   # route the monitor checks. The newest 1.x always carries them.
@@ -144,7 +144,7 @@ gate:
   # (security.yaml:90 at v1.15.0+paisans).
   sign_in_path: "/login"
   # A gated Mbin runs as a private instance, so its API refuses a read
-  # with no token (see MbinPrivateAPIProbe in internal/blueprints).
+  # with no token (internal/blueprints reads private_probe).
   private_probe: {path: "/api/entries", status: [401]}
   # MBIN_AUTHORIZED_FETCH, on unless settings.authorized_fetch turns it
   # off, and MBIN_USE_FEDERATION_ALLOW_LIST when gated, both named in
@@ -185,10 +185,10 @@ gate:
 federation:
   # Mbin always federates.
   federates: true
-# Every kind that stores objects serves them on a hostname of its own.
+# Every blueprint that stores objects serves them on a hostname of its own.
 # The set has to agree with UsesObjectStorage, and a test holds it to
-# that: a kind that stores objects without this role would publish URLs
-# nothing routes, and a kind with the role and no bucket would route a
+# that: a blueprint that stores objects without this role would publish URLs
+# nothing routes, and a blueprint with the role and no bucket would route a
 # hostname to nothing.
 hostname_roles: ["media"]
 storage:
