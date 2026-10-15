@@ -1,8 +1,9 @@
 # Doctor runs its checks as a graph, in parallel, and checks the DNS token
 
-Status: approved by the founder, 2026-10-15; not implemented. What
-Cloudflare and Caddy do is cited or was observed on staging on 2026-10-15
-(*Observed*).
+Status: approved by the founder, 2026-10-15; implemented in #320 (the token
+check and the apply gate), #321 (errors that refer to doctor), #323 (the
+check graph) and #325 (doctor's DNS checks). What Cloudflare and Caddy do
+is cited or was observed on staging on 2026-10-15 (*Observed*).
 
 ## What happened
 
