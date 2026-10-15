@@ -6,4 +6,4 @@ package version
 // matching tag is released as vMAJOR.MINOR.PATCH. Every build of a commit
 // reports the Version that commit holds, so a build between releases
 // reports the last release cut on its branch.
-const Version = "0.1.0"
+const Version = "0.2.0"
