@@ -25,6 +25,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
@@ -359,12 +360,12 @@ func (h *host) Run(command string) (string, error) {
 		w.failOnce = ""
 		return "failed by the test", errors.New("exit status 1")
 	}
-	if out, ok, err := chainedRead(command, h.Run); ok {
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
 		return out, err
 	}
 	switch field, _ := strings.CutPrefix(command, wgHelper+"show "); field {
 	case "allowed-ips", "persistent-keepalive", "listen-port":
-		out, _ := showRunning(field, h.runningWG())
+		out, _ := meshfake.ShowRunning(field, h.runningWG())
 		return out, nil
 	}
 	if h.webCommand(command) {

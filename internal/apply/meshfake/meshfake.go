@@ -1,4 +1,9 @@
-package siteremove_test
+// Package meshfake answers the WireGuard helper's reads for the fake hosts
+// of tests of the commands built on apply, as wg show would on a host whose
+// interface runs a given file. It is imported only from test files, so a
+// field the helper's show gains is answered once, here, for every package
+// that fakes a host.
+package meshfake
 
 import (
 	"regexp"
@@ -7,11 +12,11 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// chainedRead answers the WireGuard helper's reads that apply chains into
+// ChainedRead answers the WireGuard helper's reads that apply chains into
 // one command (echo paisans-show:FIELD && sudo -n HELPER show FIELD && ...)
 // by running each part through run, as a shell would. ok is false for any
 // other command.
-func chainedRead(command string, run func(string) (string, error)) (out string, ok bool, err error) {
+func ChainedRead(command string, run func(string) (string, error)) (out string, ok bool, err error) {
 	if !strings.HasPrefix(command, "echo paisans-show:") {
 		return "", false, nil
 	}
@@ -30,9 +35,9 @@ func chainedRead(command string, run func(string) (string, error)) (out string, 
 	return b.String(), true, nil
 }
 
-// showRunning answers the helper's show field for an interface that runs
+// ShowRunning answers the helper's show field for an interface that runs
 // conf, as wg show prints it. ok is false for a field it does not read.
-func showRunning(field, conf string) (out string, ok bool) {
+func ShowRunning(field, conf string) (out string, ok bool) {
 	var peers []map[string]string
 	for _, line := range strings.Split(conf, "\n") {
 		line = strings.TrimSpace(line)

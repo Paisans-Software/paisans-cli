@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
@@ -168,11 +169,11 @@ func (h *host) Run(command string) (string, error) {
 			return "failed by the test", errors.New("exit status 1")
 		}
 	}
-	if out, ok, err := chainedRead(command, h.Run); ok {
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
 		return out, err
 	}
 	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
-		if out, ok := showRunning(field, h.run); ok {
+		if out, ok := meshfake.ShowRunning(field, h.run); ok {
 			return out, nil
 		}
 	}
