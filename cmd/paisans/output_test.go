@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,7 +74,9 @@ const quietHost = `#!/bin/sh
 for last; do :; done
 b=${last#*printf %s }
 b=${b%% |*}
-cmd=$(printf %s "$b" | base64 -d 2>/dev/null | sed '1{/^export DOCKER_HOST=/d;}')
+cmd=$(printf %s "$b" | base64 -d 2>/dev/null)
+case $cmd in "export DOCKER_HOST="*) cmd=${cmd#*"
+"};; esac
 case "$cmd" in
 *"for n in "*) l=${cmd#*for n in }; l=${l%%; do*}; for n in $l; do echo "absent $(printf %s "$n" | tr -d "'")"; done;;
 *paisans-sweep-end*) l=${cmd#*for r in }; l=${l%%; do*}
@@ -85,6 +88,9 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
+# The host check's inventory asks id -u too, and refuses anyone but root
+# until phase 6 moves it to the user, so it is answered 0 here. The login
+# probe, a bare id -u, is answered 1000 before this script runs.
 *"id -u") echo 0;;
 "dpkg --print-architecture") echo amd64;;
 *"print-architecture"*) echo "arch amd64";;
@@ -98,18 +104,18 @@ exit 0
 
 // sshAnswering puts an ssh on PATH that runs script for each connection.
 // The login probe a site transport sends first, a bare id -u, is answered
-// before script sees it, as a login user with UID 1000, so script answers
-// only the commands it is about, and the test starts with no Login from an
-// earlier one.
+// ahead of script, in the same file, as a login user with UID 1000, so
+// script answers only the commands it is about, and the test starts with no
+// Login from an earlier one.
 func sshAnswering(t *testing.T, script string) {
 	t.Helper()
 	resetLogins(t)
-	dir := t.TempDir()
-	host := filepath.Join(dir, "host")
-	if err := os.WriteFile(host, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	body, ok := strings.CutPrefix(script, "#!/bin/sh\n")
+	if !ok {
+		t.Fatal("a fake ssh script does not start #!/bin/sh")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(loginUID+"exec '"+host+"' \"$@\"\n"), 0o755); err != nil {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(loginProbe+body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -117,14 +123,10 @@ func sshAnswering(t *testing.T, script string) {
 	t.Cleanup(apply.CloseConnections)
 }
 
-// loginUID answers the login probe, a remote command that is exactly id -u,
-// with UID 1000, and lets every other command through.
-const loginUID = `#!/bin/sh
-for last; do :; done
-b=${last#*printf %s }
-b=${b%% |*}
-if [ "$(printf %s "$b" | base64 -d 2>/dev/null)" = "id -u" ]; then echo 1000; exit 0; fi
-`
+// loginProbe answers the login probe, a remote command that is exactly
+// id -u, with UID 1000, by matching its base64 as apply.RemoteCommand
+// sends it, so no other command is decoded twice.
+var loginProbe = "#!/bin/sh\ncase \"$*\" in *'printf %s " + base64.StdEncoding.EncodeToString([]byte("id -u")) + " |'*) echo 1000; exit 0;; esac\n"
 
 // runningHost is a host whose stacks come up: `ps` finds a running container,
 // so the gate after each stack passes and an execution carries on.

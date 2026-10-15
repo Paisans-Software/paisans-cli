@@ -121,8 +121,12 @@ func failingSSH(t *testing.T) string {
 for last; do :; done
 b=${last#*printf %s }
 b=${b%% |*}
-{ printf '%s\n' "$*"; printf %s "$b" | base64 -d 2>/dev/null; echo; } >> `+log+`
-if [ "$(printf %s "$b" | base64 -d 2>/dev/null | sed '1{/^export DOCKER_HOST=/d;}')" = "dpkg --print-architecture" ]; then echo amd64; exit 0; fi
+raw=$(printf %s "$b" | base64 -d 2>/dev/null)
+{ printf '%s\n' "$*"; printf '%s\n' "$raw"; } >> `+log+`
+cmd=$raw
+case $cmd in "export DOCKER_HOST="*) cmd=${cmd#*"
+"};; esac
+if [ "$cmd" = "dpkg --print-architecture" ]; then echo amd64; exit 0; fi
 echo "fake: refused" >&2
 exit 1
 `)
