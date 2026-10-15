@@ -1,7 +1,10 @@
 name: release
 
 # A push to main whose version has no tag is a release: this tags it vX.Y.Z
-# and publishes the GitHub Release. Any other push to main is a no-op. The
+# and publishes the GitHub Release, with the static Linux binaries and their
+# SHA256SUMS that `make release-binaries` builds attached to it. A host owner
+# downloads one of those to run `paisans host admit` on the host itself.
+# Any other push to main is a no-op. The
 # version is the constant in internal/version/version.go, which `make bump`
 # sets on develop; the "Release X to main" pull request from develop brings
 # it here.
@@ -82,6 +85,37 @@ jobs:
             exit 1
           }
 
+      # The binaries are built before anything is tagged, so a build that
+      # fails leaves no tag and no release behind. make release-binaries is
+      # the command a contributor runs locally; the Makefile says why each
+      # flag is there.
+      - name: Set up Go
+        if: steps.decide.outputs.release == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build the Linux binaries
+        if: steps.decide.outputs.release == 'true'
+        run: make release-binaries
+
+      # The runner is linux/amd64, so the amd64 binary runs here. It has to
+      # report this release's version and this exact commit, without -dirty:
+      # anything else means it is not a build of what is being tagged.
+      - name: Check the binaries
+        if: steps.decide.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          got=$(dist/paisans-linux-amd64 version)
+          want="paisans ${VERSION} (${GITHUB_SHA:0:12})"
+          if [ "$got" != "$want" ]; then
+            echo "::error::dist/paisans-linux-amd64 version printed '${got}', expected '${want}'"
+            exit 1
+          fi
+          (cd dist && sha256sum -c SHA256SUMS)
+
       - name: Create and push the tag
         if: steps.decide.outputs.release == 'true'
         env:
@@ -134,7 +168,12 @@ jobs:
             gh pr edit "$pr" --repo "$REPO" --add-label release
           done
 
-      - name: Publish the GitHub Release
+      # The release is created as a draft, given its binaries, and only then
+      # published, so nobody sees a release that is missing them. The REST
+      # API takes a hand-written body and the generated list at once,
+      # appending the second under the first.
+      - name: Create the draft release
+        id: release
         if: steps.decide.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -142,11 +181,38 @@ jobs:
           PREVIOUS: ${{ steps.decide.outputs.previous }}
           BODY: ${{ steps.pr.outputs.body }}
         run: |
-          # The REST API takes a hand-written body and the generated list at
-          # once, appending the second under the first.
-          gh api "repos/${GITHUB_REPOSITORY}/releases" \
+          set -euo pipefail
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
             -f "tag_name=${TAG}" \
             -f "name=${TAG}" \
             -f "body=${BODY}" \
+            -F draft=true \
             -F generate_release_notes=true \
-            ${PREVIOUS:+-f "previous_tag_name=${PREVIOUS}"}
+            ${PREVIOUS:+-f "previous_tag_name=${PREVIOUS}"} \
+            --jq .id)
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+
+      # Uploaded by release id, because the API's lookup of a release by its
+      # tag does not return a draft.
+      - name: Attach the Linux binaries
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          for name in paisans-linux-amd64 paisans-linux-arm64 SHA256SUMS; do
+            gh api --method POST \
+              -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${ID}/assets?name=${name}" \
+              --input "dist/${name}" >/dev/null
+          done
+
+      - name: Publish the release
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ID: ${{ steps.release.outputs.id }}
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${ID}" \
+            -F draft=false >/dev/null
