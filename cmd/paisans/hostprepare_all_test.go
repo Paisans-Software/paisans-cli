@@ -50,7 +50,7 @@ func TestHostPrepareAllPreparesEverySiteInOrder(t *testing.T) {
 // --all stops at the first site that fails, naming it and how to resume,
 // and reaches no site after it.
 func TestHostPrepareAllStopsAtTheFirstFailure(t *testing.T) {
-	loggingSSH(t, "awk -v fp=")
+	loggingSSH(t, "tail -c1")
 	fakeGrants(t, grantedAlready(t, fixtureConfig(), fixtureSecretsPath()))
 	rec, err := prepareAll(t, hostPrepareOptions{execute: true})
 	cfg, _ := config.Load(fixtureConfig())

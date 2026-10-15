@@ -710,7 +710,7 @@ func TestTheOldGateKeysAreRefused(t *testing.T) {
 	}
 }
 
-// A control character in what the review and host allow print is refused
+// A control character in what the review prints is refused
 // where it is written, naming the field: a terminal reads ESC and its kin as
 // commands, so a key comment carrying one could redraw the review's lines.
 func TestControlCharactersAreRefused(t *testing.T) {

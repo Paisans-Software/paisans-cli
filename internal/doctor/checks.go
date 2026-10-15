@@ -43,8 +43,6 @@ type Reads interface {
 	Clock(site string) ClockSample
 	// Leftovers takes the site's inventory and classifies it.
 	Leftovers(site string) LeftoverProbe
-	// Allowlist reads the login user's key allowlist and authorized_keys.
-	Allowlist(site string) AllowlistProbe
 }
 
 // Checks is every check doctor makes on sites, the ones it asks, as a
@@ -301,16 +299,6 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 			Judge: func(in Input) []Finding { return Leftovers(bySite(in.Leftovers, site, LeftoverProbe.site)) },
 		})
 	}
-	for _, site := range sites {
-		g.Add(Node{Name: SectionAllowlist + " " + site, Section: SectionAllowlist, Site: site, Subject: site,
-			Hard: []Need{Hard(reach(site))},
-			Gather: func(Input) func(*Input) {
-				p := reads.Allowlist(site)
-				return func(in *Input) { in.Allowlists = append(in.Allowlists, p) }
-			},
-			Judge: func(in Input) []Finding { return Allowlist(cfg, bySite(in.Allowlists, site, AllowlistProbe.site)) },
-		})
-	}
 	if dr, ok := reads.(DNSReads); ok {
 		addDNS(g, cfg, sites, dr)
 	}
@@ -333,4 +321,3 @@ func (p MeshProbe) site() string      { return p.Site }
 func (s SiteContainers) site() string { return s.Site }
 func (c ClockSample) site() string    { return c.Site }
 func (p LeftoverProbe) site() string  { return p.Site }
-func (p AllowlistProbe) site() string { return p.Site }

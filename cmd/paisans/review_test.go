@@ -289,7 +289,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 	cfg := fixture(t)
 	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
-	for name, fail := range map[string]string{"succeeds": "", "a step fails": "awk -v fp="} {
+	for name, fail := range map[string]string{"succeeds": "", "a step fails": "tail -c1"} {
 		t.Run(name, func(t *testing.T) {
 			loggingSSH(t, fail)
 			hosts := fakeGrants(t, func(string) *grant.Record { return nil })
@@ -327,7 +327,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	cfg := fixture(t)
 	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
-	loggingSSH(t, "awk -v fp=")
+	loggingSSH(t, "tail -c1")
 	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 	agentFingerprints = func() []string { return []string{alice.Fingerprint} }
 	if _, err := prepare(t, answering(t, "approve\n"), io.Discard, "--execute"); err == nil {

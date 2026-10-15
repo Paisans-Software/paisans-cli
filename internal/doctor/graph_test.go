@@ -287,11 +287,6 @@ func (f *fixtureReads) Leftovers(site string) LeftoverProbe {
 	return LeftoverProbe{Site: site}
 }
 
-func (f *fixtureReads) Allowlist(site string) AllowlistProbe {
-	f.asked("allowlist " + site)
-	return AllowlistProbe{Site: site}
-}
-
 // fixtureInputs is every Input the section tests diagnose, by name.
 func fixtureInputs() map[string]Input {
 	out := map[string]Input{"healthy": healthyInput(), "stuck": stuckInput()}
@@ -389,7 +384,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	if !reflect.DeepEqual(lines, []string{"check reach home-b"}) {
 		t.Errorf("home-b's lines are %v, want reach alone:\n%s", lines, rec.Lines())
 	}
-	want := "Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers, ssh allowlist on home-b."
+	want := "Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("reach home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -401,7 +396,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 			listed += strings.Count(list, ",") + strings.Count(list, ";") + 1
 		}
 	}
-	if report.Pruned != 8 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "9 skipped") {
+	if report.Pruned != 7 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "8 skipped") {
 		t.Errorf("pruned %d, listed %d, summary %q", report.Pruned, listed, report.Summary())
 	}
 	for _, read := range reads.log.list {
@@ -430,7 +425,6 @@ func TestBoundOfOneRunsInOrder(t *testing.T) {
 		"standby auth",
 		"clock home-a", "clock home-b", "clock vm",
 		"leftovers home-a", "leftovers home-b", "leftovers vm",
-		"allowlist home-a", "allowlist home-b", "allowlist vm",
 	}
 	if !reflect.DeepEqual(reads.log.list, want) {
 		t.Errorf("reads in order:\n%s\nwant:\n%s", strings.Join(reads.log.list, "\n"), strings.Join(want, "\n"))

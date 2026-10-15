@@ -15,7 +15,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
-	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -86,7 +85,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		hostcheck.CgroupPrefix,
 	}
 	exact = append(exact, hostcheck.ReadCommands()...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path, "read "+hostprep.AllowPath("ubuntu"))
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -200,7 +199,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers, ssh allowlist on home-b.",
+		"Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
 	} {

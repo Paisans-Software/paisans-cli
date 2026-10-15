@@ -1233,6 +1233,30 @@ func TestAUserWithoutAuthorizedKeysGetsThem(t *testing.T) {
 	}
 }
 
+// host prepare adds every key ssh.keys lists, whatever a file at
+// /etc/paisans/ssh-allow.<user> on the host holds: it reads no such file,
+// and no step it plans mentions one.
+func TestKeysAreAddedWhateverAnSSHAllowFileHolds(t *testing.T) {
+	host := preparedHost(false)
+	host.files["/etc/paisans/ssh-allow.ubuntu"] = "# allows nothing\n"
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := stepsLabelled(plan, "add")
+	if len(add) != 1 || !strings.Contains(add[0].Describe, fingerprint(keyBob)+" (bob)") {
+		t.Fatalf("want bob's key added, got:\n%s", printed(plan))
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "ssh-allow") {
+			t.Errorf("%s consults an allowlist: %s", s.Title, s.Command)
+		}
+	}
+	if out := printed(plan); strings.Contains(out, "allowlist") {
+		t.Errorf("the plan mentions an allowlist:\n%s", out)
+	}
+}
+
 // A listed key cloud-init already put there is reported, neither added
 // again nor recorded, and a key nobody listed and host prepare never added is
 // not touched or mentioned.

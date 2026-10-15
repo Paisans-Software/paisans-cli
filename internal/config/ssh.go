@@ -449,5 +449,5 @@ func ControlRune(s string) (rune, bool) {
 
 // controlProblem is the refusal of a field holding r, after its path.
 func controlProblem(r rune) string {
-	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file, host allow or doctor prints; remove it.", r)
+	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file or doctor prints; remove it.", r)
 }

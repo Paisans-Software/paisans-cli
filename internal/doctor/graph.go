@@ -470,7 +470,6 @@ func (in Input) clone() Input {
 	out.Standby = slices.Clone(in.Standby)
 	out.Clocks = slices.Clone(in.Clocks)
 	out.Leftovers = slices.Clone(in.Leftovers)
-	out.Allowlists = slices.Clone(in.Allowlists)
 	out.Settings = slices.Clone(in.Settings)
 	out.Caddy = slices.Clone(in.Caddy)
 	out.Tokens = slices.Clone(in.Tokens)

@@ -34,13 +34,7 @@ and `validate --offline` reaches none. init writes only local files, and reads e
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `host deployments` reads the one
-host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `host allow`
-and `host disallow` change only a site's host's key allowlist,
-`/etc/paisans/ssh-allow.<user>`, which is the host owner's, so they claim
-nothing; with `--execute` they ask for the site's name at a terminal.
-`internal/hostprep/allow.go` holds the list's format, the refusal `host
-prepare` gives a key it lacks, and the locked write; `cmd/paisans/hostallow.go`
-the commands. `secrets
+host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
@@ -119,8 +113,6 @@ paisans init     --config examples/paisans-stack.example.yaml
 paisans render   --config examples/paisans-stack.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
 paisans host prepare --site home-a        # the host check, then what a blank host lacks
-paisans host allow home-a bob             # bob's fingerprints, and home-a's allowlist as it would be
-paisans host disallow home-a bob          # what it would take off home-a's allowlist
 paisans apply    --site home-a            # shows what would change
 paisans apply    --site home-a --execute  # does it
 paisans prune    --site home-a            # lists dangling volumes, and which go
@@ -1851,9 +1843,6 @@ before.
   it would end up in every script, and approving is the control. Tests in
   `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
   through a pipe.
-* **host prepare never appends a key the host's allowlist lacks**, checked in
-  the plan and again under the lock as the append runs. Tests in
-  `internal/hostprep/allow_test.go` run the append against real files.
 * **The SSH allow follows `ssh.port` and is never removed**, including the
   allow for a port the site used before. A test moves the port and asserts the
   old allow is kept and noted.
@@ -1872,9 +1861,8 @@ takes the narrowest action that makes the rest live. `site add` has never been
 run against a real host, so every command it sends is reasoned from upstream
 source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
 the same way.
-Nor have the review of what `paisans-stack.yaml` grants, its record on each host,
-the allowlist's refusal in `host prepare`, and `host allow` and `host
-disallow`: the shell they send is run against local files in the tests, not
+Nor have the review of what `paisans-stack.yaml` grants and its record on each
+host: the shell they send is run against local files in the tests, not
 observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover
 once its leader is cut off, `garage layout skip-dead-nodes` on a node that
 is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
