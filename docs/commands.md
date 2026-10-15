@@ -586,7 +586,9 @@ paisans host prepare --all --execute          # every site, one at a time
   what the host lacks of a site's store: the bare repository at
   `/var/lib/paisans/config/<token>.git`, the peers file, the sync script, and
   the units `paisans-<token>-config-daemon`, `-config-sync` and
-  `-config-sync.timer`. Every site's `host prepare` is also what makes the store
+  `-config-sync.timer`. The daemon runs while the deployment's WireGuard unit
+  does, so on a host whose mesh `apply` has not brought up it is enabled and
+  not running. Every site's `host prepare` is also what makes the store
   `apply` publishes to, so `apply` refuses a version no site could take with
   this command named.
 

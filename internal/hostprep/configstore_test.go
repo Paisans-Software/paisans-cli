@@ -19,6 +19,7 @@ const (
 
 	probeDaemonUnit = "is-enabled paisans-f2a9-config-daemon.service"
 	probeTimerUnit  = "is-enabled paisans-f2a9-config-sync.timer"
+	probeWireGuard  = "is-enabled wg-quick@psns-f2a9.service"
 )
 
 func storePlan(t *testing.T, host *fakeHost, peers []string) *hostprep.Plan {
@@ -47,7 +48,8 @@ func fileSteps(p *hostprep.Plan) map[string]uint32 {
 	return out
 }
 
-// settled is a host that holds exactly what the store plans, enabled and running.
+// settled is a host that holds exactly what the store plans, enabled and
+// running, on a mesh that is up.
 func settled(t *testing.T, peers []string) *fakeHost {
 	t.Helper()
 	host := freshHost()
@@ -60,7 +62,18 @@ func settled(t *testing.T, peers []string) *fakeHost {
 	host.files[storeRepo+"/HEAD"] = "ref: refs/heads/main\n"
 	host.responses[probeDaemonUnit] = "enabled enabled\nactive active\n"
 	host.responses[probeTimerUnit] = "enabled enabled\nactive active\n"
+	host.responses[probeWireGuard] = "enabled enabled\nactive active\n"
 	return host
+}
+
+// storeUnit is the content the plan writes at path.
+func storeUnit(plan *hostprep.Plan, path string) string {
+	for _, s := range plan.Steps {
+		if s.File != nil && s.File.Path == path {
+			return s.File.Content
+		}
+	}
+	return ""
 }
 
 func TestAFreshHostPlansTheWholeStore(t *testing.T) {
@@ -91,7 +104,7 @@ func TestAFreshHostPlansTheWholeStore(t *testing.T) {
 		commands = append(commands, s.Command)
 	}
 	all := strings.Join(commands, "\n")
-	for _, w := range []string{"git init --bare", storeRepo, "systemctl daemon-reload && systemctl enable --now paisans-f2a9-config-daemon.service paisans-f2a9-config-sync.timer"} {
+	for _, w := range []string{"git init --bare", storeRepo, "systemctl daemon-reload && systemctl enable --now paisans-f2a9-config-sync.timer && systemctl reenable paisans-f2a9-config-daemon.service"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("no command contains %q:\n%s", w, all)
 		}
@@ -99,7 +112,7 @@ func TestAFreshHostPlansTheWholeStore(t *testing.T) {
 	if first := plan.Steps[0]; !strings.Contains(first.Command, "git init --bare") {
 		t.Errorf("the repository is not created first: %q", first.Command)
 	}
-	if last := plan.Steps[len(plan.Steps)-1]; !strings.Contains(last.Command, "enable --now") {
+	if last := plan.Steps[len(plan.Steps)-1]; !strings.Contains(last.Command, "enable") {
 		t.Errorf("enabling is not last: %q", last.Command)
 	}
 
@@ -165,8 +178,62 @@ func TestAChangedDaemonUnitRestartsTheDaemon(t *testing.T) {
 	host.files[storeDaemon] = "stale"
 	plan := storePlan(t, host, nil)
 	last := plan.Steps[len(plan.Steps)-1].Command
-	if !strings.Contains(last, "systemctl restart paisans-f2a9-config-daemon.service") {
-		t.Errorf("the daemon keeps running the old unit: %q", last)
+	if !strings.Contains(last, "systemctl reenable paisans-f2a9-config-daemon.service") || !strings.Contains(last, "then systemctl restart paisans-f2a9-config-daemon.service") {
+		t.Errorf("the daemon keeps running the old unit, or its old links: %q", last)
+	}
+}
+
+// The daemon listens on the mesh address, which exists only once WireGuard
+// has brought the interface up, and on a host prepare reaches first apply
+// has not started it yet. It is started only where the mesh is up: started
+// before, git daemon cannot bind, and its restarts run out. Enabled, it
+// starts whenever WireGuard does.
+func TestTheDaemonIsStartedOnlyOnAMeshThatIsUp(t *testing.T) {
+	plan := storePlan(t, freshHost(), nil)
+	last := plan.Steps[len(plan.Steps)-1].Command
+	if !strings.HasSuffix(last, " && if systemctl is-active --quiet wg-quick@psns-f2a9.service; then systemctl restart paisans-f2a9-config-daemon.service; fi") {
+		t.Errorf("the daemon is not started only on a mesh that is up: %q", last)
+	}
+	if strings.Contains(last, "enable --now paisans-f2a9-config-daemon.service") {
+		t.Errorf("the daemon is started whatever the mesh: %q", last)
+	}
+}
+
+// A host whose mesh is not up yet holds the store once the daemon is
+// enabled, though it is not running: a prepared host plans nothing, and
+// apply starts the daemon by starting WireGuard. On a mesh that is up, a
+// daemon that is not running is started.
+func TestAnInactiveDaemonIsStartedOnlyWhereTheMeshIsUp(t *testing.T) {
+	host := settled(t, nil)
+	host.responses[probeDaemonUnit] = "enabled enabled\nactive inactive\n"
+	host.responses[probeWireGuard] = "enabled disabled\nactive inactive\n"
+	if plan := storePlan(t, host, nil); len(plan.Steps) != 0 {
+		t.Errorf("planned on a host whose mesh is not up: %s", describes(plan))
+	}
+	host.responses[probeWireGuard] = "enabled enabled\nactive active\n"
+	if plan := storePlan(t, host, nil); len(plan.Steps) != 1 || !strings.Contains(plan.Steps[0].Command, "then systemctl start paisans-f2a9-config-daemon.service") {
+		t.Errorf("an inactive daemon on a mesh that is up is not started: %s", describes(plan))
+	}
+}
+
+// Each unit names WireGuard's as systemd takes it, with its suffix: a
+// template instance without one is an invalid name, and systemd ignores the
+// dependency, so the daemon started before the mesh.
+func TestTheUnitsOrderAfterWireGuardByItsFullName(t *testing.T) {
+	plan := storePlan(t, freshHost(), nil)
+	daemon, sync := storeUnit(plan, storeDaemon), storeUnit(plan, storeSyncSv)
+	for _, w := range []string{"After=wg-quick@psns-f2a9.service\n", "BindsTo=wg-quick@psns-f2a9.service\n", "WantedBy=wg-quick@psns-f2a9.service\n"} {
+		if !strings.Contains(daemon, w) {
+			t.Errorf("the daemon unit lacks %q:\n%s", w, daemon)
+		}
+	}
+	if !strings.Contains(sync, "After=wg-quick@psns-f2a9.service\n") {
+		t.Errorf("the sync unit is not ordered after WireGuard:\n%s", sync)
+	}
+	for _, unit := range []string{daemon, sync} {
+		if strings.Contains(unit, "wg-quick@psns-f2a9\n") || strings.Contains(unit, "multi-user.target") {
+			t.Errorf("a unit names WireGuard without its suffix, or starts at boot whatever the mesh:\n%s", unit)
+		}
 	}
 }
 
@@ -182,7 +249,6 @@ func TestTheDaemonServesOnlyThisDeploymentsRepositoryOnTheMeshAddress(t *testing
 		"--listen=10.44.0.1 ", "--port=9418", "--base-path=/var/lib/paisans/config",
 		"/var/lib/paisans/config/f2a9.git\n", "User=nobody",
 		"Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/var/lib/paisans/config/f2a9.git\n",
-		"After=wg-quick@psns-f2a9\n", "Requires=wg-quick@psns-f2a9\n",
 	} {
 		if !strings.Contains(unit, w) {
 			t.Errorf("the daemon unit lacks %q:\n%s", w, unit)

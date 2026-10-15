@@ -20,6 +20,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so a site's peers can fetch from it after `apply` brings the mesh up.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
 
