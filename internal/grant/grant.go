@@ -26,7 +26,9 @@ import (
 
 // Grant is one site's grant.
 type Grant struct {
-	// Login is ssh.user, the account every key in Keys may log in as.
+	// Login is the login user from SSHUser(): the declared ssh.user, or the
+	// deployment's own user when none is declared. Every key in Keys may log
+	// in as it.
 	Login string
 	// Keys is one entry per key of every admin ssh.keys names, sorted by
 	// fingerprint.

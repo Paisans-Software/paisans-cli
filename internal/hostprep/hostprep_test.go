@@ -1392,7 +1392,7 @@ func TestAMissingUserIsRefused(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = "__PAISANS_ABSENT__\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "ssh.user ubuntu does not exist on fake. host prepare does not create users") {
+	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. host prepare does not create users") {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -52,7 +52,7 @@ func setSSHUser(data []byte, site, user string) ([]byte, error) {
 	}
 	_, ssh := lookup(s, "ssh")
 	if ssh == nil || ssh.Kind != yaml.MappingNode || len(ssh.Content) == 0 {
-		return nil, fmt.Errorf("sites.%s.ssh is not a section this command can add user to. Give the site its ssh section, with its keys, first", site)
+		return nil, fmt.Errorf("sites.%s.ssh is not a section this command can add a user to. Give the site its ssh section, with its keys, first", site)
 	}
 	lines := lineStarts(data)
 	_, value := lookup(ssh, "user")
@@ -60,7 +60,7 @@ func setSSHUser(data []byte, site, user string) ([]byte, error) {
 	case value == nil:
 	case value.Kind != yaml.ScalarNode:
 		return nil, fmt.Errorf("sites.%s.ssh.user is not a single value", site)
-	case value.Value == user:
+	case value.Tag == "!!str" && value.Value == user:
 		return data, nil
 	case value.Tag == "!!null" && value.Value == "":
 		return nil, fmt.Errorf("sites.%s.ssh.user is written with no value, in a form this command cannot edit in place. Write the name, Eg: user: %s, or remove the line", site, user)

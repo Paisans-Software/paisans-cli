@@ -115,7 +115,7 @@ func readUserKeys(t Transport, user string) (userKeys, error) {
 	}
 	entry = strings.TrimSpace(entry)
 	if entry == "" || entry == "__PAISANS_ABSENT__" {
-		return userKeys{}, fmt.Errorf("ssh.user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
+		return userKeys{}, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
 	}
 	fields := strings.Split(entry, ":")
 	if len(fields) < 7 || fields[5] == "" {

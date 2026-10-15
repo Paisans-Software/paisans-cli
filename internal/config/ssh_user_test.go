@@ -105,3 +105,15 @@ func TestSetSSHUserQuotesANameYAMLWouldReadAsAnotherType(t *testing.T) {
 		})
 	}
 }
+
+// A user written as null names nobody, so asking for the name null fills it
+// in; only a string that already is the name counts as the same name.
+func TestSetSSHUserFillsANullUserNamedNull(t *testing.T) {
+	out, err := setSSHUser([]byte("sites:\n  home-a:\n    ssh:\n      user: null\n      keys: [alice]\n"), "home-a", "null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "sites:\n  home-a:\n    ssh:\n      user: \"null\"\n      keys: [alice]\n"; string(out) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
+	}
+}
