@@ -24,9 +24,11 @@ func RootlessDockerHost(uid string) string { return "unix:///run/user/" + uid + 
 // its own rootless daemon, so the UID is asked once a run and every command
 // after it carries the answer.
 type Login struct {
-	// Connected, when set, is called once, after the first command run
-	// through this login has succeeded: the user exists on the host and
-	// accepted the operator's key.
+	// Connected, when set, is called once, after the first successful
+	// id -u probe and before the command that caused it runs: the user
+	// exists on the host and accepted the operator's key. It is never
+	// called for a transport whose DockerHost is given outright, which
+	// asks no probe.
 	Connected func()
 
 	mu         sync.Mutex
@@ -34,7 +36,7 @@ type Login struct {
 }
 
 // NewLogin returns a Login that calls connected after its first successful
-// command, or nothing for nil.
+// probe, or nothing for nil.
 func NewLogin(connected func()) *Login { return &Login{Connected: connected} }
 
 // resolve returns t's DOCKER_HOST, asking the host for the login user's UID
@@ -65,11 +67,14 @@ func (l *Login) resolveLocked(t SSHTransport) (host string, first bool, err erro
 		if errors.As(err, &p) {
 			return "", false, err
 		}
-		return "", false, fmt.Errorf("%s: %s: %w\n%s", t.Describe(), uidProbe, err, strings.TrimRight(out, "\n"))
+		return "", false, fmt.Errorf("%s: %w\n%s", uidProbe, err, strings.TrimRight(out, "\n"))
 	}
 	uid := strings.TrimSpace(out)
 	if uid == "" || strings.Trim(uid, "0123456789") != "" {
-		return "", false, fmt.Errorf("%s: %s printed %q, not a user ID, so the user's Docker daemon cannot be found. A shell startup file that prints on a command without a terminal does this", t.Describe(), uidProbe, uid)
+		return "", false, fmt.Errorf("%s printed %q, not a user ID, so the user's Docker daemon cannot be found. A shell startup file that prints on a command without a terminal does this", uidProbe, uid)
+	}
+	if strings.Trim(uid, "0") == "" {
+		return "", false, fmt.Errorf("%s printed %q, the user ID of root, but the deployment's user is never root, so its rootless Docker daemon cannot be found", uidProbe, uid)
 	}
 	l.dockerHost = RootlessDockerHost(uid)
 	return l.dockerHost, true, nil

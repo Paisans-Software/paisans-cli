@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,5 +107,83 @@ func TestAGivenDockerHostAsksNoUID(t *testing.T) {
 func TestRootlessDockerHost(t *testing.T) {
 	if got := apply.RootlessDockerHost("1000"); got != rootlessSocket {
 		t.Errorf("RootlessDockerHost(1000) = %q", got)
+	}
+}
+
+// A probe that fails names the destination once, not once for the probe and
+// again for the command that asked.
+func TestALoginProbeFailureNamesTheDestinationOnce(t *testing.T) {
+	loginScript(t, "Welcome to home-a\n1000\n", 0)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	_, err := tr.Run("docker ps")
+	if err == nil || strings.Count(err.Error(), "203.0.113.10") != 1 {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// The deployment's user is never root: UID 0 is refused, naming the probe.
+func TestALoginAsRootIsRefused(t *testing.T) {
+	ran := loginScript(t, "0\n", 0)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	_, err := tr.Run("docker ps")
+	if err == nil || !strings.Contains(err.Error(), "id -u printed") || !strings.Contains(err.Error(), "root") {
+		t.Errorf("err = %v", err)
+	}
+	if strings.Join(*ran, "|") != "id -u" {
+		t.Errorf("ran %q", *ran)
+	}
+}
+
+// sudo resets the environment, so DOCKER_HOST would not reach docker: the
+// combination is refused before anything runs.
+func TestSudoWithADockerHostIsRefused(t *testing.T) {
+	ran := loginScript(t, "1000\n", 0)
+	for _, tr := range []apply.SSHTransport{
+		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Sudo: true, DockerHost: rootlessSocket},
+		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Sudo: true, Login: apply.NewLogin(nil)},
+	} {
+		if _, err := tr.Run("docker ps"); err == nil || !strings.Contains(err.Error(), "sudo") {
+			t.Errorf("err = %v", err)
+		}
+	}
+	if len(*ran) != 0 {
+		t.Errorf("ran %q", *ran)
+	}
+}
+
+// Many first commands at once, on copies of one transport, ask the UID once
+// and report the connection once.
+func TestALoginUsedConcurrentlyAsksOnceAndConnectsOnce(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	blanks := 0
+	t.Cleanup(apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks))
+	var mu sync.Mutex
+	probes := 0
+	t.Cleanup(apply.FakeSSH(func(args []string, _ string) (string, int) {
+		if args[len(args)-1] == "id -u" {
+			mu.Lock()
+			probes++
+			mu.Unlock()
+			return "1000\n", 0
+		}
+		return "", 0
+	}, nil, func(time.Duration) {}, io.Discard))
+	var connected atomic.Int32
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(func() { connected.Add(1) })}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := tr
+			if _, err := c.Run("docker ps"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if probes != 1 || connected.Load() != 1 {
+		t.Errorf("probes %d, connected %d", probes, connected.Load())
 	}
 }

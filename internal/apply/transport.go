@@ -574,6 +574,9 @@ func lastLine(out string) string {
 // enough that a host which is really down is reported within seconds rather
 // than hidden behind a long wait.
 func (t SSHTransport) run(command string, stdin *string) (string, error) {
+	if t.Sudo && (t.DockerHost != "" || t.Login != nil) {
+		return "", errors.New("a transport with a Docker host cannot use sudo: sudo resets the environment, so docker would reach the host's system daemon instead of the user's own")
+	}
 	if t.Login != nil && t.DockerHost == "" {
 		host, err := t.Login.resolve(t)
 		if err != nil {
