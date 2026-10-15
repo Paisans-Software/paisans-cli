@@ -21,6 +21,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- A failed login link email says Pocket ID's cause without its wrapping and connection string format, and once, not on every operator's line, when every email failed the same way.
 - `paisans secrets set <key>` at a terminal asks for that key's value with echo off instead of refusing, so a set credential can be replaced by hand.
 - A first apply with several apps reading one new Pocket ID group no longer stops on `409 Name is already in use`: a group made since the plan was read is found and used.
 - A host ssh cannot reach is named once, with ssh's own words once, instead of repeated through every layer that tried to read it, and `init` lists each unreachable site on its own line.
