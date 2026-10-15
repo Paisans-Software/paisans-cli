@@ -56,13 +56,15 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	r := reporter()
 	if app == "" && fs.NArg() > 0 {
 		app = fs.Arg(0)
 		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return err
 		}
 	}
+	// Once every flag is read, those after the app's name included, as
+	// the reporter and the login recording take --execute and -v from them.
+	r := reporter()
 	if fs.NArg() > 0 {
 		return fmt.Errorf("app remove takes one app: paisans app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}

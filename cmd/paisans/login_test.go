@@ -340,3 +340,30 @@ func TestDoctorRecordsNoUser(t *testing.T) {
 		}
 	}
 }
+
+// A command that takes its name after the flags reads the flags after it
+// too: --execute there still makes it a run that records the user. Each
+// run here is refused before it reaches a host, after its flags are read.
+func TestExecuteAfterTheNameRecords(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(path string) error
+	}{
+		{"site remove", func(path string) error {
+			return runSiteRemove([]string{"--config", path, "--secrets", fixtureSecretsPath(), "home-b", "--execute"}, strings.NewReader(""), io.Discard)
+		}},
+		{"app remove", func(path string) error {
+			return runAppRemove([]string{"--config", path, "--secrets", fixtureSecretsPath(), "talk", "--execute"}, strings.NewReader(""), io.Discard)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := fixtureWithoutUsers(t)
+			resetLogins(t)
+			withRecorder(t, false)
+			_ = c.run(path)
+			if !recordLogins {
+				t.Error("--execute after the name is not a run that records the user")
+			}
+		})
+	}
+}

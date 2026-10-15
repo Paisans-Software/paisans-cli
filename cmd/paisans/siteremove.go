@@ -61,13 +61,15 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	r := reporter()
 	if site == "" && fs.NArg() > 0 {
 		site = fs.Arg(0)
 		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return err
 		}
 	}
+	// Once every flag is read, those after the site's name included, as
+	// the reporter and the login recording take --execute and -v from them.
+	r := reporter()
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone | --evict] [--delete-data] [--force [--ssh user@host[:port]]]"}
 	}
