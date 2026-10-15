@@ -397,6 +397,32 @@ container's users map into that range, so the UID alone misses them):
 A deployment that needs something on the owner's network asks the owner,
 who adds an accept rule. That is deliberately outside the CLI.
 
+**The mesh's own packets need a rule of their own.** WireGuard's UDP is sent
+by the kernel, not by the user, so the UID chain never sees it, and the
+deployment's user writes each peer's `Endpoint`. The helper refuses literal
+loopback, link-local and multicast endpoints, but a name resolves again at
+every up, restart and sync, as root, and the host's own addresses and the
+LAN are ordinary addresses. Once a handshake is up, moving a peer's
+endpoint keeps the session, so the user could send UDP whose payload they
+mostly choose to a service on the owner's loopback or LAN. So:
+
+* **The helper marks the socket.** `put` adds `FwMark = <mark>` to every
+  conf it installs, the mark baked in when admit renders the helper, one
+  per deployment. A conf that sets `FwMark` itself is refused, as today.
+* **The egress table filters the mark**, in a second output chain matching
+  `meta mark <mark>`, after the name was resolved, so nothing can change
+  between the check and the send. It drops loopback, link-local and
+  multicast, every address of the host itself (`fib daddr type local`),
+  and the private and shared ranges of rule 3 above. Everything else, the
+  public endpoints a mesh normally dials, passes.
+* **`--mesh-lan`** lets the deployment's sites dial each other on the
+  owner's LAN. With it, admit adds an accept for the private prefix of the
+  host's own LAN (the route of its default interface) in the mark chain,
+  and nothing wider. The plan says plainly that the deployment can then
+  send UDP to that LAN. It is off by default, and the flag is in the
+  admission record. Without it, sites on one LAN dial each other's public
+  address, which needs a router that loops it back.
+
 ## Keys
 
 `host prepare` keeps managing `authorized_keys` from `ssh.keys`, now as the
