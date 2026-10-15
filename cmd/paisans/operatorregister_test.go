@@ -28,6 +28,9 @@ func registerWorkstation(t *testing.T, answer string, f configstore.Files, runs 
 	return l
 }
 
+// bobKey is the key the fixture's second operator, bob, logs in with.
+const bobKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB bob@example.org"
+
 // withOperatorBob is the fixture's paisans-stack.yaml with alice's key
 // replaced by alice and its second operator bob's by bob.
 func withOperatorBob(t *testing.T, alice, bob string) string {

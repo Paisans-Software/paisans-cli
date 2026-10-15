@@ -33,3 +33,15 @@ func TestSiteDestinationUsesTheSSHSection(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// A site built by hand rather than loaded has no deployment to take a
+// default from, so its user is the declared one or none, never a bare
+// "paisans-".
+func TestSSHUserOfASiteNotLoadedIsOnlyTheDeclaredOne(t *testing.T) {
+	if got := (config.Site{}).SSHUser(); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+	if got := (config.Site{SSH: config.SSH{User: "admin"}}).SSHUser(); got != "admin" {
+		t.Errorf("got %q, want admin", got)
+	}
+}

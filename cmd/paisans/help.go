@@ -41,7 +41,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"host":        "Prepare a host, list what is on it, manage its key allowlist.",
+	"host":        "Prepare a host, or list what is on it.",
 	"site":        "Add a site to the running deployment, or remove one.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
@@ -174,20 +174,6 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
 		detail: "List every deployment in the registry of the host --ssh names (id, token, domain, site, roles and root, and a Caddy kept for /srv/caddy.d), and any deployment directory or labelled compose project no registry entry names. " +
 			"Needs no " + config.FileName + "; changes nothing.",
-	},
-	{
-		name:    "host allow",
-		summary: "Add operators' keys to a host's key allowlist.",
-		usage:   []string{"paisans host allow <site> <operator>... [--config " + config.FileName + "] [--ssh <destination>]\n                   [--execute]"},
-		detail: "Add each operator's key fingerprints to the site's host's key allowlist, /etc/paisans/ssh-allow.<user>, the keys host prepare may add there; a new list also holds every key a deployment already claims.\n\n" +
-			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
-	},
-	{
-		name:    "host disallow",
-		summary: "Take keys off a host's key allowlist.",
-		usage:   []string{"paisans host disallow <site> <operator|fingerprint>... [--config " + config.FileName + "]\n                      [--ssh <destination>] [--execute]"},
-		detail: "Take keys off the site's host's key allowlist, by operator or fingerprint; a key already authorized keeps working.\n\n" +
-			"The allowlist is the host owner's: --execute asks for the site's name at a terminal. Writes nothing without --execute.",
 	},
 	{
 		name:    "site add",
@@ -420,28 +406,26 @@ const configTrust = "\n\n" +
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
-const executeTopic = `host prepare, host deployments, host allow, host disallow, apply, prune, site
-add, site remove, mesh rekey, storage init, storage add, storage rotate-key, app
-admin create, app remove, oidc client create, secrets prune, secrets rotate,
-preflight, failover test, doctor, init, config and operator register are the only
-commands that reach a host. Each reads it to plan, and changes it only with
---execute; host allow and host disallow change only a host's key allowlist,
-which is the host owner's, and claim nothing; config and operator register claim
-nothing, and their --execute only starts each site's configuration sync and, for
-publish and register, adds a version to its store; host deployments, preflight,
-doctor and init have no --execute and never change it; secrets prune only reads
-the gateways' deployment records, and its --execute writes the local secrets
-file alone. With --execute, a command first claims each host it writes to in
-/var/lib/paisans/registry.json, and refuses if another deployment there holds
-this one's token, WireGuard interface or listen port, or a mesh subnet
-overlapping this one's. apply and host prepare also refuse when anything else on
-the host overlaps the mesh subnet. dns init and dns prune reach no host, only
-the DNS provider's API, and change it only with --execute; site remove also
-deletes the removed site's records there. web-server show and web-server check
-change nothing: check looks at a monitor's public hostname as any visitor could,
-and with managed_by: external both read the monitor's web server over ssh, show
-always and check when a check fails.
-Everything else writes files locally and stops.
+const executeTopic = `host prepare, host deployments, apply, prune, site add, site remove, mesh rekey,
+storage init, storage add, storage rotate-key, app admin create, app remove,
+oidc client create, secrets prune, secrets rotate, preflight, failover test,
+doctor, init, config and operator register are the only commands that reach a
+host. Each reads it to plan, and changes it only with --execute; config and
+operator register claim nothing, and their --execute only starts each site's
+configuration sync and, for publish and register, adds a version to its store;
+host deployments, preflight, doctor and init have no --execute and never change
+it; secrets prune only reads the gateways' deployment records, and its --execute
+writes the local secrets file alone. With --execute, a command first claims each
+host it writes to in /var/lib/paisans/registry.json, and refuses if another
+deployment there holds this one's token, WireGuard interface or listen port, or
+a mesh subnet overlapping this one's. apply and host prepare also refuse when
+anything else on the host overlaps the mesh subnet. dns init and dns prune reach
+no host, only the DNS provider's API, and change it only with --execute; site
+remove also deletes the removed site's records there. web-server show and
+web-server check change nothing: check looks at a monitor's public hostname as
+any visitor could, and with managed_by: external both read the monitor's web
+server over ssh, show always and check when a check fails. Everything else
+writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
 the reasons, values, request bodies and command output behind each step show

@@ -35,3 +35,16 @@ func TestSiteTransportUsesTheSectionOrTheOverride(t *testing.T) {
 		t.Fatalf("override transport: %+v", got)
 	}
 }
+
+// A site that leaves ssh.user out is reached as the deployment's own user.
+func TestSiteTransportDefaultsToTheDeploymentsUser(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := cfg.Sites["home-a"]
+	site.SSH.User = ""
+	if got := siteTransport("home-a", site, "", false); got.User != "paisans-f2a9" {
+		t.Errorf("user is %q, want paisans-f2a9", got.User)
+	}
+}

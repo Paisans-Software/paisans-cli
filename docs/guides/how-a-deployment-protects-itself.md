@@ -50,18 +50,12 @@ root.
   since, with its operator, fingerprint and comment, and an `--execute` run asks
   the operator to type `approve` at a terminal before any host changes. No flag
   answers it, and without a terminal the run is refused.
-* **The host's allowlist.** The owner of `home-a` can run `paisans host allow
-  home-a alice` to write the fingerprints that may ever be added there, in
-  `/etc/paisans/ssh-allow.<user>` on the host. `host prepare` then refuses to
-  add any other key, whoever runs it. The list holds fingerprints, not names,
-  so a key swapped in under Alice's name is refused too.
 
-**Does not protect.** A host with no allowlist file allows every key, by
-founder decision, so until its owner runs `host allow` the review is the only
-check. Neither control removes a key already in `authorized_keys`.
+**Does not protect.** The review is the only check, and it is made by whoever
+runs the command. It removes no key already in `authorized_keys`.
 
 **You do.** Read the review before typing `approve`, as you would read a diff
-before merging. If you own a host, run `host allow` on it.
+before merging.
 
 ## Someone changes an image
 

@@ -106,22 +106,16 @@ type userKeys struct {
 	lines               []hostKeyLine
 }
 
-// keysHost is what reading a user's authorized_keys needs.
-type keysHost interface {
-	Reader
-	Describe() string
-}
-
 // readUserKeys reads user's authorized_keys on the host t reaches, finding
 // it from the user's passwd entry.
-func readUserKeys(t keysHost, user string) (userKeys, error) {
+func readUserKeys(t Transport, user string) (userKeys, error) {
 	entry, err := t.Run(passwdProbe(user))
 	if err != nil {
 		return userKeys{}, err
 	}
 	entry = strings.TrimSpace(entry)
 	if entry == "" || entry == "__PAISANS_ABSENT__" {
-		return userKeys{}, fmt.Errorf("ssh.user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
+		return userKeys{}, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
 	}
 	fields := strings.Split(entry, ":")
 	if len(fields) < 7 || fields[5] == "" {
@@ -148,33 +142,12 @@ func readUserKeys(t keysHost, user string) (userKeys, error) {
 	return k, nil
 }
 
-// AuthorizedFingerprints is the fingerprint of every key in user's
-// authorized_keys on the host t reaches, as host prepare reads the file: a
-// key listed here is one host prepare shares or keeps rather than appends,
-// so the host's allowlist never refuses it.
-func AuthorizedFingerprints(t keysHost, user string) ([]string, error) {
-	k, err := readUserKeys(t, user)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, l := range k.lines {
-		out = append(out, l.key.Fingerprint)
-	}
-	return out, nil
-}
-
-// planAuthorizedKeys compares the listed keys with the user's authorized_keys,
+// planAuthorizedKeys compares the keys s lists with user's authorized_keys,
 // this deployment's sidecar and every other deployment's sidecar for the same
 // user. It returns the additions and the changes to the sidecar, which run
 // with the rest of the plan, and the removals, which run last: a key is only
 // taken away once every listed key is in place.
-//
-// A key to append that the host's allowlist does not hold is refused rather
-// than planned (allow.go). A key already in authorized_keys is never refused:
-// the list decides what host prepare may add, not who may log in now.
-func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s config.SSH) (out Section, removals []Step, err error) {
-	user := s.User
+func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s config.SSH) (out Section, removals []Step, err error) {
 	listed, problems := s.AuthorizedKeys()
 	if len(problems) > 0 {
 		// Load refuses these; reaching here is a bug, not an operator error.
@@ -186,13 +159,6 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s con
 		return out, nil, err
 	}
 	uid, gid, dir, file, found, lines := keys.uid, keys.gid, keys.dir, keys.file, keys.found, keys.lines
-
-	allowContent, hasList, err := t.ReadFile(AllowPath(user))
-	if err != nil {
-		return out, nil, err
-	}
-	allow := ParseAllow(allowContent)
-	allowed := func(fp string) bool { return !hasList || Allows(allow, fp) }
 
 	own := OwnedKeysPath(d, user)
 	sidecar, _, err := t.ReadFile(own)
@@ -306,10 +272,8 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s con
 				Label:    "share",
 				Title:    "share ssh key",
 				Describe: fmt.Sprintf("ssh: key %s is already authorized for %s and %s claims it; claim it too, so it stays while either lists it", label, user, claimedBy(k.Fingerprint)),
-				// The append, when the line has gone, is an addition like any
-				// other, so the allowlist is checked first.
-				Command: Locked(fmt.Sprintf("if grep -qxF %s %s; then %s; else %s; %s; %s; fi",
-					strings.Join(raws, " "), shellQuote(file), writeOwned(d, user, owned), allowGuard(user, k.Fingerprint), appendKey(file, k.Line), writeOwned(d, user, added))),
+				Command: Locked(fmt.Sprintf("if grep -qxF %s %s; then %s; else %s; %s; fi",
+					strings.Join(raws, " "), shellQuote(file), writeOwned(d, user, owned), appendKey(file, k.Line), writeOwned(d, user, added))),
 			})
 		case len(plain) > 0:
 			// Already there, put there by someone else (cloud-init, most
@@ -322,11 +286,6 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s con
 			// adding the plain key beside it would undo the restriction.
 			remaining++
 			out.Foreign = append(out.Foreign, fmt.Sprintf("ssh: key %s authorized for %s with options, by `%s`; left as it is", label, user, restricted[0].raw))
-		case !allowed(k.Fingerprint):
-			// Counted as remaining: a refusal stops the plan, so no removal
-			// runs on the strength of it either way.
-			remaining++
-			out.Refused = append(out.Refused, KeyRefusal{Site: site, User: user, Admin: k.Name, Fingerprint: k.Fingerprint})
 		default:
 			remaining++
 			drop(k.Fingerprint)
@@ -336,9 +295,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, site string, s con
 				Label:    "add",
 				Title:    "authorize ssh key",
 				Describe: fmt.Sprintf("ssh: authorize key %s for %s", label, user),
-				// The list is checked again under the lock, so one made
-				// between this plan and its run still holds.
-				Command: Locked(allowGuard(user, k.Fingerprint) + "; " + appendKey(file, k.Line) + "; " + writeOwned(d, user, owned)),
+				Command:  Locked(appendKey(file, k.Line) + "; " + writeOwned(d, user, owned)),
 			})
 		}
 	}

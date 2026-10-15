@@ -889,6 +889,7 @@ func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 	}
 	cfg.deriveGate()
 	cfg.resolveKeys()
+	cfg.resolveUsers()
 	if cfg.Storage.Garage.Capacity == "" {
 		cfg.Storage.Garage.Capacity = "100G"
 	}

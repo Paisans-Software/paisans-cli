@@ -26,8 +26,9 @@ type SSH struct {
 	// Host is a hostname or an IP address. Empty means the site's
 	// public_address; a site with neither is refused.
 	Host string `yaml:"host"`
-	// User is the login user. It must already exist on the host: creating
-	// users is not something host prepare does.
+	// User is the login user. Empty means the deployment's own user,
+	// paisans-<token>, which SSHUser returns. Either way it must already
+	// exist on the host: creating users is not something host prepare does.
 	User string `yaml:"user"`
 	// Port is the SSH port. Zero means 22.
 	Port int `yaml:"port"`
@@ -44,6 +45,10 @@ type SSH struct {
 	// declared records that the key was present at all, so a missing
 	// section and an empty one get different messages.
 	declared bool
+	// defaultUser is the deployment's own user, paisans-<token>, which Load
+	// records on every site so that a site can name its login without the
+	// configuration it came from.
+	defaultUser string
 }
 
 // DefaultSSHPort is the port used when a site's ssh section names none.
@@ -91,6 +96,18 @@ func (s SSH) PortOrDefault() int {
 		return DefaultSSHPort
 	}
 	return s.Port
+}
+
+// SSHUser is the user the toolkit logs in as: ssh.user, or failing that the
+// deployment's own user, paisans-<token>. The default is the prefix every
+// name the deployment owns on a host already carries, so a deployment that
+// names no user logs in as one of its own. A site Load did not build has no
+// deployment behind it, and so no default.
+func (s Site) SSHUser() string {
+	if s.SSH.User != "" {
+		return s.SSH.User
+	}
+	return s.SSH.defaultUser
 }
 
 // SSHHost is the address the toolkit connects to: ssh.host, or failing that
@@ -232,14 +249,11 @@ func sshProblems(name string, site Site, known map[string]Operator) []string {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
 	if !s.declared {
-		add("sites.%s.ssh: required. Give the section with at least user and keys: it is how the toolkit reaches the site and who may log in to it.", name)
+		add("sites.%s.ssh: required. Give the section with at least keys: it is how the toolkit reaches the site and who may log in to it.", name)
 		return problems
 	}
-	switch {
-	case s.User == "":
-		add("sites.%s.ssh.user: required. Name the login user, which must already exist on the host.", name)
-	case !unixUser.MatchString(s.User):
-		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters.", name, s.User)
+	if s.User != "" && !unixUser.MatchString(s.User) {
+		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters, or leave it out for the deployment's own user.", name, s.User)
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		add("sites.%s.ssh.port: %d is not a port. Give 1 to 65535, or leave it out for 22.", name, s.Port)
@@ -302,6 +316,16 @@ func (c *Config) resolveKeys() {
 				site.SSH.Keys = append(site.SSH.Keys, NamedKey{Name: id, Line: line})
 			}
 		}
+		c.Sites[name] = site
+	}
+}
+
+// resolveUsers records the deployment's own user on every site's ssh section,
+// for SSHUser.
+func (c *Config) resolveUsers() {
+	user := c.Deployment().Prefix()
+	for name, site := range c.Sites {
+		site.SSH.defaultUser = user
 		c.Sites[name] = site
 	}
 }
@@ -424,7 +448,7 @@ func ParseDestination(s string) (Destination, error) {
 
 // Destination is where the site's ssh section reaches it.
 func (s Site) Destination() Destination {
-	return Destination{User: s.SSH.User, Host: s.SSHHost(), Port: s.SSH.PortOrDefault()}
+	return Destination{User: s.SSHUser(), Host: s.SSHHost(), Port: s.SSH.PortOrDefault()}
 }
 
 func hasOperator(operators map[string]Operator, id string) bool {
@@ -449,5 +473,5 @@ func ControlRune(s string) (rune, bool) {
 
 // controlProblem is the refusal of a field holding r, after its path.
 func controlProblem(r rune) string {
-	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file, host allow or doctor prints; remove it.", r)
+	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file or doctor prints; remove it.", r)
 }

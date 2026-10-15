@@ -126,9 +126,6 @@ type Section struct {
 	// Warnings are reported whether or not anything is planned, because a
 	// prepared host that runs on softdog is still running on softdog.
 	Warnings []Warning
-	// Refused are keys to add that the host's allowlist does not hold. Any
-	// one refuses the whole plan, before a step runs (see Refusal).
-	Refused []KeyRefusal
 }
 
 // Warning is a problem that leaves the host working but not as declared, or
@@ -145,7 +142,6 @@ func (s *Section) add(other Section) {
 	s.Present = append(s.Present, other.Present...)
 	s.Foreign = append(s.Foreign, other.Foreign...)
 	s.Warnings = append(s.Warnings, other.Warnings...)
-	s.Refused = append(s.Refused, other.Refused...)
 }
 
 // Plan is what Build found on one site's host.
@@ -329,7 +325,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(store)
 
-	keys, keyRemovals, err := planAuthorizedKeys(t, d, site, declared.SSH)
+	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSHUser(), declared.SSH)
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}
@@ -378,10 +374,6 @@ func (p *Plan) Show(r ui.Reporter) {
 		s.Detail("%s", step.Describe)
 		s.End(ui.Pending, "")
 	}
-	if err := Refusal(p); err != nil {
-		hint, explain := ui.Describe(err)
-		r.Refuse(hint, explain)
-	}
 	if r.Verbose() {
 		for _, present := range p.Present {
 			r.Step(present).End(ui.OK, "")
@@ -402,14 +394,11 @@ func (p *Plan) Warn(r ui.Reporter) {
 	}
 }
 
-// Execute refuses a plan Refusal refuses, before any step, and otherwise
-// runs each step in order and stops at the first failure, naming the step, so an operator knows where a half finished run left the host. Every
+// Execute runs each step in order and stops at the first failure, naming the
+// step, so an operator knows where a half finished run left the host. Every
 // step is planned from a probe, so re-running Build after fixing the cause
 // plans only what is still missing.
 func Execute(plan *Plan, t Transport, r ui.Reporter) error {
-	if err := Refusal(plan); err != nil {
-		return err
-	}
 	for _, step := range plan.Steps {
 		s := r.Step(step.Title)
 		s.Detail("%s", step.Describe)

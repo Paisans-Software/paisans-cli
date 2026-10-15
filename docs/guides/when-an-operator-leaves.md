@@ -305,11 +305,9 @@ included, and refuses while one does not answer.
    they were never a recipient. Open: nothing on the mesh, once every site is
    done.
 
-7. **Bring up the replacement.** Before it, the new host's owner can bound
-   which keys `apply` may ever grant there:
+7. **Bring up the replacement.**
 
    ```sh
-   paisans host allow home-d carol dave           # on the new site, before its first apply
    paisans apply --execute
    ```
 
@@ -317,8 +315,7 @@ included, and refuses while one does not answer.
    it as a peer on every site, and prepares every site, which deletes from
    each the keys of theirs `host prepare` added. It reviews every key it
    grants on the new host, which has no record yet, and asks for `approve` at
-   the terminal (`docs/specs/2026-10-11-config-review.md`; `host allow`
-   writes `/etc/paisans/ssh-allow.<user>` there). A replacement data site is
+   the terminal (`docs/specs/2026-10-11-config-review.md`). A replacement data site is
    joined by that apply's `site add`. It also publishes the version that
    takes them out of `operators`, so from then on a version signed by any key of
    theirs is not trusted. Closes: the outage of step 5, their ssh keys on

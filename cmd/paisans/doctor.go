@@ -20,7 +20,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
-	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
@@ -430,25 +429,6 @@ func (d doctorReads) Clock(site string) doctor.ClockSample {
 
 func (d doctorReads) Leftovers(site string) doctor.LeftoverProbe {
 	return gatherLeftovers(d.cfg, site, d.transports[site])
-}
-
-func (d doctorReads) Allowlist(site string) doctor.AllowlistProbe {
-	t := d.transports[site]
-	user := d.cfg.Sites[site].SSH.User
-	p := doctor.AllowlistProbe{Site: site}
-	content, found, err := t.ReadFile(hostprep.AllowPath(user))
-	if err != nil {
-		p.Err = err.Error()
-	}
-	p.Found, p.Content = found, content
-	// Only a key host prepare would append is refused, so the warning
-	// needs to know which keys authorized_keys holds already.
-	if found {
-		if fps, err := hostprep.AuthorizedFingerprints(t, user); err == nil {
-			p.KeysRead, p.Authorized = true, fps
-		}
-	}
-	return p
 }
 
 // gatherLeftovers takes one site's inventory with the host check's probes,

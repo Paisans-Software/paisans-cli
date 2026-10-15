@@ -73,12 +73,8 @@ func main() {
 			err = runHostPrepare(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "deployments":
 			err = runHostDeployments(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "allow":
-			err = runHostAllow(os.Args[3:], os.Stdin, os.Stdout)
-		case len(os.Args) >= 3 && os.Args[2] == "disallow":
-			err = runHostDisallow(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments, allow or disallow"))
+			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare or deployments"))
 		}
 	case "site":
 		switch {
@@ -1357,11 +1353,8 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 			showReview(r, "review what "+config.FileName+" grants", review.review, false)
 			pending = review.review.Pending()
 		}
-		refusal := hostprep.Refusal(plan)
-		env.found(strings.Join(plan.Kinds(), ", "), refusal)
+		env.found(strings.Join(plan.Kinds(), ", "), nil)
 		switch {
-		case refusal != nil:
-			r.Result("Nothing changed. --execute would stop at the refusal above.")
 		case len(plan.Steps) == 0 && pending == 0:
 			r.Result("%s is prepared. Nothing to do.", o.site)
 		case len(plan.Steps) == 0:
@@ -1647,7 +1640,7 @@ func siteTransport(name string, site config.Site, override string, sudo bool) ap
 		for i, k := range keys {
 			lines[i] = k.Line
 		}
-		t = apply.SSHTransport{Site: name, User: site.SSH.User, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, Sudo: sudo}
+		t = apply.SSHTransport{Site: name, User: site.SSHUser(), Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, Sudo: sudo}
 	}
 	if sudo {
 		t.Auth = sudoAuthFor(t.Describe())

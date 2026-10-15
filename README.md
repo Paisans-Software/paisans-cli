@@ -4345,7 +4345,7 @@ and nothing is pruned.
 
 1. With `--execute`, every site reached starts its sync with its peers and the
    command waits, so a version only a site the operator cannot log in to holds
-   (Eg: a host whose allowlist leaves them out) arrives through one they can. A
+   (Eg: a site whose `ssh.keys` does not name them) arrives through one they can. A
    dry run and `config log` start no sync, because a command changes a host only
    with `--execute`; they read what each site holds now.
 2. Every site is reached over ssh, with `sudo` because the store is root's:
@@ -4564,7 +4564,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
-      user: ubuntu         # required, and must already exist on the host
+      user: ubuntu         # optional: defaults to paisans-<token>; must already exist on the host
       port: 22             # optional: empty or 0 means 22
       keys: [alice, bob]   # required: the operators who may log in
 ```
@@ -4572,7 +4572,7 @@ sites:
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
-| `user` | yes | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
+| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
 | `port` | no | outside 1 to 65535 |
 | `keys` | yes | not a list; empty; an operator the `operators` section does not declare; an operator listed twice |
 
@@ -4594,6 +4594,11 @@ which `host prepare` records on the host beside each of their keys so an
 operator can trace a key there back to this file. Options are refused rather than carried: a line `host prepare` writes
 and later compares has to mean the same thing everywhere, and a restricted key
 is added to `authorized_keys` by hand, where `host prepare` leaves it alone.
+
+`user` defaults to `paisans-<token>`, the prefix every name the deployment owns
+on a host already carries, so a deployment that names no user logs in as one of
+its own rather than as a user another deployment shares. The user must exist on
+the host either way.
 
 A single string in place of the section, `ssh: home-a.local`, is refused, and
 the refusal says the section to write and its keys (`host`,
@@ -5276,7 +5281,8 @@ That binding is the renderer's, not `host prepare`'s.
 #### host prepare manages the login user's authorized keys
 
 `host prepare` makes every key of every operator in `ssh.keys` an authorized key of
-`ssh.user`, in `~<user>/.ssh/authorized_keys`. When the directory or the file
+the login user (`ssh.user`, or `paisans-<token>` when it is left out), in
+`~<user>/.ssh/authorized_keys`. When the directory or the file
 is missing it is created, 0700 and 0600, owned by the user. A user that does
 not exist is refused: creating users is out of scope.
 
@@ -5373,74 +5379,14 @@ keys is refused. The key the current connection used is not removed either, by
 construction: the transport offers only listed keys, so the session's key is a
 listed one, unless `--ssh` or the operator's own `IdentityFile` chose another.
 
-**The host's owner may bound which keys it adds.** `paisans-stack.yaml` is one file
-every operator of a deployment edits, and whoever runs `host prepare` runs it with
-their own access, so any operator can get a key of theirs made an authorized key
-of `ssh.user` through someone else's run. That user has `sudo` and is in the
-`docker` group, so the key is root on the host. The review (see *`apply` and
-`host prepare` review what `paisans-stack.yaml` grants*) is the operator's check on
-that; this one is the host owner's, who may not be the one running the
-command. `/etc/paisans/ssh-allow.<user>`, root's and 0644, one per login user
-and shared by every deployment on the host, lists the fingerprints `host
-prepare` may add there, one per line, with `#` starting a comment:
-
-```
-# Keys host prepare may add to ubuntu's authorized_keys, one per line.
-SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA bob bob@example.org
-SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice alice@example.org
-```
-
-It holds fingerprints, not operator names, because a name is whatever
-`paisans-stack.yaml` says it is: replacing the key under `operators.alice.keys` must not
-carry Alice's permission to the new key. A line is the fingerprint, then any
-run of spaces or tabs, then a comment; it is read that way both when `host
-prepare` plans and when its append checks the list on the host, so the two
-never disagree. A line that is not a fingerprint allows nothing, so a mistyped
-line can only refuse a key.
-
-**No file, every key allowed.** A host behaves as it did before until its
-owner makes a list. Founder decision. An empty file allows no key.
-
-**With a file, `host prepare` refuses to append a key it does not list**, as a
-refusal in the plan, before any step runs, naming the key, its operator and the
-`host allow` that would allow it, whoever runs the command. Nothing else the
-list touches is refused:
-
-| Plan step | With the key not on the list |
-|---|---|
-| `authorize ssh key` (append) | **refused** |
-| `share ssh key`, `rename ssh key` | allowed: the key is already in `authorized_keys`, so nothing new can log in |
-| `release ssh key`, `forget ssh key`, `remove ssh key` | allowed: they only take away |
-
-The append checks the list again under the authorized keys lock as it runs,
-so a list made between the plan and the run still holds; so does a share
-that finds the line gone and appends it. A key already in `authorized_keys`
-keeps working whatever the list says: the list decides what `host prepare` may
-add, not who may log in now. Taking a key away is still removing it from
-`ssh.keys` and preparing again, or deleting it by hand.
-
-`paisans host allow <site> <operator>...` adds an operator's keys. It shows every
-fingerprint with its comment, and the list as it would be, so the owner checks
-each against the operator, out of band when unsure, before it is what the list
-holds. A list that does not exist yet is made holding also every key some
-deployment's sidecar already claims for the user, listed apart, so that making
-a list refuses no access the host already has. `paisans host disallow <site>
-<operator|fingerprint>...` takes lines off; it removes no key from
-`authorized_keys`, and says so. Taking the last line leaves an empty list,
-which allows nothing, rather than no file, which would allow everything; going
-back to no list is deleting the file by hand. Both are the owner's: they claim
-nothing in the registry and touch nothing of a deployment's, and `--execute`
-asks for the site's name at a terminal, since writing the list is granting or
-withdrawing access and is never scripted. `host disallow` asks as `host allow`
-does, because taking lines off can empty the list, which blocks every key
-`host prepare` would add later. The list is written under the same
-lock as `authorized_keys`, by a temporary file and a rename, and only over the
-list that was read. The file is the owner's, so both keep every line they do
-not change as it was written, comments included, and refuse a list holding a
-line they cannot read, naming it, rather than keep or drop a line whose
-meaning they do not know; the owner fixes it by hand. How to run them is under *`paisans host allow`* and
-*`paisans host disallow`* in [docs/commands.md](docs/commands.md); `doctor`
-reports each host's list.
+**The review is the check on whose keys it adds.** `paisans-stack.yaml` is one
+file every operator of a deployment edits, and whoever runs `host prepare` runs
+it with their own access, so any operator can get a key of theirs made an
+authorized key of the login user through someone else's run. That user has
+`sudo` and is in the `docker` group, so the key is root on the host. The review
+(see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) shows
+every key a run would add, with its operator and fingerprint, and an
+`--execute` run asks for `approve` at a terminal before anything changes.
 
 #### The watchdog
 
@@ -5484,7 +5430,7 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 
 | Part | Holds | Comes from |
 |---|---|---|
-| login | `ssh.user` | the site's `ssh` section |
+| login | `ssh.user`, or `paisans-<token>` when it is left out | the site's `ssh` section |
 | keys | per key: its operator, its SHA256 fingerprint and its comment | every key of every operator in the site's `ssh.keys` |
 | images | per service: its stack, its name, the image reference as the compose file writes it, and whether it is a foundation image (see below) | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
 | web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
@@ -5512,7 +5458,7 @@ C1 control such as CSI) is refused when the file is loaded, naming the field.
 A terminal reads those characters as commands, so a comment carrying one could
 move the cursor and redraw a review line, Eg: dress a `+ key` up as another
 operator's `~ key`. A host file is not loaded through that check, so as a second
-line, everything the review, `host allow`, `host disallow` and `doctor` print
+line, everything the review and `doctor` print
 from the configuration or from a host shows such a character as an escape
 (Eg: `\x1b`), never raw.
 
@@ -5652,9 +5598,8 @@ the operator's ssh agent (`ssh-add -l`), each part a run adds to also records
 next reader, not a check: anyone can load any key they hold. Who wrote a change
 is the repository's history, which the toolkit cannot see.
 
-The review is the operator's check. The host's owner, who may not be the one
-running the command, bounds which keys `host prepare` may add at all with an
-allowlist on the host (see *host prepare manages the login user's authorized keys*).
+The review is the operator's check, made at the terminal of whoever runs the
+command.
 
 ### Where WireGuard keys are generated
 
@@ -8523,7 +8468,6 @@ deployment's is left alone and not listed:
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
 | the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
-| the host's key allowlist | nothing: `/etc/paisans/ssh-allow.<user>` is the host owner's, shared by every deployment on the host | never touched. Taking a deployment off does not change what the owner allows |
 
 The check that nothing of this deployment's is left comes last, after the
 registry entry.
@@ -9163,7 +9107,6 @@ closing list is usually the cause of those after it:
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
-| SSH allowlist | `/etc/paisans/ssh-allow.<user>` on every site that answered (see *host prepare manages the login user's authorized keys*) | never. No list is `info`, since every key is then allowed; a list says how many keys it holds, and each key `ssh.keys` names that it does not hold and that is not in the login user's `authorized_keys` yet is a `WARN`, as the refusal the next `host prepare` would give when it appends that key, with the `host allow` that allows it. A key already in `authorized_keys` is never appended, so it is no warning; where `authorized_keys` could not be read, every key the list lacks is reported, as the refusal host prepare would give if it had to add it. Nothing is broken now, so it is never a `FAIL` |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there through sudo and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |

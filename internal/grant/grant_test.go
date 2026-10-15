@@ -462,3 +462,19 @@ func TestReviewLinesShowControlCharactersEscaped(t *testing.T) {
 		}
 	}
 }
+
+// A site that leaves ssh.user out grants its keys to the user it is reached
+// as, the deployment's own.
+func TestTheLoginIsTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
+	cfg := fixture(t)
+	s := cfg.Sites["home-a"]
+	s.SSH.User = ""
+	cfg.Sites["home-a"] = s
+	g, err := grant.For(cfg, nil, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Login != "paisans-f2a9" {
+		t.Errorf("login is %q, want paisans-f2a9", g.Login)
+	}
+}

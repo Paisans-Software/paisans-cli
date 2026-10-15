@@ -573,10 +573,6 @@ paisans host prepare --all --execute          # every site, one at a time
   recorded in `/var/lib/paisans/granted.<token>.json`: each key added or
   changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
   removed one a `-` line, at every verbosity.
-* **Allowlist:** with `/etc/paisans/ssh-allow.<user>` on the host, a key to
-  add that it does not list is a refusal in the plan, naming the key, its
-  operator and the `host allow` that allows it; sharing, renaming and removing
-  keys are never refused. Without the file every key is allowed.
 * **`--execute`:** asks for `approve` at a terminal when the review adds or
   changes anything, before the claim; then installs and configures what the
   plan lists, and records the login and the keys once every step has
@@ -611,63 +607,6 @@ paisans host deployments --ssh admin@203.0.113.9   # read only
 * **`--execute`:** not taken.
 
 See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
-
-### `paisans host allow`
-
-Adds each named operator's key fingerprints to the site's host's key allowlist,
-`/etc/paisans/ssh-allow.<user>`: the keys `host prepare` may add to the login
-user's `authorized_keys` there, whoever runs it.
-
-```sh
-paisans host allow home-a bob             # the fingerprints, and the list as it would be
-paisans host allow home-a bob --execute   # asks for "home-a" at a terminal
-```
-
-* **Alone:** always; the whole apply never runs it. It is the host owner's
-  command, run once they have checked each fingerprint it shows with its
-  operator.
-* **Flags:** the site and one or more operators, by their name in `operators`, as
-  arguments; `--config`, `--ssh`, `--execute`, `--sudo`. It reads no secrets.
-* **Hosts:** the one site's. It claims nothing in the registry and touches
-  nothing of a deployment's: the list is the host's.
-* **New list:** when the file does not exist yet, it is made holding also
-  every key some deployment's sidecar already claims for the user, listed
-  apart as `keep`, so that making a list refuses no access the host already
-  has.
-* **Existing list:** every line it does not change is kept as written,
-  comments included, and the new keys are added at its end. A line that is
-  neither a comment nor a fingerprint is refused, naming it, and nothing is
-  written until the owner fixes it by hand.
-* **`--execute`:** asks for the site's name at a terminal, never answered by a
-  flag, and refuses without one; then writes the list under
-  `/etc/paisans/authorized_keys.lock`, by a temporary file and a rename, only
-  over the list it read. Without it, it prints each fingerprint with its
-  comment and the file as it would be.
-
-### `paisans host disallow`
-
-Takes lines off the site's host's key allowlist, by operator or by fingerprint.
-
-```sh
-paisans host disallow home-a bob                                                      # what it would take off
-paisans host disallow home-a SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA --execute  # asks for "home-a"
-```
-
-* **Alone:** always; the whole apply never runs it.
-* **Flags:** the site and one or more operators or `SHA256:` fingerprints as
-  arguments; `--config`, `--ssh`, `--execute`, `--sudo`.
-* **Hosts:** the one site's, as `host allow`.
-* **Keys already authorized:** it removes no key from `authorized_keys`, and
-  says so with what does: the operator out of `ssh.keys` and `host prepare
-  --execute`, or the line deleted by hand.
-* **The last line:** taking it leaves an empty list, which allows no key, and
-  it says so. To allow every key again, the owner deletes the file by hand.
-  With no list at all there is nothing to take off, and nothing is written.
-* **The rest of the list:** kept as written, comments included; a line it
-  cannot read is refused, as by `host allow`.
-* **`--execute`:** as `host allow`.
-
-See *host prepare manages the login user's authorized keys* in `README.md`.
 
 ### `paisans prune`
 
@@ -951,8 +890,8 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   wrote there may still be in the web server's `include_dir`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
-  `/var/lib/paisans/granted.<token>.json`, with its registry entry, and never
-  touches the host's key allowlist. It deletes the host's configuration store
+  `/var/lib/paisans/granted.<token>.json`, with its registry entry. It deletes
+  the host's configuration store
   too, the repository and the files beside it; the other sites still hold every
   version.
   With `--evict` it needs a terminal, and asks, in order: `revoked` for a
@@ -1013,9 +952,7 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
 that are down or unhealthy, the settings a gated app must enforce, Pocket ID's active
-instance, clocks, what is left over, and each host's key allowlist, with each
-key `ssh.keys` names that it does not hold and that the next `host prepare`
-would add, since one already in `authorized_keys` is never added again.
+instance, clocks, and what is left over.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,

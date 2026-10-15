@@ -95,7 +95,7 @@ sites:
     # operator's agent. `host prepare` makes them the user's authorized keys.
     ssh:
       host: home-a.local        # optional: defaults to public_address
-      user: ubuntu              # must already exist on the host
+      user: ubuntu              # optional: defaults to paisans-<token>; must already exist on the host
       port: 22                  # optional: defaults to 22
       keys: [alice, bob]
 

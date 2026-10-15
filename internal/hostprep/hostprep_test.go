@@ -1233,6 +1233,30 @@ func TestAUserWithoutAuthorizedKeysGetsThem(t *testing.T) {
 	}
 }
 
+// host prepare adds every key ssh.keys lists, whatever a file at
+// /etc/paisans/ssh-allow.<user> on the host holds: it reads no such file,
+// and no step it plans mentions one.
+func TestKeysAreAddedWhateverAnSSHAllowFileHolds(t *testing.T) {
+	host := preparedHost(false)
+	host.files["/etc/paisans/ssh-allow.ubuntu"] = "# allows nothing\n"
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := stepsLabelled(plan, "add")
+	if len(add) != 1 || !strings.Contains(add[0].Describe, fingerprint(keyBob)+" (bob)") {
+		t.Fatalf("want bob's key added, got:\n%s", printed(plan))
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "ssh-allow") {
+			t.Errorf("%s consults an allowlist: %s", s.Title, s.Command)
+		}
+	}
+	if out := printed(plan); strings.Contains(out, "allowlist") {
+		t.Errorf("the plan mentions an allowlist:\n%s", out)
+	}
+}
+
 // A listed key cloud-init already put there is reported, neither added
 // again nor recorded, and a key nobody listed and host prepare never added is
 // not touched or mentioned.
@@ -1368,7 +1392,7 @@ func TestAMissingUserIsRefused(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = "__PAISANS_ABSENT__\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "ssh.user ubuntu does not exist on fake. host prepare does not create users") {
+	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. host prepare does not create users") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -1990,5 +2014,43 @@ func TestAFailedCaddyProbeIsAnError(t *testing.T) {
 	host.failures = map[string]error{"com.docker.compose.service=caddy": errors.New("exit status 1")}
 	if _, err := hostprep.Build("home-a", fixture(t), host); err == nil {
 		t.Fatal("a failed probe was read as no Caddy")
+	}
+}
+
+// A site that leaves ssh.user out has its keys managed for the deployment's
+// own user: its passwd entry, its authorized_keys and a sidecar named for it.
+func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
+	cfg := withKeys(t, "home-a", keyAlice)
+	s := cfg.Sites["home-a"]
+	s.SSH.User = ""
+	cfg.Sites["home-a"] = s
+	host := preparedHost(false)
+	host.responses[probePasswd] = "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/sh\n"
+	delete(host.files, authorizedKeys)
+	delete(host.files, ownedKeys)
+	plan, err := hostprep.Build("home-a", cfg, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := printed(plan)
+	if !strings.Contains(out, "ssh: authorize key "+fingerprint(keyAlice)+" (alice) for paisans-f2a9") {
+		t.Fatalf("alice's key is not authorized for paisans-f2a9:\n%s", out)
+	}
+	add := stepsLabelled(plan, "add")
+	if len(add) != 1 {
+		t.Fatalf("want one add, got:\n%s", out)
+	}
+	cmd := unlocked(t, add[0].Command)
+	for _, want := range []string{"'/home/paisans-f2a9/.ssh/authorized_keys'", "/etc/paisans/authorized_keys.paisans-f2a9.paisans-f2a9.owned"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("the add lacks %s: %s", want, cmd)
+		}
+	}
+	asked := false
+	for _, c := range host.ran {
+		asked = asked || strings.Contains(c, "getent passwd 'paisans-f2a9'")
+	}
+	if !asked {
+		t.Errorf("paisans-f2a9's passwd entry was not read:\n%s", strings.Join(host.ran, "\n"))
 	}
 }

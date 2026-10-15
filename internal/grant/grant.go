@@ -26,7 +26,9 @@ import (
 
 // Grant is one site's grant.
 type Grant struct {
-	// Login is ssh.user, the account every key in Keys may log in as.
+	// Login is the login user from SSHUser(): the declared ssh.user, or the
+	// deployment's own user when none is declared. Every key in Keys may log
+	// in as it.
 	Login string
 	// Keys is one entry per key of every admin ssh.keys names, sorted by
 	// fingerprint.
@@ -91,7 +93,7 @@ func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	if !ok {
 		return Grant{}, fmt.Errorf("no site %q is declared", site)
 	}
-	g := Grant{Login: declared.SSH.User, Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
+	g := Grant{Login: declared.SSHUser(), Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
 	if plan != nil {
 		images, err := ImagesOf(plan, site)
 		if err != nil {

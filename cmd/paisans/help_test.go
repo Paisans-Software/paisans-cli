@@ -131,7 +131,7 @@ func TestCommandHelpWraps(t *testing.T) {
 func TestEveryFlagSetHasAPage(t *testing.T) {
 	files, _ := filepath.Glob("*.go")
 	literal := regexp.MustCompile(`newFlagSet\("([^"]+)",`)
-	names := []string{"host allow", "host disallow", "web-server show", "web-server check", "dns init", "dns prune"}
+	names := []string{"web-server show", "web-server check", "dns init", "dns prune"}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -151,5 +151,20 @@ func TestEveryFlagSetHasAPage(t *testing.T) {
 func TestWrap(t *testing.T) {
 	if got := wrap("one two three four", 9); got != "one two\nthree\nfour" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// The host group prepares a host and lists what is on it; nothing in the
+// help offers a key allowlist.
+func TestHostHasNoAllowlistCommands(t *testing.T) {
+	for _, name := range []string{"host allow", "host disallow"} {
+		if findCommand(name) != nil {
+			t.Errorf("%s has a help page", name)
+		}
+	}
+	for what, text := range map[string]string{"the host group's summary": groupSummary["host"], "help execute": executeTopic} {
+		if strings.Contains(text, "allowlist") || strings.Contains(text, "host allow") {
+			t.Errorf("%s still offers an allowlist:\n%s", what, text)
+		}
 	}
 }
