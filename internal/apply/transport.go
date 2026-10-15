@@ -90,6 +90,15 @@ type SSHTransport struct {
 	// the transport so a site is asked once. Nil runs sudo as it is, which
 	// works only where it asks for no password.
 	Auth *SudoAuth
+	// DockerHost, when set, is exported as DOCKER_HOST ahead of every
+	// command (see RemoteCommand), so docker reaches the login user's own
+	// rootless daemon and never the host's system socket.
+	DockerHost string
+	// Login, when set and DockerHost is empty, finds DockerHost from the
+	// login user's UID on the transport's first command, and is shared by
+	// every copy of the transport to one destination, so the UID is asked
+	// once a run. See Login.
+	Login *Login
 	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero is
 	// DefaultConnectTimeout. ssh's own is the operating system's TCP connect
 	// timeout, which is 75 seconds on macOS for a host that is switched off
@@ -171,9 +180,9 @@ func (t SSHTransport) port() int {
 // WriteFile's content, so with one every command run with a password would
 // print it.
 //
-// The command is sent as RemoteCommand wraps it, on both routes.
+// The command is sent as RemoteCommand wraps it, with DockerHost, on both routes.
 func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
-	command = RemoteCommand(command)
+	command = RemoteCommand(t.DockerHost, command)
 	args := append(muxArgs(), "-T")
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
@@ -203,7 +212,15 @@ func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 // The string is a third longer than the command, and it is still one
 // argument: Linux allows 128 KiB in one (MAX_ARG_STRLEN), and anything large
 // here (rendered files, SQL) goes on stdin, not in the command.
-func RemoteCommand(command string) string {
+//
+// With dockerHost, the command runs after `export DOCKER_HOST=<dockerHost>`,
+// inside the same encoded word, so every docker the command starts, in a
+// pipeline or a subshell as much as at its head, reaches the login user's
+// own daemon.
+func RemoteCommand(dockerHost, command string) string {
+	if dockerHost != "" {
+		command = "export DOCKER_HOST=" + shellQuote(dockerHost) + "\n" + command
+	}
 	return `sh -c 'eval "$(printf %s ` + base64.StdEncoding.EncodeToString([]byte(command)) + ` | base64 -d)"'`
 }
 
@@ -551,10 +568,19 @@ func lastLine(out string) string {
 // temporary file and renames it, so even a transfer cut off part way leaves
 // the old file whole and a second attempt starts over.
 //
+// A transport with a Login asks its UID first, once a run (see Login).
+//
 // Three attempts, two and four seconds apart, is enough for a blip and short
 // enough that a host which is really down is reported within seconds rather
 // than hidden behind a long wait.
 func (t SSHTransport) run(command string, stdin *string) (string, error) {
+	if t.Login != nil && t.DockerHost == "" {
+		host, err := t.Login.resolve(t)
+		if err != nil {
+			return "", err
+		}
+		t.DockerHost = host
+	}
 	for attempt := 1; ; attempt++ {
 		cmd, cleanup, err := t.ssh(command)
 		if err != nil {

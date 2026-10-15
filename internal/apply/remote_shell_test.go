@@ -14,7 +14,7 @@ import (
 // exactly.
 func TestRemoteCommandQuotesNothing(t *testing.T) {
 	command := `sudo -k -S -p '' sh -c 'printf '\''%s\n'\'' "$HOME"; exit 3'`
-	remote := apply.RemoteCommand(command)
+	remote := apply.RemoteCommand("", command)
 	body, ok := strings.CutPrefix(remote, "sh -c '")
 	if !ok || !strings.HasSuffix(body, "'") {
 		t.Fatalf("not one single quoted word after sh -c: %s", remote)
@@ -57,7 +57,7 @@ func TestRemoteCommandRunsInShUnderAnyLoginShell(t *testing.T) {
 			continue
 		}
 		tried++
-		out, err := run(path, apply.RemoteCommand(command))
+		out, err := run(path, apply.RemoteCommand("", command))
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 3 {
 			t.Errorf("%s: exit %v, want status 3\n%s", shell, err, out)
@@ -68,5 +68,22 @@ func TestRemoteCommandRunsInShUnderAnyLoginShell(t *testing.T) {
 	}
 	if tried == 0 {
 		t.Skip("no shell found")
+	}
+}
+
+// With a docker host, the command runs after DOCKER_HOST is exported, inside
+// the one encoded word, so every docker the command starts sees it. Without
+// one, the command is sent exactly as given.
+func TestRemoteCommandExportsTheDockerHost(t *testing.T) {
+	remote := apply.RemoteCommand("unix:///run/user/1000/docker.sock", `printf %s "$DOCKER_HOST"`)
+	out, err := exec.Command("sh", "-c", remote).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "unix:///run/user/1000/docker.sock" {
+		t.Errorf("DOCKER_HOST was %q", out)
+	}
+	if got, ok := apply.InnerCommand(apply.RemoteCommand("", "uptime")); !ok || got != "uptime" {
+		t.Errorf("without a docker host: %q", got)
 	}
 }
