@@ -73,7 +73,7 @@ Depends on: phase 2; R9.
 Depends on: phase 1.
 
 * Create `internal/admission/request.go`: `Request` (fields per the spec's table), `Build(cfg *config.Config, site string) (Request, error)`, `Encode(Request) []byte`, `Parse([]byte) (Request, error)` with strict validation, `Digest([]byte) string` (12 hex digits in three groups of SHA-256 over the encoded bytes).
-* Create `internal/admission/record.go`: `Record` (user, grants, forwarding, ports, digest, time), path `/etc/paisans/admitted.<token>.json`, `Read(t Transport, token string) (Record, error)`.
+* Create `internal/admission/record.go`: `Record` (user, grants, forwarding, ports, digest, time), path `/etc/paisans/admitted.<token>.json`, mode 0644 and owned by root so the deployment's user can read it without sudo, `Read(t Transport, token string) (Record, error)`.
 * Create `cmd/paisans/hostrequest.go`: `host request --site <s>`; request on stdout, digest on stderr.
 * Tests: golden requests per role mix; digest stable and field-sensitive; `Parse` refusals (missing field, unknown version, bad key, address outside subnet).
 
@@ -85,6 +85,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * Create `internal/hostprep/snippets/egress.nft.tmpl` and `paisans-egress.service.tmpl`.
 * Create `cmd/paisans/hostadmit.go`: `host admit` (`--request` | `--site --ssh`, `--watchdog`, `--public-ports`, `--execute`), the typed digest, and `host evict` (`--request` | `--deployment --user` | `--site --ssh`, typed user name).
 * Golden plans: blank Ubuntu 24.04, old system Docker (refused), current system Docker, snap Docker (refused), each grant, re-run with a grant removed, a privileged existing user (refused), second watchdog holder (refused), evict of one of two deployments.
+* The admission record is written mode 0644, owned by root, via temp and rename; a golden plan and a test assert the mode, and a re-run that finds it otherwise restores 0644.
 * Any boot-ordering mechanism R10 calls for lands here.
 
 ## Phase 6: Commands as the deployment's user
@@ -95,7 +96,7 @@ Depends on: phases 2, 3, 5; R7, R8.
 * Paths: `internal/deployrecord/record.go`, `internal/grant/record.go`, `internal/gatewaymove/gatewaymove.go`, `internal/hostprep/configstore.go`, `internal/render/hostsites.go` move under `deployment.Root()`; `deployment.go` gains `StateDir()`.
 * `internal/hostcheck/inventory.go`: no UID 0; own daemon only; `ss -Hltnu`; no ufw probe.
 * `internal/apply/volumeprune.go`: `docker system df -v`. `internal/mesh/mesh.go`: the user's `daemon.json`.
-* `internal/registry`: claims happen in admit; deployment commands read the admission record instead.
+* `internal/registry`: claims happen in admit; deployment commands read the admission record (mode 0644) as the deployment's user, with no sudo, instead.
 * `internal/siteremove/host.go`: user-side removal, then the `host evict` line. `cmd/paisans/hostdeployments.go`: lists admission records.
 * `web_server.managed_by: external`: per the founder's answer to the spec's *Open* item.
 * Docker-tagged tests run against a rootless daemon.
