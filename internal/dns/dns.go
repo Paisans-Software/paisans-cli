@@ -285,6 +285,21 @@ func GatewayHostnames(cfg *config.Config) []Hostname {
 	return out
 }
 
+// ServedHostnames is every hostname the Caddy on site serves: a gateway's
+// are GatewayHostnames, and a monitor's the hostnames of the apps pinned to
+// it, which it serves itself.
+func ServedHostnames(cfg *config.Config, site string) []Hostname {
+	var out []Hostname
+	gateway := cfg.Sites[site].Has(config.RoleGateway)
+	for _, h := range hostnames(cfg) {
+		by, ok := render.ServedBy(cfg, h.App)
+		if ok && by == site || !ok && gateway {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // hostnames is every hostname the configuration names for an app.
 func hostnames(cfg *config.Config) []Hostname {
 	var out []Hostname

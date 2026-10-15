@@ -349,7 +349,7 @@ func TestTokenCheckRemoteCommand(t *testing.T) {
 		if strings.Contains(c, accountToken) || strings.Contains(c, "cfat_placeholder") {
 			t.Errorf("the token is in the command: %s", c)
 		}
-		if !strings.Contains(c, "s/^ACME_DNS_TOKEN=//p' '/srv/paisans/tok/infra/caddy/caddy.env'") {
+		if !strings.HasPrefix(c, "f='/srv/paisans/tok/infra/caddy/caddy.env'; ") || !strings.Contains(c, `s/^ACME_DNS_TOKEN=//p' "$f"`) {
 			t.Errorf("the token is not read from caddy.env: %s", c)
 		}
 		header := strings.Index(c, "Authorization")
@@ -436,9 +436,42 @@ func TestRemoteGetInAShell(t *testing.T) {
 	if out, err = run("OTHER=1\n", "0"); err != nil || out != "none\n" {
 		t.Errorf("a file without the token: %v %q", err, out)
 	}
+	// A file that cannot be read is told apart from one without a token:
+	// caddy.env is root's and 0600, and a check run without root must not
+	// report that it holds no token.
+	if os.Geteuid() != 0 {
+		if err := os.Chmod(env, 0); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("sh", "-c", remoteGet(env, "https://api.example.org/"))
+		if got, err := cmd.CombinedOutput(); err != nil || !strings.HasPrefix(string(got), "unreadable sed: ") || !strings.Contains(string(got), "ermission denied") {
+			t.Errorf("an unreadable file: %v %q", err, got)
+		}
+	}
 	os.Remove(env)
 	cmd := exec.Command("sh", "-c", remoteGet(env, "https://api.example.org/"))
-	if got, err := cmd.CombinedOutput(); err != nil || string(got) != "none\n" {
+	if got, err := cmd.CombinedOutput(); err != nil || !strings.HasPrefix(string(got), "unreadable sed: ") || strings.Count(string(got), "\n") != 1 {
 		t.Errorf("a missing file: %v %q", err, got)
 	}
 }
+
+// A caddy.env the check cannot read says so, with sed's reason, and does
+// not say the file holds no token.
+func TestOnSiteSaysWhenCaddyEnvCannotBeRead(t *testing.T) {
+	host := runnerFunc(func(string) (string, error) {
+		return "unreadable sed: can't read /srv/paisans/f2a9/infra/caddy/caddy.env: Permission denied\n", nil
+	})
+	check := TokenCheck{Provider: "cloudflare", Domain: "example.org", Place: "vm"}
+	r := check.OnSite(context.Background(), host, "/srv/paisans/f2a9/infra/caddy/caddy.env")
+	want := "cannot read caddy.env on vm: can't read /srv/paisans/f2a9/infra/caddy/caddy.env: Permission denied"
+	if r.Status != TokenFailed || r.Finding != want || !r.Unanswered {
+		t.Errorf("got %+v\nwant finding %q", r, want)
+	}
+	if strings.Contains(r.Finding+r.Advice, "holds no") {
+		t.Errorf("an unreadable file is reported as one without a token: %+v", r)
+	}
+}
+
+type runnerFunc func(string) (string, error)
+
+func (f runnerFunc) Run(command string) (string, error) { return f(command) }
