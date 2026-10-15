@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -687,14 +688,22 @@ func (t SSHTransport) ReadFile(path string) (string, bool, error) {
 // keeps it out of the process table, and writing to a temporary file first
 // means a failed transfer leaves the previous file intact rather than a
 // truncated one that an application will happily read.
+//
+// The temporary file is made by mktemp beside the target, which creates it
+// exclusively with mode 600. A fixed, guessable name would let anyone who can
+// write the directory plant a link there for a privileged write to follow, and
+// would make two writes of one path share a file. The rename onto the target
+// replaces a link at the target instead of writing through it, and the trap
+// removes the temporary file if any step before the rename fails.
 func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 	if err := t.refuseSudoDocker(); err != nil {
 		return err
 	}
 	dir := parentDir(path)
+	template := strings.TrimSuffix(dir, "/") + "/." + pathpkg.Base(path) + ".XXXXXX"
 	script := fmt.Sprintf(
-		"set -e; mkdir -p %s; tmp=%s.paisans-tmp; cat > $tmp; chmod %04o $tmp; mv $tmp %s",
-		shellQuote(dir), shellQuote(path), mode, shellQuote(path))
+		`set -e; mkdir -p %s; tmp=$(mktemp %s); trap 'rm -f "$tmp"' EXIT; cat > "$tmp"; chmod %04o "$tmp"; mv -f "$tmp" %s; trap - EXIT`,
+		shellQuote(dir), shellQuote(template), mode, shellQuote(path))
 	script, stdin, err := t.sudo(script, &content)
 	if err != nil {
 		return ui.RedactError(err)

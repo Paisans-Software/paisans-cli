@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -508,5 +509,113 @@ func TestAnSSHFailureInTheSudoProbeIsNotARefusal(t *testing.T) {
 	_, err := tr.Run("true")
 	if err == nil || strings.Contains(err.Error(), "sudo") || !strings.Contains(err.Error(), "did not accept your ssh key") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// writeFileScript runs WriteFile through a stand-in for ssh that executes the
+// remote command locally under sh, with the content on its stdin, and returns
+// the script the host would have run.
+func writeFileScript(t *testing.T, path, content string, mode uint32) (script string, err error) {
+	t.Helper()
+	restore := apply.FakeSSH(func(args []string, stdin string) (string, int) {
+		script = args[len(args)-1]
+		cmd := exec.Command("sh", "-c", script)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, rerr := cmd.CombinedOutput()
+		if rerr != nil {
+			return string(out), 1
+		}
+		return string(out), 0
+	}, nil, func(time.Duration) {}, io.Discard)
+	defer restore()
+	err = apply.SSHTransport{Destination: "vm"}.WriteFile(path, content, mode)
+	return script, err
+}
+
+// The temporary file is made by mktemp in the target's directory: created
+// exclusively with mode 600, so a link planted at a guessable name is never
+// followed, and a fresh name per write, so two writes of one path do not meet.
+func TestWriteFileTempFileComesFromMktempBesideTheTarget(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script, err := writeFileScript(t, filepath.Join(dir, "app.env"), "A=1\n", 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(script, ".paisans-tmp") {
+		t.Errorf("a fixed temporary name is still used:\n%s", script)
+	}
+	want := "mktemp '" + dir + "/.app.env.XXXXXX'"
+	if !strings.Contains(script, want) {
+		t.Errorf("script lacks %q:\n%s", want, script)
+	}
+	if !strings.Contains(script, "mv -f") {
+		t.Errorf("the temporary file is not moved with mv -f:\n%s", script)
+	}
+}
+
+// Links planted where the old fixed name was, and where a temporary name
+// would be guessed, are left alone, and the target still gets the content.
+func TestWriteFileDoesNotFollowPlantedLinks(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "app.env")
+	for _, name := range []string{"app.env.paisans-tmp", ".app.env.XXXXXX", ".app.env.000000", ".app.env.tmp"} {
+		if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The target itself is a link too: the rename replaces it.
+	if err := os.Symlink(victim, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeFileScript(t, target, "A=1\n", 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "precious" {
+		t.Errorf("a planted link was written through: %q", got)
+	}
+	if fi, _ := os.Stat(victim); fi.Mode().Perm() != 0o644 {
+		t.Errorf("a planted link was chmodded: %v", fi.Mode().Perm())
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "A=1\n" {
+		t.Fatalf("target = %q, %v", got, err)
+	}
+	if li, _ := os.Lstat(target); li.Mode()&os.ModeSymlink != 0 || li.Mode().Perm() != 0o640 {
+		t.Errorf("target mode %v", li.Mode())
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".app.env.*"))
+	if len(left) != 3 {
+		t.Errorf("a temporary file was left behind: %v", left)
+	}
+}
+
+// A write that fails part way leaves no temporary file. The mv is made to
+// fail by a stand-in earlier on the PATH.
+func TestWriteFileRemovesItsTempFileOnFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "mv"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	if _, err := writeFileScript(t, filepath.Join(dir, "app.env"), "A=1\n", 0o600); err == nil {
+		t.Fatal("a failing mv was reported as success")
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*app.env*"))
+	if len(left) != 0 {
+		t.Errorf("temporary file left behind: %v", left)
 	}
 }
