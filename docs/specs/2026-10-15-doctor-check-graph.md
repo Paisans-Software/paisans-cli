@@ -1,9 +1,8 @@
 # Doctor runs its checks as a graph, in parallel, and checks the DNS token
 
-Status: draft for the founder's review, 2026-10-15; not implemented.
-Requirements 1 to 4 under *Settled* are the founder's. The apply gate is
-recommended and waits on the founder (*Open*). What Cloudflare and Caddy do is
-cited, observed on staging, or marked to be verified.
+Status: approved by the founder, 2026-10-15; not implemented. What
+Cloudflare and Caddy do is cited or was observed on staging on 2026-10-15
+(*Observed*).
 
 ## What happened
 
@@ -60,7 +59,19 @@ Founder decisions, 2026-10-15:
   call comes from, so a check from one place says nothing about the other.
 * **A record at one of the deployment's hostnames that points somewhere
   other than its site is reported**, read only, as a check of its own that
-  needs the token's zone read.
+  needs the token's zone read. A hostname with no record fails, because
+  nothing can reach it.
+* **`apply` checks the token on each Caddy site before it starts or reloads
+  Caddy**, and refuses on a refusal, because one check costs two or three
+  calls and a token Caddy cannot use costs the provider's lockout.
+* **A provider API that does not answer stops the apply at that gate**, as
+  a refusal does, because the gate cannot tell a token Caddy can use from
+  one it cannot.
+* **Doctor reads the workstation's copy of the token from the secrets
+  file**, with the age key from the workstation's keystore as `apply` reads
+  it. Calling the provider needs the token's value, and sops encrypts each
+  value under a fresh nonce, so no comparison of encrypted values could
+  stand in for the call.
 
 ## Doctor today
 
@@ -265,19 +276,28 @@ provider that echoed a credential could not put it on the terminal.
 `dns token <place>` makes two calls, in order, and the second only when the
 first passed:
 
-1. `GET /client/v4/user/tokens/verify`. Its `result.status` is `active`,
-   `disabled` or `expired`
-   ([Cloudflare: Verify Token](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/verify/)).
-   Anything but `active` fails, with the status.
-2. The zone lookup `dns init` makes, `GET /client/v4/zones?name=<name>`,
+1. The zone lookup `dns init` makes, `GET /client/v4/zones?name=<name>`,
    suffix by suffix as `dns.FindZone` asks (`internal/dns/zone.go`), until
-   the zone holding `community.domain` is found.
+   the zone holding `community.domain` is found. Client IP Address
+   Filtering applies to it (observed), so it is the call that catches a
+   token filtered away from this place, and it proves the token can read
+   the zone, which DNS-01 needs.
+2. Verify, for the token's status, `active`, `disabled` or `expired`.
+   Anything but `active` fails, with the status. A token an account owns,
+   whose value begins `cfat_`, is verified at
+   `GET /client/v4/accounts/<account id>/tokens/verify`, with the account
+   id the zone lookup returned; any other at
+   `GET /client/v4/user/tokens/verify`
+   ([Cloudflare: Verify Token](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/verify/)).
+   The user endpoint answers an account token `401`, `Code:1000 Invalid API
+   Token`, although the token works (observed), so choosing the endpoint by
+   the prefix is what keeps a working token from failing here.
 
-The second call is the one that catches the incident: Cloudflare does not
-apply Client IP Address Filtering to Verify Token
+Verify alone could not catch the incident: Cloudflare does not apply Client
+IP Address Filtering to it
 ([Cloudflare: Restrict API tokens](https://developers.cloudflare.com/fundamentals/api/how-to/restrict-tokens/)),
-so a token refused from the gateway verifies there as active. It also
-proves the token can read the zone, which DNS-01 needs. Its answers:
+so a token refused from the gateway verifies there as active. The zone
+lookup's answers:
 
 | Answer | Finding |
 |--------|---------|
@@ -285,6 +305,7 @@ proves the token can read the zone, which DNS-01 needs. Its answers:
 | `Code:9109`, `Cannot use the access token from location: <ip>` | FAIL: `cloudflare refuses the token from <place> (<ip>)`. Add the address to the token's Client IP Address Filtering, or remove the filter. The address is the one in Cloudflare's message, because that is what it judged, and it can differ from `public_address` behind NAT. |
 | `Code:10502`, `Too many authentication failures` | FAIL: `cloudflare is locking the token out`. See *The lockout* |
 | no zone the token can see holds the domain | FAIL: `dns.FindZone`'s error, which says the token needs zone read as well as record edit |
+| `Code:1000`, `Invalid API Token` | FAIL: `cloudflare does not accept the token`; it was deleted, rolled or mistyped |
 | no answer from the API | FAIL: `cloudflare did not answer from <place>`, with curl's or Go's error |
 
 Edit permission on the zone's records cannot be read without writing one,
@@ -312,37 +333,37 @@ or the monitor's own on a monitor) reports the newest outcome:
 Hostnames failing for one reason are one finding that names them all, since
 six lines saying `9109` is the cascade the founder ruled out. The log is
 where this server's own failures are, so this node needs no secret and no
-call to the provider. The field names Caddy logs under, and that it logs
-JSON in a container, are to be verified against the Caddy the foundation
-track resolves to, from a staging log kept as a test fixture.
+call to the provider.
+
+Caddy logs JSON to the container's output (observed). The summary reads
+lines whose `logger` is `tls.obtain`, with `msg` either `could not get
+certificate from issuer` or `certificate obtained successfully`, and their
+`identifier` (the hostname), `issuer` and `error` fields. The provider's
+code is not a field of its own: it is inside `error`, as
+`{Code:9109 Message:Cannot use the access token from location: <ip> ...}`,
+so the summary reads it from there. A staging log, with addresses and
+hostnames replaced, is the test fixture.
 
 ### The lockout
 
-Cloudflare answered `Code:10502` after Caddy's repeated failures (observed).
-Its documented rate limit is 1,200 requests in five minutes per user, which
-answers 429 and blocks for five minutes
-([Cloudflare: API rate limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/)),
-but that page does not describe 10502; how many failures trip it, how long
-it lasts, and whether it is held against the token or the address are to be
-verified.
+Cloudflare answers `Code:10502`, `Too many authentication failures`, once
+calls with a refused token arrive in a burst. Observed on staging: Caddy
+started, its first `9109` came three seconds later and its first `10502` two
+seconds after that. Over the next twenty minutes Caddy's log held 30 `9109`
+answers and 42 `10502` answers, interleaved, so some calls still reached the
+filter while others were turned away. Once the token's filter admitted the
+server, the next attempt Caddy's schedule made obtained every certificate,
+with no lockout left over. So `10502` is held while refused calls keep
+arriving, and fixing the token is what ends it; how many failures trip it
+and how long it outlasts the last one are not documented
+([Cloudflare: API rate limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/)
+describes a different limit).
 
 Doctor does not add to it. When any Caddy site's log shows `10502` in the
-last fifteen minutes, every `dns token` node is skipped, with `not asked,
-so as not to extend Cloudflare's lockout`, and the finding's advice is to
-stop that site's Caddy, with the command printed for a human to run:
-
-```sh
-docker compose -f /srv/paisans/<token>/infra/compose.yaml stop caddy
-```
-
-then to wait and run `paisans doctor` again before `paisans apply`, which
-starts it. Caddy retries a failed certificate on a schedule that begins at a
-minute and lengthens to hours (certmagic, `async.go`, `retryIntervals`),
-but each attempt tries every issuer for every hostname, and a restart begins
-the schedule again, which is how six hostnames reached the lockout (the
-rate actually observed is to be verified against Caddy's issuer and solver
-retries). Stopping Caddy also stops serving the hostnames that still hold a
-certificate, which the advice says.
+last five minutes, every `dns token` node is skipped, with `not asked, so as
+not to feed Cloudflare's lockout`, and the finding says what does end it:
+fix the token's filter, after which Caddy's next scheduled attempt succeeds
+with nothing restarted.
 
 ### Records that point elsewhere
 
@@ -389,8 +410,6 @@ with its own text.
 
 ## `apply` checks the token before it starts Caddy
 
-Recommended, and waiting on the founder (*Open*).
-
 On each Caddy site, `apply` runs `dns token <site>`, the same code as
 doctor's node, before anything that makes Caddy ask the provider: after the
 gateway's files are written and its modules checked, before `validate
@@ -413,11 +432,11 @@ the site's apply with nothing of the gateway changed:
   `paisans doctor` checks the token from every place that uses it.
 ```
 
-An API that does not answer is a warning and the apply goes on, because
-Caddy keeps serving the certificates it holds, and the gate exists to keep a
-token the provider refuses out of Caddy's retries, not to make an outage at
-Cloudflare one of the deployment's. A provider with no check is not gated,
-and says so as a detail.
+An API that does not answer stops the site's apply as a refusal does,
+because the gate cannot tell a token Caddy can use from one it cannot, and
+starting Caddy on an unchecked token is what the gate exists to prevent. The
+gateway is left as it was, still serving the certificates it holds. A
+provider with no check is not gated, and says so as a detail.
 
 The workstation side is the same check, run first by `dns init` and `dns
 prune` in `dnsSetup`, so a refusal there says `from this workstation` in
@@ -481,9 +500,11 @@ under `apply`, and the gates in it.
 * **Same findings.** For every fixture `Input` in `internal/doctor`'s
   tests, the graph's findings equal `Diagnose`'s.
 * **Token check.** Against an `httptest` server: `active` and a zone pass;
-  `disabled` and `expired` fail without the zone call; `9109` names the
-  address from the message; `10502` fails; no zone fails with
-  `FindZone`'s error. The remote command, given a fake host, carries no
+  `9109` names the address from the message and makes no verify call;
+  `10502` fails; `1000` fails; no zone fails with `FindZone`'s error;
+  `disabled` and `expired` fail after the zone is found; a `cfat_` token is
+  verified at the account endpoint with the zone's account id and any other
+  at the user endpoint. The remote command, given a fake host, carries no
   token in the command string, and its stdin is the only place the
   `Authorization` header appears.
 * **No token in output.** The token, planted in a provider's error message
@@ -498,41 +519,28 @@ under `apply`, and the gates in it.
   `dns init` advice.
 * **Apply gate.** A refusal stops the site's apply before `validate gateway
   config` with nothing of the gateway changed; an API that does not answer
-  warns and goes on; an apply with no Caddy action makes no call.
+  stops it the same way; an apply with no Caddy action makes no call.
 * **Referrals.** `unhealthy` given oauth2-proxy's `tls: internal error`
   line for `id.example.org` says Caddy has no certificate for it and to run
   `paisans doctor`; the same line for a hostname Paisans does not serve
   gets no referral.
 
+## Observed
+
+On staging, 2026-10-15, with an account owned (`cfat_`) Cloudflare token:
+
+| Call | From | Answer |
+|------|------|--------|
+| `GET /zones?name=<domain>`, token filtered to another address | a workstation | `403`, `Code:9109` |
+| `GET /zones?name=<domain>`, token filtered to this server | the gateway | `200`, the zone |
+| `GET /user/tokens/verify` | the gateway | `401`, `Code:1000 Invalid API Token` |
+| `GET /accounts/<account id>/tokens/verify` | the gateway | `200`, `active` |
+| Caddy's DNS-01 calls, token filtered away from the gateway | the gateway | `9109`, then interleaved `10502` |
+
 ## Open
 
-* **The apply gate, requirement 5.** Recommended in session and written
-  here as the design; the founder has not confirmed it. It is also not the
-  single verify call the session described: Verify Token ignores IP
-  filtering, so the gate makes the zone lookup too, two or three calls per
-  Caddy site per apply that touches Caddy.
-* **An API that does not answer at the gate** warns and goes on, as written.
-  Refusing instead would hold a gateway recovery hostage to Cloudflare's
-  availability. The founder decides.
-* **Account owned tokens.** Whether `/user/tokens/verify` accepts a token an
-  account owns (the `cfat_` format) is to be verified. If it does not, the
-  verify call goes, and the zone lookup alone answers active or not, from
-  the error it returns.
-* **What 10502 is.** The threshold, the duration, whether it is held
-  against the token or the address, and whether a `9109` refusal counts
-  toward it, are to be verified. The answer decides whether a lockout seen
-  on one site should stop the workstation's call too, which this design
-  does to be safe, and what the advice says to wait.
-* **The zone listing is IP filtered.** The observed `9109` came from
-  Caddy's own calls; that `GET /zones` is refused the same way is to be
-  verified on staging, with a token filtered to another address.
-* **Caddy's log fields.** The logger names and fields the summary reads are
-  to be verified from a staging log of the foundation track's Caddy.
-* **A missing record is a FAIL.** A hostname with no record is unreachable,
-  which is why; the founder may prefer a WARN on a deployment not yet past
-  `dns init`.
 * **The per site bound of 8** is reasoned from sshd's default and not
   measured.
-* **Doctor opens the secrets.** It needs the age key for the workstation's
-  token check, which doctor never needed before. Without it, those checks
-  are skipped and every other check runs.
+* **How many refused calls trip `10502`, and how long it outlasts the
+  last one**, are not documented and were not measured; the five minute
+  window above is the conservative reading of the staging log.
