@@ -142,7 +142,7 @@ func TestSudoWithADockerHostIsRefused(t *testing.T) {
 		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Sudo: true, DockerHost: rootlessSocket},
 		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Sudo: true, Login: apply.NewLogin(nil)},
 	} {
-		if _, err := tr.Run("docker ps"); err == nil || !strings.Contains(err.Error(), "sudo") {
+		if _, err := tr.Run("docker ps"); err == nil || !strings.Contains(err.Error(), "sudo") || strings.Count(err.Error(), "paisans-f2a9@203.0.113.10") != 1 {
 			t.Errorf("err = %v", err)
 		}
 	}
@@ -185,5 +185,27 @@ func TestALoginUsedConcurrentlyAsksOnceAndConnectsOnce(t *testing.T) {
 	wg.Wait()
 	if probes != 1 || connected.Load() != 1 {
 		t.Errorf("probes %d, connected %d", probes, connected.Load())
+	}
+}
+
+// A probe that fails to run at all (ssh cannot connect, or the command exits
+// non-zero) names the destination once in the error Run returns.
+func TestALoginProbeThatFailsNamesTheDestinationOnce(t *testing.T) {
+	loginScript(t, "id: command not found\n", 127)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	_, err := tr.Run("docker ps")
+	if err == nil || !strings.Contains(err.Error(), "id -u") || strings.Count(err.Error(), "203.0.113.10") != 1 {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Dial reaches run without a wrapper that names the destination, so the
+// refusal names it itself.
+func TestDialRefusesSudoWithADockerHostNamingTheDestination(t *testing.T) {
+	loginScript(t, "1000\n", 0)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Sudo: true, DockerHost: rootlessSocket}
+	_, err := tr.Dial("127.0.0.1:80")
+	if err == nil || !strings.Contains(err.Error(), "paisans-f2a9@203.0.113.10") {
+		t.Errorf("err = %v", err)
 	}
 }

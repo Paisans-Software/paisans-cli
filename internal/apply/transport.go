@@ -285,6 +285,9 @@ func writeKeyFiles(dir string, keys []string) ([]string, error) {
 // The output itself is returned as the host printed it, since it is data a
 // caller parses; what is shown of it is redacted where it is shown.
 func (t SSHTransport) Run(command string) (string, error) {
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
+	}
 	wrapped, stdin, err := t.sudo(command, nil)
 	if err != nil {
 		return "", ui.RedactError(err)
@@ -586,8 +589,8 @@ func lastLine(out string) string {
 // enough that a host which is really down is reported within seconds rather
 // than hidden behind a long wait.
 func (t SSHTransport) run(command string, stdin *string) (string, error) {
-	if t.Sudo && (t.DockerHost != "" || t.Login != nil) {
-		return "", errors.New("a transport with a Docker host cannot use sudo: sudo resets the environment, so docker would reach the host's system daemon instead of the user's own")
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
 	}
 	if t.Login != nil && t.DockerHost == "" {
 		host, err := t.Login.resolve(t)
@@ -677,6 +680,9 @@ func (t SSHTransport) ReadFile(path string) (string, bool, error) {
 // means a failed transfer leaves the previous file intact rather than a
 // truncated one that an application will happily read.
 func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
+	if err := t.refuseSudoDocker(); err != nil {
+		return err
+	}
 	dir := parentDir(path)
 	script := fmt.Sprintf(
 		"set -e; mkdir -p %s; tmp=%s.paisans-tmp; cat > $tmp; chmod %04o $tmp; mv $tmp %s",
@@ -695,6 +701,9 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 // content that way: what goes in carries credentials, and only the command
 // line is visible in the process table.
 func (t SSHTransport) RunInput(command, stdin string) (string, error) {
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
+	}
 	wrapped, in, err := t.sudo(command, &stdin)
 	if err != nil {
 		return "", ui.RedactError(err)
@@ -730,4 +739,15 @@ func firstLine(s string) string {
 		return s[:i] + " ..."
 	}
 	return s
+}
+
+// refuseSudoDocker refuses a transport that both sets DOCKER_HOST and runs
+// through sudo: sudo resets the environment, so docker would reach the
+// host's system daemon instead of the user's own. It names the destination
+// itself, because Dial and the probes report run's error unwrapped.
+func (t SSHTransport) refuseSudoDocker() error {
+	if t.Sudo && (t.DockerHost != "" || t.Login != nil) {
+		return fmt.Errorf("%s: a transport with a Docker host cannot use sudo: sudo resets the environment, so docker would reach the host's system daemon instead of the user's own", t.Describe())
+	}
+	return nil
 }
