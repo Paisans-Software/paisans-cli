@@ -111,6 +111,51 @@ func TestLocalWriteDoesNotFollowAPlantedTemporaryName(t *testing.T) {
 	}
 }
 
+// A target that is a symbolic link, or a directory, is refused, as the ssh
+// transport's WriteFile refuses it: a rename would replace the link rather
+// than write where it points, and a directory is not a file to write. Either
+// is left as it was, and nothing is left beside it.
+func TestLocalWriteRefusesALinkOrDirectoryTarget(t *testing.T) {
+	linuxOnly(t)
+	l := hostadmit.Local()
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "directory")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirLink := filepath.Join(dir, "dirlink")
+	if err := os.Symlink(target, dirLink); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, target, dirLink} {
+		if err := l.WriteFile(path, "new\n", 0o600); err == nil {
+			t.Errorf("WriteFile wrote %s", filepath.Base(path))
+		}
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "precious" {
+		t.Errorf("the link's target was written: %q", got)
+	}
+	for _, path := range []string{link, dirLink} {
+		if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s is no longer a link: %v, %v", filepath.Base(path), info, err)
+		}
+	}
+	if entries, _ := os.ReadDir(target); len(entries) != 0 {
+		t.Errorf("the directory gained %v", entries)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 4 {
+		t.Errorf("the parent holds %v, want the four it started with", entries)
+	}
+}
+
 // Setuid, setgid and sticky survive, as chmod over ssh keeps them.
 func TestLocalWriteKeepsSpecialModeBits(t *testing.T) {
 	linuxOnly(t)
@@ -219,7 +264,8 @@ func TestLocalRefusesARelativePath(t *testing.T) {
 	}
 }
 
-// A device is refused on its type, before it is opened for reading.
+// A device is an error, not content. That it is refused before it is opened
+// for reading is TestReadFileNeverOpensASpecialFileForReading's to check.
 func TestLocalReadOfADeviceIsAnError(t *testing.T) {
 	linuxOnly(t)
 	if _, found, err := hostadmit.Local().ReadFile("/dev/null"); found || err == nil {

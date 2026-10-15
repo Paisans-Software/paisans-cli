@@ -17,6 +17,10 @@ import (
 
 const dirFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 
+// openForReading is the one place readFile opens a file for reading, so a
+// test can see that nothing is opened before the file's type is judged.
+var openForReading = unix.Openat
+
 // errNotThere marks a read path that does not exist or runs through a file.
 var errNotThere = errors.New("not there")
 
@@ -102,7 +106,7 @@ func readFile(path string) (string, bool, error) {
 	default:
 		return "", false, fmt.Errorf("%s is not a regular file", path)
 	}
-	fd, err := unix.Open(fmt.Sprintf("/proc/self/fd/%d", pfd), unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	fd, err := openForReading(dirfd, fmt.Sprintf("/proc/self/fd/%d", pfd), unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return "", false, err
 	}
@@ -132,6 +136,20 @@ func writeFile(path, content string, mode uint32) error {
 		return err
 	}
 	defer unix.Close(dirfd)
+	// A rename replaces a link at the target rather than writing where it
+	// points, and a directory is not a file to write: both are refused, as
+	// the ssh transport's WriteFile refuses them.
+	var target unix.Stat_t
+	if err := unix.Fstatat(dirfd, base, &target, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+		switch target.Mode & unix.S_IFMT {
+		case unix.S_IFLNK:
+			return fmt.Errorf("%s is a symbolic link", path)
+		case unix.S_IFDIR:
+			return fmt.Errorf("%s is a directory", path)
+		}
+	} else if !errors.Is(err, unix.ENOENT) {
+		return err
+	}
 	var random [8]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return err
