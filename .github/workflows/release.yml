@@ -98,19 +98,32 @@ jobs:
         if: steps.decide.outputs.release == 'true'
         run: make release-binaries
 
-      # The runner is linux/amd64, so the amd64 binary runs here. It has to
-      # report this release's version and this exact commit, without -dirty:
-      # anything else means it is not a build of what is being tagged.
+      # QEMU, so the arm64 binary can be run on this amd64 runner.
+      - name: Set up QEMU
+        if: steps.decide.outputs.release == 'true'
+        uses: docker/setup-qemu-action@v4.4.0
+        with:
+          platforms: arm64
+
+      # Each binary has to report this release's version and this exact
+      # commit, without -dirty: anything else means it is not a build of what
+      # is being tagged. The runner is linux/amd64, so the amd64 binary runs
+      # here directly and the arm64 one runs under QEMU in an alpine container.
       - name: Check the binaries
         if: steps.decide.outputs.release == 'true'
         env:
           VERSION: ${{ steps.decide.outputs.version }}
         run: |
           set -euo pipefail
-          got=$(dist/paisans-linux-amd64 version)
           want="paisans ${VERSION} (${GITHUB_SHA:0:12})"
+          got=$(dist/paisans-linux-amd64 version)
           if [ "$got" != "$want" ]; then
             echo "::error::dist/paisans-linux-amd64 version printed '${got}', expected '${want}'"
+            exit 1
+          fi
+          got=$(docker run --rm --platform linux/arm64 -v "$PWD/dist:/d" alpine /d/paisans-linux-arm64 version)
+          if [ "$got" != "$want" ]; then
+            echo "::error::dist/paisans-linux-arm64 version printed '${got}', expected '${want}'"
             exit 1
           fi
           (cd dist && sha256sum -c SHA256SUMS)
